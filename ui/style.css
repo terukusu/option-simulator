@@ -1,0 +1,27 @@
+:root {
+  color-scheme: light dark;
+  font-family: system-ui, sans-serif;
+}
+
+body {
+  margin: 0 auto;
+  max-width: 960px;
+  padding: 0 16px;
+}
+
+.note {
+  color: GrayText;
+  font-size: 0.9em;
+}
+
+table {
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+}
+
+th,
+td {
+  border-bottom: 1px solid color-mix(in srgb, currentColor 20%, transparent);
+  padding: 4px 8px;
+  text-align: right;
+}
