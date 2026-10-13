@@ -5,7 +5,8 @@
 ## 作り
 
 - `model/`: 価格モデル（Black-76、IV、F の推定、スマイルの補間・外挿、時間、満期損益、シナリオ、グリーク）。**純関数**で DOM・通信に依存しない。vitest で文献値・性質テスト・合成板からの回復を固定する
-- `data/`: 板の取得とアダプタ（`file` / `bigquery` / 手入力）、板の正規化
+- `data/`: 板の JSON の型と検証、アダプタ（`file` / `bigquery` / 手入力の足）、板の正規化（F・スマイル・ATM を `model/` で付ける）
+- `fixtures/synthetic/`: 合成の固定の板（架空の値。`scripts/synthBoard.ts` から `npm run fixtures` で作る。手で編集しない）
 - `ui/`: 画面（TypeScript + Vite）
 - `api/`: 板の JSON を返す Python（Flask）。縦切り 2 から
 - `infra/`: Terraform（Cloud Run + IAP、縦切り 2 から）
@@ -17,7 +18,7 @@
 ## 開発
 
 - Node は 22（`.node-version`）。依存はバージョン固定（`package-lock.json` をコミット）
-- 確認: `npm ci && npm run typecheck && npm run lint && npm test`（CI と同じ。lint は Biome、整形は `npm run format`）
+- 確認: `npm ci && npm run typecheck && npm run lint && npm run fixtures:check && npm test`（CI と同じ。lint は Biome、整形は `npm run format`）
 - 画面の雛形: `npm run dev`（Vite の root は `ui/`）、`npm run build` で `dist/`
 
 ## リポジトリに置くもの / 置かないもの
