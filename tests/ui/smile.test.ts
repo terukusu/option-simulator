@@ -1,7 +1,16 @@
 import { describe, expect, it } from 'vitest';
-import { type ChainMonth, normalizeChain } from '../../data';
-import { zoom } from '../../ui/chart/scale';
-import { axisTickLabel, type SmileAxis, type SmileModel, smileModel } from '../../ui/view/smile';
+import { boardOptionLeg, type ChainMonth, normalizeChain } from '../../data';
+import { type Domain, linear, zoom } from '../../ui/chart/scale';
+import { initialState, reduce } from '../../ui/state';
+import {
+  axisTickLabel,
+  axisValue,
+  pickStrike,
+  type SmileAxis,
+  type SmileModel,
+  smileModel,
+  smilePickRow,
+} from '../../ui/view/smile';
 import { fixture } from '../support/fixtures';
 
 /** AC-11: スマイル（AC14）。合成の板（架空の値）。 */
@@ -120,5 +129,96 @@ describe('軸の目盛りの文言', () => {
     expect(axisTickLabel('delta', 0.1)).toBe('P 0.10');
     expect(axisTickLabel('delta', 0.8)).toBe('C 0.20');
     expect(axisTickLabel('delta', 0.5)).toBe('0.50');
+  });
+});
+
+describe('スマイルからの足の追加（#11 AC-10・M3）', () => {
+  const chain = chains[0]?.chain;
+  const month = chain?.months[0];
+  if (!chain || !month) throw new Error('限月が無い');
+  const range: Domain = [40, 468];
+
+  it.each(AXES)('軸 %s: K の点の画素で K が選ばれ、12px 超離れた画素では選ばれない', (axis) => {
+    // 点の間隔が 24px 以上ある範囲に絞る（隣の点と取り違えない）
+    const full = smileModel(month, 'B', axis);
+    const atm = month.atm.B.pick?.k as number;
+    const info = month.strikes.find((s) => s.k === atm);
+    if (!info) throw new Error('ATM が無い');
+    const ax = axisValue(month, 'B', axis, info) as number;
+    const near = full.strikeXs.filter((s) => Math.abs(s.k - atm) <= 1000);
+    const xs = near.map((s) => s.x);
+    const vp: Domain = [Math.min(...xs), Math.max(...xs)];
+    const m = smileModel(month, 'B', axis, vp);
+    const sx = linear(m.domain, range);
+    expect(m.strikeXs.length).toBeGreaterThan(2);
+    for (const s of m.strikeXs) {
+      expect(pickStrike(m, sx(s.x), range)).toBe(s.k);
+      expect(pickStrike(m, sx(s.x) + 3, range)).toBe(s.k);
+    }
+    expect(pickStrike(m, sx(ax), range)).toBe(atm);
+    // どの点からも 12px 超離れた画素
+    const pxs = m.strikeXs.map((s) => sx(s.x));
+    const far = Math.max(...pxs) + 12.5;
+    expect(pickStrike(m, far, range)).toBeNull();
+    expect(pickStrike(m, Math.min(...pxs) - 12.5, range)).toBeNull();
+    expect(pickStrike(full, Number.NaN, range)).toBeNull();
+  });
+
+  it('選択 → 売り = boardOptionLeg と同じ足（OTM 側・建値 bid）、買い = 建値 ask', () => {
+    const k = month.strikes.find((s) => s.otmType === 'put' && s.node && !s.unstable)?.k as number;
+    const row = smilePickRow(month, k);
+    expect(row?.type).toBe('put');
+    const s0 = reduce(initialState, { type: 'loaded', chain, label: 'latest' });
+    const s1 = reduce(s0, { type: 'pickSmile', pick: { monthId: month.id, k } });
+    expect(s1.smilePick).toEqual({ monthId: month.id, k });
+    const sell = reduce(s1, {
+      type: 'addBoardLeg',
+      expiry: month.id,
+      k,
+      optionType: row?.type ?? 'put',
+      side: 'sell',
+    });
+    expect(sell.legs).toHaveLength(1);
+    const want = boardOptionLeg(chain, { expiry: month.id, k, type: 'put', side: 'sell' });
+    expect(sell.legs[0]?.leg).toEqual(want.leg);
+    expect(sell.legs[0]?.marks).toEqual(want.marks);
+    expect(sell.legs[0]?.leg.entry).toBe(row?.bid);
+    const buy = reduce(sell, {
+      type: 'addBoardLeg',
+      expiry: month.id,
+      k,
+      optionType: 'put',
+      side: 'buy',
+    });
+    expect(buy.legs).toHaveLength(2);
+    expect(buy.legs[1]?.leg.entry).toBe(row?.ask);
+  });
+
+  it('IV 不安定の行の足には「IV 不安定」の印', () => {
+    const info = month.strikes.find((s) => s.unstable && s.node);
+    if (!info) throw new Error('不安定の行が無い');
+    const m = smileModel(month, 'B', 'k');
+    expect(m.strikeXs.map((s) => s.k)).toContain(info.k);
+    const row = smilePickRow(month, info.k);
+    expect(row?.unstable).toBe(true);
+    const s = reduce(reduce(initialState, { type: 'loaded', chain, label: 'latest' }), {
+      type: 'addBoardLeg',
+      expiry: month.id,
+      k: info.k,
+      optionType: row?.type ?? info.otmType,
+      side: 'sell',
+    });
+    expect(s.legs[0]?.marks).toContain('unstable_iv');
+  });
+
+  it('限月の切替・板の読み直しで選択が消える', () => {
+    const s0 = reduce(initialState, { type: 'loaded', chain, label: 'latest' });
+    const picked = reduce(s0, { type: 'pickSmile', pick: { monthId: month.id, k: 60_000 } });
+    const other = chain.months[1]?.id as string;
+    expect(reduce(picked, { type: 'setMonth', monthId: other }).smilePick).toBeNull();
+    expect(reduce(picked, { type: 'loaded', chain, label: 'again' }).smilePick).toBeNull();
+    // 同じ限月の再選択・軸の切替では消えない
+    expect(reduce(picked, { type: 'setMonth', monthId: month.id }).smilePick).not.toBeNull();
+    expect(smilePickRow(month, 123)).toBeNull();
   });
 });

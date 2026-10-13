@@ -9,8 +9,8 @@
  */
 
 import type { ChainMonth, StrikeInfo } from '../../data';
-import { type AtmBasis, normCdf } from '../../model';
-import { clipSegment, type Domain, extent, padDomain } from '../chart/scale';
+import { type AtmBasis, normCdf, type OptionType } from '../../model';
+import { clipSegment, type Domain, extent, linear, padDomain } from '../chart/scale';
 import { fmtNum } from './format';
 
 export type SmileAxis = 'k' | 'moneyness' | 'delta';
@@ -65,6 +65,8 @@ export interface SmileModel {
   yDomain: Domain;
   /** 拡大の最小幅（行使価格 2 本分） */
   minWidth: number;
+  /** 表示範囲内の点・× のある行使価格の横軸の位置（タップで選ぶ候補。K の昇順） */
+  strikeXs: Array<{ k: number; x: number }>;
   empty: boolean;
 }
 
@@ -116,6 +118,7 @@ function emptyModel(axis: SmileAxis): SmileModel {
     fullDomain: EMPTY_DOMAIN,
     yDomain: [0, 100],
     minWidth: 0,
+    strikeXs: [],
     empty: true,
   };
 }
@@ -209,6 +212,15 @@ export function smileModel(
   ]);
   const yDomain = ys ? padDomain(ys, 0.08, 1) : ([0, 100] as Domain);
 
+  const strikeXs: Array<{ k: number; x: number }> = [];
+  const seen = new Set<number>();
+  for (const p of [...points, ...unstable]) {
+    if (seen.has(p.k)) continue;
+    seen.add(p.k);
+    strikeXs.push({ k: p.k, x: p.x });
+  }
+  strikeXs.sort((a, b) => a.k - b.k);
+
   const atmK = month.atm[basis].pick?.k ?? null;
   const atmInfo = atmK === null ? undefined : month.strikes.find((s) => s.k === atmK);
   const atmX = atmInfo ? axisValue(month, basis, axis, atmInfo) : null;
@@ -224,8 +236,55 @@ export function smileModel(
     fullDomain: full,
     yDomain,
     minWidth,
+    strikeXs,
     empty: false,
   };
+}
+
+/** タップで選ぶ許容（画素） */
+export const PICK_TOLERANCE_PX = 12;
+
+/**
+ * 横軸の画素 px に最も近い点・× の行使価格（横軸の画素の差が tolPx 以内。無ければ null）。
+ * range は描画域の横の画素範囲。
+ */
+export function pickStrike(
+  model: SmileModel,
+  px: number,
+  range: Domain,
+  tolPx = PICK_TOLERANCE_PX,
+): number | null {
+  if (model.empty || !Number.isFinite(px)) return null;
+  const sx = linear(model.domain, range);
+  let best: number | null = null;
+  let bestD = Number.POSITIVE_INFINITY;
+  for (const s of model.strikeXs) {
+    const d = Math.abs(sx(s.x) - px);
+    if (d <= tolPx && d < bestD) {
+      best = s.k;
+      bestD = d;
+    }
+  }
+  return best;
+}
+
+export interface SmilePickRow {
+  k: number;
+  /** 足の種別（OTM 側。板の bid / ask と同じ規則で足を作る） */
+  type: OptionType;
+  bid: number | null;
+  ask: number | null;
+  unstable: boolean;
+}
+
+/** 選んだ行使価格の操作行（板に無ければ null）。 */
+export function smilePickRow(month: ChainMonth, k: number): SmilePickRow | null {
+  const i = month.strikes.findIndex((s) => s.k === k);
+  const info = month.strikes[i];
+  const row = month.rows[i];
+  if (!info || !row) return null;
+  const q = row[info.otmType];
+  return { k, type: info.otmType, bid: q.bid, ask: q.ask, unstable: info.unstable };
 }
 
 /** 横軸の目盛りの文言。デルタは 0.5 未満を「P 0.10」、超を「C 0.10」（= 1 − x）。 */

@@ -1,11 +1,21 @@
-import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
+import { useMemo } from 'preact/hooks';
 import type { ChainMonth } from '../../data';
 import type { AtmBasis } from '../../model';
 import { type Domain, linear, niceTicks, zoom } from '../chart/scale';
 import type { Action } from '../state';
 import { fmtNum } from '../view/format';
-import { AXIS_LABEL, axisTickLabel, type SmileAxis, smileModel } from '../view/smile';
+import {
+  AXIS_LABEL,
+  axisTickLabel,
+  axisValue,
+  pickStrike,
+  type SmileAxis,
+  smileModel,
+  smilePickRow,
+} from '../view/smile';
 import { pure } from './pure';
+import { useChartGestures } from './useChartGestures';
+import { useWidth } from './useWidth';
 
 const HEIGHT = 240;
 const M = { left: 40, right: 12, top: 10, bottom: 26 };
@@ -17,26 +27,13 @@ export interface SmileProps {
   basis: AtmBasis;
   axis: SmileAxis;
   viewport: Domain | null;
+  /** 選んだ行使価格（表示中の限月の選択だけ渡す。無ければ null） */
+  pick: number | null;
   dispatch: (a: Action) => void;
 }
 
-function useWidth(initial: number) {
-  const ref = useRef<HTMLDivElement>(null);
-  const [width, setWidth] = useState(initial);
-  useEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    const update = () => setWidth(Math.max(200, Math.floor(el.clientWidth)));
-    update();
-    const ro = new ResizeObserver(update);
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, []);
-  return { ref, width };
-}
-
 /** スマイル（SVG。座標は ui/view/smile.ts・ui/chart/scale.ts の純関数）。 */
-function SmileView({ month, active, basis, axis, viewport, dispatch }: SmileProps) {
+function SmileView({ month, active, basis, axis, viewport, pick, dispatch }: SmileProps) {
   const model = useMemo(
     () => smileModel(month, basis, axis, viewport),
     [month, basis, axis, viewport],
@@ -47,6 +44,29 @@ function SmileView({ month, active, basis, axis, viewport, dispatch }: SmileProp
   const sy = linear(model.yDomain, [HEIGHT - M.bottom, M.top]);
   const xTicks = niceTicks(model.domain[0], model.domain[1], width < 420 ? 3 : 5);
   const yTicks = niceTicks(model.yDomain[0], model.yDomain[1], 4);
+  const range: Domain = [M.left, width - M.right];
+
+  // ホイール・ドラッグ・ピンチ・キー（損益グラフと共用）。タップで最寄りの行使価格を選ぶ
+  useChartGestures(ref, {
+    viewport: model.domain,
+    full: model.fullDomain,
+    minWidth: model.minWidth,
+    range,
+    disabled: model.empty || !active,
+    onViewport: (v) => dispatch({ type: 'setViewport', viewport: v }),
+    onTap: (x) => {
+      const k = pickStrike(model, x, range);
+      dispatch({ type: 'pickSmile', pick: k === null ? null : { monthId: month.id, k } });
+    },
+  });
+
+  const pickRow = pick === null ? null : smilePickRow(month, pick);
+  const pickInfo = pick === null ? undefined : month.strikes.find((s) => s.k === pick);
+  const pickX = pickInfo ? axisValue(month, basis, axis, pickInfo) : null;
+  const pickPx =
+    pickX !== null && Number.isFinite(pickX) && pickX >= model.domain[0] && pickX <= model.domain[1]
+      ? sx(pickX)
+      : null;
 
   let solid = '';
   let dotted = '';
@@ -118,7 +138,13 @@ function SmileView({ month, active, basis, axis, viewport, dispatch }: SmileProp
           </button>
         </fieldset>
       </div>
-      <div class="smile-plot" ref={ref}>
+      <div
+        class={model.empty ? 'smile-plot plot-area plot-empty' : 'smile-plot plot-area'}
+        ref={ref}
+        tabIndex={model.empty || !active ? -1 : 0}
+        role="application"
+        aria-label="スマイル（点をタップで選択。ホイール・ピンチで拡大、ドラッグでパン、ダブルクリックでリセット。キー: + / − 拡大縮小、← / → パン、R リセット）"
+      >
         {model.empty ? (
           <p class="note">スマイルなし（F が決まらないか、使える気配が無い）</p>
         ) : (
@@ -162,9 +188,57 @@ function SmileView({ month, active, basis, axis, viewport, dispatch }: SmileProp
               <path key={kind} class={`pt ${kind}`} d={dots[kind] || 'M0 0'} />
             ))}
             <path class="unstable-x" d={cross || 'M0 0'} />
+            {pickPx !== null && (
+              <line class="pick-line" x1={pickPx} x2={pickPx} y1={M.top} y2={HEIGHT - M.bottom} />
+            )}
           </svg>
         )}
       </div>
+      {pickRow && (
+        <div class="pick-row">
+          <span>
+            K {fmtNum(pickRow.k, 0)} {pickRow.type}
+            {pickRow.unstable && <span class="tag warn">IV 不安定</span>}:
+          </span>{' '}
+          <button
+            type="button"
+            class="sell"
+            onClick={() =>
+              dispatch({
+                type: 'addBoardLeg',
+                expiry: month.id,
+                k: pickRow.k,
+                optionType: pickRow.type,
+                side: 'sell',
+              })
+            }
+          >
+            売り（bid {pickRow.bid === null ? '気配なし' : fmtNum(pickRow.bid, 0)}）
+          </button>{' '}
+          <button
+            type="button"
+            class="buy"
+            onClick={() =>
+              dispatch({
+                type: 'addBoardLeg',
+                expiry: month.id,
+                k: pickRow.k,
+                optionType: pickRow.type,
+                side: 'buy',
+              })
+            }
+          >
+            買い（ask {pickRow.ask === null ? '気配なし' : fmtNum(pickRow.ask, 0)}）
+          </button>{' '}
+          <button
+            type="button"
+            aria-label="選択を消す"
+            onClick={() => dispatch({ type: 'pickSmile', pick: null })}
+          >
+            ×
+          </button>
+        </div>
+      )}
       <p class="legend note">
         <span class="lg mid">● mid</span> <span class="lg bid">● bid</span>{' '}
         <span class="lg ask">● ask</span> ─ 節点区間 ┄ 補間・外挿 × IV 不安定{' '}
