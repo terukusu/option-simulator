@@ -65,3 +65,15 @@ export function fmtIv(v: number | null | undefined): string {
 export function fmtIvPct(v: number | null | undefined): string {
   return fmtNum(v, 1);
 }
+
+/** 10 進の数（符号は先頭の − だけ。指数表記は可、16 進・Infinity は不可） */
+const DECIMAL = /^-?(\d+\.?\d*|\.\d+)(e[+-]?\d+)?$/i;
+
+/**
+ * 入力欄の数のパース: 前後の空白・桁区切り `,`・先頭の `+`・Unicode マイナス `−`（fmtNum の出力）を受ける。
+ * 空欄・数でなければ NaN。
+ */
+export function parseNum(text: string): number {
+  const t = text.trim().replace(/,/g, '').replace(/^\+/, '').replace(/^−/, '-');
+  return DECIMAL.test(t) ? Number(t) : Number.NaN;
+}

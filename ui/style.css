@@ -689,3 +689,186 @@ button.q.noquote {
 .lg.today {
   color: var(--muted);
 }
+
+.pnl-scn {
+  stroke: var(--accent);
+  stroke-dasharray: 2 3;
+  stroke-width: 1.2;
+}
+
+.lg.scn {
+  color: var(--accent);
+}
+
+/* ---------------------------------------------------------------- シナリオ（#6） */
+
+.scenario,
+.metrics {
+  border-top: 1px solid var(--line);
+  margin-top: 8px;
+  padding-top: 4px;
+}
+
+.scn-head,
+.metrics-head {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+}
+
+.scn-head {
+  justify-content: space-between;
+}
+
+.scn-presets {
+  margin: 2px 0 6px;
+}
+
+/* 1 本 = ラベル行 + (range 幅いっぱい) + 数値欄。幅 360px でも横スクロールしない */
+.scn-row {
+  align-items: center;
+  display: grid;
+  gap: 0 8px;
+  grid-template-areas:
+    "label label"
+    "range input"
+    "error error";
+  grid-template-columns: minmax(0, 1fr) auto;
+  margin-bottom: 4px;
+}
+
+.scn-label {
+  font-size: 0.85em;
+  grid-area: label;
+}
+
+.scn-range {
+  grid-area: range;
+  margin: 0;
+  min-width: 0;
+  width: 100%;
+}
+
+.scn-range:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.scn-input {
+  align-items: center;
+  display: inline-flex;
+  gap: 4px;
+  grid-area: input;
+}
+
+.scn-input input {
+  text-align: right;
+  width: 5.5em;
+}
+
+.scn-unit {
+  color: var(--muted);
+  font-size: 0.8em;
+  min-width: 3.5em;
+}
+
+.scn-error {
+  grid-area: error;
+}
+
+.scn-opts,
+.scn-eval {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  margin: 4px 0;
+}
+
+.scn-beta input,
+.metrics-fee input {
+  text-align: right;
+}
+
+/* ---------------------------------------------------------------- 指標・テール表（#6） */
+
+.metrics-fee {
+  font-size: 0.9em;
+}
+
+.metrics-list {
+  display: grid;
+  font-size: 0.85em;
+  font-variant-numeric: tabular-nums;
+  gap: 2px 12px;
+  grid-template-columns: minmax(0, 9em) minmax(0, 1fr);
+  margin: 4px 0;
+}
+
+.metrics-list dt {
+  color: var(--muted);
+}
+
+.metrics-list dd {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.unit {
+  color: var(--muted);
+  font-size: 0.85em;
+  margin-left: 2px;
+}
+
+.metrics-legs {
+  font-size: 0.85em;
+  margin: 4px 0;
+}
+
+.metrics-legs ul {
+  margin: 4px 0;
+  padding-left: 1.2em;
+}
+
+.tail-table {
+  border-collapse: collapse;
+  font-size: 0.85em;
+  font-variant-numeric: tabular-nums;
+  table-layout: fixed;
+  width: 100%;
+}
+
+.tail-table caption {
+  caption-side: top;
+  text-align: left;
+}
+
+.tail-table tr > th,
+.tail-table td {
+  border-bottom: 1px solid var(--line);
+  overflow-wrap: anywhere;
+  padding: 2px 4px;
+  vertical-align: top;
+}
+
+.tail-table thead th {
+  font-weight: normal;
+  text-align: right;
+}
+
+.tail-table thead th:first-child,
+.tail-table tbody th {
+  font-weight: normal;
+  text-align: left;
+  width: 26%;
+}
+
+.tail-table td {
+  text-align: right;
+}
+
+.tail-table td.neg {
+  color: var(--ask);
+}

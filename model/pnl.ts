@@ -144,24 +144,7 @@ export function expiryProfile(
   if (rightSlope > eps) maxP = { value: Number.POSITIVE_INFINITY, x: null };
   if (rightSlope < -eps) maxL = { value: Number.NEGATIVE_INFINITY, x: null };
 
-  // BEP: 区間ごとに符号が変わる点を 1 次式で解く
-  const bes: number[] = [];
-  for (let i = 0; i < points.length; i++) {
-    const p = points[i] as ExpiryPoint;
-    if (p.pnl === 0) bes.push(p.x);
-    const q = points[i + 1];
-    if (q && p.pnl * q.pnl < 0) bes.push(p.x + (-p.pnl * (q.x - p.x)) / (q.pnl - p.pnl));
-  }
-  const last = points[points.length - 1] as ExpiryPoint;
-  if (
-    last.pnl !== 0 &&
-    Math.abs(rightSlope) > eps &&
-    Math.sign(last.pnl) !== Math.sign(rightSlope)
-  ) {
-    bes.push(last.x - last.pnl / rightSlope);
-  }
-  const breakevens = [...new Set(bes.map((x) => Math.round(x)))].sort((a, b) => a - b);
-  return {
+  const profile: ExpiryProfile = {
     points,
     kinks,
     leftSlope,
@@ -170,9 +153,41 @@ export function expiryProfile(
     maxLoss: maxL,
     worstAtKinks,
     bestAtKinks,
-    breakevens,
+    breakevens: [],
     expiryTime,
   };
+  profile.breakevens = expiryCrossings(profile, 0);
+  return profile;
+}
+
+/**
+ * 満期損益 = level になる X'（1 円単位に丸め、昇順、重複なし）。BEP は level = 0。
+ * 区分線形の区間（下端〜折れ点、折れ点の間、最後の折れ点より右の半直線）ごとに 1 次式で解く。
+ * 「利益が掛け金の N 倍になる原資産」（設計 5.6、AC15 (b)）にも使う。level が非有限なら []。
+ */
+export function expiryCrossings(profile: ExpiryProfile, level: number): number[] {
+  if (!Number.isFinite(level)) return [];
+  const pts = profile.points;
+  const eps = 1e-9;
+  const out: number[] = [];
+  for (let i = 0; i < pts.length; i++) {
+    const p = pts[i] as ExpiryPoint;
+    const dp = p.pnl - level;
+    if (dp === 0) out.push(p.x);
+    const q = pts[i + 1];
+    if (!q) continue;
+    const dq = q.pnl - level;
+    if (dp * dq < 0) out.push(p.x + (-dp * (q.x - p.x)) / (q.pnl - p.pnl));
+  }
+  const last = pts[pts.length - 1];
+  if (last) {
+    const dl = last.pnl - level;
+    const slope = profile.rightSlope;
+    if (dl !== 0 && Math.abs(slope) > eps && Math.sign(dl) !== Math.sign(slope)) {
+      out.push(last.x - dl / slope);
+    }
+  }
+  return [...new Set(out.map((x) => Math.round(x)))].sort((a, b) => a - b);
 }
 
 /** 満期損益の関数を作る（グラフの再サンプリング用。足の 1 次式への変換を 1 回だけ行う）。 */
@@ -278,7 +293,10 @@ export interface TailRow {
 }
 
 export interface TailTable {
-  /** 倍率の基準: 受取超なら受取（net）、支払超なら支払（掛け金） */
+  /**
+   * 倍率の基準: 受取超（net > 0）なら受取 − 支払（手数料抜き。設計 6.1 の例）、
+   * それ以外は掛け金 = 支払 − 受取 + 手数料（全足。#6）。net = 0 なら掛け金も 0 とし倍率を出さない
+   */
   premiumBase: { kind: 'received' | 'paid'; amount: number };
   rows: TailRow[];
 }
@@ -298,7 +316,7 @@ export function tailTable(
   const premiumBase =
     prem.net > 0
       ? { kind: 'received' as const, amount: prem.net }
-      : { kind: 'paid' as const, amount: -prem.net };
+      : { kind: 'paid' as const, amount: prem.net < 0 ? -prem.net + prem.fees : 0 };
   const cell = (pnl: number): TailCell => ({
     pnl,
     ratio: premiumBase.amount > 0 ? pnl / premiumBase.amount : null,

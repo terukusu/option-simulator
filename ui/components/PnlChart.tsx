@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useState } from 'preact/hooks';
+import { useMemo, useState } from 'preact/hooks';
 import type { Scenario } from '../../model';
 import { type Domain, zoom } from '../chart/scale';
-import { type Action, parseDays, parsePremiumN, parseYRange } from '../state';
+import { type Action, parsePremiumN, parseYRange } from '../state';
 import { fmtNum } from '../view/format';
 import {
   PNL_MARGIN,
@@ -10,6 +10,7 @@ import {
   type PnlYMode,
   type PnlYSettings,
   pnlChartModel,
+  todayLine,
   Y_UNIT_LABEL,
 } from '../view/pnlChart';
 import { pure } from './pure';
@@ -36,7 +37,7 @@ export interface PnlChartProps {
 
 const LINE_LABEL: Record<PnlLineKind, string> = {
   expiry: '満期（SQ）',
-  date: '指定日 d',
+  date: '指定日 + シナリオ',
   today: '今日',
 };
 
@@ -48,15 +49,25 @@ const Y_MODE_LABEL: Record<PnlYMode, string> = {
 
 const fmtDays = (v: number) => String(Math.round(v * 100) / 100);
 
+const DYNAMICS_LABEL = { sticky_strike: 'sticky strike', sticky_moneyness: 'sticky moneyness' };
+
 /** 損益グラフ（SVG。座標・範囲・目盛りは ui/view/pnlChart.ts と ui/chart/scale.ts の純関数）。 */
 function PnlChartView({ base, legCount, scenario, viewport, pnlY, dispatch }: PnlChartProps) {
   const { ref, width } = useWidth(480);
   const height = width < NARROW_FROM ? HEIGHT_NARROW : HEIGHT;
   const plotWidth = Math.max(width - PNL_MARGIN.left - PNL_MARGIN.right, 1);
   const plotHeight = height - PNL_MARGIN.top - PNL_MARGIN.bottom;
+  // 今日の線はシナリオ IV を掛けない（d・ΔX・Δσ・Δs のスライダーで変わらない）ので、表示範囲・幅・β・動き方が
+  // 変わったときだけ作る（#6。スライダー 1 回の描き直しを指定日の線 + 指標に絞る）
+  const { beta, ivDynamics, ivShift } = scenario;
+  const todayYs = useMemo(
+    () => todayLine(base, viewport, plotWidth, scenario),
+    // scenario の他の値（d・ΔX・Δσ・Δs）は今日の線に効かないので追わない
+    [base, viewport, plotWidth, beta, ivDynamics, ivShift],
+  );
   const model = useMemo(
-    () => pnlChartModel({ base, scenario, viewport, pnlY, plotWidth, plotHeight }),
-    [base, scenario, viewport, pnlY, plotWidth, plotHeight],
+    () => pnlChartModel({ base, scenario, viewport, pnlY, plotWidth, plotHeight, todayYs }),
+    [base, scenario, viewport, pnlY, plotWidth, plotHeight, todayYs],
   );
   const range: Domain = [PNL_MARGIN.left, PNL_MARGIN.left + plotWidth];
 
@@ -70,17 +81,6 @@ function PnlChartView({ base, legCount, scenario, viewport, pnlY, dispatch }: Pn
   });
 
   // 入力欄（文字列は部品が持ち、検証できた値だけ状態に入れる）
-  const [daysText, setDaysText] = useState(fmtDays(scenario.days));
-  const [daysError, setDaysError] = useState<string | null>(null);
-  useEffect(() => {
-    // 外から d が変わったとき（#6 のスライダーなど）は欄を合わせる
-    const parsed = Number(daysText.replace(/,/g, ''));
-    if (!(Number.isFinite(parsed) && Math.abs(parsed - scenario.days) < 1e-9)) {
-      setDaysText(fmtDays(scenario.days));
-      setDaysError(null);
-    }
-    // daysText はここでは追わない（入力中の文字列を上書きしない）
-  }, [scenario.days]);
   const [loText, setLoText] = useState('');
   const [hiText, setHiText] = useState('');
   const [rangeError, setRangeError] = useState<string | null>(null);
@@ -88,16 +88,6 @@ function PnlChartView({ base, legCount, scenario, viewport, pnlY, dispatch }: Pn
   const [nError, setNError] = useState<string | null>(null);
 
   const noLegs = !base;
-  const maxDays = base?.maxDays ?? 0;
-
-  const onDays = (text: string) => {
-    setDaysText(text);
-    const r = parseDays(text, maxDays);
-    if (r.ok) {
-      setDaysError(null);
-      if (r.value !== scenario.days) dispatch({ type: 'setDays', days: r.value });
-    } else setDaysError(r.message);
-  };
 
   const setMode = (mode: PnlYMode) => {
     if (mode === 'manual' && !pnlY.manual) {
@@ -131,11 +121,6 @@ function PnlChartView({ base, legCount, scenario, viewport, pnlY, dispatch }: Pn
     } else setNError(r.message);
   };
 
-  // 上限（最遠の足の SQ）が変わったら、エラーになっていた入力を判定し直す（遠い限月の足を足した後など）
-  useEffect(() => {
-    if (daysError !== null && !noLegs) onDays(daysText);
-  }, [maxDays]);
-
   const zoomBy = (factor: number) =>
     dispatch({
       type: 'setPnlViewport',
@@ -144,7 +129,6 @@ function PnlChartView({ base, legCount, scenario, viewport, pnlY, dispatch }: Pn
 
   // 入力のエラーは、いま見えている欄の分だけ出す（モードを切り替えたら前のモードの分は出さない）
   const errors = [
-    daysError,
     pnlY.mode === 'manual' ? rangeError : null,
     pnlY.mode === 'premium' ? nError : null,
   ].filter((e): e is string => e !== null);
@@ -157,19 +141,6 @@ function PnlChartView({ base, legCount, scenario, viewport, pnlY, dispatch }: Pn
   return (
     <div class="pnl">
       <div class="pnl-tools">
-        <label class="pnl-days">
-          指定日 d{' '}
-          <input
-            type="text"
-            inputMode="decimal"
-            size={6}
-            value={daysText}
-            disabled={noLegs}
-            aria-invalid={daysError !== null}
-            onInput={(e) => onDays(e.currentTarget.value)}
-          />{' '}
-          日<span class="note">（0〜{fmtDays(maxDays)}）</span>
-        </label>
         <fieldset class="seg" aria-label="縦軸">
           {(['auto', 'manual', 'premium'] as const).map((m) => (
             <button
@@ -312,6 +283,15 @@ function PnlChartView({ base, legCount, scenario, viewport, pnlY, dispatch }: Pn
               {model.x0Px !== null && (
                 <line class="pnl-x0" x1={model.x0Px} x2={model.x0Px} y1={plot.top} y2={bottom} />
               )}
+              {model.scenarioPx !== null && (
+                <line
+                  class="pnl-scn"
+                  x1={model.scenarioPx}
+                  x2={model.scenarioPx}
+                  y1={plot.top}
+                  y2={bottom}
+                />
+              )}
               {model.lines.map((l) => (
                 <path key={l.kind} class={`pnl-line ${l.kind}`} d={l.d} />
               ))}
@@ -333,15 +313,21 @@ function PnlChartView({ base, legCount, scenario, viewport, pnlY, dispatch }: Pn
         <span class="lg expiry">━ {LINE_LABEL.expiry}</span>{' '}
         {model.lines.some((l) => l.kind === 'date') ? (
           <span class="lg date">
-            ━ {LINE_LABEL.date}（{fmtDays(model.days)} 日後）
+            ━{' '}
+            {model.days > 0
+              ? `指定日 d（${fmtDays(model.days)} 日後）+ シナリオ`
+              : 'シナリオ（d = 0）'}
           </span>
         ) : (
-          <span class="lg date">指定日（d = 0）= 今日</span>
+          <span class="lg date">指定日（d = 0・Δσ = Δs = 0）= 今日</span>
         )}{' '}
         <span class="lg today">┅ {LINE_LABEL.today}</span> ● 満期の折れ点 ◆ 満期の BEP ┆ X₀
+        {model.scenarioPx !== null && <span class="lg scn"> ┆ シナリオ点 X₀ + ΔX</span>}
         <span class="block">
-          横軸 X（円）/ 縦軸 損益（{unit}）。前提: シナリオ 0（ΔX・Δσ・Δs = 0）、β{' '}
-          {fmtNum(scenario.beta, 1)}pt/1%、sticky strike
+          横軸 X（円）/ 縦軸 損益（{unit}）。前提: 指定日の線 = シナリオ（Δσ{' '}
+          {fmtNum(scenario.dSigma, 1)}
+          pt、Δs {fmtNum(scenario.skew, 1)}）、今日の線 = シナリオ IV なし。どちらも β{' '}
+          {fmtNum(scenario.beta, 1)}pt/1%（横軸の各点）、{DYNAMICS_LABEL[scenario.ivDynamics]}
         </span>
         {model.premiumFallback && <span class="block warn">プレミアム 0 のため自動</span>}
         {model.daysClamped && (
