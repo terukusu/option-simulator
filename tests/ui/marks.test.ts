@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { normalizeChain } from '../../data';
+import { CALENDAR } from '../../ui/calendar';
 import { initialState, reduce } from '../../ui/state';
 import { boardRows, rowMarkLabels, sideMarkLabels } from '../../ui/view/board';
 import { positionModel } from '../../ui/view/position';
@@ -73,7 +74,7 @@ describe('印', () => {
       side: 'sell',
     });
     expect(s.legs[0]?.marks).toContain('unstable_iv');
-    const row = positionModel(chain, s.legs, 'B').rows[0];
+    const row = positionModel(chain, s.legs, 'B', CALENDAR).rows[0];
     expect(row?.markLabels).toContain('IV 不安定');
     expect(row?.warnings.some((w) => w.includes('IV 不安定'))).toBe(true);
   });

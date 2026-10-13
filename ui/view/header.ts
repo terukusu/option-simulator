@@ -1,9 +1,9 @@
 /**
  * ヘッダの表示モデル（純関数）。設計 docs/design.md 6.1・5.9・M1。
- * 計算は data/ の正規化結果をそのまま使い、ここは書式と「古い」の判定だけ。
+ * 計算は data/ の正規化結果をそのまま使い、ここは書式と「古い」・カレンダーの期限切れの判定だけ。
  */
 
-import type { Chain, ChainMonth } from '../../data';
+import { type Calendar, type Chain, type ChainMonth, isCalendarExpired } from '../../data';
 import type { AtmBasis } from '../../model';
 import { DASH, fmtDateTime, fmtNum, fmtTime } from './format';
 
@@ -66,6 +66,10 @@ export interface HeaderModel {
   months: HeaderMonthView[];
   /** 前提（常時表示） */
   assumptions: string[];
+  /** 評価時刻が取引カレンダーの covered_until より後（またはカレンダーを読めない） */
+  calendarExpired: boolean;
+  /** 「カレンダー期限切れ…」の文（assumptions にも入る。部品は warn で出す）。期限内なら null */
+  calendarWarning: string | null;
 }
 
 /** 基準価格の時刻: A = 先物の約定時刻、B = スナップショット時刻（A にフォールバックしたら先物の約定時刻）。 */
@@ -105,7 +109,27 @@ function forwardText(month: ChainMonth): string {
   return Number.isFinite(u) ? `${fmtNum(month.F, 0)} ±${fmtNum(u, 0)}` : fmtNum(month.F, 0);
 }
 
-export function headerModel(chain: Chain, basis: AtmBasis): HeaderModel {
+/** 前提に出す取引カレンダーの文と、期限切れの警告。設計 7.5。 */
+export function calendarAssumption(
+  calendar: Calendar,
+  evalTime: number,
+): { text: string; warning: string | null } {
+  if (!calendar.ok) {
+    return {
+      text: '取引カレンダー: 読めない（SQ 日は土日だけで計算）',
+      warning: 'カレンダー期限切れ（カレンダーを読めない）',
+    };
+  }
+  return {
+    text: `取引カレンダー: optionchan から同期（${calendar.syncedOn}）・確定 ${calendar.confirmedUntil} まで`,
+    warning: isCalendarExpired(calendar, evalTime)
+      ? `カレンダー期限切れ（評価時刻が ${calendar.coveredUntil} より後。休業日が漏れている可能性）`
+      : null,
+  };
+}
+
+export function headerModel(chain: Chain, basis: AtmBasis, calendar: Calendar): HeaderModel {
+  const cal = calendarAssumption(calendar, chain.evalTime);
   return {
     snapshot: fmtDateTime(chain.snapshotAt),
     delay: Number.isFinite(chain.delayedMinutes) ? `約 ${chain.delayedMinutes} 分遅れ` : DASH,
@@ -140,7 +164,10 @@ export function headerModel(chain: Chain, basis: AtmBasis): HeaderModel {
     assumptions: [
       `金利 ${fmtNum(chain.r * 100, 1)}%`,
       `評価時刻 = 板の時刻（${fmtDateTime(chain.evalTime)}）`,
-      '取引カレンダー: 休業日未反映',
+      cal.text,
+      ...(cal.warning ? [cal.warning] : []),
     ],
+    calendarExpired: cal.warning !== null,
+    calendarWarning: cal.warning,
   };
 }

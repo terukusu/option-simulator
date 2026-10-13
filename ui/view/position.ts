@@ -6,7 +6,14 @@
  * （theoreticalPnl のシナリオ 0 と一致する。手数料は含めない）。
  */
 
-import { buildMarketContext, type Chain, type LegMark, monthOf } from '../../data';
+import {
+  buildMarketContext,
+  type Calendar,
+  type Chain,
+  isExpiryConfirmed,
+  type LegMark,
+  monthOf,
+} from '../../data';
 import {
   type AnchorSource,
   type AtmBasis,
@@ -87,8 +94,11 @@ export interface PositionRow {
   warnings: string[];
   /** SQ 日（YYYY-MM-DD） */
   sqDate: string;
-  /** SQ 日を暦から求めた（休業日未反映） */
-  calendarUnverified: boolean;
+  /**
+   * SQ 日を取引カレンダーから求めた足で、その限月の第 2 金曜が確定の最終日より後（休業日未確定）。
+   * 板の限月（板の SQ 日を使う）は false
+   */
+  calendarUnconfirmed: boolean;
   state: LegState | null;
   /** 評価できない理由（読み直した板に限月が無いなど） */
   error: string | null;
@@ -111,21 +121,33 @@ export function positionContext(chain: Chain, legs: readonly UiLeg[], basis: Atm
   return buildMarketContext(chain, { atmBasis: basis, extraOptions, extraFutures });
 }
 
-function sqOf(chain: Chain, ui: UiLeg, ctx: MarketContext) {
+/** 限月 'YYYY-MM' の第 2 金曜が確定の最終日以前か（形が違えば未確定）。 */
+function confirmed(calendar: Calendar, month: string): boolean {
+  const m = /^(\d{4})-(\d{2})$/.exec(month);
+  return m !== null && isExpiryConfirmed(calendar, Number(m[1]), Number(m[2]));
+}
+
+function sqOf(chain: Chain, ui: UiLeg, ctx: MarketContext, calendar: Calendar) {
   const leg = ui.leg;
   if (leg.kind === 'option') {
     const m = monthOf(chain, leg.expiry);
-    if (m) return { sqDate: m.sqDate, calendarUnverified: false };
+    if (m) return { sqDate: m.sqDate, calendarUnconfirmed: false };
     const mk = ctx.options[leg.expiry];
-    return { sqDate: fmtDate(mk ? mk.sqTime : null), calendarUnverified: true };
+    return {
+      sqDate: fmtDate(mk ? mk.sqTime : null),
+      calendarUnconfirmed: !confirmed(calendar, leg.expiry),
+    };
   }
   if (leg.contract === chain.future.id) {
-    return { sqDate: chain.future.sqDate, calendarUnverified: false };
+    return { sqDate: chain.future.sqDate, calendarUnconfirmed: false };
   }
   const m = monthOf(chain, leg.contract);
-  if (m) return { sqDate: m.sqDate, calendarUnverified: false };
+  if (m) return { sqDate: m.sqDate, calendarUnconfirmed: false };
   const mk = ctx.futures[leg.contract];
-  return { sqDate: fmtDate(mk ? mk.sqTime : null), calendarUnverified: true };
+  return {
+    sqDate: fmtDate(mk ? mk.sqTime : null),
+    calendarUnconfirmed: !confirmed(calendar, leg.contract),
+  };
 }
 
 const finite = (v: number) => Number.isFinite(v);
@@ -134,6 +156,7 @@ export function positionModel(
   chain: Chain,
   legs: readonly UiLeg[],
   basis: AtmBasis,
+  calendar: Calendar,
 ): PositionModel {
   const ctx = positionContext(chain, legs, basis);
   const prepared: Array<PreparedLeg | null> = [];
@@ -179,7 +202,7 @@ export function positionModel(
       warnings.push('IV 不安定な行（IV の精度が低い。損益・グリークは目安）');
     }
     if (ui.marks.includes('no_quote')) warnings.push('気配なし（建値は既定の手入力値）');
-    const sq = sqOf(chain, ui, ctx);
+    const sq = sqOf(chain, ui, ctx, calendar);
     return {
       id: ui.id,
       kind: leg.kind,
@@ -202,7 +225,7 @@ export function positionModel(
       markLabels: ui.marks.map((m) => LEG_MARK_LABEL[m]),
       warnings,
       sqDate: sq.sqDate,
-      calendarUnverified: sq.calendarUnverified,
+      calendarUnconfirmed: sq.calendarUnconfirmed,
       state: e?.state ?? null,
       error: errors[i] ?? null,
     };

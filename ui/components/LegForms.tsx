@@ -164,7 +164,9 @@ export function LegForms({ chain, dispatch }: { chain: Chain; dispatch: (a: Acti
         <button type="submit">追加</button>
         {optError && <p class="field-error">{optError}</p>}
         <p class="note">
-          板の無い限月は SQ 日を暦から求める（休業日未反映）。F は板の先物価格で代用。
+          板の無い限月は SQ 日を取引カレンダー（optionchan から同期 +
+          国民の祝日）から求める。確定の最終日より後の限月は「休業日未確定」。F
+          は板の先物価格で代用。
         </p>
       </form>
     </div>

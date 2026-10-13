@@ -7,7 +7,8 @@
       "!coverage",
       "!node_modules",
       "!fixtures/local",
-      "!fixtures/synthetic"
+      "!fixtures/synthetic",
+      "!data/calendar"
     ]
   },
   "formatter": {
