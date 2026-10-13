@@ -6,4 +6,16 @@
 
 設計: [`docs/design.md`](docs/design.md)
 
-状態: 設計済み。縦切り 1（手元で損益が見える）を実装中。
+状態: 設計済み。縦切り 1（手元で損益が見える）を実装中（価格モデル `model/` と土台まで）。
+
+## 開発
+
+Node 22 を使う（`.node-version`）。
+
+```sh
+npm ci
+npm run typecheck
+npm run lint
+npm test
+npm run dev   # 画面の雛形（ui/）
+```

@@ -10,7 +10,15 @@
 - `api/`: 板の JSON を返す Python（Flask）。縦切り 2 から
 - `infra/`: Terraform（Cloud Run + IAP、縦切り 2 から）
 
+- `tests/`: vitest のテスト（`tests/model/`）と、合成の板の生成器などの補助（`tests/support/`）
+
 計算はすべてブラウザで行い、サーバーは板を返すだけ。
+
+## 開発
+
+- Node は 22（`.node-version`）。依存はバージョン固定（`package-lock.json` をコミット）
+- 確認: `npm ci && npm run typecheck && npm run lint && npm test`（CI と同じ。lint は Biome、整形は `npm run format`）
+- 画面の雛形: `npm run dev`（Vite の root は `ui/`）、`npm run build` で `dist/`
 
 ## リポジトリに置くもの / 置かないもの
 
