@@ -11,7 +11,7 @@ import { positionModel } from '../../ui/view/position';
 import { fixture } from '../support/fixtures';
 
 /**
- * #6 AC-9・AC-10: 設計 6.2 の U2・U4（証拠金を除く）、#19 AC-7: U5（手順 1〜3。手順 4 の basis の切替は #25）を固定の合成の板（架空の値）と reducer で通す。
+ * #6 AC-9・AC-10: 設計 6.2 の U2・U4（証拠金を除く）、#19 AC-7・#25 AC-2・AC-3: U5（手順 1〜4）を固定の合成の板（架空の値）と reducer で通す。
  * 画面の部品がする操作（板の bid / ask を押す = addBoardLeg、スライダー = setScenario、プリセット = applyPreset）を
  * そのまま action で並べ、表示モデル（損益グラフ・指標・テール表）を確かめる。
  */
@@ -23,7 +23,11 @@ if (!m1) throw new Error('限月が無い');
 const run = (s: State, ...a: Action[]) => a.reduce(reduce, s);
 
 function views(s: State) {
-  const settings: ModelSettings = { ...DEFAULT_SETTINGS, feePerLot: s.feePerLot };
+  const settings: ModelSettings = {
+    ...DEFAULT_SETTINGS,
+    feePerLot: s.feePerLot,
+    futureBasis: s.futureBasis,
+  };
   const pm = positionModel(chain, s.legs, s.atmBasis, CALENDAR, settings);
   const base = pnlDomains(chain, pm.prepared, pm.ctx, settings) as PnlBase;
   if (!base) throw new Error('基礎が作れない');
@@ -165,7 +169,7 @@ describe('U4: 小資金で 1 限月の 30% OTM の put 売り（AC-10。証拠�
   });
 });
 
-describe('U5: ミニ先物でデルタを中立に（AC-7。手順 1〜3）', () => {
+describe('U5: ミニ先物でデルタを中立に（#19 AC-7 手順 1〜3・#25 AC-2・AC-3 手順 4）', () => {
   const x0 = referencePrice(m1, 'B') as number;
   const rows = boardRows(chain, m1);
   // 1. 1 限月の OTM の put 売り（OTM 度 約 3%）・call 売り（約 6%）各 1 枚（Δ が 0 から離れる組み合わせ）
@@ -216,5 +220,89 @@ describe('U5: ミニ先物でデルタを中立に（AC-7。手順 1〜3）', ()
     expect(Math.abs(views(s3).metrics.scenarioPoint.total.deltaLarge)).toBeLessThanOrEqual(
       0.05 + 1e-9,
     );
+  });
+
+  it('4. [basis 減衰] で満期の線・テール表の SQ 列が w × basis × (1 − factor) だけ動き、今日の線は不変。[basis 固定] で戻る（#25 AC-2）', () => {
+    const first = views(s1).hedge.lines[0]?.input;
+    if (!first) throw new Error('追加できない');
+    const s2 = reduce(s1, { type: 'addFutureLeg', input: first });
+    const sd = reduce(s2, { type: 'setFutureBasis', basis: 'decay' });
+    const fixed = views(s2);
+    const decay = views(sd);
+    // 手計算（model の関数を呼ばない）: 先物の足 1 本（ミニ = 乗数 100）、basis = 板の先物価格 − X₀、
+    // factor = 残存（OP の SQ → 先物の SQ）/ T0（評価時刻 → 先物の SQ）。ms 差の比
+    const fut = s2.legs.at(-1)?.leg;
+    if (fut?.kind !== 'future') throw new Error('先物の足が無い');
+    expect(fut.product).toBe('fut_mini');
+    expect(chain.future.id).not.toBe(m1.id);
+    const w = (fut.side === 'buy' ? 1 : -1) * fut.qty * 100;
+    const ctx = fixed.pm.ctx;
+    const basis = (chain.future.price as number) - ctx.x0;
+    const factor = (chain.future.sqTime - m1.sqTime) / (chain.future.sqTime - ctx.evalTime);
+    expect(factor).toBeGreaterThan(0);
+    expect(factor).toBeLessThan(1);
+    const want = w * basis * (1 - factor);
+    // 板の basis ≠ 0 で差が出ること（反証可能性）
+    expect(Math.abs(want)).toBeGreaterThan(1);
+    for (const x of [ctx.x0 * 0.9, ctx.x0, ctx.x0 * 1.1]) {
+      expect(Math.abs(fixed.base.expiry(x) - decay.base.expiry(x) - want)).toBeLessThan(1e-6);
+    }
+    // テール表の SQ 列は各行で同じ額、指定日の列（d = 0）は変わらない
+    const fRows = fixed.metrics.tail.rows;
+    const dRows = decay.metrics.tail.rows;
+    expect(dRows.length).toBe(fRows.length);
+    expect(fRows.length).toBeGreaterThan(0);
+    fRows.forEach((r, i) => {
+      const d = dRows[i];
+      if (!d) throw new Error('行が無い');
+      expect(Math.abs(r.sq.pnl - d.sq.pnl - want)).toBeLessThan(1e-6);
+      expect(Math.abs(r.scenario.pnl - d.scenario.pnl)).toBeLessThan(1e-6);
+    });
+    // グラフ（同じ表示範囲で比べる。初期範囲は BEP で変わるため）: 満期の線は同じ額下がり、
+    // 今日の線（d = 0）は先物の factor = 1 なので一致
+    const vp = { type: 'setPnlViewport', viewport: [ctx.x0 * 0.9, ctx.x0 * 1.1] } as const;
+    const fChart = views(reduce(s2, vp)).chart;
+    const dChart = views(reduce(sd, vp)).chart;
+    const line = (c: typeof fChart, kind: 'expiry' | 'today') =>
+      c.lines.find((l) => l.kind === kind);
+    expect(line(dChart, 'today')?.xs).toEqual(line(fChart, 'today')?.xs);
+    expect(line(fChart, 'today')?.ys.length).toBeGreaterThan(0);
+    expect(line(dChart, 'today')?.ys).toEqual(line(fChart, 'today')?.ys);
+    const fEx = line(fChart, 'expiry');
+    const dEx = line(dChart, 'expiry');
+    expect(dEx?.xs).toEqual(fEx?.xs);
+    fEx?.ys.forEach((y, i) => {
+      expect(Math.abs(y - (dEx?.ys[i] ?? Number.NaN) - want)).toBeLessThan(1e-6);
+    });
+    // [basis 固定] に戻すと元と一致
+    const back = views(reduce(sd, { type: 'setFutureBasis', basis: 'fixed' }));
+    for (const x of [ctx.x0 * 0.9, ctx.x0, ctx.x0 * 1.1]) {
+      expect(back.base.expiry(x)).toBe(fixed.base.expiry(x));
+    }
+  });
+
+  it('差が出ない場合: OP だけ、先物と同じ限月の OP + 先物では固定 / 減衰の満期損益が一致（#25 AC-3）', () => {
+    const same = (s: State) => {
+      const f = views(s).base;
+      const d = views(reduce(s, { type: 'setFutureBasis', basis: 'decay' })).base;
+      const x0v = f.ctx.x0;
+      for (const x of [x0v * 0.9, x0v, x0v * 1.1]) {
+        expect(d.expiry(x)).toBe(f.expiry(x));
+      }
+    };
+    // OP だけ（手順 1）
+    same(s1);
+    // 先物と同じ限月の OP 1 本 + ミニ先物（OP の SQ = 先物の SQ で F = X'）
+    const mf = chain.months.find((m) => m.id === chain.future.id);
+    if (!mf) throw new Error('先物と同じ限月の OP が無い');
+    const kf = jumpToOtm(boardRows(chain, mf), 'put', x0, 0.03) as number;
+    const s = run(
+      start,
+      { type: 'addBoardLeg', expiry: mf.id, k: kf, optionType: 'put', side: 'sell' },
+      { type: 'addFutureLeg', input: { side: 'buy', qty: 1 } },
+    );
+    expect(s.legs).toHaveLength(2);
+    expect(s.legs[1]?.leg).toMatchObject({ kind: 'future', product: 'fut_mini' });
+    same(s);
   });
 });

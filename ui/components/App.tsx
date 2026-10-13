@@ -61,9 +61,12 @@ export function App() {
     () => (chain ? headerModel(chain, atmBasis, calendar) : null),
     [chain, atmBasis, calendar],
   );
-  // 手数料（1 枚あたり円）は評価の設定（損益・指標・テール表に効く）
-  const { feePerLot } = state;
-  const settings = useMemo<ModelSettings>(() => ({ ...DEFAULT_SETTINGS, feePerLot }), [feePerLot]);
+  // 手数料（1 枚あたり円）・先物の basis（固定 / 減衰。#25）は評価の設定（損益・指標・テール表・ヘッジに効く）
+  const { feePerLot, futureBasis } = state;
+  const settings = useMemo<ModelSettings>(
+    () => ({ ...DEFAULT_SETTINGS, feePerLot, futureBasis }),
+    [feePerLot, futureBasis],
+  );
   const positions = useMemo(
     () => (chain ? positionModel(chain, state.legs, atmBasis, calendar, settings) : null),
     [chain, state.legs, atmBasis, calendar, settings],
@@ -177,6 +180,7 @@ export function App() {
               />
               <ScenarioPanel
                 scenario={state.scenario}
+                futureBasis={futureBasis}
                 x0={positions?.ctx.x0 ?? Number.NaN}
                 maxDays={pnlBase?.maxDays ?? 0}
                 evalTime={chain.evalTime}

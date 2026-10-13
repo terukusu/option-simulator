@@ -345,6 +345,24 @@ describe('シナリオ・手数料・単位の状態（#6）', () => {
     expect(initialState.metricsUnit).toBe('auto');
   });
 
+  it('先物の basis（#25）: 既定は固定。固定 / 減衰の切替、不正値・同値は同じ参照、板の読み直し・リセットで保つ', () => {
+    expect(initialState.futureBasis).toBe('fixed');
+    expect(base.futureBasis).toBe('fixed');
+    const d = reduce(base, { type: 'setFutureBasis', basis: 'decay' });
+    expect(d.futureBasis).toBe('decay');
+    expect(reduce(d, { type: 'setFutureBasis', basis: 'decay' })).toBe(d);
+    expect(reduce(d, { type: 'setFutureBasis', basis: 'x' as 'fixed' })).toBe(d);
+    expect(reduce(d, { type: 'setFutureBasis', basis: 'fixed' }).futureBasis).toBe('fixed');
+    const kept = run(
+      d,
+      { type: 'loaded', chain, label: 'again' },
+      { type: 'setScenario', patch: { days: 2, dX: -500 } },
+      { type: 'resetScenario' },
+      { type: 'setFee', fee: 100 },
+    );
+    expect(kept.futureBasis).toBe('decay');
+  });
+
   it('入力の検証: 手数料、Unicode マイナス・先頭の + を受ける数のパース', () => {
     expect(parseFee('300')).toEqual({ ok: true, value: 300 });
     expect(parseFee(' 1,000 ')).toEqual({ ok: true, value: 1000 });
