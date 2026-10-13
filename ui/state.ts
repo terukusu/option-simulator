@@ -15,9 +15,19 @@ import {
   type ManualOptionLegInput,
   manualOptionLeg,
 } from '../data';
-import type { AtmBasis, FutureMarket, Leg, OptionExpiryMarket, OptionType, Side } from '../model';
+import {
+  type AtmBasis,
+  type FutureMarket,
+  type Leg,
+  type OptionExpiryMarket,
+  type OptionType,
+  type Scenario,
+  type Side,
+  ZERO_SCENARIO,
+} from '../model';
 import { CALENDAR } from './calendar';
 import type { Domain } from './chart/scale';
+import { DEFAULT_PNL_Y, type PnlYSettings } from './view/pnlChart';
 import type { SmileAxis } from './view/smile';
 
 export interface UiLeg {
@@ -48,6 +58,14 @@ export interface State {
   filterAsk: boolean;
   smileAxis: SmileAxis;
   smileViewport: Domain | null;
+  /** スマイルで選んだ行使価格（操作行を出す。限月の切替・板の読み直しで消す） */
+  smilePick: { monthId: string; k: number } | null;
+  /** シナリオ（#11 は指定日 d だけを編集する。#6 のスライダーが同じ状態を編集する） */
+  scenario: Scenario;
+  /** 損益グラフの横軸の表示範囲（null = 初期範囲。描くときに全域へ収める） */
+  pnlViewport: Domain | null;
+  /** 損益グラフの縦軸 */
+  pnlY: PnlYSettings;
   legs: UiLeg[];
   nextId: number;
   /** 足の追加フォームのエラー（data/ の例外の文言） */
@@ -67,6 +85,10 @@ export const initialState: State = {
   filterAsk: false,
   smileAxis: 'k',
   smileViewport: null,
+  smilePick: null,
+  scenario: ZERO_SCENARIO,
+  pnlViewport: null,
+  pnlY: DEFAULT_PNL_Y,
   legs: [],
   nextId: 1,
   legError: null,
@@ -92,6 +114,10 @@ export type Action =
   | { type: 'setFilterAsk'; on: boolean }
   | { type: 'setAxis'; axis: SmileAxis }
   | { type: 'setViewport'; viewport: Domain | null }
+  | { type: 'pickSmile'; pick: { monthId: string; k: number } | null }
+  | { type: 'setDays'; days: number }
+  | { type: 'setPnlViewport'; viewport: Domain | null }
+  | { type: 'setPnlY'; patch: Partial<PnlYSettings> }
   | { type: 'addBoardLeg'; expiry: string; k: number; optionType: OptionType; side: Side }
   | { type: 'addFutureLeg'; input: FutureLegInput }
   | { type: 'addManualLeg'; input: ManualOptionLegInput }
@@ -140,6 +166,8 @@ export function reduce(state: State, action: Action): State {
         loadError: null,
         monthId: keep ? state.monthId : (chain.months[0]?.id ?? null),
         smileViewport: null,
+        smilePick: null,
+        pnlViewport: null,
       };
     }
     case 'loadFailed':
@@ -150,7 +178,7 @@ export function reduce(state: State, action: Action): State {
     case 'setMonth':
       return action.monthId === state.monthId
         ? state
-        : { ...state, monthId: action.monthId, smileViewport: null };
+        : { ...state, monthId: action.monthId, smileViewport: null, smilePick: null };
     case 'setTarget':
       return { ...state, target: action.target };
     case 'setFilterAsk':
@@ -161,6 +189,16 @@ export function reduce(state: State, action: Action): State {
         : { ...state, smileAxis: action.axis, smileViewport: null };
     case 'setViewport':
       return { ...state, smileViewport: action.viewport };
+    case 'pickSmile':
+      return { ...state, smilePick: action.pick };
+    case 'setDays':
+      return Number.isFinite(action.days) && action.days >= 0
+        ? { ...state, scenario: { ...state.scenario, days: action.days } }
+        : state;
+    case 'setPnlViewport':
+      return { ...state, pnlViewport: action.viewport };
+    case 'setPnlY':
+      return { ...state, pnlY: { ...state.pnlY, ...action.patch } };
     case 'addBoardLeg': {
       if (!state.chain) return state;
       try {
@@ -206,10 +244,13 @@ export function reduce(state: State, action: Action): State {
           l.id === action.id ? { ...l, leg: applyPatch(l.leg, action.patch) } : l,
         ),
       };
-    case 'removeLeg':
-      return { ...state, legs: state.legs.filter((l) => l.id !== action.id) };
+    case 'removeLeg': {
+      const legs = state.legs.filter((l) => l.id !== action.id);
+      // 足が 0 本になったら全クリアと同じく初期範囲に戻す
+      return { ...state, legs, pnlViewport: legs.length === 0 ? null : state.pnlViewport };
+    }
     case 'clearLegs':
-      return { ...state, legs: [] };
+      return { ...state, legs: [], pnlViewport: null };
     case 'clearLegError':
       return state.legError === null ? state : { ...state, legError: null };
   }
@@ -267,4 +308,31 @@ export function parseContract(text: string): Parsed<string> {
   return m && month >= 1 && month <= 12
     ? { ok: true, value: t }
     : { ok: false, message: '限月は YYYY-MM' };
+}
+
+/** 指定日 d（暦日、小数可）: 0 以上・最遠の足の SQ までの日数以下。 */
+export function parseDays(text: string, maxDays: number): Parsed<number> {
+  const v = num(text);
+  const max = Number.isFinite(maxDays) ? Math.max(maxDays, 0) : 0;
+  return Number.isFinite(v) && v >= 0 && v <= max + 1e-9
+    ? { ok: true, value: Math.min(v, max) }
+    : { ok: false, message: `指定日は 0〜${(Math.floor(max * 100) / 100).toString()} 日` };
+}
+
+/** 縦軸の手動の範囲（円）: 両方が数で、下端 < 上端。 */
+export function parseYRange(loText: string, hiText: string): Parsed<Domain> {
+  const lo = num(loText);
+  const hi = num(hiText);
+  if (!Number.isFinite(lo) || !Number.isFinite(hi)) {
+    return { ok: false, message: '下端・上端は数（円）' };
+  }
+  return lo < hi ? { ok: true, value: [lo, hi] } : { ok: false, message: '下端 < 上端にする' };
+}
+
+/** プレミアム基準の N: 0 < N ≤ 1,000。 */
+export function parsePremiumN(text: string): Parsed<number> {
+  const v = num(text);
+  return Number.isFinite(v) && v > 0 && v <= 1000
+    ? { ok: true, value: v }
+    : { ok: false, message: 'N は 0 より大きく 1,000 以下' };
 }

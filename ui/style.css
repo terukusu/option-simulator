@@ -562,3 +562,130 @@ button.q.noquote {
   flex-direction: column;
   font-size: 0.85em;
 }
+
+/* ---------------------------------------------------------------- グラフの操作（#11） */
+
+/*
+ * グラフの描画域: 1 本指 = パン、2 本指 = 拡大（M10）。ページのスクロール・ズームはグラフの外で行う。
+ * テキストの選択とタップの強調も止める
+ */
+.plot-area {
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.plot-area:active {
+  cursor: grabbing;
+}
+
+/* 描くものが無いとき（足 0 本・スマイルなし）はページのスクロールを止めない */
+.plot-area.plot-empty {
+  cursor: auto;
+  touch-action: auto;
+}
+
+.plot-area:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.pick-line {
+  stroke: var(--accent);
+  stroke-dasharray: 2 2;
+  stroke-width: 1.5;
+}
+
+.pick-row {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  font-variant-numeric: tabular-nums;
+  gap: 4px 8px;
+  margin: 4px 0;
+}
+
+.pick-row .sell {
+  color: var(--bid);
+}
+
+.pick-row .buy {
+  color: var(--ask);
+}
+
+/* ---------------------------------------------------------------- 損益グラフ */
+
+.pnl-tools {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+}
+
+.pnl-tools input {
+  font: inherit;
+  max-width: 100%;
+}
+
+.pnl-plot {
+  min-height: 60px;
+  width: 100%;
+}
+
+.pnl-plot svg {
+  display: block;
+  font-size: 10px;
+  max-width: 100%;
+}
+
+.pnl-line {
+  fill: none;
+  stroke-linejoin: round;
+}
+
+.pnl-line.expiry {
+  stroke: currentColor;
+  stroke-width: 1.8;
+}
+
+.pnl-line.date {
+  stroke: var(--accent);
+  stroke-width: 1.6;
+}
+
+.pnl-line.today {
+  stroke: var(--muted);
+  stroke-dasharray: 5 3;
+  stroke-width: 1.4;
+}
+
+.pnl-zero {
+  stroke: var(--muted);
+  stroke-width: 1;
+}
+
+.pnl-x0 {
+  stroke: #d69e2e;
+  stroke-dasharray: 4 2;
+  stroke-width: 1.2;
+}
+
+.pnl-kink {
+  fill: currentColor;
+}
+
+.pnl-bep {
+  fill: Canvas;
+  stroke: var(--warn);
+  stroke-width: 1.5;
+}
+
+.lg.date {
+  color: var(--accent);
+}
+
+.lg.today {
+  color: var(--muted);
+}

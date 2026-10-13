@@ -3,11 +3,13 @@ import { type Chain, monthOf } from '../../data';
 import { describeLoadError, fixtureUrl, loadFromFile, loadFromUrl } from '../load';
 import { initialState, reduce } from '../state';
 import { headerModel } from '../view/header';
+import { pnlDomains } from '../view/pnlChart';
 import { positionModel } from '../view/position';
 import { Board } from './Board';
 import { Header } from './Header';
 import { LegForms } from './LegForms';
 import { Loader } from './Loader';
+import { PnlChart } from './PnlChart';
 import { Positions } from './Positions';
 import { Smile } from './Smile';
 
@@ -56,6 +58,12 @@ export function App() {
     () => (chain ? positionModel(chain, state.legs, atmBasis, calendar) : null),
     [chain, state.legs, atmBasis, calendar],
   );
+  // 損益グラフの横軸の範囲・満期の折れ点など（足・板が変わったときだけ。ドラッグ中は作り直さない）
+  const pnlBase = useMemo(
+    () => (chain && positions ? pnlDomains(chain, positions.prepared, positions.ctx) : null),
+    [chain, positions],
+  );
+  const { smilePick } = state;
 
   return (
     <div class="app">
@@ -111,6 +119,15 @@ export function App() {
               ))}
             </section>
             <section class="pane pane-side">
+              <h2>損益グラフ</h2>
+              <PnlChart
+                base={pnlBase}
+                legCount={state.legs.length}
+                scenario={state.scenario}
+                viewport={state.pnlViewport}
+                pnlY={state.pnlY}
+                dispatch={dispatch}
+              />
               <h2>スマイル {month ? `${month.id} 限` : ''}</h2>
               {chain.months.map((m) => {
                 const active = m.id === state.monthId;
@@ -122,6 +139,7 @@ export function App() {
                     basis={atmBasis}
                     axis={state.smileAxis}
                     viewport={active ? state.smileViewport : null}
+                    pick={active && smilePick?.monthId === m.id ? smilePick.k : null}
                     dispatch={dispatch}
                   />
                 );
