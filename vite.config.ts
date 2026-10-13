@@ -1,7 +1,14 @@
 import { defineConfig } from 'vitest/config';
+import { serveSyntheticFixtures } from './scripts/devFixtures.mjs';
 
 export default defineConfig({
   root: 'ui',
+  // 合成の板（fixtures/synthetic/）を dev サーバーでだけ /fixtures/<name>.json で配る（dist/ には入らない）
+  plugins: [serveSyntheticFixtures()],
+  server: {
+    // 実データの dump（fixtures/local/）を dev サーバーの /@fs/ からも配らない（Vite の既定の拒否も残す）
+    fs: { deny: ['.env', '.env.*', '*.{crt,pem}', '**/.git/**', '**/fixtures/local/**'] },
+  },
   build: {
     outDir: '../dist',
     emptyOutDir: true,
