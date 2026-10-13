@@ -1,0 +1,17 @@
+node_modules/
+dist/
+coverage/
+.venv/
+__pycache__/
+*.pyc
+.env
+.env.*
+fixtures/local/
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+!*.tfvars.example
+.claude/settings.local.json
+.claude/handoff/
+.claude/worktrees/
