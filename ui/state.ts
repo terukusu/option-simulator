@@ -21,6 +21,7 @@ import {
   CRASH_PRESETS,
   type FutureMarket,
   type Leg,
+  type ModelSettings,
   type OptionExpiryMarket,
   type OptionType,
   type Scenario,
@@ -68,6 +69,8 @@ export interface State {
   scenario: Scenario;
   /** 手数料（1 枚あたり円、既定 0。全足に掛ける） */
   feePerLot: number;
+  /** 先物の足の basis: 固定 / 先物の SQ で 0 へ線形に減衰（設計 5.8。全ての先物の足に 1 つ。#25） */
+  futureBasis: ModelSettings['futureBasis'];
   /** 指標の金額の単位（自動 = 受取 + 支払が 10 万円以上なら千円） */
   metricsUnit: MetricsUnitSetting;
   /** 損益グラフの横軸の表示範囲（null = 初期範囲。描くときに全域へ収める） */
@@ -103,6 +106,7 @@ export const initialState: State = {
   smilePick: null,
   scenario: ZERO_SCENARIO,
   feePerLot: 0,
+  futureBasis: 'fixed',
   metricsUnit: 'auto',
   pnlViewport: null,
   pnlY: DEFAULT_PNL_Y,
@@ -138,6 +142,7 @@ export type Action =
   | { type: 'applyPreset'; index: number; x0: number }
   | { type: 'resetScenario' }
   | { type: 'setFee'; fee: number }
+  | { type: 'setFutureBasis'; basis: ModelSettings['futureBasis'] }
   | { type: 'setMetricsUnit'; unit: MetricsUnitSetting }
   | { type: 'setPnlViewport'; viewport: Domain | null }
   | { type: 'setPnlY'; patch: Partial<PnlYSettings> }
@@ -270,6 +275,11 @@ export function reduce(state: State, action: Action): State {
     case 'setFee':
       return Number.isFinite(action.fee) && action.fee >= 0 && action.fee <= FEE_MAX
         ? { ...state, feePerLot: action.fee }
+        : state;
+    case 'setFutureBasis':
+      return (action.basis === 'fixed' || action.basis === 'decay') &&
+        action.basis !== state.futureBasis
+        ? { ...state, futureBasis: action.basis }
         : state;
     case 'setMetricsUnit':
       return { ...state, metricsUnit: action.unit };

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'preact/hooks';
-import { CRASH_PRESETS, type IvDynamics, type Scenario } from '../../model';
+import { CRASH_PRESETS, type IvDynamics, type ModelSettings, type Scenario } from '../../model';
 import type { Action } from '../state';
 import { fmtDateTime, fmtNum } from '../view/format';
 import {
@@ -27,6 +27,14 @@ const FIELDS: readonly SliderField[] = ['days', 'dX', 'dSigma', 'skew'];
 const DYNAMICS: ReadonlyArray<{ v: IvDynamics; label: string }> = [
   { v: 'sticky_strike', label: 'sticky strike' },
   { v: 'sticky_moneyness', label: 'sticky moneyness' },
+];
+
+type FutureBasis = ModelSettings['futureBasis'];
+
+/** 先物の足の basis（設計 5.8。#25） */
+const FUTURE_BASIS: ReadonlyArray<{ v: FutureBasis; label: string }> = [
+  { v: 'fixed', label: 'basis 固定' },
+  { v: 'decay', label: 'basis 減衰' },
 ];
 
 /** スライダー 1 本（range + 数値欄）。値は表示の単位（ΔX は % か円）。 */
@@ -114,6 +122,8 @@ function SliderRow(props: {
 
 export interface ScenarioPanelProps {
   scenario: Scenario;
+  /** 先物の足の basis（固定 / 減衰。全ての先物の足に 1 つ） */
+  futureBasis: FutureBasis;
   /** 横軸の基準 X₀（決まらなければ NaN） */
   x0: number;
   /** d の上限（最遠の足の SQ までの暦日。足 0 本・評価できる足が無ければ 0） */
@@ -129,7 +139,7 @@ export interface ScenarioPanelProps {
 
 /** シナリオのパネル（M5・5.4）。値の範囲・キー操作・パースは ui/view/scenario.ts の純関数。 */
 export function ScenarioPanel(props: ScenarioPanelProps) {
-  const { scenario, x0, maxDays, evalTime, targets, dispatch, onZoom } = props;
+  const { scenario, futureBasis, x0, maxDays, evalTime, targets, dispatch, onZoom } = props;
   const [dXUnit, setDXUnit] = useState<DXUnit>('pct');
   const specs = useMemo(
     () => FIELDS.map((f) => sliderSpec(f, { x0, maxDays, dXUnit })),
@@ -234,12 +244,28 @@ export function ScenarioPanel(props: ScenarioPanelProps) {
             </button>
           ))}
         </fieldset>
+        <fieldset class="seg" aria-label="先物の basis">
+          {FUTURE_BASIS.map((b) => (
+            <button
+              type="button"
+              key={b.v}
+              aria-pressed={futureBasis === b.v}
+              onClick={() => dispatch({ type: 'setFutureBasis', basis: b.v })}
+            >
+              {b.label}
+            </button>
+          ))}
+        </fieldset>
       </div>
       {betaError && (
         <p class="field-error" role="alert">
           {betaError}
         </p>
       )}
+      <p class="note">
+        先物 basis: 先物の足をその SQ より前に評価するとき F = X' + basis。減衰は先物の SQ で 0
+        へ線形。
+      </p>
       <div class="scn-eval">
         {targets.length > 1 && (
           <label>
