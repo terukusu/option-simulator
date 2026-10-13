@@ -32,6 +32,8 @@ export interface PnlChartProps {
   scenario: Scenario;
   viewport: Domain | null;
   pnlY: PnlYSettings;
+  /** 表示中の限月のシナリオ ATM（ΔX ≠ 0 のときだけ。無ければ null。#26） */
+  scenarioAtm: { monthId: string; k: number; F: number } | null;
   dispatch: (a: Action) => void;
 }
 
@@ -52,7 +54,15 @@ const fmtDays = (v: number) => String(Math.round(v * 100) / 100);
 const DYNAMICS_LABEL = { sticky_strike: 'sticky strike', sticky_moneyness: 'sticky moneyness' };
 
 /** 損益グラフ（SVG。座標・範囲・目盛りは ui/view/pnlChart.ts と ui/chart/scale.ts の純関数）。 */
-function PnlChartView({ base, legCount, scenario, viewport, pnlY, dispatch }: PnlChartProps) {
+function PnlChartView({
+  base,
+  legCount,
+  scenario,
+  viewport,
+  pnlY,
+  scenarioAtm,
+  dispatch,
+}: PnlChartProps) {
   const { ref, width } = useWidth(480);
   const height = width < NARROW_FROM ? HEIGHT_NARROW : HEIGHT;
   const plotWidth = Math.max(width - PNL_MARGIN.left - PNL_MARGIN.right, 1);
@@ -66,8 +76,18 @@ function PnlChartView({ base, legCount, scenario, viewport, pnlY, dispatch }: Pn
     [base, viewport, plotWidth, beta, ivDynamics, ivShift],
   );
   const model = useMemo(
-    () => pnlChartModel({ base, scenario, viewport, pnlY, plotWidth, plotHeight, todayYs }),
-    [base, scenario, viewport, pnlY, plotWidth, plotHeight, todayYs],
+    () =>
+      pnlChartModel({
+        base,
+        scenario,
+        viewport,
+        pnlY,
+        plotWidth,
+        plotHeight,
+        todayYs,
+        scenarioAtm,
+      }),
+    [base, scenario, viewport, pnlY, plotWidth, plotHeight, todayYs, scenarioAtm],
   );
   const range: Domain = [PNL_MARGIN.left, PNL_MARGIN.left + plotWidth];
 
@@ -292,6 +312,15 @@ function PnlChartView({ base, legCount, scenario, viewport, pnlY, dispatch }: Pn
                   y2={bottom}
                 />
               )}
+              {model.scenarioAtm !== null && (
+                <line
+                  class="pnl-scn-atm"
+                  x1={model.scenarioAtm.px}
+                  x2={model.scenarioAtm.px}
+                  y1={plot.top}
+                  y2={bottom}
+                />
+              )}
               {model.lines.map((l) => (
                 <path key={l.kind} class={`pnl-line ${l.kind}`} d={l.d} />
               ))}
@@ -323,6 +352,12 @@ function PnlChartView({ base, legCount, scenario, viewport, pnlY, dispatch }: Pn
         )}{' '}
         <span class="lg today">┅ {LINE_LABEL.today}</span> ● 満期の折れ点 ◆ 満期の BEP ┆ X₀
         {model.scenarioPx !== null && <span class="lg scn"> ┆ シナリオ点 X₀ + ΔX</span>}
+        {model.scenarioAtm !== null && (
+          <span class="lg scn-atm">
+            {' '}
+            ┆ シナリオ ATM（{model.scenarioAtm.monthId} 限 {fmtNum(model.scenarioAtm.k, 0)}）
+          </span>
+        )}
         <span class="block">
           横軸 X（円）/ 縦軸 損益（{unit}）。前提: 指定日の線 = シナリオ（Δσ{' '}
           {fmtNum(scenario.dSigma, 1)}

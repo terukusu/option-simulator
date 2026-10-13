@@ -478,6 +478,19 @@ button.q.noquote {
   color: #d69e2e;
 }
 
+/* シナリオ ATM（#26）: 市場 ATM（橙の破線）と区別する紫の細かい点線。損益グラフとスマイルで共通 */
+.scn-atm-line,
+.pnl-scn-atm {
+  stroke: #9f7aea;
+  stroke-dasharray: 1 3;
+  stroke-linecap: round;
+  stroke-width: 2;
+}
+
+.lg.scn-atm {
+  color: #9f7aea;
+}
+
 /* ---------------------------------------------------------------- ポジション */
 
 .positions-head {
