@@ -157,7 +157,7 @@ EPIC 本文のテンプレート（**`### 子 Issue と着手順` と `### 終�
 
 - 子 Issue の中身の実装（`/implement-issue` の責務）、EPIC への `/implement-issue` 実行
 - 引数で指定された EPIC 以外の既存 Issue の書き換え・クローズ・削除
-- EPIC の自動クローズ（人の判断）
+- EPIC のクローズ（終了条件の判定とあわせて `/implement-epic` が行う）
 - 本番への変更（デプロイ・`terraform apply`・IAM / GitHub 設定）、optionchan への書き込み・optionchan のリポジトリへの起票
 - 設計（`docs/design.md` の決定事項・判断待ち）を EPIC の中で決めること
 - ラベルの新設、EPIC 健全性チェックの自動化
