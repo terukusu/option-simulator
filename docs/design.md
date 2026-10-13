@@ -44,6 +44,8 @@ MVP は 3 つの縦切りで作る。縦切り 1 は GCP 無しで手元で動�
 | **2. 本番の板で動く** | M9（`bigquery`）、7 章の API・「使える板」判定・キャッシュ、8 章のデプロイ（IAP）、M1 の鮮度表示。作業項目: **JPX グリークの単位の確定**（AC7 の閾値）、Q2 の統計の再測（数日分 + 11 月 SQ 後）、7.2 の夜間の時刻の実測 | 取引時間中・時間外・寄り前で正しい板が出る。AC1・AC2・AC7・AC11・AC12・AC25 |
 | **3. 検討を速くする** | M7 テンプレート、M8 保存、M12 デルタヘッジ、M13 ピン留め、M14 証拠金の手入力 | **U1・U3・U5** と U4 の手順 4 が通る。AC9・AC19・AC20・AC28・AC29 |
 
+縦切り 1 の画面（#5、2026-10-14 にオーナー確定）: M3 の「スマイルから足を追加」と M10 のホイール・ドラッグ・ピンチ（スマイルを含む）は損益グラフと一緒に #11 で作る（#5 は板の bid / ask からの追加と、スマイルの [−][＋][⟲] ボタンでの拡大まで）。M1 の鮮度（板の時刻・約 N 分遅れ・先物の約定時刻・基準価格が 30 分以上古い「古い」）は縦切り 1 で JSON の値の表示まで入れ、実データでの確認と AC1 は縦切り 2。
+
 | # | 機能 | 内容 |
 |---|---|---|
 | M1 | 板の読み込み | 最新の「使える」スナップショット（2 限月分）。原資産（日経平均・先物）、行使価格ごとの call / put の bid / ask・IV、約定価格・JPX グリーク（あれば）。ATM は 5.9。鮮度（スナップショット時刻・先物の約定時刻・約 15 分遅れ）を常時表示 |
@@ -498,9 +500,15 @@ F の推定・補間・ATM の判定はブラウザ（`model/`）。`sq_date`・
 
 夜間の寄り前（16:45〜17:00）の壊れた板（気配・先物なし）は API が返さないので fixture にせず、テストで `latest.json` の気配を消して作る（F は NaN、スマイル・ATM は null、例外を出さない）。
 
+画面での読み込み（縦切り 1）: `npm run dev` では Vite のプラグイン（`scripts/devFixtures.mjs`、`apply: 'serve'`）が `fixtures/synthetic/` の 3 ファイルだけを `/fixtures/<name>.json` で配り、画面は既定で `latest.json` を読む（切替できる）。許可リストの名前だけを配り、`fixtures/local/`（実データの dump）は配らない（`vite.config.ts` の `server.fs.deny` で Vite の `/@fs/` 経由も拒否）。fixture の一覧は `import.meta.env.DEV` の分岐の中に置くのでビルド（`dist/`）には JSON も一覧も入らない（本番はファイル選択だけ。縦切り 2 で `bigquery` が既定）。手元の JSON（`fixtures/local/` の dump など）は画面のファイル選択で読む（Blob 経路）。評価時刻は板の `snapshot_at`、金利は 0.5%。
+
+322 行の板（9 章の性能の確認用）: `npm run fixtures -- --wide` が `fixtures/local/synthetic_wide.json`（gitignore。コミットしない）に、`latest.json` と同じ時刻・先物で行使価格を 125 円刻みの 322 本にした 2 限月の板を書く（`scripts/synthBoard.ts` の `buildWideChainJson`）。テスト（`tests/ui/board.test.ts`）は同じ関数で作る。
+
 ### 7.5 取引カレンダー
 
 optionchan の `config/trading_calendar.toml`（休業日・立会時間・`covered_until`）が一次情報で、BigQuery には無い。MVP は **シミュレーター側に写し**、CI で upstream（固定したコミット）と比較して差分があれば失敗、`covered_until` の期限切れを検知して警告する。併記: optionchan にカレンダーの公開を依頼する案（R3）。SQ 日の計算は 5.2。
+
+写しと CI の比較は #14 で作る。それまでは休業日なしで計算し（板の無い限月の手入力の足・板の先物と限月違いの先物の足の SQ 日は暦の第 2 金曜）、画面に「休業日未反映」を出す（ポジションの足の SQ 日の横と、ヘッダの前提の「取引カレンダー: 休業日未反映」）。板にある限月の SQ 日は板（サーバーがカレンダーから入れた値）を使う。
 
 ## 8. 置き場所（Q1。比較と推奨）
 
@@ -543,7 +551,7 @@ optionchan の `config/trading_calendar.toml`（休業日・立会時間・`cove
 |---|---|
 | 性能 | 板の読み込み 3 秒以内（コールドスタート +2〜3 秒を許容）。描き直し 16 ms 以内（横軸は 1 画素 1 点で再サンプリング、足 10 本）。拡大 / パンも 16 ms。板は 322 行 × 2 種別を 16 ms |
 | ブラウザ | 最新の Chrome / Safari / Firefox、iOS Safari、Android Chrome |
-| スマホ | 幅 360px 以上で横スクロールなし。板は call / put 切替と列の絞り込み |
+| スマホ | 幅 360px 以上で横スクロールなし。板は call / put 切替と列の絞り込み（板の枠が 560px 未満なら K・bid / ask・IV だけ。2 ペインは 720px 以上） |
 | 数値精度 | 価格 0.01 円、IV の逆算 1e-6（Newton + 二分法）、グリークは解析解。`erf` は高精度実装。極限で NaN を出さない |
 | 可用性 | optionchan が止まっていても最後の板（localStorage）で動く。API が 503 なら「古い板」の印 |
 | セキュリティ | 8.1。入力値は応答・ログに反射しない。BigQuery の例外本文は応答に出さない |
@@ -554,8 +562,8 @@ optionchan の `config/trading_calendar.toml`（休業日・立会時間・`cove
 
 | 層 | 候補 | 備考 |
 |---|---|---|
-| UI | TypeScript + Vite。小さいフレームワーク（Preact / Svelte）か素の DOM | 状態はポジション・シナリオ・板の 3 つ |
-| グラフ | uPlot（Canvas。ホイール・ドラッグのプラグイン例あり、ピンチは自前）か自前 Canvas | 実装時に試作して決める |
+| UI | TypeScript + Vite + **Preact 10（hooks だけ。2026-10-14 決定）**。JSX は Vite が tsconfig の `jsxImportSource` で変換（プラグイン・preact/compat・signals は入れない） | 状態はポジション・シナリオ・板の 3 つ。状態と reducer は `ui/state.ts`、表示モデルは `ui/view/` の純関数（Preact に依存しない。vitest で確かめる）、部品（`ui/components/`）は表示モデルを描くだけ。Svelte は CSS の注入方式の設定・コンパイラ・型検査の追加が要り、素の DOM は入力欄の多い画面でフォーカスの保持と差分更新を自前で書くことになるので退けた |
+| グラフ | **自前の SVG（2026-10-14 決定。当初の候補 uPlot / 自前 Canvas から変更）**。座標・目盛り・拡大は DOM を持たない純関数 `ui/chart/scale.ts` に置き、スマイル（#5）と損益グラフ（#11）で共用 | 位置・線種は SVG の属性、色は CSS クラス（CSP の style 属性を使わない）。区間ごとの実線 / 点線・× 印・縦線がそのまま書け、#11 のスマイルからの足の追加は DOM のヒットテストで済む。uPlot（+22 KB gzip）は区間ごとの線種・× に系列分けの工夫が要り、ピンチは結局自前。点は種類ごとに 1 本の path にして要素数を抑える。#11 で 16 ms を超えたら描画面だけ Canvas に差し替えられる（座標は `scale.ts`） |
 | 計算 | 自前の Black-76（依存なし） | WebWorker は不要 |
 | API | Python 3.13 + Flask + gunicorn + google-cloud-bigquery | 依存は uv.lock、`exclude-newer` |
 | 保存 | localStorage + URL の `#` に圧縮 JSON | サーバーに状態を持たない |
@@ -661,6 +669,7 @@ optionchan の `config/trading_calendar.toml`（休業日・立会時間・`cove
 | K9 | 縦切り 1 → 2 → 3 の順で作る（Q3） | 2026-10-13 |
 | K10 | 板の無い限月は MVP で手入力、段階 2 で 1・2 限月のスマイルからの理論値（Q4） | 2026-10-13 |
 | K11 | 時間外・引け後の板の既定は板寄せ前の最後のスナップショット。清算値 + IV 逆算は参照列・切替（Q5） | 2026-10-13 |
+| K12 | UI は Preact 10（hooks）、グラフは自前の SVG（座標は `ui/chart/scale.ts` の純関数で共用）。スマイルからの足の追加・グラフのジェスチャーは #11、取引カレンダーの写しは #14（10 章・7.5） | 2026-10-14 |
 
 ### 13.2 オーナー判断が要るもの
 
@@ -695,7 +704,7 @@ optionchan の `config/trading_calendar.toml`（休業日・立会時間・`cove
 - IV 逆算の「解なし」: 時間価値（価格 − 割引本源的価値）が 0.01 円未満（実装済み。アンカー IV は 5.3 (i) でスマイルへ）
 - Vite のビルド設定（インライン script・`modulepreload` の polyfill）と CI の検査方法
 - キャッシュの TTL・single-flight の実装、`?at=` の制限値
-- 拡大 / パンの実装（uPlot のプラグイン / 自前 Canvas）、再サンプリングの点数、縦軸の刻み
+- 拡大 / パンの実装: **決定（2026-10-14）** — 自前の SVG + Pointer Events（ホイール / ドラッグ / ピンチは #11。座標・拡大の規則は `ui/chart/scale.ts` の純関数で共用。#5 はボタンの拡大だけ）。再サンプリングの点数、縦軸の刻みは #11 で決める
 - カレンダーの写しの更新手順（CI の比較に失敗したときの直し方）
 
 ### 13.5 リスク
@@ -775,6 +784,16 @@ optionchan-gcp の bootstrap / prod を写すだけでは足りないもの。
 | GitHub | repository variables（`GCP_PROJECT_ID`、`TF_STATE_BUCKET`、SA 名）、secret（WIF プロバイダ）、Environment `prod`（required reviewer）、ブランチ保護 |
 
 ## 変更履歴
+
+### 2026-10-14 縦切り 1c（画面: ヘッダ・板・スマイル・ポジション）の実装
+
+- 10 章: UI は Preact 10（hooks）、グラフは自前の SVG（当初の候補 uPlot / 自前 Canvas から変更。座標・目盛り・拡大は `ui/chart/scale.ts` の純関数で #11 と共用）。13.4 の「拡大 / パンの実装」を決定済みに
+- 2.1: M3 のスマイルからの足の追加と M10 のジェスチャー（スマイルを含む）は #11。M1 の鮮度は JSON の値の表示まで（実データでの確認は縦切り 2）
+- 7.4: dev の fixture の配り方（serve だけの Vite プラグイン、許可リスト、`dist/` に入れない、`server.fs.deny` で `fixtures/local/` を `/@fs/` からも配らない）と 322 行の板（`npm run fixtures -- --wide`、`fixtures/local/` に書く）
+- 7.5: 取引カレンダーの写しは #14。それまで板に無い限月の SQ 日は休業日なしで計算し、画面に「休業日未反映」
+- 6.1 との差: スマイルは右ペイン（ポジションの上）に置いた。損益グラフ（#11）を右ペインに入れるときに配置を決め直す。板の列は画面幅ではなく板の枠の幅で絞る（枠が 560px 未満なら call / put 切替で K・bid / ask・IV だけ。2 ペインの中間幅でも列が重ならない）
+- 9 章の描き直し 16 ms のため、板とスマイルは限月ごとに持ち、表示中でない限月は CSS（`content-visibility: hidden`）で描画を止めて保つ（限月の切替で 322 行を作り直さない）。ATM の強調は背景と下線だけ（文字を足すと表の再レイアウトが起きる）
+- 建値ずれ（5.3）の画面での見せ方: ポジションの足ごとに「シナリオ 0 の理論損益への影響」= −売買の符号 × mismatch × 乗数 × 枚数（円。手数料は含めない）。|値| < 1 円は 0。理由（建値 ≤ 割引本源的価値でスマイルの IV を使用 / IV を手で入れた）を注記。合計は指標（#6）
 
 ### 2026-10-13 縦切り 1b（データ）の実装
 

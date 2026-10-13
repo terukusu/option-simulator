@@ -61,6 +61,8 @@ export interface MonthSpec {
   tradeRatio: number;
   /** 建玉を入れるか（夜間序盤は全行 null） */
   positions: boolean;
+  /** 行使価格を直接指定する（省略時は fixtureStrikes。322 行の板で使う） */
+  strikes?: readonly number[];
 }
 
 export interface ChainSpec {
@@ -354,7 +356,9 @@ function makeSide(c: SideContext): ChainSide {
 function buildMonth(spec: MonthSpec, snapshot: number, r: number, quotationDate: string | null) {
   const T = yearFraction(snapshot, sqInstant(spec.sqDate));
   const wing = [...spec.callWing.twoSided, ...spec.callWing.askOnly];
-  const strikes = fixtureStrikes(spec.F, spec.lowPct, spec.highPct, wing);
+  const strikes = spec.strikes
+    ? [...spec.strikes]
+    : fixtureStrikes(spec.F, spec.lowPct, spec.highPct, wing);
   const askOnlyKs = new Set(spec.callWing.askOnly.map((x) => nearestStrike(strikes, spec.F * x)));
   const svi = makeSvi(T, spec.atmVol, spec.leftVol, Math.log(0.6), spec.rho ?? -0.7);
   const drop = (spec.dropAt ?? []).map((x) => nearestStrike(strikes, spec.F * x));
@@ -489,4 +493,31 @@ export function buildFixtureFiles(): Record<string, string> {
   const out: Record<string, string> = {};
   for (const spec of SPECS) out[`${spec.name}.json`] = serializeChainJson(buildChainJson(spec));
   return out;
+}
+
+/** 322 行の板の行使価格の本数（設計 9 章「板は 322 行 × 2 種別を 16 ms」） */
+export const WIDE_STRIKE_COUNT = 322;
+
+/** F の周りに 125 円刻みで count 本（F − 20,000 円付近から）。 */
+export function wideStrikes(F: number, count = WIDE_STRIKE_COUNT): number[] {
+  const start = Math.round((F - 20_000) / 125) * 125;
+  return Array.from({ length: count }, (_, i) => start + i * 125);
+}
+
+/**
+ * 322 行 × 2 限月の板（性能の確認・ジャンプのテスト用）。latest と同じ時刻・先物で、行使価格だけを
+ * 125 円刻みの 322 本にする。fixtures/synthetic/ には入れない（`npm run fixtures -- --wide` は
+ * fixtures/local/ に書く。約 650 KB をリポジトリに足さない）。
+ */
+export function buildWideChainJson(): ChainJson {
+  const base = SPECS.find((s) => s.name === 'latest') as ChainSpec;
+  return buildChainJson({
+    ...base,
+    name: 'synthetic_wide',
+    months: base.months.map((m) => ({
+      ...m,
+      callWing: { twoSided: [], askOnly: [] },
+      strikes: wideStrikes(m.F),
+    })),
+  });
 }

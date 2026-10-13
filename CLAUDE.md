@@ -7,11 +7,11 @@
 - `model/`: 価格モデル（Black-76、IV、F の推定、スマイルの補間・外挿、時間、満期損益、シナリオ、グリーク）。**純関数**で DOM・通信に依存しない。vitest で文献値・性質テスト・合成板からの回復を固定する
 - `data/`: 板の JSON の型と検証、アダプタ（`file` / `bigquery` / 手入力の足）、板の正規化（F・スマイル・ATM を `model/` で付ける）
 - `fixtures/synthetic/`: 合成の固定の板（架空の値。`scripts/synthBoard.ts` から `npm run fixtures` で作る。手で編集しない）
-- `ui/`: 画面（TypeScript + Vite）
+- `ui/`: 画面（TypeScript + Vite + Preact 10）。状態と reducer は `ui/state.ts`、表示モデルは `ui/view/` の純関数（Preact に依存しない。`tests/ui/` で確かめる）、グラフの座標は `ui/chart/scale.ts`、部品（`ui/components/`）は表示モデルを描くだけ。板・入力値は JSX のテキスト / 属性で入れ、HTML 文字列を DOM に入れる API と `style` 属性（JSX の style prop を含む）を使わない（CSP）
 - `api/`: 板の JSON を返す Python（Flask）。縦切り 2 から
 - `infra/`: Terraform（Cloud Run + IAP、縦切り 2 から）
 
-- `tests/`: vitest のテスト（`tests/model/`）と、合成の板の生成器などの補助（`tests/support/`）
+- `tests/`: vitest のテスト（`tests/model/`・`tests/data/`・`tests/ui/`）と、合成の板の生成器などの補助（`tests/support/`）
 
 計算はすべてブラウザで行い、サーバーは板を返すだけ。
 
@@ -19,7 +19,7 @@
 
 - Node は 22（`.node-version`）。依存はバージョン固定（`package-lock.json` をコミット）
 - 確認: `npm ci && npm run typecheck && npm run lint && npm run fixtures:check && npm test`（CI と同じ。lint は Biome、整形は `npm run format`）
-- 画面の雛形: `npm run dev`（Vite の root は `ui/`）、`npm run build` で `dist/`
+- 画面: `npm run dev`（Vite の root は `ui/`。合成の板は `scripts/devFixtures.mjs` が dev サーバーでだけ配る）、`npm run build` で `dist/`（JSON を入れない）。322 行の板は `npm run fixtures -- --wide`（`fixtures/local/` に書く）
 
 ## リポジトリに置くもの / 置かないもの
 

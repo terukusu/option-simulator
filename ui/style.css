@@ -1,27 +1,564 @@
+/* 画面のスタイル（CSP のため style 属性・style 要素は使わず、このファイルのクラスだけで描く）。 */
+
 :root {
   color-scheme: light dark;
   font-family: system-ui, sans-serif;
+  --line: color-mix(in srgb, currentColor 20%, transparent);
+  --muted: color-mix(in srgb, currentColor 60%, transparent);
+  --accent: #2b6cb0;
+  --atm: color-mix(in srgb, #d69e2e 28%, transparent);
+  --flash: color-mix(in srgb, #3182ce 30%, transparent);
+  --warn: #c05621;
+  --bid: #2f855a;
+  --ask: #c53030;
+  --mid: #2b6cb0;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --accent: #63b3ed;
+    --warn: #f6ad55;
+    --bid: #68d391;
+    --ask: #fc8181;
+    --mid: #90cdf4;
+  }
+}
+
+* {
+  box-sizing: border-box;
 }
 
 body {
+  margin: 0;
+  background: Canvas;
+  color: CanvasText;
+}
+
+.app {
   margin: 0 auto;
-  max-width: 960px;
-  padding: 0 16px;
+  max-width: 1400px;
+  padding: 0 12px 24px;
+}
+
+h1 {
+  font-size: 1.1rem;
+  margin: 8px 0;
+}
+
+h2 {
+  font-size: 1rem;
+  margin: 12px 0 6px;
+}
+
+h3 {
+  font-size: 0.95rem;
+  margin: 0 0 4px;
+}
+
+p {
+  margin: 4px 0;
 }
 
 .note {
-  color: GrayText;
-  font-size: 0.9em;
+  color: var(--muted);
+  font-size: 0.85em;
 }
 
-table {
-  border-collapse: collapse;
+.block {
+  display: block;
+}
+
+.warn {
+  color: var(--warn);
+}
+
+.tag {
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  display: inline-block;
+  font-size: 0.75em;
+  line-height: 1.3;
+  margin-left: 4px;
+  padding: 0 4px;
+  white-space: nowrap;
+}
+
+.tag.warn {
+  border-color: var(--warn);
+}
+
+.error,
+.field-error {
+  color: var(--warn);
+}
+
+.error ul {
+  margin: 4px 0;
+  max-height: 10em;
+  overflow-y: auto;
+  padding-left: 1.2em;
+}
+
+.field-error {
+  display: block;
+  font-size: 0.8em;
+}
+
+button {
+  font: inherit;
+  font-size: 0.85em;
+  padding: 3px 8px;
+}
+
+button[aria-pressed="true"] {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: Canvas;
+}
+
+.seg {
+  border: 0;
+  margin: 0;
+  min-width: 0;
+  padding: 0;
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 2px;
+}
+
+input,
+select {
+  font: inherit;
+  font-size: 0.9em;
+  max-width: 100%;
+}
+
+/* ---------------------------------------------------------------- 上部・ヘッダ */
+
+.topbar {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+}
+
+.loader {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+}
+
+.loader input[type="file"] {
+  max-width: 220px;
+}
+
+.empty {
+  margin: 24px 0;
+}
+
+.header {
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 6px;
+}
+
+.head-line {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+}
+
+.basis {
+  border: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  margin: 4px 0;
+  padding: 0;
+}
+
+.basis legend {
+  float: left;
+  margin-right: 8px;
+  padding: 0;
+}
+
+.head-months {
+  display: grid;
+  gap: 4px 24px;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+}
+
+.head-month {
   font-variant-numeric: tabular-nums;
 }
 
-th,
-td {
-  border-bottom: 1px solid color-mix(in srgb, currentColor 20%, transparent);
-  padding: 4px 8px;
+.refs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 12px;
+}
+
+.ref.active {
+  font-weight: 600;
+}
+
+.tabs {
+  display: flex;
+  gap: 4px;
+  margin: 8px 0;
+}
+
+/* ---------------------------------------------------------------- 2 ペイン */
+
+.panes {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.pane {
+  min-width: 0;
+}
+
+@media (min-width: 720px) {
+  .panes {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+}
+
+/* ---------------------------------------------------------------- 板 */
+
+.board-tools {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  padding: 4px 0;
+  position: sticky;
+  top: 0;
+  background: Canvas;
+  z-index: 2;
+}
+
+/*
+ * 限月ごとに板を持ち、表示中でない板は描画を止めて保つ（content-visibility: hidden はレイアウトを
+ * 保持するので、限月の切替で 322 行を作り直さない。設計 9 章の 16 ms）。未対応のブラウザでも
+ * 高さ 0 で隠れる
+ */
+.board.inactive,
+.smile.inactive,
+.board-scroll.side-hidden {
+  content-visibility: hidden;
+  height: 0;
+  overflow: hidden;
+}
+
+.board-scroll {
+  border: 1px solid var(--line);
+  max-height: 70vh;
+  overflow-x: auto;
+  overflow-y: auto;
+}
+
+.board-table {
+  border-collapse: collapse;
+  font-size: 0.85em;
+  font-variant-numeric: tabular-nums;
+  table-layout: fixed;
+  width: 100%;
+}
+
+.board-table th,
+.board-table td {
+  border-bottom: 1px solid var(--line);
+  padding: 1px 3px;
   text-align: right;
+  white-space: nowrap;
+}
+
+.board-table thead th {
+  background: Canvas;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
+.board-table th.k {
+  text-align: center;
+}
+
+.board-table tbody th.k {
+  font-weight: 600;
+  white-space: normal;
+}
+
+.board-table tr.atm {
+  background: var(--atm);
+}
+
+/* ATM の行は背景と下線だけで示す（文字を足すと表の再レイアウトが起き、基準の切替が遅くなる） */
+.board-table tr.atm th.k {
+  text-decoration: underline 2px;
+}
+
+.sr-only {
+  clip-path: inset(50%);
+  height: 1px;
+  overflow: hidden;
+  position: absolute;
+  white-space: nowrap;
+  width: 1px;
+}
+
+.board-table tr.flash {
+  background: var(--flash);
+}
+
+.board-table td.iv .tag {
+  display: block;
+  margin: 0;
+  text-align: center;
+}
+
+/*
+ * 列幅は固定レイアウト（見出しの幅で決まる。描き直しで 322 行を測り直さない）。9 列は枠が
+ * FULL_BOARD_MIN_WIDTH（560px）以上のときだけ出すので、その幅で各列の内容が収まる割合にしてある
+ */
+.board .board-table thead th.delta {
+  width: 9%;
+}
+
+.board .board-table thead th.iv {
+  width: 15%;
+}
+
+.board .board-table thead th.bid,
+.board .board-table thead th.ask {
+  width: 10%;
+}
+
+.board .board-table thead th.k {
+  width: 12%;
+}
+
+.board.compact .board-table thead th.k {
+  width: 28%;
+}
+
+.board.compact .board-table thead th.bid,
+.board.compact .board-table thead th.ask {
+  width: 20%;
+}
+
+.board.compact .board-table thead th.iv {
+  width: 32%;
+}
+
+button.q {
+  background: none;
+  font-size: inherit;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  cursor: pointer;
+  font-variant-numeric: tabular-nums;
+  min-width: 3.2em;
+  padding: 1px 3px;
+  text-align: right;
+}
+
+button.q:hover,
+button.q:focus-visible {
+  border-color: var(--accent);
+}
+
+button.q.bid {
+  color: var(--bid);
+}
+
+button.q.ask {
+  color: var(--ask);
+}
+
+button.q.noquote {
+  color: var(--muted);
+}
+
+/* スマホ: 対象の種別だけ、列は K・bid / ask・IV */
+
+@media (max-width: 719.98px) {
+  .board-scroll {
+    max-height: 60vh;
+  }
+}
+
+/* ---------------------------------------------------------------- スマイル */
+
+.smile-tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+}
+
+.smile-plot {
+  min-height: 60px;
+  width: 100%;
+}
+
+.smile-plot svg {
+  display: block;
+  font-size: 10px;
+  max-width: 100%;
+}
+
+.grid line {
+  stroke: var(--line);
+}
+
+.grid text {
+  fill: var(--muted);
+}
+
+.tick-x {
+  text-anchor: middle;
+}
+
+.tick-y {
+  dominant-baseline: middle;
+  text-anchor: end;
+}
+
+.smile-line {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+}
+
+.smile-line.dotted {
+  stroke-width: 1.2;
+}
+
+.pt.mid {
+  fill: var(--mid);
+}
+
+.pt.bid {
+  fill: var(--bid);
+}
+
+.pt.ask {
+  fill: var(--ask);
+}
+
+.unstable-x {
+  fill: none;
+  stroke: var(--warn);
+  stroke-width: 1.5;
+}
+
+.atm-line {
+  stroke: #d69e2e;
+  stroke-dasharray: 4 2;
+  stroke-width: 1.5;
+}
+
+.lg.mid {
+  color: var(--mid);
+}
+
+.lg.bid {
+  color: var(--bid);
+}
+
+.lg.ask {
+  color: var(--ask);
+}
+
+.lg.atm {
+  color: #d69e2e;
+}
+
+/* ---------------------------------------------------------------- ポジション */
+
+.positions-head {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+}
+
+/* 1 ペインの幅に全列は収まらないので、どの幅でも足ごとのカードにする（見出しは data-label） */
+.positions-table thead {
+  display: none;
+}
+
+.positions-table,
+.positions-table tbody {
+  display: block;
+  font-size: 0.85em;
+  font-variant-numeric: tabular-nums;
+}
+
+.positions-table tr {
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  display: grid;
+  gap: 2px 8px;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  margin-bottom: 6px;
+  padding: 4px;
+}
+
+.positions-table tr.warn-row {
+  border-color: var(--warn);
+}
+
+.positions-table td {
+  display: block;
+  padding: 0;
+  vertical-align: top;
+}
+
+.positions-table td[data-label]::before {
+  color: var(--muted);
+  content: attr(data-label);
+  display: block;
+  font-size: 0.8em;
+}
+
+.positions-table input {
+  text-align: right;
+  width: 6em;
+}
+
+.positions-table .note.block {
+  white-space: normal;
+}
+
+.leg-forms {
+  display: grid;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.leg-form {
+  align-items: end;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  padding: 6px;
+}
+
+.leg-form h3,
+.leg-form .note,
+.leg-form .field-error {
+  flex-basis: 100%;
+}
+
+.leg-form label {
+  display: flex;
+  flex-direction: column;
+  font-size: 0.85em;
 }
