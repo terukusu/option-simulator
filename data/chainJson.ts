@@ -247,6 +247,13 @@ export function validateChainJson(input: unknown): ValidationResult<ChainJsonVal
       if (cm && future.sq_date && !future.sq_date.startsWith(cm)) {
         c.fail('$.future.sq_date', 'contract_month の月でない');
       }
+      if (
+        future.last_trading_day &&
+        future.sq_date &&
+        !(future.last_trading_day < future.sq_date)
+      ) {
+        c.fail('$.future.last_trading_day', 'SQ 日より前でない');
+      }
     }
   }
 

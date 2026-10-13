@@ -44,7 +44,9 @@ export type LegMark =
   /** 限月の F が合成先物で決まらず、先物価格で代用（限月違いのことがある） */
   | 'forward_from_future'
   /** 先物の限月が板の先物と違う（建値は手入力） */
-  | 'future_manual';
+  | 'future_manual'
+  /** 板に先物価格が無い（夜間の寄り前など）。建値を評価価格に使う */
+  | 'no_price';
 
 export interface BuiltLeg<L> {
   leg: L;
@@ -100,8 +102,9 @@ export function boardOptionLeg(chain: Chain, input: BoardOptionLegInput): BuiltL
 
   if (Number.isFinite(month.F) && month.T > 0) {
     // 足の側の行で IV 不安定を判定する（ITM の側も同じ基準）
+    // 気配も約定も無く IV が作れない行は「気配なし」だけにする（不安定の印は付けない）
     const node = buildNode(input.k, input.type, q, month.F, month.T, chain.r);
-    if (!node || node.unstable) marks.push('unstable_iv');
+    if (node?.unstable === true) marks.push('unstable_iv');
   }
   if (info.mark === 'extrapolated') marks.push('extrapolated');
   else if (info.mark === 'interpolated') marks.push('interpolated');
@@ -157,7 +160,7 @@ export interface ManualOptionLegInput {
   entry: number;
   /** IV（小数。0.25 = 25%）。アンカー IV として使う */
   iv: number;
-  /** その限月の F（省略時は板の先物価格 = basis 0。5.7 (b) と同じ扱い） */
+  /** その限月の F（省略時は板の先物価格 = basis 0。5.7 (b) と同じ扱い）。板にある限月では指定できない */
   forward?: number;
 }
 
@@ -192,6 +195,11 @@ export function manualOptionLeg(
   };
   const onBoard = chain ? monthOf(chain, input.expiry) : undefined;
   if (onBoard) {
+    if (input.forward !== undefined) {
+      throw new Error(
+        `板にある限月（${input.expiry}）の F は板の合成先物を使う（forward は指定できない）`,
+      );
+    }
     return {
       leg,
       marks: onBoard.syntheticOk ? [] : ['forward_from_future'],
@@ -232,37 +240,36 @@ export function futureLeg(
   const contract = input.contract ?? chain.future.id;
   const product = input.product ?? 'fut_mini';
   const qty = input.qty ?? 1;
+  const marks: LegMark[] = [];
+  let sqTime: number;
+  let price: number | null;
   if (contract === chain.future.id) {
-    const price = chain.future.price ?? Number.NaN;
-    return {
-      leg: {
-        kind: 'future',
-        product,
-        contract,
-        side: input.side,
-        qty,
-        entry: input.entry ?? price,
-      },
-      marks: [],
-      market: { sqTime: chain.future.sqTime, price },
-    };
+    sqTime = chain.future.sqTime;
+    price = chain.future.price;
+  } else {
+    // 板に無い先物の限月: 初期値はその月のオプションの合成先物、無ければ先物価格（5.7）。
+    // SQ 日は板の限月ならその SQ 日、無ければ暦から
+    marks.push('future_manual');
+    const opt = monthOf(chain, contract);
+    if (opt) sqTime = opt.sqTime;
+    else {
+      const { year, month } = parseYearMonth(contract);
+      sqTime = monthlyExpiry(year, month, holidays).sqTime;
+    }
+    price = opt?.syntheticOk ? opt.F : chain.future.price;
   }
-  // 板に無い先物の限月: 初期値はその月のオプションの合成先物、無ければ先物価格（5.7）
-  const { year, month } = parseYearMonth(contract);
-  const e = monthlyExpiry(year, month, holidays);
-  const opt = monthOf(chain, contract);
-  const initial = opt?.syntheticOk ? opt.F : (chain.future.price ?? Number.NaN);
+  if (price === null || !Number.isFinite(price)) {
+    // 先物価格が無い: 建値の入力を必須にし、評価価格も建値にする（NaN を出さない）
+    if (input.entry === undefined || !Number.isFinite(input.entry)) {
+      throw new Error('先物価格が無いので建値の入力が要る');
+    }
+    marks.push('no_price');
+    price = input.entry;
+  }
   return {
-    leg: {
-      kind: 'future',
-      product,
-      contract,
-      side: input.side,
-      qty,
-      entry: input.entry ?? initial,
-    },
-    marks: ['future_manual'],
-    market: { sqTime: e.sqTime, price: initial },
+    leg: { kind: 'future', product, contract, side: input.side, qty, entry: input.entry ?? price },
+    marks,
+    market: { sqTime, price },
   };
 }
 
@@ -283,10 +290,10 @@ export function buildMarketContext(chain: Chain, opts: MarketContextOptions = {}
     options[m.id] = { sqTime: m.sqTime, forward: m.F, smile: m.smile?.smile ?? null };
   }
   const futures: Record<string, FutureMarket> = { ...opts.extraFutures };
-  futures[chain.future.id] = {
-    sqTime: chain.future.sqTime,
-    price: chain.future.price ?? Number.NaN,
-  };
+  // 先物価格が無い板では先物の市場を入れない（足は futureLeg の market を extraFutures で渡す）
+  if (chain.future.price !== null) {
+    futures[chain.future.id] = { sqTime: chain.future.sqTime, price: chain.future.price };
+  }
   return {
     evalTime: chain.evalTime,
     r: chain.r,

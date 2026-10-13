@@ -67,7 +67,8 @@ describe('板の足', () => {
   it('気配の無い行は建値の既定がスマイルの理論価格（呼値に丸め）で、「補間」の印', () => {
     const k = findStrike(m1, (s) => s.call.quote === 'none' && s.put.quote === 'none');
     const b = boardOptionLeg(chain, { expiry: m1.id, k, type: 'put', side: 'buy' });
-    expect(b.marks).toEqual(expect.arrayContaining(['no_quote', 'interpolated']));
+    // IV が作れない行なので「IV 不安定」は付けない
+    expect(b.marks).toEqual(['no_quote', 'interpolated']);
     expect(b.leg.entry).toBe(manualEntryDefault(m1, k, 'put', null, chain.r));
     expect(b.leg.entry).toBeGreaterThan(0);
     expect(Number.isInteger(b.leg.entry)).toBe(true);
@@ -148,6 +149,21 @@ describe('手入力の足（板の無い限月。5.7 (a)・AC17）', () => {
     expect(m.market.smile).not.toBeNull();
   });
 
+  it('板にある限月で F を指定すると例外（板の合成先物を使う）', () => {
+    expect(() =>
+      manualOptionLeg(chain, {
+        product: 'op_large',
+        expiry: m1.id,
+        type: 'put',
+        k: 64000,
+        side: 'sell',
+        entry: 800,
+        iv: 0.29,
+        forward: 68000,
+      }),
+    ).toThrow(/forward は指定できない/);
+  });
+
   it('板が無くても（chain = null）F を入れれば足になる。不正な入力は例外', () => {
     const m = manualOptionLeg(null, {
       product: 'op_large',
@@ -196,6 +212,10 @@ describe('先物の足', () => {
     expect(f.marks).toEqual(['future_manual']);
     expect(f.leg.entry).toBe(m1.F);
     expect(f.market.sqTime).toBe(m1.sqTime);
+    // 板の限月の SQ 日は板（サーバーのカレンダー）のもの。休業日の一覧を渡しても暦で求め直さない
+    expect(
+      futureLeg(chain, { contract: '2026-11', side: 'buy' }, ['2026-11-13']).market.sqTime,
+    ).toBe(m1.sqTime);
     const g = futureLeg(chain, {
       product: 'fut_micro',
       contract: '2027-03',
@@ -204,6 +224,25 @@ describe('先物の足', () => {
     });
     expect(g.leg.entry).toBe(68000);
     expect(g.market.price).toBe(67880);
+    expect(g.market.sqTime).toBe(Date.parse('2027-03-12T09:00:00+09:00'));
+  });
+
+  it('板に先物価格が無いと「価格なし」の印で、評価価格は建値（NaN を出さない）。建値が無ければ例外', () => {
+    const j = fixture('latest');
+    j.future.price = null;
+    const c = normalizeChain(j);
+    const f = futureLeg(c, { side: 'buy', entry: 67900 });
+    expect(f.marks).toEqual(['no_price']);
+    expect(f.market.price).toBe(67900);
+    expect(f.leg.entry).toBe(67900);
+    // 板の無い限月でも、合成先物が決まれば価格はある
+    expect(futureLeg(c, { contract: '2026-11', side: 'buy' }).marks).toEqual(['future_manual']);
+    expect(() => futureLeg(c, { side: 'buy' })).toThrow(/建値の入力が要る/);
+    expect(() => futureLeg(c, { contract: '2027-03', side: 'buy' })).toThrow(/建値の入力が要る/);
+    // 市場には先物価格の無い限月を入れない（足の market を extraFutures で渡す）
+    expect(buildMarketContext(c).futures).toEqual({});
+    const ctx = buildMarketContext(c, { extraFutures: { [f.leg.contract]: f.market } });
+    expect(ctx.futures[f.leg.contract]?.price).toBe(67900);
   });
 });
 

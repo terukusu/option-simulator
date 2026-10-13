@@ -85,49 +85,75 @@ describe('正規化（合成の固定 JSON）', () => {
       for (const s of missing) expect(s.mark).toBe('node');
     });
 
-    it('補間後の裁定の印: 1 限月は無し。2 限月は片側気配が混じる翼（ATM ±20% の外）だけ', () => {
+    it('補間後の裁定の印: 固定の板では出ない（呼値丸めの範囲に収まる）', () => {
       expect(m1.violations).toEqual([]);
-      expect(m2.violations.length).toBeGreaterThan(0);
-      for (const v of m2.violations) expect(Math.abs(v.k / m2.F - 1)).toBeGreaterThan(0.2);
-      for (const v of m2.violations) {
-        expect(m2.strikes.find((s) => s.k === v.k)?.arbitrage).toBe(true);
-      }
+      expect(m2.violations).toEqual([]);
+      expect(chain.months.flatMap((m) => m.strikes).some((s) => s.arbitrage)).toBe(false);
+    });
+
+    it('補間後の裁定の印: K 単調性を崩した行には印が付く', () => {
+      const j = fixture('latest');
+      const row = j.months[0]?.rows.find((r) => r.k === 75000);
+      if (!row) throw new Error();
+      // OTM 側（call）の気配を 1 本下の行使価格より高くする
+      row.call.bid = 900;
+      row.call.ask = 905;
+      const m = normalizeChain(j).months[0];
+      expect(m?.violations.some((v) => v.k === 75000 && v.kind === 'call_monotonic')).toBe(true);
+      expect(m?.strikes.find((s) => s.k === 75000)?.arbitrage).toBe(true);
     });
   });
 
-  describe('AC16: IV 不安定・外挿の印', () => {
-    it.each(['latest', 'pre_open'] as const)(
-      '%s: 帯 > 5pt または ask ≤ 5 円の行だけが不安定',
-      (name) => {
-        const c = normalizeChain(fixture(name));
-        let unstable = 0;
-        for (const m of c.months) {
-          m.strikes.forEach((s, i) => {
-            if (!s.node) return;
-            const ask = m.rows[i]?.[s.otmType].ask ?? null;
-            const expected =
-              s.node.bandWidth === null || s.node.bandWidth > 0.05 || (ask !== null && ask <= 5);
-            expect(s.unstable).toBe(expected);
-            if (s.unstable) {
-              unstable += 1;
-              // 不安定な行は節点から外す（補間か外挿の値になる）
-              expect(s.mark).not.toBe('node');
-            }
-          });
-        }
-        expect(unstable).toBeGreaterThan(10);
+  describe('AC16: IV 不安定・外挿の印（latest の 1 限月、K を固定）', () => {
+    const at = (k: number) => {
+      const i = m1.strikes.findIndex((s) => s.k === k);
+      const s = m1.strikes[i];
+      const q = m1.rows[i];
+      if (!s || !q) throw new Error(`行が無い: ${k}`);
+      return { s, q };
+    };
+
+    it.each([30000, 31000, 32000])(
+      'K %i の put（ask 1 円）は IV の分解能の帯 > 5pt で不安定',
+      (k) => {
+        const { s, q } = at(k);
+        expect(q.put).toMatchObject({ bid: null, ask: 1 });
+        expect(s.otmType).toBe('put');
+        expect(s.node?.bandWidth).toBeGreaterThan(0.05);
+        expect(s.unstable).toBe(true);
+        expect(s.mark).toBe('extrapolated');
       },
     );
 
-    it('両方の理由（ask ≤ 5 円 / 帯 > 5pt）の不安定行が固定の板にある', () => {
-      const all = [...chain.months, ...normalizeChain(fixture('pre_open')).months];
-      const byBand = all.flatMap((m) => m.strikes).filter((s) => (s.node?.bandWidth ?? 0) > 0.05);
-      expect(byBand.length).toBeGreaterThan(0);
-      for (const s of byBand) expect(s.unstable).toBe(true);
-      const putWing = m1.strikes.filter((s) => s.otmType === 'put' && s.unstable);
-      const callWing = m1.strikes.filter((s) => s.otmType === 'call' && s.unstable);
-      expect(putWing.length).toBeGreaterThan(0);
-      expect(callWing.length).toBeGreaterThan(0);
+    it.each([
+      [37000, null, 5],
+      [39000, 2, 5],
+    ])('K %i の put（bid %s / ask %i 円）は帯 ≤ 5pt だが ask ≤ 5 円で不安定', (k, bid, ask) => {
+      const { s, q } = at(k);
+      expect(q.put).toMatchObject({ bid, ask });
+      expect(s.node?.bandWidth).toBeLessThanOrEqual(0.05);
+      expect(s.unstable).toBe(true);
+      expect(s.mark).toBe('extrapolated');
+    });
+
+    it('call の翼の 90000（ask 4 円だけ）も不安定で外挿。ATM 近くの 64000 の put は安定な節点', () => {
+      const c = at(90000);
+      expect(c.q.call).toMatchObject({ bid: null, ask: 4 });
+      expect(c.s.unstable).toBe(true);
+      expect(c.s.mark).toBe('extrapolated');
+      const p = at(64000);
+      expect(p.s.unstable).toBe(false);
+      expect(p.s.mark).toBe('node');
+    });
+
+    it('帯由来の不安定行は固定の板（latest・pre_open）にそれぞれ 3 本以上', () => {
+      for (const c of [chain, normalizeChain(fixture('pre_open'))]) {
+        const byBand = c.months
+          .flatMap((m) => m.strikes)
+          .filter((s) => (s.node?.bandWidth ?? 0) > 0.05);
+        expect(byBand.length).toBeGreaterThanOrEqual(3);
+        for (const s of byBand) expect(s.unstable).toBe(true);
+      }
     });
 
     it('安定な節点の外側は「外挿」の印', () => {
@@ -143,10 +169,20 @@ describe('正規化（合成の固定 JSON）', () => {
     });
   });
 
-  it('片側気配・気配なしの状態（ask だけの call の翼、2 限月の put の翼）', () => {
-    const callAskOnly = m1.strikes.filter((s) => s.k / m1.F - 1 > 0.2);
-    expect(callAskOnly.length).toBeGreaterThan(0);
-    for (const s of callAskOnly) expect(s.call.quote).toBe('ask_only');
+  it('call の翼は上場を絞る（付録 A.2）: 20〜30% は数本で両側、1 限月の 30% 超は ask だけ 1 本', () => {
+    const band = (m: typeof m1, lo: number, hi: number) =>
+      m.strikes.filter((s) => s.k / m.F - 1 > lo && s.k / m.F - 1 <= hi);
+    expect(band(m1, 0.2, 0.3).map((s) => s.call.quote)).toEqual([
+      'two_sided',
+      'two_sided',
+      'two_sided',
+    ]);
+    expect(band(m1, 0.3, 1).map((s) => [s.k, s.call.quote])).toEqual([[90000, 'ask_only']]);
+    expect(band(m2, 0.2, 0.3).map((s) => s.call.quote)).toEqual(Array(6).fill('two_sided'));
+    expect(band(m2, 0.3, 1)).toEqual([]);
+  });
+
+  it('2 限月の 40% 超の put は両側・ask だけ・気配なしが混じる', () => {
     const wing = m2.strikes.filter((s) => 1 - s.k / m2.F > 0.4);
     const states = new Set(wing.map((s) => s.put.quote));
     expect(states).toEqual(new Set(['two_sided', 'ask_only', 'none']));

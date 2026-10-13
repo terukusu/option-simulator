@@ -35,10 +35,16 @@ export function sviTotalVariance(p: SviParams, x: number): number {
 
 /**
  * ATM の IV と翼の IV から SVI を決める（ρ・m・s は固定、a・b を 2 点で解く）。
- * 既定は 1 限月らしい形: ATM 25%、40% OTM put で 70% 前後、call 側はほぼ平ら。
+ * 既定は 1 限月らしい形: ATM 25%、40% OTM put で 70% 前後、call 側はほぼ平ら（ρ = −0.7）。
+ * ρ を大きく（例 −0.5）すると call の翼の IV が上がる。
  */
-export function makeSvi(T: number, atmVol = 0.25, leftVol = 0.7, leftX = Math.log(0.6)): SviParams {
-  const rho = -0.7;
+export function makeSvi(
+  T: number,
+  atmVol = 0.25,
+  leftVol = 0.7,
+  leftX = Math.log(0.6),
+  rho = -0.7,
+): SviParams {
   const m = 0;
   const s = 0.1;
   const g = (x: number) => rho * (x - m) + Math.sqrt((x - m) ** 2 + s * s);

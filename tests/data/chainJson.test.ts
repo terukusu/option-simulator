@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { parseChainJson, validateChainJson } from '../../data/chainJson';
-import { buildFixtureFiles } from '../../scripts/synthBoard';
+import { buildFixtureFiles, sessionStart } from '../../scripts/synthBoard';
 import { RAW_FIXTURES, rawFixture } from '../support/fixtures';
 
 type Obj = Record<string, unknown>;
@@ -28,6 +28,41 @@ describe('板の JSON の検証', () => {
     for (const [name, text] of Object.entries(files)) {
       expect(JSON.parse(text)).toEqual(RAW_FIXTURES[name]);
     }
+  });
+
+  it.each(Object.keys(RAW_FIXTURES))(
+    '%s: 約定時刻はその立会の開始〜スナップショットの間',
+    (name) => {
+      const res = validateChainJson(RAW_FIXTURES[name]);
+      if (!res.ok) throw new Error();
+      const snap = Date.parse(res.value.snapshot_at);
+      const start = sessionStart(snap);
+      let n = 0;
+      for (const m of res.value.months) {
+        for (const r of m.rows) {
+          for (const side of [r.call, r.put]) {
+            if (side.price_time === null) continue;
+            n += 1;
+            const t = Date.parse(side.price_time);
+            expect(t).toBeGreaterThanOrEqual(start);
+            expect(t).toBeLessThanOrEqual(snap);
+          }
+        }
+      }
+      expect(n).toBeGreaterThan(0);
+    },
+  );
+
+  it('立会の開始: 夜間は 17:00（翌朝は前日の 17:00）、日中は 8:45', () => {
+    expect(sessionStart(Date.parse('2026-10-13T21:31:00+09:00'))).toBe(
+      Date.parse('2026-10-13T17:00:00+09:00'),
+    );
+    expect(sessionStart(Date.parse('2026-10-14T03:00:00+09:00'))).toBe(
+      Date.parse('2026-10-13T17:00:00+09:00'),
+    );
+    expect(sessionStart(Date.parse('2026-10-13T15:40:00+09:00'))).toBe(
+      Date.parse('2026-10-13T08:45:00+09:00'),
+    );
   });
 
   it('任意のキー（source・quotation・quotation_date・is_atm）は省略でき、知らないキーは無視する', () => {
@@ -126,6 +161,10 @@ describe('板の JSON の検証', () => {
       rejects(
         (j) => ((j.future as Obj).sq_date = '2026-11-13'),
         /future\.sq_date: contract_month の月でない/,
+      );
+      rejects(
+        (j) => ((j.future as Obj).last_trading_day = '2026-12-11'),
+        /future\.last_trading_day: SQ 日より前でない/,
       );
     });
 
