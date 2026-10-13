@@ -121,7 +121,7 @@ function LegRow({ row, dispatch }: { row: PositionRow; dispatch: (a: Action) => 
       </td>
       <td data-label="SQ 日">
         {row.sqDate}
-        {row.calendarUnverified && <span class="tag">休業日未反映</span>}
+        {row.calendarUnconfirmed && <span class="tag">休業日未確定</span>}
       </td>
       <td data-label="印">
         {row.markLabels.map((m) => (

@@ -7,7 +7,8 @@
  * - T ≤ T_min（1 分）は本源的価値に切り替える
  *
  * 日付は 'YYYY-MM-DD'（JST の暦日）、時刻は epoch ミリ秒。休業日の一覧は引数で受け取る
- * （一次情報は optionchan の config/trading_calendar.toml。設計 7.5）。土日は常に休業日。
+ * （休業日 = optionchan の config/trading_calendar.toml の closed_dates ∪ 国民の祝日。同期した一覧は
+ * data/calendar/。設計 5.2・7.5）。土日は常に休業日。
  */
 
 export const DAY_MS = 86_400_000;

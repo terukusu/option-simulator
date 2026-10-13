@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { normalizeChain } from '../../data';
 import { buildWideChainJson } from '../../scripts/synthBoard';
+import { CALENDAR } from '../../ui/calendar';
 import { atmStrike, boardRows } from '../../ui/view/board';
 import { headerModel } from '../../ui/view/header';
 import { smileModel } from '../../ui/view/smile';
@@ -23,7 +24,7 @@ describe('性能（AC-18 の計算部分）', () => {
       acc += atmStrike(m, 'A') ?? 0;
       acc += smileModel(m, 'B', 'delta').points.length;
     }
-    acc += headerModel(chain, 'B').months.length;
+    acc += headerModel(chain, 'B', CALENDAR).months.length;
     return acc;
   }
 

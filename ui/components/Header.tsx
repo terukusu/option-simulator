@@ -1,3 +1,4 @@
+import { Fragment } from 'preact';
 import type { AtmBasis } from '../../model';
 import type { HeaderModel, ReferenceView } from '../view/header';
 
@@ -81,7 +82,15 @@ export function Header({
           </div>
         ))}
       </div>
-      <p class="note">前提: {model.assumptions.join(' / ')}</p>
+      <p class="note">
+        前提:{' '}
+        {model.assumptions.map((a, i) => (
+          <Fragment key={a}>
+            {i > 0 && ' / '}
+            {a === model.calendarWarning ? <strong class="warn">{a}</strong> : a}
+          </Fragment>
+        ))}
+      </p>
     </header>
   );
 }

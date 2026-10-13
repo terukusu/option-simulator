@@ -7,6 +7,7 @@
 
 import {
   boardOptionLeg,
+  type Calendar,
   type Chain,
   type FutureLegInput,
   futureLeg,
@@ -15,6 +16,7 @@ import {
   manualOptionLeg,
 } from '../data';
 import type { AtmBasis, FutureMarket, Leg, OptionExpiryMarket, OptionType, Side } from '../model';
+import { CALENDAR } from './calendar';
 import type { Domain } from './chart/scale';
 import type { SmileAxis } from './view/smile';
 
@@ -50,6 +52,8 @@ export interface State {
   nextId: number;
   /** 足の追加フォームのエラー（data/ の例外の文言） */
   legError: string | null;
+  /** 取引カレンダー（板に無い限月の SQ 日を求める休業日。ui/calendar.ts。テストは差し替える） */
+  calendar: Calendar;
 }
 
 export const initialState: State = {
@@ -66,6 +70,7 @@ export const initialState: State = {
   legs: [],
   nextId: 1,
   legError: null,
+  calendar: CALENDAR,
 };
 
 /** 足の編集（画面の入力を検証済みの値にしたもの）。 */
@@ -173,7 +178,7 @@ export function reduce(state: State, action: Action): State {
     case 'addFutureLeg': {
       if (!state.chain) return state;
       try {
-        const built = futureLeg(state.chain, action.input);
+        const built = futureLeg(state.chain, action.input, state.calendar.holidays);
         return pushLeg(state, {
           leg: built.leg,
           marks: built.marks,
@@ -185,7 +190,7 @@ export function reduce(state: State, action: Action): State {
     }
     case 'addManualLeg': {
       try {
-        const built = manualOptionLeg(state.chain, action.input);
+        const built = manualOptionLeg(state.chain, action.input, state.calendar.holidays);
         const onBoard = !built.marks.includes('no_board');
         const leg: Omit<UiLeg, 'id'> = { leg: built.leg, marks: built.marks };
         if (!onBoard) leg.optionMarket = { expiry: built.leg.expiry, market: built.market };

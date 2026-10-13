@@ -47,10 +47,14 @@ export function App() {
 
   const { chain, atmBasis } = state;
   const month = chain && state.monthId ? (monthOf(chain, state.monthId) ?? null) : null;
-  const header = useMemo(() => (chain ? headerModel(chain, atmBasis) : null), [chain, atmBasis]);
+  const { calendar } = state;
+  const header = useMemo(
+    () => (chain ? headerModel(chain, atmBasis, calendar) : null),
+    [chain, atmBasis, calendar],
+  );
   const positions = useMemo(
-    () => (chain ? positionModel(chain, state.legs, atmBasis) : null),
-    [chain, state.legs, atmBasis],
+    () => (chain ? positionModel(chain, state.legs, atmBasis, calendar) : null),
+    [chain, state.legs, atmBasis, calendar],
   );
 
   return (

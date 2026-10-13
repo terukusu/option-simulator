@@ -14,7 +14,8 @@
     "format": "biome check --write .",
     "test": "vitest run",
     "fixtures": "node scripts/fixtures.mjs",
-    "fixtures:check": "node scripts/fixtures.mjs --check"
+    "fixtures:check": "node scripts/fixtures.mjs --check",
+    "calendar:sync": "node scripts/syncCalendar.mjs"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.14",

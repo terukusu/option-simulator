@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { type ChainJson, normalizeChain } from '../../data';
 import { sqInstant } from '../../model';
+import { CALENDAR } from '../../ui/calendar';
 import { type Action, initialState, reduce, type State } from '../../ui/state';
 import { boardModel } from '../../ui/view/board';
 import { headerModel } from '../../ui/view/header';
@@ -27,12 +28,12 @@ function blank(j: ChainJson): ChainJson {
 function allModels(state: State) {
   const chain = state.chain;
   if (!chain) throw new Error('板が無い');
-  const header = headerModel(chain, 'B');
+  const header = headerModel(chain, 'B', CALENDAR);
   const boards = chain.months.map((m) => boardModel(chain, m, 'B'));
   const smiles = chain.months.flatMap((m) =>
     (['k', 'moneyness', 'delta'] as const).map((a) => smileModel(m, 'B', a)),
   );
-  const positions = positionModel(chain, state.legs, 'B');
+  const positions = positionModel(chain, state.legs, 'B', CALENDAR);
   return { header, boards, smiles, positions };
 }
 
