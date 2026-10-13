@@ -30,6 +30,7 @@ import {
 import { CALENDAR } from './calendar';
 import type { Domain } from './chart/scale';
 import { parseNum } from './view/format';
+import { DEFAULT_HEDGE, HEDGE_TARGET_MAX, type HedgeSettings, hedgeContracts } from './view/hedge';
 import { DEFAULT_PNL_Y, type PnlYSettings } from './view/pnlChart';
 import type { SmileAxis } from './view/smile';
 
@@ -79,6 +80,8 @@ export interface State {
   legError: string | null;
   /** 取引カレンダー（板に無い限月の SQ 日を求める休業日。ui/calendar.ts。テストは差し替える） */
   calendar: Calendar;
+  /** デルタヘッジのパネル（目標 Δ・評価点・限月。M12・5.8） */
+  hedge: HedgeSettings;
 }
 
 export type MetricsUnitSetting = 'auto' | 'yen' | 'thousand';
@@ -107,6 +110,7 @@ export const initialState: State = {
   nextId: 1,
   legError: null,
   calendar: CALENDAR,
+  hedge: DEFAULT_HEDGE,
 };
 
 /** 足の編集（画面の入力を検証済みの値にしたもの）。 */
@@ -143,7 +147,8 @@ export type Action =
   | { type: 'editLeg'; id: number; patch: LegPatch }
   | { type: 'removeLeg'; id: number }
   | { type: 'clearLegs' }
-  | { type: 'clearLegError' };
+  | { type: 'clearLegError' }
+  | { type: 'setHedge'; patch: Partial<HedgeSettings> };
 
 function errorText(e: unknown): string {
   return e instanceof Error ? e.message : '足を追加できない';
@@ -188,6 +193,18 @@ function validScenarioPatch(p: Partial<Scenario>): boolean {
   );
 }
 
+/** ヘッジの設定の更新の検証（目標は有限かつ |t| ≤ 1,000、評価点は 2 値、限月は null か板の選択肢） */
+function validHedgePatch(p: Partial<HedgeSettings>, chain: Chain | null): boolean {
+  return (
+    (p.target === undefined ||
+      (Number.isFinite(p.target) && Math.abs(p.target) <= HEDGE_TARGET_MAX)) &&
+    (p.at === undefined || p.at === 'base' || p.at === 'scenario') &&
+    (p.contract === undefined ||
+      p.contract === null ||
+      (chain !== null && hedgeContracts(chain).includes(p.contract)))
+  );
+}
+
 export function reduce(state: State, action: Action): State {
   switch (action.type) {
     case 'loading':
@@ -195,6 +212,10 @@ export function reduce(state: State, action: Action): State {
     case 'loaded': {
       const { chain } = action;
       const keep = state.monthId !== null && chain.months.some((m) => m.id === state.monthId);
+      // ヘッジの限月が新しい板の選択肢に無ければ板の先物に戻す
+      const { hedge } = state;
+      const keepContract =
+        hedge.contract === null || hedgeContracts(chain).includes(hedge.contract);
       return {
         ...state,
         chain,
@@ -205,6 +226,7 @@ export function reduce(state: State, action: Action): State {
         smileViewport: null,
         smilePick: null,
         pnlViewport: null,
+        hedge: keepContract ? hedge : { ...hedge, contract: null },
       };
     }
     case 'loadFailed':
@@ -309,6 +331,11 @@ export function reduce(state: State, action: Action): State {
       return { ...state, legs: [], pnlViewport: null };
     case 'clearLegError':
       return state.legError === null ? state : { ...state, legError: null };
+    case 'setHedge':
+      // 不正な値を含む更新は丸ごと無視する（部分的に反映しない）
+      return validHedgePatch(action.patch, state.chain)
+        ? { ...state, hedge: { ...state.hedge, ...action.patch } }
+        : state;
   }
 }
 
@@ -379,6 +406,14 @@ export function parseFee(text: string): Parsed<number> {
   return Number.isFinite(v) && v >= 0 && v <= FEE_MAX
     ? { ok: true, value: v }
     : { ok: false, message: '手数料は 0〜100,000 円 / 枚' };
+}
+
+/** 目標 Δ（ラージ換算）: −1,000〜1,000。 */
+export function parseHedgeTarget(text: string): Parsed<number> {
+  const v = num(text);
+  return Number.isFinite(v) && Math.abs(v) <= HEDGE_TARGET_MAX
+    ? { ok: true, value: v || 0 }
+    : { ok: false, message: '目標 Δ は −1,000〜1,000（ラージ換算）' };
 }
 
 /** 縦軸の手動の範囲（円）: 両方が数で、下端 < 上端。 */

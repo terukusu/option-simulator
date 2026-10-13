@@ -2,6 +2,7 @@
 export * from './atm';
 export * from './black76';
 export * from './forward';
+export * from './hedge';
 export * from './iv';
 export * from './normal';
 export * from './pnl';

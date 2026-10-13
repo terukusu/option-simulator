@@ -4,13 +4,14 @@ import { DEFAULT_SETTINGS, type ModelSettings, theoreticalPnl } from '../../mode
 import { CALENDAR } from '../../ui/calendar';
 import { type Action, initialState, reduce, type State } from '../../ui/state';
 import { boardRows, jumpToOtm, referencePrice } from '../../ui/view/board';
+import { hedgeModel } from '../../ui/view/hedge';
 import { metricsModel } from '../../ui/view/metrics';
 import { type PnlBase, pnlChartModel, pnlDomains } from '../../ui/view/pnlChart';
 import { positionModel } from '../../ui/view/position';
 import { fixture } from '../support/fixtures';
 
 /**
- * #6 AC-9・AC-10: 設計 6.2 の U2・U4（証拠金を除く）を固定の合成の板（架空の値）と reducer で通す。
+ * #6 AC-9・AC-10: 設計 6.2 の U2・U4（証拠金を除く）、#19 AC-7: U5（手順 1〜3。手順 4 の basis の切替は #25）を固定の合成の板（架空の値）と reducer で通す。
  * 画面の部品がする操作（板の bid / ask を押す = addBoardLeg、スライダー = setScenario、プリセット = applyPreset）を
  * そのまま action で並べ、表示モデル（損益グラフ・指標・テール表）を確かめる。
  */
@@ -35,7 +36,16 @@ function views(s: State) {
     plotHeight: 220,
   });
   const metrics = metricsModel({ base, scenario: s.scenario, unit: s.metricsUnit });
-  return { pm, base, chart, metrics };
+  const hedge = hedgeModel({
+    chain,
+    ctx: pm.ctx,
+    base,
+    settings,
+    scenario: s.scenario,
+    hedge: s.hedge,
+    holidays: s.calendar.holidays,
+  });
+  return { pm, base, chart, metrics, hedge };
 }
 
 const start = reduce(initialState, { type: 'loaded', chain, label: 'latest' });
@@ -152,5 +162,59 @@ describe('U4: 小資金で 1 限月の 30% OTM の put 売り（AC-10。証拠�
     });
     // シナリオ点（−10%）の理論損益も損
     expect(crashed.metrics.scenarioPoint.pnl).toBeLessThan(0);
+  });
+});
+
+describe('U5: ミニ先物でデルタを中立に（AC-7。手順 1〜3）', () => {
+  const x0 = referencePrice(m1, 'B') as number;
+  const rows = boardRows(chain, m1);
+  // 1. 1 限月の OTM の put 売り（OTM 度 約 3%）・call 売り（約 6%）各 1 枚（Δ が 0 から離れる組み合わせ）
+  const kp = jumpToOtm(rows, 'put', x0, 0.03) as number;
+  const kc = jumpToOtm(rows, 'call', x0, 0.06) as number;
+  const s1 = run(
+    start,
+    { type: 'addBoardLeg', expiry: m1.id, k: kp, optionType: 'put', side: 'sell' },
+    { type: 'addBoardLeg', expiry: m1.id, k: kc, optionType: 'call', side: 'sell' },
+  );
+  const listDelta = (s: State) =>
+    views(s).pm.rows.reduce((a, r) => a + (r.greeks?.deltaLarge ?? 0), 0);
+
+  it('2. ヘッジ（目標 0、ミニ）→ [追加] 後のポジション一覧・指標の |Δ| ≤ 0.05', () => {
+    const { hedge } = views(s1);
+    expect(hedge.at).toBe('base');
+    expect(hedge.target).toBe(0);
+    const mini = hedge.lines[0];
+    expect(mini?.product).toBe('fut_mini');
+    if (!mini?.input) throw new Error('追加できない');
+    const s2 = reduce(s1, { type: 'addFutureLeg', input: mini.input });
+    expect(s2.legs.at(-1)?.leg).toMatchObject({ kind: 'future', product: 'fut_mini' });
+    expect(Math.abs(listDelta(s2))).toBeLessThanOrEqual(0.05 + 1e-9);
+    // シナリオ 0 では指標の合計 Δ も同じ点
+    expect(Math.abs(views(s2).metrics.scenarioPoint.total.deltaLarge)).toBeLessThanOrEqual(
+      0.05 + 1e-9,
+    );
+    // 出し直すと 0 枚
+    expect(views(s2).hedge.lines[0]?.lots).toBe(0);
+  });
+
+  it('3. 原資産 −5%・評価点 = シナリオ時点で枚数が 0 でない → [追加] 後のシナリオ点の |Δ| ≤ 0.05', () => {
+    const first = views(s1).hedge.lines[0]?.input;
+    if (!first) throw new Error('追加できない');
+    const s2 = run(
+      s1,
+      { type: 'addFutureLeg', input: first },
+      { type: 'setScenario', patch: { dX: -0.05 * views(s1).pm.ctx.x0 } },
+      { type: 'setHedge', patch: { at: 'scenario' } },
+    );
+    const { hedge, metrics } = views(s2);
+    expect(hedge.current?.large).toBeCloseTo(metrics.scenarioPoint.total.deltaLarge, 12);
+    const mini = hedge.lines[0];
+    expect(mini?.lots).not.toBe(0);
+    if (!mini?.input) throw new Error('追加できない');
+    const s3 = reduce(s2, { type: 'addFutureLeg', input: mini.input });
+    expect(s3.legs).toHaveLength(4);
+    expect(Math.abs(views(s3).metrics.scenarioPoint.total.deltaLarge)).toBeLessThanOrEqual(
+      0.05 + 1e-9,
+    );
   });
 });
