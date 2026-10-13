@@ -1,15 +1,17 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef } from 'preact/hooks';
 import { type Chain, monthOf } from '../../data';
-import { DEFAULT_SETTINGS, type ModelSettings } from '../../model';
+import { DEFAULT_SETTINGS, type ModelSettings, ZERO_SCENARIO } from '../../model';
 import { describeLoadError, fixtureUrl, loadFromFile, loadFromUrl } from '../load';
 import { initialState, reduce } from '../state';
 import { headerModel } from '../view/header';
+import { hedgeModel } from '../view/hedge';
 import { metricsModel } from '../view/metrics';
 import { pnlDomains, zoomViewport } from '../view/pnlChart';
 import { positionModel } from '../view/position';
 import { evalTimeTargets } from '../view/scenario';
 import { Board } from './Board';
 import { Header } from './Header';
+import { Hedge } from './Hedge';
 import { LegForms } from './LegForms';
 import { Loader } from './Loader';
 import { Metrics } from './Metrics';
@@ -76,6 +78,24 @@ export function App() {
   const metrics = useMemo(
     () => metricsModel({ base: pnlBase, scenario: state.scenario, unit: state.metricsUnit }),
     [pnlBase, state.scenario, state.metricsUnit],
+  );
+  // デルタヘッジ（足・目標・評価点・限月の変更ごと。シナリオは評価点がシナリオ時点のときだけ効く）
+  const { hedge, scenario } = state;
+  const hedgeScenario = hedge.at === 'scenario' ? scenario : null;
+  const hedgeView = useMemo(
+    () =>
+      chain && positions
+        ? hedgeModel({
+            chain,
+            ctx: positions.ctx,
+            base: pnlBase,
+            settings,
+            scenario: hedgeScenario ?? ZERO_SCENARIO,
+            hedge,
+            holidays: calendar.holidays,
+          })
+        : null,
+    [chain, positions, pnlBase, settings, hedgeScenario, hedge, calendar],
   );
   const targets = useMemo(
     () => (chain ? evalTimeTargets(chain, state.legs, calendar) : []),
@@ -187,6 +207,7 @@ export function App() {
                 );
               })}
               <Positions model={positions} dispatch={dispatch} />
+              {hedgeView && <Hedge model={hedgeView} dispatch={dispatch} />}
               <LegForms chain={chain} dispatch={dispatch} />
             </section>
           </div>

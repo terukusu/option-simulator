@@ -872,3 +872,54 @@ button.q.noquote {
 .tail-table td.neg {
   color: var(--ask);
 }
+
+/* ---------------------------------------------------------------- デルタヘッジ（#19） */
+
+.hedge {
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  margin-top: 8px;
+  padding: 6px;
+}
+
+.hedge h2 {
+  margin-top: 0;
+}
+
+.hedge-tools {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  font-size: 0.85em;
+  gap: 4px 12px;
+}
+
+.hedge-tools input {
+  text-align: right;
+  width: 6em;
+}
+
+.hedge-current {
+  font-size: 0.9em;
+  font-variant-numeric: tabular-nums;
+}
+
+.hedge-lines {
+  display: grid;
+  gap: 4px;
+  list-style: none;
+  margin: 4px 0;
+  padding: 0;
+}
+
+.hedge-line {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  font-variant-numeric: tabular-nums;
+  gap: 2px 8px;
+}
+
+.hedge-line .field-error {
+  flex-basis: 100%;
+}
