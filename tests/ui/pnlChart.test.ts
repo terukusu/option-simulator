@@ -3,7 +3,9 @@ import { boardOptionLeg, type Chain, type ChainJson, normalizeChain } from '../.
 import {
   DAY_MS,
   expiryProfile,
+  type Leg,
   type OptionType,
+  preparePosition,
   type Scenario,
   type Side,
   sqInstant,
@@ -18,15 +20,21 @@ import {
   clippedPath,
   DEFAULT_PNL_Y,
   fmtPnlTick,
+  hasDateLine,
   maxScenarioDays,
   type PnlBase,
   type PnlChartModel,
   type PnlYSettings,
   pnlChartModel,
   pnlDomains,
+  pnlViewDomain,
+  todayLine,
+  todayScenario,
+  zoomViewport,
 } from '../../ui/view/pnlChart';
 import { positionModel } from '../../ui/view/position';
 import { fixture } from '../support/fixtures';
+import { M1, M2, makeMarket } from '../support/market';
 
 /** #11 AC-4〜AC-9: 損益グラフの表示モデル。合成の板（架空の値）。 */
 const latest = normalizeChain(fixture('latest'));
@@ -114,9 +122,9 @@ describe('横軸の範囲（AC-4）', () => {
   ]);
   const base = baseOf(latest, legs);
 
-  it('初期範囲は X₀ と全足の折れ点 K − basis_i を含み、両端に余白（全域の端を除く）', () => {
+  it('初期範囲は X₀ と全足の折れ点 K − basis_i と満期の BEP（#6）を含み、両端に余白（全域の端を除く）', () => {
     const { initial, full, profile } = base;
-    const core = extent([base.ctx.x0, ...profile.kinks]) as Domain;
+    const core = extent([base.ctx.x0, ...profile.kinks, ...profile.breakevens]) as Domain;
     expect(initial[0]).toBeLessThanOrEqual(core[0]);
     expect(initial[1]).toBeGreaterThanOrEqual(core[1]);
     const pad = Math.max((core[1] - core[0]) * 0.15, base.ctx.x0 * 0.02);
@@ -618,5 +626,166 @@ describe('描く座標（path）が解析解と一致する（Phase 4 #1）', ()
     expect(clippedPath([0, 1], [Number.NEGATIVE_INFINITY, Number.NaN], 0, 100)).toBe(
       'M0.0 0.0L1.0 100.0',
     );
+  });
+});
+
+describe('シナリオと線（#6）', () => {
+  const legs = uiLegs(latest, [
+    { expiry: m1.id, k: 64_000, type: 'put', side: 'sell' },
+    { expiry: m1.id, k: 71_000, type: 'call', side: 'sell' },
+    { expiry: m2.id, k: 60_000, type: 'put', side: 'buy' },
+  ]);
+  const base = baseOf(latest, legs);
+  const lineOf = (m: PnlChartModel, kind: 'date' | 'today') => m.lines.find((l) => l.kind === kind);
+
+  it('今日の線はシナリオ IV を掛けない（d = ΔX = Δσ = Δs = 0）。β と動き方は横軸の各点に効く', () => {
+    const sc: Scenario = {
+      ...ZERO_SCENARIO,
+      days: 3,
+      dX: -2_000,
+      dSigma: 5,
+      skew: 2,
+      beta: 0,
+      ivDynamics: 'sticky_moneyness',
+    };
+    expect(todayScenario(sc)).toEqual({ ...sc, days: 0, dX: 0, dSigma: 0, skew: 0 });
+    const m = chartOf(base, { scenario: sc, days: 3 });
+    const today = lineOf(m, 'today');
+    const want = todayScenario(sc);
+    today?.xs.forEach((x, i) => {
+      expect(today.ys[i]).toBe(theoreticalPnl(base.legs, x, want, base.ctx));
+    });
+    // β = 0 と β = 1 で今日の線は変わる（X₀ から離れた点）
+    const b1 = lineOf(chartOf(base, { scenario: { ...sc, beta: 1 }, days: 3 }), 'today');
+    expect(b1?.ys[0]).not.toBeCloseTo(today?.ys[0] as number, 0);
+    // d・ΔX・Δσ・Δs を動かしても今日の線は同じ
+    const moved = lineOf(
+      chartOf(base, { scenario: { ...sc, dX: 1_000, dSigma: -3, skew: -1 }, days: 9 }),
+      'today',
+    );
+    expect(moved?.ys).toEqual(today?.ys);
+  });
+
+  it('指定日の線（シナリオ全体）は d > 0 または Δσ・Δs ≠ 0 のときだけ。ΔX だけでは描かない', () => {
+    const kinds = (sc: Partial<Scenario>) =>
+      chartOf(base, { scenario: { ...ZERO_SCENARIO, ...sc }, days: sc.days ?? 0 }).lines.map(
+        (l) => l.kind,
+      );
+    expect(kinds({})).toEqual(['expiry', 'today']);
+    expect(kinds({ dX: -3_000 })).toEqual(['expiry', 'today']);
+    expect(kinds({ dSigma: -3 })).toEqual(['expiry', 'date', 'today']);
+    expect(kinds({ skew: 0.5 })).toEqual(['expiry', 'date', 'today']);
+    expect(kinds({ days: 1 })).toEqual(['expiry', 'date', 'today']);
+    expect(hasDateLine(ZERO_SCENARIO, 0)).toBe(false);
+    // d = 0・Δσ −3pt（U2 の手順 2）: 指定日の線は今日と異なり、各点は theoreticalPnl
+    const sc: Scenario = { ...ZERO_SCENARIO, dSigma: -3 };
+    const m = chartOf(base, { scenario: sc, days: 0 });
+    const date = lineOf(m, 'date');
+    const today = lineOf(m, 'today');
+    date?.xs.forEach((x, i) => {
+      expect(date.ys[i]).toBe(theoreticalPnl(base.legs, x, sc, base.ctx));
+    });
+    expect(date?.ys.some((y, i) => Math.abs(y - (today?.ys[i] as number)) > 1)).toBe(true);
+  });
+
+  it('前計算した今日の線（todayLine）を渡すと同じモデル。点数が合わなければ自分で作る', () => {
+    const sc: Scenario = { ...ZERO_SCENARIO, days: 4, dSigma: 2, beta: 1.5 };
+    const viewport: Domain = [60_000, 75_000];
+    const pre = todayLine(base, viewport, PLOT_W, sc);
+    const plain = chartOf(base, { scenario: sc, days: 4, viewport });
+    const withPre = pnlChartModel({
+      base,
+      scenario: sc,
+      viewport,
+      pnlY: DEFAULT_PNL_Y,
+      plotWidth: PLOT_W,
+      plotHeight: PLOT_H,
+      todayYs: pre,
+    });
+    expect(withPre).toEqual(plain);
+    const wrong = pnlChartModel({
+      base,
+      scenario: sc,
+      viewport,
+      pnlY: DEFAULT_PNL_Y,
+      plotWidth: PLOT_W,
+      plotHeight: PLOT_H,
+      todayYs: [1, 2, 3],
+    });
+    expect(wrong).toEqual(plain);
+    expect(todayLine(null, null, PLOT_W, sc)).toBeNull();
+  });
+
+  it('シナリオ点 X₀ + ΔX の縦線（ΔX ≠ 0 で範囲内のとき）', () => {
+    const m = chartOf(base, { scenario: { ...ZERO_SCENARIO, dX: -2_000 } });
+    expect(m.scenarioX).toBeCloseTo(base.ctx.x0 - 2_000, 9);
+    const want =
+      m.plot.left + ((m.scenarioX - m.domain[0]) / (m.domain[1] - m.domain[0])) * m.plot.width;
+    expect(m.scenarioPx).toBeCloseTo(want, 6);
+    expect(chartOf(base).scenarioPx).toBeNull();
+    const out = chartOf(base, {
+      scenario: { ...ZERO_SCENARIO, dX: -2_000 },
+      viewport: [base.ctx.x0, base.ctx.x0 + 5_000],
+    });
+    expect(out.scenarioPx).toBeNull();
+  });
+
+  it('パネルの + / − は中心固定で ×0.8 / ×1.25（全域・最小幅で止まる）', () => {
+    const v = pnlViewDomain(base, null);
+    const zin = zoomViewport(base, null, 0.8);
+    expect(zin[1] - zin[0]).toBeCloseTo((v[1] - v[0]) * 0.8, 6);
+    expect((zin[0] + zin[1]) / 2).toBeCloseTo((v[0] + v[1]) / 2, 6);
+    let w: Domain = v;
+    for (let i = 0; i < 60; i++) w = zoomViewport(base, w, 1.25);
+    expect(w).toEqual(base.full);
+    for (let i = 0; i < 80; i++) w = zoomViewport(base, w, 0.8);
+    expect(w[1] - w[0]).toBeCloseTo(base.minWidth, 6);
+  });
+});
+
+describe('横軸の初期範囲に満期の BEP（AC-12）', () => {
+  it('ストラングル売り（P 64,000 @ 810・C 70,500 @ 995、F = 67,810）の満期 BEP 62,195・72,305 が初期範囲の内側、初期範囲は全域の中', () => {
+    const { ctx, rows } = makeMarket();
+    const legs: Leg[] = [
+      {
+        kind: 'option',
+        product: 'op_large',
+        type: 'put',
+        expiry: M1.id,
+        strike: 64000,
+        side: 'sell',
+        qty: 1,
+        entry: 810,
+      },
+      {
+        kind: 'option',
+        product: 'op_large',
+        type: 'call',
+        expiry: M1.id,
+        strike: 70500,
+        side: 'sell',
+        qty: 1,
+        entry: 995,
+      },
+    ];
+    const board = {
+      months: [
+        { F: M1.F, rows: rows[M1.id] ?? [] },
+        { F: M2.F, rows: rows[M2.id] ?? [] },
+      ],
+    };
+    const base = pnlDomains(board, preparePosition(legs, ctx), ctx);
+    if (!base) throw new Error('基礎が作れない');
+    expect(base.profile.breakevens).toEqual([62_195, 72_305]);
+    const [lo, hi] = base.initial;
+    // 芯 62,195〜72,305（幅 10,110）+ 余白 max(1,516.5, 1,356.2) = 1,516.5
+    expect(lo).toBeLessThan(62_195);
+    expect(hi).toBeGreaterThan(72_305);
+    expect(lo).toBeCloseTo(62_195 - 10_110 * 0.15, 6);
+    expect(hi).toBeCloseTo(72_305 + 10_110 * 0.15, 6);
+    expect(lo).toBeGreaterThanOrEqual(base.full[0]);
+    expect(hi).toBeLessThanOrEqual(base.full[1]);
+    // 初期表示のグラフに満期の BEP の印が 2 つ
+    expect(chartOf(base).breakevens.map((b) => b.x)).toEqual([62_195, 72_305]);
   });
 });

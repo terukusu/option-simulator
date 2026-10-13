@@ -6,7 +6,8 @@ import { buildWideChainJson } from '../../scripts/synthBoard';
 import { CALENDAR } from '../../ui/calendar';
 import { atmStrike, boardRows } from '../../ui/view/board';
 import { headerModel } from '../../ui/view/header';
-import { DEFAULT_PNL_Y, pnlChartModel, pnlDomains } from '../../ui/view/pnlChart';
+import { metricsModel } from '../../ui/view/metrics';
+import { DEFAULT_PNL_Y, pnlChartModel, pnlDomains, todayLine } from '../../ui/view/pnlChart';
 import { smileModel } from '../../ui/view/smile';
 import { M1, M2, makeMarket } from '../support/market';
 import { PERF_LEGS } from '../support/perfPosition';
@@ -95,6 +96,65 @@ describe('性能（#11 AC-13: 損益グラフの表示モデル）', () => {
     for (let i = 0; i < 30; i++) {
       const t0 = performance.now();
       redraw();
+      best = Math.min(best, performance.now() - t0);
+    }
+    expect(best).toBeLessThan(BUDGET_MS);
+  });
+});
+
+/**
+ * #6 AC-11（AC8 の計算部分）: 足 10 本・描画幅 1,000px で、スライダー 1 回の描き直しに要る計算
+ * （損益グラフの表示モデル + 指標 + テール表）が予算以内。今日の線はスライダーで変わらないので部品が memo した
+ * 前計算（todayLine）を渡す。表示範囲・β・動き方を変えたとき（今日の線も作り直す）は上の #11 のテスト
+ * （3 本の線をすべて作る）と同じ量。
+ */
+describe('性能（#6 AC-11: スライダー 1 回の描き直し）', () => {
+  const { ctx, rows } = makeMarket();
+  const legs = preparePosition(PERF_LEGS, ctx);
+  const board = {
+    months: [
+      { F: M1.F, rows: rows[M1.id] ?? [] },
+      { F: M2.F, rows: rows[M2.id] ?? [] },
+    ],
+  };
+  const base = pnlDomains(board, legs, ctx);
+  if (!base) throw new Error('損益グラフの基礎が作れない');
+  const scenario0 = { ...ZERO_SCENARIO, days: 5 };
+  const today = todayLine(base, null, 1000, scenario0);
+  let tick = 0;
+
+  function slide(): number {
+    // ドラッグ中を模して d・ΔX・Δσ・Δs を毎回少しずつ動かす
+    tick = (tick + 1) % 40;
+    const scenario = {
+      ...scenario0,
+      days: 5 + tick * 0.5,
+      dX: -tick * 100,
+      dSigma: tick * 0.5,
+      skew: (tick % 10) * 0.5,
+    };
+    const m = pnlChartModel({
+      base,
+      scenario,
+      viewport: null,
+      pnlY: DEFAULT_PNL_Y,
+      plotWidth: 1000,
+      plotHeight: 260,
+      todayYs: today,
+    });
+    const mm = metricsModel({ base, scenario, unit: 'auto' });
+    return (
+      m.lines.length + (m.lines[1]?.d.length ?? 0) + mm.tail.rows.length + mm.dateBreakevens.length
+    );
+  }
+
+  it(`グラフの表示モデル + 指標 + テール表が ${BUDGET_MS} ms 以内（30 回の最小値）`, () => {
+    expect(slide()).toBeGreaterThan(8);
+    for (let i = 0; i < 20; i++) slide();
+    let best = Number.POSITIVE_INFINITY;
+    for (let i = 0; i < 30; i++) {
+      const t0 = performance.now();
+      slide();
       best = Math.min(best, performance.now() - t0);
     }
     expect(best).toBeLessThan(BUDGET_MS);

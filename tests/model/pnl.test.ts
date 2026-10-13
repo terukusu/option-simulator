@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { black76Price } from '../../model/black76';
 import {
+  expiryCrossings,
   expiryPnl,
   expiryProfile,
   findBreakevens,
@@ -19,6 +20,7 @@ import {
 import { applyPreset, CRASH_PRESETS, type Scenario, ZERO_SCENARIO } from '../../model/scenario';
 import { DAY_MS } from '../../model/time';
 import { EVAL_TIME, FUT, M1, M2, makeMarket, R } from '../support/market';
+import { rng } from '../support/synthChain';
 
 const { ctx } = makeMarket();
 
@@ -231,6 +233,143 @@ describe('テール表（AC22）', () => {
       ctx,
     );
     expect(t.premiumBase).toEqual({ kind: 'paid', amount: 5000 });
+  });
+
+  it('支払超の基準は掛け金 = 支払 − 受取 + 手数料（全足）。受取超は手数料抜きの受取（#6）', () => {
+    const fee = { ...DEFAULT_SETTINGS, feePerLot: 300 };
+    const buy = preparePosition([op(M1.id, 'put', 47500, 'buy', 5)], ctx, fee);
+    const t = tailTable(buy, ZERO_SCENARIO, ctx, fee);
+    expect(t.premiumBase).toEqual({ kind: 'paid', amount: 5300 });
+    t.rows.forEach((r) => {
+      expect(r.sq.ratio).toBeCloseTo(r.sq.pnl / 5300, 12);
+    });
+    // ミニ先物 2 枚つきでも手数料は全足（掛け金 = 5,000 + 300 × 3）
+    const withFut = preparePosition(
+      [
+        op(M1.id, 'put', 47500, 'buy', 5),
+        {
+          kind: 'future',
+          product: 'fut_mini',
+          contract: FUT.id,
+          side: 'buy',
+          qty: 2,
+          entry: 67880,
+        },
+      ],
+      ctx,
+      fee,
+    );
+    expect(tailTable(withFut, ZERO_SCENARIO, ctx, fee).premiumBase).toEqual({
+      kind: 'paid',
+      amount: 5900,
+    });
+    // 受取超は手数料を引かない（設計 6.1 の例: 手数料 300 円でも基準 1,805,000）
+    const sell = preparePosition(legs, ctx, fee);
+    expect(tailTable(sell, ZERO_SCENARIO, ctx, fee).premiumBase).toEqual({
+      kind: 'received',
+      amount: 1_805_000,
+    });
+  });
+});
+
+describe('満期損益が水準に一致する原資産（expiryCrossings、#6 AC15 (b)）', () => {
+  it('手計算: 5 円の put K 47,500 を 1 枚買い（乗数 1,000、手数料 0）で 掛け金の N 倍 → X = 47,500 − 5 − 5N', () => {
+    // 満期損益 = (47,500 − X − 5) × 1,000（X ≤ 47,495）。N × 5,000 円になる X = 47,495 − 5N
+    const prof = expiryProfile(preparePosition([op(M1.id, 'put', 47500, 'buy', 5)], ctx), ctx);
+    expect(expiryCrossings(prof, 5_000)).toEqual([47490]);
+    expect(expiryCrossings(prof, 5 * 5_000)).toEqual([47470]);
+    expect(expiryCrossings(prof, 10 * 5_000)).toEqual([47445]);
+    // 下端（X = 0）での最大利益 (47,500 − 5) × 1,000 を超える水準は解なし
+    expect(expiryCrossings(prof, 47_495_000 + 1)).toEqual([]);
+    expect(expiryCrossings(prof, Number.NaN)).toEqual([]);
+    expect(expiryCrossings(prof, Number.POSITIVE_INFINITY)).toEqual([]);
+  });
+
+  it('水準 0 は expiryProfile の BEP と同じ（設計 6.1 のストラングル売り 62,195 / 72,305）', () => {
+    const legs = [op(M1.id, 'put', 64000, 'sell', 810), op(M1.id, 'call', 70500, 'sell', 995)];
+    const prof = expiryProfile(preparePosition(legs, ctx), ctx);
+    expect(expiryCrossings(prof, 0)).toEqual([62195, 72305]);
+    expect(prof.breakevens).toEqual(expiryCrossings(prof, 0));
+    // 右端の区間（X → ∞）の交点も解く: 受取（1,805 円 × 1,000）の 2 倍の損 −3,610,000 は
+    // put 側 64,000 − 1,805 − 3,610 = 58,585、call 側 70,500 + 1,805 + 3,610 = 75,915
+    expect(expiryCrossings(prof, -3_610_000)).toEqual([58585, 75915]);
+  });
+
+  /**
+   * 性質テスト（種つき乱数）: 200 ポジション（足 1〜6、売買・型・行使価格・建値・限月・先物をランダム）×
+   * 水準 3 通り（0・ランダム・折れ点の値ちょうど）。各解 x で |満期損益(x) − 水準| は 1 円丸めの分以内
+   * （真の交点 r は |x − r| ≤ 0.5 なので、区分線形の f では |f(x) − f(r)| ≤ max |f(t) − f(x)|、
+   * t は x ± 0.5 と範囲内の折れ点）。区間（下端・折れ点・右端の半直線）の内部で符号が変わる箇所は必ず 1 つ返す。
+   */
+  it('性質: 解は水準を 1 円丸めの分以内で満たし、符号の変わる区間を取りこぼさない', () => {
+    const rand = rng(20261014);
+    const pick = <T>(xs: readonly T[]): T => xs[Math.floor(rand() * xs.length)] as T;
+    let checked = 0;
+    for (let n = 0; n < 200; n++) {
+      const settings: ModelSettings = {
+        ...DEFAULT_SETTINGS,
+        basisMode: rand() < 0.2 ? 'pct' : 'yen',
+        feePerLot: rand() < 0.5 ? 0 : Math.round(rand() * 500),
+      };
+      const count = 1 + Math.floor(rand() * 6);
+      const legs: Leg[] = [];
+      for (let i = 0; i < count; i++) {
+        if (rand() < 0.1) {
+          legs.push({
+            kind: 'future',
+            product: pick(['fut_mini', 'fut_large', 'fut_micro'] as const),
+            contract: FUT.id,
+            side: pick(['buy', 'sell'] as const),
+            qty: 1 + Math.floor(rand() * 3),
+            entry: FUT.price + Math.round((rand() - 0.5) * 400),
+          });
+          continue;
+        }
+        legs.push(
+          op(
+            pick([M1.id, M2.id]),
+            pick(['call', 'put'] as const),
+            Math.round((45000 + rand() * 40000) / 125) * 125,
+            pick(['buy', 'sell'] as const),
+            Math.round(1 + rand() * 3000),
+            1 + Math.floor(rand() * 3),
+          ),
+        );
+      }
+      const prepared = preparePosition(legs, ctx, settings);
+      const prof = expiryProfile(prepared, ctx, settings);
+      const f = (x: number) => expiryPnl(prepared, x, ctx, settings);
+      const kinkLevel = pick(prof.points).pnl;
+      const levels = [0, (rand() - 0.5) * 8_000_000, kinkLevel];
+      for (const level of levels) {
+        const xs = expiryCrossings(prof, level);
+        // 昇順・重複なし・1 円単位
+        expect([...xs].sort((a, b) => a - b)).toEqual(xs);
+        expect(new Set(xs).size).toBe(xs.length);
+        for (const x of xs) {
+          expect(Number.isInteger(x)).toBe(true);
+          const ts = [x - 0.5, x + 0.5, ...prof.kinks.filter((k) => Math.abs(k - x) <= 0.5)];
+          const bound = Math.max(...ts.map((t) => Math.abs(f(t) - f(x))));
+          expect(Math.abs(f(x) - level)).toBeLessThanOrEqual(bound + 1e-6);
+          checked++;
+        }
+        // 区間の内部の符号変化（区分線形なので両端の値で判定）には、その区間の ±0.5 に解がある
+        const pts = prof.points;
+        for (let i = 0; i + 1 < pts.length; i++) {
+          const p = pts[i] as { x: number; pnl: number };
+          const q = pts[i + 1] as { x: number; pnl: number };
+          if ((p.pnl - level) * (q.pnl - level) < 0) {
+            expect(xs.some((x) => x >= p.x - 0.5 && x <= q.x + 0.5)).toBe(true);
+          }
+        }
+        const last = pts[pts.length - 1] as { x: number; pnl: number };
+        const far = last.x + 1e7;
+        if ((last.pnl - level) * (f(far) - level) < 0) {
+          expect(xs.some((x) => x >= last.x - 0.5)).toBe(true);
+        }
+      }
+    }
+    expect(checked).toBeGreaterThan(200);
   });
 });
 

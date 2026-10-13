@@ -17,11 +17,13 @@ import {
 import {
   type AnchorSource,
   type AtmBasis,
+  DEFAULT_SETTINGS,
   type DisplayGreeks,
   evaluatePosition,
   type FutureMarket,
   type LegState,
   type MarketContext,
+  type ModelSettings,
   type OptionExpiryMarket,
   type PreparedLeg,
   type Product,
@@ -157,13 +159,14 @@ export function positionModel(
   legs: readonly UiLeg[],
   basis: AtmBasis,
   calendar: Calendar,
+  settings: ModelSettings = DEFAULT_SETTINGS,
 ): PositionModel {
   const ctx = positionContext(chain, legs, basis);
   const prepared: Array<PreparedLeg | null> = [];
   const errors: Array<string | null> = [];
   for (const ui of legs) {
     try {
-      prepared.push(prepareLeg(ui.leg, ctx));
+      prepared.push(prepareLeg(ui.leg, ctx, settings));
       errors.push(null);
     } catch {
       prepared.push(null);
@@ -175,7 +178,7 @@ export function positionModel(
     }
   }
   const ok = prepared.filter((p): p is PreparedLeg => p !== null);
-  const evaluation = evaluatePosition(ok, ZERO_SCENARIO, ctx);
+  const evaluation = evaluatePosition(ok, ZERO_SCENARIO, ctx, settings);
   let j = 0;
   const rows = legs.map((ui, i): PositionRow => {
     const leg = ui.leg;

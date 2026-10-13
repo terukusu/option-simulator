@@ -1,16 +1,21 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef } from 'preact/hooks';
 import { type Chain, monthOf } from '../../data';
+import { DEFAULT_SETTINGS, type ModelSettings } from '../../model';
 import { describeLoadError, fixtureUrl, loadFromFile, loadFromUrl } from '../load';
 import { initialState, reduce } from '../state';
 import { headerModel } from '../view/header';
-import { pnlDomains } from '../view/pnlChart';
+import { metricsModel } from '../view/metrics';
+import { pnlDomains, zoomViewport } from '../view/pnlChart';
 import { positionModel } from '../view/position';
+import { evalTimeTargets } from '../view/scenario';
 import { Board } from './Board';
 import { Header } from './Header';
 import { LegForms } from './LegForms';
 import { Loader } from './Loader';
+import { Metrics } from './Metrics';
 import { PnlChart } from './PnlChart';
 import { Positions } from './Positions';
+import { ScenarioPanel } from './ScenarioPanel';
 import { Smile } from './Smile';
 
 /** dev サーバーだけが配る合成の板（本番のビルドではこの分岐ごと消える） */
@@ -54,14 +59,36 @@ export function App() {
     () => (chain ? headerModel(chain, atmBasis, calendar) : null),
     [chain, atmBasis, calendar],
   );
+  // 手数料（1 枚あたり円）は評価の設定（損益・指標・テール表に効く）
+  const { feePerLot } = state;
+  const settings = useMemo<ModelSettings>(() => ({ ...DEFAULT_SETTINGS, feePerLot }), [feePerLot]);
   const positions = useMemo(
-    () => (chain ? positionModel(chain, state.legs, atmBasis, calendar) : null),
-    [chain, state.legs, atmBasis, calendar],
+    () => (chain ? positionModel(chain, state.legs, atmBasis, calendar, settings) : null),
+    [chain, state.legs, atmBasis, calendar, settings],
   );
   // 損益グラフの横軸の範囲・満期の折れ点など（足・板が変わったときだけ。ドラッグ中は作り直さない）
   const pnlBase = useMemo(
-    () => (chain && positions ? pnlDomains(chain, positions.prepared, positions.ctx) : null),
-    [chain, positions],
+    () =>
+      chain && positions ? pnlDomains(chain, positions.prepared, positions.ctx, settings) : null,
+    [chain, positions, settings],
+  );
+  // 指標・テール表（スライダーの操作ごと。グラフの表示モデルと合わせて 1 フレームの予算に収める）
+  const metrics = useMemo(
+    () => metricsModel({ base: pnlBase, scenario: state.scenario, unit: state.metricsUnit }),
+    [pnlBase, state.scenario, state.metricsUnit],
+  );
+  const targets = useMemo(
+    () => (chain ? evalTimeTargets(chain, state.legs, calendar) : []),
+    [chain, state.legs, calendar],
+  );
+  const { pnlViewport } = state;
+  const onZoom = useCallback(
+    (factor: number) => {
+      if (pnlBase) {
+        dispatch({ type: 'setPnlViewport', viewport: zoomViewport(pnlBase, pnlViewport, factor) });
+      }
+    },
+    [pnlBase, pnlViewport],
   );
   const { smilePick } = state;
 
@@ -126,6 +153,21 @@ export function App() {
                 scenario={state.scenario}
                 viewport={state.pnlViewport}
                 pnlY={state.pnlY}
+                dispatch={dispatch}
+              />
+              <ScenarioPanel
+                scenario={state.scenario}
+                x0={positions?.ctx.x0 ?? Number.NaN}
+                maxDays={pnlBase?.maxDays ?? 0}
+                evalTime={chain.evalTime}
+                targets={targets}
+                dispatch={dispatch}
+                onZoom={onZoom}
+              />
+              <Metrics
+                model={metrics}
+                unitSetting={state.metricsUnit}
+                feePerLot={feePerLot}
                 dispatch={dispatch}
               />
               <h2>スマイル {month ? `${month.id} 限` : ''}</h2>

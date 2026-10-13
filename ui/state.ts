@@ -17,6 +17,8 @@ import {
 } from '../data';
 import {
   type AtmBasis,
+  applyPreset,
+  CRASH_PRESETS,
   type FutureMarket,
   type Leg,
   type OptionExpiryMarket,
@@ -27,6 +29,7 @@ import {
 } from '../model';
 import { CALENDAR } from './calendar';
 import type { Domain } from './chart/scale';
+import { parseNum } from './view/format';
 import { DEFAULT_PNL_Y, type PnlYSettings } from './view/pnlChart';
 import type { SmileAxis } from './view/smile';
 
@@ -60,8 +63,12 @@ export interface State {
   smileViewport: Domain | null;
   /** スマイルで選んだ行使価格（操作行を出す。限月の切替・板の読み直しで消す） */
   smilePick: { monthId: string; k: number } | null;
-  /** シナリオ（#11 は指定日 d だけを編集する。#6 のスライダーが同じ状態を編集する） */
+  /** シナリオ（#6 のシナリオのパネルが編集する。グラフ・指標・テール表が使う） */
   scenario: Scenario;
+  /** 手数料（1 枚あたり円、既定 0。全足に掛ける） */
+  feePerLot: number;
+  /** 指標の金額の単位（自動 = 受取 + 支払が 10 万円以上なら千円） */
+  metricsUnit: MetricsUnitSetting;
   /** 損益グラフの横軸の表示範囲（null = 初期範囲。描くときに全域へ収める） */
   pnlViewport: Domain | null;
   /** 損益グラフの縦軸 */
@@ -73,6 +80,11 @@ export interface State {
   /** 取引カレンダー（板に無い限月の SQ 日を求める休業日。ui/calendar.ts。テストは差し替える） */
   calendar: Calendar;
 }
+
+export type MetricsUnitSetting = 'auto' | 'yen' | 'thousand';
+
+/** 手数料の上限（1 枚あたり円） */
+export const FEE_MAX = 100_000;
 
 export const initialState: State = {
   chain: null,
@@ -87,6 +99,8 @@ export const initialState: State = {
   smileViewport: null,
   smilePick: null,
   scenario: ZERO_SCENARIO,
+  feePerLot: 0,
+  metricsUnit: 'auto',
   pnlViewport: null,
   pnlY: DEFAULT_PNL_Y,
   legs: [],
@@ -116,6 +130,11 @@ export type Action =
   | { type: 'setViewport'; viewport: Domain | null }
   | { type: 'pickSmile'; pick: { monthId: string; k: number } | null }
   | { type: 'setDays'; days: number }
+  | { type: 'setScenario'; patch: Partial<Scenario> }
+  | { type: 'applyPreset'; index: number; x0: number }
+  | { type: 'resetScenario' }
+  | { type: 'setFee'; fee: number }
+  | { type: 'setMetricsUnit'; unit: MetricsUnitSetting }
   | { type: 'setPnlViewport'; viewport: Domain | null }
   | { type: 'setPnlY'; patch: Partial<PnlYSettings> }
   | { type: 'addBoardLeg'; expiry: string; k: number; optionType: OptionType; side: Side }
@@ -149,6 +168,24 @@ function applyPatch(leg: Leg, patch: LegPatch): Leg {
     else next.iv = patch.iv;
   }
   return next;
+}
+
+/** シナリオの各値の範囲（設計 5.4。d の上限と ΔX の % 範囲は描く側・パネルが X₀ と足から決める） */
+function validScenarioPatch(p: Partial<Scenario>): boolean {
+  const fin = (v: number | undefined) => v === undefined || Number.isFinite(v);
+  const within = (v: number | undefined, lo: number, hi: number) =>
+    v === undefined || (Number.isFinite(v) && v >= lo && v <= hi);
+  return (
+    fin(p.dX) &&
+    within(p.days, 0, Number.POSITIVE_INFINITY) &&
+    within(p.dSigma, -10, 40) &&
+    within(p.skew, -5, 5) &&
+    within(p.beta, 0, 10) &&
+    (p.ivDynamics === undefined ||
+      p.ivDynamics === 'sticky_strike' ||
+      p.ivDynamics === 'sticky_moneyness') &&
+    (p.ivShift === undefined || p.ivShift === 'absolute' || p.ivShift === 'relative')
+  );
 }
 
 export function reduce(state: State, action: Action): State {
@@ -195,6 +232,25 @@ export function reduce(state: State, action: Action): State {
       return Number.isFinite(action.days) && action.days >= 0
         ? { ...state, scenario: { ...state.scenario, days: action.days } }
         : state;
+    case 'setScenario':
+      // 非有限・範囲外を含む更新は丸ごと無視する（部分的に反映しない）
+      return validScenarioPatch(action.patch)
+        ? { ...state, scenario: { ...state.scenario, ...action.patch } }
+        : state;
+    case 'applyPreset': {
+      const preset = CRASH_PRESETS[action.index];
+      if (!preset || !(Number.isFinite(action.x0) && action.x0 > 0)) return state;
+      return { ...state, scenario: applyPreset(state.scenario, preset, action.x0) };
+    }
+    case 'resetScenario':
+      // d・ΔX・Δσ・Δs を 0 に（β・動き方は設定として保つ）
+      return { ...state, scenario: { ...state.scenario, days: 0, dX: 0, dSigma: 0, skew: 0 } };
+    case 'setFee':
+      return Number.isFinite(action.fee) && action.fee >= 0 && action.fee <= FEE_MAX
+        ? { ...state, feePerLot: action.fee }
+        : state;
+    case 'setMetricsUnit':
+      return { ...state, metricsUnit: action.unit };
     case 'setPnlViewport':
       return { ...state, pnlViewport: action.viewport };
     case 'setPnlY':
@@ -260,10 +316,8 @@ export function reduce(state: State, action: Action): State {
 
 export type Parsed<T> = { ok: true; value: T } | { ok: false; message: string };
 
-function num(text: string): number {
-  const t = text.trim().replace(/,/g, '');
-  return t === '' ? Number.NaN : Number(t);
-}
+/** 数のパース（`−`・先頭の `+`・桁区切りを受ける。view/format.ts の parseNum） */
+const num = parseNum;
 
 /** 枚数: 1 以上の整数。 */
 export function parseQty(text: string): Parsed<number> {
@@ -317,6 +371,14 @@ export function parseDays(text: string, maxDays: number): Parsed<number> {
   return Number.isFinite(v) && v >= 0 && v <= max + 1e-9
     ? { ok: true, value: Math.min(v, max) }
     : { ok: false, message: `指定日は 0〜${(Math.floor(max * 100) / 100).toString()} 日` };
+}
+
+/** 手数料（1 枚あたり円）: 0〜100,000。 */
+export function parseFee(text: string): Parsed<number> {
+  const v = num(text);
+  return Number.isFinite(v) && v >= 0 && v <= FEE_MAX
+    ? { ok: true, value: v }
+    : { ok: false, message: '手数料は 0〜100,000 円 / 枚' };
 }
 
 /** 縦軸の手動の範囲（円）: 両方が数で、下端 < 上端。 */

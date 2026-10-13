@@ -3,9 +3,12 @@
  *
  * - 横軸 = 基準原資産 X（円モード F_i' = X' + basis_i）。縦軸 = 損益（円）
  * - 線: 満期（SQ。expiryProfile の折れ点を頂点に持つ折れ線 = 解析解。サンプリングしない）、
- *   指定日 d と今日（d = 0）は横軸 1 画素 1 点で theoreticalPnl を再サンプリング（点数 = 描画幅の
- *   CSS px、2〜2,000）。d = 0 なら指定日の線は描かない（今日と重なる）
- * - 横軸の初期範囲 = X₀ と全足の満期の折れ点の範囲 + 余白 max(幅 × 15%, X₀ × 2%)。全域（縮小の上限）=
+ *   指定日 + シナリオと今日は横軸 1 画素 1 点で theoreticalPnl を再サンプリング（点数 = 描画幅の
+ *   CSS px、2〜2,000）。今日の線 = シナリオ IV を掛けない基準の線（d = Δσ = Δs = 0。β と動き方は
+ *   横軸の各点に効く。#6）。指定日の線（シナリオ全体）は d > 0 または Δσ・Δs ≠ 0 のときだけ描く
+ *   （そうでなければ今日と重なる）。ΔX は線に効かない（β は評価点 X' ごと）のでシナリオ点の縦線で見せる
+ * - 横軸の初期範囲 = X₀・全足の満期の折れ点・満期の BEP の範囲 + 余白 max(幅 × 15%, X₀ × 2%)（#6 で満期の
+ *   BEP を追加。指定日の BEP はスライダーで動くので入れない）。全域（縮小の上限）=
  *   板の全限月（F が決まる限月）の行使価格の横軸上の位置 K − basis_i と初期範囲を合わせた範囲で、下端は
  *   X_lo（全足の原資産が 0 以上）。拡大の最小幅 = 板の行使価格の最小刻み × 2（無ければ X₀ × 1%）
  * - 縦軸: 自動（表示範囲内の全線のサンプル値と 0）/ 手動 / プレミアム基準 ±N × |受取 − 支払|
@@ -24,7 +27,15 @@ import {
   type Scenario,
   theoreticalPnl,
 } from '../../model';
-import { clampViewport, type Domain, extent, linear, niceTicks, padDomain } from '../chart/scale';
+import {
+  clampViewport,
+  type Domain,
+  extent,
+  linear,
+  niceTicks,
+  padDomain,
+  zoom,
+} from '../chart/scale';
 import { fmtNum } from './format';
 
 /** 初期範囲の余白（幅に対する割合と、X₀ に対する最小） */
@@ -74,11 +85,23 @@ export interface PnlBase {
   xLo: number;
 }
 
-/** 指定日 d の上限 = 最遠の足の SQ までの暦日（足 0 本は 0）。 */
+/**
+ * 残存 T0（年）の足を満期にする d（暦日）: T0 × 365 を、model の T' = T0 − d / 365 が 0 以下になるまで
+ * 1 ulp ずつ上げたもの（浮動小数の端数で T' が正の微小値 = near_expiry に残らないように。差は 1 ms よりずっと小さい）。
+ */
+export function daysToExpire(T0: number): number {
+  let d = T0 * 365;
+  for (let i = 0; i < 8 && T0 - d / 365 > 0; i++) {
+    d += Math.max(Math.abs(d) * Number.EPSILON, Number.MIN_VALUE);
+  }
+  return d;
+}
+
+/** 指定日 d の上限 = 最遠の足の SQ までの暦日（足 0 本は 0。上限ちょうどで最遠の足が満期になる）。 */
 export function maxScenarioDays(prepared: readonly PreparedLeg[]): number {
   let max = 0;
   for (const p of prepared) if (Number.isFinite(p.T0) && p.T0 > max) max = p.T0;
-  return max * 365;
+  return max > 0 ? daysToExpire(max) : 0;
 }
 
 function axisX(k: number, F: number, x0: number, settings: ModelSettings): number {
@@ -100,7 +123,7 @@ export function pnlDomains(
   const lo0 = profile.points[0]?.x;
   const xLo = lo0 !== undefined && Number.isFinite(lo0) ? lo0 : 0;
 
-  const core = extent([x0, ...profile.kinks]) ?? ([x0, x0] as Domain);
+  const core = extent([x0, ...profile.kinks, ...profile.breakevens]) ?? ([x0, x0] as Domain);
   const pad = Math.max((core[1] - core[0]) * INITIAL_PAD_RATIO, x0 * INITIAL_PAD_MIN_X0);
   const initialRaw: Domain = [core[0] - pad, core[1] + pad];
 
@@ -177,6 +200,9 @@ export interface PnlChartModel {
   breakevens: PnlMarker[];
   /** X₀ の縦線の画素（範囲外は null） */
   x0Px: number | null;
+  /** シナリオ点 X₀ + ΔX（ΔX ≠ 0 のとき。範囲外・ΔX = 0 は画素 null） */
+  scenarioX: number;
+  scenarioPx: number | null;
   /** 損益 0 の横線の画素（範囲外は null） */
   zeroPy: number | null;
   xTicks: PnlTick[];
@@ -199,6 +225,11 @@ export interface PnlChartInput {
   /** 描画域の幅・高さ（CSS px） */
   plotWidth: number;
   plotHeight: number;
+  /**
+   * 前計算した今日の線の値（todayLine の戻り値。スライダーの操作では今日の線が変わらないので部品が memo する）。
+   * 無い・点数が合わなければ自分で作る
+   */
+  todayYs?: readonly number[] | null;
 }
 
 /** 縦軸の目盛りの文言（千円は値 / 1,000。刻みに合わせて小数を出す）。 */
@@ -224,6 +255,8 @@ function emptyModel(input: PnlChartInput): PnlChartModel {
     kinks: [],
     breakevens: [],
     x0Px: null,
+    scenarioX: Number.NaN,
+    scenarioPx: null,
     zeroPy: null,
     xTicks: [],
     yTicks: [],
@@ -275,11 +308,69 @@ export function clippedPath(
   return d;
 }
 
+/** 今日の線のシナリオ: d = ΔX = Δσ = Δs = 0。β・動き方・IV 平行移動の解釈はシナリオの設定のまま（#6）。 */
+export function todayScenario(sc: Scenario): Scenario {
+  return { ...sc, days: 0, dX: 0, dSigma: 0, skew: 0 };
+}
+
+/** 指定日の線（シナリオ全体）を描くか: d > 0 または Δσ・Δs ≠ 0（#6）。 */
+export function hasDateLine(sc: Scenario, days: number): boolean {
+  return days > 0 || sc.dSigma !== 0 || sc.skew !== 0;
+}
+
+/** 表示範囲（全域・最小幅に収めたもの）。 */
+export function pnlViewDomain(base: PnlBase, viewport: Domain | null): Domain {
+  return clampViewport(viewport ?? base.initial, base.full, base.minWidth);
+}
+
+/** 再サンプリングの横軸（描画幅の CSS px の点、2〜2,000）。 */
+export function sampleXs(domain: Domain, plotWidth: number): number[] {
+  const [lo, hi] = domain;
+  const n = Math.min(Math.max(Math.round(plotWidth), 2), MAX_SAMPLES);
+  const xs = new Array<number>(n);
+  for (let i = 0; i < n; i++) xs[i] = i === n - 1 ? hi : lo + ((hi - lo) * i) / (n - 1);
+  return xs;
+}
+
+function sampleLine(base: PnlBase, xs: readonly number[], sc: Scenario): number[] {
+  const { legs, ctx, settings } = base;
+  return xs.map((x) => theoreticalPnl(legs, x, sc, ctx, settings));
+}
+
+/**
+ * 今日の線の値（pnlChartModel の todayYs に渡す）。表示範囲・描画幅・β・動き方が変わったときだけ作り直せば
+ * よい（d・ΔX・Δσ・Δs のスライダーでは変わらない）。
+ */
+export function todayLine(
+  base: PnlBase | null,
+  viewport: Domain | null,
+  plotWidth: number,
+  scenario: Scenario,
+): number[] | null {
+  if (!base) return null;
+  return sampleLine(
+    base,
+    sampleXs(pnlViewDomain(base, viewport), plotWidth),
+    todayScenario(scenario),
+  );
+}
+
+/** パネルの + / − の拡大・縮小（中心固定。×0.8 / ×1.25 はグラフのボタンと同じ）。 */
+export function zoomViewport(base: PnlBase, viewport: Domain | null, factor: number): Domain {
+  return zoom(pnlViewDomain(base, viewport), factor, base.full, base.minWidth);
+}
+
+/** 描く指定日 d（最遠の足の SQ に収める）と、収めたか。 */
+export function clampDays(scenario: Scenario, maxDays: number): { days: number; clamped: boolean } {
+  const want = Number.isFinite(scenario.days) ? Math.max(scenario.days, 0) : 0;
+  return { days: Math.min(want, maxDays), clamped: want > maxDays + 1e-9 };
+}
+
 export function pnlChartModel(input: PnlChartInput): PnlChartModel {
   const { base, scenario } = input;
   if (!base) return emptyModel(input);
-  const { legs, ctx, settings } = base;
-  const domain = clampViewport(input.viewport ?? base.initial, base.full, base.minWidth);
+  const { ctx } = base;
+  const domain = pnlViewDomain(base, input.viewport);
   const [lo, hi] = domain;
 
   // 満期: 頂点 = 表示範囲の両端と範囲内の折れ点
@@ -288,15 +379,15 @@ export function pnlChartModel(input: PnlChartInput): PnlChartModel {
   ex.push(hi);
   const lines: PnlLine[] = [{ kind: 'expiry', xs: ex, ys: ex.map(base.expiry), d: '' }];
 
-  const n = Math.min(Math.max(Math.round(input.plotWidth), 2), MAX_SAMPLES);
-  const xs = new Array<number>(n);
-  for (let i = 0; i < n; i++) xs[i] = i === n - 1 ? hi : lo + ((hi - lo) * i) / (n - 1);
-  const want = Number.isFinite(scenario.days) ? Math.max(scenario.days, 0) : 0;
-  const days = Math.min(want, base.maxDays);
-  const daysClamped = want > base.maxDays + 1e-9;
-  const sample = (sc: Scenario) => xs.map((x) => theoreticalPnl(legs, x, sc, ctx, settings));
-  if (days > 0) lines.push({ kind: 'date', xs, ys: sample({ ...scenario, days }), d: '' });
-  lines.push({ kind: 'today', xs, ys: sample({ ...scenario, days: 0 }), d: '' });
+  const xs = sampleXs(domain, input.plotWidth);
+  const { days, clamped: daysClamped } = clampDays(scenario, base.maxDays);
+  if (hasDateLine(scenario, days)) {
+    lines.push({ kind: 'date', xs, ys: sampleLine(base, xs, { ...scenario, days }), d: '' });
+  }
+  const pre = input.todayYs;
+  const todayYs =
+    pre && pre.length === xs.length ? [...pre] : sampleLine(base, xs, todayScenario(scenario));
+  lines.push({ kind: 'today', xs, ys: todayYs, d: '' });
 
   // 縦軸
   const auto = (): Domain => {
@@ -335,6 +426,7 @@ export function pnlChartModel(input: PnlChartInput): PnlChartModel {
   }
 
   const inside = (x: number) => x >= lo && x <= hi;
+  const scenarioX = ctx.x0 + (Number.isFinite(scenario.dX) ? scenario.dX : 0);
   const kinks = base.profile.kinks.filter(inside).map((x) => {
     const y = base.expiry(x);
     return { x, y, px: sx(x), py: sy(y) };
@@ -360,6 +452,8 @@ export function pnlChartModel(input: PnlChartInput): PnlChartModel {
     kinks,
     breakevens,
     x0Px: inside(ctx.x0) ? sx(ctx.x0) : null,
+    scenarioX,
+    scenarioPx: scenario.dX !== 0 && inside(scenarioX) ? sx(scenarioX) : null,
     zeroPy: yDomain[0] <= 0 && yDomain[1] >= 0 ? syRaw(0) : null,
     xTicks: xt.map((v) => ({ v, px: sx(v), label: fmtNum(v, 0) })),
     yTicks: yt.map((v) => ({ v, px: syRaw(v), label: fmtPnlTick(v, yUnit, yStep) })),
