@@ -291,7 +291,7 @@ block とするのは次の 4 類型のみ。改善提案・好みは block に�
    ```
    末尾の署名行は Claude Code の通常ルールに従う
 7. CI の結果を `gh pr checks --repo "$REPO" <PR番号> --watch` で確認する（失敗したら原因を直して push し直す）
-8. PR URL を提示し **「PR を main にマージしてよいですか？」とユーザーに確認**する。マージするかどうかはユーザーが決める。承認後 `gh pr merge --merge` → `git checkout main && git pull --ff-only`
+8. PR URL を提示し **「PR を main にマージしてよいですか？」とユーザーに確認**する。マージするかどうかはユーザーが決める。承認後 `gh pr merge --merge` → `git checkout main && git pull --ff-only`。Issue が `Closes` で自動クローズされていなければ、PR 番号をコメントしてクローズする
 9. デプロイ対象が「なし」なら完了報告して終了。ありなら Phase 6 へ
 
 ---
