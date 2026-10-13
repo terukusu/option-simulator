@@ -425,7 +425,31 @@ JPX の商品一覧（2026-10-13）にある日経225の商品は、先物 3 つ
 | `GET /api/chain?at=<ISO 時刻>` | `at` 以前で最新の使えるスナップショット（14 日以内）。`latest_runs` で `snapshot_at` に解決してから 1 秒の窓で読む。「板寄せ前」「清算値」モードと後段の過去時点に使う。連打は 1 クライアント 10 回 / 分に制限（キーは IAP のユーザー ID ヘッダのハッシュをメモリ内にだけ持つ。保存・ログ出力しない） |
 | `GET /healthz` | 設定の読み込みだけ（BigQuery に触れない） |
 
-JSON（案）: `{ snapshot_at, delayed_minutes: 15, reason: "latest" | "pre_open" | "after_close" | "closed", spot: {price, price_time}, future: {price, price_time, contract_month}, months: [{ last_trading_day, sq_date, strikes: [{ k, call: {bid, ask, bid_iv, ask_iv, price, iv, price_time, quotation, delta, gamma, theta, vega, volume, positions, is_atm}, put: {...} }] }] }`。F の推定・補間・ATM の判定はブラウザ（`model/`）。`sq_date` はサーバーがカレンダー（7.5）から入れる。
+JSON（版 1。縦切り 1b で確定。型は `data/chainTypes.ts`、検証は `data/chainJson.ts`）:
+
+```
+{ schema_version: 1,
+  snapshot_at, delayed_minutes: 15, reason: "latest" | "pre_open" | "after_close" | "closed",
+  source?: "synthetic" | "bigquery" | ...,
+  spot:   { price, price_time },
+  future: { price, price_time, contract_month, last_trading_day, sq_date },
+  months: [{ contract_month, last_trading_day, sq_date,
+             rows: [{ k, call: {bid, ask, bid_iv, ask_iv, price, price_time, iv, volume, positions,
+                                quotation?, quotation_date?, delta, gamma, theta, vega, is_atm?},
+                         put: {...} }] }] }
+```
+
+F の推定・補間・ATM の判定はブラウザ（`model/`）。`sq_date`・`last_trading_day` はサーバーがカレンダー（7.5）から入れる。案から決めたこと:
+
+- **版** `schema_version`（整数。形を変えたら上げる。未対応の版は拒否）。データ元の表示用に任意の `source`
+- **時刻**は ISO 8601 の **オフセット付き**（`2026-10-13T21:31:00+09:00`）。optionchan の DATETIME（JST の壁時計）はサーバーが +09:00 を付ける。オフセットの無い時刻は拒否（解釈が端末のタイムゾーンに依存するため）。日付は `YYYY-MM-DD`、限月は `YYYY-MM`
+- **限月の ID** として各限月に `contract_month` を持つ（足・市場のキー）。`sq_date` はその月の中、`last_trading_day < sq_date`、限月は SQ 日の昇順・重複なし
+- **先物にも `last_trading_day`・`sq_date`** を付ける（先物の足の満期評価に要る。ブラウザにカレンダーを持たせないため）
+- 行は `strikes` ではなく **`rows`**（行使価格の昇順・重複なし。行使価格は整数円）
+- **IV は %**（optionchan・JPX の表示と同じ。例 25.31）。`model/` に渡すときに小数にする。スマイルの節点の IV は `bid_iv` / `ask_iv` ではなく **気配の価格から model/ で求める**（5.3）。気配があるのに `bid_iv` / `ask_iv` が両方 null の行は「JPX の IV 欠損」の印だけ付ける
+- **欠損は null**（キーは省略しない）。省略してよいのは `source`・`quotation`・`quotation_date`・`is_atm` だけ。知らないキーは無視する（前方互換。optionchan の列が増えても壊れない）
+- JPX グリークは単位が未確定（AC7）なので値をそのまま運ぶ。合成の板では Black-76 の δ・Γ（1 円あたり）・Θ（円 / 暦日）・V（円 / IV 1pt）を入れている（架空）
+- 検証は構造・型・形式・順序だけ。**気配の中身の矛盾**（bid > ask など）は拒否せず、正規化で「両側気配なし」として扱う。エラーは 50 件で打ち切る
 
 ### 7.2 「使える板」の判定（サーバー。AC2）
 
@@ -459,6 +483,20 @@ JSON（案）: `{ snapshot_at, delayed_minutes: 15, reason: "latest" | "pre_open
 | 手入力 | 板が無くても検討できる | ブラウザ内 |
 
 テスト用の板: **合成データ**（Black-76 から生成した板、または実データから絞って丸めた少数行）をリポジトリに置く。実データの dump は `fixtures/local/`（gitignore）にだけ置き、件数だけ Issue に記録する（JPX 由来のデータを公開リポジトリに置かない。8.1 の D 案を退けた理由と同じ）。dump コマンドは「コミットしない」と表示する。
+
+アダプタのインターフェース（`data/adapter.ts`）: `loadChain(opts?: { at?, signal? }): Promise<ChainJson>` は **検証済みの JSON** を返し、壊れていれば `ChainLoadError`（応答の本文はメッセージに入れない）。正規化（`normalizeChain(json, { r, evalTime })`）は別にし、金利・評価時刻を変えても読み直さない。`bigquery` のブラウザ側は同一オリジンの `/api/chain`（`?at=`）を読むだけ。手入力は板を読まず、`data/legs.ts` の `manualOptionLeg`（商品・限月・K・建値・IV。SQ 日は暦から、F は先物価格 = basis 0 か指定値、印 `no_board`）と `futureLeg` で足と市場を作る。
+
+合成の固定 JSON（`fixtures/synthetic/`。生成器は `scripts/synthBoard.ts`、`npm run fixtures` で作り直し、CI は `npm run fixtures:check` で一致を検査。種固定で決定的）:
+
+| ファイル | 内容 |
+|---|---|
+| `latest.json` | 開発の既定。夜間 21:31、`reason = latest`。2 限月（1 限月は先物と限月違い、2 限月は同じ）+ 先物 1 本。put の翼は −55% まで。call の翼は付録 A.2 に合わせて上場を絞る（1 限月: 20〜30% は 3 本で両側気配、30% 超は ask だけ 1 本。2 限月: 20〜30% は 6 本で両側、30% 超は無し）。1 限月の ATM ±10% の中に気配の無い行、JPX の IV 欠損行、ask ≤ 5 円の不安定行（両翼）、IV の分解能の帯 > 5pt の不安定行（52% 超の put を ask 1 円・bid なしにした 3 本。AC16）。2 限月の 40% 超の put は両側（スプレッドが広い）・ask だけ・気配なしが混じる |
+| `night_early.json` | 夜間の序盤 17:01。行使価格が少ない（−25%〜+15%）、ATM ±5% のスプレッドが広い（片側 10〜16 呼値）、建玉は全行 null、約定はほぼ無い |
+| `pre_open.json` | 寄り前に API が返す「板寄せ前の最後のスナップショット」（日中 15:40、`reason = pre_open`）。翼の形は `latest.json` と同じ（帯 > 5pt の不安定行 3 本を含む） |
+
+帯 > 5pt は価格 ±0.5 円の IV の幅なので、満期の短い限月の 1 円前後の行でだけ起きる（2 限月の T ≈ 58 日では 1 円でも 4.6pt）。約定時刻（`price_time`）はその立会の開始（夜間 17:00、日中 8:45）からスナップショットまでの間に置く。
+
+夜間の寄り前（16:45〜17:00）の壊れた板（気配・先物なし）は API が返さないので fixture にせず、テストで `latest.json` の気配を消して作る（F は NaN、スマイル・ATM は null、例外を出さない）。
 
 ### 7.5 取引カレンダー
 
@@ -737,6 +775,12 @@ optionchan-gcp の bootstrap / prod を写すだけでは足りないもの。
 | GitHub | repository variables（`GCP_PROJECT_ID`、`TF_STATE_BUCKET`、SA 名）、secret（WIF プロバイダ）、Environment `prod`（required reviewer）、ブランチ保護 |
 
 ## 変更履歴
+
+### 2026-10-13 縦切り 1b（データ）の実装
+
+- 7.1: 板の JSON を版 1 として確定（`schema_version`、オフセット付きの時刻、限月の `contract_month`、先物の `last_trading_day`・`sq_date`、`strikes` → `rows`、IV は %、欠損は null・省略できるキー、知らないキーは無視、気配の矛盾は拒否せず正規化で扱う）
+- 7.4: アダプタのインターフェース（検証済み JSON を返す `loadChain`、正規化は別）、手入力の足、合成の固定 JSON の 3 パターンと CI の一致検査。レビューの反映で call の翼を付録 A.2 に合わせ、帯 > 5pt の行を意図的に入れた
+- 5.9: ATM の判定を `model/atm.ts` の純関数に（`findAtm`・`atmReference`）。正規化で限月ごとに A / B の両方を付ける
 
 ### 2026-10-13 縦切り 1a の実装レビューの反映
 

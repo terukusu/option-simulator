@@ -27,6 +27,8 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
       - run: npm run lint
+      - name: 合成の板 JSON が生成器の出力と一致するか
+        run: npm run fixtures:check
       - run: npm test
         env:
           # 性能テスト（AC8 の計算部分）は CI では緩い閾値にする

@@ -12,7 +12,9 @@
     "typecheck": "tsc --noEmit",
     "lint": "biome check .",
     "format": "biome check --write .",
-    "test": "vitest run"
+    "test": "vitest run",
+    "fixtures": "node scripts/fixtures.mjs",
+    "fixtures:check": "node scripts/fixtures.mjs --check"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.14",
