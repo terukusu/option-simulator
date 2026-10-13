@@ -32,3 +32,13 @@ jobs:
           # 性能テスト（AC8 の計算部分）は CI では緩い閾値にする
           PERF_BUDGET_MS: '200'
       - run: npm run build
+      - name: ビルド成果物の検査（CSP。インライン script・style 属性・外部 URL を拒否）
+        run: |
+          set -eu
+          f=dist/index.html
+          # src の無い <script>（インライン）と <style> 要素
+          if grep -n '<script' "$f" | grep -v 'src='; then echo "インライン script がある: $f"; exit 1; fi
+          if grep -n '<style' "$f"; then echo "style 要素がある: $f"; exit 1; fi
+          if grep -nE '[[:space:]]style=' "$f"; then echo "style 属性がある: $f"; exit 1; fi
+          if grep -nE 'https?://' "$f"; then echo "外部 URL がある: $f"; exit 1; fi
+          echo "ok: $f"

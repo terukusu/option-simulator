@@ -2,11 +2,13 @@ import { describe, expect, it } from 'vitest';
 import { black76Price } from '../../model/black76';
 import { impliedVol } from '../../model/iv';
 import {
+  atTheForwardNode,
   buildNode,
   buildSmile,
   checkArbitrage,
   PiecewiseLinearSmile,
   smileAtStrikes,
+  wingMonotoneBound,
 } from '../../model/smile';
 import { synthChain } from '../support/synthChain';
 
@@ -63,23 +65,85 @@ describe('スマイル（OTM 側・総分散の区分線形、AC4）', () => {
         F,
         T,
         R,
+        exact.rows,
       ),
     ).toEqual([]);
     const fine = Array.from({ length: 480 }, (_, i) => 30000 + i * 125);
     expect(checkArbitrage(smile, fine, F, T, R)).toEqual([]);
   });
 
-  it('呼値で丸めた板は mid 自体が凸性を崩すので、検査が違反を見つけて印にできる', () => {
-    const smile = (fit as NonNullable<typeof fit>).smile;
-    const v = checkArbitrage(
-      smile,
-      rows.map((r) => r.k),
-      F,
-      T,
-      R,
-    );
-    expect(v.length).toBeGreaterThan(0);
-    for (const x of v) expect(Number.isFinite(x.amount) && x.amount > 0).toBe(true);
+  it('呼値で丸めた板: 許容（bid–ask 幅の和の半分）を超える違反の印は全行の 3% 未満', () => {
+    for (const seed of [1, 2, 3, 4, 5, 11]) {
+      const chain = synthChain({ F, T, r: R, seed });
+      const f = buildSmile(chain.rows, F, T, R);
+      if (!f) throw new Error('スマイルが作れない');
+      const ks = chain.rows.map((r) => r.k);
+      const v = checkArbitrage(f.smile, ks, F, T, R, chain.rows);
+      expect(v.length).toBeLessThan(ks.length * 0.03);
+      for (const x of v) expect(x.amount).toBeGreaterThan(x.allowance);
+    }
+  });
+
+  it('わざと崩した行（OTM の put の気配を +150 円）は検出される', () => {
+    for (const seed of [1, 2, 3]) {
+      const bad = 66000;
+      const chain = synthChain({ F, T, r: R, seed });
+      const broken = chain.rows.map((r) =>
+        r.k === bad
+          ? { ...r, put: { bid: (r.put.bid ?? 0) + 150, ask: (r.put.ask ?? 0) + 150, last: null } }
+          : r,
+      );
+      const f = buildSmile(broken, F, T, R);
+      if (!f) throw new Error('スマイルが作れない');
+      const v = checkArbitrage(
+        f.smile,
+        broken.map((r) => r.k),
+        F,
+        T,
+        R,
+        broken,
+      );
+      expect(v.some((x) => x.kind === 'butterfly' && x.k === bad)).toBe(true);
+    }
+  });
+
+  it('K = F の行: 安定な側だけで平均（片側だけ安定ならその側、両方不安定なら平均して不安定）', () => {
+    const node = (type: 'call' | 'put', iv: number, unstable: boolean) => ({
+      k: F,
+      x: 0,
+      iv,
+      type,
+      source: 'mid' as const,
+      bidIv: null,
+      askIv: null,
+      midIv: iv,
+      bandWidth: 0.001,
+      unstable,
+    });
+    expect(atTheForwardNode(node('call', 0.24, false), node('put', 0.26, false))).toMatchObject({
+      iv: 0.25,
+      unstable: false,
+    });
+    expect(atTheForwardNode(node('call', 0.24, true), node('put', 0.26, false))).toMatchObject({
+      iv: 0.26,
+      type: 'put',
+      unstable: false,
+    });
+    expect(atTheForwardNode(node('call', 0.24, false), node('put', 0.26, true))).toMatchObject({
+      iv: 0.24,
+      type: 'call',
+      unstable: false,
+    });
+    expect(atTheForwardNode(node('call', 0.24, true), node('put', 0.26, true))).toMatchObject({
+      iv: 0.25,
+      unstable: true,
+    });
+    expect(atTheForwardNode(null, node('put', 0.26, true))?.type).toBe('put');
+    expect(atTheForwardNode(null, null)).toBeNull();
+    // 板から: F と同じ行使価格の行があると、その行が節点になる
+    const chain = synthChain({ F: 67750, T, r: R, seed: 2 });
+    const f = buildSmile(chain.rows, 67750, T, R);
+    expect(f?.nodes.filter((n) => n.k === 67750).length).toBe(1);
   });
 
   it('ask ≤ 5 円・帯 5pt 超の行は不安定として節点から外す', () => {
@@ -110,19 +174,23 @@ describe('スマイル（OTM 側・総分散の区分線形、AC4）', () => {
 
 describe('翼の外挿（Lee の傾き ≤ 2 にクランプ）', () => {
   const T1 = 0.1;
-  it('端の区間の傾きで延ばし、|傾き| が 2 を超えるときは 2 に', () => {
-    // 左端の傾き −3（クランプされて −2）、右端の傾き +0.5
+  it('端の区間の傾きで延ばし、|傾き| を Lee の上限 2 と端の点での K 単調性の上限でクランプ', () => {
     const steep = new PiecewiseLinearSmile(
       [
-        { x: -0.2, w: 0.31 },
-        { x: -0.1, w: 0.01 },
+        { x: -0.2, w: 1.5 },
+        { x: -0.1, w: 1.2 },
         { x: 0.1, w: 0.01 },
         { x: 0.2, w: 0.06 },
       ],
       T1,
     );
-    expect(steep.totalVariance(-0.3)).toBeCloseTo(0.31 + 2 * 0.1, 12);
-    expect(steep.totalVariance(0.4)).toBeCloseTo(0.06 + 0.5 * 0.2, 12);
+    // 左端の傾き −3 → Lee の上限 2 でクランプ（この点の単調性の上限は 2 より大きい）
+    expect(wingMonotoneBound(-0.2, 1.5, 'left')).toBeGreaterThan(2);
+    expect(steep.totalVariance(-0.3)).toBeCloseTo(1.5 + 2 * 0.1, 12);
+    // 右端の傾き 0.5 → 端の点で call が K に増加しない上限（約 0.33）でクランプ
+    const cap = wingMonotoneBound(0.2, 0.06, 'right');
+    expect(cap).toBeLessThan(0.5);
+    expect(steep.totalVariance(0.4)).toBeCloseTo(0.06 + cap * 0.2, 12);
     expect(steep.mark(-0.3)).toBe('extrapolated');
     expect(steep.mark(-0.1)).toBe('node');
     expect(steep.mark(0)).toBe('interpolated');

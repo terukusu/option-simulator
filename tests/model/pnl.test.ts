@@ -343,3 +343,60 @@ describe('設計 6.1 のワイヤーの数値（架空の例）と一致', () =>
     ]);
   });
 });
+
+describe('先物だけのポジションの満期（SQ の違う先物 2 本）', () => {
+  // 架空の値: 近い限月（SQ まで 30 日、67,700）と先の限月（SQ まで 120 日、67,950）
+  const c: MarketContext = {
+    evalTime: 0,
+    r: 0.005,
+    x0: 67810,
+    options: {},
+    futures: {
+      NEAR: { sqTime: 30 * DAY_MS, price: 67700 },
+      FAR: { sqTime: 120 * DAY_MS, price: 67950 },
+    },
+  };
+  const legs: Leg[] = [
+    { kind: 'future', product: 'fut_mini', contract: 'NEAR', side: 'buy', qty: 2, entry: 67700 },
+    { kind: 'future', product: 'fut_large', contract: 'FAR', side: 'sell', qty: 1, entry: 67950 },
+  ];
+
+  it.each(['fixed', 'decay'] as const)(
+    'basis %s: expiryProfile / expiryPnl が最後の SQ での evaluateLeg と一致',
+    (futureBasis) => {
+      const settings = { ...DEFAULT_SETTINGS, futureBasis };
+      const prepared = preparePosition(legs, c, settings);
+      const prof = expiryProfile(prepared, c, settings);
+      const sc = { ...ZERO_SCENARIO, days: 120 };
+      for (const x of [40000, 60000, 67810, 80000]) {
+        const want = evaluatePosition(prepared, sc, c, settings, x).pnl;
+        expect(expiryPnl(prepared, x, c, settings)).toBeCloseTo(want, 6);
+      }
+      // 両方とも SQ に達しているので F = X'。傾き = ミニ 2 枚 200 − ラージ 1 枚 1,000
+      expect(prof.rightSlope).toBe(-800);
+    },
+  );
+});
+
+describe('basis ≠ 0 の限月の put 売り（設計 5.5 の注記）', () => {
+  it('basis > 0 の限月は SQ の下限が basis になり、最大損失は (K − basis − 受取) × 乗数', () => {
+    const basis = M2.F - M1.F; // +75
+    const prof = expiryProfile(preparePosition([op(M2.id, 'put', 60000, 'sell', 320)], ctx), ctx);
+    expect(prof.points[0]?.x).toBe(0);
+    expect(prof.maxLoss).toEqual({ value: -(60000 - basis - 320) * 1000, x: 0 });
+    expect(prof.breakevens).toEqual([60000 - basis - 320]);
+  });
+
+  it("basis < 0 の限月は X' の下端が −basis（SQ = 0）で、最大損失は (K − 受取) × 乗数", () => {
+    const c: MarketContext = {
+      ...ctx,
+      options: {
+        ...ctx.options,
+        LOW: { sqTime: ctx.evalTime + 30 * DAY_MS, forward: M1.F - 200, smile: null },
+      },
+    };
+    const prof = expiryProfile(preparePosition([op('LOW', 'put', 60000, 'sell', 320)], c), c);
+    expect(prof.points[0]?.x).toBe(200);
+    expect(prof.maxLoss).toEqual({ value: -(60000 - 320) * 1000, x: 200 });
+  });
+});

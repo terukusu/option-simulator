@@ -26,7 +26,15 @@ export interface IvOptions {
   /** σ の許容誤差（既定 1e-10。設計の要求は 1e-6） */
   sigmaTol?: number;
   maxIterations?: number;
+  /**
+   * 時間価値（価格 − 割引本源的価値）がこれ未満なら解なし（below_intrinsic）。既定 0.01 円。
+   * 本源的価値に張り付いた価格では IV が数値的に決まらないため（アンカー IV は設計 5.3 (i) でスマイルへ）
+   */
+  minTimeValue?: number;
 }
+
+/** 解ありとみなす時間価値の下限（円）の既定 */
+export const MIN_TIME_VALUE = 0.01;
 
 const SIGMA_LO = 1e-8;
 const SIGMA_HI_MAX = 1e3;
@@ -50,7 +58,9 @@ export function impliedVol(
   if (T <= tMin) return { ok: false, reason: 'expired' };
   const lower = discountedIntrinsic(type, F, K, T, r);
   const upper = upperBound(type, F, K, T, r);
-  if (price <= lower) return { ok: false, reason: 'below_intrinsic' };
+  if (price - lower < (opts.minTimeValue ?? MIN_TIME_VALUE) || price <= lower) {
+    return { ok: false, reason: 'below_intrinsic' };
+  }
   if (price >= upper) return { ok: false, reason: 'above_upper' };
 
   const f = (s: number) => black76Price(type, F, K, T, s, r) - price;

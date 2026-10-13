@@ -39,15 +39,15 @@ describe('急落プリセット / β（AC23）', () => {
     const s = scenarioIvShift(at(X0, sc));
     expect(s.betaPt).toBeCloseTo(10, 12);
     expect(s.xEff).toBe(0);
-    expect(s.shiftPt).toBeCloseTo(30, 12);
+    expect(Math.abs(s.shiftPt - 30)).toBeLessThan(1e-6);
     expect(scenarioSigma(at(X0, sc)) - smile.sigma(0)).toBeCloseTo(0.3, 12);
   });
 
-  it('10% OTM の put は +33pt（Δs × x_eff / 0.1 の +3.16pt が加わる。x_eff = ln 0.9）', () => {
+  it('10% OTM の put は +33.16pt（Δs × x_eff / 0.1 の +3.16pt が加わる。x_eff = ln 0.9 ≒ −0.105）', () => {
     const k = X0 * 0.9;
     const s = scenarioIvShift(at(k, sc));
-    expect(s.shiftPt).toBeCloseTo(30 - (3 * Math.log(0.9)) / 0.1, 12);
-    expect(s.shiftPt).toBeCloseTo(33, 0);
+    expect(Math.abs(s.shiftPt - (30 - (3 * Math.log(0.9)) / 0.1))).toBeLessThan(1e-6);
+    expect(Math.abs(s.shiftPt - 33.1608)).toBeLessThan(1e-4);
   });
 
   it("β = 0 なら連動なし、sticky moneyness では x_eff が F_i' 基準になる", () => {

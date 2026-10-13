@@ -159,6 +159,20 @@ export function prepareLeg(
   if (!m) throw new Error(`オプションの限月が無い: ${leg.expiry}`);
   const F = m.forward;
   const T0 = yearFraction(ctx.evalTime, m.sqTime);
+  if (!Number.isFinite(F)) {
+    // F が決まらない限月（合成も先物も無い）: アンカー IV は決めず、評価は建値のまま（no_forward）
+    const anchor = leg.iv ?? settings.sigmaMin;
+    return {
+      leg,
+      multiplier,
+      sign,
+      F,
+      basis: 0,
+      expiryTime: m.sqTime,
+      T0,
+      option: { anchor, anchorSource: 'none', x0: 0, sigmaBase: () => anchor, mismatch: 0 },
+    };
+  }
   const x0 = Math.log(leg.strike / F);
   let anchor: number;
   let anchorSource: AnchorSource;
@@ -204,7 +218,8 @@ export function preparePosition(
   return legs.map((l) => prepareLeg(l, ctx, settings));
 }
 
-export type LegState = 'live' | 'near_expiry' | 'expired' | 'settled_flat';
+/** no_forward: 原資産 F が決まらない足（評価は建値のまま、損益は手数料だけ。NaN を広げない） */
+export type LegState = 'live' | 'near_expiry' | 'expired' | 'settled_flat' | 'no_forward';
 
 export interface LegEvaluation {
   /** 評価価格（オプションはプレミアム、先物は価格） */
@@ -250,6 +265,16 @@ export function evaluateLeg(
   const T = p.T0 - scenario.days / 365;
   const qtyMult = p.sign * p.leg.qty * p.multiplier;
   const fee = settings.feePerLot * p.leg.qty;
+  if (!Number.isFinite(p.F)) {
+    return {
+      value: p.leg.entry,
+      pnl: 0 - fee,
+      sigma: null,
+      underlying: Number.NaN,
+      greeks: NO_GREEKS,
+      state: 'no_forward',
+    };
+  }
   if (p.leg.kind === 'future') {
     const { value, state } = futureValue(p, xPrime, T, ctx, settings);
     return {
@@ -319,6 +344,7 @@ export function legValue(
 ): number {
   const T = p.T0 - scenario.days / 365;
   const leg = p.leg;
+  if (!Number.isFinite(p.F)) return leg.entry;
   if (leg.kind === 'future') {
     if (T <= 0) return xPrime;
     const factor = settings.futureBasis === 'decay' && p.T0 > 0 ? Math.min(T / p.T0, 1) : 1;

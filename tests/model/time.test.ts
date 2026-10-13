@@ -36,7 +36,9 @@ describe('SQ 日・取引最終日', () => {
     expect(lastTradingDay(2026, 12, HOLIDAYS)).toBe('2026-12-10');
   });
 
-  it('取引最終日の翌営業日 = SQ 日（設計 5.2）', () => {
+  // 往復確認: 同じ関数で求めた取引最終日と SQ 日の整合だけを見る（自己参照）。
+  // optionchan の last_trading_day との照合は縦切り 2（実データ・カレンダーの写しが入ってから）
+  it('往復確認: 取引最終日の翌営業日 = SQ 日（optionchan の last_trading_day との照合は縦切り 2）', () => {
     for (let y = 2026; y <= 2028; y++) {
       for (let m = 1; m <= 12; m++) {
         const ltd = lastTradingDay(y, m, HOLIDAYS);

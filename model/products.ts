@@ -37,7 +37,12 @@ export const OPTION_TICK_RULE = { threshold: 300, small: 1, large: 5 } as const;
  * ラージ 10 円・ミニ 5 円は制度概要ページで確認、マイクロは要確認（ミニと同じ 5 円を仮置き）。
  */
 export const FUTURE_TICK: Record<FutureProduct, number> = {
+  // 出典: JPX 制度概要ページ（日経225先物・日経225mini）。確認日 2026-10-13
   fut_large: 10,
   fut_mini: 5,
+  // 要確認（設計 3.1）: マイクロ先物の呼値は一次情報で未確認。ミニと同じ 5 円を仮置き（2026-10-13 時点）
   fut_micro: 5,
 };
+
+/** 呼値が一次情報で確認できていない先物（UI で「要確認」を出すのに使う） */
+export const FUTURE_TICK_UNCONFIRMED: ReadonlySet<FutureProduct> = new Set(['fut_micro']);

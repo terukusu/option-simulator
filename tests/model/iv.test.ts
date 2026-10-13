@@ -16,8 +16,14 @@ describe('IV 逆算（Newton + 二分法）', () => {
       const r = rand() * 0.02;
       const type = rand() < 0.5 ? 'call' : 'put';
       const price = black76Price(type, F, K, T, s, r);
-      // 時間価値が実質 0（価格が割引本源的価値と浮動小数で区別できない）なら解なしが正しい
-      if (price - discountedIntrinsic(type, F, K, T, r) < 1e-7) continue;
+      // 時間価値が 0.01 円未満なら解なし（MIN_TIME_VALUE）が正しい
+      if (price - discountedIntrinsic(type, F, K, T, r) < 0.01) {
+        expect(impliedVol(type, price, F, K, T, r)).toEqual({
+          ok: false,
+          reason: 'below_intrinsic',
+        });
+        continue;
+      }
       const res = impliedVol(type, price, F, K, T, r);
       expect(res.ok).toBe(true);
       if (!res.ok) continue;
@@ -27,6 +33,22 @@ describe('IV 逆算（Newton + 二分法）', () => {
       n++;
     }
     expect(n).toBeGreaterThan(1500);
+  });
+
+  it('時間価値（価格 − 割引本源的価値）が 0.01 円未満は解なし', () => {
+    const F = 67810;
+    const T = 30 / 365;
+    const intrinsic = discountedIntrinsic('call', F, 60000, T, 0.005);
+    expect(impliedVol('call', intrinsic + 0.005, F, 60000, T, 0.005)).toEqual({
+      ok: false,
+      reason: 'below_intrinsic',
+    });
+    expect(impliedVol('call', intrinsic + 0.02, F, 60000, T, 0.005).ok).toBe(true);
+    // OTM（本源的価値 0）の 0.005 円も解なし
+    expect(impliedVol('put', 0.005, F, 40000, T, 0.005)).toEqual({
+      ok: false,
+      reason: 'below_intrinsic',
+    });
   });
 
   it('割引本源的価値以下・上限以上・T ≤ T_min は解なし', () => {

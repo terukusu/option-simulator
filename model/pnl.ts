@@ -75,16 +75,18 @@ function toLinearLegs(legs: readonly PreparedLeg[], ctx: MarketContext, settings
   const out: LinearLeg[] = legs.map((p) => {
     const w = p.sign * p.leg.qty * p.multiplier;
     const fee = settings.feePerLot * p.leg.qty;
+    if (!Number.isFinite(p.F)) {
+      // 原資産が決まらない足は建値のまま（損益 0。NaN を広げない。position.ts の no_forward と同じ）
+      return { kind: 'linear', a: 0, b: p.leg.entry, k: 0, w, entry: p.leg.entry, fee };
+    }
     if (p.leg.kind === 'option') {
       const a = yen ? 1 : p.F / ctx.x0;
       const b = yen ? p.basis : 0;
       return { kind: p.leg.type, a, b, k: p.leg.strike, w, entry: p.leg.entry, fee };
     }
-    // 先物: 満期の評価時刻での価格
-    if (optionLegs.length > 0 && p.expiryTime < expiryTime) {
-      return { kind: 'linear', a: 1, b: 0, k: 0, w, entry: p.leg.entry, fee }; // 先に SQ、F = X'
-    }
+    // 先物: 満期の評価時刻での価格。その時点で先物の SQ に達していれば F = X'（evaluateLeg と同じ）
     const remaining = (p.expiryTime - expiryTime) / (365 * 86_400_000);
+    if (remaining <= 0) return { kind: 'linear', a: 1, b: 0, k: 0, w, entry: p.leg.entry, fee };
     const factor = settings.futureBasis === 'decay' && p.T0 > 0 ? Math.min(remaining / p.T0, 1) : 1;
     if (yen) return { kind: 'linear', a: 1, b: p.basis * factor, k: 0, w, entry: p.leg.entry, fee };
     return {

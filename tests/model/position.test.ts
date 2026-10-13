@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { black76Price, discountedIntrinsic } from '../../model/black76';
+import { expiryProfile } from '../../model/pnl';
 import {
   DEFAULT_SETTINGS,
   deltaUnits,
@@ -243,5 +244,68 @@ describe('満期と T_min', () => {
     const after = evaluateLeg(fp, 60000, { ...ZERO_SCENARIO, days: FUT.days + 1 }, ctx);
     expect(after.state).toBe('settled_flat');
     expect(after.value).toBe(60000);
+  });
+});
+
+describe('アンカー IV が決まらない足（設計 5.3 (i)）', () => {
+  it('建値が割引本源的価値 + 0.01 円未満ならスマイルにフォールバックし、差は建値ずれ', () => {
+    const k = 64000;
+    const T = M1.days / 365;
+    const intrinsic = discountedIntrinsic('call', M1.F, k, T, ctx.r);
+    const leg: Leg = {
+      kind: 'option',
+      product: 'op_large',
+      type: 'call',
+      expiry: M1.id,
+      strike: k,
+      side: 'sell',
+      qty: 1,
+      entry: intrinsic + 0.005,
+    };
+    const p = prepareLeg(leg, ctx);
+    expect(p.option?.anchorSource).toBe('smile');
+    expect(Number.isFinite(p.option?.mismatch ?? Number.NaN)).toBe(true);
+    expect(p.option?.mismatch).toBeLessThan(0);
+  });
+});
+
+describe('F が決まらない限月（NaN を広げない）', () => {
+  const noF = {
+    ...ctx,
+    options: {
+      ...ctx.options,
+      BAD: { sqTime: ctx.evalTime + 30 * DAY_MS, forward: Number.NaN, smile: null },
+    },
+  };
+  const leg: Leg = {
+    kind: 'option',
+    product: 'op_large',
+    type: 'put',
+    expiry: 'BAD',
+    strike: 64000,
+    side: 'sell',
+    qty: 1,
+    entry: 800,
+  };
+
+  it("prepareLeg は anchorSource 'none'、評価は建値のまま（損益 0、グリーク 0）", () => {
+    const p = prepareLeg(leg, noF);
+    expect(p.option?.anchorSource).toBe('none');
+    expect(Number.isFinite(p.option?.anchor ?? Number.NaN)).toBe(true);
+    expect(p.option?.mismatch).toBe(0);
+    const e = evaluateLeg(p, 60000, { ...ZERO_SCENARIO, dSigma: 10 }, noF);
+    expect(e.state).toBe('no_forward');
+    expect(e.pnl).toBe(0);
+    expect(e.greeks).toEqual({ delta: 0, gamma: 0, vega: 0, theta: 0 });
+  });
+
+  it('ポジション全体の損益・グリーク・満期プロファイルが有限', () => {
+    const legs = preparePosition([leg, opLeg(M1, 'put', 64000, 'sell')], noF);
+    const ev = evaluatePosition(legs, ZERO_SCENARIO, noF, DEFAULT_SETTINGS, 62000);
+    expect(Number.isFinite(ev.pnl)).toBe(true);
+    for (const v of Object.values(ev.total)) expect(Number.isFinite(v)).toBe(true);
+    const prof = expiryProfile(legs, noF);
+    expect(prof.points.every((pt) => Number.isFinite(pt.pnl))).toBe(true);
+    expect(prof.kinks).toEqual([64000]);
   });
 });

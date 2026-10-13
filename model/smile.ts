@@ -13,6 +13,8 @@
 
 import { black76Price, type OptionType } from './black76';
 import { impliedVol, ivResolutionBand } from './iv';
+import { normCdf, normPdf } from './normal';
+import { optionTick } from './tick';
 import { hasTwoSided, type Quote, type StrikeRow } from './types';
 
 export type SmileMark = 'node' | 'interpolated' | 'extrapolated';
@@ -59,6 +61,19 @@ export interface SmileBuildOptions {
   bandHalfWidth?: number;
 }
 
+/**
+ * 点 (x, w) で K 単調性を保つ総分散の傾きの上限（絶対値）。
+ * ∂C/∂K ≤ 0 ⟺ w' ≤ 2√w Φ(d₂)/φ(d₂)、∂P/∂K ≥ 0 ⟺ −w' ≤ 2√w Φ(−d₂)/φ(d₂)（d₂ = −x/√w − √w/2）。
+ */
+export function wingMonotoneBound(x: number, w: number, side: 'left' | 'right'): number {
+  if (!(w > 0)) return 0;
+  const sw = Math.sqrt(w);
+  const d2 = -x / sw - sw / 2;
+  const pdf = normPdf(d2);
+  if (!(pdf > 0)) return Number.POSITIVE_INFINITY;
+  return (2 * sw * normCdf(side === 'right' ? d2 : -d2)) / pdf;
+}
+
 /** 区分線形の総分散スマイル（MVP）。 */
 export class PiecewiseLinearSmile implements Smile {
   readonly T: number;
@@ -90,9 +105,15 @@ export class PiecewiseLinearSmile implements Smile {
       const sR =
         ((this.ws[n - 1] as number) - (this.ws[n - 2] as number)) /
         ((this.xs[n - 1] as number) - (this.xs[n - 2] as number));
-      // 左翼は x が減ると w が増える向き（傾き ≤ 0）、右翼は増える向き（傾き ≥ 0）だけを延ばし、|傾き| ≤ 2
-      this.leftSlope = Math.min(0, Math.max(sL, -maxSlope));
-      this.rightSlope = Math.max(0, Math.min(sR, maxSlope));
+      // 左翼は x が減ると w が増える向き（傾き ≤ 0）、右翼は増える向き（傾き ≥ 0）だけを延ばし、|傾き| ≤ 2。
+      // さらに端の節点で K 単調性が崩れない傾き（wingMonotoneBound）以下にする。Lee の上限 2 は
+      // x → ∞ の漸近条件で、満期の短い限月では端の近くで call 価格が K に増加することがあるため
+      const x0 = this.xs[0] as number;
+      const xn = this.xs[n - 1] as number;
+      const leftCap = Math.min(maxSlope, wingMonotoneBound(x0, this.ws[0] as number, 'left'));
+      const rightCap = Math.min(maxSlope, wingMonotoneBound(xn, this.ws[n - 1] as number, 'right'));
+      this.leftSlope = Math.min(0, Math.max(sL, -leftCap));
+      this.rightSlope = Math.max(0, Math.min(sR, rightCap));
     }
   }
 
@@ -205,6 +226,18 @@ export interface SmileFit {
 }
 
 /**
+ * K = F の行の節点: 安定な側だけで平均する。片側だけ安定ならその側、両方不安定なら
+ * 両側の平均を不安定として残す。片側しか作れなければその側。
+ */
+export function atTheForwardNode(c: SmileNode | null, p: SmileNode | null): SmileNode | null {
+  if (!c || !p) return c ?? p;
+  if (!c.unstable && !p.unstable) return { ...c, iv: (c.iv + p.iv) / 2 };
+  if (!c.unstable) return c;
+  if (!p.unstable) return p;
+  return { ...c, iv: (c.iv + p.iv) / 2, unstable: true };
+}
+
+/**
  * 板の 1 限月分から OTM 側のスマイルを作る。安定な節点が 1 つも無ければ null。
  */
 export function buildSmile(
@@ -223,11 +256,10 @@ export function buildSmile(
       const n = buildNode(row.k, 'call', row.call, F, T, r, opts);
       if (n) nodes.push(n);
     } else {
-      // K = F: call と put の平均（どちらか片方なら片方）
-      const c = buildNode(row.k, 'call', row.call, F, T, r, opts);
-      const p = buildNode(row.k, 'put', row.put, F, T, r, opts);
-      const pick =
-        c && p ? { ...c, iv: (c.iv + p.iv) / 2, unstable: c.unstable && p.unstable } : (c ?? p);
+      const pick = atTheForwardNode(
+        buildNode(row.k, 'call', row.call, F, T, r, opts),
+        buildNode(row.k, 'put', row.put, F, T, r, opts),
+      );
       if (pick) nodes.push(pick);
     }
   }
@@ -271,11 +303,19 @@ export interface ArbitrageViolation {
   k: number;
   /** 違反の大きさ（円） */
   amount: number;
+  /** 許容（関係する行の bid–ask 幅の和の半分。気配が無い行は呼値） */
+  allowance: number;
 }
 
 /**
  * 補間後のスマイルで、行使価格の列について K 単調性（call は減少、put は増加）と
- * バタフライ ≥ 0（call 価格の K に対する凸性）を検査する。許容誤差 tol 円。
+ * バタフライ ≥ 0（call 価格の K に対する凸性）を検査する（設計 5.3・13.4）。
+ *
+ * 違反とするのは、違反量が「関係する行の bid–ask 幅の和の半分」を超えるときだけ。
+ * 幅はスマイルの節点と同じ OTM 側（K < F は put、それ以外は call）の気配で測り、両側気配が
+ * 無い行（板に無い行使価格を含む）はその行の理論価格での呼値を使う。
+ * バタフライの量は λ = (K₂ − K₁)/(K₂ − K₀) として 2 × (λC₀ + (1 − λ)C₂ − C₁) の符号を反転したもの
+ * （等間隔なら C₀ − 2C₁ + C₂ の不足分）。
  */
 export function checkArbitrage(
   smile: Smile,
@@ -283,27 +323,43 @@ export function checkArbitrage(
   F: number,
   T: number,
   r: number,
-  tol = 1e-6,
+  quotes: readonly StrikeRow[] = [],
 ): ArbitrageViolation[] {
   const ks = [...new Set(strikes)].sort((a, b) => a - b);
+  const byK = new Map(quotes.map((q) => [q.k, q]));
   const call = ks.map((k) => black76Price('call', F, k, T, smile.sigma(Math.log(k / F)), r));
   const put = ks.map((k) => black76Price('put', F, k, T, smile.sigma(Math.log(k / F)), r));
+  const width = ks.map((k, i) => {
+    const row = byK.get(k);
+    const q = row ? (k < F ? row.put : row.call) : null;
+    if (q && hasTwoSided(q)) return q.ask - q.bid;
+    return optionTick((k < F ? put[i] : call[i]) as number);
+  });
+  const w = (i: number) => width[i] as number;
   const out: ArbitrageViolation[] = [];
   for (let i = 1; i < ks.length; i++) {
+    const allowance = (w(i - 1) + w(i)) / 2;
     const dc = (call[i] as number) - (call[i - 1] as number);
-    if (dc > tol) out.push({ kind: 'call_monotonic', k: ks[i] as number, amount: dc });
+    if (dc > allowance) {
+      out.push({ kind: 'call_monotonic', k: ks[i] as number, amount: dc, allowance });
+    }
     const dp = (put[i] as number) - (put[i - 1] as number);
-    if (dp < -tol) out.push({ kind: 'put_monotonic', k: ks[i] as number, amount: -dp });
+    if (-dp > allowance) {
+      out.push({ kind: 'put_monotonic', k: ks[i] as number, amount: -dp, allowance });
+    }
   }
   for (let i = 1; i + 1 < ks.length; i++) {
     const k0 = ks[i - 1] as number;
     const k1 = ks[i] as number;
     const k2 = ks[i + 1] as number;
-    const s1 = ((call[i] as number) - (call[i - 1] as number)) / (k1 - k0);
-    const s2 = ((call[i + 1] as number) - (call[i] as number)) / (k2 - k1);
-    // 凸性: s2 ≥ s1。違反の大きさは等価なバタフライの価格（円）に直す
-    const fly = (s2 - s1) * Math.min(k1 - k0, k2 - k1);
-    if (fly < -tol) out.push({ kind: 'butterfly', k: k1, amount: -fly });
+    const lambda = (k2 - k1) / (k2 - k0);
+    const fly =
+      2 *
+      (lambda * (call[i - 1] as number) +
+        (1 - lambda) * (call[i + 1] as number) -
+        (call[i] as number));
+    const allowance = (w(i - 1) + w(i) + w(i + 1)) / 2;
+    if (-fly > allowance) out.push({ kind: 'butterfly', k: k1, amount: -fly, allowance });
   }
   return out;
 }
