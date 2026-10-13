@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef } from 'preact/hooks';
-import { type Chain, monthOf } from '../../data';
+import { axisOrigin, type Chain, monthOf } from '../../data';
 import { DEFAULT_SETTINGS, type ModelSettings, ZERO_SCENARIO } from '../../model';
 import { describeLoadError, fixtureUrl, loadFromFile, loadFromUrl } from '../load';
 import { initialState, reduce } from '../state';
@@ -9,6 +9,7 @@ import { metricsModel } from '../view/metrics';
 import { pnlDomains, zoomViewport } from '../view/pnlChart';
 import { positionModel } from '../view/position';
 import { evalTimeTargets } from '../view/scenario';
+import { scenarioAtmMark } from '../view/scenarioAtm';
 import { Board } from './Board';
 import { Header } from './Header';
 import { Hedge } from './Hedge';
@@ -114,6 +115,14 @@ export function App() {
     [pnlBase, pnlViewport],
   );
   const { smilePick } = state;
+  // 表示中の限月のシナリオ ATM（#26。ΔX ≠ 0 のときだけ。板の ATM・ヘッダ・スマイルの市場 ATM は動かさない）
+  const dX = scenario.dX;
+  const { basisMode } = settings;
+  const scenarioAtmView = useMemo(() => {
+    if (!chain || !month) return null;
+    const pick = scenarioAtmMark(month, atmBasis, axisOrigin(chain, atmBasis), dX, basisMode);
+    return pick ? { monthId: month.id, k: pick.k, F: month.F } : null;
+  }, [chain, month, atmBasis, dX, basisMode]);
 
   return (
     <div class="app">
@@ -176,6 +185,7 @@ export function App() {
                 scenario={state.scenario}
                 viewport={state.pnlViewport}
                 pnlY={state.pnlY}
+                scenarioAtm={scenarioAtmView}
                 dispatch={dispatch}
               />
               <ScenarioPanel
@@ -206,6 +216,9 @@ export function App() {
                     axis={state.smileAxis}
                     viewport={active ? state.smileViewport : null}
                     pick={active && smilePick?.monthId === m.id ? smilePick.k : null}
+                    scenarioAtmK={
+                      active && scenarioAtmView?.monthId === m.id ? scenarioAtmView.k : null
+                    }
                     dispatch={dispatch}
                   />
                 );

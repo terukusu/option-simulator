@@ -10,6 +10,7 @@ import {
   axisValue,
   pickStrike,
   type SmileAxis,
+  smileMarkX,
   smileModel,
   smilePickRow,
 } from '../view/smile';
@@ -29,14 +30,29 @@ export interface SmileProps {
   viewport: Domain | null;
   /** 選んだ行使価格（表示中の限月の選択だけ渡す。無ければ null） */
   pick: number | null;
+  /** シナリオ ATM の行使価格（表示中の限月で ΔX ≠ 0 のときだけ。他は null。#26） */
+  scenarioAtmK: number | null;
   dispatch: (a: Action) => void;
 }
 
 /** スマイル（SVG。座標は ui/view/smile.ts・ui/chart/scale.ts の純関数）。 */
-function SmileView({ month, active, basis, axis, viewport, pick, dispatch }: SmileProps) {
+function SmileView({
+  month,
+  active,
+  basis,
+  axis,
+  viewport,
+  pick,
+  scenarioAtmK,
+  dispatch,
+}: SmileProps) {
   const model = useMemo(
     () => smileModel(month, basis, axis, viewport),
     [month, basis, axis, viewport],
+  );
+  const scnAtmX = useMemo(
+    () => smileMarkX(model, month, basis, axis, scenarioAtmK),
+    [model, month, basis, axis, scenarioAtmK],
   );
   const { ref, width } = useWidth(480);
 
@@ -182,6 +198,15 @@ function SmileView({ month, active, basis, axis, viewport, pick, dispatch }: Smi
                 y2={HEIGHT - M.bottom}
               />
             )}
+            {scnAtmX !== null && (
+              <line
+                class="scn-atm-line"
+                x1={sx(scnAtmX)}
+                x2={sx(scnAtmX)}
+                y1={M.top}
+                y2={HEIGHT - M.bottom}
+              />
+            )}
             <path class="smile-line solid" d={solid || 'M0 0'} />
             <path class="smile-line dotted" d={dotted || 'M0 0'} stroke-dasharray="3 3" />
             {(['bid', 'ask', 'mid'] as const).map((kind) => (
@@ -243,6 +268,9 @@ function SmileView({ month, active, basis, axis, viewport, pick, dispatch }: Smi
         <span class="lg mid">● mid</span> <span class="lg bid">● bid</span>{' '}
         <span class="lg ask">● ask</span> ─ 節点区間 ┄ 補間・外挿 × IV 不安定{' '}
         <span class="lg atm">│ ATM（{basis}）</span>
+        {scnAtmX !== null && scenarioAtmK !== null && (
+          <span class="lg scn-atm"> ┆ シナリオ ATM {fmtNum(scenarioAtmK, 0)}</span>
+        )}
       </p>
     </div>
   );

@@ -203,6 +203,11 @@ export interface PnlChartModel {
   /** シナリオ点 X₀ + ΔX（ΔX ≠ 0 のとき。範囲外・ΔX = 0 は画素 null） */
   scenarioX: number;
   scenarioPx: number | null;
+  /**
+   * 表示中の限月のシナリオ ATM（#26）。x = 横軸上の位置 K − basis_i（満期の折れ点と同じ写像）。
+   * ΔX = 0・無し・F が決まらない・表示範囲外は null
+   */
+  scenarioAtm: { monthId: string; k: number; x: number; px: number } | null;
   /** 損益 0 の横線の画素（範囲外は null） */
   zeroPy: number | null;
   xTicks: PnlTick[];
@@ -230,6 +235,8 @@ export interface PnlChartInput {
    * 無い・点数が合わなければ自分で作る
    */
   todayYs?: readonly number[] | null;
+  /** 表示中の限月のシナリオ ATM（ui/view/scenarioAtm.ts の scenarioAtmMark の K と、その限月の F。#26） */
+  scenarioAtm?: { monthId: string; k: number; F: number } | null;
 }
 
 /** 縦軸の目盛りの文言（千円は値 / 1,000。刻みに合わせて小数を出す）。 */
@@ -257,6 +264,7 @@ function emptyModel(input: PnlChartInput): PnlChartModel {
     x0Px: null,
     scenarioX: Number.NaN,
     scenarioPx: null,
+    scenarioAtm: null,
     zeroPy: null,
     xTicks: [],
     yTicks: [],
@@ -427,6 +435,13 @@ export function pnlChartModel(input: PnlChartInput): PnlChartModel {
 
   const inside = (x: number) => x >= lo && x <= hi;
   const scenarioX = ctx.x0 + (Number.isFinite(scenario.dX) ? scenario.dX : 0);
+  const sa = input.scenarioAtm;
+  let scenarioAtm: PnlChartModel['scenarioAtm'] = null;
+  if (sa && scenario.dX !== 0 && Number.isFinite(sa.k) && Number.isFinite(sa.F) && sa.F > 0) {
+    const x = axisX(sa.k, sa.F, ctx.x0, base.settings);
+    if (Number.isFinite(x) && inside(x))
+      scenarioAtm = { monthId: sa.monthId, k: sa.k, x, px: sx(x) };
+  }
   const kinks = base.profile.kinks.filter(inside).map((x) => {
     const y = base.expiry(x);
     return { x, y, px: sx(x), py: sy(y) };
@@ -454,6 +469,7 @@ export function pnlChartModel(input: PnlChartInput): PnlChartModel {
     x0Px: inside(ctx.x0) ? sx(ctx.x0) : null,
     scenarioX,
     scenarioPx: scenario.dX !== 0 && inside(scenarioX) ? sx(scenarioX) : null,
+    scenarioAtm,
     zeroPy: yDomain[0] <= 0 && yDomain[1] >= 0 ? syRaw(0) : null,
     xTicks: xt.map((v) => ({ v, px: sx(v), label: fmtNum(v, 0) })),
     yTicks: yt.map((v) => ({ v, px: syRaw(v), label: fmtPnlTick(v, yUnit, yStep) })),

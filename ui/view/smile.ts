@@ -241,6 +241,25 @@ export function smileModel(
   };
 }
 
+/**
+ * 行使価格 k の印（シナリオ ATM の縦線。#26）の横軸の位置。市場 ATM の縦線と同じ axisValue で、
+ * k が無い・板に無い・値が決まらない・表示範囲外なら null。
+ */
+export function smileMarkX(
+  model: SmileModel,
+  month: ChainMonth,
+  basis: AtmBasis,
+  axis: SmileAxis,
+  k: number | null,
+): number | null {
+  if (k === null || model.empty) return null;
+  const info = month.strikes.find((s) => s.k === k);
+  if (!info) return null;
+  const x = axisValue(month, basis, axis, info);
+  if (x === null || !Number.isFinite(x)) return null;
+  return x >= model.domain[0] && x <= model.domain[1] ? x : null;
+}
+
 /** タップで選ぶ許容（画素） */
 export const PICK_TOLERANCE_PX = 12;
 
