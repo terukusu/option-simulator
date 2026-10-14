@@ -11,6 +11,7 @@ import {
   boardColumns,
   boardRows,
   DELTA_JUMPS,
+  displayRows,
   filterByAsk,
   jumpToDelta,
   jumpToOtm,
@@ -224,9 +225,11 @@ export interface BoardProps {
 }
 
 function BoardView({ chain, month, active, basis, target, filterAsk, dispatch }: BoardProps) {
+  // rows はデータの順（昇順）でジャンプの計算に使う。表示は行使価格の降順（#50）
   const rows = useMemo(() => boardRows(chain, month), [chain, month]);
-  const putRows = useMemo(() => (filterAsk ? filterByAsk(rows, 'put') : rows), [rows, filterAsk]);
-  const callRows = useMemo(() => (filterAsk ? filterByAsk(rows, 'call') : rows), [rows, filterAsk]);
+  const desc = useMemo(() => displayRows(rows), [rows]);
+  const putRows = useMemo(() => (filterAsk ? filterByAsk(desc, 'put') : desc), [desc, filterAsk]);
+  const callRows = useMemo(() => (filterAsk ? filterByAsk(desc, 'call') : desc), [desc, filterAsk]);
   const shown = target === 'put' ? putRows : callRows;
   const atmK = atmStrike(month, basis);
   const x0 = referencePrice(month, basis);

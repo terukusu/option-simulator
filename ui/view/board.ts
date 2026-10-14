@@ -5,6 +5,7 @@
  *   オブジェクトが変わらないので、画面は強調の変わる行だけを描き直せる
  * - Δ はスマイルの IV（σ_smile(K)）での Black-76 の Δ（`model/` の black76Greeks）
  * - OTM 度: put は 1 − K / X₀,i、call は K / X₀,i − 1（X₀,i = 選択中の基準の基準価格）
+ * - 表示の並びは行使価格の降順（`displayRows`、#50）。板のデータ・`boardRows` は昇順のまま
  */
 
 import type { Chain, ChainMonth, QuoteState } from '../../data';
@@ -89,6 +90,14 @@ export function boardRows(chain: Chain, month: ChainMonth): BoardRow[] {
   });
 }
 
+/**
+ * 板の表示順（行使価格の降順、#50）。並べ替えは表示だけで、データ（昇順）は変えない。
+ * 入力の配列は変えず、行のオブジェクトは同じ参照のまま（行ごとの描き直しの判定を保つ）。
+ */
+export function displayRows(rows: readonly BoardRow[]): BoardRow[] {
+  return [...rows].sort((a, b) => b.k - a.k);
+}
+
 export function atmStrike(month: ChainMonth, basis: AtmBasis): number | null {
   return month.atm[basis].pick?.k ?? null;
 }
@@ -169,14 +178,14 @@ export interface BoardOptions {
   filterAsk: boolean;
 }
 
-/** 板の表示モデル（行・ATM・基準価格）。 */
+/** 板の表示モデル（行・ATM・基準価格）。行は表示順（行使価格の降順）。 */
 export function boardModel(
   chain: Chain,
   month: ChainMonth,
   basis: AtmBasis,
   opts: BoardOptions = { target: 'put', filterAsk: false },
 ): BoardModel {
-  const all = boardRows(chain, month);
+  const all = displayRows(boardRows(chain, month));
   return {
     monthId: month.id,
     atmK: atmStrike(month, basis),
