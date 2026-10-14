@@ -67,3 +67,11 @@ variable "simulator_iap_members" {
     error_message = "simulator_iap_members の各要素は user:<メール> か group:<メール>（domain: / allUsers / allAuthenticatedUsers は不可）。"
   }
 }
+
+# GitHub の OIDC トークンの sub の形式。2026 年以降の既定は不変 ID 入り（repo:<owner>@<owner_id>/<name>@<repo_id>:...）。
+# `gh api repos/<owner>/<repo>/actions/oidc/customization/sub` の use_immutable_subject と合わせる（false なら従来の repo:<owner>/<name>:...）
+variable "github_oidc_immutable_subject" {
+  description = "GitHub の OIDC の sub が不変 ID 入りの形式か（apply SA の subject の組み立てに使う）"
+  type        = bool
+  default     = true
+}

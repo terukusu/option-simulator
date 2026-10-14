@@ -880,7 +880,7 @@ optionchan-gcp の bootstrap / prod を写すだけでは足りないもの。
 
 | 必要なもの | 内容 |
 |---|---|
-| WIF | **プールとプロバイダを新設**（optionchan の既存プロバイダは条件でリポジトリ ID を固定している）。プール `sim-github` / プロバイダ `github-actions`（条件はこのリポジトリの数値 ID とオーナー ID）。`sa-sim-tf-plan`（このリポジトリの workflow から借用。プロジェクト単位は `run.viewer` だけ）/ `sa-sim-tf-apply` を新設し、apply は Environment `prod` の subject にだけ許可 |
+| WIF | **プールとプロバイダを新設**（optionchan の既存プロバイダは条件でリポジトリ ID を固定している）。プール `sim-github` / プロバイダ `github-actions`（条件はこのリポジトリの数値 ID とオーナー ID）。`sa-sim-tf-plan`（このリポジトリの workflow から借用。プロジェクト単位は `run.viewer` だけ）/ `sa-sim-tf-apply` を新設し、apply は Environment `prod` の subject にだけ許可（sub の形式は GitHub の設定に合わせる。既定は不変 ID 入り `repo:<OWNER>@<OWNER_ID>/<REPO>@<REPO_ID>:environment:prod`、変数 `github_oidc_immutable_subject`） |
 | state | tfstate バケット 2 つ（prod 用 `<PROJECT_ID>-sim-tfstate`、bootstrap 用 `<PROJECT_ID>-sim-tfstate-bootstrap`。optionchan のバケットと衝突しない名前）。bootstrap 用は初回だけ gcloud で作って `import` ブロックで取り込む。plan SA は prod の state の読み取り、apply SA は読み書き、bootstrap 用には CI 用 SA の付与なし |
 | Artifact Registry | リポジトリ `simulator` を新設し、apply SA にリポジトリ単位の writer、plan SA に reader（digest を引く）。optionchan と同じクリーンアップポリシー・immutable tags。**bootstrap に置く**（リポジトリ単位の付与の時点でリポジトリが要る。prod に置くと apply SA にプロジェクト単位の `artifactregistry.admin` が要る。#35） |
 | 実行 SA | `sa-simulator`: `optionchan_tokyo` の `dataViewer`（非権威的 member。代替としてテーブル・ルーチン単位の付与もあるが、データセットに他の秘匿データは無いので MVP はデータセット単位）+ プロジェクトの `bigquery.jobUser`。apply SA に `serviceAccountUser` |
@@ -892,6 +892,10 @@ optionchan-gcp の bootstrap / prod を写すだけでは足りないもの。
 | テスト | `terraform test`（`infra/bootstrap/tests/`・`infra/prod/tests/`、モックのプロバイダ。資格情報なしで CI の `check` job で回る）: bootstrap は公開の拒否、WIF の条件、apply SA の subject、データセットの付与の型と role。prod は IAP 有効・`ingress`・IAM の検査が有効、`run.invoker` が IAP のサービスエージェント 1 件だけ、イメージが digest か `src-<20hex>` のタグ参照だけ、8.3 の値（AC11） |
 
 ## 変更履歴
+
+### 2026-10-14 WIF の subject（初回デプロイの失敗の修正）
+
+- 付録 B: apply SA の借用の subject を、GitHub の OIDC の sub の形式（不変 ID 入り `repo:<OWNER>@<OWNER_ID>/<REPO>@<REPO_ID>:environment:prod` が既定）に合わせる変数 `github_oidc_immutable_subject` を追加。従来形式の subject では初回の deploy の apply が `iam.serviceAccounts.getAccessToken` の 403 で失敗した
 
 ### 2026-10-14 infra/prod と CI / CD（#36）
 

@@ -56,8 +56,8 @@ variables {
 run "defaults" {
   # (b) apply SA を借用できるのは Environment prod の job だけ（principal 1 件）
   assert {
-    condition     = endswith(google_service_account_iam_member.tf_apply_wif.member, "/subject/repo:example-owner/example-repo:environment:prod")
-    error_message = "apply SA の workloadIdentityUser は repo:<OWNER>/<REPO>:environment:prod の subject 1 件だけ"
+    condition     = endswith(google_service_account_iam_member.tf_apply_wif.member, "/subject/repo:example-owner@456/example-repo@123:environment:prod")
+    error_message = "apply SA の workloadIdentityUser は不変 ID 入りの repo:<OWNER>@<OWNER_ID>/<REPO>@<REPO_ID>:environment:prod の subject 1 件だけ"
   }
   assert {
     condition     = startswith(google_service_account_iam_member.tf_apply_wif.member, "principal://iam.googleapis.com/")
@@ -245,4 +245,15 @@ run "reject_bad_repository" {
     github_repository = "example-repo"
   }
   expect_failures = [var.github_repository]
+}
+
+run "legacy_subject" {
+  # GitHub の sub が従来形式（use_immutable_subject = false）のとき
+  variables {
+    github_oidc_immutable_subject = false
+  }
+  assert {
+    condition     = endswith(google_service_account_iam_member.tf_apply_wif.member, "/subject/repo:example-owner/example-repo:environment:prod")
+    error_message = "従来形式の subject は repo:<OWNER>/<REPO>:environment:prod"
+  }
 }
