@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { ChainLoadError } from '../../data';
-import { describeLoadError, initialSource, MAX_ERROR_LINES } from '../../ui/load';
+import { describeLoadError, initialSource, loaderNote, MAX_ERROR_LINES } from '../../ui/load';
 
 /** #34 AC-1: 最初に読むデータ元。 */
 describe('initialSource', () => {
@@ -55,5 +55,16 @@ describe('describeLoadError', () => {
     expect(v.message).toBe('板を読めない（JSON として読めないか、正規化に失敗）');
     expect(v.message).not.toMatch(SECRET);
     expect(v.errors).toEqual([]);
+  });
+});
+
+/** #48 AC-1: 読み込みの行の文言（読んだファイル名は「表示中」に出す）。 */
+describe('loaderNote', () => {
+  it('読み込み中 > データ元あり > なし', () => {
+    expect(loaderNote(true, 'board.json')).toBe('読み込み中…');
+    expect(loaderNote(false, 'board.json')).toBe('表示中: board.json');
+    expect(loaderNote(false, 'API')).toBe('表示中: API');
+    expect(loaderNote(false, null)).toBe('');
+    expect(loaderNote(false, '')).toBe('');
   });
 });

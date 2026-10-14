@@ -28,6 +28,12 @@ export function initialSource(isDev: boolean): InitialSource {
   return isDev ? { kind: 'fixture', name: 'latest' } : { kind: 'api' };
 }
 
+/** 読み込みの行の文言（読み込み中 / 「表示中: <データ元>」。ファイルならその名前。#48）。 */
+export function loaderNote(loading: boolean, sourceLabel: string | null): string {
+  if (loading) return '読み込み中…';
+  return sourceLabel ? `表示中: ${sourceLabel}` : '';
+}
+
 /** dev サーバーが配る合成の板の URL（`/fixtures/<name>.json`）。 */
 export function fixtureUrl(name: string): string {
   return `/fixtures/${encodeURIComponent(name)}.json`;

@@ -1,3 +1,4 @@
+import { loaderNote } from '../load';
 import type { LoadErrorView } from '../state';
 
 export interface LoaderProps {
@@ -47,11 +48,21 @@ export function Loader(props: LoaderProps) {
           </select>
         </label>
       )}
-      <label>
-        板の JSON{' '}
+      {/* ネイティブの input は既定の文言（「選択されていません」）が幅や言語で省略されるので視覚的に隠し、
+          label をボタンにする（display: none にしない＝Tab で届き、Enter / Space で開く。#48） */}
+      <label class="file-open" title="手元の板の JSON を開く">
+        ファイルを開く…
         <input
           type="file"
+          class="sr-only"
           accept="application/json,.json"
+          onKeyDown={(e) => {
+            // Space はブラウザが開く。Enter はブラウザによって開かないので揃える
+            if (e.key === 'Enter') {
+              e.preventDefault();
+              e.currentTarget.click();
+            }
+          }}
           onChange={(e) => {
             const input = e.currentTarget;
             const file = input.files?.[0];
@@ -60,9 +71,7 @@ export function Loader(props: LoaderProps) {
           }}
         />
       </label>
-      <span class="note">
-        {loading ? '読み込み中…' : sourceLabel ? `表示中: ${sourceLabel}` : ''}
-      </span>
+      <span class="note">{loaderNote(loading, sourceLabel)}</span>
       {error && (
         <div class="error" role="alert">
           <p>
