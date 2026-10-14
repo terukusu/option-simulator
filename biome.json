@@ -8,7 +8,9 @@
       "!node_modules",
       "!fixtures/local",
       "!fixtures/synthetic",
-      "!data/calendar"
+      "!data/calendar",
+      "!api/.venv",
+      "!.optionchan"
     ]
   },
   "formatter": {

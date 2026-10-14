@@ -46,3 +46,50 @@ jobs:
           if grep -nE '[[:space:]]style=' "$f"; then echo "style 属性がある: $f"; exit 1; fi
           if grep -nE 'https?://' "$f"; then echo "外部 URL がある: $f"; exit 1; fi
           echo "ok: $f"
+      # API（api/、#33）。Python 3.13 と uv.lock（uv は pip で固定版を入れる。optionchan の CI と同じ流儀）
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.13'
+      - name: API の依存
+        working-directory: api
+        run: |
+          python -m pip install uv==0.12.19
+          uv sync --locked --python 3.13
+      - name: API の lint
+        working-directory: api
+        run: uv run --locked ruff check
+      - name: API のテスト
+        working-directory: api
+        run: uv run --locked pytest -q
+      # optionchan との契約（AC25）: API が宣言した列（api/src/simulator_api/contract.py）を optionchan の固定コミット
+      # （api/contract/optionchan_commit.txt）の schema/tokyo と照合する。リポジトリ名はリポジトリ変数 OPTIONCHAN_REPO
+      # （<OWNER>/<REPO>）で渡し、未設定（fork・clone）なら notice を出してスキップする
+      - name: optionchan の固定コミット
+        id: optionchan
+        env:
+          OPTIONCHAN_REPO: ${{ vars.OPTIONCHAN_REPO }}
+        run: |
+          set -eu
+          sha=$(cat api/contract/optionchan_commit.txt)
+          if ! printf '%s' "$sha" | grep -Eq '^[0-9a-f]{40}$'; then echo "api/contract/optionchan_commit.txt が 40 桁の SHA でない"; exit 1; fi
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          if [ -z "$OPTIONCHAN_REPO" ]; then
+            echo "::notice::リポジトリ変数 OPTIONCHAN_REPO が未設定なので optionchan との契約の照合をスキップ"
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: steps.optionchan.outputs.enabled == 'true'
+        with:
+          repository: ${{ vars.OPTIONCHAN_REPO }}
+          ref: ${{ steps.optionchan.outputs.sha }}
+          path: .optionchan
+          sparse-checkout: schema/tokyo
+          persist-credentials: false
+      - name: optionchan との契約の照合
+        if: steps.optionchan.outputs.enabled == 'true'
+        working-directory: api
+        env:
+          OPTIONCHAN_SCHEMA_DIR: ${{ github.workspace }}/.optionchan/schema/tokyo
+        run: uv run --locked pytest -q -rs tests/test_contract.py

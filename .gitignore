@@ -3,6 +3,10 @@ dist/
 coverage/
 .venv/
 __pycache__/
+.pytest_cache/
+.ruff_cache/
+# CI の契約照合で sparse checkout する optionchan（手元で同じ場所に置いても入れない）
+.optionchan/
 *.pyc
 .env
 .env.*

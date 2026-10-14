@@ -8,6 +8,8 @@ export default defineConfig({
   server: {
     // 実データの dump（fixtures/local/）を dev サーバーの /@fs/ からも配らない（Vite の既定の拒否も残す）
     fs: { deny: ['.env', '.env.*', '*.{crt,pem}', '**/.git/**', '**/fixtures/local/**'] },
+    // 手元の API（api/ の Flask。`flask --app simulator_api.app run -p 8080`）へ /api を渡す（同一オリジンを保つ。8.3）
+    proxy: { '/api': 'http://127.0.0.1:8080' },
   },
   build: {
     outDir: '../dist',
