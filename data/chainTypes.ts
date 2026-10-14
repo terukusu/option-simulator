@@ -29,7 +29,7 @@ export interface ChainSide {
   quotation: number | null;
   /** 清算値の日付（YYYY-MM-DD）。任意 */
   quotation_date: string | null;
-  /** JPX グリーク（約定のあった行だけ。単位は未確定 = AC7） */
+  /** JPX グリーク（約定のあった行だけ。約定時点の値。原資産 1 単位あたり: δ、Γ は 1 円あたり（小数 4 桁に丸め）、Θ は円 / 暦日、V は円 / IV 1pt。設計 5.6・data/jpxGreeks.ts） */
   delta: number | null;
   gamma: number | null;
   theta: number | null;

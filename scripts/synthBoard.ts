@@ -344,7 +344,8 @@ function makeSide(c: SideContext): ChainSide {
     positions: oi,
     quotation: c.quotationDate === null ? null : Math.max(roundOptionPrice(theo), 1),
     quotation_date: c.quotationDate,
-    // JPX グリークの単位は未確定（AC7）。合成では Black-76 の δ・Γ（1 円あたり）・Θ（円 / 暦日）・V（円 / IV 1pt）
+    // JPX グリークと同じ単位（原資産 1 単位あたり。設計 5.6「JPX グリークの単位」）: Black-76 の δ・Γ（1 円あたり）・Θ（円 / 暦日）・V（円 / IV 1pt）。
+    // JPX と違い Γ を小数 4 桁に丸めず、約定の IV ではなく生成の IV・スナップショット時刻の F で付ける（架空）
     delta: greeks ? round(greeks.delta, 4) : null,
     gamma: greeks ? round(greeks.gamma, 8) : null,
     theta: greeks ? round(greeks.theta / 365, 4) : null,
