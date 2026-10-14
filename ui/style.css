@@ -149,8 +149,37 @@ select {
   gap: 4px 12px;
 }
 
-.loader input[type="file"] {
-  max-width: 220px;
+/* ファイルを開く（補助。ネイティブの input は .sr-only で隠し、label をボタンの見た目に。#48） */
+.file-open {
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.85em;
+  padding: 3px 8px;
+  position: relative;
+  white-space: nowrap;
+}
+
+.file-open:hover {
+  border-color: var(--muted);
+}
+
+.file-open:focus-within {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* :has() が使えるブラウザでは、マウスで押したときは枠を出さずキーボードのときだけ出す */
+.file-open:has(:focus):not(:has(:focus-visible)) {
+  outline: none;
+}
+
+/* 「表示中: <ファイル名>」とヘッダの「取得 HH:MM（<ファイル名>）」は長い名前でも折り返す
+   （幅 360px で横スクロールしない。#48） */
+.loader .note,
+.head-line .note {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 /* 読み込みのエラーは次の行に（幅 360px でも横にはみ出さない） */
