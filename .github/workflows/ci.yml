@@ -17,7 +17,8 @@ concurrency:
 jobs:
   check:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    # イメージのビルド・検査（#36）で数分延びる
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -37,15 +38,8 @@ jobs:
           PERF_BUDGET_MS: '200'
       - run: npm run build
       - name: ビルド成果物の検査（CSP。インライン script・style 属性・外部 URL を拒否）
-        run: |
-          set -eu
-          f=dist/index.html
-          # src の無い <script>（インライン）と <style> 要素
-          if grep -n '<script' "$f" | grep -v 'src='; then echo "インライン script がある: $f"; exit 1; fi
-          if grep -n '<style' "$f"; then echo "style 要素がある: $f"; exit 1; fi
-          if grep -nE '[[:space:]]style=' "$f"; then echo "style 属性がある: $f"; exit 1; fi
-          if grep -nE 'https?://' "$f"; then echo "外部 URL がある: $f"; exit 1; fi
-          echo "ok: $f"
+        # 検査の中身は .github/scripts/csp-check.sh（イメージに同梱した index.html にも同じ検査をする。#36）
+        run: .github/scripts/csp-check.sh dist/index.html
       # API（api/、#33）。Python 3.13 と uv.lock（uv は pip で固定版を入れる。optionchan の CI と同じ流儀）
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
@@ -93,7 +87,8 @@ jobs:
         env:
           OPTIONCHAN_SCHEMA_DIR: ${{ github.workspace }}/.optionchan/schema/tokyo
         run: uv run --locked pytest -q -rs tests/test_contract.py
-      # Terraform（infra/、#35）。資格情報なし: fmt・validate と、モックのプロバイダの terraform test だけ（plan は infra/README.md）
+      # Terraform（infra/、#35・#36）。資格情報なし: fmt・validate と、モックのプロバイダの terraform test だけ
+      # （prod の plan は下の terraform-plan job と deploy.yml。bootstrap の plan は infra/README.md）
       - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
         with:
           terraform_version: 1.16.4
@@ -106,3 +101,126 @@ jobs:
           terraform -chdir=infra/bootstrap validate -no-color
       - name: terraform test（bootstrap、モックのプロバイダ）
         run: terraform -chdir=infra/bootstrap test -no-color
+      - name: terraform validate（prod）
+        run: |
+          terraform -chdir=infra/prod init -backend=false -input=false -no-color
+          terraform -chdir=infra/prod validate -no-color
+      - name: terraform test（prod、モックのプロバイダ）
+        run: terraform -chdir=infra/prod test -no-color
+      # Cloud Run simulator のイメージ（#36）。GCP の認証は使わない（push は deploy.yml の承認後の apply job）
+      - name: イメージの入力と .dockerignore の一致
+        run: |
+          set -euo pipefail
+          # .dockerignore の許可リスト（! の行。末尾の / を除く）+ Dockerfile・.dockerignore = image.sh の入力パス
+          diff <(.github/scripts/image.sh simulator paths | sort) \
+            <({ sed -n 's/^!\(.*\)$/\1/p' .dockerignore | sed 's:/$::'; printf '%s\n' Dockerfile .dockerignore; } | sort)
+          echo "タグ: $(.github/scripts/image.sh simulator tag)"
+      - name: イメージのビルド
+        run: docker build -t simulator:ci .
+      - name: イメージの検査（import・非 root・除外物・同梱の index.html の CSP・/healthz・/・/assets の 200 と CSP ヘッダ）
+        run: .github/scripts/image-check.sh simulator:ci
+
+  # PR の infra/prod の plan（#36）。同じリポジトリのブランチの PR だけ（fork の PR には資格情報を渡さない。fork の PR に資格情報が渡るトリガーは使わない）。
+  # 必須 check にはしない（ブランチ保護の必須は check だけ）。公開リポジトリなので、plan の全文・plan ファイルは出さず、
+  # 要約（アドレスと操作・件数）を step summary にだけ書く。repository variables が無い（clone して使う人）ときは notice を出して何もしない
+  terraform-plan:
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      id-token: write
+    defaults:
+      run:
+        shell: bash
+    env:
+      TF_IN_AUTOMATION: "1"
+      GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+      TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
+      GCP_SA_TF_PLAN: ${{ vars.GCP_SA_TF_PLAN }}
+      TF_VAR_project_id: ${{ vars.GCP_PROJECT_ID }}
+      # 失敗時のログ末尾に使うマスク: 9 桁以上の数字（プロジェクト番号等）と、SA 以外のメールアドレス
+      MASK_SED: >-
+        s/[0-9]{9,}/<num>/g;
+        s/@([A-Za-z0-9-]+)\.iam\.gserviceaccount\.com/__SA__\1__/g;
+        s/[A-Za-z0-9._%+-]+@([A-Za-z0-9-]+\.)+[A-Za-z]{2,}/<email>/g;
+        s/__SA__([A-Za-z0-9-]+)__/@\1.iam.gserviceaccount.com/g
+      # terraform show -json の出力から「アドレス: 操作」と操作ごとの件数だけを Markdown にする（deploy.yml と同じ）
+      PLAN_SUMMARY_JQ: |
+        def ops:
+          (if .change.importing then ["import"] else [] end)
+          + (.change.actions
+             | if . == ["delete", "create"] or . == ["create", "delete"] then ["replace"]
+               elif . == ["no-op"] or . == ["read"] then []
+               else . end);
+        [.resource_changes[]? | {address, ops: ops} | select(.ops | length > 0)] as $rc
+        | if ($rc | length) == 0 then "差分なし（No changes）"
+          else
+            "| 操作 | 件数 |", "|---|---|",
+            ($rc | map(.ops[]) | group_by(.) | map("| \(.[0]) | \(length) |")[]),
+            "",
+            ($rc[] | "- `\(.address)`: \(.ops | join(", "))")
+          end
+    steps:
+      - name: repository variables の確認
+        id: vars
+        run: |
+          for v in GCP_PROJECT_ID TF_STATE_BUCKET GCP_SA_TF_PLAN; do
+            if [ -z "${!v}" ]; then
+              echo "::notice::repository variable ${v} が未設定なので infra/prod の plan をスキップ（infra/README.md「GitHub の設定」）"
+              echo "enabled=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+          done
+          echo "enabled=true" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: steps.vars.outputs.enabled == 'true'
+        with:
+          persist-credentials: false
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        if: steps.vars.outputs.enabled == 'true'
+        with:
+          terraform_version: 1.16.4
+          # wrapper は stdout を step 出力に載せるので使わない
+          terraform_wrapper: false
+      - uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
+        if: steps.vars.outputs.enabled == 'true'
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_SA_TF_PLAN }}
+      # Artifact Registry にあれば digest、無ければタグ参照で plan する（ビルド・push はマージ後に承認された apply job）
+      - name: イメージの解決
+        id: image
+        if: steps.vars.outputs.enabled == 'true'
+        run: .github/scripts/image.sh simulator resolve >> "$GITHUB_OUTPUT"
+      - name: terraform plan（prod）
+        if: steps.vars.outputs.enabled == 'true'
+        working-directory: infra/prod
+        env:
+          TF_VAR_simulator_image: ${{ steps.image.outputs.image }}
+          IMAGE_TAG: ${{ steps.image.outputs.tag }}
+          IMAGE_EXISTS: ${{ steps.image.outputs.exists }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          rc=0
+          { terraform init -input=false -no-color -backend-config="bucket=${TF_STATE_BUCKET}" \
+              && terraform plan -lock=false -input=false -no-color -out=tfplan; } > plan.log 2>&1 || rc=$?
+          if [ "$rc" -ne 0 ]; then
+            echo "terraform が失敗した（exit $rc）。ログの末尾（マスク済み）:"
+            tail -n 40 plan.log | sed -E "$MASK_SED"
+            exit "$rc"
+          fi
+          {
+            echo "### terraform plan（infra/prod）"
+            echo
+            terraform show -json tfplan | jq -r "$PLAN_SUMMARY_JQ"
+            echo
+            if [ "$IMAGE_EXISTS" = true ]; then
+              digest=${TF_VAR_simulator_image##*@sha256:}
+              echo "- イメージ simulator: \`${IMAGE_TAG}\` は既存（digest \`sha256:${digest:0:12}\` で plan）"
+            else
+              echo "- イメージ simulator: \`${IMAGE_TAG}\` は未作成（マージ後、承認された apply job がビルド・push してから digest で apply する）"
+            fi
+            echo
+            echo "対象コミット: ${HEAD_SHA}（全文は公開しない。アドレスと操作のみ）"
+          } >> "$GITHUB_STEP_SUMMARY"

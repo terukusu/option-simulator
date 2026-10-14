@@ -36,7 +36,7 @@ GCP_PROJECT=<PROJECT_ID> uv run --locked flask --app simulator_api.app run -p 80
 DATA_SOURCE=file CHAIN_FILE=../fixtures/synthetic/latest.json uv run --locked flask --app simulator_api.app run -p 8080
 ```
 
-画面は別の端末で `npm run dev`（Vite の `server.proxy` が `/api` を `127.0.0.1:8080` に渡す。同一オリジン）。本番は gunicorn（`simulator_api.app:app`。Dockerfile・Cloud Run は #36）。
+画面は別の端末で `npm run dev`（Vite の `server.proxy` が `/api` を `127.0.0.1:8080` に渡す。同一オリジン）。本番は gunicorn（`simulator_api.app:app`、1 ワーカー・8 スレッド）。イメージはリポジトリ直下の `Dockerfile`（画面の `dist/` を同梱し `STATIC_DIR=/app/static`）、検査は `.github/scripts/image-check.sh`、Cloud Run の設定（環境変数 `GCP_PROJECT`・`BQ_DATASET`・`BQ_LOCATION`）は `infra/prod/simulator.tf`、手順は `infra/README.md`「prod（Cloud Run simulator）」。
 
 ## テスト
 

@@ -5,7 +5,7 @@ option-simulator の GCP リソースを Terraform で管理する（`docs/desig
 | ルート | 中身 | apply する人 | state | state を読める主体 |
 |---|---|---|---|---|
 | `infra/bootstrap` | tfstate バケット 2 つ（`<PROJECT_ID>-sim-tfstate` / `<PROJECT_ID>-sim-tfstate-bootstrap`）、WIF プール `sim-github` / プロバイダ `github-actions`、SA `sa-sim-tf-plan` / `sa-sim-tf-apply` / `sa-simulator` と権限、Artifact Registry `simulator` とリポジトリ単位の付与、`optionchan_tokyo` の読み取り（`sa-simulator`、非権威的）、IAP の閲覧許可（`simulator_iap_members`） | 所有者がローカルから（CI は fmt / validate / test だけ） | `gs://<PROJECT_ID>-sim-tfstate-bootstrap/bootstrap/` | 所有者（+ プロジェクトの Editor を持つ既定の SA） |
-| `infra/prod`（#36） | Cloud Run `simulator`（IAP）、IAP のサービスエージェントの `run.invoker` | CI（Environment `prod` の承認後） | `gs://<PROJECT_ID>-sim-tfstate/prod/` | `sa-sim-tf-plan`（読み取り）、`sa-sim-tf-apply`（読み書き）、所有者 |
+| `infra/prod` | Cloud Run `simulator`（IAP）、IAP のサービスエージェントの `run.invoker` | CI（`.github/workflows/deploy.yml`。Environment `prod` の承認後） | `gs://<PROJECT_ID>-sim-tfstate/prod/` | `sa-sim-tf-plan`（読み取り）、`sa-sim-tf-apply`（読み書き）、所有者 |
 
 - API の有効化は宣言しない（optionchan の bootstrap が有効化済み。二重管理を避ける）。clone 利用者は iam・iamcredentials・sts・artifactregistry・run・iap・bigquery・cloudresourcemanager が有効であることを先に確かめる（`gcloud services list --enabled --project "$P"`）
 - 付与はすべて追加型（`*_iam_member`）。権威的な型（`*_iam_policy` / `*_iam_binding`、`google_bigquery_dataset_access`）は既存の付与（optionchan のもの）を消すので使わない
@@ -17,12 +17,14 @@ option-simulator の GCP リソースを Terraform で管理する（`docs/desig
 ```sh
 TF="mise exec terraform@1.16.4 -- terraform"
 $TF fmt -check -recursive infra
-$TF -chdir=infra/bootstrap init -backend=false -input=false
-$TF -chdir=infra/bootstrap validate
-$TF -chdir=infra/bootstrap test     # tests/*.tftest.hcl。モックのプロバイダで、実リソースは作らない
+for d in bootstrap prod; do
+  $TF -chdir=infra/$d init -backend=false -input=false
+  $TF -chdir=infra/$d validate
+  $TF -chdir=infra/$d test     # tests/*.tftest.hcl。モックのプロバイダで、実リソースは作らない
+done
 ```
 
-`terraform test` は、公開になる閲覧者（`allUsers`・`allAuthenticatedUsers`・`domain:`）を変数の検証で拒否すること、apply SA を借用できるのが Environment `prod` の subject だけであること、WIF の条件がリポジトリ ID とオーナー ID の両方を含むこと、データセットの読み取りが非権威的な `dataViewer` であること、などを確かめる。
+`terraform test` は、bootstrap では公開になる閲覧者（`allUsers`・`allAuthenticatedUsers`・`domain:`）を変数の検証で拒否すること、apply SA を借用できるのが Environment `prod` の subject だけであること、WIF の条件がリポジトリ ID とオーナー ID の両方を含むこと、データセットの読み取りが非権威的な `dataViewer` であること、などを確かめる。prod では IAP が有効（`iap_enabled`・`ingress = INGRESS_TRAFFIC_ALL`・`invoker_iam_disabled = false`）、`run.invoker` が IAP のサービスエージェント 1 件だけ、イメージが digest か `src-<20hex>` のタグ参照だけ（`:latest`・別リポジトリ・別イメージ名を拒否）、Cloud Run の値が `docs/design.md` 8.3 どおり、を確かめる。
 
 ## 共通の変数
 
@@ -181,6 +183,99 @@ $TF -chdir=infra/bootstrap apply -input=false b.tfplan; rm -f infra/bootstrap/b.
 ```
 
 目安は create 1 件 / 閲覧者（`google_iap_web_cloud_run_service_iam_member.simulator_access[...]`）、他 0。アドレスにメールが入るので、要約は件数だけを記録する。`allUsers`・`allAuthenticatedUsers`・`domain:` は変数の検証で拒否される。閲覧者を外すときは一覧から消して同じ手順（delete 1）。
+
+## prod（Cloud Run simulator）
+
+`infra/prod/simulator.tf`（#36）。イメージはリポジトリ直下の `Dockerfile`（API と画面の `dist/` を 1 つに）。
+
+| 項目 | 値 |
+|---|---|
+| サービス | `simulator`（`var.region`、既定 `asia-northeast1`）、`iap_enabled = true`、`ingress = INGRESS_TRAFFIC_ALL`（IAP は run.app の URL に掛かる）、`invoker_iam_disabled = false`、`deletion_protection = false` |
+| 実行 | 第 1 世代、CPU 1・512Mi・リクエスト中だけ CPU、同時実行 8、0〜2 インスタンス、60 秒、SA `sa-simulator`、起動プローブ `/healthz`（BigQuery に触れない） |
+| イメージ | `<region>-docker.pkg.dev/<PROJECT_ID>/simulator/simulator`。タグは入力パスの git のハッシュ `src-<20hex>`（`.github/scripts/image.sh simulator tag`）、Cloud Run には digest で渡す。gunicorn 1 ワーカー・8 スレッド（API のキャッシュ・single-flight をインスタンス内で共有）、uid 10001、`STATIC_DIR=/app/static` |
+| 環境変数 | `GCP_PROJECT`・`BQ_DATASET`・`BQ_LOCATION`（Terraform の変数 `project_id`・`bq_dataset`・`bq_location`）。`MAX_BYTES_BILLED`・`DATA_SOURCE` は API の既定 |
+| 権限 | `run.invoker` = IAP のサービスエージェント（`service-<番号>@gcp-sa-iap…`。番号は `data "google_project"`）だけ。閲覧者（`iap.httpsResourceAccessor`）は bootstrap の `simulator_iap_members` |
+
+outputs は置かない（サービスの URL はプロジェクト番号由来の文字列を含む）。
+
+### CI / CD の流れ
+
+- **PR**（`ci.yml`）: `check` job が `infra/prod` の validate / test、`.dockerignore` の許可リストと `image.sh simulator paths` の一致、イメージのビルドと検査（`.github/scripts/image-check.sh`。import・非 root・`.git` / `node_modules` / テスト / fixture / `infra` / `.env*` / `*.tfvars` を含まない・同梱の `index.html` の CSP 検査・`/healthz` / `/` / `/assets/*` が 200 で CSP ヘッダ付き）を行う。別 job `terraform-plan` が同じリポジトリのブランチの PR だけ plan SA で `plan -lock=false` し、要約（アドレスと操作・件数、イメージが既存か未作成か）を step summary に書く（必須 check ではない。fork の PR では動かない）
+- **deploy**（`deploy.yml`。`main` への push と `workflow_dispatch`、`concurrency: terraform-prod`）: `plan` job（plan SA）→ 差分があるときだけ `apply` job（Environment `prod`。所有者が GitHub で承認）→ イメージが未作成なら GCP の認証より前にビルド・検査 → apply SA で push → digest であることを確かめて `terraform apply`。plan ファイルは artifact で渡さず、承認後にもう一度 plan して適用する。失敗時のログはマスクして末尾だけ
+- repository variables（`GCP_PROJECT_ID`・`TF_STATE_BUCKET`・`GCP_SA_TF_PLAN`）が無い（clone して variables を設定していない）ときは、plan も deploy も notice を出して何もしない
+
+### prod の state の初期化（所有者、一度だけ。最初の PR の前）
+
+`sa-sim-tf-plan` は prod の state を読むだけなので、state が無いと CI の `terraform init` が空の state を書けずに失敗する。所有者の資格情報で一度だけ `init` して空の state を作る（「共通の変数」を設定してから）。
+
+```sh
+$TF -chdir=infra/prod init -input=false -backend-config="bucket=$P-sim-tfstate"
+gcloud storage ls "gs://$P-sim-tfstate/prod/"   # default.tfstate が 1 件
+```
+
+### 初回デプロイ
+
+前提: bootstrap の初回 apply・GitHub の設定・IAP（OAuth クライアントがリージョン単位に設定済み、サービスエージェントが作成済み）・prod の state の初期化が済んでいる。
+
+1. **PR**: `check` が green、`terraform-plan` の要約が下の目安どおりであることを見てからマージする
+2. **作業前の記録**（スクラッチに保存し、貼らない）: `SCRATCH=${SCRATCH:-$(mktemp -d)}; gcloud run services list --project="$P" --format='value(metadata.name,status.latestReadyRevisionName)' > "$SCRATCH/run-before.txt"`
+3. **deploy**: マージで `deploy` が動く。`plan` job の要約が下の目安どおりなら、所有者が GitHub の Actions の画面で Environment `prod` の `apply` job を承認する。`apply` job がイメージをビルド・検査・push し、digest で apply する
+4. **確認**（下の「確認」）→ **bootstrap の 2 回目の apply**（閲覧者。「2 回目の apply（閲覧者）」）
+
+plan の要約の目安:
+
+| 場面 | 要約 |
+|---|---|
+| 初回（PR・deploy の plan） | create 2（`google_cloud_run_v2_service.simulator`、`google_cloud_run_v2_service_iam_member.simulator_iap_invoker`）、update / delete / replace 0、イメージは「未作成」 |
+| apply 後 | 差分なし |
+| 以後、アプリ（`ui`・`model`・`data`・`api/src` など入力パス）だけを変えた PR | update 1（`google_cloud_run_v2_service.simulator`）、イメージは「未作成」 |
+| Terraform も入力パスも変えない PR | 差分なし（deploy の `apply` job は動かない） |
+
+目安と違う（特に optionchan のサービス `ingest` / `viewer` や、ここに無い delete / replace が出る）ときはマージ・承認しない。
+
+### 確認
+
+URL・プロジェクト番号・メールは表示・記録しない（件数と pass / fail だけ）。
+
+```sh
+L=asia-northeast1
+# 差分 0（exit 0）。イメージは Artifact Registry の digest
+eval "$(GCP_PROJECT_ID=$P .github/scripts/image.sh simulator resolve | grep '^image=')"
+TF_VAR_project_id=$P TF_VAR_simulator_image=$image $TF -chdir=infra/prod plan -lock=false -input=false -detailed-exitcode > /dev/null; echo $?
+# 構成（v2 API）: true、INGRESS_TRAFFIC_ALL、false、sa-simulator、0、2、true、[GCP_PROJECT,BQ_DATASET,BQ_LOCATION]
+curl -sf -H "Authorization: Bearer $(gcloud auth print-access-token)" \
+  "https://run.googleapis.com/v2/projects/$P/locations/$L/services/simulator" \
+  | jq -c '{iap: .iapEnabled, ingress, invoker_check_disabled: (.invokerIamDisabled // false), sa: (.template.serviceAccount | split("@")[0]),
+            min: (.template.scaling.minInstanceCount // 0), max: .template.scaling.maxInstanceCount,
+            digest: (.template.containers[0].image | test("@sha256:[0-9a-f]{64}$")), envs: [.template.containers[0].env[].name]}'
+# run.invoker は IAP のサービスエージェント 1 件だけ: [{"role":"roles/run.invoker","m":["serviceAccount:service-<num>@gcp-sa-iap.iam.gserviceaccount.com"]}]
+gcloud run services get-iam-policy simulator --region=$L --project="$P" --format=json \
+  | jq -c '[.bindings[] | {role, m: [.members[] | sub("[0-9]+"; "<num>")]}]'
+# 未認証の呼び出しが IAP で止まる（302 / 401 / 403。200 でない）。URL は表示しない
+U=$(gcloud run services describe simulator --region=$L --project="$P" --format='value(status.url)')
+curl -s -o /dev/null -w '%{http_code}\n' "$U/healthz"
+# デプロイ後 10 分の ERROR ログ 0 件
+gcloud logging read 'resource.type="cloud_run_revision" AND resource.labels.service_name="simulator" AND severity>=ERROR' \
+  --project="$P" --freshness=10m --limit=20 --format='value(timestamp,severity,jsonPayload.message)' | wc -l
+# optionchan の ingest / viewer の最新リビジョンが作業前と同じ
+gcloud run services list --project="$P" --format='value(metadata.name,status.latestReadyRevisionName)' \
+  | grep -vE '^simulator[[:space:]]' | diff -q - <(grep -vE '^simulator[[:space:]]' "$SCRATCH/run-before.txt") && echo same
+```
+
+ブラウザ（閲覧者を入れた後。所有者はプロジェクト単位の `iap.httpsResourceAccessor` を継承していれば先に開ける）: `/` と `/api/chain` を開き、開発者ツールのコンソールに CSP の違反（`Refused to …`）が出ないこと、`/api/chain` の `reason` と時刻だけを記録する（`api/README.md`「本番での `reason` の確認」）。
+
+### 更新
+
+アプリの変更は PR → マージ → deploy の `apply` job の承認で反映される（入力パスが変わるとタグが変わり、plan に `simulator` の update 1 が出る）。ベースイメージ（`Dockerfile` の `ARG`）は公開から 2 週間以上たった版の digest にする。
+
+### 切り戻し・撤去
+
+| 段階 | 手段 | 影響 |
+|---|---|---|
+| 緊急に閉じる | `gcloud run services remove-iam-policy-binding simulator --region=$L --project="$P" --role=roles/run.invoker --member="serviceAccount:service-$(gcloud projects describe "$P" --format='value(projectNumber)')@gcp-sa-iap.iam.gserviceaccount.com"`（IAP を通っても 403 になる）。次の apply で戻るので、続けて撤去か修正の PR を出す | simulator が開けなくなるだけ。optionchan は影響なし |
+| 前の版に戻す | 原因のコミットを revert する PR → deploy（タグが前の入力に戻り、Artifact Registry の既存イメージの digest で update 1）。急ぐときは `gcloud run services update-traffic simulator --region=$L --project="$P" --to-revisions=<旧リビジョン>=100`（Terraform のトラフィックは最新 100% なので次の apply で戻る。続けて revert の PR で揃える） | 1 回の apply で新しいリビジョン |
+| 初回デプロイが途中で失敗 | サービスはできたが `run.invoker` が無い状態は公開にならない（IAP を通っても 403）。原因を直す PR → deploy。IAP の有効化で失敗したら `gcloud iap settings get --resource-type=cloud-run --region=$L --project="$P"` でクライアントの設定を確かめ、deploy をやり直す | 公開にはならない |
+| 撤去 | `infra/prod/simulator.tf` の 2 リソースを消す PR → deploy（delete 2。`deletion_protection = false`）→ bootstrap の `simulator_iap_members` を `[]` にして apply。#36 の PR の revert は `deploy.yml` も消えて apply されないので、撤去には使わない。Artifact Registry のイメージはクリーンアップポリシーで消える | optionchan は影響なし |
 
 ## `run.admin` の影響範囲
 
