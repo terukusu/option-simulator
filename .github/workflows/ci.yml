@@ -93,3 +93,16 @@ jobs:
         env:
           OPTIONCHAN_SCHEMA_DIR: ${{ github.workspace }}/.optionchan/schema/tokyo
         run: uv run --locked pytest -q -rs tests/test_contract.py
+      # Terraform（infra/、#35）。資格情報なし: fmt・validate と、モックのプロバイダの terraform test だけ（plan は infra/README.md）
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: 1.16.4
+          terraform_wrapper: false
+      - name: terraform fmt
+        run: terraform fmt -check -recursive infra
+      - name: terraform validate（bootstrap）
+        run: |
+          terraform -chdir=infra/bootstrap init -backend=false -input=false -no-color
+          terraform -chdir=infra/bootstrap validate -no-color
+      - name: terraform test（bootstrap、モックのプロバイダ）
+        run: terraform -chdir=infra/bootstrap test -no-color

@@ -609,7 +609,7 @@ F の推定・補間・ATM の判定はブラウザ（`model/`）。`sq_date`・
 | 決めごと | 推奨 | 理由 |
 |---|---|---|
 | GCP プロジェクト | optionchan と同じ | データセットの読み取りが同じプロジェクト内。OAuth クライアントを流用できる |
-| IaC の置き場所 | このリポジトリ（`infra/bootstrap` を所有者が apply、`infra/prod` を CI が apply）。必要なものの一覧は付録 B | optionchan-gcp 側の変更を不要にする |
+| IaC の置き場所 | このリポジトリ（`infra/bootstrap` を所有者が apply、`infra/prod` を CI が apply）。必要なものの一覧・名前は付録 B、手順は `infra/README.md` | optionchan-gcp 側の変更を不要にする |
 | API の言語 | Python（Flask / gunicorn）。ビューアーの `bq.py` / `settings.py` / テスト / Dockerfile を写す | BigQuery の読み方・セキュリティヘッダ・テストの流儀が揃う。API は薄い |
 | 静的ファイル | Vite のビルド成果物を Flask から配る（環境変数 `STATIC_DIR` のディレクトリの `/`（`index.html`、`no-cache`）と `/assets/<path>`（`immutable`）。未設定なら 404）。イメージへの同梱は Dockerfile の Node ステージ（#36）。CDN なし。ローカルは Vite の `server.proxy` で `/api` → `127.0.0.1:8080` の Flask（同一オリジン維持） | CSP `script-src 'self'` |
 | 設定 | `GCP_PROJECT`（`bigquery` のとき必須）、`BQ_DATASET`（既定 `optionchan_tokyo`）、`BQ_LOCATION`（既定 `asia-northeast1`）、`MAX_BYTES_BILLED`（既定かつ上限 512 MiB）、`DATA_SOURCE`（`bigquery` / `file`。`file` は `CHAIN_FILE` の JSON をそのまま `/api/chain` で返し、`/api/calendar` は 503。GCP なしの起動確認・clone した人向け）、`CHAIN_FILE`、`STATIC_DIR`。詳細は `api/README.md` | ビューアーと同じ名前 |
@@ -821,7 +821,7 @@ F の推定・補間・ATM の判定はブラウザ（`model/`）。`sq_date`・
 | 板の無い限月の理論値が実勢とずれる | 判断を誤る | 「理論値（板なし）」の印。建値・IV を編集可 |
 | optionchan のテーブル関数・列・カレンダーの変更 | 壊れる | 契約節（4.1）、CI のスキーマ照合、カレンダーの定期同期（toml の形が変われば同期が失敗して通知。7.5）、「カレンダー期限切れ」の表示、R1・R2 |
 | BigQuery の 1 日 32 GiB を使い切る | optionchan のビューアーも止まる | `snapshot_at` キャッシュ、single-flight、512 MiB、ポーリングなし、SA 別監視（D8） |
-| apply SA の `run.admin` が optionchan のサービスに及ぶ | 誤操作の影響範囲 | Environment の承認、state の分離、runbook に明記（付録 B） |
+| apply SA の `run.admin` が optionchan のサービスに及ぶ（逆に optionchan の apply SA も simulator に及ぶ。対称） | 誤操作の影響範囲 | Environment の承認、state の分離、`infra/README.md` に明記（付録 B） |
 | JPX 由来データの利用範囲 | 公開の場所に置けない | IAP の後ろ。fixture は合成データ |
 | 商品の制度変更 | 限月一覧・丸めが古くなる | 商品定義を 1 つの設定ファイルに、確認日を書く |
 | 価格モデルの誤り | 判断を誤る | AC3〜AC6・AC21〜AC24。モデルの前提を画面の「前提」に書く |
@@ -872,17 +872,24 @@ optionchan-gcp の bootstrap / prod を写すだけでは足りないもの。
 
 | 必要なもの | 内容 |
 |---|---|
-| WIF | **プールとプロバイダを新設**（optionchan の既存プロバイダは条件でリポジトリ ID を固定している）。`sa-sim-tf-plan` / `sa-sim-tf-apply` を新設し、apply は Environment `prod` にだけ許可 |
-| state | tfstate バケット 2 つ（bootstrap / prod） |
-| Artifact Registry | リポジトリを新設し、apply SA にリポジトリ単位の writer。optionchan と同じクリーンアップポリシー・immutable tags |
+| WIF | **プールとプロバイダを新設**（optionchan の既存プロバイダは条件でリポジトリ ID を固定している）。プール `sim-github` / プロバイダ `github-actions`（条件はこのリポジトリの数値 ID とオーナー ID）。`sa-sim-tf-plan`（このリポジトリの workflow から借用。プロジェクト単位は `run.viewer` だけ）/ `sa-sim-tf-apply` を新設し、apply は Environment `prod` の subject にだけ許可 |
+| state | tfstate バケット 2 つ（prod 用 `<PROJECT_ID>-sim-tfstate`、bootstrap 用 `<PROJECT_ID>-sim-tfstate-bootstrap`。optionchan のバケットと衝突しない名前）。bootstrap 用は初回だけ gcloud で作って `import` ブロックで取り込む。plan SA は prod の state の読み取り、apply SA は読み書き、bootstrap 用には CI 用 SA の付与なし |
+| Artifact Registry | リポジトリ `simulator` を新設し、apply SA にリポジトリ単位の writer、plan SA に reader（digest を引く）。optionchan と同じクリーンアップポリシー・immutable tags。**bootstrap に置く**（リポジトリ単位の付与の時点でリポジトリが要る。prod に置くと apply SA にプロジェクト単位の `artifactregistry.admin` が要る。#35） |
 | 実行 SA | `sa-simulator`: `optionchan_tokyo` の `dataViewer`（非権威的 member。代替としてテーブル・ルーチン単位の付与もあるが、データセットに他の秘匿データは無いので MVP はデータセット単位）+ プロジェクトの `bigquery.jobUser`。apply SA に `serviceAccountUser` |
 | Cloud Run の権限 | Cloud Run の作成には **プロジェクト単位の `run.admin`** が要り、apply SA の権限が optionchan のサービス（`ingest` / `viewer`）にも及ぶ。代替: (i) 受け入れる（Environment の承認と state の分離で緩和）、(ii) optionchan の prod にサービスだけ置く（B に近づく）。推奨 (i)、影響範囲を runbook に明記 |
 | API の有効化 | simulator 側では宣言しない（optionchan の bootstrap が有効化済み。二重管理を避ける） |
 | IAP | prod: `iap_enabled = true`、`run.invoker` = IAP のサービスエージェント。bootstrap: `httpsResourceAccessor` をサービス単位で閲覧者に（`roles/iap.admin` が要るので所有者 apply。apply SA には渡さない） |
 | OAuth クライアント | ビューアーでリージョン単位に設定済みなら流用（`gcloud iap settings get --resource-type=cloud-run --region=<REGION>` で確認）。サービス単位だったら `--service=simulator` で同じクライアントを設定。プロジェクト単位の `iap.httpsResourceAccessor` の継承も確認項目。**clone 利用者は optionchan の runbook「ビューアー」の手順 2〜4（同意画面・クライアント作成・IAP 設定）が丸ごと必要** |
-| GitHub | repository variables（`GCP_PROJECT_ID`、`TF_STATE_BUCKET`、SA 名）、secret（WIF プロバイダ）、Environment `prod`（required reviewer）、ブランチ保護 |
+| GitHub | repository variables（`GCP_PROJECT_ID`、`TF_STATE_BUCKET`、`GCP_SA_TF_PLAN`、`GCP_SA_TF_APPLY`）、secret `GCP_WIF_PROVIDER`（WIF プロバイダの完全名。プロジェクト番号を含む）、Environment `prod`（`main` のみ・required reviewer は所有者）、ブランチ保護（既存の必須 check `check`。変更なし）。Terraform の github プロバイダは使わず gh の手順（`infra/README.md`。所有者の GitHub トークンを Terraform・state に入れない） |
+| テスト | `terraform test`（`infra/bootstrap/tests/`、モックのプロバイダ。資格情報なしで CI の `check` job で回る）: 公開の拒否、WIF の条件、apply SA の subject、データセットの付与の型と role（AC11） |
 
 ## 変更履歴
+
+### 2026-10-14 infra/bootstrap（#35）
+
+- 付録 B: WIF のプール / プロバイダの ID（`sim-github` / `github-actions`）、state バケットの名前と bootstrap 用の取り込み、Artifact Registry を bootstrap に置くこと（理由）、plan SA の `run.viewer` と AR の reader、GitHub の値の名前と gh の手順、`terraform test` の行を追加
+- 8.3: IaC の行に名前と手順の参照（付録 B・`infra/README.md`）
+- 13.5: `run.admin` のリスクに、optionchan の apply SA も simulator に及ぶ（対称）ことを追記
 
 ### 2026-10-14 JPX グリークの単位と AC7 の閾値（#37）
 
