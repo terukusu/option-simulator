@@ -10,7 +10,7 @@
 - `fixtures/synthetic/`: 合成の固定の板（架空の値。`scripts/synthBoard.ts` から `npm run fixtures` で作る。手で編集しない）
 - `ui/`: 画面（TypeScript + Vite + Preact 10）。状態と reducer は `ui/state.ts`、表示モデルは `ui/view/` の純関数（Preact に依存しない。`tests/ui/` で確かめる）、グラフの座標と拡大・パンの規則は `ui/chart/scale.ts`、ジェスチャー（ドラッグ・ピンチ・タップ）の状態機械は `ui/chart/gesture.ts`（どちらも純関数）、DOM のイベントは損益グラフとスマイルで共用のフック `ui/components/useChartGestures.ts`、部品（`ui/components/`）は表示モデルを描くだけ。板・入力値は JSX のテキスト / 属性で入れ、HTML 文字列を DOM に入れる API と `style` 属性（JSX の style prop を含む）を使わない（CSP）
 - `api/`: 板（`/api/chain`）とカレンダー（`/api/calendar`）の JSON を返す Python 3.13（Flask / gunicorn、uv.lock）。optionchan の BigQuery を読むだけ（書き込まない）。使える板の判定は `api/src/simulator_api/usable.py` の純関数（定数は `settings.py` の上部）、optionchan との契約（使う列・型）は `contract.py` に 1 か所。テストは pytest と偽の runner（合成の板）。手順は `api/README.md`
-- `infra/`: Terraform（Cloud Run + IAP、縦切り 2 から）
+- `infra/`: Terraform（terraform 1.16.4・google 8.4.0）。`infra/bootstrap` は所有者が手元で apply する WIF・SA・state バケット・Artifact Registry・`optionchan_tokyo` の読み取り（非権威的）・IAP の閲覧許可、`infra/prod`（#36）は CI が apply する Cloud Run。付与は追加型（`*_iam_member`）だけ。テストは `infra/bootstrap/tests/`（`terraform test`、モックのプロバイダ）。手順・構成は `infra/README.md`
 
 - `tests/`: vitest のテスト（`tests/model/`・`tests/data/`・`tests/ui/`）と、合成の板の生成器などの補助（`tests/support/`）
 
@@ -19,7 +19,7 @@
 ## 開発
 
 - Node は 22（`.node-version`）。依存はバージョン固定（`package-lock.json` をコミット）
-- 確認: `npm ci && npm run typecheck && npm run lint && npm run fixtures:check && npm test`（CI と同じ。lint は Biome、整形は `npm run format`）。API は `cd api && uv run --locked ruff check && uv run --locked pytest -q`（uv 0.12.19、Python 3.13）
+- 確認: `npm ci && npm run typecheck && npm run lint && npm run fixtures:check && npm test`（CI と同じ。lint は Biome、整形は `npm run format`）。API は `cd api && uv run --locked ruff check && uv run --locked pytest -q`（uv 0.12.19、Python 3.13）。Terraform は `terraform fmt -check -recursive infra && terraform -chdir=infra/bootstrap init -backend=false -input=false && terraform -chdir=infra/bootstrap validate && terraform -chdir=infra/bootstrap test`（手元は `mise exec terraform@1.16.4 -- terraform`。資格情報なし）
 - 画面: `npm run dev`（Vite の root は `ui/`。合成の板は `scripts/devFixtures.mjs` が dev サーバーでだけ配る）、`npm run build` で `dist/`（JSON を入れない）。322 行の板は `npm run fixtures -- --wide`（`fixtures/local/` に書く）
 
 ## リポジトリに置くもの / 置かないもの

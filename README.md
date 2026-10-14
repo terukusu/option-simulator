@@ -6,7 +6,7 @@
 
 設計: [`docs/design.md`](docs/design.md)
 
-状態: 設計済み。縦切り 1（手元で損益が見える）を実装済み（価格モデル `model/`、データ `data/`、合成の固定の板、画面のヘッダ・板・スマイル・ポジション一覧・損益グラフ（拡大・パン）・シナリオのスライダー・指標・テール表）。縦切り 3 のデルタヘッジ（#19）・先物の basis 固定 / 減衰の切替（#25）を実装済み。縦切り 2 の API（`api/`。板 `/api/chain` とカレンダー `/api/calendar`。#33）を実装済みで、画面からの利用・デプロイはこれから。
+状態: 設計済み。縦切り 1（手元で損益が見える）を実装済み（価格モデル `model/`、データ `data/`、合成の固定の板、画面のヘッダ・板・スマイル・ポジション一覧・損益グラフ（拡大・パン）・シナリオのスライダー・指標・テール表）。縦切り 3 のデルタヘッジ（#19）・先物の basis 固定 / 減衰の切替（#25）を実装済み。縦切り 2 の API（`api/`。板 `/api/chain` とカレンダー `/api/calendar`。#33）を実装済み。インフラは `infra/bootstrap`（WIF・SA・state・Artifact Registry・IAP の閲覧許可。#35）まで。画面からの利用・デプロイ（`infra/prod`）はこれから。
 
 ## 開発
 
@@ -36,6 +36,14 @@ DATA_SOURCE=file CHAIN_FILE=../fixtures/synthetic/latest.json uv run --locked fl
 ```
 
 `npm run dev` は `/api` を `127.0.0.1:8080`（手元の Flask）へ渡す（Vite の `server.proxy`）。
+
+インフラ（`infra/`。Terraform 1.16.4）。構成・初回の apply・GitHub の設定は [`infra/README.md`](infra/README.md)。
+
+```sh
+TF="mise exec terraform@1.16.4 -- terraform"
+$TF fmt -check -recursive infra
+$TF -chdir=infra/bootstrap init -backend=false -input=false && $TF -chdir=infra/bootstrap validate && $TF -chdir=infra/bootstrap test   # モックのプロバイダ。資格情報なし
+```
 
 ## 板のデータ
 
