@@ -627,6 +627,8 @@ button.q.noquote {
   touch-action: none;
   user-select: none;
   -webkit-user-select: none;
+  /* 長押しで iOS の吹き出し（リンク・画像のメニュー）を出さない（#52） */
+  -webkit-touch-callout: none;
   -webkit-tap-highlight-color: transparent;
 }
 
@@ -751,6 +753,80 @@ button.q.noquote {
 
 .lg.scn {
   color: var(--accent);
+}
+
+/* シナリオ点の縦線のつかむ域（透明の太線。#52） */
+.pnl-scn-hit {
+  cursor: ew-resize;
+  pointer-events: stroke;
+  stroke: transparent;
+  stroke-width: 24;
+}
+
+/* 縦線と線の交点・金額のラベル（線の色。背景色の縁取りで線の上でも読める。#52） */
+.pnl-mark {
+  fill: Canvas;
+  stroke-width: 1.8;
+}
+
+.pnl-mark.expiry {
+  stroke: currentColor;
+}
+
+.pnl-mark.date {
+  stroke: var(--accent);
+}
+
+.pnl-mark.today {
+  stroke: var(--muted);
+}
+
+.pnl-mark-label {
+  dominant-baseline: central;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  paint-order: stroke;
+  pointer-events: none;
+  stroke: Canvas;
+  stroke-linejoin: round;
+  stroke-width: 3px;
+  text-anchor: start;
+}
+
+.pnl-mark-label.end {
+  text-anchor: end;
+}
+
+.pnl-mark-label.expiry {
+  fill: currentColor;
+}
+
+.pnl-mark-label.date {
+  fill: var(--accent);
+}
+
+.pnl-mark-label.today {
+  fill: var(--muted);
+}
+
+/* 読み取りの帯（シナリオ点の値。#52）: グラフ・帯・シナリオ欄（.pnl-group）の範囲で画面の上端に残る */
+.readout {
+  background: Canvas;
+  border-bottom: 1px solid var(--line);
+  font-size: 0.8rem;
+  font-variant-numeric: tabular-nums;
+  padding: 4px 0;
+  position: sticky;
+  top: 0;
+  z-index: 3;
+}
+
+.readout-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 12px;
+  margin: 0;
+  overflow-wrap: anywhere;
 }
 
 /* ---------------------------------------------------------------- シナリオ（#6） */

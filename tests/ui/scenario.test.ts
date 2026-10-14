@@ -14,7 +14,10 @@ import { type Action, initialState, reduce, type State } from '../../ui/state';
 import { maxScenarioDays, pnlDomains } from '../../ui/view/pnlChart';
 import { positionModel } from '../../ui/view/position';
 import {
+  DRAG_DX_STEP,
   daysToTarget,
+  dXFromAxis,
+  dXRange,
   evalTimeTargets,
   fmtSliderValue,
   fromDisplay,
@@ -22,6 +25,7 @@ import {
   parseSliderInput,
   type SliderSpec,
   sliderSpec,
+  stepDXKey,
   stepSlider,
   toDisplay,
 } from '../../ui/view/scenario';
@@ -293,5 +297,92 @@ describe('「SQ 日 9:00」「取引最終日 15:45」ボタン（AC-5）', () =
     expect(daysToTarget(t, t + 2.5 * DAY_MS, 30)).toBeCloseTo(2.5, 12);
     expect(daysToTarget(t, t + 40 * DAY_MS, 30)).toBe(30);
     expect(daysToTarget(t, Number.NaN, 30)).toBeNull();
+  });
+});
+
+/** #52 AC-4・AC-5: グラフの位置 → ΔX（10 円の格子）とグラフのキー（, . < >）。架空の X₀。 */
+describe('グラフ上の ΔX（#52）', () => {
+  const x0 = 33_912.34;
+
+  it('範囲: −40% / +20% の内側の格子の端', () => {
+    expect(dXRange(x0)).toEqual([-13_560, 6_780]);
+    expect(dXRange(x0, 100)).toEqual([-13_500, 6_700]);
+    expect(DRAG_DX_STEP).toBe(10);
+  });
+
+  it('横軸の値 − X₀ を 10 円の格子に丸め、範囲に収める', () => {
+    expect(dXFromAxis(x0 + 1_234.4, x0)).toBe(1_230);
+    expect(dXFromAxis(x0 + 1_235.1, x0)).toBe(1_240);
+    expect(dXFromAxis(x0 - 4.9, x0)).toBe(0);
+    expect(dXFromAxis(x0 - 777.7, x0)).toBe(-780);
+    expect(dXFromAxis(x0 * 2, x0)).toBe(6_780);
+    expect(dXFromAxis(0, x0)).toBe(-13_560);
+    for (const v of [x0 * 0.3, x0 * 0.7, x0, x0 * 1.1, x0 * 1.5]) {
+      const d = dXFromAxis(v, x0) as number;
+      expect(Number.isInteger(d / 10)).toBe(true);
+      expect(d).toBeGreaterThanOrEqual(-0.4 * x0);
+      expect(d).toBeLessThanOrEqual(0.2 * x0);
+    }
+  });
+
+  it('X₀ が非有限・0 以下、横軸の値が非有限なら変換しない（null）', () => {
+    for (const bad of [Number.NaN, Number.POSITIVE_INFINITY, 0, -100]) {
+      expect(dXFromAxis(30_000, bad)).toBeNull();
+      expect(stepDXKey(0, '.', bad)).toBeNull();
+    }
+    expect(dXFromAxis(Number.NaN, x0)).toBeNull();
+    expect(dXFromAxis(Number.NEGATIVE_INFINITY, x0)).toBeNull();
+  });
+
+  it('キー: , / . で ∓100 円、< / > で ∓1,000 円（現在値から押した向きに動かし、ドラッグと同じ範囲に収める）', () => {
+    expect(stepDXKey(0, ',', x0)).toBe(-100);
+    expect(stepDXKey(0, '.', x0)).toBe(100);
+    expect(stepDXKey(0, '<', x0)).toBe(-1_000);
+    expect(stepDXKey(0, '>', x0)).toBe(1_000);
+    // ドラッグの 10 円の格子の値からも、押した向きにちょうど 100 円
+    expect(stepDXKey(1_230, '.', x0)).toBe(1_330);
+    expect(stepDXKey(1_270, ',', x0)).toBe(1_170);
+    // 範囲はドラッグと共通（10 円の格子の内側の端）
+    expect(stepDXKey(6_650, '>', x0)).toBe(6_780);
+    expect(stepDXKey(-13_200, '<', x0)).toBe(-13_560);
+    // 非有限の ΔX は 0 から
+    expect(stepDXKey(Number.NaN, '.', x0)).toBe(100);
+  });
+
+  it('キー: ドラッグで端（上限・下限）まで動かした後は、押した向きに動かない（逆向きにならない）', () => {
+    const [lo, hi] = dXRange(x0);
+    for (const k of ['.', '>']) expect(stepDXKey(hi, k, x0)).toBe(hi);
+    for (const k of [',', '<']) expect(stepDXKey(lo, k, x0)).toBe(lo);
+    // 端から内側へは動く
+    expect(stepDXKey(hi, ',', x0)).toBe(hi - 100);
+    expect(stepDXKey(lo, '.', x0)).toBe(lo + 100);
+    // 範囲の外の値（% のスライダーの +20% = 6,782.468 円）から押しても逆向きにならない
+    const pctMax = 0.2 * x0;
+    expect(stepDXKey(pctMax, '.', x0)).toBe(pctMax);
+    expect(stepDXKey(pctMax, ',', x0)).toBe(6_680);
+    // 押した向きと逆に動くことはない（多数の値）
+    for (let v = lo - 50; v <= hi + 50; v += 37) {
+      for (const k of ['.', '>']) expect(stepDXKey(v, k, x0) as number).toBeGreaterThanOrEqual(v);
+      for (const k of [',', '<']) expect(stepDXKey(v, k, x0) as number).toBeLessThanOrEqual(v);
+    }
+  });
+
+  it('キー: 他のキー（← / → / + / − / R など）は扱わない', () => {
+    for (const k of [
+      'ArrowLeft',
+      'ArrowRight',
+      '+',
+      '-',
+      '=',
+      '−',
+      'r',
+      'R',
+      'a',
+      ' ',
+      'toString',
+      'constructor',
+    ]) {
+      expect(stepDXKey(0, k, x0)).toBeNull();
+    }
   });
 });

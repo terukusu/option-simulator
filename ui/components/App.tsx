@@ -16,6 +16,7 @@ import { hedgeModel } from '../view/hedge';
 import { metricsModel } from '../view/metrics';
 import { pnlDomains, zoomViewport } from '../view/pnlChart';
 import { positionModel } from '../view/position';
+import { readoutModel } from '../view/readout';
 import { evalTimeTargets } from '../view/scenario';
 import { scenarioAtmMark } from '../view/scenarioAtm';
 import { Board } from './Board';
@@ -96,6 +97,11 @@ export function App() {
   const metrics = useMemo(
     () => metricsModel({ base: pnlBase, scenario: state.scenario, unit: state.metricsUnit }),
     [pnlBase, state.scenario, state.metricsUnit],
+  );
+  // 読み取りの帯（シナリオ点の値。指標の値 + 満期・今日の 2 回の評価。#52）
+  const readout = useMemo(
+    () => readoutModel({ base: pnlBase, metrics, scenario: state.scenario }),
+    [pnlBase, metrics, state.scenario],
   );
   // デルタヘッジ（足・目標・評価点・限月の変更ごと。シナリオは評価点がシナリオ時点のときだけ効く）
   const { hedge, scenario } = state;
@@ -200,26 +206,31 @@ export function App() {
               ))}
             </section>
             <section class="pane pane-side">
-              <h2>損益グラフ</h2>
-              <PnlChart
-                base={pnlBase}
-                legCount={state.legs.length}
-                scenario={state.scenario}
-                viewport={state.pnlViewport}
-                pnlY={state.pnlY}
-                scenarioAtm={scenarioAtmView}
-                dispatch={dispatch}
-              />
-              <ScenarioPanel
-                scenario={state.scenario}
-                futureBasis={futureBasis}
-                x0={positions?.ctx.x0 ?? Number.NaN}
-                maxDays={pnlBase?.maxDays ?? 0}
-                evalTime={chain.evalTime}
-                targets={targets}
-                dispatch={dispatch}
-                onZoom={onZoom}
-              />
+              {/* グラフ・読み取りの帯（PnlChart の中）・シナリオ欄（帯の sticky はこの範囲だけ効く。#52） */}
+              <div class="pnl-group">
+                <h2>損益グラフ</h2>
+                <PnlChart
+                  base={pnlBase}
+                  legCount={state.legs.length}
+                  scenario={state.scenario}
+                  viewport={state.pnlViewport}
+                  pnlY={state.pnlY}
+                  scenarioAtm={scenarioAtmView}
+                  amountUnit={metrics.unit}
+                  readout={readout}
+                  dispatch={dispatch}
+                />
+                <ScenarioPanel
+                  scenario={state.scenario}
+                  futureBasis={futureBasis}
+                  x0={positions?.ctx.x0 ?? Number.NaN}
+                  maxDays={pnlBase?.maxDays ?? 0}
+                  evalTime={chain.evalTime}
+                  targets={targets}
+                  dispatch={dispatch}
+                  onZoom={onZoom}
+                />
+              </div>
               <Metrics
                 model={metrics}
                 unitSetting={state.metricsUnit}

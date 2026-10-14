@@ -1,9 +1,11 @@
 import { useMemo, useState } from 'preact/hooks';
 import type { Scenario } from '../../model';
-import { type Domain, zoom } from '../chart/scale';
+import { type Domain, pixelToValue, zoom } from '../chart/scale';
 import { type Action, parsePremiumN, parseYRange } from '../state';
 import { fmtNum } from '../view/format';
+import { AMOUNT_UNIT_LABEL, type AmountUnit } from '../view/metrics';
 import {
+  dateLine,
   PNL_MARGIN,
   type PnlBase,
   type PnlLineKind,
@@ -13,7 +15,11 @@ import {
   todayLine,
   Y_UNIT_LABEL,
 } from '../view/pnlChart';
+import type { ReadoutModel } from '../view/readout';
+import { dXFromAxis, stepDXKey } from '../view/scenario';
+import { scenarioMarks } from '../view/scenarioMarks';
 import { pure } from './pure';
+import { Readout } from './Readout';
 import { useChartGestures } from './useChartGestures';
 import { useWidth } from './useWidth';
 
@@ -34,6 +40,10 @@ export interface PnlChartProps {
   pnlY: PnlYSettings;
   /** 表示中の限月のシナリオ ATM（ΔX ≠ 0 のときだけ。無ければ null。#26） */
   scenarioAtm: { monthId: string; k: number; F: number } | null;
+  /** 交点のラベルの金額の単位（指標の単位。metricsModel の unit。#52） */
+  amountUnit: AmountUnit;
+  /** 読み取りの帯（シナリオ点の値。App で memo。#52） */
+  readout: ReadoutModel;
   dispatch: (a: Action) => void;
 }
 
@@ -61,6 +71,8 @@ function PnlChartView({
   viewport,
   pnlY,
   scenarioAtm,
+  amountUnit,
+  readout,
   dispatch,
 }: PnlChartProps) {
   const { ref, width } = useWidth(480);
@@ -75,6 +87,14 @@ function PnlChartView({
     // scenario の他の値（d・ΔX・Δσ・Δs）は今日の線に効かないので追わない
     [base, viewport, plotWidth, beta, ivDynamics, ivShift],
   );
+  // 指定日の線は ΔX で形が変わらない（β は評価点 X' ごと）ので、長押しドラッグ・ΔX のスライダーでは作り直さない
+  // （#52。ΔX 以外のシナリオ・表示範囲・幅が変わったときだけ）
+  const { days, dSigma, skew } = scenario;
+  const dateYs = useMemo(
+    () => dateLine(base, viewport, plotWidth, scenario),
+    // ΔX は指定日の線に効かないので追わない
+    [base, viewport, plotWidth, days, dSigma, skew, beta, ivDynamics, ivShift],
+  );
   const model = useMemo(
     () =>
       pnlChartModel({
@@ -85,11 +105,21 @@ function PnlChartView({
         plotWidth,
         plotHeight,
         todayYs,
+        dateYs,
         scenarioAtm,
       }),
-    [base, scenario, viewport, pnlY, plotWidth, plotHeight, todayYs, scenarioAtm],
+    [base, scenario, viewport, pnlY, plotWidth, plotHeight, todayYs, dateYs, scenarioAtm],
+  );
+  // シナリオ点の縦線と線の交点・金額のラベル（#52。ΔX = 0 でも X₀ 上に出す）
+  const marks = useMemo(
+    () => scenarioMarks({ base, scenario, chart: model, unit: amountUnit }),
+    [base, scenario, model, amountUnit],
   );
   const range: Domain = [PNL_MARGIN.left, PNL_MARGIN.left + plotWidth];
+  const x0 = base?.ctx.x0 ?? Number.NaN;
+  const setDX = (dX: number | null) => {
+    if (dX !== null && dX !== scenario.dX) dispatch({ type: 'setScenario', patch: { dX } });
+  };
 
   useChartGestures(ref, {
     viewport: model.domain,
@@ -98,6 +128,15 @@ function PnlChartView({
     range,
     disabled: model.empty,
     onViewport: (v) => dispatch({ type: 'setPnlViewport', viewport: v }),
+    // 長押し・縦線をつかむ → ΔX（10 円の格子・−40〜+20%）。キー , . < > で ΔX（#52）
+    scrub: { linePx: model.scenarioPx },
+    onScrub: (px) => setDX(dXFromAxis(pixelToValue(model.domain, range, px), x0)),
+    onScrubKey: (key) => {
+      const dX = stepDXKey(scenario.dX, key, x0);
+      if (dX === null) return false;
+      setDX(dX);
+      return true;
+    },
   });
 
   // 入力欄（文字列は部品が持ち、検証できた値だけ状態に入れる）
@@ -159,7 +198,8 @@ function PnlChartView({
   const unit = Y_UNIT_LABEL[model.yUnit];
 
   return (
-    <div class="pnl">
+    // ルートは箱を作らない（読み取りの帯の sticky の範囲を親の .pnl-group にする。#52）
+    <>
       <div class="pnl-tools">
         <fieldset class="seg" aria-label="縦軸">
           {(['auto', 'manual', 'premium'] as const).map((m) => (
@@ -253,7 +293,7 @@ function PnlChartView({
         ref={ref}
         tabIndex={model.empty ? -1 : 0}
         role="application"
-        aria-label="損益グラフ（ホイール・ピンチで拡大、ドラッグでパン、ダブルクリックでリセット。キー: + / − 拡大縮小、← / → パン、R リセット）"
+        aria-label="損益グラフ（ホイール・ピンチで拡大、ドラッグでパン、ダブルクリックでリセット、長押しして左右にドラッグでシナリオ点 ΔX。キー: + / − 拡大縮小、← / → パン、R リセット、, / . で ΔX ∓100 円、< / > で ∓1,000 円）"
       >
         {model.empty ? (
           <p class="note">
@@ -312,6 +352,16 @@ function PnlChartView({
                   y2={bottom}
                 />
               )}
+              {model.scenarioPx !== null && (
+                // つかむ域（透明の太線。マウスを載せると左右矢印のカーソル）
+                <line
+                  class="pnl-scn-hit"
+                  x1={model.scenarioPx}
+                  x2={model.scenarioPx}
+                  y1={plot.top}
+                  y2={bottom}
+                />
+              )}
               {model.scenarioAtm !== null && (
                 <line
                   class="pnl-scn-atm"
@@ -335,9 +385,33 @@ function PnlChartView({
                 />
               ))}
             </svg>
+            {/* 交点の点と金額のラベル（切り抜きの外に描く。座標は描画域の内側に収めてある） */}
+            {marks?.marks.map((m) =>
+              m.py === null ? null : (
+                <circle
+                  key={`mp${m.kind}`}
+                  class={`pnl-mark ${m.kind}`}
+                  cx={marks.px}
+                  cy={m.py}
+                  r={3.5}
+                />
+              ),
+            )}
+            {marks?.marks.map((m) => (
+              <text
+                key={`ml${m.kind}`}
+                class={`pnl-mark-label ${m.kind} ${m.anchor}`}
+                x={m.labelX}
+                y={m.labelY}
+              >
+                {m.text}
+              </text>
+            ))}
           </svg>
         )}
       </div>
+      {/* グラフのすぐ下に読み取りの帯（シナリオ点の値。#52） */}
+      <Readout model={readout} />
       <p class="legend note">
         <span class="lg expiry">━ {LINE_LABEL.expiry}</span>{' '}
         {model.lines.some((l) => l.kind === 'date') ? (
@@ -358,6 +432,13 @@ function PnlChartView({
             ┆ シナリオ ATM（{model.scenarioAtm.monthId} 限 {fmtNum(model.scenarioAtm.k, 0)}）
           </span>
         )}
+        {marks && (
+          <span class="block">
+            縦線上の 満 / 指 / 今 = シナリオ点 X {fmtNum(marks.x)}{' '}
+            の満期・指定日・今日の損益（指標の単位 {AMOUNT_UNIT_LABEL[amountUnit]}
+            ）。長押しして左右にドラッグでシナリオ点を動かす
+          </span>
+        )}
         <span class="block">
           横軸 X（円）/ 縦軸 損益（{unit}）。前提: 指定日の線 = シナリオ（Δσ{' '}
           {fmtNum(scenario.dSigma, 1)}
@@ -371,7 +452,7 @@ function PnlChartView({
           </span>
         )}
       </p>
-    </div>
+    </>
   );
 }
 
