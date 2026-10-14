@@ -6,7 +6,7 @@
 
 設計: [`docs/design.md`](docs/design.md)
 
-状態: 設計済み。縦切り 1（手元で損益が見える）を実装済み（価格モデル `model/`、データ `data/`、合成の固定の板、画面のヘッダ・板・スマイル・ポジション一覧・損益グラフ（拡大・パン）・シナリオのスライダー・指標・テール表）。縦切り 3 のデルタヘッジ（#19）・先物の basis 固定 / 減衰の切替（#25）を実装済み。本番の板（縦切り 2）はこれから。
+状態: 設計済み。縦切り 1（手元で損益が見える）を実装済み（価格モデル `model/`、データ `data/`、合成の固定の板、画面のヘッダ・板・スマイル・ポジション一覧・損益グラフ（拡大・パン）・シナリオのスライダー・指標・テール表）。縦切り 3 のデルタヘッジ（#19）・先物の basis 固定 / 減衰の切替（#25）を実装済み。縦切り 2 の API（`api/`。板 `/api/chain` とカレンダー `/api/calendar`。#33）を実装済みで、画面からの利用・デプロイはこれから。
 
 ## 開発
 
@@ -23,6 +23,19 @@ npm run fixtures   # 合成の板 JSON（fixtures/synthetic/）を作り直す�
 npm run fixtures -- --wide  # 322 行 × 2 限月の板を fixtures/local/synthetic_wide.json に書く（性能の確認用。コミットしない）
 OPTIONCHAN_CALENDAR_URL=<URL> npm run calendar:sync  # 取引カレンダーと国民の祝日を data/calendar/ に同期（下の「取引カレンダー」）
 ```
+
+API（`api/`。Python 3.13 + Flask。uv 0.12.19）。手順の詳細・環境変数は [`api/README.md`](api/README.md)。
+
+```sh
+cd api
+uv sync --locked --python 3.13
+uv run --locked ruff check
+uv run --locked pytest -q
+GCP_PROJECT=<PROJECT_ID> uv run --locked flask --app simulator_api.app run -p 8080   # ADC で BigQuery を読む（読み取りのみ）
+DATA_SOURCE=file CHAIN_FILE=../fixtures/synthetic/latest.json uv run --locked flask --app simulator_api.app run -p 8080  # GCP なし
+```
+
+`npm run dev` は `/api` を `127.0.0.1:8080`（手元の Flask）へ渡す（Vite の `server.proxy`）。
 
 ## 板のデータ
 

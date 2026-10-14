@@ -151,7 +151,7 @@ JPX の商品一覧（2026-10-13）にある日経225の商品は、先物 3 つ
 
 ### 4.1 契約（依存するインターフェース）
 
-データセット `optionchan_tokyo`（東京）。読むのは **テーブル関数 4 本**だけ（生テーブルは読まない）。引数はすべて `(start_at TIMESTAMP, end_at TIMESTAMP)` の半開区間 `[start_at, end_at)`。
+データセット `optionchan_tokyo`（東京）。読むのは **テーブル関数 4 本とビュー `trading_calendar_latest`** だけ（生テーブルは読まない）。テーブル関数の引数はすべて `(start_at TIMESTAMP, end_at TIMESTAMP)` の半開区間 `[start_at, end_at)`。
 
 | テーブル関数 | 使う列 | 意味 |
 |---|---|---|
@@ -159,10 +159,10 @@ JPX の商品一覧（2026-10-13）にある日経225の商品は、先物 3 つ
 | `option_price_latest` | `type`（1 = call / 2 = put）, `target_price`, `last_trading_day`, `bid`, `ask`, `bid_iv`, `ask_iv`, `price`, `price_time`, `iv`, `delta`〜`vega`, `quotation`, `quotation_date`, `volume`, `positions`, `is_atm`, `created_at` | 板。`created_at` = スナップショット時刻（1 限月ページの更新時刻）。`option_price` は `created_at` の UTC 日パーティションで `require_partition_filter` |
 | `future_price_latest` | `price`, `price_time`, `contract_month` | 先物（スナップショット 1 回に 1 行。ラージの直近四半期限月） |
 | `spot_price_latest` | `price`, `price_time` | 日経平均 |
+| `trading_calendar_latest`（ビュー） | `version_at`, `calendar_date`, `is_trading_day`, `status`, `name`, `covered_until`, `listed_until` | 取引カレンダーの最新版（版の全行）。SQ 日・取引最終日の休業日には **全行**（`is_trading_day` を問わない）+ 土日を使う（7.5） |
 
-- 列の型・意味は optionchan の `schema/tokyo/*.json`。CI で **固定したコミット**の JSON と照合し、SQL は dry run（課金 0）で検査する（AC25）
+- 列の型・意味は optionchan の `schema/tokyo/*.json`。API が使う列・型・非 NULL の前提は `api/src/simulator_api/contract.py` に 1 か所で宣言し（SQL は宣言した列だけを明示。`SELECT *` を使わない）、CI の job `check` で **固定したコミット**（`api/contract/optionchan_commit.txt`）の JSON と照合する。optionchan のリポジトリ名はリポジトリ変数 `OPTIONCHAN_REPO` で渡し、未設定の fork・clone では notice を出してスキップする。SQL は dry run（課金 0。`OPTIONCHAN_BQ_TEST=1` のときだけ手元で）で見積もりと結果の列・型を検査する（AC25）
 - optionchan への依頼（R1・R2）は 13.3。読み取り権限の付与は simulator の bootstrap で済む（R0）
-- 取引カレンダーは BigQuery に無い（7.5）
 
 ### 4.2 限月と先物の限月
 
@@ -455,7 +455,8 @@ JPX の商品一覧（2026-10-13）にある日経225の商品は、先物 3 つ
 | エンドポイント | 内容 |
 |---|---|
 | `GET /api/chain` | 使える最新スナップショット（7.2）の 2 限月分の板・先物・現物・時刻・`reason` を 1 つの JSON で。約 1,100 行、gzip で数十 KB |
-| `GET /api/chain?at=<ISO 時刻>` | `at` 以前で最新の使えるスナップショット（14 日以内）。`latest_runs` で `snapshot_at` に解決してから 1 秒の窓で読む。「板寄せ前」「清算値」モードと後段の過去時点に使う。連打は 1 クライアント 10 回 / 分に制限（キーは IAP のユーザー ID ヘッダのハッシュをメモリ内にだけ持つ。保存・ログ出力しない） |
+| `GET /api/chain?at=<ISO 時刻>` | **後段**（#33 では 400 `{"error":"bad_request"}`。入力値は応答・ログに出さない）。案: `at` 以前で最新の使えるスナップショット（14 日以内）を `latest_runs` で `snapshot_at` に解決してから 1 秒の窓で読む。使う画面（過去時点の閲覧・「清算値」モード）が MVP に無く、異なる `at` ごとに約 150 MiB を読むので、連打制限（1 クライアント 10 回 / 分。キーは IAP のユーザー ID ヘッダのハッシュをメモリ内にだけ持つ）だけでは費用を抑えきれない。上限の設計と一緒に入れる |
+| `GET /api/calendar` | 取引カレンダーの最新版（`trading_calendar_latest`。7.5）。`{schema_version: 1, source: "bigquery", version_at, covered_until, listed_until, days: [{date, is_trading_day, status, name}]}`（版の全行、日付の昇順。`version_at` は +09:00）。板とは別のエンドポイント（更新頻度が違い、板の無い限月・手入力の足・`file` アダプタでも使うため。板の JSON 版 1 の形を変えない）。`Cache-Control: private, max-age=3600`、`ETag` = `version_at`。ブラウザ側の型・検証・切替は #39 |
 | `GET /healthz` | 設定の読み込みだけ（BigQuery に触れない） |
 
 JSON（版 1。縦切り 1b で確定。型は `data/chainTypes.ts`、検証は `data/chainJson.ts`）:
@@ -488,21 +489,35 @@ F の推定・補間・ATM の判定はブラウザ（`model/`）。`sq_date`・
 
 時刻はすべて `snapshot_at`（ページ時刻）で書く。基準は **同じスナップショットの `future_price.price` ±5%**（1 限月で約 54 行。サーバーは合成先物を計算しない）。
 
-1. `latest_runs(now − 14 日, now)` を取り、新しい順に見る（約 150 KB）
-2. **主判定は気配の充足**: 候補の板を読み、1 限月の先物 ±5% で両側気配のある行が 80% 以上なら採用（`reason = latest`）。行数は補助（`rows_option ≥ 300`。夜間序盤の 522 行を捨てない）。先物価格が NULL（夜間の寄り前）なら不採用
-3. 満たさなければ時間帯で分ける: 寄り前（8:39〜8:46、16:45〜17:00）/ 引け後（15:41〜15:59、5:56〜6:30）/ 時間外 → **板寄せ前の最後のスナップショット**（日中 ≤ 15:40、夜間 ≤ 5:55。夜間は縦切り 2 の実測で確定）を返し `reason` を付ける（Q5 の (i)）。候補を読むのは最大 3 回
-4. 「清算値」モード（Q5 の (ii)）: `quotation_date` が当日になった 15:46 以降の `quotation` を価格、IV はツール側で逆算。参照列として常に出し、切替で主値にできる
+1. `latest_runs(now − 14 日, now + 1 秒)` を取り、新しい順に見る（約 80 KB）。0 件なら 503
+2. **主判定は気配の充足**: 候補の板を読み、1 限月（`last_trading_day` の最小）の先物 ±5%（`0.95F ≤ K ≤ 1.05F`。call・put を別に数える）で `bid` と `ask` が両方 NULL でない行が 80% 以上なら採用（分母 0 は不採用）。行数は補助（`rows_option ≥ 300` の候補だけを読む。夜間序盤の 522 行を捨てない）。先物価格が NULL / 0 以下（夜間の寄り前）なら **板を読まずに** 不採用（先物を先に読む）。採用したら現物を読む
+3. 最新 `R0` が「新しい（45 分以内）・連続売買の窓・`rows_option ≥ 300`」で使えれば `reason = latest`。それ以外は `R0` の時刻で `reason` を決める: 45 分より古い → `closed`（土日・休業日・取り込みの停止）/ 寄り前の窓 → `pre_open` / 引け後の窓 → `after_close` / それ以外 → `closed`。返す板は `R0` より前（`R0` を読んでいなければ `R0` も）の「連続売買の窓・`rows_option ≥ 300`」の候補を新しい順に評価した最初の使える板 = **板寄せ前の最後のスナップショット**（Q5 の (i)）。`R0` が窓の中で使えなかった（まれ）ときは古い方へ進み、同じ立会の板なら `latest`
+4. 板を読むのは 1 リクエスト最大 3 回（先物は 10 回。先物 NULL が続くときの安全弁）。尽きたら 503。1 リクエストの BigQuery 待ちの合計が 40 秒を超えたら次のクエリを出さずに 503
+
+時刻はすべて `snapshot_at` を **JST** にした壁時計で判定する（UTC の日跨ぎ = JST 9:00 に依らない）。定数は `api/src/simulator_api/settings.py` の上部の 1 か所（#38 の実測で直すのはここだけ）:
+
+| 定数 | 値 |
+|---|---|
+| 連続売買の窓（両端含む） | 日中 8:45〜15:40、夜間 17:00〜翌 5:55（15:40・5:55 = 板寄せ前の最後） |
+| 寄り前の窓 | 8:39〜8:46、16:45〜17:00 |
+| 引け後の窓 | 15:41〜16:44、5:56〜8:38（夜間は縦切り 2 の実測（#38）で確定） |
+| 古さ（`closed`） | `now − snapshot_at` > 45 分 |
+| 行数・気配 | `rows_option ≥ 300`、先物 ±5% の両側気配 ≥ 80% |
+| 読む上限 | 板 3 回、先物 10 回、待ち 40 秒（1 ジョブ 20 秒） |
+
+5. 「清算値」モード（Q5 の (ii)。#33 では作らない。`quotation` は板の JSON で運ぶだけ）: `quotation_date` が当日になった 15:46 以降の `quotation` を価格、IV はツール側で逆算。参照列として常に出し、切替で主値にできる
 
 ### 7.3 クエリ費用と抑制
 
 | クエリ | スキャン量（dry run 実測） |
 |---|---|
-| `latest_runs` 14 日 | 約 150 KB |
-| `option_price_latest` 1 秒の窓（必要列） | **約 80〜90 MB**。UTC 日パーティション全体を読むので、日中後半 + 夜間 + 翌朝が同じパーティションに入る時間帯は 130〜150 MB |
-| `future_price_latest` + `spot_price_latest` 1 秒 | 約 90 KB |
+| `latest_runs` 14 日 | 約 80 KB |
+| `option_price_latest` 1 秒の窓（必要列 = 4.1 の 20 列） | **約 152 MiB**（2026-10-14 の実測。UTC 日パーティション全体を読むので、書き込みの終わった日は時刻に依らずほぼ同じ。書き込み中の当日はそれより小さい） |
+| `future_price_latest` + `spot_price_latest` 1 秒 | 約 230〜300 KB |
+| `trading_calendar_latest`（7 列） | 約 12〜31 KB |
 
-- 1 回 ≒ 100 MB ≒ 0.0006 USD（東京のオンデマンド $6.25 / TiB）。BigQuery の結果キャッシュは立会中（テーブルが毎分更新）は効かない
-- 抑制: (1) サーバーのキャッシュキーは **`snapshot_at`**（`latest_runs` だけを引き、変わったときだけ板を取る）。(2) **single-flight**（同時リクエストを 1 本にまとめる）。(3) `MAX_BYTES_BILLED` **512 MiB**。(4) ブラウザは自動ポーリングしない（手動の [最新] だけ）。(5) `?at=` の連打制限。(6) `Cache-Control: private, max-age=60`、`ETag = snapshot_at`
+- 1 回 ≒ 152 MiB ≒ 0.0009 USD（東京のオンデマンド $6.25 / TiB）。BigQuery の結果キャッシュは立会中（テーブルが毎分更新）は効かない
+- 抑制: (1) サーバーのキャッシュキーは **`snapshot_at`**（実装は `(snapshot_at, finished_at)`。再処理で書き直されたら取り直す。`latest_runs` だけを TTL 10 秒で引き、変わったときだけ板を取る。使えない板も「不採用」として覚える）。(2) **single-flight**（同時リクエストを 1 本にまとめる。`latest_runs`・板・カレンダー）。(3) `MAX_BYTES_BILLED` **512 MiB**（既定かつ上限。超える値は起動時にエラー）。全ジョブにパラメータ化（`ScalarQueryParameter`）と `maximum_bytes_billed`。(4) ブラウザは自動ポーリングしない（手動の [最新] だけ）。(5) `?at=` は後段（7.1。#33 では 400）。(6) `Cache-Control: private, max-age=60`、`ETag` = `"<snapshot_at>-<finished_at>-<reason>-<カレンダーの版>"`（UTC の秒）、`If-None-Match` で 304、gzip
 - optionchan のプロジェクトは **1 日 32 GiB のクエリ量上限**（runbook「コスト」）。1 回 150 MB なら 1 日 200 回で上限。手動操作だけなら 1 日 20〜50 回。監視は `INFORMATION_SCHEMA.JOBS` の SA 別集計（D8）
 - 後段の候補（費用をさらに下げる）: optionchan の ingest が最新板の JSON を GCS に書く / 最新だけの小さい表を持つ（R4）
 - 採らない案: 生 HTML（GCS）を直接解析（optionchan の内部形式に結合する）
@@ -537,7 +552,9 @@ F の推定・補間・ATM の判定はブラウザ（`model/`）。`sq_date`・
 
 ### 7.5 取引カレンダー
 
-optionchan の `config/trading_calendar.toml`（休業日・立会時間・`covered_until`）が `closed_dates` の一次情報で、BigQuery には無い。国民の祝日は別の一次情報（内閣府「国民の祝日について」の CSV）。SQ 日の規則は 5.2。**MVP は自動同期**（オーナー判断 2026-10-14。#14。当初案の「手で写して CI で固定コミットと比較」から変更）:
+**2026-10-14 更新（#33）**: optionchan の TOML は廃止され（optionchan #75）、休業日の正は BigQuery のビュー `optionchan_tokyo.trading_calendar_latest`（4.1）だけになった。API は板の限月・先物の `sq_date`・`last_trading_day` をこのビューから求め（版の **全行**（`is_trading_day = true` の祝日取引の実施日も）+ 土日を休業日として第 2 金曜から前営業日へ。規則は 5.2）、`GET /api/calendar`（7.1）で版をそのまま返す。ブラウザ側の `/api/calendar` への切替と下の同期（`calendar-sync.yml`）の廃止は #39 で行い、この節の以下の記述もそこで書き換える。
+
+以下は #14 の時点の記述: optionchan の `config/trading_calendar.toml`（休業日・立会時間・`covered_until`）が `closed_dates` の一次情報で、BigQuery には無い。国民の祝日は別の一次情報（内閣府「国民の祝日について」の CSV）。SQ 日の規則は 5.2。**MVP は自動同期**（オーナー判断 2026-10-14。#14。当初案の「手で写して CI で固定コミットと比較」から変更）:
 
 - **同期コマンド** `npm run calendar:sync`（`scripts/syncCalendar.mjs` → `scripts/calendarSync.ts`）: 環境変数 `OPTIONCHAN_CALENDAR_URL`（toml の URL。リポジトリに書かない。CI では secret）と `HOLIDAYS_CSV_URL`（任意。既定は内閣府の CSV の公的な URL）から取得し、JSON に変換して `data/calendar/` に書く。https だけ（リダイレクトは自分で辿り、転送先も https だけ。http の転送先には要求を出さない）、HTTP 200 以外・1 MiB 超（ストリームで打ち切る）・30 秒は失敗。**両方を取得・変換・検証してから書く**（どちらかが失敗したら何も書かない）。書き込みも 2 ファイルまとめて（両方を一時ファイルに書いてから rename し、途中で失敗したら書いたものを元に戻す）。既存のファイルが「無い」以外の理由で読めなければ失敗（新規扱いにしない）。`source.fetched_at` 以外が同じなら書かない（差分を出さない）。URL 未設定なら理由を出して exit 1。標準出力・JSON に URL を出さない
 - **toml の読み込み**: 依存を足さず、optionchan の toml に要る部分集合だけを TypeScript で読む（コメント、`key = value`（日付・整数・`"..."`・日付 / 文字列の配列（複数行・末尾カンマ可））、表 `[sessions]`）。それ以外の形・キーの重複・未知の表は失敗。読んだ後は optionchan の `calendar.py` と同じキーの検査（トップレベルのキーがちょうど 4 つ、`[sessions]` がちょうど 4 キー）に加え、型を `calendar.py` より厳しく見る（`[sessions]` は `"HH:MM"`、`grace_minutes` は整数、`no_night_session_before` は日付の配列）。使わない値も見るのは、形の変化を optionchan 側の変更のサインとして同期を止め、人が確かめるため（失敗側に倒れるだけで誤った休業日は入らない）。`[sessions]` の後に書いたキーは `[sessions]` に入るので失敗する
@@ -576,8 +593,8 @@ optionchan の `config/trading_calendar.toml`（休業日・立会時間・`cove
 | GCP プロジェクト | optionchan と同じ | データセットの読み取りが同じプロジェクト内。OAuth クライアントを流用できる |
 | IaC の置き場所 | このリポジトリ（`infra/bootstrap` を所有者が apply、`infra/prod` を CI が apply）。必要なものの一覧は付録 B | optionchan-gcp 側の変更を不要にする |
 | API の言語 | Python（Flask / gunicorn）。ビューアーの `bq.py` / `settings.py` / テスト / Dockerfile を写す | BigQuery の読み方・セキュリティヘッダ・テストの流儀が揃う。API は薄い |
-| 静的ファイル | Vite のビルド成果物を Flask の `static/` に同梱（Dockerfile の Node ステージ）。CDN なし。ローカルは Vite の `server.proxy` で `/api` → Flask（同一オリジン維持） | CSP `script-src 'self'` |
-| 設定 | `GCP_PROJECT`（必須）、`BQ_DATASET`、`BQ_LOCATION`、`MAX_BYTES_BILLED`（既定 512 MiB）、`DATA_SOURCE`、`CHAIN_FILE` | ビューアーと同じ名前 |
+| 静的ファイル | Vite のビルド成果物を Flask から配る（環境変数 `STATIC_DIR` のディレクトリの `/`（`index.html`、`no-cache`）と `/assets/<path>`（`immutable`）。未設定なら 404）。イメージへの同梱は Dockerfile の Node ステージ（#36）。CDN なし。ローカルは Vite の `server.proxy` で `/api` → `127.0.0.1:8080` の Flask（同一オリジン維持） | CSP `script-src 'self'` |
+| 設定 | `GCP_PROJECT`（`bigquery` のとき必須）、`BQ_DATASET`（既定 `optionchan_tokyo`）、`BQ_LOCATION`（既定 `asia-northeast1`）、`MAX_BYTES_BILLED`（既定かつ上限 512 MiB）、`DATA_SOURCE`（`bigquery` / `file`。`file` は `CHAIN_FILE` の JSON をそのまま `/api/chain` で返し、`/api/calendar` は 503。GCP なしの起動確認・clone した人向け）、`CHAIN_FILE`、`STATIC_DIR`。詳細は `api/README.md` | ビューアーと同じ名前 |
 | Cloud Run | ビューアーと同じ（第 1 世代、CPU 1・512Mi、0〜2 インスタンス、60 秒、digest 指定）。検証はリビジョンタグ（トラフィック 0 のタグ付き URL） | 実績のある値 |
 | IAP の権限 | `httpsResourceAccessor`（閲覧者）は **bootstrap（所有者 apply、`local.auto.tfvars`）** に置く。付与には `roles/iap.admin` が要り、apply SA には渡さない | optionchan と同じ |
 
@@ -736,12 +753,13 @@ optionchan の `config/trading_calendar.toml`（休業日・立会時間・`cove
 ### 13.4 実装時に決めるもの
 
 - F 推定の外れ値除去の閾値（箱の幅 3 倍、300 円）、ペア数の下限（5 組）
-- 板寄せ前の時刻（日中 15:40、夜間 5:55）の実測と調整。候補を読む上限（3 回）
+- 板寄せ前の時刻（日中 15:40、夜間 5:55）の実測と調整。候補を読む上限（3 回）。**#33 で定数として実装**（`api/src/simulator_api/settings.py` の上部。7.2 の表）。実測（#38）で直すのは定数だけ
 - 補間の軸（`ln(K/F)` か正規化 moneyness）、クランプの傾き（2）、`σ_min`、`T_min`
 - 裁定の検査の閾値: 違反量が関係する行の bid–ask 幅の和の半分（無ければ呼値の和の半分）を超えたら印（実装済み。合成の板では印は全行の 3% 未満）
 - IV 逆算の「解なし」: 時間価値（価格 − 割引本源的価値）が 0.01 円未満（実装済み。アンカー IV は 5.3 (i) でスマイルへ）
 - Vite のビルド設定（インライン script・`modulepreload` の polyfill）と CI の検査方法
-- キャッシュの TTL・single-flight の実装、`?at=` の制限値
+- キャッシュの TTL・single-flight の実装: **決定（2026-10-14、#33）** — `latest_runs` TTL 10 秒、板 LRU 16 件（キー `(snapshot_at, finished_at)`。値は判定の結果と組み立て済みの JSON・gzip）、カレンダー TTL 1 時間（読めなければ古い版。一度も読めていなければ 503）、すべて single-flight（gunicorn のワーカーごと）。1 リクエストの BigQuery 待ちの合計 40 秒・1 ジョブ 20 秒
+- `?at=` の制限値（後段。7.1）
 - 拡大 / パンの実装: **決定（2026-10-14）** — 自前の SVG + Pointer Events（ホイール / ドラッグ / ピンチは #11。座標・拡大の規則は `ui/chart/scale.ts` の純関数で共用。#5 はボタンの拡大だけ）
 - 損益グラフの数値: **決定（2026-10-14、#11）**
   - 再サンプリング: 指定日・今日の線は描画幅の CSS px 数の点（2〜2,000）。満期の線はサンプリングせず解析解の頂点（表示範囲の両端 + 範囲内の折れ点）
@@ -847,6 +865,16 @@ optionchan-gcp の bootstrap / prod を写すだけでは足りないもの。
 | GitHub | repository variables（`GCP_PROJECT_ID`、`TF_STATE_BUCKET`、SA 名）、secret（WIF プロバイダ）、Environment `prod`（required reviewer）、ブランチ保護 |
 
 ## 変更履歴
+
+### 2026-10-14 API（#33）
+
+- 4.1: 契約にビュー `trading_calendar_latest`（7 列。SQ 日には版の全行を休業日に使う）を追加。「取引カレンダーは BigQuery に無い」を削除。照合は `api/src/simulator_api/contract.py` と CI（固定コミット `api/contract/optionchan_commit.txt`、リポジトリ名はリポジトリ変数 `OPTIONCHAN_REPO`）
+- 7.1: `GET /api/calendar`（JSON の形）を追加。`?at=` は後段（#33 では 400。異なる `at` ごとに約 150 MiB のため上限の設計と一緒に）
+- 7.2: 時間帯の規則の具体（手順、`closed` = 45 分より古い、引け後の窓 15:41〜16:44・5:56〜8:38、窓の中で使えないときは古い方へ進み同じ立会なら `latest`、先物を先に読む、読む上限）と定数の表
+- 7.3: dry run の実測を更新（板 約 152 MiB、`latest_runs` 約 80 KB、先物 + 現物 約 230〜300 KB、カレンダー 約 12〜31 KB）。抑制の実装（キー `(snapshot_at, finished_at)`、ETag の形、`?at=` は後段）
+- 7.5: 読み先が `trading_calendar_latest` になった（optionchan #75 で TOML 廃止）旨と `/api/calendar`。ブラウザの切替と同期の廃止は #39
+- 8.3: 設定に `STATIC_DIR`、`MAX_BYTES_BILLED` の上限 512 MiB、`DATA_SOURCE=file` の意味。静的ファイルの配り方
+- 13.4: キャッシュの TTL・single-flight を決定済みに。板寄せ前の時刻は定数として実装（#38 で実測）。`?at=` の制限値は後段のまま
 
 ### 2026-10-14 シナリオ ATM の印（#26）
 

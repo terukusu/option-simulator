@@ -1,0 +1,36 @@
+[project]
+name = "simulator-api"
+version = "0.1.0"
+description = "option-simulator の API（板とカレンダーの JSON）。optionchan の BigQuery を読むだけの Flask アプリ"
+requires-python = ">=3.13,<3.14"
+dependencies = [
+    # 正確な版とハッシュは uv.lock で固定する（pandas・bqstorage は入れない）
+    "flask>=3.1,<3.2",
+    "gunicorn>=26,<27",
+    "google-cloud-bigquery>=3.45,<4",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=9,<10",
+    "ruff>=0.16,<0.17",
+]
+
+[build-system]
+requires = ["uv_build>=0.12,<0.13"]
+build-backend = "uv_build"
+
+[tool.uv]
+# 公開から 2 週間未満の版を入れない（サプライチェーン対策）。更新するときはこの日付を進めて uv lock する
+exclude-newer = "2026-09-28T00:00:00Z"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 120
+target-version = "py313"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP"]
