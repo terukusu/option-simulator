@@ -8,6 +8,7 @@ import {
   boardColumns,
   boardModel,
   boardRows,
+  displayRows,
   FULL_BOARD_MIN_WIDTH,
   filterByAsk,
   jumpToDelta,
@@ -85,10 +86,60 @@ describe.each(chain.months.map((m) => [m.id, m] as const))('322 行の板（%s�
         .filter((r) => r[type].ask !== null && (r[type].ask as number) <= ASK_FILTER_YEN)
         .map((r) => r.k);
       expect(kept.map((r) => r.k)).toEqual(expected);
-      expect(boardModel(chain, month, 'B', { target: type, filterAsk: true }).rows).toEqual(kept);
+      // 表示モデルは降順（#50）
+      expect(boardModel(chain, month, 'B', { target: type, filterAsk: true }).rows).toEqual(
+        displayRows(kept),
+      );
     },
   );
 });
+
+describe.each(chain.months.map((m) => [m.id, m] as const))(
+  '板の表示順は行使価格の降順（%s、#50）',
+  (_id, month) => {
+    const rows = boardRows(chain, month);
+    const strictlyDesc = (ks: number[]) => ks.every((k, i) => i === 0 || k < (ks[i - 1] as number));
+
+    it('表示順は行使価格の降順（行の集合は同じ・入力の配列を変えない）', () => {
+      const before = rows.map((r) => r.k);
+      const shown = displayRows(rows);
+      expect(shown).toHaveLength(rows.length);
+      expect(strictlyDesc(shown.map((r) => r.k))).toBe(true);
+      expect(new Set(shown)).toEqual(new Set(rows)); // 行のオブジェクトは同じ参照
+      expect(rows.map((r) => r.k)).toEqual(before); // データは昇順のまま
+      expect(strictlyDesc(month.strikes.map((s) => s.k).reverse())).toBe(true);
+    });
+
+    it.each<OptionType>(['put', 'call'])('絞り込み（ask ≤ 50 円、%s）後も降順', (type) => {
+      // 残る行がある限月は下の「残る行がある」で確認（遠い限月の put は 0 行のことがある）
+      const kept = filterByAsk(displayRows(rows), type);
+      expect(strictlyDesc(kept.map((r) => r.k))).toBe(true);
+      expect(kept.map((r) => r.k)).toEqual(
+        filterByAsk(rows, type)
+          .map((r) => r.k)
+          .reverse(),
+      );
+    });
+
+    it('boardModel の行は降順', () => {
+      const m = boardModel(chain, month, 'B');
+      expect(strictlyDesc(m.rows.map((r) => r.k))).toBe(true);
+      expect(m.rows).toHaveLength(rows.length);
+    });
+
+    it.each<OptionType>(['put', 'call'])(
+      'ジャンプの行使価格は並び替えの前後で同じ（%s）',
+      (type) => {
+        const shown = displayRows(rows);
+        const x0 = referencePrice(month, 'B');
+        expect(jumpToOtm(shown, type, x0, 0.3)).toBe(jumpToOtm(rows, type, x0, 0.3));
+        expect(jumpToDelta(shown, type, 0.1)).toBe(jumpToDelta(rows, type, 0.1));
+        const atm = atmStrike(month, 'B');
+        expect(shown.some((r) => r.k === atm)).toBe(true);
+      },
+    );
+  },
+);
 
 it('「ask ≤ 50 円」で残る行がある（1 限月の put・call）', () => {
   const month = chain.months[0];
