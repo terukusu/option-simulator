@@ -52,8 +52,10 @@ export interface LoadErrorView {
 
 export interface State {
   chain: Chain | null;
-  /** 読み込んだ板の名前（fixture 名・ファイル名） */
+  /** 読み込んだ板の名前（fixture 名・ファイル名・API） */
   sourceLabel: string | null;
+  /** 板を読み込んだ時刻（ブラウザの時計、epoch ミリ秒。#34。失敗しても前の値を保つ） */
+  fetchedAt: number | null;
   loading: boolean;
   loadError: LoadErrorView | null;
   atmBasis: AtmBasis;
@@ -95,6 +97,7 @@ export const FEE_MAX = 100_000;
 export const initialState: State = {
   chain: null,
   sourceLabel: null,
+  fetchedAt: null,
   loading: false,
   loadError: null,
   atmBasis: 'B',
@@ -128,7 +131,8 @@ export interface LegPatch {
 
 export type Action =
   | { type: 'loading' }
-  | { type: 'loaded'; chain: Chain; label: string }
+  /** fetchedAt は App が Date.now() を渡す（reducer は時計を読まない。省略時は null） */
+  | { type: 'loaded'; chain: Chain; label: string; fetchedAt?: number }
   | { type: 'loadFailed'; error: LoadErrorView }
   | { type: 'setBasis'; basis: AtmBasis }
   | { type: 'setMonth'; monthId: string }
@@ -225,6 +229,7 @@ export function reduce(state: State, action: Action): State {
         ...state,
         chain,
         sourceLabel: action.label,
+        fetchedAt: action.fetchedAt ?? null,
         loading: false,
         loadError: null,
         monthId: keep ? state.monthId : (chain.months[0]?.id ?? null),
@@ -235,7 +240,7 @@ export function reduce(state: State, action: Action): State {
       };
     }
     case 'loadFailed':
-      // 前の板は保持する
+      // 前の板・取得時刻・データ元は保持する（localStorage の古い板は #23）
       return { ...state, loading: false, loadError: action.error };
     case 'setBasis':
       return { ...state, atmBasis: action.basis };

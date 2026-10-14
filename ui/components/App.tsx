@@ -1,9 +1,17 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef } from 'preact/hooks';
 import { axisOrigin, type Chain, monthOf } from '../../data';
 import { DEFAULT_SETTINGS, type ModelSettings, ZERO_SCENARIO } from '../../model';
-import { describeLoadError, fixtureUrl, loadFromFile, loadFromUrl } from '../load';
+import {
+  API_LABEL,
+  describeLoadError,
+  fixtureUrl,
+  initialSource,
+  loadFromApi,
+  loadFromFile,
+  loadFromUrl,
+} from '../load';
 import { initialState, reduce } from '../state';
-import { headerModel } from '../view/header';
+import { headerModel, keptBoardNote } from '../view/header';
 import { hedgeModel } from '../view/hedge';
 import { metricsModel } from '../view/metrics';
 import { pnlDomains, zoomViewport } from '../view/pnlChart';
@@ -35,7 +43,8 @@ export function App() {
     dispatch({ type: 'loading' });
     try {
       const chain = await fn();
-      if (id === seq.current) dispatch({ type: 'loaded', chain, label });
+      // 取得時刻はブラウザの時計（reducer は時計を読まない）
+      if (id === seq.current) dispatch({ type: 'loaded', chain, label, fetchedAt: Date.now() });
     } catch (e) {
       if (id === seq.current) dispatch({ type: 'loadFailed', error: describeLoadError(e) });
     }
@@ -49,18 +58,23 @@ export function App() {
     [load],
   );
   const onFile = useCallback((file: File) => load(file.name, () => loadFromFile(file)), [load]);
+  // [最新]: API から読み直す（手動だけ。自動ポーリング・タイマーは入れない。7.3 (4)）
+  const onLatest = useCallback(() => load(API_LABEL, () => loadFromApi()), [load]);
 
+  // 開いたら 1 回だけ読む（本番 = API、dev = 合成の latest）
   useEffect(() => {
-    const first = DEV_FIXTURES[0];
-    if (first) onFixture(first);
-  }, [onFixture]);
+    const first = initialSource(import.meta.env.DEV);
+    if (first.kind === 'api') onLatest();
+    else onFixture(first.name);
+  }, [onFixture, onLatest]);
 
   const { chain, atmBasis } = state;
   const month = chain && state.monthId ? (monthOf(chain, state.monthId) ?? null) : null;
-  const { calendar } = state;
+  const { calendar, fetchedAt, sourceLabel } = state;
   const header = useMemo(
-    () => (chain ? headerModel(chain, atmBasis, calendar) : null),
-    [chain, atmBasis, calendar],
+    () =>
+      chain ? headerModel(chain, atmBasis, calendar, { fetchedAt, label: sourceLabel }) : null,
+    [chain, atmBasis, calendar, fetchedAt, sourceLabel],
   );
   // 手数料（1 枚あたり円）・先物の basis（固定 / 減衰。#25）は評価の設定（損益・指標・テール表・ヘッジに効く）
   const { feePerLot, futureBasis } = state;
@@ -130,15 +144,23 @@ export function App() {
         <h1>option-simulator</h1>
         <Loader
           fixtures={DEV_FIXTURES}
-          sourceLabel={state.sourceLabel}
+          sourceLabel={sourceLabel}
           loading={state.loading}
           error={state.loadError}
+          kept={chain ? keptBoardNote(fetchedAt) : null}
           onFixture={onFixture}
           onFile={onFile}
+          onLatest={onLatest}
         />
       </div>
       {!chain || !header ? (
-        <p class="empty">{state.loading ? '読み込み中…' : '板の JSON を選んでください。'}</p>
+        <p class="empty">
+          {state.loading
+            ? '読み込み中…'
+            : state.loadError
+              ? '板を読めない。[最新] で読み直すか、板の JSON を選んでください。'
+              : '板の JSON を選んでください。'}
+        </p>
       ) : (
         <>
           <Header model={header} onBasis={(basis) => dispatch({ type: 'setBasis', basis })} />

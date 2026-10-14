@@ -24,8 +24,15 @@ export function Header({
     <header class="header">
       <p class="head-line">
         <strong>板 {model.snapshot}</strong>（{model.delay}）<span class="tag">{model.reason}</span>
+        {model.fetched && (
+          <span class="note">
+            取得 {model.fetched}
+            {model.loadedFrom && `（${model.loadedFrom}）`}
+          </span>
+        )}
         {model.source && <span class="note">データ元: {model.source}</span>}
       </p>
+      {model.reasonNote && <p class="note reason-note">{model.reasonNote}</p>}
       <p class="head-line">
         <span>
           日経平均 {model.spot.price}
