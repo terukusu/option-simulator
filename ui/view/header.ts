@@ -14,8 +14,39 @@ export const REASON_LABEL: Record<Chain['reason'], string> = {
   latest: '最新',
   pre_open: '板寄せ前',
   after_close: '引け後',
-  closed: '休場',
+  closed: '時間外',
 };
+
+/**
+ * reason の理由の 1 行（latest は null）。板の時刻を含む。設計 7.1・13.4（文言の見直しは #38）。
+ * closed は「45 分より古い（土日・休業日・取り込みの停止）」と「別の立会の板への戻り」の両方を含むので「休場」と言い切らない。
+ */
+export function reasonNote(chain: Chain): string | null {
+  const at = fmtDateTime(chain.snapshotAt);
+  switch (chain.reason) {
+    case 'latest':
+      return null;
+    case 'pre_open':
+      return `寄り前のため、板寄せ前の最後のスナップショット（${at}）を表示`;
+    case 'after_close':
+      return `引け後のため、板寄せ前の最後のスナップショット（${at}）を表示`;
+    case 'closed':
+      return `時間外・休業日、または取り込みの停止のため、最後に使えた板寄せ前のスナップショット（${at}）を表示`;
+    default:
+      return null;
+  }
+}
+
+/** 読み込みに失敗したとき、前の板を表示し続けている旨（板が無ければ null）。 */
+export function keptBoardNote(fetchedAt: number | null): string | null {
+  return fetchedAt === null ? null : `前の板のまま（取得 ${fmtTime(fetchedAt)}）`;
+}
+
+/** 読み込みの情報（取得時刻・データ元のラベル）。App の state から渡す */
+export interface LoadInfo {
+  fetchedAt?: number | null;
+  label?: string | null;
+}
 
 export type ForwardKind = 'synthetic' | 'future' | 'future_other_month' | 'none';
 
@@ -59,7 +90,13 @@ export interface HeaderModel {
   snapshot: string;
   delay: string;
   reason: string;
+  /** reason の理由の 1 行（latest は null） */
+  reasonNote: string | null;
   source: string | null;
+  /** 板を読み込んだ時刻（JST HH:mm。ポーリングしないので開いたままの画面の古さを示す）。未指定は null */
+  fetched: string | null;
+  /** データ元のラベル（API・fixture 名・ファイル名）。未指定は null */
+  loadedFrom: string | null;
   spot: { price: string; time: string };
   future: { contract: string; price: string; time: string; sqDate: string };
   basis: AtmBasis;
@@ -128,13 +165,21 @@ export function calendarAssumption(
   };
 }
 
-export function headerModel(chain: Chain, basis: AtmBasis, calendar: Calendar): HeaderModel {
+export function headerModel(
+  chain: Chain,
+  basis: AtmBasis,
+  calendar: Calendar,
+  load: LoadInfo = {},
+): HeaderModel {
   const cal = calendarAssumption(calendar, chain.evalTime);
   return {
     snapshot: fmtDateTime(chain.snapshotAt),
     delay: Number.isFinite(chain.delayedMinutes) ? `約 ${chain.delayedMinutes} 分遅れ` : DASH,
     reason: REASON_LABEL[chain.reason] ?? chain.reason,
+    reasonNote: reasonNote(chain),
     source: chain.source,
+    fetched: load.fetchedAt == null ? null : fmtTime(load.fetchedAt),
+    loadedFrom: load.label ?? null,
     spot: { price: fmtNum(chain.spot.price, 0), time: fmtTime(chain.spot.priceTime) },
     future: {
       contract: chain.future.id,

@@ -17,8 +17,8 @@ npm ci
 npm run typecheck
 npm run lint
 npm test
-npm run dev        # 画面（ui/）。合成の板 latest.json を既定で読み、night_early / pre_open に切替、手元の JSON はファイル選択
-npm run build      # dist/（合成の板は入らない。本番の画面は板の JSON をファイル選択で読む）
+npm run dev        # 画面（ui/）。合成の板 latest.json を既定で読み、night_early / pre_open に切替、[最新] で API（/api を 127.0.0.1:8080 の手元の Flask へプロキシ。api/README.md の DATA_SOURCE=file）、手元の JSON はファイル選択
+npm run build      # dist/（合成の板は入らない。本番の画面は開いたら 1 回 /api/chain を読み、以降は [最新] で読み直す。ファイル選択も使える）
 npm run fixtures   # 合成の板 JSON（fixtures/synthetic/）を作り直す。CI は fixtures:check で一致を検査
 npm run fixtures -- --wide  # 322 行 × 2 限月の板を fixtures/local/synthetic_wide.json に書く（性能の確認用。コミットしない）
 OPTIONCHAN_CALENDAR_URL=<URL> npm run calendar:sync  # 取引カレンダーと国民の祝日を data/calendar/ に同期（下の「取引カレンダー」）
@@ -50,9 +50,10 @@ $TF -chdir=infra/bootstrap init -backend=false -input=false && $TF -chdir=infra/
 - `fixtures/synthetic/*.json`: 開発・テストの既定の板。Black-76 から作った **架空の値**（生成器 `scripts/synthBoard.ts`）。形は `docs/design.md` 7.1
 - `fixtures/local/`: 実データ（optionchan の板）の dump を手元で試す置き場。**gitignore 済みで、コミットしない**（JPX 由来のデータを公開リポジトリに置かない）。`/api/chain` と同じ形の JSON を置くと `npm test` が検証・正規化を試し（`tests/data/local.test.ts`。件数だけ出す）。`npm run dev` の画面のファイル選択でも読める。Issue / PR には件数・割合などの要約だけを書く
 
-## 画面（縦切り 1c・#11・#6・#19）
+## 画面（縦切り 1c・#11・#6・#19・#34）
 
-- ヘッダ: 板の時刻・約 N 分遅れ・最新 / 板寄せ前、日経平均・先物、限月ごとの取引最終日・SQ 日・F（合成先物 / 先物で代用）、ATM の基準 A（ラージ先物）/ B（合成先物。既定）の切替と両方の基準価格。基準価格がスナップショットより 30 分以上古ければ「古い」
+- 読み込み: 本番は開いたら 1 回だけ API（`/api/chain`）から板を読み、[最新] で読み直す（自動ポーリングはしない。読み込み中は押せない。足・限月の選択は保つ）。失敗したら種別ごとの文言（503・ログイン切れ・通信エラー・壊れた JSON。応答の本文は出さない）と「前の板のまま（取得 HH:MM）」。localStorage の「古い板」は #23
+- ヘッダ: 板の時刻・約 N 分遅れ・最新 / 板寄せ前 / 引け後 / 時間外、取得時刻（ブラウザで読んだ時刻）とデータ元、`latest` 以外は理由の 1 行、日経平均・先物、限月ごとの取引最終日・SQ 日・F（合成先物 / 先物で代用）、ATM の基準 A（ラージ先物）/ B（合成先物。既定）の切替と両方の基準価格。基準価格がスナップショットより 30 分以上古ければ「古い」
 - 板: 限月タブ、bid を押すと売り・ask を押すと買いの足が入る。「ATM へ戻る」、OTM 度・|Δ| へのジャンプ、ask ≤ 50 円の絞り込み、印（IV 不安定・補間・外挿・JPX の IV 欠損・気配なし）。板の枠が狭い（560px 未満。スマホや 2 ペインの中間幅）ときは call / put 切替で K・bid / ask・IV だけ
 - 損益グラフ（右ペインの先頭。スマホは板の下）: 横軸 = 基準原資産 X（円）、縦軸 = 損益。線は満期（SQ。折れ点 K − basis_i を頂点に持つ解析解）・指定日 + シナリオ・今日（横軸 1 画素 1 点で再サンプリング）。今日の線はシナリオ IV を掛けない基準の線（d = ΔX = Δσ = Δs = 0。β と sticky の設定は横軸の各点に効く）で、指定日の線は d > 0 または Δσ・Δs ≠ 0 のときだけ描く。印は損益 0 の線、X₀ の縦線、シナリオ点 X₀ + ΔX の縦線、満期の折れ点と BEP
   - 縦軸: 自動（表示中の範囲の線と 0）/ 手動（下端・上端を円で）/ ±N 倍（受取 − 支払の N 倍。既定 5。プレミアム 0 なら自動）。目盛りは 10 万円以上で千円

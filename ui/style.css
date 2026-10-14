@@ -153,6 +153,12 @@ select {
   max-width: 220px;
 }
 
+/* 読み込みのエラーは次の行に（幅 360px でも横にはみ出さない） */
+.loader .error {
+  flex-basis: 100%;
+  min-width: 0;
+}
+
 .empty {
   margin: 24px 0;
 }
@@ -166,6 +172,11 @@ select {
   display: flex;
   flex-wrap: wrap;
   gap: 4px 16px;
+}
+
+/* reason の理由の 1 行（latest 以外。#34） */
+.reason-note {
+  margin-top: 0;
 }
 
 .basis {

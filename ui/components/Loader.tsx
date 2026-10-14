@@ -6,15 +6,28 @@ export interface LoaderProps {
   sourceLabel: string | null;
   loading: boolean;
   error: LoadErrorView | null;
+  /** 失敗しても前の板を表示している旨（「前の板のまま（取得 HH:MM）」。板が無ければ null） */
+  kept: string | null;
   onFixture: (name: string) => void;
   onFile: (file: File) => void;
+  /** [最新]: API から読み直す */
+  onLatest: () => void;
 }
 
-/** 板の読み込み（dev は合成の fixture の切替、どこでもファイル選択）。 */
+/** 板の読み込み（[最新] = API、dev は合成の fixture の切替、どこでもファイル選択）。 */
 export function Loader(props: LoaderProps) {
-  const { fixtures, sourceLabel, loading, error } = props;
+  const { fixtures, sourceLabel, loading, error, kept } = props;
   return (
     <div class="loader">
+      <button
+        type="button"
+        class="latest"
+        disabled={loading}
+        title="API から板を読み直す"
+        onClick={() => props.onLatest()}
+      >
+        最新
+      </button>
       {fixtures.length > 0 && (
         <label>
           合成の板{' '}
@@ -52,7 +65,10 @@ export function Loader(props: LoaderProps) {
       </span>
       {error && (
         <div class="error" role="alert">
-          <p>{error.message}（前の板のまま）</p>
+          <p>
+            {error.message}
+            {kept && `。${kept}`}
+          </p>
           {error.errors.length > 0 && (
             <ul>
               {error.errors.map((e, i) => (

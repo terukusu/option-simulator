@@ -4,7 +4,13 @@ import holidaysJson from '../../data/calendar/holidays_jp.json';
 import tradingJson from '../../data/calendar/trading_calendar.json';
 import { CALENDAR } from '../../ui/calendar';
 import { fmtNum } from '../../ui/view/format';
-import { headerModel, STALE_MINUTES } from '../../ui/view/header';
+import {
+  headerModel,
+  keptBoardNote,
+  REASON_LABEL,
+  reasonNote,
+  STALE_MINUTES,
+} from '../../ui/view/header';
 import { fixture } from '../support/fixtures';
 
 /** AC-6: ヘッダ（M1・5.9）。値は合成の板（架空）。 */
@@ -120,5 +126,65 @@ describe('ヘッダの前提: 取引カレンダー', () => {
     expect(h.calendarExpired).toBe(true);
     expect(h.calendarWarning).toBe('カレンダー期限切れ（カレンダーを読めない）');
     expect(h.assumptions).toContain(h.calendarWarning);
+  });
+});
+
+/** #34 AC-5: 鮮度（取得時刻・データ元）と reason の理由の行。板は合成（reason は書き換え）。 */
+describe('ヘッダ: 取得時刻・データ元・reason の理由', () => {
+  const FETCHED = Date.parse('2026-10-13T21:47:30+09:00');
+
+  it('(a)(b) 取得時刻は JST の HH:MM、データ元はラベル。省略時は null', () => {
+    const chain = normalizeChain(fixture('latest'));
+    const h = headerModel(chain, 'B', CALENDAR, { fetchedAt: FETCHED, label: 'API' });
+    expect(h.fetched).toBe('21:47');
+    expect(h.loadedFrom).toBe('API');
+    const bare = headerModel(chain, 'B', CALENDAR);
+    expect(bare.fetched).toBeNull();
+    expect(bare.loadedFrom).toBeNull();
+    expect(headerModel(chain, 'B', CALENDAR, { fetchedAt: null, label: null }).fetched).toBeNull();
+  });
+
+  it('(c) タグは 最新 / 板寄せ前 / 引け後 / 時間外', () => {
+    expect(REASON_LABEL).toEqual({
+      latest: '最新',
+      pre_open: '板寄せ前',
+      after_close: '引け後',
+      closed: '時間外',
+    });
+  });
+
+  it('(c) latest は理由の行なし', () => {
+    const chain = normalizeChain(fixture('latest'));
+    expect(reasonNote(chain)).toBeNull();
+    expect(headerModel(chain, 'B', CALENDAR).reasonNote).toBeNull();
+  });
+
+  it('(c) pre_open（合成の pre_open.json）は板の時刻を含む理由の行', () => {
+    const chain = normalizeChain(fixture('pre_open'));
+    const h = headerModel(chain, 'B', CALENDAR);
+    expect(h.reason).toBe('板寄せ前');
+    expect(h.reasonNote).toBe(
+      '寄り前のため、板寄せ前の最後のスナップショット（2026-10-13 15:40）を表示',
+    );
+  });
+
+  it.each([
+    ['after_close', '引け後', /^引け後のため、.*（2026-10-13 21:31）を表示$/],
+    [
+      'closed',
+      '時間外',
+      /^時間外・休業日、または取り込みの停止のため、.*（2026-10-13 21:31）を表示$/,
+    ],
+  ] as const)('(c) %s → タグ「%s」と板の時刻を含む理由の行', (reason, tag, note) => {
+    const json = fixture('latest');
+    json.reason = reason;
+    const h = headerModel(normalizeChain(json), 'B', CALENDAR);
+    expect(h.reason).toBe(tag);
+    expect(h.reasonNote).toMatch(note);
+  });
+
+  it('keptBoardNote: 取得時刻が無ければ null、あれば「前の板のまま（取得 HH:MM）」', () => {
+    expect(keptBoardNote(null)).toBeNull();
+    expect(keptBoardNote(FETCHED)).toBe('前の板のまま（取得 21:47）');
   });
 });

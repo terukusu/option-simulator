@@ -77,6 +77,118 @@ describe('bigquery アダプタ（ブラウザ側。/api/chain を読む）', ()
   });
 });
 
+/** #34 AC-2: 本番の既定のアダプタ。fetch は偽物、板は合成。 */
+describe('bigquery アダプタの応答の扱い（#34）', () => {
+  interface Init {
+    signal?: AbortSignal;
+    cache?: RequestCache;
+    redirect?: RequestRedirect;
+  }
+
+  function recorder(res: { ok: boolean; status: number; type?: string; body?: string }) {
+    const inits: (Init | undefined)[] = [];
+    const fetch = async (_url: string, init?: Init) => {
+      inits.push(init);
+      return {
+        ok: res.ok,
+        status: res.status,
+        ...(res.type !== undefined ? { type: res.type } : {}),
+        text: async () => res.body ?? '',
+      };
+    };
+    return { fetch, inits };
+  }
+
+  it('(a) 200 の合成の板 → 検証済みの ChainJson', async () => {
+    const { fetch } = recorder({ ok: true, status: 200, body: latestText });
+    const json = await createBigQueryAdapter({ fetch }).loadChain();
+    expect(json.snapshot_at).toBe('2026-10-13T21:31:00+09:00');
+    expect(json.reason).toBe('latest');
+  });
+
+  it("(b) init は cache: 'no-cache'・redirect: 'manual'（signal も渡す）", async () => {
+    const { fetch, inits } = recorder({ ok: true, status: 200, body: latestText });
+    const a = createBigQueryAdapter({ fetch });
+    await a.loadChain();
+    const ctl = new AbortController();
+    await a.loadChain({ signal: ctl.signal });
+    expect(inits[0]).toEqual({ cache: 'no-cache', redirect: 'manual' });
+    expect(inits[1]).toEqual({ cache: 'no-cache', redirect: 'manual', signal: ctl.signal });
+  });
+
+  it('file アダプタの init は従来どおり no-store（redirect は既定）', async () => {
+    const { fetch, inits } = recorder({ ok: true, status: 200, body: latestText });
+    await createFileAdapter({ url: 'x.json', fetch }).loadChain();
+    expect(inits[0]).toEqual({ cache: 'no-store' });
+  });
+
+  it('(c) 503 → kind http・status 503。応答の本文を含めない', async () => {
+    const { fetch } = recorder({ ok: false, status: 503, body: '{"error":"secret detail"}' });
+    const e = await createBigQueryAdapter({ fetch })
+      .loadChain()
+      .catch((x) => x);
+    expect(e).toBeInstanceOf(ChainLoadError);
+    expect(e.kind).toBe('http');
+    expect(e.status).toBe(503);
+    expect(e.message).not.toMatch(/secret/);
+    expect(e.errors).toEqual([]);
+  });
+
+  it.each([
+    ['opaqueredirect', { ok: false, status: 0, type: 'opaqueredirect' }],
+    ['401', { ok: false, status: 401, body: 'login page' }],
+  ])('(d) %s → ログイン切れ（kind auth）', async (_name, res) => {
+    const { fetch } = recorder(res);
+    const e = await createBigQueryAdapter({ fetch })
+      .loadChain()
+      .catch((x) => x);
+    expect(e).toBeInstanceOf(ChainLoadError);
+    expect(e.kind).toBe('auth');
+    expect(e.message).not.toMatch(/login page/);
+  });
+
+  it('(e) 通信エラー（例外）→ kind network', async () => {
+    const a = createBigQueryAdapter({
+      fetch: async () => {
+        throw new TypeError('Failed to fetch secret-host');
+      },
+    });
+    const e = await a.loadChain().catch((x) => x);
+    expect(e).toBeInstanceOf(ChainLoadError);
+    expect(e.kind).toBe('network');
+    expect(e.status).toBeNull();
+    expect(e.message).not.toMatch(/secret/);
+  });
+
+  it('(f) AbortError はそのまま投げる', async () => {
+    const abort = new DOMException('aborted', 'AbortError');
+    const a = createBigQueryAdapter({
+      fetch: async () => {
+        throw abort;
+      },
+    });
+    await expect(a.loadChain()).rejects.toBe(abort);
+  });
+
+  it('(g) 壊れた JSON → kind invalid・検証エラーの明細つき', async () => {
+    const { fetch } = recorder({ ok: true, status: 200, body: '{"schema_version":1}' });
+    const e = await createBigQueryAdapter({ fetch })
+      .loadChain()
+      .catch((x) => x);
+    expect(e).toBeInstanceOf(ChainLoadError);
+    expect(e.kind).toBe('invalid');
+    expect(e.status).toBeNull();
+    expect(e.errors.length).toBeGreaterThan(0);
+  });
+
+  it('ChainLoadError の既定は kind invalid・status null（既存の呼び方の互換）', () => {
+    const e = new ChainLoadError('x', ['a']);
+    expect(e.kind).toBe('invalid');
+    expect(e.status).toBeNull();
+    expect(e.errors).toEqual(['a']);
+  });
+});
+
 it('読んで正規化まで', async () => {
   const a = createFileAdapter({ blob: new Blob([latestText]) });
   const chain = await loadNormalizedChain(a, { r: 0.004 });

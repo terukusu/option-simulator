@@ -376,3 +376,69 @@ describe('シナリオ・手数料・単位の状態（#6）', () => {
     expect(parseQty('0x10').ok).toBe(false);
   });
 });
+
+/** #34 AC-4: 読み直し（[最新]）と失敗時の保持。時計は App が渡す（reducer は読まない）。 */
+describe('取得時刻と読み直し（#34）', () => {
+  const chain = normalizeChain(fixture('latest'));
+  const T1 = Date.parse('2026-10-13T21:47:00+09:00');
+  const T2 = Date.parse('2026-10-13T21:52:00+09:00');
+
+  it('初期は取得時刻なし。loaded で入る', () => {
+    expect(initialState.fetchedAt).toBeNull();
+    const s = reduce(initialState, { type: 'loaded', chain, label: 'API', fetchedAt: T1 });
+    expect(s.fetchedAt).toBe(T1);
+    expect(s.sourceLabel).toBe('API');
+  });
+
+  it('(a) 板があるときの loaded は足・限月の選択を保ち、取得時刻を更新', () => {
+    const m2 = chain.months[1]?.id as string;
+    const k = chain.months[0]?.source[0]?.k as number;
+    let s = run(
+      initialState,
+      { type: 'loaded', chain, label: 'API', fetchedAt: T1 },
+      { type: 'setMonth', monthId: m2 },
+      {
+        type: 'addBoardLeg',
+        expiry: chain.months[0]?.id as string,
+        k,
+        optionType: 'call',
+        side: 'buy',
+      },
+      { type: 'loading' },
+    );
+    expect(s.loading).toBe(true);
+    const again = normalizeChain(fixture('latest'));
+    s = reduce(s, { type: 'loaded', chain: again, label: 'API', fetchedAt: T2 });
+    expect(s.chain).toBe(again);
+    expect(s.monthId).toBe(m2);
+    expect(s.legs).toHaveLength(1);
+    expect(s.fetchedAt).toBe(T2);
+    expect(s.loading).toBe(false);
+    expect(s.loadError).toBeNull();
+  });
+
+  it('(b) loadFailed は板・取得時刻・データ元を保ってエラーを入れる', () => {
+    const s = run(
+      initialState,
+      { type: 'loaded', chain, label: 'API', fetchedAt: T1 },
+      { type: 'loading' },
+      { type: 'loadFailed', error: { message: '板を読めない（通信エラー）', errors: [] } },
+    );
+    expect(s.chain).toBe(chain);
+    expect(s.fetchedAt).toBe(T1);
+    expect(s.sourceLabel).toBe('API');
+    expect(s.loading).toBe(false);
+    expect(s.loadError?.message).toBe('板を読めない（通信エラー）');
+  });
+
+  it('最初の読み込みで失敗 → 板も取得時刻も無いまま', () => {
+    const s = run(
+      initialState,
+      { type: 'loading' },
+      { type: 'loadFailed', error: { message: 'x', errors: [] } },
+    );
+    expect(s.chain).toBeNull();
+    expect(s.fetchedAt).toBeNull();
+    expect(s.loadError?.message).toBe('x');
+  });
+});
