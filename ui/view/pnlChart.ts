@@ -235,6 +235,11 @@ export interface PnlChartInput {
    * 無い・点数が合わなければ自分で作る
    */
   todayYs?: readonly number[] | null;
+  /**
+   * 前計算した指定日の線の値（dateLine の戻り値。ΔX は線の形に効かないので、長押しドラッグ・ΔX のスライダーでは
+   * 作り直さない。#52）。無い・点数が合わなければ自分で作る
+   */
+  dateYs?: readonly number[] | null;
   /** 表示中の限月のシナリオ ATM（ui/view/scenarioAtm.ts の scenarioAtmMark の K と、その限月の F。#26） */
   scenarioAtm?: { monthId: string; k: number; F: number } | null;
 }
@@ -363,6 +368,25 @@ export function todayLine(
   );
 }
 
+/**
+ * 指定日の線の値（pnlChartModel の dateYs に渡す。描かない条件・足なしは null）。ΔX は線の形に効かない
+ * （β は評価点 X' ごと）ので、ΔX 以外のシナリオ・表示範囲・描画幅が変わったときだけ作り直せばよい（#52）。
+ */
+export function dateLine(
+  base: PnlBase | null,
+  viewport: Domain | null,
+  plotWidth: number,
+  scenario: Scenario,
+): number[] | null {
+  if (!base) return null;
+  const { days } = clampDays(scenario, base.maxDays);
+  if (!hasDateLine(scenario, days)) return null;
+  return sampleLine(base, sampleXs(pnlViewDomain(base, viewport), plotWidth), {
+    ...scenario,
+    days,
+  });
+}
+
 /** パネルの + / − の拡大・縮小（中心固定。×0.8 / ×1.25 はグラフのボタンと同じ）。 */
 export function zoomViewport(base: PnlBase, viewport: Domain | null, factor: number): Domain {
   return zoom(pnlViewDomain(base, viewport), factor, base.full, base.minWidth);
@@ -390,7 +414,12 @@ export function pnlChartModel(input: PnlChartInput): PnlChartModel {
   const xs = sampleXs(domain, input.plotWidth);
   const { days, clamped: daysClamped } = clampDays(scenario, base.maxDays);
   if (hasDateLine(scenario, days)) {
-    lines.push({ kind: 'date', xs, ys: sampleLine(base, xs, { ...scenario, days }), d: '' });
+    const preDate = input.dateYs;
+    const dateYs =
+      preDate && preDate.length === xs.length
+        ? [...preDate]
+        : sampleLine(base, xs, { ...scenario, days });
+    lines.push({ kind: 'date', xs, ys: dateYs, d: '' });
   }
   const pre = input.todayYs;
   const todayYs =

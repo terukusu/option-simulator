@@ -7,6 +7,7 @@
  *   Home/End 端、R = そのスライダーの既定値、+ / = / − / - = 損益グラフの拡大・縮小
  * - 数値欄のパース（範囲外・非数は固定の文言で拒否し、状態を変えない）
  * - 「SQ 日 9:00」「取引最終日 15:45」ボタンの対象（足の限月）と d
+ * - 損益グラフ上の ΔX（#52）: 長押しドラッグの位置 → ΔX（10 円の格子）、グラフのキー , . < >
  */
 
 import { type Calendar, type Chain, monthOf } from '../../data';
@@ -138,6 +139,56 @@ export function sliderSpec(field: SliderField, ctx: SliderContext): SliderSpec {
 const clamp = (v: number, lo: number, hi: number) => Math.min(Math.max(v, lo), hi);
 /** 刻みの格子（0 基準）に丸める（浮動小数の端数を落とす） */
 const snap = (v: number, step: number) => Number((Math.round(v / step) * step).toFixed(10));
+
+// ---------------------------------------------------------------- グラフ上の ΔX（#52）
+
+/** 長押しドラッグの ΔX の格子（円） */
+export const DRAG_DX_STEP = 10;
+/** グラフのキー , / . の刻み（円。スライダーの円の刻みと同じ）と、< / > の刻み */
+export const KEY_DX_STEP = DX_YEN_STEP;
+export const KEY_DX_BIG = 1000;
+
+/** ΔX の範囲（−40%〜+20% の内側で、step の格子に乗る端。X₀ は有効な値であること）。 */
+export function dXRange(x0: number, step: number = DRAG_DX_STEP): [number, number] {
+  return [
+    snapZero(Math.ceil((DX_MIN_RATIO * x0) / step) * step),
+    snapZero(Math.floor((DX_MAX_RATIO * x0) / step) * step),
+  ];
+}
+
+const snapZero = (v: number) => (v === 0 ? 0 : v);
+
+/**
+ * 横軸の値（グラフの位置）→ ΔX: 値 − X₀ を 10 円の格子に丸め、範囲に収める。X₀ が非有限・0 以下、
+ * 値が非有限なら null（NaN を状態に入れない）。
+ */
+export function dXFromAxis(xValue: number, x0: number): number | null {
+  if (!validX0(x0) || !Number.isFinite(xValue)) return null;
+  const [lo, hi] = dXRange(x0);
+  return snapZero(clamp(snap(xValue - x0, DRAG_DX_STEP), lo, hi));
+}
+
+const KEY_DX: ReadonlyMap<string, number> = new Map([
+  [',', -KEY_DX_STEP],
+  ['.', KEY_DX_STEP],
+  ['<', -KEY_DX_BIG],
+  ['>', KEY_DX_BIG],
+]);
+
+/**
+ * グラフのキー: , / . で ∓100 円、< / > で ∓1,000 円。現在値から押した向きに動かし（10 円の格子に乗せる）、
+ * ドラッグと同じ範囲（dXRange）に収める。範囲の端では動かない（押した向きと逆には動かさない）。
+ * 他のキー・X₀ が無効なら null（← / → / + / − / R はグラフの既存の操作のまま）。
+ */
+export function stepDXKey(dX: number, key: string, x0: number): number | null {
+  const delta = KEY_DX.get(key);
+  if (delta === undefined || !validX0(x0)) return null;
+  const cur = Number.isFinite(dX) ? dX : 0;
+  const [lo, hi] = dXRange(x0);
+  const next = snapZero(clamp(snap(cur + delta, DRAG_DX_STEP), lo, hi));
+  // 範囲の外の値（% のスライダーの端など）から端へ戻すと逆向きになるので、そのときは動かさない
+  return (delta > 0 ? next < cur : next > cur) ? cur : next;
+}
 
 export type SliderKeyResult = number | 'zoomIn' | 'zoomOut' | null;
 

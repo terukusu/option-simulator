@@ -19,6 +19,7 @@ import { boardRows, jumpToOtm, referencePrice } from '../../ui/view/board';
 import {
   clippedPath,
   DEFAULT_PNL_Y,
+  dateLine,
   fmtPnlTick,
   hasDateLine,
   maxScenarioDays,
@@ -714,6 +715,28 @@ describe('シナリオと線（#6）', () => {
     });
     expect(wrong).toEqual(plain);
     expect(todayLine(null, null, PLOT_W, sc)).toBeNull();
+  });
+
+  it('前計算した指定日の線（dateLine）を渡すと同じモデル。ΔX だけ違う前計算も同じ。点数が合わなければ自分で作る（#52 AC-11）', () => {
+    const sc: Scenario = { ...ZERO_SCENARIO, days: 4, dX: -1_500, dSigma: 2, beta: 1.5 };
+    const viewport: Domain = [60_000, 75_000];
+    const input = {
+      base,
+      scenario: sc,
+      viewport,
+      pnlY: DEFAULT_PNL_Y,
+      plotWidth: PLOT_W,
+      plotHeight: PLOT_H,
+    };
+    const plain = pnlChartModel(input);
+    // ΔX は線の形に効かないので、ΔX = 0 で作った前計算をそのまま使える
+    const pre = dateLine(base, viewport, PLOT_W, { ...sc, dX: 0 });
+    expect(pre).toHaveLength(PLOT_W);
+    expect(pnlChartModel({ ...input, dateYs: pre })).toEqual(plain);
+    expect(pnlChartModel({ ...input, dateYs: [1, 2, 3] })).toEqual(plain);
+    // 指定日の線を描かない条件・足なしは null
+    expect(dateLine(base, viewport, PLOT_W, { ...ZERO_SCENARIO, dX: 500 })).toBeNull();
+    expect(dateLine(null, viewport, PLOT_W, sc)).toBeNull();
   });
 
   it('シナリオ点 X₀ + ΔX の縦線（ΔX ≠ 0 で範囲内のとき）', () => {

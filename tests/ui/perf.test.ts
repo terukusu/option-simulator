@@ -7,7 +7,15 @@ import { CALENDAR } from '../../ui/calendar';
 import { atmStrike, boardRows } from '../../ui/view/board';
 import { headerModel } from '../../ui/view/header';
 import { metricsModel } from '../../ui/view/metrics';
-import { DEFAULT_PNL_Y, pnlChartModel, pnlDomains, todayLine } from '../../ui/view/pnlChart';
+import {
+  DEFAULT_PNL_Y,
+  dateLine,
+  pnlChartModel,
+  pnlDomains,
+  todayLine,
+} from '../../ui/view/pnlChart';
+import { readoutModel } from '../../ui/view/readout';
+import { scenarioMarks } from '../../ui/view/scenarioMarks';
 import { smileModel } from '../../ui/view/smile';
 import { M1, M2, makeMarket } from '../support/market';
 import { PERF_LEGS } from '../support/perfPosition';
@@ -157,6 +165,60 @@ describe('性能（#6 AC-11: スライダー 1 回の描き直し）', () => {
       slide();
       best = Math.min(best, performance.now() - t0);
     }
+    expect(best).toBeLessThan(BUDGET_MS);
+  });
+});
+
+/**
+ * #52 AC-10: 長押しドラッグの 1 フレーム（ΔX だけが変わる）。部品が memo した今日・指定日の線（todayLine・
+ * dateLine）を渡したグラフの表示モデル + 交点のラベル + 指標 + 読み取りの帯が、足 10 本・幅 1,000px で予算以内。
+ */
+describe('性能（#52 AC-10: 長押しドラッグの 1 フレーム）', () => {
+  const { ctx, rows } = makeMarket();
+  const legs = preparePosition(PERF_LEGS, ctx);
+  const board = {
+    months: [
+      { F: M1.F, rows: rows[M1.id] ?? [] },
+      { F: M2.F, rows: rows[M2.id] ?? [] },
+    ],
+  };
+  const base = pnlDomains(board, legs, ctx);
+  if (!base) throw new Error('損益グラフの基礎が作れない');
+  const scenario0 = { ...ZERO_SCENARIO, days: 5, dSigma: 2 };
+  const today = todayLine(base, null, 1000, scenario0);
+  const date = dateLine(base, null, 1000, scenario0);
+  let tick = 0;
+
+  function scrubFrame(): number {
+    tick = (tick + 1) % 40;
+    const scenario = { ...scenario0, dX: -2_000 + tick * 100 };
+    const m = pnlChartModel({
+      base,
+      scenario,
+      viewport: null,
+      pnlY: DEFAULT_PNL_Y,
+      plotWidth: 1000,
+      plotHeight: 260,
+      todayYs: today,
+      dateYs: date,
+    });
+    const mm = metricsModel({ base, scenario, unit: 'auto' });
+    const marks = scenarioMarks({ base, scenario, chart: m, unit: mm.unit });
+    const r = readoutModel({ base, metrics: mm, scenario });
+    return m.lines.length + (marks?.marks.length ?? 0) + mm.tail.rows.length + r.text.x.length;
+  }
+
+  it(`グラフの表示モデル + 交点 + 指標 + 帯が ${BUDGET_MS} ms 以内（30 回の最小値）`, () => {
+    expect(date).not.toBeNull();
+    expect(scrubFrame()).toBeGreaterThan(8);
+    for (let i = 0; i < 20; i++) scrubFrame();
+    let best = Number.POSITIVE_INFINITY;
+    for (let i = 0; i < 30; i++) {
+      const t0 = performance.now();
+      scrubFrame();
+      best = Math.min(best, performance.now() - t0);
+    }
+    console.info(`#52 長押しドラッグの 1 フレーム: ${best.toFixed(2)} ms`);
     expect(best).toBeLessThan(BUDGET_MS);
   });
 });

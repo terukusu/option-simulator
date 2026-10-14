@@ -5,6 +5,9 @@
  * - ドラッグ / 1 本指: パン。2 本指: ピンチ。ダブルクリック / ダブルタップ: リセット
  * - フォーカス時のキー: + / = 拡大、− 縮小（中心固定）、← / → 幅の 10% パン、R リセット
  * - タップ（動かさずに離す）は onTap に要素の座標で渡す（スマイルの点の選択）
+ * - scrub を渡したとき（損益グラフ。#52）: 長押し（6px 未満のまま 450ms）・縦線の ±12px の押下でつかみ、
+ *   指の位置を onScrub に要素の座標で渡す。キー , . < > は onScrubKey に渡す。長押しの OS のメニュー
+ *   （contextmenu）を止める
  *
  * 規則はすべて純関数（ui/chart/scale.ts・ui/chart/gesture.ts）。ここはイベントを受けて渡すだけ。
  * move・wheel の反映は requestAnimationFrame で 1 フレーム 1 回にまとめる。最新の props は ref で持ち、
@@ -18,9 +21,11 @@ import {
   type GestureResult,
   gestureCancel,
   gestureDown,
+  gestureLongPress,
   gestureMove,
   gestureUp,
   initialGesture,
+  LONG_PRESS_MS,
   type PointerSample,
 } from '../chart/gesture';
 import { type Domain, panBy, pixelToValue, wheelFactor, zoom, zoomAt } from '../chart/scale';
@@ -42,6 +47,12 @@ export interface ChartGestureOptions {
   /** 表示範囲の変更（null = リセット） */
   onViewport: (viewport: Domain | null) => void;
   onTap?: (x: number, y: number) => void;
+  /** 長押し・縦線をつかむ操作を有効にする（linePx = つかめる縦線の画素。無ければ null。#52） */
+  scrub?: { linePx: number | null };
+  /** つかんでいる位置（要素の座標の画素。1 フレーム 1 回） */
+  onScrub?: (x: number) => void;
+  /** グラフのキー（, . < >）。扱ったら true（既定の動作を止める） */
+  onScrubKey?: (key: string) => boolean;
 }
 
 export function useChartGestures(ref: RefObject<HTMLElement>, opts: ChartGestureOptions): void {
@@ -54,27 +65,49 @@ export function useChartGestures(ref: RefObject<HTMLElement>, opts: ChartGesture
     let state = initialGesture();
     /** まだ反映していない表示範囲（同じフレームの wheel を重ねる・ピンチの取り直しに使う） */
     let pending: Domain | null = null;
+    /** まだ反映していない、つかんでいる位置 */
+    let pendingScrub: number | null = null;
     let frame = 0;
+    /** 長押しのタイマー */
+    let longTimer = 0;
 
     const current = (): Domain => pending ?? optsRef.current.viewport;
     const ctx = (): GestureCtx => {
       const o = optsRef.current;
-      return { viewport: current(), range: o.range, full: o.full, minWidth: o.minWidth };
+      return {
+        viewport: current(),
+        range: o.range,
+        full: o.full,
+        minWidth: o.minWidth,
+        ...(o.scrub ? { scrub: o.scrub } : {}),
+      };
     };
     const flush = () => {
       frame = 0;
       const v = pending;
+      const sx = pendingScrub;
       pending = null;
+      pendingScrub = null;
       if (v) optsRef.current.onViewport(v);
+      if (sx !== null) optsRef.current.onScrub?.(sx);
     };
     const schedule = (v: Domain) => {
       pending = v;
       if (!frame) frame = requestAnimationFrame(flush);
     };
+    const scheduleScrub = (x: number) => {
+      pendingScrub = x;
+      if (!frame) frame = requestAnimationFrame(flush);
+    };
+    const clearLong = () => {
+      if (longTimer) clearTimeout(longTimer);
+      longTimer = 0;
+    };
     const reset = () => {
       if (frame) cancelAnimationFrame(frame);
       frame = 0;
       pending = null;
+      pendingScrub = null;
       optsRef.current.onViewport(null);
     };
     const sample = (e: PointerEvent): PointerSample => {
@@ -85,7 +118,10 @@ export function useChartGestures(ref: RefObject<HTMLElement>, opts: ChartGesture
       state = res.state;
       if (res.reset) reset();
       else if (res.viewport) schedule(res.viewport);
+      if (res.scrub) scheduleScrub(res.scrub.x);
       if (res.tap) optsRef.current.onTap?.(res.tap.x, res.tap.y);
+      // 長押しを待つのは 1 本の押下（pending）の間だけ
+      if (state.mode !== 'pending' || state.pointers.length !== 1) clearLong();
     };
 
     const onDown = (e: PointerEvent) => {
@@ -99,11 +135,21 @@ export function useChartGestures(ref: RefObject<HTMLElement>, opts: ChartGesture
         // capture できない環境でも操作は続ける
       }
       apply(gestureDown(state, sample(e), ctx()));
+      if (optsRef.current.scrub && state.mode === 'pending' && state.pointers.length === 1) {
+        clearLong();
+        // PointerEvent.timeStamp と同じ時計（performance.now）で発火時刻を渡す
+        longTimer = window.setTimeout(() => {
+          longTimer = 0;
+          apply(gestureLongPress(state, performance.now(), ctx()));
+        }, LONG_PRESS_MS);
+      }
     };
     const onMove = (e: PointerEvent) => {
       if (state.pointers.length === 0) return;
       apply(gestureMove(state, sample(e), ctx()));
-      if (state.mode === 'drag' || state.mode === 'pinch') e.preventDefault();
+      if (state.mode === 'drag' || state.mode === 'pinch' || state.mode === 'scrub') {
+        e.preventDefault();
+      }
     };
     const onUp = (e: PointerEvent) => {
       if (state.pointers.length === 0) return;
@@ -155,6 +201,7 @@ export function useChartGestures(ref: RefObject<HTMLElement>, opts: ChartGesture
           reset();
           return;
         default:
+          if (o.onScrubKey?.(e.key)) e.preventDefault();
           return;
       }
       e.preventDefault();
@@ -167,7 +214,13 @@ export function useChartGestures(ref: RefObject<HTMLElement>, opts: ChartGesture
       reset();
     };
 
+    // 長押しで OS のメニュー（Android Chrome の長押しメニュー・右クリック）を出さない（損益グラフだけ）
+    const onContextMenu = (e: Event) => {
+      if (optsRef.current.scrub && !optsRef.current.disabled) e.preventDefault();
+    };
+
     el.addEventListener('pointerdown', onDown);
+    el.addEventListener('contextmenu', onContextMenu);
     el.addEventListener('pointermove', onMove);
     el.addEventListener('pointerup', onUp);
     el.addEventListener('pointercancel', onCancel);
@@ -177,7 +230,9 @@ export function useChartGestures(ref: RefObject<HTMLElement>, opts: ChartGesture
     el.addEventListener('dblclick', onDbl);
     return () => {
       if (frame) cancelAnimationFrame(frame);
+      clearLong();
       el.removeEventListener('pointerdown', onDown);
+      el.removeEventListener('contextmenu', onContextMenu);
       el.removeEventListener('pointermove', onMove);
       el.removeEventListener('pointerup', onUp);
       el.removeEventListener('pointercancel', onCancel);
