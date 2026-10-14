@@ -614,9 +614,9 @@ F の推定・補間・ATM の判定はブラウザ（`model/`）。`sq_date`・
 | GCP プロジェクト | optionchan と同じ | データセットの読み取りが同じプロジェクト内。OAuth クライアントを流用できる |
 | IaC の置き場所 | このリポジトリ（`infra/bootstrap` を所有者が apply、`infra/prod` を CI が apply）。必要なものの一覧・名前は付録 B、手順は `infra/README.md` | optionchan-gcp 側の変更を不要にする |
 | API の言語 | Python（Flask / gunicorn）。ビューアーの `bq.py` / `settings.py` / テスト / Dockerfile を写す | BigQuery の読み方・セキュリティヘッダ・テストの流儀が揃う。API は薄い |
-| 静的ファイル | Vite のビルド成果物を Flask から配る（環境変数 `STATIC_DIR` のディレクトリの `/`（`index.html`、`no-cache`）と `/assets/<path>`（`immutable`）。未設定なら 404）。イメージへの同梱は Dockerfile の Node ステージ（#36）。CDN なし。ローカルは Vite の `server.proxy` で `/api` → `127.0.0.1:8080` の Flask（同一オリジン維持） | CSP `script-src 'self'` |
+| 静的ファイル | Vite のビルド成果物を Flask から配る（環境変数 `STATIC_DIR` のディレクトリの `/`（`index.html`、`no-cache`）と `/assets/<path>`（`immutable`）。未設定なら 404）。イメージへの同梱はリポジトリ直下の `Dockerfile` の Node ステージ（`npm ci --ignore-scripts` → `npm run build` の `dist/` を `/app/static` に置き、`STATIC_DIR` はイメージの環境変数。#36）。CDN なし。ローカルは Vite の `server.proxy` で `/api` → `127.0.0.1:8080` の Flask（同一オリジン維持） | CSP `script-src 'self'` |
 | 設定 | `GCP_PROJECT`（`bigquery` のとき必須）、`BQ_DATASET`（既定 `optionchan_tokyo`）、`BQ_LOCATION`（既定 `asia-northeast1`）、`MAX_BYTES_BILLED`（既定かつ上限 512 MiB）、`DATA_SOURCE`（`bigquery` / `file`。`file` は `CHAIN_FILE` の JSON をそのまま `/api/chain` で返し、`/api/calendar` は 503。GCP なしの起動確認・clone した人向け）、`CHAIN_FILE`、`STATIC_DIR`。詳細は `api/README.md` | ビューアーと同じ名前 |
-| Cloud Run | ビューアーと同じ（第 1 世代、CPU 1・512Mi、0〜2 インスタンス、60 秒、digest 指定）。検証はリビジョンタグ（トラフィック 0 のタグ付き URL） | 実績のある値 |
+| Cloud Run | ビューアーと同じ（第 1 世代、CPU 1・512Mi・リクエスト中だけ CPU、0〜2 インスタンス、60 秒、digest 指定、同時実行 8、起動プローブ `/healthz`）。gunicorn は 1 ワーカー・8 スレッド（API のキャッシュと single-flight をインスタンス内で共有する。13.4）。`infra/prod/simulator.tf`。検証は apply 後に本番の URL で行い（`infra/README.md`「prod（Cloud Run simulator）」の確認）、戻すときは revert の PR → deploy、急ぐときは `gcloud run services update-traffic` で旧リビジョンへ（#36。リビジョンタグでの事前検証はしない） | 実績のある値。リビジョンタグはビューアーも使っておらず、初回は戻す先の旧リビジョンも利用者もいない。タグを入れると Terraform の `traffic` と deploy の 2 段階化が要る |
 | IAP の権限 | `httpsResourceAccessor`（閲覧者）は **bootstrap（所有者 apply、`local.auto.tfvars`）** に置く。付与には `roles/iap.admin` が要り、apply SA には渡さない | optionchan と同じ |
 
 初回デプロイの順序: bootstrap 1 回目（SA・WIF・state・閲覧者は空）→ IAP のサービスエージェント作成 → OAuth クライアントの確認（付録 B）→ prod の apply（CI。サービスと `run.invoker`）→ bootstrap 2 回目（閲覧者を入れる）→ 確認。
@@ -632,7 +632,7 @@ F の推定・補間・ATM の判定はブラウザ（`model/`）。`sq_date`・
 | 可用性 | optionchan が止まっていても最後の板（localStorage）で動く。API が 503 なら「古い板」の印（#23。#34 の時点では開いたままの画面のメモリ内の前の板を保ち、種別ごとのエラーを出すだけ） |
 | セキュリティ | 8.1。入力値は応答・ログに反射しない。BigQuery の例外本文は応答に出さない |
 | ログ | JSON の構造化ログ（ビューアーの `log.py` と同じ形）。個人情報・資格情報・IAP のメールを出さない |
-| テスト戦略 | (1) `model/`: vitest。文献値、性質テスト（PCP 恒等式、K 単調性・凸性、価格 ↔ IV のラウンドトリップ、極限）、合成板からの F の回復、満期損益の解析解。(2) 補間・テンプレート・判定: 合成の固定 JSON でスナップショットテスト（17 時台の少ない行数の板も）。(3) API: pytest、偽 runner。SQL は `OPTIONCHAN_BQ_TEST=1` のときだけ dry run。スキーマ照合は CI（AC25）。(4) インフラ: Terraform の静的テスト（IAP 有効、`allUsers` 不在、digest 指定）。(5) ビルド成果物の CSP 検査（AC11）。(6) E2E は後段（Playwright で U1） |
+| テスト戦略 | (1) `model/`: vitest。文献値、性質テスト（PCP 恒等式、K 単調性・凸性、価格 ↔ IV のラウンドトリップ、極限）、合成板からの F の回復、満期損益の解析解。(2) 補間・テンプレート・判定: 合成の固定 JSON でスナップショットテスト（17 時台の少ない行数の板も）。(3) API: pytest、偽 runner。SQL は `OPTIONCHAN_BQ_TEST=1` のときだけ dry run。スキーマ照合は CI（AC25）。(4) インフラ: Terraform の静的テスト（IAP 有効、`allUsers` 不在、digest 指定。`infra/*/tests/`）と、イメージの検査（`.github/scripts/image-check.sh`。import・非 root・`.git` / テスト / fixture / `infra` を含まない・`/healthz`・`/`・`/assets/*` が 200 で CSP ヘッダ付き）。(5) ビルド成果物の CSP 検査（`.github/scripts/csp-check.sh`。`dist/index.html` とイメージに同梱した `index.html` の両方。AC11）。(6) E2E は後段（Playwright で U1） |
 
 ## 10. 技術の候補
 
@@ -779,7 +779,7 @@ F の推定・補間・ATM の判定はブラウザ（`model/`）。`sq_date`・
 - 裁定の検査の閾値: 違反量が関係する行の bid–ask 幅の和の半分（無ければ呼値の和の半分）を超えたら印（実装済み。合成の板では印は全行の 3% 未満）
 - IV 逆算の「解なし」: 時間価値（価格 − 割引本源的価値）が 0.01 円未満（実装済み。アンカー IV は 5.3 (i) でスマイルへ）
 - Vite のビルド設定（インライン script・`modulepreload` の polyfill）と CI の検査方法
-- キャッシュの TTL・single-flight の実装: **決定（2026-10-14、#33）** — `latest_runs` TTL 10 秒、板 LRU 16 件（キー `(snapshot_at, finished_at)`。値は判定の結果と組み立て済みの JSON・gzip）、カレンダー TTL 1 時間（読めなければ古い版。一度も読めていなければ 503）、すべて single-flight（gunicorn のワーカーごと）。1 リクエストの BigQuery 待ちの合計 40 秒・1 ジョブ 20 秒
+- キャッシュの TTL・single-flight の実装: **決定（2026-10-14、#33）** — `latest_runs` TTL 10 秒、板 LRU 16 件（キー `(snapshot_at, finished_at)`。値は判定の結果と組み立て済みの JSON・gzip）、カレンダー TTL 1 時間（読めなければ古い版。一度も読めていなければ 503）、すべて single-flight（gunicorn のワーカーごと。本番は 1 ワーカー・8 スレッドなのでインスタンスごと。#36）。1 リクエストの BigQuery 待ちの合計 40 秒・1 ジョブ 20 秒
 - `?at=` の制限値（後段。7.1）
 - 拡大 / パンの実装: **決定（2026-10-14）** — 自前の SVG + Pointer Events（ホイール / ドラッグ / ピンチは #11。座標・拡大の規則は `ui/chart/scale.ts` の純関数で共用。#5 はボタンの拡大だけ）
 - 損益グラフの数値: **決定（2026-10-14、#11）**
@@ -889,9 +889,16 @@ optionchan-gcp の bootstrap / prod を写すだけでは足りないもの。
 | IAP | prod: `iap_enabled = true`、`run.invoker` = IAP のサービスエージェント。bootstrap: `httpsResourceAccessor` をサービス単位で閲覧者に（`roles/iap.admin` が要るので所有者 apply。apply SA には渡さない） |
 | OAuth クライアント | ビューアーでリージョン単位に設定済みなら流用（`gcloud iap settings get --resource-type=cloud-run --region=<REGION>` で確認）。サービス単位だったら `--service=simulator` で同じクライアントを設定。プロジェクト単位の `iap.httpsResourceAccessor` の継承も確認項目。**clone 利用者は optionchan の runbook「ビューアー」の手順 2〜4（同意画面・クライアント作成・IAP 設定）が丸ごと必要** |
 | GitHub | repository variables（`GCP_PROJECT_ID`、`TF_STATE_BUCKET`、`GCP_SA_TF_PLAN`、`GCP_SA_TF_APPLY`）、secret `GCP_WIF_PROVIDER`（WIF プロバイダの完全名。プロジェクト番号を含む）、Environment `prod`（`main` のみ・required reviewer は所有者）、ブランチ保護（既存の必須 check `check`。変更なし）。Terraform の github プロバイダは使わず gh の手順（`infra/README.md`。所有者の GitHub トークンを Terraform・state に入れない） |
-| テスト | `terraform test`（`infra/bootstrap/tests/`、モックのプロバイダ。資格情報なしで CI の `check` job で回る）: 公開の拒否、WIF の条件、apply SA の subject、データセットの付与の型と role（AC11） |
+| テスト | `terraform test`（`infra/bootstrap/tests/`・`infra/prod/tests/`、モックのプロバイダ。資格情報なしで CI の `check` job で回る）: bootstrap は公開の拒否、WIF の条件、apply SA の subject、データセットの付与の型と role。prod は IAP 有効・`ingress`・IAM の検査が有効、`run.invoker` が IAP のサービスエージェント 1 件だけ、イメージが digest か `src-<20hex>` のタグ参照だけ、8.3 の値（AC11） |
 
 ## 変更履歴
+
+### 2026-10-14 infra/prod と CI / CD（#36）
+
+- 8.3: Cloud Run の行に同時実行 8・リクエスト中だけ CPU・起動プローブ `/healthz`・gunicorn 1 ワーカー 8 スレッド（13.4）。「検証はリビジョンタグ」を、apply 後に本番の URL で確かめ、戻すのは revert / `update-traffic` に変更（オーナー判断、2026-10-14。理由は表の右列）。静的ファイルの行にイメージへの同梱の方法
+- 付録 B: テストの行に `infra/prod/tests/`
+- 13.4: キャッシュ・single-flight の行に本番の gunicorn は 1 ワーカー（インスタンスごと）
+- 9 章: テスト戦略の (4)(5) にイメージの検査と CSP 検査のスクリプト（`.github/scripts/`）
 
 ### 2026-10-14 画面の bigquery アダプタ（#34）
 
