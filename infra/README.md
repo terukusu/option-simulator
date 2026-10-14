@@ -40,6 +40,10 @@ R=repos/$REPO
 TF="mise exec terraform@1.16.4 -- terraform"
 export TF_VAR_project_id=$P TF_VAR_github_repository=$REPO
 export TF_VAR_github_repository_id=$(gh api $R --jq .id) TF_VAR_github_owner_id=$(gh api $R --jq .owner.id)
+# GitHub の OIDC の sub の形式（2026 年以降の既定は不変 ID 入り = true）。apply SA の subject がこれに合わないと deploy の apply で借用に失敗する
+export TF_VAR_github_oidc_immutable_subject=$(gh api $R/actions/oidc/customization/sub --jq '.use_immutable_subject // false')
+# ↑ 取得に失敗すると false になるので、値を echo して確かめる。use_default が false（sub のキーを独自に指定）の場合はこの組み立てでは合わない。owner / repo 名の大文字小文字は GitHub の実際の表記に合わせる
+echo "immutable_subject=$TF_VAR_github_oidc_immutable_subject"
 # ADC が無いときだけトークンを渡す（トークンは 1 時間で切れるので、長い作業では途中で export し直す）
 gcloud auth application-default print-access-token > /dev/null 2>&1 \
   || export GOOGLE_OAUTH_ACCESS_TOKEN=$(gcloud auth print-access-token)

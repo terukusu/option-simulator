@@ -20,6 +20,12 @@ resource "google_service_account" "tf_apply" {
 
 locals {
   pool_name = google_iam_workload_identity_pool.github.name
+  # Environment prod の job の sub（variables.tf の github_oidc_immutable_subject）
+  github_owner = split("/", var.github_repository)[0]
+  github_name  = split("/", var.github_repository)[1]
+  apply_subject = (var.github_oidc_immutable_subject
+    ? "repo:${local.github_owner}@${var.github_owner_id}/${local.github_name}@${var.github_repository_id}:environment:prod"
+  : "repo:${var.github_repository}:environment:prod")
 }
 
 # plan SA: このリポジトリのどの workflow からも借用できる（PR の plan 用）
@@ -33,7 +39,7 @@ resource "google_service_account_iam_member" "tf_plan_wif" {
 resource "google_service_account_iam_member" "tf_apply_wif" {
   service_account_id = google_service_account.tf_apply.name
   role               = "roles/iam.workloadIdentityUser"
-  member             = "principal://iam.googleapis.com/${local.pool_name}/subject/repo:${var.github_repository}:environment:prod"
+  member             = "principal://iam.googleapis.com/${local.pool_name}/subject/${local.apply_subject}"
 }
 
 # Cloud Run の作成にはプロジェクト単位の run.admin が要る。optionchan のサービス（ingest / viewer）にも及ぶ
