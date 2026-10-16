@@ -19,7 +19,7 @@
 ## 開発
 
 - Node は 22（`.node-version`）。依存はバージョン固定（`package-lock.json` をコミット）
-- 確認: `npm ci && npm run typecheck && npm run lint && npm run fixtures:check && npm test`（CI と同じ。lint は Biome、整形は `npm run format`）。API は `cd api && uv run --locked ruff check && uv run --locked pytest -q`（uv 0.12.19、Python 3.13）。Terraform は `terraform fmt -check -recursive infra` と、`infra/bootstrap`・`infra/prod` それぞれで `init -backend=false -input=false && validate && test`（手元は `mise exec terraform@1.16.4 -- terraform`。資格情報なし）。イメージ（リポジトリ直下の `Dockerfile`。context に入るものは `.dockerignore` の許可リストで、`.github/scripts/image.sh` の入力パスと同じにする）は `docker build -t simulator:local . && .github/scripts/image-check.sh simulator:local`
+- 確認: `npm ci && npm run typecheck && npm run lint && npm run fixtures:check && npm test`（CI と同じ。lint は Biome、整形は `npm run format`）。性能に関わる変更は負荷の低いときに `npm run perf`（16 ms の判定。性能テストの 2 ファイルだけを並列なしで。`npm test`・CI の性能テストは 200 ms）。API は `cd api && uv run --locked ruff check && uv run --locked pytest -q`（uv 0.12.19、Python 3.13）。Terraform は `terraform fmt -check -recursive infra` と、`infra/bootstrap`・`infra/prod` それぞれで `init -backend=false -input=false && validate && test`（手元は `mise exec terraform@1.16.4 -- terraform`。資格情報なし）。イメージ（リポジトリ直下の `Dockerfile`。context に入るものは `.dockerignore` の許可リストで、`.github/scripts/image.sh` の入力パスと同じにする）は `docker build -t simulator:local . && .github/scripts/image-check.sh simulator:local`
 - 画面: `npm run dev`（Vite の root は `ui/`。合成の板は `scripts/devFixtures.mjs` が dev サーバーでだけ配る）、`npm run build` で `dist/`（JSON を入れない）。322 行の板は `npm run fixtures -- --wide`（`fixtures/local/` に書く）
 
 ## リポジトリに置くもの / 置かないもの

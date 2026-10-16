@@ -687,7 +687,7 @@ F の推定・補間・ATM の判定はブラウザ（`model/`）。`sq_date`・
 | 可用性 | optionchan が止まっていても最後の板（localStorage）で動く。開いたとき API が 503・通信エラーで板が無ければ、最後に取れた板を「古い板」の印（ヘッダのタグ・日付つきの取得時刻・Loader の注記）つきで使う（#23）。開いたままの画面ではメモリ内の前の板を保ち、種別ごとのエラーを出す（#34） |
 | セキュリティ | 8.1。入力値は応答・ログに反射しない。BigQuery の例外本文は応答に出さない |
 | ログ | JSON の構造化ログ（ビューアーの `log.py` と同じ形）。個人情報・資格情報・IAP のメールを出さない |
-| テスト戦略 | (1) `model/`: vitest。文献値、性質テスト（PCP 恒等式、K 単調性・凸性、価格 ↔ IV のラウンドトリップ、極限）、合成板からの F の回復、満期損益の解析解。(2) 補間・テンプレート・判定: 合成の固定 JSON でスナップショットテスト（17 時台の少ない行数の板も）。(3) API: pytest、偽 runner。SQL は `OPTIONCHAN_BQ_TEST=1` のときだけ dry run。スキーマ照合は CI（AC25）。(4) インフラ: Terraform の静的テスト（IAP 有効、`allUsers` 不在、digest 指定。`infra/*/tests/`）と、イメージの検査（`.github/scripts/image-check.sh`。import・非 root・`.git` / テスト / fixture / `infra` を含まない・`/healthz`・`/`・`/assets/*` が 200 で CSP ヘッダ付き）。(5) ビルド成果物の CSP 検査（`.github/scripts/csp-check.sh`。`dist/index.html` とイメージに同梱した `index.html` の両方。AC11）。(6) E2E は後段（Playwright で U1） |
+| テスト戦略 | (1) `model/`: vitest。文献値、性質テスト（PCP 恒等式、K 単調性・凸性、価格 ↔ IV のラウンドトリップ、極限）、合成板からの F の回復、満期損益の解析解。(2) 補間・テンプレート・判定: 合成の固定 JSON でスナップショットテスト（17 時台の少ない行数の板も）。(3) API: pytest、偽 runner。SQL は `OPTIONCHAN_BQ_TEST=1` のときだけ dry run。スキーマ照合は CI（AC25）。(4) インフラ: Terraform の静的テスト（IAP 有効、`allUsers` 不在、digest 指定。`infra/*/tests/`）と、イメージの検査（`.github/scripts/image-check.sh`。import・非 root・`.git` / テスト / fixture / `infra` を含まない・`/healthz`・`/`・`/assets/*` が 200 で CSP ヘッダ付き）。(5) ビルド成果物の CSP 検査（`.github/scripts/csp-check.sh`。`dist/index.html` とイメージに同梱した `index.html` の両方。AC11）。(6) E2E は後段（Playwright で U1）。(7) 性能: 計算部分のベンチ（`tests/model/perf.test.ts`・`tests/ui/perf.test.ts`。AC8 の補助。計測の手順は `tests/support/perf.ts` の 1 か所で、判定は最小値）。16 ms の判定は `npm run perf`（2 ファイルだけを並列なしで。手元・負荷の低いときに。始めに load average と CPU の数を出す）、`npm test` と CI は 200 ms（桁違いの悪化だけを落とす） |
 
 ## 10. 技術の候補
 
@@ -1017,6 +1017,12 @@ optionchan-gcp の bootstrap / prod を写すだけでは足りないもの。
 | テスト | `terraform test`（`infra/bootstrap/tests/`・`infra/prod/tests/`、モックのプロバイダ。資格情報なしで CI の `check` job で回る）: bootstrap は公開の拒否、WIF の条件、apply SA の subject、データセットの付与の型と role。prod は IAP 有効・`ingress`・IAM の検査が有効、`run.invoker` が IAP のサービスエージェント 1 件だけ、イメージが digest か `src-<20hex>` のタグ参照だけ、8.3 の値（AC11） |
 
 ## 変更履歴
+
+### 2026-10-16 性能の判定の分離（#32）
+
+- 9 章「テスト戦略」に (7) 性能を追加。16 ms の判定の手段を `npm test` の既定から `npm run perf`（`scripts/perf.mjs`。性能テストの 2 ファイルだけを並列なしで、既定 16 ms）に移した。`npm test` の既定は CI と同じ 200 ms。性能の目標（9 章「性能」・2 章 AC8）と 16 ms の数値は変えない
+- 性能テスト 14 件（判定 12 件 + 記録のみ 2 件）の計測を `tests/support/perf.ts` にまとめた（ウォームアップ・回数は従来どおり。判定は最小値。予算を超えたら同じ回数を最大 2 巡まで測り直し、全回の最小値で判定）。記録のみ 2 件の回数は `npm run perf` で 5 回、`npm test`・CI で 1 回（重い記録が他の負荷で timeout に掛からないように）
+- 損益グラフの path の照合（`tests/ui/pnlChart.test.ts`）を、点の近くの区間だけを二分探索で選んで測る形にした（「1px 以内か」の判定は総当たりと同じ。点数 2,001・許容 1px は不変）。照合が 1.5px ずらした path を落とすテストを追加
 
 ### 2026-10-16 ピン留め（#22）
 

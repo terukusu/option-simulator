@@ -13,6 +13,7 @@
     "lint": "biome check .",
     "format": "biome check --write .",
     "test": "vitest run",
+    "perf": "node scripts/perf.mjs",
     "fixtures": "node scripts/fixtures.mjs",
     "fixtures:check": "node scripts/fixtures.mjs --check",
     "calendar:sync": "node scripts/syncCalendar.mjs"
