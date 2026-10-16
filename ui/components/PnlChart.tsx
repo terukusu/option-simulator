@@ -20,6 +20,7 @@ import {
 import type { ReadoutModel } from '../view/readout';
 import { dXFromAxis, stepDXKey } from '../view/scenario';
 import { scenarioMarks } from '../view/scenarioMarks';
+import { Hint } from './Hint';
 import { pure } from './pure';
 import { Readout } from './Readout';
 import { useChartGestures } from './useChartGestures';
@@ -432,7 +433,7 @@ function PnlChartView({
         {/* グラフのすぐ下に読み取りの帯（シナリオ点の値。#52） */}
         <Readout model={readout} />
       </div>
-      <p class="legend note">
+      <p class="legend note hint-host">
         <span class="lg expiry">━ {LINE_LABEL.expiry}</span>{' '}
         {model.lines.some((l) => l.kind === 'date') ? (
           <span class="lg date">
@@ -451,20 +452,23 @@ function PnlChartView({
             {' '}
             ┆ シナリオ ATM（{model.scenarioAtm.monthId} 限 {fmtNum(model.scenarioAtm.k, 0)}）
           </span>
-        )}
-        {marks && (
+        )}{' '}
+        <span class="lg y-unit">縦軸 {unit}</span>{' '}
+        <Hint label="損益グラフの前提と操作">
+          {marks && (
+            <span class="block">
+              縦線上の 満 / 指 / 今 = シナリオ点 X {fmtNum(marks.x)}{' '}
+              の満期・指定日・今日の損益（指標の単位 {AMOUNT_UNIT_LABEL[amountUnit]}
+              ）。長押しして左右にドラッグでシナリオ点を動かす
+            </span>
+          )}
           <span class="block">
-            縦線上の 満 / 指 / 今 = シナリオ点 X {fmtNum(marks.x)}{' '}
-            の満期・指定日・今日の損益（指標の単位 {AMOUNT_UNIT_LABEL[amountUnit]}
-            ）。長押しして左右にドラッグでシナリオ点を動かす
+            横軸 = 原資産 X（円）、縦軸 = 損益（単位は凡例の「縦軸」）。前提: 指定日の線 =
+            シナリオ（Δσ {fmtNum(scenario.dSigma, 1)}
+            pt、Δs {fmtNum(scenario.skew, 1)}）、今日の線 = シナリオ IV なし。どちらも β{' '}
+            {fmtNum(scenario.beta, 1)}pt/1%（横軸の各点）、{DYNAMICS_LABEL[scenario.ivDynamics]}
           </span>
-        )}
-        <span class="block">
-          横軸 X（円）/ 縦軸 損益（{unit}）。前提: 指定日の線 = シナリオ（Δσ{' '}
-          {fmtNum(scenario.dSigma, 1)}
-          pt、Δs {fmtNum(scenario.skew, 1)}）、今日の線 = シナリオ IV なし。どちらも β{' '}
-          {fmtNum(scenario.beta, 1)}pt/1%（横軸の各点）、{DYNAMICS_LABEL[scenario.ivDynamics]}
-        </span>
+        </Hint>
         {model.premiumFallback && <span class="block warn">プレミアム 0 のため自動</span>}
         {model.daysClamped && (
           <span class="block warn">

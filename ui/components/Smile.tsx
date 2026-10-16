@@ -17,6 +17,7 @@ import {
   stepStrike,
   tapStrike,
 } from '../view/smile';
+import { Hint } from './Hint';
 import { pure } from './pure';
 import { useChartGestures } from './useChartGestures';
 import { useWidth } from './useWidth';
@@ -290,16 +291,16 @@ function SmileView({
           </button>
         </div>
       )}
-      <p class="legend note">
+      <p class="legend note hint-host">
         <span class="lg mid">● mid</span> <span class="lg bid">● bid</span>{' '}
         <span class="lg ask">● ask</span> ─ 節点区間 ┄ 補間・外挿 × IV 不安定{' '}
         <span class="lg atm">│ ATM（{basis}）</span>
         {scnAtmX !== null && scenarioAtmK !== null && (
           <span class="lg scn-atm"> ┆ シナリオ ATM {fmtNum(scenarioAtmK, 0)}</span>
         )}
-        <span class="block">
+        <Hint label="スマイルの操作">
           点をタップで選択（もう一度タップで解除）。長押しして左右にドラッグで選択を切り替え
-        </span>
+        </Hint>
       </p>
     </div>
   );

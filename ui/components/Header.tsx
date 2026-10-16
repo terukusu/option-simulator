@@ -1,6 +1,7 @@
 import { Fragment } from 'preact';
 import type { AtmBasis } from '../../model';
 import type { HeaderModel, ReferenceView } from '../view/header';
+import { Hint } from './Hint';
 
 function Ref({ r, active }: { r: ReferenceView; active: boolean }) {
   return (
@@ -89,14 +90,20 @@ export function Header({
           </div>
         ))}
       </div>
-      <p class="note">
+      <p class="note hint-host">
         前提:{' '}
         {model.assumptions.map((a, i) => (
           <Fragment key={a}>
             {i > 0 && ' / '}
             {a === model.calendarWarning ? <strong class="warn">{a}</strong> : a}
           </Fragment>
-        ))}
+        ))}{' '}
+        <Hint label="計算の前提">
+          金利は割引（e^−rT）とプット・コール・パリティに使う年率（価格への影響はおおむね 金利 ×
+          残存期間。0.5% なら 1 か月で 0.05% 程度）。評価時刻は残存期間を数える起点で、指定日 d
+          はここから数える。取引カレンダーは SQ
+          日・取引最終日の休業日の判定に使い、確定の範囲より先は休業日が漏れている可能性がある
+        </Hint>
       </p>
     </header>
   );

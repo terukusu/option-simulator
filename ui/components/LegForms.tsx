@@ -10,6 +10,7 @@ import {
   parseStrike,
 } from '../state';
 import { PRODUCT_LABEL } from '../view/position';
+import { Hint } from './Hint';
 
 function text(form: HTMLFormElement, name: string): string {
   const el = form.elements.namedItem(name);
@@ -122,7 +123,14 @@ export function LegForms({ chain, dispatch }: { chain: Chain; dispatch: (a: Acti
         {futError && <p class="field-error">{futError}</p>}
       </form>
       <form class="leg-form" onSubmit={addOption}>
-        <h3>OP の足（手入力）</h3>
+        <div class="sub-head hint-host">
+          <h3>OP の足（手入力）</h3>
+          <Hint label="手入力の OP の足">
+            板の無い限月は SQ 日を取引カレンダー（optionchan から同期 +
+            国民の祝日）から求める。確定の最終日より後の限月は「休業日未確定」。F
+            は板の先物価格で代用。
+          </Hint>
+        </div>
         <label>
           限月
           <input name="expiry" placeholder="YYYY-MM" size={8} />
@@ -163,11 +171,6 @@ export function LegForms({ chain, dispatch }: { chain: Chain; dispatch: (a: Acti
         </label>
         <button type="submit">追加</button>
         {optError && <p class="field-error">{optError}</p>}
-        <p class="note">
-          板の無い限月は SQ 日を取引カレンダー（optionchan から同期 +
-          国民の祝日）から求める。確定の最終日より後の限月は「休業日未確定」。F
-          は板の先物価格で代用。
-        </p>
       </form>
     </div>
   );

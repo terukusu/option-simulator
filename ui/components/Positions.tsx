@@ -18,6 +18,7 @@ import {
   stepQty,
   toggledSide,
 } from '../view/position';
+import { Hint } from './Hint';
 
 /** 編集できる数値欄（入力中は下書き、確定（change）で検証して反映。範囲外は反映せずエラー）。 */
 function NumField(props: {
@@ -222,8 +223,12 @@ export function Positions({
   const rows = model?.rows ?? [];
   return (
     <div class="positions">
-      <div class="positions-head">
+      <div class="positions-head hint-host">
         <h2>ポジション</h2>
+        <Hint label="ポジションのグリークと建値ずれ">
+          グリークはシナリオ 0（評価時刻 = 板の時刻、X = 基準価格）。建値ずれ = シナリオ 0
+          の理論損益への影響（手数料は含めない）。
+        </Hint>
         <button
           type="button"
           disabled={rows.length === 0}
@@ -241,10 +246,6 @@ export function Positions({
           ))}
         </ul>
       )}
-      <p class="note">
-        グリークはシナリオ 0（評価時刻 = 板の時刻、X = 基準価格）。建値ずれ = シナリオ 0
-        の理論損益への影響（手数料は含めない）。
-      </p>
     </div>
   );
 }
