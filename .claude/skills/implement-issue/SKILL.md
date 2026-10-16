@@ -207,7 +207,7 @@ block とするのは次の 4 類型のみ。改善提案・好みは block に�
      - **文献値**: 出典（書名・版・節や数値例）をテストのコメントに書き、文献の数値例と許容誤差つきで一致させる（例: Hull・Haug の Black-76 の数値例）。文献に無い桁の参照値は、高精度計算（mpmath 等）で求めた値と、その求め方をコメントに書く
      - **性質テスト**: 種つき乱数（`tests/support/synthChain.ts` の `rng`）で多数の入力を作り、PCP 恒等式・K に対する単調性と凸性・価格 ↔ IV のラウンドトリップ・上下限・極限（T → 0、σ → 0、ファー OTM）で NaN を出さないこと、などを確かめる
      - **合成板での検証**: `tests/support/synthChain.ts` で既知のパラメータ（F*、スマイル）から合成の板を作り、推定値がそれを許容誤差内で回復すること（例: AC5 の F を ±10 円）
-     - 性能に関わる変更は `tests/model/perf.test.ts` の予算（CI は `PERF_BUDGET_MS`）を確認する
+     - 性能に関わる変更は負荷の低いとき（`uptime` の 1 分の load が CPU の数未満）に `npm run perf`（`tests/model/perf.test.ts`・`tests/ui/perf.test.ts` を 16 ms で判定）を流し exit 0 を確認する（`npm test`・CI の性能テストは 200 ms で桁違いの悪化だけを落とす）
    - `data/`・テンプレート・判定: 合成の固定 JSON でのテスト（17 時台の少ない行数の板なども合成で作る）
    - `ui/`: 計算・整形のロジックは DOM から切り離した関数にして vitest で確かめる。見た目・操作は `npm run dev` での確認手順（画面・操作・期待する表示）を handoff に書く
    - `api/`（縦切り 2 以降）: pytest と偽の BigQuery runner。SQL の dry run は `OPTIONCHAN_BQ_TEST=1` のときだけ。契約の照合（AC25）
@@ -219,6 +219,7 @@ block とするのは次の 4 類型のみ。改善提案・好みは block に�
    npm run typecheck
    npm run lint        # 整形の差分は npm run format で直す
    npm test
+   npm run perf        # 性能に関わる変更のとき（16 ms の判定。負荷の低いときに）
    npm run build
    # .github/workflows/ci.yml の「ビルド成果物の検査」と同じ確認を dist/index.html に行う
    # (インライン script・style 要素・style 属性・外部 URL が無いこと)。ci.yml に検査が増えていればそれも実行する

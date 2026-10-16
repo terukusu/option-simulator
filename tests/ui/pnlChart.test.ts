@@ -490,55 +490,156 @@ function pathPoints(d: string): Array<[number, number]> {
   return [...d.matchAll(/[ML](-?[\d.]+) (-?[\d.]+)/g)].map((m) => [Number(m[1]), Number(m[2])]);
 }
 
-/** 点から折れ線までの距離（画素）。急な線では縦の差より意味がある（x の丸め 0.05px が縦に増幅されない） */
-function distToPath(points: Array<[number, number]>, px: number, py: number): number {
+/** 照合用の折れ線: 頂点と、その x（単調非減少。二分探索で点の近くの区間だけを選ぶ） */
+interface PathPts {
+  points: Array<[number, number]>;
+  xs: number[];
+}
+
+/** path の頂点を照合用に読む。頂点の x が単調でなければ throw（窓で区間を選ぶ前提が崩れたら黙って通さない） */
+function preparePath(points: Array<[number, number]>): PathPts {
+  const xs = points.map((p) => p[0]);
+  for (let i = 1; i < xs.length; i++) {
+    if ((xs[i] as number) < (xs[i - 1] as number)) {
+      throw new Error(`path の頂点の x が単調でない: ${i - 1} → ${i}（${xs[i - 1]} → ${xs[i]}）`);
+    }
+  }
+  return { points, xs };
+}
+
+/** 昇順の配列で「値 ≥ v」の最初の位置（無ければ長さ） */
+function lowerBound(xs: readonly number[], v: number): number {
+  let lo = 0;
+  let hi = xs.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if ((xs[mid] as number) < v) lo = mid + 1;
+    else hi = mid;
+  }
+  return lo;
+}
+
+/** 点から線分までの距離（画素） */
+function distToSegment(
+  [x1, y1]: [number, number],
+  [x2, y2]: [number, number],
+  px: number,
+  py: number,
+): number {
+  const dx = x2 - x1;
+  const dy = y2 - y1;
+  const len2 = dx * dx + dy * dy;
+  const t = len2 > 0 ? Math.min(Math.max(((px - x1) * dx + (py - y1) * dy) / len2, 0), 1) : 0;
+  return Math.hypot(px - (x1 + t * dx), py - (y1 + t * dy));
+}
+
+/** 点から折れ線までの距離（総当たり。窓付きの distToPath の参照） */
+function distToPathBrute(points: Array<[number, number]>, px: number, py: number): number {
+  if (points.length === 1)
+    return distToSegment(points[0] as [number, number], points[0] as [number, number], px, py);
   let best = Number.POSITIVE_INFINITY;
   for (let i = 1; i < points.length; i++) {
-    const [x1, y1] = points[i - 1] as [number, number];
-    const [x2, y2] = points[i] as [number, number];
-    const dx = x2 - x1;
-    const dy = y2 - y1;
-    const len2 = dx * dx + dy * dy;
-    const t = len2 > 0 ? Math.min(Math.max(((px - x1) * dx + (py - y1) * dy) / len2, 0), 1) : 0;
-    best = Math.min(best, Math.hypot(px - (x1 + t * dx), py - (y1 + t * dy)));
+    best = Math.min(
+      best,
+      distToSegment(points[i - 1] as [number, number], points[i] as [number, number], px, py),
+    );
   }
   return best;
 }
 
+/**
+ * 点から折れ線までの距離（画素）。急な線では縦の差より意味がある（x の丸め 0.05px が縦に増幅されない）。
+ * 点の x から ±1px に x の範囲が掛かる区間だけを測る。1px 以内の区間は必ずこの窓に入るので「≤ 1px か」の判定は
+ * 総当たりと同じ（窓の外の区間は距離 > 1）。窓に区間が無ければ +∞（= 外れ）
+ */
+function distToPath(path: PathPts, px: number, py: number): number {
+  const { points, xs } = path;
+  if (points.length === 0) return Number.POSITIVE_INFINITY;
+  if (points.length === 1) {
+    const [x, y] = points[0] as [number, number];
+    return Math.abs(x - px) <= 1 ? Math.hypot(px - x, py - y) : Number.POSITIVE_INFINITY;
+  }
+  // 区間 [i − 1, i] は x の範囲 [x_{i−1}, x_i] が [px − 1, px + 1] に掛かるもの: x_i ≥ px − 1 かつ x_{i−1} ≤ px + 1
+  let best = Number.POSITIVE_INFINITY;
+  for (let i = Math.max(lowerBound(xs, px - 1), 1); i < points.length; i++) {
+    if ((xs[i - 1] as number) > px + 1) break;
+    best = Math.min(
+      best,
+      distToSegment(points[i - 1] as [number, number], points[i] as [number, number], px, py),
+    );
+  }
+  return best;
+}
+
+/** 線ごとの照合の結果: 描画域の中に見える点の最大の距離（画素）とその x、照合した点の数 */
+interface LineError {
+  max: number;
+  atX: number;
+  checked: number;
+}
+
+/**
+ * 描画域の中に見える部分: 横 2,000 等分（2,001 点）で、解析解（満期）/ サンプル値の線形補間（指定日・今日）と
+ * path の距離を測る。d を渡すとその path で測る（照合の検出力のテスト用）
+ */
+function lineError(
+  m: PnlChartModel,
+  base: PnlBase,
+  kind: 'expiry' | 'date' | 'today',
+  d?: string,
+): LineError {
+  const { left, top, width, height } = m.plot;
+  const sx = linear(m.domain, [left, left + width]);
+  const sy = linear(m.yDomain, [top + height, top]);
+  const line = m.lines.find((l) => l.kind === kind);
+  if (!line) throw new Error(`線が無い: ${kind}`);
+  const path = preparePath(pathPoints(d ?? line.d));
+  let max = 0;
+  let atX = Number.NaN;
+  let checked = 0;
+  for (let i = 0; i <= 2000; i++) {
+    const x = m.domain[0] + ((m.domain[1] - m.domain[0]) * i) / 2000;
+    let v: number;
+    if (kind === 'expiry') v = base.expiry(x);
+    else {
+      // findIndex((u) => u >= x) と同じ（無ければ長さ → 末尾の区間に clamp）
+      const j = Math.min(Math.max(lowerBound(line.xs, x), 1), line.xs.length - 1);
+      const x1 = line.xs[j - 1] as number;
+      const x2 = line.xs[j] as number;
+      const y1 = line.ys[j - 1] as number;
+      const y2 = line.ys[j] as number;
+      v = y1 + ((y2 - y1) * (x - x1)) / (x2 - x1);
+    }
+    const want = sy(v);
+    if (want < top || want > top + height) continue;
+    const dist = distToPath(path, sx(x), want);
+    // NaN は外れとして残す（以後の点で上書きしない）
+    if (!Number.isNaN(max) && !(dist <= max)) {
+      max = dist;
+      atX = x;
+    }
+    checked++;
+  }
+  return { max, atX, checked };
+}
+
+/** path の頂点の y を dy だけずらして組み立て直す */
+function shiftPath(d: string, dy: number): string {
+  return pathPoints(d)
+    .map(([x, y], i) => `${i === 0 ? 'M' : 'L'}${x} ${y + dy}`)
+    .join('');
+}
+
 describe('描く座標（path）が解析解と一致する（Phase 4 #1）', () => {
   function check(m: PnlChartModel, base: PnlBase, kinds: Array<'expiry' | 'date' | 'today'>) {
-    const { left, top, width, height } = m.plot;
-    const sx = linear(m.domain, [left, left + width]);
-    const sy = linear(m.yDomain, [top + height, top]);
     let checked = 0;
     for (const kind of kinds) {
-      const line = m.lines.find((l) => l.kind === kind);
-      if (!line) throw new Error(`線が無い: ${kind}`);
-      const pts = pathPoints(line.d);
-      // 描画域の中に見える部分: 横 2,000 点で、解析解（満期）/ サンプル値の線形補間（指定日・今日）と 1px 以内
-      for (let i = 0; i <= 2000; i++) {
-        const x = m.domain[0] + ((m.domain[1] - m.domain[0]) * i) / 2000;
-        let v: number;
-        if (kind === 'expiry') v = base.expiry(x);
-        else {
-          const j = Math.min(
-            Math.max(
-              line.xs.findIndex((u) => u >= x),
-              1,
-            ),
-            line.xs.length - 1,
-          );
-          const x1 = line.xs[j - 1] as number;
-          const x2 = line.xs[j] as number;
-          const y1 = line.ys[j - 1] as number;
-          const y2 = line.ys[j] as number;
-          v = y1 + ((y2 - y1) * (x - x1)) / (x2 - x1);
-        }
-        const want = sy(v);
-        if (want < top || want > top + height) continue;
-        expect(distToPath(pts, sx(x), want)).toBeLessThanOrEqual(1);
-        checked++;
-      }
+      const e = lineError(m, base, kind);
+      expect(
+        e.max,
+        `${kind} の線: x = ${e.atX} で ${e.max}px 離れる（domain ${m.domain.join('〜')}・yDomain ${m.yDomain.join('〜')}）`,
+      ).toBeLessThanOrEqual(1);
+      checked += e.checked;
     }
     expect(checked).toBeGreaterThan(0);
   }
@@ -577,7 +678,7 @@ describe('描く座標（path）が解析解と一致する（Phase 4 #1）', ()
     expect(Math.abs((crossPx as number) - truePx)).toBeLessThanOrEqual(1);
     // BEP の印の位置で満期の線の y が 0 の画素
     const b = m.breakevens[0];
-    expect(distToPath(ex, b?.px as number, m.zeroPy as number)).toBeLessThanOrEqual(1);
+    expect(distToPath(preparePath(ex), b?.px as number, m.zeroPy as number)).toBeLessThanOrEqual(1);
     expect(Math.abs((b?.py as number) - (m.zeroPy as number))).toBeLessThanOrEqual(1e-9);
     check(m, base, ['expiry', 'date', 'today']);
   });
@@ -609,6 +710,99 @@ describe('描く座標（path）が解析解と一致する（Phase 4 #1）', ()
       cal,
       ['expiry', 'today'],
     );
+  });
+
+  it('照合は 1.5px ずらした path を外れとして落とす（元の path は 1px 以内）', () => {
+    const base = put();
+    for (const viewport of [null, base.full]) {
+      const m = chartOf(base, { viewport, pnlY: DEFAULT_PNL_Y, days: 5 });
+      for (const kind of ['expiry', 'date', 'today'] as const) {
+        const d = m.lines.find((l) => l.kind === kind)?.d ?? '';
+        const ok = lineError(m, base, kind);
+        expect(ok.checked).toBeGreaterThan(0);
+        expect(ok.max).toBeLessThanOrEqual(1);
+        for (const dy of [1.5, -1.5]) {
+          const bad = lineError(m, base, kind, shiftPath(d, dy));
+          expect(bad.max, `${kind}・${dy}px`).toBeGreaterThan(1);
+        }
+      }
+    }
+  });
+
+  it('窓付きの距離は総当たりと「1px 以内か」が一致し、1px 以内なら値も同じ', () => {
+    const base = put();
+    const m = chartOf(base, { viewport: base.full, pnlY: DEFAULT_PNL_Y, days: 5 });
+    const { left, width } = m.plot;
+    let near = 0;
+    let far = 0;
+    const mismatches: string[] = [];
+    for (const line of m.lines) {
+      const pts = pathPoints(line.d);
+      const path = preparePath(pts);
+      for (let i = 0; i <= 80; i++) {
+        const px = left - 3 + ((width + 6) * i) / 80;
+        // 線の近くの y: 線の頂点の y（窓の中の頂点）からずらす
+        const k = Math.min(lowerBound(path.xs, px), pts.length - 1);
+        const y0 = (pts[k] as [number, number])[1];
+        for (const off of [0, 0.4, 0.9, 1.1, 1.6, 4, -0.6, -1.2, -3]) {
+          const py = y0 + off;
+          const w = distToPath(path, px, py);
+          const b = distToPathBrute(pts, px, py);
+          if (w <= 1 !== b <= 1 || (b <= 1 && Math.abs(w - b) > 1e-12)) {
+            mismatches.push(`${line.kind}・px ${px}・py ${py}: 窓 ${w} / 総当たり ${b}`);
+          }
+          if (b <= 1) near++;
+          else far++;
+        }
+      }
+    }
+    expect(mismatches).toEqual([]);
+    // 両側を踏んでいる
+    expect(near).toBeGreaterThan(100);
+    expect(far).toBeGreaterThan(100);
+    // 頂点 1 つ・窓が空・単調でない path
+    expect(distToPath(preparePath([[10, 20]]), 10.5, 20.5)).toBeCloseTo(Math.SQRT1_2, 12);
+    expect(distToPath(preparePath([[10, 20]]), 12, 20)).toBe(Number.POSITIVE_INFINITY);
+    expect(
+      distToPath(
+        preparePath([
+          [0, 0],
+          [5, 0],
+        ]),
+        7,
+        0,
+      ),
+    ).toBe(Number.POSITIVE_INFINITY);
+    expect(
+      distToPathBrute(
+        [
+          [0, 0],
+          [5, 0],
+        ],
+        7,
+        0,
+      ),
+    ).toBe(2);
+    // 縦の区間（同じ x）も窓に入る
+    expect(
+      distToPath(
+        preparePath([
+          [0, 0],
+          [5, 0],
+          [5, 10],
+          [9, 10],
+        ]),
+        5.5,
+        5,
+      ),
+    ).toBeCloseTo(0.5, 12);
+    expect(() =>
+      preparePath([
+        [0, 0],
+        [5, 0],
+        [4, 1],
+      ]),
+    ).toThrow('単調でない');
   });
 
   it('clippedPath: 境を横切る点を足し、内側の形を保つ。非有限は境に置く', () => {

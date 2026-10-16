@@ -43,15 +43,15 @@ import { scenarioMarks } from '../../ui/view/scenarioMarks';
 import { smileModel } from '../../ui/view/smile';
 import { tabsModel } from '../../ui/view/tabs';
 import { M1, M2, makeMarket } from '../support/market';
+import { BUDGET_MS, expectWithinBudget, RECORD_RUNS, record } from '../support/perf';
 import { PERF_LEGS } from '../support/perfPosition';
 
 /**
  * AC-18 の補助（計算部分）: 322 行の板の限月切替で作り直す表示モデル（板の行・スマイル・ヘッダ）の
  * 生成が予算以内。描画（DOM）はブラウザの Performance で手動確認する。
- * CI は共有ランナーなので環境変数 PERF_BUDGET_MS で緩い閾値にする。
+ * このファイルの閾値は `npm test`・CI が 200 ms（桁違いの悪化だけを落とす）、16 ms の判定は `npm run perf`
+ * （負荷の低いときに。性能テストの 2 ファイルだけを並列なしで）。計測の手順は tests/support/perf.ts。
  */
-const env = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env;
-const BUDGET_MS = Number(env?.PERF_BUDGET_MS ?? 16);
 
 describe('性能（AC-18 の計算部分）', () => {
   const chain = normalizeChain(buildWideChainJson());
@@ -68,14 +68,7 @@ describe('性能（AC-18 の計算部分）', () => {
   }
 
   it(`2 限月分の表示モデルの生成が ${BUDGET_MS} ms 以内（20 回の最小値）`, () => {
-    for (let i = 0; i < 10; i++) rebuild();
-    let best = Number.POSITIVE_INFINITY;
-    for (let i = 0; i < 20; i++) {
-      const t0 = performance.now();
-      rebuild();
-      best = Math.min(best, performance.now() - t0);
-    }
-    expect(best).toBeLessThan(BUDGET_MS);
+    expectWithinBudget('AC-18 2 限月分の表示モデル', rebuild, { warmup: 10, runs: 20 });
   });
 });
 
@@ -124,14 +117,7 @@ describe('性能（#11 AC-13: 損益グラフの表示モデル）', () => {
       plotHeight: 260,
     });
     expect(m.lines.map((l) => l.xs.length)).toEqual([m.lines[0]?.xs.length, 1000, 1000]);
-    for (let i = 0; i < 20; i++) redraw();
-    let best = Number.POSITIVE_INFINITY;
-    for (let i = 0; i < 30; i++) {
-      const t0 = performance.now();
-      redraw();
-      best = Math.min(best, performance.now() - t0);
-    }
-    expect(best).toBeLessThan(BUDGET_MS);
+    expectWithinBudget('#11 損益グラフの表示モデル', redraw, { warmup: 20, runs: 30 });
   });
 });
 
@@ -183,14 +169,7 @@ describe('性能（#6 AC-11: スライダー 1 回の描き直し）', () => {
 
   it(`グラフの表示モデル + 指標 + テール表が ${BUDGET_MS} ms 以内（30 回の最小値）`, () => {
     expect(slide()).toBeGreaterThan(8);
-    for (let i = 0; i < 20; i++) slide();
-    let best = Number.POSITIVE_INFINITY;
-    for (let i = 0; i < 30; i++) {
-      const t0 = performance.now();
-      slide();
-      best = Math.min(best, performance.now() - t0);
-    }
-    expect(best).toBeLessThan(BUDGET_MS);
+    expectWithinBudget('#6 スライダー 1 回の描き直し', slide, { warmup: 20, runs: 30 });
   });
 });
 
@@ -236,15 +215,7 @@ describe('性能（#52 AC-10: 長押しドラッグの 1 フレーム）', () =>
   it(`グラフの表示モデル + 交点 + 指標 + 帯が ${BUDGET_MS} ms 以内（30 回の最小値）`, () => {
     expect(date).not.toBeNull();
     expect(scrubFrame()).toBeGreaterThan(8);
-    for (let i = 0; i < 20; i++) scrubFrame();
-    let best = Number.POSITIVE_INFINITY;
-    for (let i = 0; i < 30; i++) {
-      const t0 = performance.now();
-      scrubFrame();
-      best = Math.min(best, performance.now() - t0);
-    }
-    console.info(`#52 長押しドラッグの 1 フレーム: ${best.toFixed(2)} ms`);
-    expect(best).toBeLessThan(BUDGET_MS);
+    expectWithinBudget('#52 長押しドラッグの 1 フレーム', scrubFrame, { warmup: 20, runs: 30 });
   });
 });
 
@@ -266,37 +237,24 @@ describe('性能（#23 作業・板の保存）', () => {
 
   it(`足 10 本の保存の直列化 + 読み取り + 復元が ${BUDGET_MS} ms 以内（30 回の最小値）`, () => {
     expect(PERF_LEGS).toHaveLength(10);
-    for (let i = 0; i < 10; i++) roundTrip();
-    let best = Number.POSITIVE_INFINITY;
-    for (let i = 0; i < 30; i++) {
-      const t0 = performance.now();
-      roundTrip();
-      best = Math.min(best, performance.now() - t0);
-    }
-    console.info(
-      `#23 作業の保存（足 10 本）: ${best.toFixed(3)} ms・${serializeWorkspace(state, 0).length} 字`,
-    );
-    expect(best).toBeLessThan(BUDGET_MS);
+    expectWithinBudget('#23 作業の保存（足 10 本）', roundTrip, { warmup: 10, runs: 30 });
+    console.info(`#23 作業の保存（足 10 本）: ${serializeWorkspace(state, 0).length} 字`);
   });
 
   it('板（322 行 × 2 限月）の保存の直列化・読み取りの時間と大きさ（記録のみ）', () => {
     const json = buildWideChainJson();
-    let text = '';
-    let ser = Number.POSITIVE_INFINITY;
-    let read = Number.POSITIVE_INFINITY;
-    for (let i = 0; i < 5; i++) {
-      const t0 = performance.now();
-      text = serializeBoard(json, 0, 'API');
-      const t1 = performance.now();
-      const back = readSavedBoard(text);
-      const t2 = performance.now();
-      expect(back?.chain.months).toHaveLength(2);
-      ser = Math.min(ser, t1 - t0);
-      read = Math.min(read, t2 - t1);
-    }
-    console.info(
-      `#23 板の保存（322 行 × 2）: ${text.length} 字・直列化 ${ser.toFixed(2)} ms・読み取り（検証 + 正規化）${read.toFixed(2)} ms`,
-    );
+    const text = serializeBoard(json, 0, 'API');
+    record('#23 板の保存（322 行 × 2）の直列化', () => serializeBoard(json, 0, 'API'), {
+      warmup: 0,
+      runs: RECORD_RUNS,
+      after: (t) => expect(t).toBe(text),
+    });
+    record('#23 板の保存（322 行 × 2）の読み取り（検証 + 正規化）', () => readSavedBoard(text), {
+      warmup: 0,
+      runs: RECORD_RUNS,
+      after: (back) => expect(back?.chain.months).toHaveLength(2),
+    });
+    console.info(`#23 板の保存（322 行 × 2）: ${text.length} 字`);
     expect(text.length).toBeGreaterThan(0);
   });
 });
@@ -356,22 +314,15 @@ describe('性能（#70 ポジ帳の一覧の要約）', () => {
     // 全ての足が今の板で評価できる（計測が空振りしていない）
     expect(v.rows[0]?.markText).not.toBe('—');
     expect(v.rows[0]?.note).toBeNull();
-    for (let i = 0; i < 20; i++) list();
-    let best = Number.POSITIVE_INFINITY;
-    for (let i = 0; i < 30; i++) {
-      const t0 = performance.now();
-      list();
-      best = Math.min(best, performance.now() - t0);
-    }
-    console.info(`#70 ポジ帳の一覧（50 件 × 足 10 本）: ${best.toFixed(2)} ms・${read.chars} 字`);
-    expect(best).toBeLessThan(BUDGET_MS);
+    expectWithinBudget('#70 ポジ帳の一覧（50 件 × 足 10 本）', list, { warmup: 20, runs: 30 });
+    console.info(`#70 ポジ帳の一覧（50 件 × 足 10 本）: ${read.chars} 字`);
   });
 });
 
 /**
  * #71 AC9: タブの切り替え 1 回（reduce switchTab = 退避 + 足の市場の作り直し、ポジションの表示モデル・損益グラフの
  * 基礎と 3 本の線・指標・テール表・読み取りの帯・タブの帯）が、322 行 × 2 限月の板・足 10 本 ↔ 足 4 本で予算以内。
- * 足 200 本のタブへの切り替えは記録のみ。
+ * 足 200 本のタブへの切り替えは記録のみ（回数は `npm run perf` で 5 回、`npm test`・CI で 1 回。RECORD_RUNS）。
  */
 describe('性能（#71 タブの切り替え）', () => {
   const chain = normalizeChain(buildWideChainJson());
@@ -437,15 +388,10 @@ describe('性能（#71 タブの切り替え）', () => {
     switchOnce();
     expect(state.legs).toHaveLength(10);
     expect(state.legs.every((l) => !l.marks.includes('no_board'))).toBe(true);
-    for (let i = 0; i < 20; i++) switchOnce();
-    let best = Number.POSITIVE_INFINITY;
-    for (let i = 0; i < 30; i++) {
-      const t0 = performance.now();
-      switchOnce();
-      best = Math.min(best, performance.now() - t0);
-    }
-    console.info(`#71 タブの切り替え（足 10 本 ↔ 4 本）: ${best.toFixed(2)} ms`);
-    expect(best).toBeLessThan(BUDGET_MS);
+    expectWithinBudget('#71 タブの切り替え（足 10 本 ↔ 4 本）', switchOnce, {
+      warmup: 20,
+      runs: 30,
+    });
   });
 
   it('足 200 本のタブへの切り替え（記録のみ）', () => {
@@ -454,21 +400,24 @@ describe('性能（#71 タブの切り替え）', () => {
     expect(s.legs).toHaveLength(200);
     const big = s.activeTab;
     const small = s.tabs[0]?.id ?? 1;
-    let best = Number.POSITIVE_INFINITY;
-    let bestReduce = Number.POSITIVE_INFINITY;
-    for (let i = 0; i < 5; i++) {
+    const toSmall = () => {
       s = reduce(s, { type: 'switchTab', id: small });
-      const t0 = performance.now();
+    };
+    const toBig = () => {
       s = reduce(s, { type: 'switchTab', id: big });
-      const t1 = performance.now();
-      evaluate(s);
-      best = Math.min(best, performance.now() - t0);
-      bestReduce = Math.min(bestReduce, t1 - t0);
-    }
+      return s;
+    };
     // 評価（ポジションの表示モデル・損益グラフ）は足 200 本を 1 つのタブで持つときと同じ量。切り替えの増分は reduce だけ
-    console.info(
-      `#71 足 200 本のタブへの切り替え: ${best.toFixed(2)} ms（うち reduce ${bestReduce.toFixed(2)} ms）`,
-    );
+    record('#71 足 200 本のタブへの切り替え（reduce）', toBig, {
+      warmup: 0,
+      runs: RECORD_RUNS,
+      before: toSmall,
+    });
+    record('#71 足 200 本のタブへの切り替え（reduce + 評価）', () => evaluate(toBig()), {
+      warmup: 0,
+      runs: RECORD_RUNS,
+      before: toSmall,
+    });
     expect(s.legs).toHaveLength(200);
   });
 });
@@ -512,10 +461,6 @@ describe('性能（#22 AC8: ピン 3 本）', () => {
     excluded: 0,
     boardSnapshotAt: null,
   });
-  const median = (xs: number[]): number => {
-    const a = [...xs].sort((p, q) => p - q);
-    return a[Math.floor(a.length / 2)] ?? Number.NaN;
-  };
   const linesOf = (cache: Map<PinNo, PinLineCacheEntry>, ts: PinTarget[]): PinLineData[] =>
     ts
       .map((t) => cache.get(t.no)?.data)
@@ -558,18 +503,7 @@ describe('性能（#22 AC8: ピン 3 本）', () => {
 
   it(`重ね 3 本でのスライダー 1 回が ${BUDGET_MS} ms 以内（30 回の最小値）`, () => {
     expect(slide()).toBeGreaterThan(9);
-    for (let i = 0; i < 20; i++) slide();
-    const times: number[] = [];
-    for (let i = 0; i < 30; i++) {
-      const t0 = performance.now();
-      slide();
-      times.push(performance.now() - t0);
-    }
-    const best = Math.min(...times);
-    console.info(
-      `#22 重ね 3 本でのスライダー 1 回: ${best.toFixed(2)} ms（中央値 ${median(times).toFixed(2)} ms）`,
-    );
-    expect(best).toBeLessThan(BUDGET_MS);
+    expectWithinBudget('#22 重ね 3 本でのスライダー 1 回', slide, { warmup: 20, runs: 30 });
   });
 
   let shift = 0;
@@ -595,18 +529,7 @@ describe('性能（#22 AC8: ピン 3 本）', () => {
 
   it(`ゴースト 3 本でのパン 1 フレームが ${BUDGET_MS} ms 以内（30 回の最小値）`, () => {
     expect(pan()).toBeGreaterThan(8);
-    for (let i = 0; i < 20; i++) pan();
-    const times: number[] = [];
-    for (let i = 0; i < 30; i++) {
-      const t0 = performance.now();
-      pan();
-      times.push(performance.now() - t0);
-    }
-    const best = Math.min(...times);
-    console.info(
-      `#22 ゴースト 3 本でのパン 1 フレーム: ${best.toFixed(2)} ms（中央値 ${median(times).toFixed(2)} ms）`,
-    );
-    expect(best).toBeLessThan(BUDGET_MS);
+    expectWithinBudget('#22 ゴースト 3 本でのパン 1 フレーム', pan, { warmup: 20, runs: 30 });
   });
 
   // 拡大縮小（ホイール・ピンチ・ボタン）: 表示範囲の幅を毎フレーム変える。格子を使い回せないので、画面と同じく
@@ -636,18 +559,10 @@ describe('性能（#22 AC8: ピン 3 本）', () => {
 
   it(`ゴースト 3 本での拡大縮小 1 フレームが ${BUDGET_MS} ms 以内（30 回の最小値）`, () => {
     expect(zoomFrame()).toBeGreaterThan(8);
-    for (let i = 0; i < 20; i++) zoomFrame();
-    const times: number[] = [];
-    for (let i = 0; i < 30; i++) {
-      const t0 = performance.now();
-      zoomFrame();
-      times.push(performance.now() - t0);
-    }
-    const best = Math.min(...times);
-    console.info(
-      `#22 ゴースト 3 本での拡大縮小 1 フレーム: ${best.toFixed(2)} ms（中央値 ${median(times).toFixed(2)} ms）`,
-    );
-    expect(best).toBeLessThan(BUDGET_MS);
+    expectWithinBudget('#22 ゴースト 3 本での拡大縮小 1 フレーム', zoomFrame, {
+      warmup: 20,
+      runs: 30,
+    });
   });
 
   it(`ピン 3 本での長押しドラッグ 1 フレームが ${BUDGET_MS} ms 以内（ピンの線は使い回し）`, () => {
@@ -690,17 +605,9 @@ describe('性能（#22 AC8: ピン 3 本）', () => {
       );
     };
     expect(frame()).toBeGreaterThan(6);
-    for (let i = 0; i < 20; i++) frame();
-    const times: number[] = [];
-    for (let i = 0; i < 30; i++) {
-      const t0 = performance.now();
-      frame();
-      times.push(performance.now() - t0);
-    }
-    const best = Math.min(...times);
-    console.info(
-      `#22 ピン 3 本での長押しドラッグ 1 フレーム: ${best.toFixed(2)} ms（中央値 ${median(times).toFixed(2)} ms）`,
-    );
-    expect(best).toBeLessThan(BUDGET_MS);
+    expectWithinBudget('#22 ピン 3 本での長押しドラッグ 1 フレーム', frame, {
+      warmup: 20,
+      runs: 30,
+    });
   });
 });

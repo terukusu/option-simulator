@@ -3,15 +3,15 @@ import { expiryPnlFn, expiryProfile, tailTable } from '../../model/pnl';
 import { evaluatePosition, preparePosition, theoreticalPnl } from '../../model/position';
 import { type Scenario, ZERO_SCENARIO } from '../../model/scenario';
 import { makeMarket } from '../support/market';
+import { BUDGET_MS, expectWithinBudget } from '../support/perf';
 import { PERF_LEGS } from '../support/perfPosition';
 
 /**
  * AC8 の計算部分: 4 スライダーの 1 回の描き直しに要る計算（横軸 1 画素 1 点 = 1,000 点 × 足 10 本の
  * 指定日・今日・満期の 3 本 + シナリオ点の指標 + テール表）が 16 ms 以内。
- * CI は共有ランナーなので環境変数 PERF_BUDGET_MS で緩い閾値にする。
+ * 閾値は `npm test`・CI が 200 ms（桁違いの悪化だけを落とす）、16 ms の判定は `npm run perf`（負荷の低いときに。
+ * 2 ファイルだけを並列なしで）。計測の手順は tests/support/perf.ts。
  */
-const env = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env;
-const BUDGET_MS = Number(env?.PERF_BUDGET_MS ?? 16);
 
 describe('性能（AC8 の計算部分）', () => {
   const { ctx } = makeMarket();
@@ -37,21 +37,11 @@ describe('性能（AC8 の計算部分）', () => {
   }
 
   it(`1 回の描き直しの計算が ${BUDGET_MS} ms 以内（30 回の最小値）`, () => {
-    for (let i = 0; i < 20; i++) redraw(); // ウォームアップ（JIT）
-    const times: number[] = [];
-    for (let i = 0; i < 30; i++) {
-      const t0 = performance.now();
-      const v = redraw();
-      times.push(performance.now() - t0);
-      expect(Number.isFinite(v)).toBe(true);
-    }
-    // 他のテストファイルと並列に走るので、割り込みの影響を除くため最小値で判定する（中央値は参考に表示）
-    times.sort((a, b) => a - b);
-    const min = times[0] as number;
-    const median = times[15] as number;
-    console.info(
-      `AC8 計算部分: 最小 ${min.toFixed(2)} ms / 中央値 ${median.toFixed(2)} ms（閾値 ${BUDGET_MS} ms）`,
-    );
-    expect(min).toBeLessThan(BUDGET_MS);
+    // 他のテストファイルと並列に走りうるので、割り込みの影響を除くため最小値で判定する（中央値は参考に表示）
+    expectWithinBudget('AC8 計算部分', redraw, {
+      warmup: 20,
+      runs: 30,
+      after: (v) => expect(Number.isFinite(v)).toBe(true),
+    });
   });
 });
