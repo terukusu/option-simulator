@@ -11,7 +11,9 @@
  *   BEP を追加。指定日の BEP はスライダーで動くので入れない）。全域（縮小の上限）=
  *   板の全限月（F が決まる限月）の行使価格の横軸上の位置 K − basis_i と初期範囲を合わせた範囲で、下端は
  *   X_lo（全足の原資産が 0 以上）。拡大の最小幅 = 板の行使価格の最小刻み × 2（無ければ X₀ × 1%）
- * - 縦軸: 自動（表示範囲内の全線のサンプル値と 0）/ 手動 / プレミアム基準 ±N × |受取 − 支払|
+ * - 縦軸: 自動（表示範囲内の全線のサンプル値・ピンの線の値（#22）と 0）/ 手動 / プレミアム基準 ±N × |受取 − 支払|
+ * - ピン（#22）: 線の値は ui/view/pins.ts が作り（pins）、ここでは縦軸の自動と path だけ。横軸の初期範囲・全域は
+ *   今のポジションだけで決める（ピンを外しても範囲が変わらない）
  * - 評価できない足（F が決まらない限月）は線から除く。計算は model/ の関数をそのまま使う
  */
 
@@ -212,6 +214,21 @@ export interface PnlMarker {
 
 export type PnlYUnit = 'yen' | 'thousand';
 
+/** ピンの線の入力（ui/view/pins.ts の pinLineData。番号ごとに 1 本） */
+export interface PnlPinInput {
+  no: number;
+  xs: readonly number[];
+  ys: readonly number[];
+}
+
+/** ピンの線の path */
+export interface PnlPinLine {
+  no: number;
+  /** 右端の点（横は表示範囲の上端。値が無ければ NaN） */
+  lastY: number;
+  d: string;
+}
+
 export interface PnlChartModel {
   empty: boolean;
   /** 表示中の横軸の範囲（全域に収めたもの） */
@@ -221,6 +238,8 @@ export interface PnlChartModel {
   yDomain: Domain;
   yUnit: PnlYUnit;
   lines: PnlLine[];
+  /** ピンの線（#22。入力の順） */
+  pins: PnlPinLine[];
   /** 表示範囲内の満期の折れ点 */
   kinks: PnlMarker[];
   /** 表示範囲内の満期の BEP */
@@ -269,6 +288,8 @@ export interface PnlChartInput {
   dateYs?: readonly number[] | null;
   /** 表示中の限月のシナリオ ATM（ui/view/scenarioAtm.ts の scenarioAtmMark の K と、その限月の F。#26） */
   scenarioAtm?: { monthId: string; k: number; F: number } | null;
+  /** ピンの線の値（#22。表示範囲で作ったもの。縦軸の自動に入れて path にする） */
+  pins?: readonly PnlPinInput[];
 }
 
 /** 縦軸の目盛りの文言（千円は値 / 1,000。刻みに合わせて小数を出す）。 */
@@ -291,6 +312,7 @@ function emptyModel(input: PnlChartInput): PnlChartModel {
     yDomain: [-1, 1],
     yUnit: 'yen',
     lines: [],
+    pins: [],
     kinks: [],
     breakevens: [],
     x0Px: null,
@@ -453,9 +475,12 @@ export function pnlChartModel(input: PnlChartInput): PnlChartModel {
     pre && pre.length === xs.length ? [...pre] : sampleLine(base, xs, todayScenario(scenario));
   lines.push({ kind: 'today', xs, ys: todayYs, d: '' });
 
-  // 縦軸
+  // 縦軸（自動はピンの線も入れる。#22）
+  const pinInputs = input.pins ?? [];
   const auto = (): Domain => {
-    const e = extent([0, ...lines.flatMap((l) => l.ys)]) ?? ([-1, 1] as Domain);
+    const e =
+      extent([0, ...lines.flatMap((l) => l.ys), ...pinInputs.flatMap((p) => p.ys)]) ??
+      ([-1, 1] as Domain);
     return padDomain(e, 0.08, 1);
   };
   let yDomain: Domain;
@@ -488,6 +513,16 @@ export function pnlChartModel(input: PnlChartInput): PnlChartModel {
     const py = l.ys.map((y) => syRaw(y));
     l.d = clippedPath(px, py, yMin, yMax);
   }
+  const pins: PnlPinLine[] = pinInputs.map((p) => ({
+    no: p.no,
+    lastY: p.ys[p.ys.length - 1] ?? Number.NaN,
+    d: clippedPath(
+      p.xs.map((x) => sx(x)),
+      p.ys.map((y) => syRaw(y)),
+      yMin,
+      yMax,
+    ),
+  }));
 
   const inside = (x: number) => x >= lo && x <= hi;
   const scenarioX = ctx.x0 + (Number.isFinite(scenario.dX) ? scenario.dX : 0);
@@ -521,6 +556,7 @@ export function pnlChartModel(input: PnlChartInput): PnlChartModel {
     yDomain,
     yUnit,
     lines,
+    pins,
     kinks,
     breakevens,
     x0Px: inside(ctx.x0) ? sx(ctx.x0) : null,

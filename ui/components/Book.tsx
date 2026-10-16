@@ -1,5 +1,6 @@
 import { useId, useLayoutEffect, useRef, useState } from 'preact/hooks';
 import { NAME_MAX } from '../book';
+import { PINS_FULL_TEXT } from '../pins';
 import {
   type BookConfirm,
   type BookListView,
@@ -34,6 +35,10 @@ export interface BookProps {
   onOpenNewTab: (id: string) => boolean;
   /** タブを足せる（上限未満） */
   canAddTab: boolean;
+  /** 損益グラフに重ねる（#22。今の板・今のシナリオ・今の設定。成功したら一覧を閉じる） */
+  onOverlay: (id: string) => boolean;
+  /** ピンを足せる（上限未満） */
+  canPin: boolean;
   /** 作業中のタブの名前（[開く] の確認の文言・保存の説明） */
   tabName: string;
   onOverwrite: (id: string) => boolean;
@@ -60,7 +65,7 @@ export function BookButton({ count, onOpen }: { count: number | null; onOpen: ()
 }
 
 export function Book(props: BookProps) {
-  const { view, legCount, message, hasBoard, canAddTab, tabName } = props;
+  const { view, legCount, message, hasBoard, canAddTab, canPin, tabName } = props;
   const ref = useRef<HTMLDialogElement>(null);
   const titleId = useId();
   const [name, setName] = useState(props.defaultName);
@@ -154,7 +159,9 @@ export function Book(props: BookProps) {
           保存した建値のまま{MARK_BASIS_TEXT}で評価し、その項目の手数料（1 枚あたり × 枚数）を引く。
           Δ・満期の最大損失は今の板で計算。[開く] は作業中のタブの足と、シナリオ・手数料・先物の
           basis（全タブ共通）を置き換える（表示の設定は今のまま）。[新しいタブで開く]
-          は作業中のタブを残してタブを足す。保存・上書きは作業中のタブ（{tabName}）を保存する。
+          は作業中のタブを残してタブを足す。[重ねる]
+          は損益グラフにピン（今の板・今のシナリオ・今の設定で描く線）として重ねる（最大 3
+          本・保存しない）。保存・上書きは作業中のタブ（{tabName}）を保存する。
         </Hint>
         <button type="button" class="book-close" onClick={() => ref.current?.close()}>
           閉じる
@@ -370,6 +377,25 @@ export function Book(props: BookProps) {
                           }}
                         >
                           新しいタブで開く
+                        </button>
+                        <button
+                          type="button"
+                          aria-label={`${row.name} を損益グラフに重ねる`}
+                          disabled={readonly || !hasBoard || !canPin}
+                          title={
+                            !hasBoard
+                              ? '板が無いので重ねられない（板を読むと重ねられる）'
+                              : canPin
+                                ? '今の板・今のシナリオ・今の設定で損益グラフに線を重ねる（ピン）'
+                                : PINS_FULL_TEXT
+                          }
+                          onClick={() => {
+                            setConfirm(null);
+                            setRenaming(null);
+                            props.onOverlay(row.id);
+                          }}
+                        >
+                          重ねる
                         </button>
                         <button
                           type="button"
