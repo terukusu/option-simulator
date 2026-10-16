@@ -15,6 +15,7 @@ import {
   parseYRange,
   reduce,
   type State,
+  validEntry,
 } from '../../ui/state';
 import { fixture } from '../support/fixtures';
 
@@ -180,6 +181,12 @@ describe('入力の検証', () => {
     expect(parseQty('1.5').ok).toBe(false);
     expect(parseEntry('1,234')).toEqual({ ok: true, value: 1234 });
     expect(parseEntry('-1').ok).toBe(false);
+    // 上限は保存の検証と同じ 1e9（入れられた建値が次に開いたときに捨てられない）
+    expect(parseEntry('1,000,000,000')).toEqual({ ok: true, value: 1e9 });
+    expect(parseEntry('1000000001').ok).toBe(false);
+    expect(validEntry(1e9)).toBe(true);
+    expect(validEntry(1e9 + 1)).toBe(false);
+    expect(validEntry(Number.NaN)).toBe(false);
     expect(parseIvPct('25', false)).toEqual({ ok: true, value: 0.25 });
     expect(parseIvPct('', true)).toEqual({ ok: true, value: null });
     expect(parseIvPct('', false).ok).toBe(false);
@@ -466,5 +473,54 @@ describe('取得時刻と読み直し（#34）', () => {
     expect(s.chain).toBeNull();
     expect(s.fetchedAt).toBeNull();
     expect(s.loadError?.message).toBe('x');
+  });
+});
+
+/** #23 AC5: 開いたとき読み込みに失敗して板が無ければ、保存した最後の板を「古い板」として使う。 */
+describe('保存した板のフォールバック（#23）', () => {
+  const chain = normalizeChain(fixture('latest'));
+  const saved = normalizeChain(fixture('night_early'));
+  const T0 = Date.parse('2026-10-11T21:47:00+09:00');
+  const T1 = Date.parse('2026-10-13T21:47:00+09:00');
+  const error = { message: 'API が板を返せない（HTTP 503）', errors: [] };
+  const fallback = { chain: saved, label: '保存した板（API）', fetchedAt: T0 };
+
+  it('板が無いときは保存した板を表示し、エラーは出したまま「古い板」', () => {
+    const s = run(
+      { ...initialState, monthId: '2099-01' },
+      { type: 'loading' },
+      { type: 'loadFailed', error, fallback },
+    );
+    expect(s.chain).toBe(saved);
+    expect(s.boardStale).toBe(true);
+    expect(s.fetchedAt).toBe(T0);
+    expect(s.sourceLabel).toBe('保存した板（API）');
+    expect(s.loadError).toEqual(error);
+    expect(s.loading).toBe(false);
+    // 限月は loaded と同じく板に合わせる
+    expect(s.monthId).toBe(saved.months[0]?.id);
+  });
+
+  it('板があるときの失敗は保存した板を使わない（メモリ内の板の方が新しい）', () => {
+    const s = run(
+      initialState,
+      { type: 'loaded', chain, label: 'API', fetchedAt: T1 },
+      { type: 'loading' },
+      { type: 'loadFailed', error, fallback },
+    );
+    expect(s.chain).toBe(chain);
+    expect(s.boardStale).toBe(false);
+    expect(s.fetchedAt).toBe(T1);
+  });
+
+  it('読み込みに成功すると「古い板」の印とエラーが消える。古い板のまま再び失敗しても印は残る', () => {
+    const stale = run(initialState, { type: 'loadFailed', error, fallback });
+    const again = run(stale, { type: 'loading' }, { type: 'loadFailed', error, fallback });
+    expect(again.boardStale).toBe(true);
+    expect(again.chain).toBe(saved);
+    const ok = reduce(stale, { type: 'loaded', chain, label: 'API', fetchedAt: T1 });
+    expect(ok.boardStale).toBe(false);
+    expect(ok.loadError).toBeNull();
+    expect(ok.chain).toBe(chain);
   });
 });

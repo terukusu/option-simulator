@@ -1,19 +1,44 @@
-import { useCallback, useEffect, useMemo, useReducer, useRef } from 'preact/hooks';
-import { axisOrigin, type Chain, monthOf } from '../../data';
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'preact/hooks';
+import { axisOrigin, type Chain, type ChainJson, monthOf } from '../../data';
 import { DEFAULT_SETTINGS, type ModelSettings, ZERO_SCENARIO } from '../../model';
 import {
   API_LABEL,
   describeLoadError,
   fixtureUrl,
   initialSource,
-  loadFromApi,
+  loadBoardFromApi,
+  loadBoardFromUrl,
   loadFromFile,
-  loadFromUrl,
+  savedBoardLabel,
 } from '../load';
-import { initialState, reduce } from '../state';
+import {
+  BOARD_KEY,
+  bootState,
+  isNewerBoard,
+  isNewerWorkspace,
+  persistKey,
+  type ReadResult,
+  readSavedBoard,
+  serializeBoard,
+  serializeWorkspace,
+  storageChange,
+  WORKSPACE_KEY,
+} from '../persist';
+import { reduce } from '../state';
+import { readKey, removeKey, writeKey } from '../storage';
 import { headerModel, keptBoardNote } from '../view/header';
 import { hedgeModel } from '../view/hedge';
 import { metricsModel } from '../view/metrics';
+import {
+  bootNote,
+  dropNote,
+  NEWER_OTHER_TAB_NOTE,
+  OTHER_TAB_NOTE,
+  type PersistNote,
+  type PersistNoteKind,
+  pushNote,
+  saveFailedNote,
+} from '../view/persistNote';
 import { pnlDomains, zoomViewport } from '../view/pnlChart';
 import { positionModel } from '../view/position';
 import { readoutModel } from '../view/readout';
@@ -35,32 +60,234 @@ const DEV_FIXTURES: readonly string[] = import.meta.env.DEV
   ? ['latest', 'night_early', 'pre_open']
   : [];
 
-export function App() {
-  const [state, dispatch] = useReducer(reduce, initialState);
-  const seq = useRef(0);
+/** 開いたときの localStorage（main.tsx が 1 回だけ読む。#23） */
+export interface Boot {
+  storage: Storage | null;
+  read: ReadResult;
+}
 
-  const load = useCallback(async (label: string, fn: () => Promise<Chain>) => {
-    const id = ++seq.current;
-    dispatch({ type: 'loading' });
-    try {
-      const chain = await fn();
-      // 取得時刻はブラウザの時計（reducer は時計を読まない）
-      if (id === seq.current) dispatch({ type: 'loaded', chain, label, fetchedAt: Date.now() });
-    } catch (e) {
-      if (id === seq.current) dispatch({ type: 'loadFailed', error: describeLoadError(e) });
-    }
-  }, []);
+const NO_BOOT: Boot = { storage: null, read: { kind: 'empty' } };
+
+/** 作業の保存の debounce（スライダーのドラッグ中は書かない。止まってから 1 回） */
+const SAVE_DELAY_MS = 500;
+
+/** 読み込んだ板（json は保存に使う。ファイル選択は保存しないので持たない） */
+interface Loaded {
+  chain: Chain;
+  json?: ChainJson;
+}
+
+export function App({ boot = NO_BOOT }: { boot?: Boot }) {
+  const [state, dispatch] = useReducer(reduce, boot.read, bootState);
+  const seq = useRef(0);
+  const { storage } = boot;
+  const [notes, setNotes] = useState<PersistNote[]>(() => pushNote([], bootNote(boot.read)));
+  const closeNote = useCallback(
+    (kind: PersistNoteKind) => setNotes((ns) => ns.filter((n) => n.kind !== kind)),
+    [],
+  );
+  // 読み込みの失敗で保存した板を使うかの判定に、その時点の板の有無を読む
+  const chainRef = useRef(state.chain);
+  chainRef.current = state.chain;
+
+  /**
+   * 板を読む。persist = 成功したら最後に取れた板として保存し、板が 1 枚も無いまま失敗したら保存した板を使う
+   * （API と dev の合成の板。ファイル選択は過去・手元の板なので使わない。#23）
+   */
+  const load = useCallback(
+    async (label: string, fn: () => Promise<Loaded>, persist: boolean) => {
+      const id = ++seq.current;
+      dispatch({ type: 'loading' });
+      try {
+        const { chain, json } = await fn();
+        if (id !== seq.current) return;
+        // 取得時刻はブラウザの時計（reducer は時計を読まない）
+        const fetchedAt = Date.now();
+        dispatch({ type: 'loaded', chain, label, fetchedAt });
+        if (persist && json) {
+          // 板を描いてから書く（20〜35 万字の setItem。容量が足りなければ板は諦める＝作業の保存を優先）
+          setTimeout(() => {
+            if (writeKey(storage, BOARD_KEY, serializeBoard(json, fetchedAt, label)) === 'quota') {
+              removeKey(storage, BOARD_KEY);
+            }
+          }, 0);
+        }
+      } catch (e) {
+        if (id !== seq.current) return;
+        const error = describeLoadError(e);
+        if (persist && chainRef.current === null) {
+          const text = readKey(storage, BOARD_KEY);
+          const saved = readSavedBoard(text);
+          if (saved) {
+            dispatch({
+              type: 'loadFailed',
+              error,
+              fallback: {
+                chain: saved.chain,
+                label: savedBoardLabel(saved.label),
+                fetchedAt: saved.fetchedAt,
+              },
+            });
+            return;
+          }
+          // 壊れた・古い版の保存は消す（従来の「板を読めない」の画面）。新しい版の板は残す
+          if (text !== null && !isNewerBoard(text)) removeKey(storage, BOARD_KEY);
+        }
+        dispatch({ type: 'loadFailed', error });
+      }
+    },
+    [storage],
+  );
 
   // 合成の板の読み込みは dev だけ（本番のビルドでは分岐ごと消え、fixture の URL も残らない）
   const onFixture = useCallback(
     (name: string) => {
-      if (import.meta.env.DEV) load(name, () => loadFromUrl(fixtureUrl(name)));
+      if (import.meta.env.DEV) load(name, () => loadBoardFromUrl(fixtureUrl(name)), true);
     },
     [load],
   );
-  const onFile = useCallback((file: File) => load(file.name, () => loadFromFile(file)), [load]);
+  const onFile = useCallback(
+    (file: File) => load(file.name, async () => ({ chain: await loadFromFile(file) }), false),
+    [load],
+  );
   // [最新]: API から読み直す（手動だけ。自動ポーリング・タイマーは入れない。7.3 (4)）
-  const onLatest = useCallback(() => load(API_LABEL, () => loadFromApi()), [load]);
+  const onLatest = useCallback(() => load(API_LABEL, () => loadBoardFromApi(), true), [load]);
+
+  // ---- 作業の自動保存（#23）。新しい版の保存を見たら（開いたとき・別のタブの保存・書く直前の読み直し）、
+  // このセッションでは書かない（開いたままの古い版のタブが新しい版の保存を上書きしない）
+  const blocked = useRef(boot.read.kind === 'newer');
+  const stateRef = useRef(state);
+  stateRef.current = state;
+  // 最後に書いた（開いたときは復元した）内容。同じなら書かない（開いているだけのタブは書かない）
+  const lastKey = useRef<string | null>(null);
+  if (lastKey.current === null) lastKey.current = persistKey(state);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const notified = useRef(new Set<string>());
+
+  const block = useCallback(() => {
+    blocked.current = true;
+    if (timer.current !== null) {
+      clearTimeout(timer.current);
+      timer.current = null;
+    }
+    setNotes((ns) => pushNote(dropNote(ns, 'otherTab'), NEWER_OTHER_TAB_NOTE));
+  }, []);
+
+  const flush = useCallback(() => {
+    if (timer.current !== null) {
+      clearTimeout(timer.current);
+      timer.current = null;
+    }
+    if (blocked.current) return;
+    const s = stateRef.current;
+    const key = persistKey(s);
+    if (key === lastKey.current) return;
+    // 書く直前に読み直す（storage イベントが届かない場合の守り。数 KB の読み取り 1 回）
+    if (isNewerWorkspace(readKey(storage, WORKSPACE_KEY))) {
+      block();
+      return;
+    }
+    const text = serializeWorkspace(s, Date.now());
+    let result = writeKey(storage, WORKSPACE_KEY, text);
+    if (result === 'quota') {
+      // 板（大きい方）を消して 1 回だけ再試行（作業を板より優先）
+      removeKey(storage, BOARD_KEY);
+      result = writeKey(storage, WORKSPACE_KEY, text);
+    }
+    if (result === 'ok') {
+      lastKey.current = key;
+      // 前に出した「保存できない」は、書けたら消す（また失敗したらまた知らせる）
+      if (notified.current.size > 0) {
+        notified.current.clear();
+        setNotes((ns) => dropNote(ns, 'saveFailed'));
+      }
+      return;
+    }
+    if (!notified.current.has(result)) {
+      notified.current.add(result);
+      setNotes((ns) => pushNote(ns, saveFailedNote(result)));
+    }
+  }, [block, storage]);
+
+  // 保存の対象が変わったら debounce で書く（書くのは止まってから 1 回）。
+  // 板の読み込みが合わせた分（限月・ヘッジの限月・足の市場）は利用者の変更でないので書かない
+  // （開いているだけのタブが他のタブの保存を上書きしない）。比較の文字列は足 10 本で 0.1 ms 未満
+  const {
+    chain: loadedChain,
+    legs,
+    scenario: savedScenario,
+    atmBasis: savedBasis,
+    monthId,
+    target,
+    filterAsk,
+    smileAxis,
+    feePerLot: savedFee,
+    futureBasis: savedFutureBasis,
+    metricsUnit,
+    pnlY,
+    pnlFolded,
+    hedge: savedHedge,
+  } = state;
+  const baseChain = useRef(loadedChain);
+  // 保存の対象が変わったときだけ走る（値は stateRef から読む）
+  useEffect(() => {
+    if (blocked.current) return;
+    const key = persistKey(stateRef.current);
+    const byLoad = loadedChain !== baseChain.current;
+    baseChain.current = loadedChain;
+    if (byLoad && timer.current === null) {
+      lastKey.current = key;
+      return;
+    }
+    if (timer.current !== null) clearTimeout(timer.current);
+    timer.current = key === lastKey.current ? null : setTimeout(flush, SAVE_DELAY_MS);
+  }, [
+    flush,
+    loadedChain,
+    legs,
+    savedScenario,
+    savedBasis,
+    monthId,
+    target,
+    filterAsk,
+    smileAxis,
+    savedFee,
+    savedFutureBasis,
+    metricsUnit,
+    pnlY,
+    pnlFolded,
+    savedHedge,
+  ]);
+
+  // タブを閉じる・隠すときは保留中の書き込みをすぐ書く（iOS Safari は unload が来ないことがある。
+  // beforeunload は bfcache を壊すので使わない）。別のタブの保存は 1 行で知らせる（後勝ち・取り込まない）
+  useEffect(() => {
+    const onHide = () => {
+      if (document.visibilityState === 'hidden') flush();
+    };
+    const onStorage = (e: StorageEvent) => {
+      if (blocked.current) return;
+      const change = storageChange(e.key, e.newValue);
+      if (change === 'newer') block();
+      else if (change === 'otherTab') setNotes((ns) => pushNote(ns, OTHER_TAB_NOTE));
+    };
+    window.addEventListener('pagehide', flush);
+    document.addEventListener('visibilitychange', onHide);
+    window.addEventListener('storage', onStorage);
+    return () => {
+      window.removeEventListener('pagehide', flush);
+      document.removeEventListener('visibilitychange', onHide);
+      window.removeEventListener('storage', onStorage);
+    };
+  }, [block, flush]);
+
+  // 保留中の書き込みの timer を後始末する（App はアンマウントしないが、残さない）
+  useEffect(
+    () => () => {
+      if (timer.current !== null) clearTimeout(timer.current);
+    },
+    [],
+  );
 
   // 開いたら 1 回だけ読む（本番 = API、dev = 合成の latest）
   useEffect(() => {
@@ -71,11 +298,17 @@ export function App() {
 
   const { chain, atmBasis } = state;
   const month = chain && state.monthId ? (monthOf(chain, state.monthId) ?? null) : null;
-  const { calendar, fetchedAt, sourceLabel } = state;
+  const { calendar, fetchedAt, sourceLabel, boardStale } = state;
   const header = useMemo(
     () =>
-      chain ? headerModel(chain, atmBasis, calendar, { fetchedAt, label: sourceLabel }) : null,
-    [chain, atmBasis, calendar, fetchedAt, sourceLabel],
+      chain
+        ? headerModel(chain, atmBasis, calendar, {
+            fetchedAt,
+            label: sourceLabel,
+            stale: boardStale,
+          })
+        : null,
+    [chain, atmBasis, calendar, fetchedAt, sourceLabel, boardStale],
   );
   // 手数料（1 枚あたり円）・先物の basis（固定 / 減衰。#25）は評価の設定（損益・指標・テール表・ヘッジに効く）
   const { feePerLot, futureBasis } = state;
@@ -153,12 +386,24 @@ export function App() {
           sourceLabel={sourceLabel}
           loading={state.loading}
           error={state.loadError}
-          kept={chain ? keptBoardNote(fetchedAt) : null}
+          kept={chain ? keptBoardNote(fetchedAt, boardStale) : null}
           onFixture={onFixture}
           onFile={onFile}
           onLatest={onLatest}
         />
       </div>
+      {notes.length > 0 && (
+        <div class="persist-notes">
+          {notes.map((n) => (
+            <p key={n.kind} class={n.warn ? 'note warn' : 'note'} role="status">
+              {n.text}
+              <button type="button" onClick={() => closeNote(n.kind)}>
+                閉じる
+              </button>
+            </p>
+          ))}
+        </div>
+      )}
       {!chain || !header ? (
         <p class="empty">
           {state.loading

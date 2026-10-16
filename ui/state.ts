@@ -1,5 +1,6 @@
 /**
- * 画面の状態と reducer（純関数）。ポジションは画面の状態としてだけ持つ（保存は #8）。
+ * 画面の状態と reducer（純関数）。足・シナリオ・設定の localStorage への保存と復元は ui/persist.ts
+ * （I/O は App。reducer は I/O を持たない。#23）。
  *
  * 足の追加は data/ の boardOptionLeg / manualOptionLeg / futureLeg を呼ぶだけ。評価（アンカー IV・
  * グリーク・建値ずれ）は表示モデル（view/position.ts）が毎回 model/ の preparePosition から求める。
@@ -30,6 +31,7 @@ import {
 } from '../model';
 import { CALENDAR } from './calendar';
 import type { Domain } from './chart/scale';
+import { refreshLegMarkets } from './legMarket';
 import { parseNum } from './view/format';
 import { DEFAULT_HEDGE, HEDGE_TARGET_MAX, type HedgeSettings, hedgeContracts } from './view/hedge';
 import { DEFAULT_PNL_Y, type PnlYSettings } from './view/pnlChart';
@@ -56,6 +58,8 @@ export interface State {
   sourceLabel: string | null;
   /** 板を読み込んだ時刻（ブラウザの時計、epoch ミリ秒。#34。失敗しても前の値を保つ） */
   fetchedAt: number | null;
+  /** 表示中の板は localStorage に保存した「最後に取れた板」（読み込みに失敗して代わりに使った。#23） */
+  boardStale: boolean;
   loading: boolean;
   loadError: LoadErrorView | null;
   atmBasis: AtmBasis;
@@ -100,6 +104,7 @@ export const initialState: State = {
   chain: null,
   sourceLabel: null,
   fetchedAt: null,
+  boardStale: false,
   loading: false,
   loadError: null,
   atmBasis: 'B',
@@ -136,7 +141,15 @@ export type Action =
   | { type: 'loading' }
   /** fetchedAt は App が Date.now() を渡す（reducer は時計を読まない。省略時は null） */
   | { type: 'loaded'; chain: Chain; label: string; fetchedAt?: number }
-  | { type: 'loadFailed'; error: LoadErrorView }
+  /**
+   * 読み込みの失敗。fallback は保存した最後の板（板が 1 枚も無いときだけ使う。#23）。
+   * fetchedAt は保存した板の取得時刻、label はデータ元の表示
+   */
+  | {
+      type: 'loadFailed';
+      error: LoadErrorView;
+      fallback?: { chain: Chain; label: string; fetchedAt: number };
+    }
   | { type: 'setBasis'; basis: AtmBasis }
   | { type: 'setMonth'; monthId: string }
   | { type: 'setTarget'; target: OptionType }
@@ -189,7 +202,7 @@ function applyPatch(leg: Leg, patch: LegPatch): Leg {
 }
 
 /** シナリオの各値の範囲（設計 5.4。d の上限と ΔX の % 範囲は描く側・パネルが X₀ と足から決める） */
-function validScenarioPatch(p: Partial<Scenario>): boolean {
+export function validScenarioPatch(p: Partial<Scenario>): boolean {
   const fin = (v: number | undefined) => v === undefined || Number.isFinite(v);
   const within = (v: number | undefined, lo: number, hi: number) =>
     v === undefined || (Number.isFinite(v) && v >= lo && v <= hi);
@@ -234,6 +247,10 @@ export function reduce(state: State, action: Action): State {
         chain,
         sourceLabel: action.label,
         fetchedAt: action.fetchedAt ?? null,
+        boardStale: false,
+        // 足の市場（手入力の足の SQ・F、先物の足の SQ・価格）と市場の印は今の板から作り直す。
+        // 建値・枚数・売買・IV の編集は変えない（足を追加したときと同じ規則。#23）
+        legs: refreshLegMarkets(chain, state.legs, state.calendar.holidays),
         loading: false,
         loadError: null,
         monthId: keep ? state.monthId : (chain.months[0]?.id ?? null),
@@ -243,9 +260,21 @@ export function reduce(state: State, action: Action): State {
         hedge: keepContract ? hedge : { ...hedge, contract: null },
       };
     }
-    case 'loadFailed':
-      // 前の板・取得時刻・データ元は保持する（localStorage の古い板は #23）
+    case 'loadFailed': {
+      // 板が 1 枚も無ければ保存した最後の板を「古い板」として使う（#23）。エラーは出したまま
+      const { fallback } = action;
+      if (state.chain === null && fallback) {
+        const s = reduce(state, {
+          type: 'loaded',
+          chain: fallback.chain,
+          label: fallback.label,
+          fetchedAt: fallback.fetchedAt,
+        });
+        return { ...s, loadError: action.error, boardStale: true };
+      }
+      // 前の板・取得時刻・データ元・古い板の印は保持する
       return { ...state, loading: false, loadError: action.error };
+    }
     case 'setBasis':
       return { ...state, atmBasis: action.basis };
     case 'setMonth':
@@ -367,20 +396,47 @@ export type Parsed<T> = { ok: true; value: T } | { ok: false; message: string };
 /** 数のパース（`−`・先頭の `+`・桁区切りを受ける。view/format.ts の parseNum） */
 const num = parseNum;
 
+/** 枚数の上限 */
+export const QTY_MAX = 100_000;
+
+/** 枚数として正しい数か（1〜100,000 の整数。parseQty と保存の検証が使う）。 */
+export function validQty(v: unknown): v is number {
+  return typeof v === 'number' && Number.isInteger(v) && v >= 1 && v <= QTY_MAX;
+}
+
+/** IV（小数）として正しい数か（0 < iv ≤ 10 = 1,000%。parseIvPct と保存の検証が使う）。 */
+export function validIv(v: unknown): v is number {
+  return typeof v === 'number' && Number.isFinite(v) && v > 0 && v <= 10;
+}
+
+/** 限月の ID（YYYY-MM、月 1〜12）か。 */
+export function isContractId(v: unknown): v is string {
+  if (typeof v !== 'string') return false;
+  const m = /^(\d{4})-(\d{2})$/.exec(v);
+  const month = m ? Number(m[2]) : 0;
+  return month >= 1 && month <= 12;
+}
+
 /** 枚数: 1 以上の整数。 */
 export function parseQty(text: string): Parsed<number> {
   const v = num(text);
-  return Number.isInteger(v) && v >= 1 && v <= 100_000
-    ? { ok: true, value: v }
-    : { ok: false, message: '枚数は 1 以上の整数' };
+  return validQty(v) ? { ok: true, value: v } : { ok: false, message: '枚数は 1 以上の整数' };
 }
 
-/** 建値: 0 以上の数（円）。 */
+/** 建値の上限（円。保存の検証と揃える） */
+export const ENTRY_MAX = 1e9;
+
+/** 建値として正しい数か（0〜1e9。parseEntry と保存の検証が使う）。 */
+export function validEntry(v: unknown): v is number {
+  return typeof v === 'number' && Number.isFinite(v) && v >= 0 && v <= ENTRY_MAX;
+}
+
+/** 建値: 0 以上 1e9 以下の数（円）。 */
 export function parseEntry(text: string): Parsed<number> {
   const v = num(text);
-  return Number.isFinite(v) && v >= 0
+  return validEntry(v)
     ? { ok: true, value: v }
-    : { ok: false, message: '建値は 0 以上' };
+    : { ok: false, message: '建値は 0 以上 1,000,000,000 以下' };
 }
 
 /** IV: % で入力した正の数 → 小数。空欄は null（編集の取り消し）。 */
@@ -405,11 +461,7 @@ export function parseStrike(text: string): Parsed<number> {
 /** 限月: YYYY-MM。 */
 export function parseContract(text: string): Parsed<string> {
   const t = text.trim();
-  const m = /^(\d{4})-(\d{2})$/.exec(t);
-  const month = m ? Number(m[2]) : 0;
-  return m && month >= 1 && month <= 12
-    ? { ok: true, value: t }
-    : { ok: false, message: '限月は YYYY-MM' };
+  return isContractId(t) ? { ok: true, value: t } : { ok: false, message: '限月は YYYY-MM' };
 }
 
 /** 指定日 d（暦日、小数可）: 0 以上・最遠の足の SQ までの日数以下。 */

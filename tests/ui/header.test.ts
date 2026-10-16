@@ -187,4 +187,18 @@ describe('ヘッダ: 取得時刻・データ元・reason の理由', () => {
     expect(keptBoardNote(null)).toBeNull();
     expect(keptBoardNote(FETCHED)).toBe('前の板のまま（取得 21:47）');
   });
+
+  it('#23 保存した板: keptBoardNote は日付つき、ヘッダは「古い板」と日付つきの取得時刻', () => {
+    expect(keptBoardNote(FETCHED, true)).toBe('保存した板を表示（取得 2026-10-13 21:47）');
+    const chain = normalizeChain(fixture('latest'));
+    const h = headerModel(chain, 'B', CALENDAR, {
+      fetchedAt: FETCHED,
+      label: '保存した板（API）',
+      stale: true,
+    });
+    expect(h.boardStale).toBe(true);
+    expect(h.fetched).toBe('2026-10-13 21:47');
+    expect(h.loadedFrom).toBe('保存した板（API）');
+    expect(headerModel(chain, 'B', CALENDAR, { fetchedAt: FETCHED }).boardStale).toBe(false);
+  });
 });

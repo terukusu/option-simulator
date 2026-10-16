@@ -6,6 +6,13 @@
 
 import { render } from 'preact';
 import { App } from './components/App';
+import { readWorkspace, WORKSPACE_KEY } from './persist';
+import { getStorage, readKey } from './storage';
 
 const root = document.getElementById('app');
-if (root) render(<App />, root);
+if (root) {
+  // 保存した作業は板を読む前に 1 回だけ読む（App が初期 state に入れる。ちらつかない。#23）
+  const storage = getStorage();
+  const read = readWorkspace(readKey(storage, WORKSPACE_KEY));
+  render(<App boot={{ storage, read }} />, root);
+}
