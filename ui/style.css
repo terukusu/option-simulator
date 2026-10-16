@@ -249,8 +249,15 @@ select {
   margin: 8px 0;
 }
 
-/* ---------------------------------------------------------------- 2 ペイン */
+/* ---------------------------------------------------------------- 3 段階の配置（#61。設計 6.1） */
 
+/*
+ * 幅の段階は ui/view/layout.ts と同じ値にする。
+ * - スマホ < 720px: 1 列（板 → シミュレーター → 詳細）
+ * - タブレット 720〜1199.98px: 2 列（板 | シミュレーター + 詳細）
+ * - PC ≥ 1200px: 3 列（板 | シミュレーター | 詳細）。シミュレーターの列は画面の上端に残る
+ * スマホ・タブレットでは .pane-sim を箱にしない（ドックの sticky の範囲を .pane-side 全体にする）
+ */
 .panes {
   display: grid;
   gap: 16px;
@@ -261,9 +268,42 @@ select {
   min-width: 0;
 }
 
+.pane-sim {
+  display: contents;
+}
+
 @media (min-width: 720px) {
   .panes {
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+}
+
+@media (min-width: 1200px) {
+  .app {
+    max-width: 1800px;
+  }
+
+  /* 板の列は 9 列の表示（FULL_BOARD_MIN_WIDTH = 560px。ui/view/board.ts）を保つ幅を下限にする */
+  .panes {
+    grid-template-columns: minmax(560px, 1.2fr) minmax(0, 1fr) minmax(0, 1fr);
+  }
+
+  .pane-side {
+    display: contents;
+  }
+
+  /*
+   * align-self: start が無いと行の高さに伸びて sticky が効かない。列が画面より長ければ列の中でスクロール。
+   * 高さは .app の下の余白（24px）を引く（ページの下端でも列の上端が画面の外へ押し出されない）
+   */
+  .pane-sim {
+    align-self: start;
+    display: block;
+    max-height: calc(100vh - 24px);
+    min-width: 0;
+    overflow-y: auto;
+    position: sticky;
+    top: 0;
   }
 }
 
@@ -294,11 +334,16 @@ select {
   overflow: hidden;
 }
 
+/*
+ * position: relative で行の中の .sr-only（ATM の読み上げ。position: absolute）をこの枠に収める
+ * （無いと枠のスクロールで切り取られず、ページの下に空白ができる。PC のシミュレーターの列が下端で外れる。#61）
+ */
 .board-scroll {
   border: 1px solid var(--line);
   max-height: 70vh;
   overflow-x: auto;
   overflow-y: auto;
+  position: relative;
 }
 
 .board-table {
@@ -672,6 +717,38 @@ button.q.noquote {
 
 /* ---------------------------------------------------------------- 損益グラフ */
 
+/*
+ * ドック（操作行・描画域・読み取りの帯。#61）: 画面の上端に残る。範囲はスマホ・タブレットでは
+ * .pane-side（シミュレーター + 詳細）、PC では .pane-sim（シミュレーターの列のスクロール域）
+ */
+.pnl-dock {
+  background: Canvas;
+  border-bottom: 1px solid var(--line);
+  position: sticky;
+  top: 0;
+  z-index: 3;
+}
+
+.pnl-fold {
+  margin-left: auto;
+}
+
+/*
+ * キーボードでフォーカスした要素をドックの下に隠さない（レビューの指摘。#61）。ページの上端からドックの高さ（操作行 +
+ * 描画域 + 帯）より少し大きい範囲を「見えていない」扱いにする。PC はシミュレーターが別の列なので不要
+ */
+@media (max-width: 1199.98px) {
+  html {
+    scroll-padding-top: 340px;
+  }
+}
+
+@media (max-width: 719.98px) {
+  html {
+    scroll-padding-top: 300px;
+  }
+}
+
 .pnl-tools {
   align-items: center;
   display: flex;
@@ -693,6 +770,14 @@ button.q.noquote {
   display: block;
   font-size: 10px;
   max-width: 100%;
+}
+
+/* たたむ: 描画域は外さず（幅の監視・ジェスチャを保つ）描画を止めて高さ 0 にする */
+.pnl-dock.folded .pnl-plot {
+  content-visibility: hidden;
+  height: 0;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .pnl-line {
@@ -809,16 +894,12 @@ button.q.noquote {
   fill: var(--muted);
 }
 
-/* 読み取りの帯（シナリオ点の値。#52）: グラフ・帯・シナリオ欄（.pnl-group）の範囲で画面の上端に残る */
+/* 読み取りの帯（シナリオ点の値。#52）: 上端に残るのは親のドック（.pnl-dock。#61） */
 .readout {
   background: Canvas;
-  border-bottom: 1px solid var(--line);
   font-size: 0.8rem;
   font-variant-numeric: tabular-nums;
   padding: 4px 0;
-  position: sticky;
-  top: 0;
-  z-index: 3;
 }
 
 .readout-row {

@@ -79,6 +79,8 @@ export interface State {
   pnlViewport: Domain | null;
   /** 損益グラフの縦軸 */
   pnlY: PnlYSettings;
+  /** 損益グラフの描画域をたたんでいる（操作行・読み取りの帯は残す。板の読み直し・足のクリアでも保つ。#61） */
+  pnlFolded: boolean;
   legs: UiLeg[];
   nextId: number;
   /** 足の追加フォームのエラー（data/ の例外の文言） */
@@ -113,6 +115,7 @@ export const initialState: State = {
   metricsUnit: 'auto',
   pnlViewport: null,
   pnlY: DEFAULT_PNL_Y,
+  pnlFolded: false,
   legs: [],
   nextId: 1,
   legError: null,
@@ -150,6 +153,7 @@ export type Action =
   | { type: 'setMetricsUnit'; unit: MetricsUnitSetting }
   | { type: 'setPnlViewport'; viewport: Domain | null }
   | { type: 'setPnlY'; patch: Partial<PnlYSettings> }
+  | { type: 'setPnlFolded'; folded: boolean }
   | { type: 'addBoardLeg'; expiry: string; k: number; optionType: OptionType; side: Side }
   | { type: 'addFutureLeg'; input: FutureLegInput }
   | { type: 'addManualLeg'; input: ManualOptionLegInput }
@@ -292,6 +296,8 @@ export function reduce(state: State, action: Action): State {
       return { ...state, pnlViewport: action.viewport };
     case 'setPnlY':
       return { ...state, pnlY: { ...state.pnlY, ...action.patch } };
+    case 'setPnlFolded':
+      return action.folded === state.pnlFolded ? state : { ...state, pnlFolded: action.folded };
     case 'addBoardLeg': {
       if (!state.chain) return state;
       try {

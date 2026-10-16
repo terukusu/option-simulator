@@ -3,6 +3,7 @@ import type { Scenario } from '../../model';
 import { type Domain, pixelToValue, zoom } from '../chart/scale';
 import { type Action, parsePremiumN, parseYRange } from '../state';
 import { fmtNum } from '../view/format';
+import { PHONE_QUERY } from '../view/layout';
 import { AMOUNT_UNIT_LABEL, type AmountUnit } from '../view/metrics';
 import {
   dateLine,
@@ -11,6 +12,7 @@ import {
   type PnlLineKind,
   type PnlYMode,
   type PnlYSettings,
+  pnlChartHeight,
   pnlChartModel,
   todayLine,
   Y_UNIT_LABEL,
@@ -21,12 +23,9 @@ import { scenarioMarks } from '../view/scenarioMarks';
 import { pure } from './pure';
 import { Readout } from './Readout';
 import { useChartGestures } from './useChartGestures';
+import { useMediaQuery } from './useMediaQuery';
 import { useWidth } from './useWidth';
 
-/** グラフの高さ（幅 < 560px は低くして、グラフの外でページをスクロールできるようにする） */
-const HEIGHT = 260;
-const HEIGHT_NARROW = 220;
-const NARROW_FROM = 560;
 /** ボタンの拡大・縮小の倍率 */
 const BUTTON_ZOOM_IN = 0.8;
 const BUTTON_ZOOM_OUT = 1.25;
@@ -44,6 +43,8 @@ export interface PnlChartProps {
   amountUnit: AmountUnit;
   /** 読み取りの帯（シナリオ点の値。App で memo。#52） */
   readout: ReadoutModel;
+  /** 描画域をたたんでいる（操作行・帯は残す。#61） */
+  folded: boolean;
   dispatch: (a: Action) => void;
 }
 
@@ -73,10 +74,13 @@ function PnlChartView({
   scenarioAtm,
   amountUnit,
   readout,
+  folded,
   dispatch,
 }: PnlChartProps) {
   const { ref, width } = useWidth(480);
-  const height = width < NARROW_FROM ? HEIGHT_NARROW : HEIGHT;
+  // スマホは 180px（ドックの下でページをスクロールできる高さを残す。#61）
+  const phone = useMediaQuery(PHONE_QUERY);
+  const height = pnlChartHeight(width, phone);
   const plotWidth = Math.max(width - PNL_MARGIN.left - PNL_MARGIN.right, 1);
   const plotHeight = height - PNL_MARGIN.top - PNL_MARGIN.bottom;
   // 今日の線はシナリオ IV を掛けない（d・ΔX・Δσ・Δs のスライダーで変わらない）ので、表示範囲・幅・β・動き方が
@@ -198,220 +202,236 @@ function PnlChartView({
   const unit = Y_UNIT_LABEL[model.yUnit];
 
   return (
-    // ルートは箱を作らない（読み取りの帯の sticky の範囲を親の .pnl-group にする。#52）
+    // ドック（操作行・描画域・読み取りの帯）は画面の上端に残る（sticky。#61）。凡例はドックの外で流れる
     <>
-      <div class="pnl-tools">
-        <fieldset class="seg" aria-label="縦軸">
-          {(['auto', 'manual', 'premium'] as const).map((m) => (
+      <div class={folded ? 'pnl-dock folded' : 'pnl-dock'}>
+        <div class="pnl-tools">
+          <fieldset class="seg" aria-label="縦軸">
+            {(['auto', 'manual', 'premium'] as const).map((m) => (
+              <button
+                type="button"
+                key={m}
+                aria-pressed={pnlY.mode === m}
+                disabled={noLegs}
+                onClick={() => setMode(m)}
+              >
+                {Y_MODE_LABEL[m]}
+              </button>
+            ))}
+          </fieldset>
+          {pnlY.mode === 'manual' && (
+            <span class="pnl-range">
+              <label>
+                下端{' '}
+                <input
+                  type="text"
+                  inputMode="decimal"
+                  size={9}
+                  value={loText}
+                  aria-invalid={rangeError !== null}
+                  onInput={(e) => setLoText(e.currentTarget.value)}
+                  onChange={(e) => commitRange(e.currentTarget.value, hiText)}
+                />
+              </label>{' '}
+              <label>
+                上端{' '}
+                <input
+                  type="text"
+                  inputMode="decimal"
+                  size={9}
+                  value={hiText}
+                  aria-invalid={rangeError !== null}
+                  onInput={(e) => setHiText(e.currentTarget.value)}
+                  onChange={(e) => commitRange(loText, e.currentTarget.value)}
+                />
+              </label>{' '}
+              円
+            </span>
+          )}
+          {pnlY.mode === 'premium' && (
+            <label class="pnl-n">
+              N{' '}
+              <input
+                type="text"
+                inputMode="decimal"
+                size={4}
+                value={nText}
+                aria-invalid={nError !== null}
+                onInput={(e) => onN(e.currentTarget.value)}
+              />
+            </label>
+          )}
+          <fieldset class="seg" aria-label="拡大">
             <button
               type="button"
-              key={m}
-              aria-pressed={pnlY.mode === m}
-              disabled={noLegs}
-              onClick={() => setMode(m)}
+              aria-label="縮小"
+              disabled={model.empty}
+              onClick={() => zoomBy(BUTTON_ZOOM_OUT)}
             >
-              {Y_MODE_LABEL[m]}
+              −
             </button>
-          ))}
-        </fieldset>
-        {pnlY.mode === 'manual' && (
-          <span class="pnl-range">
-            <label>
-              下端{' '}
-              <input
-                type="text"
-                inputMode="decimal"
-                size={9}
-                value={loText}
-                aria-invalid={rangeError !== null}
-                onInput={(e) => setLoText(e.currentTarget.value)}
-                onChange={(e) => commitRange(e.currentTarget.value, hiText)}
-              />
-            </label>{' '}
-            <label>
-              上端{' '}
-              <input
-                type="text"
-                inputMode="decimal"
-                size={9}
-                value={hiText}
-                aria-invalid={rangeError !== null}
-                onInput={(e) => setHiText(e.currentTarget.value)}
-                onChange={(e) => commitRange(loText, e.currentTarget.value)}
-              />
-            </label>{' '}
-            円
-          </span>
-        )}
-        {pnlY.mode === 'premium' && (
-          <label class="pnl-n">
-            N{' '}
-            <input
-              type="text"
-              inputMode="decimal"
-              size={4}
-              value={nText}
-              aria-invalid={nError !== null}
-              onInput={(e) => onN(e.currentTarget.value)}
-            />
-          </label>
-        )}
-        <fieldset class="seg" aria-label="拡大">
+            <button
+              type="button"
+              aria-label="拡大"
+              disabled={model.empty}
+              onClick={() => zoomBy(BUTTON_ZOOM_IN)}
+            >
+              ＋
+            </button>
+            <button
+              type="button"
+              aria-label="リセット"
+              disabled={model.empty}
+              onClick={() => dispatch({ type: 'setPnlViewport', viewport: null })}
+            >
+              ⟲
+            </button>
+          </fieldset>
           <button
             type="button"
-            aria-label="縮小"
-            disabled={model.empty}
-            onClick={() => zoomBy(BUTTON_ZOOM_OUT)}
+            class="pnl-fold"
+            aria-expanded={!folded}
+            onClick={() => dispatch({ type: 'setPnlFolded', folded: !folded })}
           >
-            −
+            {folded ? 'ひらく' : 'たたむ'}
           </button>
-          <button
-            type="button"
-            aria-label="拡大"
-            disabled={model.empty}
-            onClick={() => zoomBy(BUTTON_ZOOM_IN)}
-          >
-            ＋
-          </button>
-          <button
-            type="button"
-            aria-label="リセット"
-            disabled={model.empty}
-            onClick={() => dispatch({ type: 'setPnlViewport', viewport: null })}
-          >
-            ⟲
-          </button>
-        </fieldset>
-      </div>
-      {errors.length > 0 && (
-        <p class="field-error" role="alert">
-          {errors.join(' / ')}
-        </p>
-      )}
-      <div
-        class={model.empty ? 'plot-area pnl-plot plot-empty' : 'plot-area pnl-plot'}
-        ref={ref}
-        tabIndex={model.empty ? -1 : 0}
-        role="application"
-        aria-label="損益グラフ（ホイール・ピンチで拡大、ドラッグでパン、ダブルクリックでリセット、長押しして左右にドラッグでシナリオ点 ΔX。キー: + / − 拡大縮小、← / → パン、R リセット、, / . で ΔX ∓100 円、< / > で ∓1,000 円）"
-      >
-        {model.empty ? (
-          <p class="note">
-            {legCount === 0
-              ? '足を追加すると損益が出ます'
-              : '評価できる足が無い（F が決まらない限月の足だけ）'}
+        </div>
+        {errors.length > 0 && (
+          <p class="field-error" role="alert">
+            {errors.join(' / ')}
           </p>
-        ) : (
-          <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`} aria-hidden="true">
-            <g class="grid">
-              {model.yTicks.map((t) => (
-                <g key={`y${t.v}`}>
-                  <line x1={plot.left} x2={right} y1={t.px} y2={t.px} />
-                  <text x={plot.left - 4} y={t.px} class="tick-y">
-                    {t.label}
-                  </text>
-                </g>
-              ))}
-              {model.xTicks.map((t) => (
-                <g key={`x${t.v}`}>
-                  <line x1={t.px} x2={t.px} y1={plot.top} y2={bottom} />
-                  <text x={t.px} y={bottom + 16} class="tick-x">
-                    {t.label}
-                  </text>
-                </g>
-              ))}
-            </g>
-            {/* 描画域の切り抜き（入れ子の svg。clip-path の ID を使わない） */}
+        )}
+        <div
+          class={model.empty ? 'plot-area pnl-plot plot-empty' : 'plot-area pnl-plot'}
+          ref={ref}
+          // たたんでいる間も描画域は外さない（幅の監視・ジェスチャの購読を保つ。CSS で隠す）
+          tabIndex={model.empty || folded ? -1 : 0}
+          role="application"
+          aria-label="損益グラフ（ホイール・ピンチで拡大、ドラッグでパン、ダブルクリックでリセット、長押しして左右にドラッグでシナリオ点 ΔX。キー: + / − 拡大縮小、← / → パン、R リセット、, / . で ΔX ∓100 円、< / > で ∓1,000 円）"
+        >
+          {model.empty ? (
+            <p class="note">
+              {legCount === 0
+                ? '足を追加すると損益が出ます'
+                : '評価できる足が無い（F が決まらない限月の足だけ）'}
+            </p>
+          ) : (
             <svg
-              x={plot.left}
-              y={plot.top}
-              width={plot.width}
-              height={plot.height}
-              viewBox={`${plot.left} ${plot.top} ${plot.width} ${plot.height}`}
-              class="pnl-clip"
+              width={width}
+              height={height}
+              viewBox={`0 0 ${width} ${height}`}
               aria-hidden="true"
             >
-              {model.zeroPy !== null && (
-                <line
-                  class="pnl-zero"
-                  x1={plot.left}
-                  x2={right}
-                  y1={model.zeroPy}
-                  y2={model.zeroPy}
-                />
+              <g class="grid">
+                {model.yTicks.map((t) => (
+                  <g key={`y${t.v}`}>
+                    <line x1={plot.left} x2={right} y1={t.px} y2={t.px} />
+                    <text x={plot.left - 4} y={t.px} class="tick-y">
+                      {t.label}
+                    </text>
+                  </g>
+                ))}
+                {model.xTicks.map((t) => (
+                  <g key={`x${t.v}`}>
+                    <line x1={t.px} x2={t.px} y1={plot.top} y2={bottom} />
+                    <text x={t.px} y={bottom + 16} class="tick-x">
+                      {t.label}
+                    </text>
+                  </g>
+                ))}
+              </g>
+              {/* 描画域の切り抜き（入れ子の svg。clip-path の ID を使わない） */}
+              <svg
+                x={plot.left}
+                y={plot.top}
+                width={plot.width}
+                height={plot.height}
+                viewBox={`${plot.left} ${plot.top} ${plot.width} ${plot.height}`}
+                class="pnl-clip"
+                aria-hidden="true"
+              >
+                {model.zeroPy !== null && (
+                  <line
+                    class="pnl-zero"
+                    x1={plot.left}
+                    x2={right}
+                    y1={model.zeroPy}
+                    y2={model.zeroPy}
+                  />
+                )}
+                {model.x0Px !== null && (
+                  <line class="pnl-x0" x1={model.x0Px} x2={model.x0Px} y1={plot.top} y2={bottom} />
+                )}
+                {model.scenarioPx !== null && (
+                  <line
+                    class="pnl-scn"
+                    x1={model.scenarioPx}
+                    x2={model.scenarioPx}
+                    y1={plot.top}
+                    y2={bottom}
+                  />
+                )}
+                {model.scenarioPx !== null && (
+                  // つかむ域（透明の太線。マウスを載せると左右矢印のカーソル）
+                  <line
+                    class="pnl-scn-hit"
+                    x1={model.scenarioPx}
+                    x2={model.scenarioPx}
+                    y1={plot.top}
+                    y2={bottom}
+                  />
+                )}
+                {model.scenarioAtm !== null && (
+                  <line
+                    class="pnl-scn-atm"
+                    x1={model.scenarioAtm.px}
+                    x2={model.scenarioAtm.px}
+                    y1={plot.top}
+                    y2={bottom}
+                  />
+                )}
+                {model.lines.map((l) => (
+                  <path key={l.kind} class={`pnl-line ${l.kind}`} d={l.d} />
+                ))}
+                {model.kinks.map((k) => (
+                  <circle key={`k${k.x}`} class="pnl-kink" cx={k.px} cy={k.py} r={3} />
+                ))}
+                {model.breakevens.map((b) => (
+                  <path
+                    key={`b${b.x}`}
+                    class="pnl-bep"
+                    d={`M${b.px.toFixed(1)} ${(b.py - 5).toFixed(1)}l5 5l-5 5l-5 -5z`}
+                  />
+                ))}
+              </svg>
+              {/* 交点の点と金額のラベル（切り抜きの外に描く。座標は描画域の内側に収めてある） */}
+              {marks?.marks.map((m) =>
+                m.py === null ? null : (
+                  <circle
+                    key={`mp${m.kind}`}
+                    class={`pnl-mark ${m.kind}`}
+                    cx={marks.px}
+                    cy={m.py}
+                    r={3.5}
+                  />
+                ),
               )}
-              {model.x0Px !== null && (
-                <line class="pnl-x0" x1={model.x0Px} x2={model.x0Px} y1={plot.top} y2={bottom} />
-              )}
-              {model.scenarioPx !== null && (
-                <line
-                  class="pnl-scn"
-                  x1={model.scenarioPx}
-                  x2={model.scenarioPx}
-                  y1={plot.top}
-                  y2={bottom}
-                />
-              )}
-              {model.scenarioPx !== null && (
-                // つかむ域（透明の太線。マウスを載せると左右矢印のカーソル）
-                <line
-                  class="pnl-scn-hit"
-                  x1={model.scenarioPx}
-                  x2={model.scenarioPx}
-                  y1={plot.top}
-                  y2={bottom}
-                />
-              )}
-              {model.scenarioAtm !== null && (
-                <line
-                  class="pnl-scn-atm"
-                  x1={model.scenarioAtm.px}
-                  x2={model.scenarioAtm.px}
-                  y1={plot.top}
-                  y2={bottom}
-                />
-              )}
-              {model.lines.map((l) => (
-                <path key={l.kind} class={`pnl-line ${l.kind}`} d={l.d} />
-              ))}
-              {model.kinks.map((k) => (
-                <circle key={`k${k.x}`} class="pnl-kink" cx={k.px} cy={k.py} r={3} />
-              ))}
-              {model.breakevens.map((b) => (
-                <path
-                  key={`b${b.x}`}
-                  class="pnl-bep"
-                  d={`M${b.px.toFixed(1)} ${(b.py - 5).toFixed(1)}l5 5l-5 5l-5 -5z`}
-                />
+              {marks?.marks.map((m) => (
+                <text
+                  key={`ml${m.kind}`}
+                  class={`pnl-mark-label ${m.kind} ${m.anchor}`}
+                  x={m.labelX}
+                  y={m.labelY}
+                >
+                  {m.text}
+                </text>
               ))}
             </svg>
-            {/* 交点の点と金額のラベル（切り抜きの外に描く。座標は描画域の内側に収めてある） */}
-            {marks?.marks.map((m) =>
-              m.py === null ? null : (
-                <circle
-                  key={`mp${m.kind}`}
-                  class={`pnl-mark ${m.kind}`}
-                  cx={marks.px}
-                  cy={m.py}
-                  r={3.5}
-                />
-              ),
-            )}
-            {marks?.marks.map((m) => (
-              <text
-                key={`ml${m.kind}`}
-                class={`pnl-mark-label ${m.kind} ${m.anchor}`}
-                x={m.labelX}
-                y={m.labelY}
-              >
-                {m.text}
-              </text>
-            ))}
-          </svg>
-        )}
+          )}
+        </div>
+        {/* グラフのすぐ下に読み取りの帯（シナリオ点の値。#52） */}
+        <Readout model={readout} />
       </div>
-      {/* グラフのすぐ下に読み取りの帯（シナリオ点の値。#52） */}
-      <Readout model={readout} />
       <p class="legend note">
         <span class="lg expiry">━ {LINE_LABEL.expiry}</span>{' '}
         {model.lines.some((l) => l.kind === 'date') ? (

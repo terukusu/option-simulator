@@ -60,6 +60,23 @@ const X_TICK_OPTIONS: FitTicksOptions = {
 
 export const PNL_MARGIN = { left: 56, right: 12, top: 10, bottom: 26 } as const;
 
+/** 描画域の高さ（px）: 既定 / 描画域の幅が狭いとき / スマホ（#61） */
+export const PNL_HEIGHT = 260;
+export const PNL_HEIGHT_NARROW = 220;
+export const PNL_HEIGHT_PHONE = 180;
+/** この幅（描画域の幅、px）未満を狭いとする */
+export const PNL_NARROW_FROM = 560;
+
+/**
+ * 描画域の高さ。スマホ（ビューポート < 720px。ui/view/layout.ts の PHONE_QUERY）は 180px にして、
+ * 上端に残るドックの下でページをスクロールできる高さを残す。それ以外は描画域の幅 < 560px で 220px、
+ * 以上で 260px（#61）。
+ */
+export function pnlChartHeight(plotWidth: number, phone: boolean): number {
+  if (phone) return PNL_HEIGHT_PHONE;
+  return plotWidth < PNL_NARROW_FROM ? PNL_HEIGHT_NARROW : PNL_HEIGHT;
+}
+
 export type PnlYMode = 'auto' | 'manual' | 'premium';
 
 export interface PnlYSettings {
