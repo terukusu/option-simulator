@@ -18,6 +18,7 @@ import {
   stepQty,
   toggledSide,
 } from '../view/position';
+import { BookButton } from './Book';
 import { Hint } from './Hint';
 
 /** 編集できる数値欄（入力中は下書き、確定（change）で検証して反映。範囲外は反映せずエラー）。 */
@@ -216,9 +217,14 @@ function LegRow({ row, dispatch }: { row: PositionRow; dispatch: (a: Action) => 
 export function Positions({
   model,
   dispatch,
+  bookCount,
+  onOpenBook,
 }: {
   model: PositionModel | null;
   dispatch: (a: Action) => void;
+  /** 保存一覧の項目数（読めない・新しい版なら null。#70） */
+  bookCount: number | null;
+  onOpenBook: () => void;
 }) {
   const rows = model?.rows ?? [];
   return (
@@ -229,6 +235,7 @@ export function Positions({
           グリークはシナリオ 0（評価時刻 = 板の時刻、X = 基準価格）。建値ずれ = シナリオ 0
           の理論損益への影響（手数料は含めない）。
         </Hint>
+        <BookButton count={bookCount} onOpen={onOpenBook} />
         <button
           type="button"
           disabled={rows.length === 0}

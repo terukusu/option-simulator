@@ -1318,3 +1318,170 @@ button.q.noquote {
 .hedge-line .field-error {
   flex-basis: 100%;
 }
+
+/* ---------------------------------------------------------------- 保存一覧（ポジ帳。#70。設計 6.1） */
+
+/* [保存一覧（N）]: ポジションの見出し（ⓘ の右・全クリアの左）と topbar（板が無くても開ける） */
+.positions-head .book-open,
+.topbar .book-open {
+  white-space: nowrap;
+}
+
+/* モーダルの <dialog>。PC は幅 720px まで、スマホは画面いっぱい（左右 8px）。中身は縦スクロール */
+dialog.book {
+  background: Canvas;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: CanvasText;
+  max-height: calc(100dvh - 32px);
+  max-width: calc(100vw - 16px);
+  overflow-y: auto;
+  padding: 8px 12px 12px;
+  width: min(720px, calc(100vw - 32px));
+}
+
+dialog.book::backdrop {
+  background: color-mix(in srgb, #000 45%, transparent);
+}
+
+.book-head {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+}
+
+.book-head h2 {
+  margin: 4px 0;
+}
+
+/* ⓘ は見出しの横、[閉じる] は右端 */
+.book-head .hint {
+  margin-right: auto;
+}
+
+.book-msg,
+.book-state {
+  margin: 4px 0;
+  overflow-wrap: anywhere;
+}
+
+.book-save,
+.book-io {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  margin: 6px 0;
+}
+
+.book-save label {
+  align-items: center;
+  display: flex;
+  flex: 1 1 16em;
+  gap: 4px;
+  min-width: 0;
+}
+
+.book-save input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.file-open.disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+.book-list {
+  font-size: 0.85em;
+  font-variant-numeric: tabular-nums;
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 0;
+}
+
+.book-row {
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  margin-bottom: 6px;
+  padding: 4px 6px;
+}
+
+.book-row.current {
+  border-color: var(--accent);
+}
+
+.book-row.bad {
+  border-color: var(--warn);
+}
+
+.book-row-head {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 4px;
+}
+
+/* 名前は長くても折り返す（横スクロールしない） */
+.book-name {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.book-rename {
+  align-items: center;
+  display: flex;
+  flex: 1 1 100%;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.book-rename input {
+  flex: 1 1 12em;
+  min-width: 0;
+}
+
+.book-sum {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 12px;
+  margin-top: 2px;
+}
+
+.book-times {
+  margin-top: 2px;
+}
+
+.book-ops {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+.book-confirm {
+  border-top: 1px dashed var(--warn);
+  margin-top: 4px;
+  overflow-wrap: anywhere;
+  padding-top: 4px;
+}
+
+.book-confirm .danger {
+  border-color: var(--warn);
+  color: var(--warn);
+}
+
+@media (pointer: coarse) {
+  .book-ops button {
+    min-height: 36px;
+    min-width: 44px;
+  }
+}
+
+@media (max-width: 719.98px) {
+  dialog.book {
+    max-height: calc(100dvh - 16px);
+    padding: 6px 8px 10px;
+    width: calc(100vw - 16px);
+  }
+}
