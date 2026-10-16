@@ -1,0 +1,59 @@
+#!/usr/bin/env bash
+# 追跡しているファイルに個人の値（CLAUDE.md「置かないもの」）が無いかの検査（docs/design.md 2.2 AC12）。
+# ci.yml の check（必須）と terraform-plan で使う。手元でもそのまま動く（README.md「開発」）。
+#
+#   repo-values-check.sh [dir]
+#
+# - 形の検査（値を知らなくても効く）: run.app のホスト名、許可リスト外のドメインのメールアドレス、
+#   /home/<名前>・/Users/<名前>、10 桁以上の projects/<番号>・service-<番号>、トークン・鍵・署名の形
+# - 値の検査: 環境変数 GCP_PROJECT_ID・GCP_PROJECT_NUMBER・REPO_OWNER のうち空でないものを固定文字列
+#   （大小無視・語単位）で探す。空なら飛ばしたことを 1 行出す
+# - 出力は「NG <検査名>: <ファイル>:<行番号>」と件数だけ（一致した文字列・行の中身・変数の値は出さない）。1 件以上で exit 1
+# - 対象は git ls-files（package-lock.json・api/uv.lock を除く。バイナリは grep -I で飛ばす）
+set -euo pipefail
+
+cd "${1:-.}"
+mapfile -d '' files < <(git ls-files -z | { grep -zvE '^(package-lock\.json|api/uv\.lock)$' || true; })
+if [ "${#files[@]}" -eq 0 ]; then
+  echo "ok: 追跡ファイルなし"
+  exit 0
+fi
+
+hits=0
+# 標準入力の grep -Hn の出力（<ファイル>:<行番号>:<中身>）から位置だけを出して数える。
+# grep には必ず -H を付ける（1 ファイルだと -n の出力が <行番号>:<中身> になり、中身が出てしまう）。
+# 呼び出しはプロセス置換で（パイプだとサブシェルになり hits が増えない）
+report() {
+  local loc
+  while IFS= read -r loc; do
+    echo "NG ${1}: ${loc}"
+    hits=$((hits + 1))
+  done < <(cut -d: -f1,2 | sort -u)
+}
+shape() { report "$1" < <(grep -HnsIE -e "$2" -- "${files[@]}" || true); }
+
+shape run-app-host '[a-z0-9][a-z0-9-]*-[a-z0-9]+-[a-z]{2,4}\.a\.run\.app|[a-z0-9][a-z0-9-]*-[0-9]+\.[a-z]+-[a-z]+[0-9]+\.run\.app'
+shape home-path '/(home|Users)/[A-Za-z0-9._-]+'
+shape project-number '(projects/|service-)[0-9]{10,}'
+# [X] などはこのファイル自身に一致させないための書き方
+shape token 'ya29\.[A-Za-z0-9_-]|GOCSP[X]-|-----BEGIN [A-Z ]*PRIVATE KEY-----|"private_key_i[d]"|X-Goog-Signatur[e]='
+
+# メールアドレスはドメインがプレースホルダの許可リストに無いものだけ。awk には ENVIRON で渡す（-v だと \. が崩れる）
+export REPO_VALUES_ALLOW='^(example\.(com|org|net)|[a-z0-9-]+\.example\.com|example-project\.iam\.gserviceaccount\.com|gcp-sa-[a-z-]+\.iam\.gserviceaccount\.com)$'
+report email-domain < <({ grep -HnosIE -e '[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}' -- "${files[@]}" || true; } \
+  | awk -F: '{ m = $NF; d = tolower(substr(m, index(m, "@") + 1)); if (d !~ ENVIRON["REPO_VALUES_ALLOW"]) print $1 ":" $2 }')
+
+for name in GCP_PROJECT_ID GCP_PROJECT_NUMBER REPO_OWNER; do
+  v=${!name:-}
+  if [ -z "$v" ]; then
+    echo "skip: ${name} が空なので値の検査を飛ばす"
+    continue
+  fi
+  report "value-${name}" < <(grep -HnsIFiw -e "$v" -- "${files[@]}" || true)
+done
+
+if [ "$hits" -gt 0 ]; then
+  echo "NG: ${hits} 件（CLAUDE.md「置かないもの」。値はプレースホルダ・変数にする）"
+  exit 1
+fi
+echo "ok: ${#files[@]} ファイル"

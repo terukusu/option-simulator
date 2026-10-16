@@ -21,6 +21,22 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      # 個人の値の検査（docs/design.md 2.2 AC12、#40）。出力はファイル名・行番号・検査名だけ（値・行の中身は出さない）。
+      # 公開リポジトリの Actions のログに repository variables の値は伏せられずに出るので、ここでは vars を渡さない:
+      # オーナー名（URL で公開済み）と、secret の WIF プロバイダから取ったプロジェクト番号（マスクする）だけ。
+      # プロジェクト ID の値の検査は terraform-plan job（同じリポジトリの PR だけ）。fork の PR では番号の検査は飛ぶ
+      - name: 個人の値の検査のテスト
+        run: .github/scripts/repo-values-check.test.sh
+      - name: 個人の値の検査（形・オーナー名・プロジェクト番号）
+        env:
+          REPO_OWNER: ${{ github.repository_owner }}
+          GCP_WIF_PROVIDER: ${{ secrets.GCP_WIF_PROVIDER }}
+        run: |
+          set -eu
+          GCP_PROJECT_NUMBER=$(printf '%s' "$GCP_WIF_PROVIDER" | sed -nE 's#^projects/([0-9]+)/.*#\1#p')
+          if [ -n "$GCP_PROJECT_NUMBER" ]; then echo "::add-mask::$GCP_PROJECT_NUMBER"; fi
+          export GCP_PROJECT_NUMBER
+          .github/scripts/repo-values-check.sh .
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version-file: .node-version
@@ -175,6 +191,11 @@ jobs:
         if: steps.vars.outputs.enabled == 'true'
         with:
           persist-credentials: false
+      # 個人の値の検査のうちプロジェクト ID の値（#40）。GCP_PROJECT_ID は job の env にあるものを使う
+      # （check job に vars を渡してログの露出を増やさない）。出力はファイル名・行番号・検査名だけ
+      - name: 個人の値の検査（プロジェクト ID）
+        if: steps.vars.outputs.enabled == 'true'
+        run: .github/scripts/repo-values-check.sh .
       - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
         if: steps.vars.outputs.enabled == 'true'
         with:

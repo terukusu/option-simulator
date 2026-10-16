@@ -54,16 +54,43 @@ uv run --locked pytest -q
 
 optionchan の `schema/tokyo` が変わったら（列の追加・型の変更）、`contract/optionchan_commit.txt` を optionchan の新しいコミットの SHA にし、上の契約テストと dry run を手元で通してから PR にする。照合に落ちたら `contract.py`・`sql/*.sql`・`chain.py` を直す。
 
-## 本番での `reason` の確認（AC-11。判定は #40）
+## 本番での `reason` の確認（AC2）
 
-デプロイ後、ブラウザ（IAP のログイン済み）で `/api/chain` を次の時間帯に開き、`reason` と `snapshot_at` の時刻だけを記録する（価格・URL は記録しない）。
+`reason` は最新の取り込み（`latest_runs` の先頭 = R0）の `snapshot_at` の JST の時刻で決まり、R0 が 45 分（`CLOSED_AFTER_MINUTES`）より古ければ時刻より先に `closed` になる（`docs/design.md` 7.2、`src/simulator_api/usable.py`）。optionchan の取り込みは引け後しばらくで止まり、次の寄り前に再開する（観測（2026-10-14〜16）: 日中は 16:45 に再開、夜間は 8:30 に再開。止まる時刻は optionchan の運用で変わる）ので、引け後の `after_close` は最新の取り込みが 45 分以内のあいだだけになる。
 
-| 時間帯（JST） | 期待 |
-|---|---|
-| 取引時間中（例 10:00、21:00） | `latest`、`snapshot_at` は約 15 分前 |
-| 夜間の寄り前（16:45〜17:00 の板が最新のとき） | `pre_open`、`snapshot_at` は 15:40 以前 |
-| 日中の引け後（15:41〜16:44 の板が最新のとき） | `after_close`、`snapshot_at` は 15:40 以前 |
-| 夜間の引け後（5:56〜8:38） | `after_close`、`snapshot_at` は 5:55 以前 |
-| 土日・休業日 | `closed`、`snapshot_at` は直前の立会の最後 |
+| 時間帯（JST、ブラウザで開いた時刻） | 期待の `reason` | 返す板（`snapshot_at`） |
+|---|---|---|
+| 取引時間中（例 10:00、21:00） | `latest` | 約 15 分前 |
+| 日中の寄り前（8:39〜8:46 の取り込みが最新） | `pre_open` | 5:55（夜間の板寄せ前の最後） |
+| 日中の引け後（15:41〜、最新の取り込みが 45 分以内のあいだ。観測上 16:44 ごろまで） | `after_close` | 15:40 以前 |
+| 夜間の寄り前（16:45〜17:00 の取り込みが最新） | `pre_open` | 15:40 以前 |
+| 夜間の引け後（5:56〜、最新の取り込みが 45 分以内のあいだ。観測上 7:00 ごろまで） | `after_close` | 5:55 |
+| 夜間の引け後で取り込みが止まって 45 分を過ぎてから再開まで（観測上 約 7:00〜8:29） | `closed` | 5:55 |
+| 取り込みの再開後（8:30〜8:38 の取り込みが最新） | `after_close` | 5:55 |
+| 土日・休業日 | `closed` | 直前の立会の最後 |
 
-あわせて Cloud Logging の `chain_served`（`reason`・`board_reads`）と `bq_job`（`total_bytes_billed`）を見る。同じ `snapshot_at` の 2 回目のリクエストで `bq_job` が `latest_runs` だけなら、キャッシュが効いている。
+確かめ方: ブラウザ（IAP のログイン済み）で本番の `/` を開いて [最新] を 1 回押し、画面のヘッダの理由と板の時刻を記録する（価格・URL は記録しない）。その後、その時刻の `chain_served` のログを読んで表と突き合わせる:
+
+```sh
+gcloud logging read 'resource.type="cloud_run_revision" AND resource.labels.service_name="simulator" AND jsonPayload.event="chain_served"' \
+  --project="$P" --freshness=1d --format='value(timestamp,jsonPayload.reason,jsonPayload.snapshot_at,jsonPayload.cache)'
+```
+
+ログは 1 行 1 件の JSON（`src/simulator_api/log.py`。`message` と `event` がイベント名）。`chain_served` の `cache` は `miss`（板を読んだ）/ `hit`、`board_reads` は板を読んだ回数。`bq_job`（`name`・`elapsed_ms`・`total_bytes_billed`）も同じ形で読める。同じ `snapshot_at` の 2 回目のリクエストで `bq_job` が `latest_runs` だけなら、キャッシュが効いている。
+
+## クエリ量の監視（7.3・D8）
+
+simulator の SA が出した BigQuery のジョブを、日ごと（JST）のジョブ数・課金量・1 ジョブの最大・エラー数に集計する。元は Cloud Logging の BigQuery の監査ログ（Data Access。BigQuery では既定で記録され無料、保持は既定 30 日）の `jobChange`。値は出ない（日付と数字だけ）:
+
+```sh
+P=$(gcloud config get-value project)
+SA=sa-simulator@$P.iam.gserviceaccount.com
+gcloud logging read "protoPayload.serviceName=\"bigquery.googleapis.com\" AND protoPayload.authenticationInfo.principalEmail=\"$SA\" AND protoPayload.metadata.jobChange.after=\"DONE\"" \
+  --project="$P" --freshness=7d --limit=10000 --format=json \
+  | jq -r 'map({d: (.timestamp | sub("\\.[0-9]+"; "") | fromdateiso8601 + 32400 | strftime("%Y-%m-%d")),
+               b: ((.protoPayload.metadata.jobChange.job.jobStats.queryStats.totalBilledBytes // "0") | tonumber),
+               e: (.protoPayload.metadata.jobChange.job.jobStatus.errorResult != null)})
+           | group_by(.d)[] | "\(.[0].d) jobs=\(length) billed_GiB=\((map(.b) | add) / 1073741824 * 100 | round / 100) max_MiB=\((map(.b) | max) / 1048576 * 10 | round / 10) errors=\(map(select(.e)) | length)"'
+```
+
+目安: 1 日の課金量がプロジェクトの 1 日の上限 32 GiB の 10%（3.2 GiB）未満、1 ジョブの最大が 512 MiB（`MAX_BYTES_BILLED_LIMIT`）以下、`errors` が 0。課金量は 1 ジョブ 10 MiB の最小課金を含むので、処理量より大きめに出る（上限の判定では安全側）。`region-asia-northeast1.INFORMATION_SCHEMA.JOBS_BY_PROJECT` は 1 日に絞っても最小のスキャンが 512 MiB を超え、`--maximum_bytes_billed=536870912` の下では読めないので使わない。

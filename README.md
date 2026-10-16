@@ -6,7 +6,7 @@
 
 設計: [`docs/design.md`](docs/design.md)、使い方（利用者マニュアル）: [`docs/user-guide.md`](docs/user-guide.md)
 
-状態: 設計済み。縦切り 1（手元で損益が見える）を実装済み（価格モデル `model/`、データ `data/`、合成の固定の板、画面のヘッダ・板・スマイル・ポジション一覧・損益グラフ（拡大・パン）・シナリオのスライダー・指標・テール表）。縦切り 3 のデルタヘッジ（#19）・先物の basis 固定 / 減衰の切替（#25）を実装済み。縦切り 2 の API（`api/`。板 `/api/chain` とカレンダー `/api/calendar`。#33）を実装済み。インフラは `infra/bootstrap`（WIF・SA・state・Artifact Registry・IAP の閲覧許可。#35）と `infra/prod`（Cloud Run `simulator`（IAP）・イメージ（`Dockerfile`）・PR の plan と承認つきの deploy。#36）を実装済み。画面の既定を API にすること（#34）・閲覧者の追加と本番での受け入れ確認（#40）はこれから。
+状態: 設計済み。縦切り 1（手元で損益が見える）を実装済み（価格モデル `model/`、データ `data/`、合成の固定の板、画面のヘッダ・板・スマイル・ポジション一覧・損益グラフ（拡大・パン）・シナリオのスライダー・指標・テール表）。縦切り 3 のデルタヘッジ（#19）・先物の basis 固定 / 減衰の切替（#25）を実装済み。縦切り 2 の API（`api/`。板 `/api/chain` とカレンダー `/api/calendar`。#33）を実装済み。インフラは `infra/bootstrap`（WIF・SA・state・Artifact Registry・IAP の閲覧許可。#35）と `infra/prod`（Cloud Run `simulator`（IAP）・イメージ（`Dockerfile`）・PR の plan と承認つきの deploy。#36）を実装済み。画面の既定を API にすること（#34）、閲覧者の追加と本番の受け入れ確認・個人の値の検査（CI）・クエリ量の監視の手順（#40。AC1 の読み込み時間は #95）を済ませた。
 
 ## 開発
 
@@ -46,6 +46,15 @@ for d in bootstrap prod; do   # モックのプロバイダ。資格情報なし
 done
 # イメージ（Cloud Run simulator。API + dist/）のビルドと検査（GCP の認証なし。BigQuery に触れない）
 docker build -t simulator:local . && .github/scripts/image-check.sh simulator:local
+```
+
+個人の値（CLAUDE.md「置かないもの」）の検査（CI の `check` と同じ。出力はファイル名・行番号・検査名だけ）。変数を渡さなければ形の検査（`run.app` のホスト名・許可リスト外のメール・ホームのパス・10 桁以上のプロジェクト番号・トークンの形）だけ。オーナー名が一般語で誤検出するなら `REPO_OWNER` は空にする。
+
+```sh
+.github/scripts/repo-values-check.test.sh   # 検査そのもののテスト
+P=$(gcloud config get-value project); REPO=$(gh repo view --json nameWithOwner -q .nameWithOwner)
+GCP_PROJECT_ID=$P GCP_PROJECT_NUMBER=$(gcloud projects describe "$P" --format='value(projectNumber)') REPO_OWNER=${REPO%%/*} \
+  .github/scripts/repo-values-check.sh
 ```
 
 ## 板のデータ
