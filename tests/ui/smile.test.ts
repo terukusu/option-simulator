@@ -13,6 +13,7 @@ import {
   smileModel,
   smilePickRow,
   stepStrike,
+  tapStrike,
 } from '../../ui/view/smile';
 import { fixture } from '../support/fixtures';
 
@@ -196,6 +197,19 @@ describe('スマイルからの足の追加（#11 AC-10・M3）', () => {
       expect(scrubStrike(m, range[1] + 200, range)).toBe(vis[vis.length - 1]?.k);
       expect(scrubStrike(m, Number.NaN, range)).toBeNull();
     });
+
+    it.each(AXES)(
+      '軸 %s: タップ = 別の点で切替、選択中の点で解除、離れた所で解除（#59）',
+      (axis) => {
+        const { m, vis, sx } = setup(axis);
+        const a = vis[0] as { k: number; x: number };
+        const b = vis[vis.length - 1] as { k: number; x: number };
+        expect(tapStrike(m, sx(a.x), range, null)).toBe(a.k);
+        expect(tapStrike(m, sx(b.x), range, a.k)).toBe(b.k);
+        expect(tapStrike(m, sx(a.x), range, a.k)).toBeNull();
+        expect(tapStrike(m, range[1] + 200, range, a.k)).toBeNull();
+      },
+    );
 
     it.each(AXES)('軸 %s: キーで左右へ 1 本 / 5 本、端で止まる、始点は ATM', (axis) => {
       const { m, vis, atm } = setup(axis);

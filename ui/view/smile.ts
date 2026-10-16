@@ -287,6 +287,20 @@ export function pickStrike(
   return best;
 }
 
+/**
+ * タップで選ぶ行使価格（#59）: 最寄りの点（12px 以内）。いま選んでいる点をもう一度タップしたら解除（null）、
+ * 点から離れた所のタップも解除。長押しで選んだ選択も離した後は残り、タップで解除する。
+ */
+export function tapStrike(
+  model: SmileModel,
+  px: number,
+  range: Domain,
+  current: number | null,
+): number | null {
+  const k = pickStrike(model, px, range);
+  return k === current ? null : k;
+}
+
 /** 表示範囲の中の行使価格（横軸の値の昇順 = 画面の左から）。 */
 function visibleStrikes(model: SmileModel): Array<{ k: number; x: number }> {
   const [lo, hi] = model.domain;

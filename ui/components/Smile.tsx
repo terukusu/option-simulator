@@ -8,7 +8,6 @@ import {
   AXIS_LABEL,
   axisTickLabel,
   axisValue,
-  pickStrike,
   SCRUB_KEY_STEPS,
   type SmileAxis,
   scrubStrike,
@@ -16,6 +15,7 @@ import {
   smileModel,
   smilePickRow,
   stepStrike,
+  tapStrike,
 } from '../view/smile';
 import { pure } from './pure';
 import { useChartGestures } from './useChartGestures';
@@ -94,8 +94,9 @@ function SmileView({
     range,
     disabled: model.empty || !active,
     onViewport: (v) => dispatch({ type: 'setViewport', viewport: v }),
+    // 選択中の点をもう一度タップ・点から離れた所のタップで解除（#59）
     onTap: (x) => {
-      const k = pickStrike(model, x, range);
+      const k = tapStrike(model, x, range, pick);
       dispatch({ type: 'pickSmile', pick: k === null ? null : { monthId: month.id, k } });
     },
     // 縦線の近くの押下で即つかむのは使わない（点の間隔が 12px 未満のことが多く、隣の点のタップと取り合う）
@@ -184,7 +185,7 @@ function SmileView({
         ref={ref}
         tabIndex={model.empty || !active ? -1 : 0}
         role="application"
-        aria-label="スマイル（点をタップで選択、長押しして左右にドラッグで選択を切り替え。ホイール・ピンチで拡大、ドラッグでパン、ダブルクリックでリセット。キー: + / − 拡大縮小、← / → パン、R リセット、, / . で選択を 1 本、< / > で 5 本左右へ）"
+        aria-label="スマイル（点をタップで選択・もう一度タップで解除、長押しして左右にドラッグで選択を切り替え。ホイール・ピンチで拡大、ドラッグでパン、ダブルクリックでリセット。キー: + / − 拡大縮小、← / → パン、R リセット、, / . で選択を 1 本、< / > で 5 本左右へ）"
       >
         {model.empty ? (
           <p class="note">スマイルなし（F が決まらないか、使える気配が無い）</p>
@@ -296,7 +297,9 @@ function SmileView({
         {scnAtmX !== null && scenarioAtmK !== null && (
           <span class="lg scn-atm"> ┆ シナリオ ATM {fmtNum(scenarioAtmK, 0)}</span>
         )}
-        <span class="block">点をタップで選択。長押しして左右にドラッグで選択を切り替え</span>
+        <span class="block">
+          点をタップで選択（もう一度タップで解除）。長押しして左右にドラッグで選択を切り替え
+        </span>
       </p>
     </div>
   );
