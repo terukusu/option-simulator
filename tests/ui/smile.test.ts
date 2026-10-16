@@ -6,10 +6,13 @@ import {
   axisTickLabel,
   axisValue,
   pickStrike,
+  SCRUB_KEY_STEPS,
   type SmileAxis,
   type SmileModel,
+  scrubStrike,
   smileModel,
   smilePickRow,
+  stepStrike,
 } from '../../ui/view/smile';
 import { fixture } from '../support/fixtures';
 
@@ -162,6 +165,69 @@ describe('スマイルからの足の追加（#11 AC-10・M3）', () => {
     expect(pickStrike(m, far, range)).toBeNull();
     expect(pickStrike(m, Math.min(...pxs) - 12.5, range)).toBeNull();
     expect(pickStrike(full, Number.NaN, range)).toBeNull();
+  });
+
+  describe('長押し・ドラッグ・キーでの選択（#57）', () => {
+    /** ATM ±1,000 円に絞った表示範囲のモデルと、表示範囲の中の点（画面の左から） */
+    const setup = (axis: SmileAxis) => {
+      const full = smileModel(month, 'B', axis);
+      const atm = month.atm.B.pick?.k as number;
+      const xs = full.strikeXs.filter((s) => Math.abs(s.k - atm) <= 1000).map((s) => s.x);
+      const m = smileModel(month, 'B', axis, [Math.min(...xs), Math.max(...xs)]);
+      const vis = m.strikeXs
+        .filter((s) => s.x >= m.domain[0] && s.x <= m.domain[1])
+        .sort((a, b) => a.x - b.x);
+      return { m, vis, sx: linear(m.domain, range), atm };
+    };
+
+    it.each(AXES)('軸 %s: 点の画素でその K、点の間でも最寄り、描画域の外は端の点', (axis) => {
+      const { m, vis, sx } = setup(axis);
+      expect(vis.length).toBeGreaterThan(2);
+      for (const s of vis) expect(scrubStrike(m, sx(s.x), range)).toBe(s.k);
+      // 隣り合う点の間（左の点寄り 1/3）は左の点。12px の制限はない
+      for (let i = 0; i + 1 < vis.length; i++) {
+        const a = vis[i] as { k: number; x: number };
+        const b = vis[i + 1] as { k: number; x: number };
+        const px = sx(a.x) + (sx(b.x) - sx(a.x)) / 3;
+        expect(scrubStrike(m, px, range)).toBe(a.k);
+      }
+      // 描画域の外の画素は端の点（表示範囲の外の点ではない）
+      expect(scrubStrike(m, range[0] - 200, range)).toBe(vis[0]?.k);
+      expect(scrubStrike(m, range[1] + 200, range)).toBe(vis[vis.length - 1]?.k);
+      expect(scrubStrike(m, Number.NaN, range)).toBeNull();
+    });
+
+    it.each(AXES)('軸 %s: キーで左右へ 1 本 / 5 本、端で止まる、始点は ATM', (axis) => {
+      const { m, vis, atm } = setup(axis);
+      const ks = vis.map((s) => s.k);
+      const i = ks.indexOf(atm);
+      expect(i).toBeGreaterThan(0);
+      expect(stepStrike(m, null, 1)).toBe(atm);
+      expect(stepStrike(m, 999_999, -1)).toBe(atm);
+      expect(stepStrike(m, atm, SCRUB_KEY_STEPS['.'] as number)).toBe(ks[i + 1]);
+      expect(stepStrike(m, atm, SCRUB_KEY_STEPS[','] as number)).toBe(ks[i - 1]);
+      expect(stepStrike(m, atm, SCRUB_KEY_STEPS['>'] as number)).toBe(
+        ks[Math.min(i + 5, ks.length - 1)],
+      );
+      expect(stepStrike(m, ks[0] as number, -5)).toBe(ks[0]);
+      expect(stepStrike(m, ks[ks.length - 1] as number, 1)).toBe(ks[ks.length - 1]);
+    });
+
+    it.each(AXES)('軸 %s: ATM が表示範囲の外なら、範囲の中央に最も近い点から始める', (axis) => {
+      const full = smileModel(month, 'B', axis);
+      const atm = month.atm.B.pick?.k as number;
+      // ATM より 2,000〜4,000 円下の点だけを表示する
+      const xs = full.strikeXs
+        .filter((s) => s.k <= atm - 2000 && s.k >= atm - 4000)
+        .map((s) => s.x);
+      const m = smileModel(month, 'B', axis, [Math.min(...xs), Math.max(...xs)]);
+      expect(m.strikeXs.some((s) => s.k === atm)).toBe(false);
+      const mid = (m.domain[0] + m.domain[1]) / 2;
+      const nearest = [...m.strikeXs].sort((a, b) => Math.abs(a.x - mid) - Math.abs(b.x - mid))[0];
+      expect(stepStrike(m, null, 1)).toBe(nearest?.k);
+      // 表示範囲の外の選択（ATM）からも中央の点へ
+      expect(stepStrike(m, atm, -1)).toBe(nearest?.k);
+    });
   });
 
   it('選択 → 売り = boardOptionLeg と同じ足（OTM 側・建値 bid）、買い = 建値 ask', () => {
