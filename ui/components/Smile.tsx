@@ -9,10 +9,13 @@ import {
   axisTickLabel,
   axisValue,
   pickStrike,
+  SCRUB_KEY_STEPS,
   type SmileAxis,
+  scrubStrike,
   smileMarkX,
   smileModel,
   smilePickRow,
+  stepStrike,
 } from '../view/smile';
 import { pure } from './pure';
 import { useChartGestures } from './useChartGestures';
@@ -71,7 +74,19 @@ function SmileView({
   );
   const yTicks = niceTicks(model.yDomain[0], model.yDomain[1], 4);
 
-  // ホイール・ドラッグ・ピンチ・キー（損益グラフと共用）。タップで最寄りの行使価格を選ぶ
+  const pickRow = pick === null ? null : smilePickRow(month, pick);
+  const pickInfo = pick === null ? undefined : month.strikes.find((s) => s.k === pick);
+  const pickX = pickInfo ? axisValue(month, basis, axis, pickInfo) : null;
+  const pickPx =
+    pickX !== null && Number.isFinite(pickX) && pickX >= model.domain[0] && pickX <= model.domain[1]
+      ? sx(pickX)
+      : null;
+  const select = (k: number | null) => {
+    if (k !== null && k !== pick) dispatch({ type: 'pickSmile', pick: { monthId: month.id, k } });
+  };
+
+  // ホイール・ドラッグ・ピンチ・キー（損益グラフと共用）。タップで最寄りの行使価格を選ぶ。
+  // 長押しでつかむと、離すまで指の位置の最寄りの行使価格を選び続ける（#57）。キー , . < > で左右へ
   useChartGestures(ref, {
     viewport: model.domain,
     full: model.fullDomain,
@@ -83,15 +98,16 @@ function SmileView({
       const k = pickStrike(model, x, range);
       dispatch({ type: 'pickSmile', pick: k === null ? null : { monthId: month.id, k } });
     },
+    // 縦線の近くの押下で即つかむのは使わない（点の間隔が 12px 未満のことが多く、隣の点のタップと取り合う）
+    scrub: { linePx: null },
+    onScrub: (x) => select(scrubStrike(model, x, range)),
+    onScrubKey: (key) => {
+      const steps = SCRUB_KEY_STEPS[key];
+      if (steps === undefined) return false;
+      select(stepStrike(model, pick, steps));
+      return true;
+    },
   });
-
-  const pickRow = pick === null ? null : smilePickRow(month, pick);
-  const pickInfo = pick === null ? undefined : month.strikes.find((s) => s.k === pick);
-  const pickX = pickInfo ? axisValue(month, basis, axis, pickInfo) : null;
-  const pickPx =
-    pickX !== null && Number.isFinite(pickX) && pickX >= model.domain[0] && pickX <= model.domain[1]
-      ? sx(pickX)
-      : null;
 
   let solid = '';
   let dotted = '';
@@ -168,7 +184,7 @@ function SmileView({
         ref={ref}
         tabIndex={model.empty || !active ? -1 : 0}
         role="application"
-        aria-label="スマイル（点をタップで選択。ホイール・ピンチで拡大、ドラッグでパン、ダブルクリックでリセット。キー: + / − 拡大縮小、← / → パン、R リセット）"
+        aria-label="スマイル（点をタップで選択、長押しして左右にドラッグで選択を切り替え。ホイール・ピンチで拡大、ドラッグでパン、ダブルクリックでリセット。キー: + / − 拡大縮小、← / → パン、R リセット、, / . で選択を 1 本、< / > で 5 本左右へ）"
       >
         {model.empty ? (
           <p class="note">スマイルなし（F が決まらないか、使える気配が無い）</p>
@@ -280,6 +296,7 @@ function SmileView({
         {scnAtmX !== null && scenarioAtmK !== null && (
           <span class="lg scn-atm"> ┆ シナリオ ATM {fmtNum(scenarioAtmK, 0)}</span>
         )}
+        <span class="block">点をタップで選択。長押しして左右にドラッグで選択を切り替え</span>
       </p>
     </div>
   );

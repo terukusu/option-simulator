@@ -287,6 +287,67 @@ export function pickStrike(
   return best;
 }
 
+/** 表示範囲の中の行使価格（横軸の値の昇順 = 画面の左から）。 */
+function visibleStrikes(model: SmileModel): Array<{ k: number; x: number }> {
+  const [lo, hi] = model.domain;
+  return model.strikeXs.filter((s) => s.x >= lo && s.x <= hi).sort((a, b) => a.x - b.x);
+}
+
+/**
+ * 長押し・ドラッグで選ぶ行使価格（#57）: 画素 px に最も近い、表示範囲の中の点の行使価格（距離の制限なし。
+ * 指が点から離れていても最寄りに吸い付く）。描くものが無い・px が数でなければ null。
+ */
+export function scrubStrike(model: SmileModel, px: number, range: Domain): number | null {
+  if (model.empty || !Number.isFinite(px)) return null;
+  const sx = linear(model.domain, range);
+  let best: number | null = null;
+  let bestD = Number.POSITIVE_INFINITY;
+  for (const s of visibleStrikes(model)) {
+    const d = Math.abs(sx(s.x) - px);
+    if (d < bestD) {
+      best = s.k;
+      bestD = d;
+    }
+  }
+  return best;
+}
+
+/** キー , . で 1 本、< > で 5 本、選択を画面の左右へ動かす（#57） */
+export const SCRUB_KEY_STEPS: Readonly<Record<string, number>> = {
+  ',': -1,
+  '.': 1,
+  '<': -5,
+  '>': 5,
+};
+
+/**
+ * キーで選択を動かした先の行使価格（#57）。表示範囲の中の点を画面の左から並べ、いまの選択から steps 本動かす
+ * （端で止まる）。選択が無い・表示範囲の外なら、市場 ATM（無ければ範囲の中央に最も近い点）から始める。
+ * 点が無ければ null。
+ */
+export function stepStrike(
+  model: SmileModel,
+  current: number | null,
+  steps: number,
+): number | null {
+  const vis = visibleStrikes(model);
+  if (model.empty || vis.length === 0) return null;
+  let i = current === null ? -1 : vis.findIndex((s) => s.k === current);
+  if (i < 0) {
+    const atm = model.atmK === null ? -1 : vis.findIndex((s) => s.k === model.atmK);
+    if (atm >= 0) return vis[atm]?.k ?? null;
+    const mid = (model.domain[0] + model.domain[1]) / 2;
+    i = 0;
+    for (let j = 1; j < vis.length; j++) {
+      if (Math.abs((vis[j] as { x: number }).x - mid) < Math.abs((vis[i] as { x: number }).x - mid))
+        i = j;
+    }
+    return vis[i]?.k ?? null;
+  }
+  const to = Math.min(Math.max(i + steps, 0), vis.length - 1);
+  return vis[to]?.k ?? null;
+}
+
 export interface SmilePickRow {
   k: number;
   /** 足の種別（OTM 側。板の bid / ask と同じ規則で足を作る） */
