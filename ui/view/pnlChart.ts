@@ -31,6 +31,8 @@ import {
   clampViewport,
   type Domain,
   extent,
+  type FitTicksOptions,
+  fitTicks,
   linear,
   niceTicks,
   padDomain,
@@ -47,6 +49,14 @@ export const MAX_SAMPLES = 2000;
 export const THOUSAND_YEN_FROM = 100_000;
 /** プレミアム基準の既定の N */
 export const DEFAULT_PREMIUM_N = 5;
+
+/** 横軸の目盛りのラベル（円、整数） */
+const xTickLabel = (v: number) => fmtNum(v, 0);
+/** 横軸の刻みの候補: 1・2・2.5・5 × 10^n（1 円以上、2.5 は 10 円以上だけ。#55） */
+const X_TICK_OPTIONS: FitTicksOptions = {
+  mantissas: [1, 2, 2.5, 5],
+  minStepFor: (m) => (m === 2.5 ? 10 : 1),
+};
 
 export const PNL_MARGIN = { left: 56, right: 12, top: 10, bottom: 26 } as const;
 
@@ -483,7 +493,8 @@ export function pnlChartModel(input: PnlChartInput): PnlChartModel {
     Math.max(Math.abs(yDomain[0]), Math.abs(yDomain[1])) >= THOUSAND_YEN_FROM ? 'thousand' : 'yen';
   const yt = niceTicks(yDomain[0], yDomain[1], 5);
   const yStep = yt.length > 1 ? (yt[1] as number) - (yt[0] as number) : 0;
-  const xt = niceTicks(lo, hi, pw < 420 ? 3 : 5);
+  // 横軸はラベルが重ならない範囲で最も細かい刻み（#55）。2.5 は 10 円以上だけ（行使価格の 250 円刻みと揃う）
+  const xt = fitTicks(lo, hi, pw, xTickLabel, { ...X_TICK_OPTIONS, widthSample: base.full });
 
   return {
     empty: false,
@@ -500,7 +511,7 @@ export function pnlChartModel(input: PnlChartInput): PnlChartModel {
     scenarioPx: scenario.dX !== 0 && inside(scenarioX) ? sx(scenarioX) : null,
     scenarioAtm,
     zeroPy: yDomain[0] <= 0 && yDomain[1] >= 0 ? syRaw(0) : null,
-    xTicks: xt.map((v) => ({ v, px: sx(v), label: fmtNum(v, 0) })),
+    xTicks: xt.map((v) => ({ v, px: sx(v), label: xTickLabel(v) })),
     yTicks: yt.map((v) => ({ v, px: syRaw(v), label: fmtPnlTick(v, yUnit, yStep) })),
     premiumFallback,
     days,

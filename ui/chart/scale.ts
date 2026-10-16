@@ -34,6 +34,88 @@ export function niceTicks(lo: number, hi: number, count = 5): number[] {
   if (hi < lo) [lo, hi] = [hi, lo];
   const step = niceStep(hi - lo, count);
   if (step === 0) return [lo];
+  return stepTicks(lo, hi, step);
+}
+
+export interface FitTicksOptions {
+  /** 刻みの仮数の候補（昇順、1 以上 10 未満）。既定は 1・2・5 */
+  mantissas?: readonly number[];
+  /** この刻み未満では使わない仮数（例: 2.5 は 10 以上だけ）。仮数ごとの下限 */
+  minStepFor?: (mantissa: number) => number;
+  /** ラベルの間の最小の余白（px） */
+  gapPx?: number;
+  /**
+   * ラベルの幅の見積もりに加える値（グラフの全域の両端など）。刻みの格子に丸めてからラベルにする。
+   * 表示中の目盛りだけで見積もると、範囲の幅を変えずにパンしただけで桁数が変わって刻みが切り替わる（ちらつく）ので、
+   * 全域の両端を入れて「幅と全域だけで刻みが決まる」ようにする
+   */
+  widthSample?: readonly number[];
+}
+
+/** ラベルの間の余白の既定（px） */
+export const TICK_GAP_PX = 12;
+
+/**
+ * 目盛りのラベルの推定幅（px）。グラフの文字は 10px（style.css）。数字は約 0.56em、カンマ・ピリオドは約 0.28em、
+ * それ以外（%・+・−・P・C・空白）は 0.65em と見積もる（% 単体は実際より狭いが、+・空白を広めに取るので
+ * 「+12.5%」でも誤差は 1px 程度。余白 12px で吸収する）。
+ */
+export function tickLabelPx(label: string): number {
+  let w = 0;
+  for (const c of label) w += c >= '0' && c <= '9' ? 5.8 : c === ',' || c === '.' ? 3 : 6.5;
+  return w;
+}
+
+/**
+ * 横軸の目盛り: ラベルが重ならない範囲で最も細かい、きりのよい刻み（#55）。
+ * 刻みは「仮数 × 10^n」を細かい方から試し、画面上の間隔（step / 幅 × px）が「最も広いラベルの推定幅（tickLabelPx）+ 余白」以上になる
+ * 最初のものにする。本数はグラフの幅で決まる（広い画面ほど細かい）。仮数の比が最大 2.5（1・2・5）/ 2（1・2・2.5・5）なので、
+ * 間隔は通常、必要な幅の 2.5 倍未満に収まる（minStepFor の下限で切られたときを除く）。
+ */
+export function fitTicks(
+  lo: number,
+  hi: number,
+  px: number,
+  label: (v: number) => string,
+  opts: FitTicksOptions = {},
+): number[] {
+  if (!Number.isFinite(lo) || !Number.isFinite(hi) || !(px > 0) || !Number.isFinite(px)) return [];
+  if (hi < lo) [lo, hi] = [hi, lo];
+  const span = hi - lo;
+  if (!(span > 0)) return [lo];
+  const mantissas = opts.mantissas ?? [1, 2, 5];
+  const gapPx = opts.gapPx ?? TICK_GAP_PX;
+  // 1 画素あたりの値より細かい刻みは要らない（そこから粗い方へ試す）
+  const e0 = Math.floor(Math.log10(span / px));
+  let last: number[] = [lo];
+  for (let e = e0; e < e0 + 40; e++) {
+    for (const m of mantissas) {
+      // 10^e を毎回求める（掛け算の繰り返しで誤差をためない）。負の指数は割り算で 0.1 などをちょうどにする
+      const step = e >= 0 ? m * 10 ** e : m / 10 ** -e;
+      if (opts.minStepFor && step < opts.minStepFor(m)) continue;
+      const stepPx = (step / span) * px;
+      // 余白にも足りない刻みはラベルを作らずに飛ばす（ドラッグ中の毎フレームの計算を軽くする）
+      if (stepPx < gapPx) continue;
+      const ticks = stepTicks(lo, hi, step);
+      last = ticks;
+      let widest = ticks.reduce((w, v) => Math.max(w, tickLabelPx(label(v))), 0);
+      for (const v of opts.widthSample ?? []) {
+        if (Number.isFinite(v)) widest = Math.max(widest, tickLabelPx(label(snapTo(v, step))));
+      }
+      if (stepPx >= widest + gapPx) return ticks;
+    }
+  }
+  return last;
+}
+
+/** step の格子に丸めた値（浮動小数の誤差を刻みの桁で落とす）。 */
+function snapTo(v: number, step: number): number {
+  const digits = Math.max(0, -Math.floor(Math.log10(step)) + 1);
+  return Number((Math.round(v / step) * step).toFixed(digits));
+}
+
+/** [lo, hi] に入る step の倍数（最大 101 個で打ち切る。間隔は 12px 以上なので、描画幅 1,200px 超でないと届かない）。 */
+function stepTicks(lo: number, hi: number, step: number): number[] {
   const out: number[] = [];
   const start = Math.ceil(lo / step - 1e-9) * step;
   for (let v = start; v <= hi + step * 1e-9; v += step) {
