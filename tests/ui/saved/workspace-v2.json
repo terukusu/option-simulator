@@ -1,0 +1,124 @@
+{
+  "schema_version": 2,
+  "saved_at": "2026-11-03T12:10:00.000Z",
+  "active": 1,
+  "tabs": [
+    {
+      "name": "A",
+      "position": {
+        "board_snapshot_at": "2026-11-03T21:05:00+09:00",
+        "legs": [
+          {
+            "leg": {
+              "kind": "option",
+              "product": "op_large",
+              "type": "put",
+              "expiry": "2026-11",
+              "strike": 63500,
+              "side": "sell",
+              "qty": 1,
+              "entry": 640,
+              "mid": 650
+            },
+            "marks": []
+          },
+          {
+            "leg": {
+              "kind": "option",
+              "product": "op_large",
+              "type": "call",
+              "expiry": "2026-11",
+              "strike": 71000,
+              "side": "sell",
+              "qty": 1,
+              "entry": 520,
+              "mid": 515
+            },
+            "marks": []
+          }
+        ],
+        "scenario": {
+          "days": 1.5,
+          "dX": -400,
+          "dSigma": 2,
+          "skew": 0,
+          "beta": 1,
+          "ivDynamics": "sticky_strike",
+          "ivShift": "absolute"
+        }
+      }
+    },
+    {
+      "name": "ヘッジ案",
+      "position": {
+        "board_snapshot_at": "2026-11-03T21:09:00+09:00",
+        "legs": [
+          {
+            "leg": {
+              "kind": "option",
+              "product": "op_large",
+              "type": "put",
+              "expiry": "2026-12",
+              "strike": 60000,
+              "side": "buy",
+              "qty": 2,
+              "entry": 310,
+              "iv": 0.24
+            },
+            "marks": []
+          },
+          {
+            "leg": {
+              "kind": "future",
+              "product": "fut_micro",
+              "contract": "2026-12",
+              "side": "sell",
+              "qty": 5,
+              "entry": 67500
+            },
+            "marks": [],
+            "future_market": { "sq_time": 1797000000000, "price": 67500 }
+          }
+        ],
+        "scenario": {
+          "days": 1.5,
+          "dX": -400,
+          "dSigma": 2,
+          "skew": 0,
+          "beta": 1,
+          "ivDynamics": "sticky_strike",
+          "ivShift": "absolute"
+        }
+      }
+    },
+    {
+      "name": "C",
+      "position": {
+        "board_snapshot_at": null,
+        "legs": [],
+        "scenario": {
+          "days": 1.5,
+          "dX": -400,
+          "dSigma": 2,
+          "skew": 0,
+          "beta": 1,
+          "ivDynamics": "sticky_strike",
+          "ivShift": "absolute"
+        }
+      }
+    }
+  ],
+  "ui": {
+    "atm_basis": "B",
+    "month_id": "2026-11",
+    "target": "put",
+    "filter_ask": false,
+    "smile_axis": "k",
+    "fee_per_lot": 150,
+    "future_basis": "fixed",
+    "metrics_unit": "auto",
+    "pnl_y": { "mode": "auto", "manual": null, "n": 5 },
+    "pnl_folded": false,
+    "hedge": { "target": 0, "at": "base", "contract": null }
+  }
+}

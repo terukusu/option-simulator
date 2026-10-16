@@ -4,29 +4,43 @@ import { ZERO_SCENARIO } from '../../model';
 import {
   BOARD_KEY,
   bootState,
+  type DocReadResult,
   isNewerBoard,
   isNewerWorkspace,
   MAX_SAVED_LEGS,
+  MAX_TABS_READ,
   migrate,
+  POSITION_DOC_VERSION,
   persistKey,
   type ReadResult,
+  readPositionDoc,
   readSavedBoard,
   readWorkspace,
   readWorkspaceValue,
   restoreState,
+  restoreWorkspace,
   savedFromWorkspace,
   savedVersion,
   serializeBoard,
   serializeWorkspace,
   storageChange,
+  type TabsWorkspace,
   toSaved,
   WORKSPACE_KEY,
   WORKSPACE_SCHEMA_VERSION,
   type Workspace,
 } from '../../ui/persist';
-import { type Action, initialState, reduce, type State, type UiLeg } from '../../ui/state';
+import {
+  type Action,
+  initialState,
+  MAX_TABS,
+  reduce,
+  type State,
+  type UiLeg,
+} from '../../ui/state';
 import { fixture, rawFixture } from '../support/fixtures';
 import v1 from './saved/workspace-v1.json';
+import v2 from './saved/workspace-v2.json';
 
 const NOW = Date.parse('2026-11-02T12:47:00.000Z');
 
@@ -34,7 +48,14 @@ function run(state: State, ...actions: Action[]): State {
   return actions.reduce(reduce, state);
 }
 
-function ok(r: ReadResult): { saved: Workspace; dropped: boolean } {
+/** 1 ポジションの文書（版 1。保存一覧の項目・ファイル）の読み取りの結果 */
+function ok(r: DocReadResult): { saved: Workspace; dropped: boolean } {
+  if (r.kind !== 'ok') throw new Error(`読めない: ${r.kind}`);
+  return r;
+}
+
+/** 作業のキー（版 2。#71）の読み取りの結果 */
+function okWs(r: ReadResult): { saved: TabsWorkspace; dropped: boolean; droppedTabs: number } {
   if (r.kind !== 'ok') throw new Error(`読めない: ${r.kind}`);
   return r;
 }
@@ -67,12 +88,20 @@ const stripId = (legs: readonly UiLeg[]) => legs.map(({ id: _id, ...rest }) => r
 
 /** AC2: v1 の fixture（tests/ui/saved/workspace-v1.json。一度書いたら変えない）の後方互換。 */
 describe('版 1 の保存の読み取り（後方互換の固定）', () => {
-  it('v1 の fixture を読むと期待の State になる', () => {
-    const { saved, dropped } = ok(readWorkspace(JSON.stringify(v1)));
+  it('v1 の fixture を読むと版 2 に読み替わり（タブ 1 個「A」）、期待の State になる（#71）', () => {
+    const { saved, dropped, droppedTabs } = okWs(readWorkspace(JSON.stringify(v1)));
     expect(dropped).toBe(false);
+    expect(droppedTabs).toBe(0);
     expect(saved.savedAt).toBe(NOW);
-    expect(saved.position?.boardSnapshotAt).toBe(Date.parse('2026-11-02T21:31:00+09:00'));
-    const s = restoreState(initialState, saved);
+    expect(saved.active).toBe(0);
+    expect(saved.tabs.map((t) => t.name)).toEqual(['A']);
+    expect(saved.tabs[0]?.position.boardSnapshotAt).toBe(Date.parse('2026-11-02T21:31:00+09:00'));
+    const s = restoreWorkspace(initialState, saved);
+    expect(s.tabs).toEqual([{ id: 1, name: 'A', saved: null }]);
+    expect(s.activeTab).toBe(1);
+    expect(s.nextTabId).toBe(2);
+    // 1 ポジションの文書として読んでも同じ足・シナリオ・設定（保存一覧の項目と同じ形）
+    expect(restoreState(initialState, ok(readPositionDoc(JSON.stringify(v1))).saved)).toEqual(s);
     expect(s.legs).toEqual([
       {
         id: 1,
@@ -233,16 +262,19 @@ describe('書き出しと往復', () => {
   it('往復: 足（id 以外）・シナリオ・設定が一致し、板の時刻・保存の時刻が入る', () => {
     const s = worked();
     const text = serializeWorkspace(s, NOW);
-    const { saved } = ok(readWorkspace(text));
+    const { saved } = okWs(readWorkspace(text));
     expect(saved.savedAt).toBe(NOW);
-    expect(saved.position?.boardSnapshotAt).toBe(chain.snapshotAt);
-    const r = restoreState(initialState, saved);
+    expect(saved.tabs[0]?.position.boardSnapshotAt).toBe(chain.snapshotAt);
+    const r = restoreWorkspace(initialState, saved);
     expect(stripId(r.legs)).toEqual(stripId(s.legs));
     expect(r.legs.map((l) => l.id)).toEqual([1, 2, 3]);
     expect(r.scenario).toEqual(s.scenario);
     expect(persistKey(r)).toBe(persistKey(s));
+    expect(savedVersion(text)).toBe(WORKSPACE_SCHEMA_VERSION);
+    // 保存一覧に入れる 1 ポジションの文書は版 1 のまま（#71。ロールバックした画面でも読める）
     const saved1 = toSaved(s, NOW);
-    expect(saved1.schema_version).toBe(WORKSPACE_SCHEMA_VERSION);
+    expect(saved1.schema_version).toBe(POSITION_DOC_VERSION);
+    expect(POSITION_DOC_VERSION).toBe(1);
     // id は書かない
     expect(text).not.toMatch(/"id"/);
   });
@@ -271,7 +303,7 @@ describe('書き出しと往復', () => {
     const s = { ...initialState, legs: [leg], nextId: 6 };
     const text = serializeWorkspace(s, NOW);
     expect(text).toContain('"forward":null');
-    const r = restoreState(initialState, ok(readWorkspace(text)).saved);
+    const r = restoreWorkspace(initialState, okWs(readWorkspace(text)).saved);
     expect(r.legs[0]?.optionMarket?.market.forward).toBeNaN();
     expect(stripId(r.legs)).toEqual(stripId(s.legs));
   });
@@ -365,15 +397,21 @@ describe('検証（壊れた・他の版・余計なキー・範囲外）', () =
   });
 
   it('新しい版は newer（読まない）、知らない古い版（0）は invalid', () => {
-    expect(readWorkspace(v1With((o) => Object.assign(o, { schema_version: 2 })))).toEqual({
+    const next = WORKSPACE_SCHEMA_VERSION + 1;
+    expect(readWorkspace(v1With((o) => Object.assign(o, { schema_version: next })))).toEqual({
       kind: 'newer',
-      version: 2,
+      version: next,
     });
     expect(readWorkspace(v1With((o) => Object.assign(o, { schema_version: 0 }))).kind).toBe(
       'invalid',
     );
+    // 1 ポジションの文書は版 1 が今の版（版 2 の文書は新しい版）
+    expect(readPositionDoc(v1With((o) => Object.assign(o, { schema_version: 2 })))).toEqual({
+      kind: 'newer',
+      version: 2,
+    });
     expect(migrate({}, 0)).toBeNull();
-    expect(migrate({ a: 1 }, 1)).toEqual({ a: 1 });
+    expect(migrate({ a: 1 }, WORKSPACE_SCHEMA_VERSION)).toEqual({ a: 1 });
   });
 
   it('余計なキー・__proto__ は写さず、Object.prototype を汚さない', () => {
@@ -384,7 +422,7 @@ describe('検証（壊れた・他の版・余計なキー・範囲外）', () =
       )
       .replace('"strike":64000', '"strike":64000,"__proto__":{"polluted":2},"evil":"<b>x</b>"')
       .replace('"atm_basis":"A"', '"atm_basis":"A","__proto__":{"polluted":3}');
-    const { saved } = ok(readWorkspace(text));
+    const { saved } = ok(readPositionDoc(text));
     const s = restoreState(initialState, saved);
     expect(({} as Record<string, unknown>).polluted).toBeUndefined();
     expect(Object.keys(s.legs[0]?.leg ?? {}).sort()).toEqual(
@@ -420,7 +458,7 @@ describe('検証（壊れた・他の版・余計なキー・範囲外）', () =
     ['scenario.ivShift 不明', (o: RawV1) => (o.position.scenario.ivShift = 'log')],
     ['legs が配列でない', (o: RawV1) => ((o.position as Rec).legs = {})],
   ])('足・シナリオが 1 つでも不正なら position ごと捨てる（%s）。設定は残す', (_name, edit) => {
-    const { saved, dropped } = ok(readWorkspace(v1With((o) => edit(o))));
+    const { saved, dropped } = ok(readPositionDoc(v1With((o) => edit(o))));
     expect(dropped).toBe(true);
     expect(saved.position).toBeNull();
     const s = restoreState(initialState, saved);
@@ -430,14 +468,14 @@ describe('検証（壊れた・他の版・余計なキー・範囲外）', () =
   });
 
   it('建値の上限 1e9 ちょうどは読める（入力 parseEntry と同じ範囲）', () => {
-    const { saved, dropped } = ok(readWorkspace(v1With((o) => (L(o, 0).leg.entry = 1e9))));
+    const { saved, dropped } = ok(readPositionDoc(v1With((o) => (L(o, 0).leg.entry = 1e9))));
     expect(dropped).toBe(false);
     expect(saved.position?.legs[0]?.leg.entry).toBe(1e9);
   });
 
   it('限月が板に入った手入力の足（「板なし」が無い）も足の市場を持てる（F の null は NaN）', () => {
     const { saved, dropped } = ok(
-      readWorkspace(
+      readPositionDoc(
         v1With((o) => {
           L(o, 1).marks = [];
           L(o, 1).option_market = { sq_time: 1794528000000, forward: null };
@@ -454,16 +492,16 @@ describe('検証（壊れた・他の版・余計なキー・範囲外）', () =
     const many = v1With((o) => {
       (o.position as Rec).legs = Array.from({ length: MAX_SAVED_LEGS + 1 }, () => leg);
     });
-    expect(ok(readWorkspace(many)).dropped).toBe(true);
+    expect(ok(readPositionDoc(many)).dropped).toBe(true);
     const max = v1With((o) => {
       (o.position as Rec).legs = Array.from({ length: MAX_SAVED_LEGS }, () => leg);
     });
-    expect(ok(readWorkspace(max)).saved.position?.legs).toHaveLength(MAX_SAVED_LEGS);
+    expect(ok(readPositionDoc(max)).saved.position?.legs).toHaveLength(MAX_SAVED_LEGS);
   });
 
   it('未知の印・重複は捨てる（足は捨てない）', () => {
     const { saved } = ok(
-      readWorkspace(
+      readPositionDoc(
         v1With((o) => {
           L(o, 0).marks = ['interpolated', 'mystery', 'interpolated', 'toString'];
         }),
@@ -562,7 +600,7 @@ describe('検証（壊れた・他の版・余計なキー・範囲外）', () =
       'auto',
     ],
   ] as const)('設定の 1 項目が不正ならその項目だけ既定（%s）', (_name, edit, key, expected) => {
-    const { saved, dropped } = ok(readWorkspace(v1With((o) => edit(o))));
+    const { saved, dropped } = ok(readPositionDoc(v1With((o) => edit(o))));
     expect(dropped).toBe(false);
     const s = restoreState(initialState, saved);
     expect(s[key]).toEqual(expected);
@@ -574,7 +612,7 @@ describe('検証（壊れた・他の版・余計なキー・範囲外）', () =
 
   it('ui が丸ごと無い・壊れていれば全て既定、保存の時刻が読めなければ null', () => {
     const { saved } = ok(
-      readWorkspace(
+      readPositionDoc(
         v1With((o) => {
           (o as { ui: unknown }).ui = [1];
           o.saved_at = 'yesterday';
@@ -628,15 +666,15 @@ describe('最後に取れた板の保存', () => {
 });
 
 describe('作業の値の検証の切り出し（#70 readWorkspaceValue・savedFromWorkspace）', () => {
-  it('readWorkspace と同じ結果（JSON.parse の後を共有する）', () => {
+  it('readPositionDoc と同じ結果（JSON.parse の後を共有する）', () => {
     for (const text of [JSON.stringify(v1), '[]', '{"schema_version":9}', '{"schema_version":1}']) {
-      expect(readWorkspaceValue(JSON.parse(text))).toEqual(readWorkspace(text));
+      expect(readWorkspaceValue(JSON.parse(text))).toEqual(readPositionDoc(text));
     }
     expect(readWorkspaceValue(null)).toEqual({ kind: 'invalid' });
   });
 
   it('検証済みの作業を保存の形に戻すと、同じ作業に読める（余計なキーを写さない）', () => {
-    const { saved } = ok(readWorkspace(JSON.stringify({ ...v1, extra: '<x>' })));
+    const { saved } = ok(readPositionDoc(JSON.stringify({ ...v1, extra: '<x>' })));
     const back = savedFromWorkspace(saved, 0);
     expect(Object.keys(back)).toEqual(['schema_version', 'saved_at', 'position', 'ui']);
     expect(ok(readWorkspaceValue(back)).saved).toEqual(saved);
@@ -644,5 +682,237 @@ describe('作業の値の検証の切り出し（#70 readWorkspaceValue・savedF
     expect(savedFromWorkspace({ ...saved, savedAt: null }, NOW).saved_at).toBe(
       new Date(NOW).toISOString(),
     );
+  });
+});
+
+/** #71: 作業のキーの版 2（タブの並び）。tests/ui/saved/workspace-v2.json（架空の値。一度書いたら変えない）を固定する。 */
+describe('作業のキーの版 2（#71 BOX タブ）', () => {
+  type RawV2 = Rec & { tabs: Array<Rec & { name: unknown; position: RawV1['position'] }> };
+  function v2With(edit: (o: RawV2) => void): string {
+    const o = structuredClone(v2) as unknown as RawV2;
+    edit(o);
+    return JSON.stringify(o);
+  }
+
+  it('v2 の fixture を読むとタブ 3 個・名前・作業中のタブ・各タブの足が戻る', () => {
+    const { saved, dropped, droppedTabs } = okWs(readWorkspace(JSON.stringify(v2)));
+    expect([dropped, droppedTabs]).toEqual([false, 0]);
+    expect(saved.tabs.map((t) => [t.name, t.position.legs.length])).toEqual([
+      ['A', 2],
+      ['ヘッジ案', 2],
+      ['C', 0],
+    ]);
+    expect(saved.active).toBe(1);
+    const s = bootState(readWorkspace(JSON.stringify(v2)));
+    expect(s.tabs.map((t) => [t.id, t.name, t.saved === null])).toEqual([
+      [1, 'A', false],
+      [2, 'ヘッジ案', true],
+      [3, 'C', false],
+    ]);
+    expect(s.activeTab).toBe(2);
+    expect(s.nextTabId).toBe(4);
+    // 作業中のタブ（ヘッジ案）の足が State の足、他のタブは退避の形
+    expect(s.legs.map((l) => [l.id, l.leg.kind])).toEqual([
+      [1, 'option'],
+      [2, 'future'],
+    ]);
+    expect(s.nextId).toBe(3);
+    expect(s.tabs[0]?.saved?.legs.map((l) => l.leg.kind === 'option' && l.leg.strike)).toEqual([
+      63500, 71000,
+    ]);
+    expect(s.tabs[0]?.saved?.boardSnapshotAt).toBe(Date.parse('2026-11-03T21:05:00+09:00'));
+    expect(s.scenario).toEqual({
+      days: 1.5,
+      dX: -400,
+      dSigma: 2,
+      skew: 0,
+      beta: 1,
+      ivDynamics: 'sticky_strike',
+      ivShift: 'absolute',
+    });
+    expect(s.feePerLot).toBe(150);
+  });
+
+  it('往復: 全タブ・名前・作業中のタブ・足が戻り、persistKey が一致する（AC4）', () => {
+    const s = bootState(readWorkspace(JSON.stringify(v2)));
+    const text = serializeWorkspace(s, NOW);
+    const back = bootState(readWorkspace(text));
+    expect(back.tabs).toEqual(s.tabs);
+    expect(back.activeTab).toBe(s.activeTab);
+    expect(stripId(back.legs)).toEqual(stripId(s.legs));
+    expect(persistKey(back)).toBe(persistKey(s));
+    const raw = JSON.parse(text) as Rec;
+    expect(Object.keys(raw)).toEqual(['schema_version', 'saved_at', 'active', 'tabs', 'ui']);
+    expect(raw.active).toBe(1);
+    // 共通のシナリオ: 全タブに作業中のシナリオを書く
+    const tabs = raw.tabs as Array<{ position: { scenario: unknown } }>;
+    expect(new Set(tabs.map((t) => JSON.stringify(t.position.scenario))).size).toBe(1);
+    // 板の時刻は退避したタブは保存した値、作業中のタブは板が無いので null
+    expect(
+      (tabs[0] as unknown as { position: { board_snapshot_at: string } }).position
+        .board_snapshot_at,
+    ).toBe('2026-11-03T12:05:00.000Z');
+  });
+
+  it('persistKey: タブの切り替え・名前・他のタブの足で変わる。板の読み直しでは変わらない', () => {
+    const chain = normalizeChain(fixture('latest'));
+    const s = reduce(bootState(readWorkspace(JSON.stringify(v2))), {
+      type: 'loaded',
+      chain,
+      label: 'API',
+    });
+    const k0 = persistKey(s);
+    expect(
+      persistKey(
+        reduce(s, { type: 'loaded', chain: normalizeChain(fixture('night_early')), label: 'x' }),
+      ),
+    ).toBe(k0);
+    expect(persistKey(reduce(s, { type: 'switchTab', id: 1 }))).not.toBe(k0);
+    expect(persistKey(reduce(s, { type: 'renameTab', id: 3, name: 'Z' }))).not.toBe(k0);
+    expect(persistKey(reduce(s, { type: 'closeTab', id: 3 }))).not.toBe(k0);
+    expect(persistKey(reduce(s, { type: 'addTab', mode: 'empty' }))).not.toBe(k0);
+  });
+
+  it('保存一覧の項目は作業中のタブ 1 つの版 1 の文書（タブの並びを含まない）', () => {
+    const s = bootState(readWorkspace(JSON.stringify(v2)));
+    const doc = toSaved(s, NOW);
+    expect(doc.schema_version).toBe(1);
+    expect(Object.keys(doc)).toEqual(['schema_version', 'saved_at', 'position', 'ui']);
+    expect(doc.position.legs.map((l) => l.leg.kind)).toEqual(['option', 'future']);
+    // 1 ポジションの文書として読める（保存一覧・読み込み）。作業のキー（版 2）は文書としては新しい版
+    expect(ok(readWorkspaceValue(doc)).dropped).toBe(false);
+    expect(readPositionDoc(JSON.stringify(v2)).kind).toBe('newer');
+  });
+
+  it('壊れたタブはタブごと捨て、残りを復元する（作業中のタブを捨てたら先頭）。droppedTabs に個数（AC6）', () => {
+    const r = okWs(
+      readWorkspace(
+        v2With((o) => {
+          const t = o.tabs[1];
+          if (t) (t.position.legs[0] as RawLeg).leg.qty = 0;
+        }),
+      ),
+    );
+    expect(r.dropped).toBe(false);
+    expect(r.droppedTabs).toBe(1);
+    expect(r.saved.tabs.map((t) => t.name)).toEqual(['A', 'C']);
+    expect(r.saved.active).toBe(0);
+    // 作業中より前のタブを捨てたら作業中の位置を詰める
+    const r2 = okWs(
+      readWorkspace(
+        v2With((o) => {
+          const t = o.tabs[0];
+          if (t) (t.position as Rec).legs = 'x';
+        }),
+      ),
+    );
+    expect(r2.saved.tabs.map((t) => t.name)).toEqual(['ヘッジ案', 'C']);
+    expect(r2.saved.active).toBe(0);
+  });
+
+  it.each([
+    ['tabs が配列でない', (o: RawV2) => ((o as Rec).tabs = {})],
+    ['tabs が空', (o: RawV2) => ((o as Rec).tabs = [])],
+    [
+      `tabs が ${MAX_TABS_READ} 個を超える`,
+      (o: RawV2) => ((o as Rec).tabs = Array.from({ length: MAX_TABS_READ + 1 }, () => o.tabs[2])),
+    ],
+    ['全タブが壊れている', (o: RawV2) => ((o as Rec).tabs = [1, null, { name: 'x' }])],
+  ])('タブの並びが壊れている（%s）なら足を全部捨てて設定だけ戻す（タブは空の A）', (_n, edit) => {
+    const r = okWs(readWorkspace(v2With(edit)));
+    expect(r.dropped).toBe(true);
+    expect(r.saved.tabs).toEqual([]);
+    const s = bootState(readWorkspace(v2With(edit)));
+    expect(s.tabs).toEqual([{ id: 1, name: 'A', saved: null }]);
+    expect(s.legs).toEqual([]);
+    expect(s.feePerLot).toBe(150);
+  });
+
+  it(`タブは先頭から ${MAX_TABS} 個まで。作業中の位置が範囲外・整数でなければ先頭`, () => {
+    const many = okWs(
+      readWorkspace(
+        v2With((o) => {
+          const c = o.tabs[2];
+          (o as Rec).tabs = Array.from({ length: 9 }, (_, i) => ({ ...c, name: `T${i}` }));
+          o.active = 8;
+        }),
+      ),
+    );
+    expect(many.saved.tabs.map((t) => t.name)).toEqual(['T0', 'T1', 'T2', 'T3', 'T4', 'T5']);
+    expect(many.saved.active).toBe(0);
+    for (const active of [-1, 3, 1.5, '1', null]) {
+      const r = okWs(readWorkspace(v2With((o) => Object.assign(o, { active }))));
+      expect(r.saved.active, String(active)).toBe(0);
+    }
+  });
+
+  it('名前の変更（renameTab）で付けた名前は書いて読み直しても変わらない（重複は変更の側で断る）', () => {
+    let s = bootState(readWorkspace(JSON.stringify(v2)));
+    const names = s.tabs.map((t) => t.name);
+    // 他のタブと同じ名前にはならない（読み取りで別の文字に変わる重複を作らない）
+    for (const t of s.tabs) {
+      for (const name of names) s = reduce(s, { type: 'renameTab', id: t.id, name });
+    }
+    expect(s.tabs.map((t) => t.name)).toEqual(names);
+    s = reduce(s, { type: 'renameTab', id: s.tabs[0]?.id ?? 0, name: '売りの案' });
+    const back = okWs(readWorkspace(serializeWorkspace(s, NOW)));
+    expect(back.saved.tabs.map((t) => t.name)).toEqual(s.tabs.map((t) => t.name));
+  });
+
+  it('名前は外から来た値: 制御文字・双方向の制御を除き 12 字。空・重複・文字列でなければ空いている文字', () => {
+    const r = okWs(
+      readWorkspace(
+        v2With((o) => {
+          const [a, b, c] = o.tabs;
+          if (!a || !b || !c) throw new Error('タブが無い');
+          a.name = '\u202e<script>alert(1)</script>';
+          b.name = '\u0000\u200e ';
+          c.name = 42;
+        }),
+      ),
+    );
+    expect(r.saved.tabs.map((t) => t.name)).toEqual(['<script>aler', 'A', 'B']);
+    const dup = okWs(
+      readWorkspace(
+        v2With((o) => {
+          for (const t of o.tabs) t.name = 'X';
+        }),
+      ),
+    );
+    expect(dup.saved.tabs.map((t) => t.name)).toEqual(['X', 'A', 'B']);
+  });
+
+  it('余計なキー・__proto__ は写さず、Object.prototype を汚さない（タブの並び）', () => {
+    const text = JSON.stringify(v2)
+      .replace('"active":1', '"active":1,"__proto__":{"polluted":1},"extra":1')
+      .replace('"name":"A"', '"name":"A","__proto__":{"polluted":2},"evil":"<b>"');
+    const s = bootState(readWorkspace(text));
+    expect(({} as Record<string, unknown>).polluted).toBeUndefined();
+    expect(Object.keys(s.tabs[0] ?? {}).sort()).toEqual(['id', 'name', 'saved']);
+    expect(s).not.toHaveProperty('extra');
+  });
+
+  it('版 1 の作業で足が壊れていたら（読み替え後のタブ A を捨てる）設定だけ戻す', () => {
+    const text = v1With((o) => (L(o, 0).leg.qty = 0));
+    const r = okWs(readWorkspace(text));
+    expect(r.dropped).toBe(true);
+    const s = bootState(readWorkspace(text));
+    expect(s.legs).toEqual([]);
+    expect(s.tabs).toEqual(initialState.tabs);
+    expect(s.feePerLot).toBe(300);
+  });
+
+  it('MIGRATIONS[1]: 版 1 → 版 2 はタブ 1 個「A」（position・ui を移し、余計なキーは写さない）', () => {
+    const m = migrate(
+      { schema_version: 1, saved_at: 'x', position: { a: 1 }, ui: { b: 2 }, z: 3 },
+      1,
+    );
+    expect(m).toEqual({
+      schema_version: 2,
+      saved_at: 'x',
+      active: 0,
+      tabs: [{ name: 'A', position: { a: 1 } }],
+      ui: { b: 2 },
+    });
   });
 });

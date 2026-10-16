@@ -1,3 +1,4 @@
+import type { ComponentChildren } from 'preact';
 import { useMemo, useState } from 'preact/hooks';
 import type { Scenario } from '../../model';
 import { type Domain, pixelToValue, zoom } from '../chart/scale';
@@ -47,6 +48,11 @@ export interface PnlChartProps {
   /** 描画域をたたんでいる（操作行・帯は残す。#61） */
   folded: boolean;
   dispatch: (a: Action) => void;
+  /**
+   * ドックの 1 行目に置く作業中のポジションのタブ（#71。上端に残る・たたんでも残る）。
+   * 浅い比較で描き直しを省くので、App は表示モデルが変わったときだけ作り直した要素を渡す
+   */
+  tabs?: ComponentChildren;
 }
 
 const LINE_LABEL: Record<PnlLineKind, string> = {
@@ -77,6 +83,7 @@ function PnlChartView({
   readout,
   folded,
   dispatch,
+  tabs,
 }: PnlChartProps) {
   const { ref, width } = useWidth(480);
   // スマホは 180px（ドックの下でページをスクロールできる高さを残す。#61）
@@ -206,6 +213,7 @@ function PnlChartView({
     // ドック（操作行・描画域・読み取りの帯）は画面の上端に残る（sticky。#61）。凡例はドックの外で流れる
     <>
       <div class={folded ? 'pnl-dock folded' : 'pnl-dock'}>
+        {tabs}
         <div class="pnl-tools">
           <fieldset class="seg" aria-label="縦軸">
             {(['auto', 'manual', 'premium'] as const).map((m) => (
