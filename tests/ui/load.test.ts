@@ -5,6 +5,7 @@ import {
   initialSource,
   loaderNote,
   MAX_ERROR_LINES,
+  readsCalendar,
   savedBoardLabel,
 } from '../../ui/load';
 
@@ -13,6 +14,17 @@ describe('initialSource', () => {
   it('dev は合成の latest、本番は API（bigquery）', () => {
     expect(initialSource(true)).toEqual({ kind: 'fixture', name: 'latest' });
     expect(initialSource(false)).toEqual({ kind: 'api' });
+  });
+});
+
+/** #39 AC-6: 取引カレンダー（/api/calendar）を読む契機。API の板を読むときだけ。 */
+describe('readsCalendar', () => {
+  it('本番の初回（API）・[最新] は読む。dev の既定（合成の latest）・ファイル選択は読まない', () => {
+    expect(readsCalendar(initialSource(false))).toBe(true);
+    expect(readsCalendar(initialSource(true))).toBe(false);
+    expect(readsCalendar({ kind: 'api' })).toBe(true);
+    expect(readsCalendar({ kind: 'fixture', name: 'latest' })).toBe(false);
+    expect(readsCalendar({ kind: 'file' })).toBe(false);
   });
 });
 

@@ -126,8 +126,8 @@ export function LegForms({ chain, dispatch }: { chain: Chain; dispatch: (a: Acti
         <div class="sub-head hint-host">
           <h3>OP の足（手入力）</h3>
           <Hint label="手入力の OP の足">
-            板の無い限月は SQ 日を取引カレンダー（optionchan から同期 +
-            国民の祝日）から求める。確定の最終日より後の限月は「休業日未確定」。F
+            板の無い限月は SQ 日を取引カレンダー（optionchan
+            の版か同梱の版）から求める。確定の最終日より後の限月は「休業日未確定」。F
             は板の先物価格で代用。
           </Hint>
         </div>

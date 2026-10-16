@@ -156,7 +156,7 @@ function forwardText(month: ChainMonth): string {
   return Number.isFinite(u) ? `${fmtNum(month.F, 0)} ±${fmtNum(u, 0)}` : fmtNum(month.F, 0);
 }
 
-/** 前提に出す取引カレンダーの文と、期限切れの警告。設計 7.5。 */
+/** 前提に出す取引カレンダーの文（API の版 / 同梱の版 / 読めない）と、期限切れの警告。設計 7.5。 */
 export function calendarAssumption(
   calendar: Calendar,
   evalTime: number,
@@ -168,7 +168,7 @@ export function calendarAssumption(
     };
   }
   return {
-    text: `取引カレンダー: optionchan から同期（${calendar.syncedOn}）・確定 ${calendar.confirmedUntil} まで`,
+    text: `取引カレンダー: ${calendar.origin === 'api' ? 'optionchan の版' : '同梱の版'}（${calendar.versionOn}）・確定 ${calendar.coveredUntil} まで`,
     warning: isCalendarExpired(calendar, evalTime)
       ? `カレンダー期限切れ（評価時刻が ${calendar.coveredUntil} より後。休業日が漏れている可能性）`
       : null,

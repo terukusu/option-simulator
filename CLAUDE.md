@@ -6,7 +6,7 @@
 
 - `model/`: 価格モデル（Black-76、IV、F の推定、スマイルの補間・外挿、時間、満期損益、シナリオ、グリーク）。**純関数**で DOM・通信に依存しない。vitest で文献値・性質テスト・合成板からの回復を固定する
 - `data/`: 板の JSON の型と検証、アダプタ（`file` / `bigquery` / 手入力の足）、板の正規化（F・スマイル・ATM を `model/` で付ける）
-- `data/calendar/`: 取引カレンダー（optionchan の toml から）と国民の祝日（内閣府の CSV から）の JSON。`npm run calendar:sync`（環境変数 `OPTIONCHAN_CALENDAR_URL`。CI では同名の secret。URL はリポジトリに書かない）と定期同期のワークフロー（`.github/workflows/calendar-sync.yml`）が書く生成物で、手で編集しない。形の検査と休業日の集合は `data/calendar.ts`
+- `data/calendar/`: 取引カレンダーの同梱の版（`calendar.json`。`/api/calendar` と同じ形。API から取れないときに使う）。自動更新はせず、手で作り直して PR（手順は README の「取引カレンダー」）。形の検査と休業日の集合は `data/calendar.ts`
 - `fixtures/synthetic/`: 合成の固定の板（架空の値。`scripts/synthBoard.ts` から `npm run fixtures` で作る。手で編集しない）
 - `ui/`: 画面（TypeScript + Vite + Preact 10）。状態と reducer は `ui/state.ts`、表示モデルは `ui/view/` の純関数（Preact に依存しない。`tests/ui/` で確かめる）、グラフの座標と拡大・パンの規則は `ui/chart/scale.ts`、ジェスチャー（ドラッグ・ピンチ・タップ・損益グラフの長押し / つかむ）の状態機械は `ui/chart/gesture.ts`（どちらも純関数）、DOM のイベントは損益グラフとスマイルで共用のフック `ui/components/useChartGestures.ts`、部品（`ui/components/`）は表示モデルを描くだけ。板・入力値は JSX のテキスト / 属性で入れ、HTML 文字列を DOM に入れる API と `style` 属性（JSX の style prop を含む）を使わない（CSP）
 - `api/`: 板（`/api/chain`）とカレンダー（`/api/calendar`）の JSON を返す Python 3.13（Flask / gunicorn、uv.lock）。optionchan の BigQuery を読むだけ（書き込まない）。使える板の判定は `api/src/simulator_api/usable.py` の純関数（定数は `settings.py` の上部）、optionchan との契約（使う列・型）は `contract.py` に 1 か所。テストは pytest と偽の runner（合成の板）。手順は `api/README.md`

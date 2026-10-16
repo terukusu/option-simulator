@@ -107,7 +107,7 @@ URL 共有（#72、2026-10-16）: M8 のうち **URL（圧縮 JSON）** を入�
 | AC22 テール表: −5〜−40% × {SQ, 指定日} の損益と受取プレミアムの倍率が出て、SQ 列は満期損益の式、指定日列はシナリオ IV（β 込み）の Black-76 と一致する | 単体テスト |
 | AC23 急落プリセット / β: プリセット「−10% / +20pt / +3」を β = 1 で適用すると、ATM IV は **+30pt**（プリセットの +20pt と β の +10pt は独立に加算）、10% OTM の put は **+33.16pt**（Δs × x_eff / 0.1 で x_eff = ln 0.9 ≒ −0.105 なので +3.16pt が加わる） | 単体テスト |
 | AC24 複数限月の横軸: 1 限月・2 限月・先物の足を同じ横軸に載せたとき、各足の原資産が `X' + basis_i`（円）または `X' × F_i / X₀`（%）で動き、X' = X₀ で各限月の F が板の F に戻る。**満期の折れ点が横軸上で `K − basis_i`** に出る | 単体テスト |
-| AC25 契約: optionchan のテーブル関数 4 本の列・型が、固定したコミットの `schema/tokyo/*.json` と一致し、SQL の dry run が通る | CI（スキーマ照合）、`OPTIONCHAN_BQ_TEST=1` で dry run |
+| AC25 契約: optionchan のテーブル関数 4 本とビュー `trading_calendar_latest` の列・型が、固定したコミットの `schema/tokyo/*.json` と一致し、SQL の dry run が通る | CI（スキーマ照合）、`OPTIONCHAN_BQ_TEST=1` で dry run |
 | AC26 スライダー操作: 数値入力・矢印キー（1 刻み / Shift 10 刻み）・R（リセット）・+ / −（拡大）が効き、日数の上限が最遠の SQ、「SQ 日 9:00」「取引最終日 15:45」ボタンで評価時刻がその時刻になる | ブラウザで操作、単体テスト（評価時刻） |
 | AC27 ポジション一覧: 各足の IV（編集可）と足別グリークが出る | スナップショットテスト |
 | AC28 ピン留め: 現在の線と指標をゴーストで残し、足を変えても比較できる（最大 3 本） | ブラウザで操作 + 状態・線の単体テスト（`tests/ui/pins.test.ts`）+ 性能テスト（#22） |
@@ -132,7 +132,7 @@ JPX の制度概要ページ（[日経225オプション](https://www.jpx.co.jp/
 | 限月 | 四半期限月（6・12 月は直近 16、3・9 月は直近 3）+ その他の月（直近 8、最長 12 か月）。**optionchan が取り込むのは直近 2 限月だけ** | 11 限月制（金曜・水曜の週次） |
 | 行使価格 | 新規は 250 円刻み上下 16 本。直近 3 限月は 125 円刻み上下 24 本を毎営業日追加 | 125 円刻み上下 24 本 |
 | 立会時間 | 日中 8:45〜15:45（クロージング 15:45）、夜間 17:00〜翌 6:00（クロージング 6:00） | 同じ |
-| 休業日 | 土日・年末年始（12/31〜1/3）・祝日取引を実施しない日。optionchan の `config/trading_calendar.toml` が一次情報（7.5）。**SQ 日・取引最終日の判定では国民の祝日（祝日取引の実施日を含む）も休業日**（5.2） | 同じ |
+| 休業日 | 土日・年末年始（12/31〜1/3）・祝日取引を実施しない日。optionchan の BigQuery のビュー `trading_calendar_latest`（4.1・7.5）が一次情報。**SQ 日・取引最終日の判定では版の全行（祝日取引の実施日を含む）を休業日**（5.2） | 同じ |
 | 証拠金 | VaR 方式（JSCC）。再現は後段 | 同じ |
 
 ### 3.1 商品の体系（このツールで選べる商品）
@@ -153,7 +153,7 @@ JPX の商品一覧（2026-10-13）にある日経225の商品は、先物 3 つ
 - 日経225マイクロ先物の限月の設定。先物の呼値（ラージ 10 円、ミニ 5 円は制度概要ページで確認、マイクロは要確認）。建値の入力の丸めにだけ使う
 - ミニ先物の毎月限月の SQ が同じ月のラージ OP の SQ と同じ日であること（先物の足の満期評価で使う）
 
-取引最終日の夜間セッションは optionchan のカレンダーでは **SQ 日の取引日扱い**（夜間は次の取引日に属する）なので、満了する限月はそこでは取引されない。→ T の終端は **SQ 日 9:00 の一択**（5.2）。
+取引最終日の夜間セッションは optionchan の取引日の扱いでは **SQ 日の取引日扱い**（夜間は次の取引日に属する）なので、満了する限月はそこでは取引されない。→ T の終端は **SQ 日 9:00 の一択**（5.2）。
 
 ## 4. データの実際（optionchan）
 
@@ -228,7 +228,7 @@ JPX の商品一覧（2026-10-13）にある日経225の商品は、先物 3 つ
 - 評価時刻の既定はスナップショット時刻。シナリオの経過日数 d（小数可）で `T' = T − d / 365`。「SQ 日 9:00」「取引最終日 15:45」のボタンは評価時刻をその時刻に置く
 - **T → 0 の扱い**: `T' ≤ T_min`（= 1 分）なら本源的価値に切り替え、グリークは直前の値で固定、IV 逆算は「解なし」。SQ を過ぎた足は満期損益で、IV の変化は無視する
 - 終端は SQ 日 9:00 の一択（3 章）。営業日ベースは後段
-- **SQ 日・取引最終日の判定に使う休業日 = 土日 ∪ toml の `closed_dates` ∪ 国民の祝日**（「休業日なら繰り上げ」の具体化。13.1 の決定は変えない）。toml の規則では平日の祝日は祝日取引を実施する「取引日」だが、SQ 日・取引最終日は祝日を避けて繰り上がる。根拠: optionchan の旧系データ（JPX のページの取引最終日。2018-11〜2026-12 の 93 限月）で土日だけの規則と合わないのは 4 限月で、うち 2023-08 限（第 2 金曜 8/11 が山の日。祝日取引の開始 2022-09 の後）は取引最終日 8/9・SQ 日 8/10。toml の `closed_dates` は年末年始・BCP テスト日だけなので、祝日を入れないと 2027-02 限（2/11 が木曜 → 取引最終日 2/10）・2028-02 限（2/11 が金曜 → SQ 日 2/10）がずれる。祝日の一覧は内閣府の公表（JPX 由来でない）から同期する（7.5）
+- **SQ 日・取引最終日の判定に使う休業日 = 土日 ∪ 取引カレンダーの版（`trading_calendar_latest`。7.5）の全行の日付**（「休業日なら繰り上げ」の具体化。13.1 の決定は変えない）。版の行には祝日取引を実施する「取引日」（`is_trading_day = true`）も入るが、SQ 日・取引最終日は祝日を避けて繰り上がるので `is_trading_day` を問わず休業日に使う（API の `calendar.py` と同じ規則）。根拠: optionchan の旧系データ（JPX のページの取引最終日。2018-11〜2026-12 の 93 限月）で土日だけの規則と合わないのは 4 限月で、うち 2023-08 限（第 2 金曜 8/11 が山の日。祝日取引の開始 2022-09 の後）は取引最終日 8/9・SQ 日 8/10。取引日の行を除くと 2023-08 限・2027-02 限（2/11 が木曜 → 取引最終日 2/10）がずれる。版の掲載範囲（`listed_until`）より後の月は土日だけで求まり（例 2028-02 限は 2/11 の祝日が版に無いので SQ 日 2/11）、下の「休業日未確定」の印が付く
 - 板にある限月の SQ 日・取引最終日は板の値（サーバーが入れる）を使い、ブラウザでは求め直さない。ブラウザが求めるのは板の無い限月（手入力の足・板の先物と限月違いの先物の足）だけ。その限月の **第 2 金曜** が確定の最終日（7.5）より後なら「休業日未確定」の印（SQ 日・取引最終日の決定に使う日はすべて第 2 金曜以前なので、第 2 金曜まで確定していれば両方確定）
 
 ### 5.3 IV（アンカー IV・スマイル・補間・欠損）
@@ -468,7 +468,7 @@ JPX の商品一覧（2026-10-13）にある日経225の商品は、先物 3 つ
   - 開閉（純関数 `ui/view/hint.ts` の `hintNext`）: ⓘ でトグル、外側の `pointerdown`（capture。既定動作は止めないのでグラフのパン・ボタンはそのまま効く）・Esc で閉じる（Esc のときフォーカスが吹き出しの中ならボタンへ戻す）。document の購読は開いている間だけ。同時に開くのは 1 つ（モジュール内の「いま開いている ⓘ を閉じる関数」。キーボードで別の ⓘ を開いても前のが閉じる）。開いたら吹き出しを `scrollIntoView({ block: 'nearest' })`（PC のシミュレーターの列の下端で切れないように）
   - 位置（CSS とクラスだけ。style 属性を使わない）: ⓘ を置く行に `.hint-host`（`position: relative`）、吹き出しは `position: absolute; top: 100%; left: 0; width: max-content; max-width: min(320px, 100%)`。最大幅を画面幅（`100vw − 余白`）ではなく**行の幅**にするのは、PC のシミュレーターの列（`overflow-y: auto`）の横スクロールを生まないため。ボタンの中心が行の右半分なら `.end`（右端に揃える。純関数 `hintAlign`）。z-index 2: 板の thead（1）より上、ドック（3）より下（スクロールするとドックの下に入る）
   - タッチ: ⓘ の押せる面は `::after`（上下左右 8px）で広げ、行の高さは増やさない
-  - 対象（吹き出しへ）: ヘッダの前提の説明（金利・評価時刻・取引カレンダーが何に使われるか。**前提の値（「金利 0.5%」・評価時刻・カレンダーの同期日と確定日）とカレンダー期限切れの警告は「前提:」の行に常に出す**）、板の使い方（bid = 売り / ask = 買い、Δ はスマイルの IV。板の上の「板の使い方 ⓘ」の行）、損益グラフの凡例の「縦線上の 満 / 指 / 今」と線の前提（**縦軸の単位（円 / 千円）は凡例の行の ⓘ の前に「縦軸 千円」の形で常に出す**。目盛りは数字だけなので、隠すと桁を取り違える。「プレミアム 0 のため自動」「指定日 d を…収めて描いた」の警告は凡例に常に出す）、basis の説明、スライダーのキー操作（「評価時刻 = …（板の時刻 + d）」は常に出す）、ポジションのグリークの前提と建値ずれ（見出しの横）、金額の単位の自動の規則（「金額の単位: 千円（自動）」は常に出す）、テール表の指定日の列の計算方法（見出しの横。caption の単位・基準額は値なので残す）、スマイルの操作（凡例の行末）、手入力の OP の足の SQ 日・F の前提（見出しの横）
+  - 対象（吹き出しへ）: ヘッダの前提の説明（金利・評価時刻・取引カレンダーが何に使われるか。**前提の値（「金利 0.5%」・評価時刻・カレンダーの版の日付と確定日）とカレンダー期限切れの警告は「前提:」の行に常に出す**）、板の使い方（bid = 売り / ask = 買い、Δ はスマイルの IV。板の上の「板の使い方 ⓘ」の行）、損益グラフの凡例の「縦線上の 満 / 指 / 今」と線の前提（**縦軸の単位（円 / 千円）は凡例の行の ⓘ の前に「縦軸 千円」の形で常に出す**。目盛りは数字だけなので、隠すと桁を取り違える。「プレミアム 0 のため自動」「指定日 d を…収めて描いた」の警告は凡例に常に出す）、basis の説明、スライダーのキー操作（「評価時刻 = …（板の時刻 + d）」は常に出す）、ポジションのグリークの前提と建値ずれ（見出しの横）、金額の単位の自動の規則（「金額の単位: 千円（自動）」は常に出す）、テール表の指定日の列の計算方法（見出しの横。caption の単位・基準額は値なので残す）、スマイルの操作（凡例の行末）、手入力の OP の足の SQ 日・F の前提（見出しの横）
   - 残すもの: 時刻・データ元・理由の 1 行、ヘッダの前提の値、損益グラフの縦軸の単位、空の状態の案内（「板の bid / ask を押すか…」など）、線と点の凡例、値の注記（BEP・d・X など）、建値ずれの足ごとの注記、デルタヘッジの注記、テール表の caption
   - 印刷用の CSS は持たない（閉じた説明は印刷されない）。スマホ 390×844・足 2 本のページの高さ 4,172px → 3,734px（EPIC #64 の目標 3,900px 以下）
 - 板の行の並び（**決定（2026-10-14、#50、オーナーの指摘）**）: 行使価格の**降順**（上が高い K）。9 列・枠が狭いときの put / call の表とも。並べ替えは表示だけ（`ui/view/board.ts` の `displayRows`）で、板のデータ（`ChainMonth.strikes` / `rows`）・`model/`・JSON は昇順のまま。ジャンプ（ATM へ戻る・OTM 度・|Δ|）は行使価格で行を指すので並びに依らず、絞り込み（ask ≤ 50 円）の後も降順。板以外に行使価格を並べる一覧は無い（ポジションは追加順、足の追加は数値入力）。スマイル・損益グラフの横軸は昇順のまま。昇順 / 降順の切替は持たない
@@ -530,7 +530,7 @@ JPX の商品一覧（2026-10-13）にある日経225の商品は、先物 3 つ
 |---|---|
 | `GET /api/chain` | 使える最新スナップショット（7.2）の 2 限月分の板・先物・現物・時刻・`reason` を 1 つの JSON で。約 1,100 行、gzip で数十 KB |
 | `GET /api/chain?at=<ISO 時刻>` | **後段**（#33 では 400 `{"error":"bad_request"}`。入力値は応答・ログに出さない）。案: `at` 以前で最新の使えるスナップショット（14 日以内）を `latest_runs` で `snapshot_at` に解決してから 1 秒の窓で読む。使う画面（過去時点の閲覧・「清算値」モード）が MVP に無く、異なる `at` ごとに約 150 MiB を読むので、連打制限（1 クライアント 10 回 / 分。キーは IAP のユーザー ID ヘッダのハッシュをメモリ内にだけ持つ）だけでは費用を抑えきれない。上限の設計と一緒に入れる |
-| `GET /api/calendar` | 取引カレンダーの最新版（`trading_calendar_latest`。7.5）。`{schema_version: 1, source: "bigquery", version_at, covered_until, listed_until, days: [{date, is_trading_day, status, name}]}`（版の全行、日付の昇順。`version_at` は +09:00）。板とは別のエンドポイント（更新頻度が違い、板の無い限月・手入力の足・`file` アダプタでも使うため。板の JSON 版 1 の形を変えない）。`Cache-Control: private, max-age=3600`、`ETag` = `version_at`。ブラウザ側の型・検証・切替は #39 |
+| `GET /api/calendar` | 取引カレンダーの最新版（`trading_calendar_latest`。7.5）。`{schema_version: 1, source: "bigquery", version_at, covered_until, listed_until, days: [{date, is_trading_day, status, name}]}`（版の全行、日付の昇順。`version_at` は +09:00）。板とは別のエンドポイント（更新頻度が違い、板の無い限月・手入力の足・`file` アダプタでも使うため。板の JSON 版 1 の形を変えない）。`Cache-Control: private, max-age=3600`、`ETag` = `version_at`。ブラウザは本番で開いたときと [最新] で読む（型・検証・同梱の版へのフォールバックは 7.5。#39） |
 | `GET /healthz` | 設定の読み込みだけ（BigQuery に触れない） |
 
 JSON（版 1。縦切り 1b で確定。型は `data/chainTypes.ts`、検証は `data/chainJson.ts`）:
@@ -552,7 +552,7 @@ F の推定・補間・ATM の判定はブラウザ（`model/`）。`sq_date`・
 - **版** `schema_version`（整数。形を変えたら上げる。未対応の版は拒否）。データ元の表示用に任意の `source`
 - **時刻**は ISO 8601 の **オフセット付き**（`2026-10-13T21:31:00+09:00`）。optionchan の DATETIME（JST の壁時計）はサーバーが +09:00 を付ける。オフセットの無い時刻は拒否（解釈が端末のタイムゾーンに依存するため）。日付は `YYYY-MM-DD`、限月は `YYYY-MM`
 - **限月の ID** として各限月に `contract_month` を持つ（足・市場のキー）。`sq_date` はその月の中、`last_trading_day < sq_date`、限月は SQ 日の昇順・重複なし
-- **先物にも `last_trading_day`・`sq_date`** を付ける（先物の足の満期評価に要る。板の限月の日付はサーバーの値を使い、ブラウザは板の無い限月だけを同期済みのカレンダー（7.5）で求める）
+- **先物にも `last_trading_day`・`sq_date`** を付ける（先物の足の満期評価に要る。板の限月の日付はサーバーの値を使い、ブラウザは板の無い限月だけを取引カレンダー（7.5）で求める）
 - 行は `strikes` ではなく **`rows`**（行使価格の昇順・重複なし。行使価格は整数円）
 - **IV は %**（optionchan・JPX の表示と同じ。例 25.31）。`model/` に渡すときに小数にする。スマイルの節点の IV は `bid_iv` / `ask_iv` ではなく **気配の価格から model/ で求める**（5.3）。気配があるのに `bid_iv` / `ask_iv` が両方 null の行は「JPX の IV 欠損」の印だけ付ける
 - **欠損は null**（キーは省略しない）。省略してよいのは `source`・`quotation`・`quotation_date`・`is_atm` だけ。知らないキーは無視する（前方互換。optionchan の列が増えても壊れない）
@@ -606,7 +606,7 @@ F の推定・補間・ATM の判定はブラウザ（`model/`）。`sq_date`・
 
 テスト用の板: **合成データ**（Black-76 から生成した板、または実データから絞って丸めた少数行）をリポジトリに置く。実データの dump は `fixtures/local/`（gitignore）にだけ置き、件数だけ Issue に記録する（JPX 由来のデータを公開リポジトリに置かない。8.1 の D 案を退けた理由と同じ）。dump コマンドは「コミットしない」と表示する。
 
-アダプタのインターフェース（`data/adapter.ts`）: `loadChain(opts?: { at?, signal? }): Promise<ChainJson>` は **検証済みの JSON** を返し、壊れていれば `ChainLoadError`（応答の本文はメッセージに入れない）。正規化（`normalizeChain(json, { r, evalTime })`）は別にし、金利・評価時刻を変えても読み直さない。`bigquery` のブラウザ側は同一オリジンの `/api/chain`（`?at=`）を読むだけ。手入力は板を読まず、`data/legs.ts` の `manualOptionLeg`（商品・限月・K・建値・IV。SQ 日は取引カレンダー（7.5）の休業日で求め、F は先物価格 = basis 0 か指定値、印 `no_board`）と `futureLeg` で足と市場を作る。
+アダプタのインターフェース（`data/adapter.ts`）: `loadChain(opts?: { at?, signal? }): Promise<ChainJson>` は **検証済みの JSON** を返し、壊れていれば `ChainLoadError`（応答の本文はメッセージに入れない）。正規化（`normalizeChain(json, { r, evalTime })`）は別にし、金利・評価時刻を変えても読み直さない。`bigquery` のブラウザ側は同一オリジンの `/api/chain`（`?at=`）を読むだけ。手入力は板を読まず、`data/legs.ts` の `manualOptionLeg`（商品・限月・K・建値・IV。SQ 日は取引カレンダー（7.5）の休業日で求め、F は先物価格 = basis 0 か指定値、印 `no_board`）と `futureLeg` で足と市場を作る。取引カレンダーは `loadCalendarJson(opts?: { endpoint?, fetch?, signal? }): Promise<CalendarJson>`（既定 `/api/calendar`。`fetch` の作法と `ChainLoadError` の種別は `/api/chain` と同じ。JSON として読めない・検証に落ちれば `invalid` + 明細。7.5）。
 
 合成の固定 JSON（`fixtures/synthetic/`。生成器は `scripts/synthBoard.ts`、`npm run fixtures` で作り直し、CI は `npm run fixtures:check` で一致を検査。種固定で決定的）:
 
@@ -622,24 +622,20 @@ F の推定・補間・ATM の判定はブラウザ（`model/`）。`sq_date`・
 
 画面での読み込み（縦切り 1）: `npm run dev` では Vite のプラグイン（`scripts/devFixtures.mjs`、`apply: 'serve'`）が `fixtures/synthetic/` の 3 ファイルだけを `/fixtures/<name>.json` で配り、画面は既定で `latest.json` を読む（切替できる）。許可リストの名前だけを配り、`fixtures/local/`（実データの dump）は配らない（`vite.config.ts` の `server.fs.deny` で Vite の `/@fs/` 経由も拒否）。fixture の一覧は `import.meta.env.DEV` の分岐の中に置くのでビルド（`dist/`）には JSON も一覧も入らない（本番の既定は `bigquery`。下の「画面での読み込み（縦切り 2）」）。手元の JSON（`fixtures/local/` の dump など）は画面のファイル選択で読む（Blob 経路）。評価時刻は板の `snapshot_at`、金利は 0.5%。
 
-画面での読み込み（縦切り 2、#34）: **本番のビルドは開いたら 1 回だけ** `bigquery` アダプタで同一オリジンの `/api/chain` を読み、以降は [最新] を押したときだけ読み直す（自動ポーリング・タイマーなし。7.3 (4)）。最初に読むデータ元は `ui/load.ts` の `initialSource(import.meta.env.DEV)`（dev = 合成の `latest`、本番 = API）。dev でも [最新] で API（Vite の `/api` プロキシ → 手元の Flask。`api/README.md` の `DATA_SOURCE=file`）に切り替えられ、ファイル選択はどちらでも使える。`bigquery` アダプタの `fetch` は `cache: 'no-cache'`（毎回 `If-None-Match` で再検証し、変わっていなければ 304）と `redirect: 'manual'`（IAP のログイン切れの 302 に追従しない）。`file` は `no-store` のまま。失敗は `ChainLoadError` の `kind`（`http`（`status` つき）/ `auth`（opaqueredirect か 401）/ `network` / `invalid`（検証エラーの明細））で分け、画面は種別ごとの固定の文言を出す（応答の本文は出さない。`describeLoadError`）。読み直しは足・限月の選択を保ち、取得時刻（`State.fetchedAt`。App が `Date.now()` を渡し、reducer は時計を読まない）を更新する。失敗したら板・取得時刻・データ元はメモリ内の前のまま。**最後に取れた板（#23）**: API（[最新]・本番の初回）と dev の合成の板の読み込みに成功したら、検証済みの板 JSON を localStorage（`option-simulator.lastBoard`、1 枚だけ上書き）に保存する（描いた後に `setTimeout` で書く。ファイル選択は過去・手元の板なので保存しない）。読み込みに失敗して**画面に板が 1 枚も無い**とき（開いたとき API が 503・通信エラー・ログイン切れ）は、保存した板を板 JSON と同じ検証（`validateChainJson`）・正規化を通して「古い板」として使う（エラーは出したまま。`State.boardStale`、取得時刻は保存した板の取得時刻）。板があるときの失敗は従来どおりメモリ内の板を保つ。成功すれば「古い板」の印は消える。保存した板が壊れている・版が違えばキーを消して従来の「板を読めない」の画面。取引カレンダーは #39 まで同梱の JSON（板の限月の SQ 日・取引最終日は API の板の値）。
+画面での読み込み（縦切り 2、#34）: **本番のビルドは開いたら 1 回だけ** `bigquery` アダプタで同一オリジンの `/api/chain` を読み、以降は [最新] を押したときだけ読み直す（自動ポーリング・タイマーなし。7.3 (4)）。最初に読むデータ元は `ui/load.ts` の `initialSource(import.meta.env.DEV)`（dev = 合成の `latest`、本番 = API）。dev でも [最新] で API（Vite の `/api` プロキシ → 手元の Flask。`api/README.md` の `DATA_SOURCE=file`）に切り替えられ、ファイル選択はどちらでも使える。`bigquery` アダプタの `fetch` は `cache: 'no-cache'`（毎回 `If-None-Match` で再検証し、変わっていなければ 304）と `redirect: 'manual'`（IAP のログイン切れの 302 に追従しない）。`file` は `no-store` のまま。失敗は `ChainLoadError` の `kind`（`http`（`status` つき）/ `auth`（opaqueredirect か 401）/ `network` / `invalid`（検証エラーの明細））で分け、画面は種別ごとの固定の文言を出す（応答の本文は出さない。`describeLoadError`）。読み直しは足・限月の選択を保ち、取得時刻（`State.fetchedAt`。App が `Date.now()` を渡し、reducer は時計を読まない）を更新する。失敗したら板・取得時刻・データ元はメモリ内の前のまま。**最後に取れた板（#23）**: API（[最新]・本番の初回）と dev の合成の板の読み込みに成功したら、検証済みの板 JSON を localStorage（`option-simulator.lastBoard`、1 枚だけ上書き）に保存する（描いた後に `setTimeout` で書く。ファイル選択は過去・手元の板なので保存しない）。読み込みに失敗して**画面に板が 1 枚も無い**とき（開いたとき API が 503・通信エラー・ログイン切れ）は、保存した板を板 JSON と同じ検証（`validateChainJson`）・正規化を通して「古い板」として使う（エラーは出したまま。`State.boardStale`、取得時刻は保存した板の取得時刻）。板があるときの失敗は従来どおりメモリ内の板を保つ。成功すれば「古い板」の印は消える。保存した板が壊れている・版が違えばキーを消して従来の「板を読めない」の画面。**取引カレンダー（#39）**: API の板を読むとき（本番の初回・[最新]。dev では [最新] で API に切り替えたとき。`ui/load.ts` の `readsCalendar`）だけ、板と並行に `/api/calendar` を読む（板の読み込みとは独立。片方の失敗で他方を止めない。専用の連番で古い応答を捨てる）。届いたら `State.calendar` を API の版に置き換え（同じ `version_at` の API の版なら何もしない）、板があれば作業中の足の市場（手入力の足・限月違いの先物の足の SQ）を新しい休業日で作り直す（建値・枚数・売買・IV の編集は変えない）。失敗は画面に出さず、同梱の版か前の API の版のまま（前提の文言で分かる）。dev の既定（合成の板）とファイル選択では読まない（同梱の版）。板の限月の SQ 日・取引最終日は API の板の値。
 
 322 行の板（9 章の性能の確認用）: `npm run fixtures -- --wide` が `fixtures/local/synthetic_wide.json`（gitignore。コミットしない）に、`latest.json` と同じ時刻・先物で行使価格を 125 円刻みの 322 本にした 2 限月の板を書く（`scripts/synthBoard.ts` の `buildWideChainJson`）。テスト（`tests/ui/board.test.ts`）は同じ関数で作る。
 
 ### 7.5 取引カレンダー
 
-**2026-10-14 更新（#33）**: optionchan の TOML は廃止され（optionchan #75）、休業日の正は BigQuery のビュー `optionchan_tokyo.trading_calendar_latest`（4.1）だけになった。API は板の限月・先物の `sq_date`・`last_trading_day` をこのビューから求め（版の **全行**（`is_trading_day = true` の祝日取引の実施日も）+ 土日を休業日として第 2 金曜から前営業日へ。規則は 5.2）、`GET /api/calendar`（7.1）で版をそのまま返す。ブラウザ側の `/api/calendar` への切替と下の同期（`calendar-sync.yml`）の廃止は #39 で行い、この節の以下の記述もそこで書き換える。
+休業日の正は optionchan の BigQuery のビュー `optionchan_tokyo.trading_calendar_latest`（4.1。取引カレンダーの最新版の全行）。経緯: #14 では optionchan の `config/trading_calendar.toml` と内閣府の祝日の CSV を定期同期で写していたが、optionchan #75 で TOML が廃止されたので、#39 で API（#33）の版をブラウザが読む形に置き換え、同期を廃止した。
 
-以下は #14 の時点の記述: optionchan の `config/trading_calendar.toml`（休業日・立会時間・`covered_until`）が `closed_dates` の一次情報で、BigQuery には無い。国民の祝日は別の一次情報（内閣府「国民の祝日について」の CSV）。SQ 日の規則は 5.2。**MVP は自動同期**（オーナー判断 2026-10-14。#14。当初案の「手で写して CI で固定コミットと比較」から変更）:
-
-- **同期コマンド** `npm run calendar:sync`（`scripts/syncCalendar.mjs` → `scripts/calendarSync.ts`）: 環境変数 `OPTIONCHAN_CALENDAR_URL`（toml の URL。リポジトリに書かない。CI では secret）と `HOLIDAYS_CSV_URL`（任意。既定は内閣府の CSV の公的な URL）から取得し、JSON に変換して `data/calendar/` に書く。https だけ（リダイレクトは自分で辿り、転送先も https だけ。http の転送先には要求を出さない）、HTTP 200 以外・1 MiB 超（ストリームで打ち切る）・30 秒は失敗。**両方を取得・変換・検証してから書く**（どちらかが失敗したら何も書かない）。書き込みも 2 ファイルまとめて（両方を一時ファイルに書いてから rename し、途中で失敗したら書いたものを元に戻す）。既存のファイルが「無い」以外の理由で読めなければ失敗（新規扱いにしない）。`source.fetched_at` 以外が同じなら書かない（差分を出さない）。URL 未設定なら理由を出して exit 1。標準出力・JSON に URL を出さない
-- **toml の読み込み**: 依存を足さず、optionchan の toml に要る部分集合だけを TypeScript で読む（コメント、`key = value`（日付・整数・`"..."`・日付 / 文字列の配列（複数行・末尾カンマ可））、表 `[sessions]`）。それ以外の形・キーの重複・未知の表は失敗。読んだ後は optionchan の `calendar.py` と同じキーの検査（トップレベルのキーがちょうど 4 つ、`[sessions]` がちょうど 4 キー）に加え、型を `calendar.py` より厳しく見る（`[sessions]` は `"HH:MM"`、`grace_minutes` は整数、`no_night_session_before` は日付の配列）。使わない値も見るのは、形の変化を optionchan 側の変更のサインとして同期を止め、人が確かめるため（失敗側に倒れるだけで誤った休業日は入らない）。`[sessions]` の後に書いたキーは `[sessions]` に入るので失敗する
-- **祝日の CSV**: Shift_JIS、1 行目は見出し、データ行は `YYYY/M/D,名称`。実在の日付・重複なし・2020 年以降の各年に 10 件以上を検査し、収録の最終日（最終年の 12/31）が既存より短くなる CSV は取り込まない。2020-01-01 以降だけを持つ
-- **JSON**（生成物。手で編集しない。Biome の対象外）: `data/calendar/trading_calendar.json` = `{schema_version: 1, source: {name, sha256, fetched_at}, covered_until, closed_dates}`（立会時間などは持たない）、`data/calendar/holidays_jp.json` = `{schema_version: 1, source, covered_until, holidays: [{date, name}]}`。`sha256` は取得した内容のハッシュ（toml のコメントだけの変更でも同期 PR になる）。形の検査は `data/calendar.ts`（同期の出力と画面の読み込みで同じ関数）
-- **ブラウザ**: ビルドはコミット済みの JSON をバンドルに入れるだけ（ネットワークに出ない。`ui/calendar.ts` の `CALENDAR`）。休業日 = `closed_dates` ∪ 祝日（土日は `model/time.ts` が常に休業日扱い）。確定の最終日 = 2 つの `covered_until` の早い方。壊れていれば例外を出さず、休業日なし（土日だけ）・期限切れ扱い
-- **画面**: ヘッダの前提に「取引カレンダー: optionchan から同期（<同期日>）・確定 <確定の最終日> まで」。評価時刻（JST の日付）が toml の `covered_until` より後なら「カレンダー期限切れ（評価時刻が <covered_until> より後。休業日が漏れている可能性）」を警告色で、読めなければ「取引カレンダー: 読めない（SQ 日は土日だけで計算）」と「カレンダー期限切れ（カレンダーを読めない）」。板の無い限月の足は第 2 金曜が確定の最終日より後なら SQ 日の横に「休業日未確定」（5.2）
-- **定期同期のワークフロー** `.github/workflows/calendar-sync.yml`: 毎週月曜 09:17 JST + 手動。既定ブランチでだけ動く（schedule のイベントには `github.event.repository` が無いので、job の条件は「schedule か、ref が既定ブランチ」にし、既定ブランチ名は `github.event.repository.default_branch || github.ref_name`）。取得先は **secret** `OPTIONCHAN_CALENDAR_URL`（Actions のログでマスクされる。使うステップの env にだけ渡す）、`HOLIDAYS_CSV_URL` は任意のリポジトリ変数。secret が未設定なら警告だけで成功終了（fork・clone した人の Actions を落とさない）。書き込み権限のある job なので `npm ci --ignore-scripts`。差分があれば固定ブランチ `calendar-sync` を既定ブランチから作り直して force push し、PR が無ければ作る（PR は 1 本）。差分が無くなったら開いている同期 PR を閉じる。同期の失敗はジョブの失敗（通知）。権限はトップレベル `{}`、job だけ `contents: write`・`pull-requests: write`・`actions: write`。`GITHUB_TOKEN` で作った PR には `pull_request` の CI が走らないので、`ci.yml` を `workflow_dispatch`（`--ref calendar-sync`）で起動し、job `check` のチェックを PR の head に付ける（必須チェック `check` を満たす）
-- **将来の候補**（後段）: 縦切り 2 の API でカレンダーを返す / optionchan 側が JPX から自動取り込み（R3）
+- **流れ**: API はビューを TTL 1 時間・single-flight（`/api/chain` とキャッシュを共用。7.3）で読み、板の限月・先物の `sq_date`・`last_trading_day` を求め、`GET /api/calendar`（7.1）で版をそのまま返す。ブラウザは本番で開いたときと [最新] で `/api/calendar` を読み（7.4。`cache: 'no-cache'` で 2 回目以降は `If-None-Match` → 304）、板の無い限月（手入力の足・板の先物と限月違いの先物の足・シナリオの「SQ 日 9:00」「取引最終日 15:45」の対象）の SQ 日・取引最終日を求める。自動ポーリングなし
+- **検証**（`data/calendar.ts` の `validateCalendarJson`・`buildCalendar(json, origin)`。純関数・例外なし）: ルートがオブジェクト、`schema_version` = 1、`version_at` は ISO 8601 の日時（オフセットつき）、`covered_until`・`listed_until` は実在の `YYYY-MM-DD`、`days` は配列で各行の `date` が実在の日付で厳密に昇順（重複なし）・`is_trading_day` が boolean・`status` が空でない文字列（`confirmed` / `planned` 以外も通す）・`name` が文字列。`source` と余分なキーは見ない。`days` が空でもよい。明細は最大 50 件
+- **休業日** = 版の全行の日付（`is_trading_day` を問わない。土日は `model/time.ts` が常に休業日扱い。規則は 5.2）。**確定の最終日** = `covered_until`（板の無い限月の第 2 金曜がこれより後なら「休業日未確定」。5.2）、**掲載の最終日** = `listed_until`（これより後の月は土日だけで求まる）
+- **同梱の版**（`data/calendar/calendar.json`。`/api/calendar` と同じ形の JSON 1 つ。`ui/calendar.ts` がバンドルに入れる）: 初期状態のカレンダー。API から一度も取れていないとき（dev の合成の板・ファイル選択・`DATA_SOURCE=file` の Flask の 503・通信の失敗・ログイン切れ）に使い、取れた後の失敗はメモリ内の API の版のまま。壊れていれば（API・同梱とも）休業日なし（土日だけ）・期限切れ扱い。同梱の版は自動更新しない。作り直すときは BigQuery を読める手元で `/api/calendar` の応答をそのまま書き、`npm test`（検証・全月の SQ の検査・合成の板の日付との一致）を通して PR（手順は README の「取引カレンダー」）。clone した人は BigQuery 無しでも同梱の版で動く
+- **画面**: ヘッダの前提に、API の版なら「取引カレンダー: optionchan の版（<版の日付>）・確定 <covered_until> まで」、同梱の版なら「取引カレンダー: 同梱の版（<版の日付>）・確定 <covered_until> まで」（版の日付 = `version_at` の JST の日付）。評価時刻（JST の日付）が `covered_until` より後なら「カレンダー期限切れ（評価時刻が <covered_until> より後。休業日が漏れている可能性）」を警告色で、読めなければ「取引カレンダー: 読めない（SQ 日は土日だけで計算）」と「カレンダー期限切れ（カレンダーを読めない）」。`name`・`status` は画面に出さない
+- **将来の候補**（後段）: カレンダーの localStorage への保存（最後に取れた版）、`?at=` のカレンダー、optionchan 側が JPX から自動取り込み（R3）
 
 ## 8. 置き場所（Q1。比較と推奨）
 
@@ -800,7 +796,7 @@ F の推定・補間・ATM の判定はブラウザ（`model/`）。`sq_date`・
 | K9 | 縦切り 1 → 2 → 3 の順で作る（Q3）。注記: 2026-10-14 オーナー承認で、GCP なしで進められる縦切り 3（EPIC #24）を、本番を作る縦切り 2（#7）より先に進める | 2026-10-13 |
 | K10 | 板の無い限月は MVP で手入力、段階 2 で 1・2 限月のスマイルからの理論値（Q4） | 2026-10-13 |
 | K11 | 時間外・引け後の板の既定は板寄せ前の最後のスナップショット。清算値 + IV 逆算は参照列・切替（Q5） | 2026-10-13 |
-| K12 | UI は Preact 10（hooks）、グラフは自前の SVG（座標は `ui/chart/scale.ts` の純関数で共用）。スマイルからの足の追加・グラフのジェスチャーは #11、取引カレンダーの写しは #14（10 章・7.5） | 2026-10-14 |
+| K12 | UI は Preact 10（hooks）、グラフは自前の SVG（座標は `ui/chart/scale.ts` の純関数で共用）。スマイルからの足の追加・グラフのジェスチャーは #11、取引カレンダーは #14（写し）・#39（API の版と同梱の版）（10 章・7.5） | 2026-10-14 |
 
 ### 13.2 オーナー判断が要るもの
 
@@ -821,7 +817,7 @@ F の推定・補間・ATM の判定はブラウザ（`model/`）。`sq_date`・
 | R0 | （依頼不要）読み取り権限: `optionchan_tokyo` の `dataViewer` は simulator の bootstrap で非権威的 member として付与する。optionchan の変更は無い | — | 縦切り 2 | 付録 B |
 | R1 | テーブル関数 4 本と 4.1 の列を **公開インターフェース**として扱う（変更時に告知。CI のスキーマ照合で検知はする） | 任意（望ましい） | 縦切り 2 | 4.1 |
 | R2 | データセットの IAM を権威的（authoritative）にしない（simulator の member と共存） | **必須** | 縦切り 2 | 4.1、付録 B |
-| R3 | 取引カレンダー（`trading_calendar.toml`）の公開（API か GCS）。MVP は toml の定期同期（`npm run calendar:sync` と同期 PR。#14）で対応。API で返す / optionchan 側の JPX からの自動取り込みは後段 | 任意 | 後段 | 7.5 |
+| R3 | 取引カレンダーの公開。**済み**: optionchan 側が BigQuery のビュー `trading_calendar_latest` に取り込み、API が `/api/calendar` で返し（#33）、ブラウザが読む（#39）。optionchan 側の JPX からの自動取り込みは後段 | 任意 | 済み | 7.5 |
 | R4 | 最新板の JSON を ingest が GCS に書く / 最新だけの小さい表（クエリ費用の削減） | 任意 | 後段 | 7.3、8.1 の D |
 | R5 | 3 限月以降のページの取り込み（行数 1.3〜1.5 倍の見積もり。ページの有無・形式は要確認） | Q4 の (c) を選ぶなら | 段階 3 | 5.7 |
 | R6 | ミニオプションのページの取り込み | K1 の後段 | 後段 | 3.1 |
@@ -937,7 +933,7 @@ F の推定・補間・ATM の判定はブラウザ（`model/`）。`sq_date`・
   - 保存しない: `State` の中だけ。作業の版 2・保存一覧・URL の形式は変えない（`persistKey`・`serializeWorkspace`・`toSaved` は既知のキーだけ組み立てるのでピンは入らない。テストで固定）。ゴーストを同じ値で復元するにはピンした時点の板（20〜35 万字）も要り、localStorage の見積もり（#23・#70）を崩すため。保存するなら作業の版 3 で重ね（tab の添字・saved の足）だけを足す
   - 性能（手元の測定、node、足 10 本・322 行 × 2 限月、30 回の最小値。測定時はマシンの負荷が高く（load average 2.6〜3.7・2 コア）、既存の #6・#11 の値も Phase 1 の測定の約 1.5 倍）: 重ね 3 本でのスライダー 1 回（ピンの線 3 本の作り直し + グラフ + 番号ラベル + 一覧 + 指標・テール表）**14.5〜15.8 ms**、ゴースト 3 本でのパン 1 フレーム（今の 3 本の線 + ピン 3 本。パンの格子の使い回しあり）**15.1〜15.5 ms**（ピン無しのパンの #11 とほぼ同じ。ほとんどが今の線の 1,000 点）、ピン 3 本での長押しドラッグ 1 フレーム **4.6〜5.5 ms**。性能テスト 3 件で 16 ms 以内を固定（`tests/ui/perf.test.ts`）。レビュー後に拡大縮小 1 フレーム（ゴースト 3 本、幅を毎回変える）を足して 4 件: 負荷の低いとき（load 0.3〜0.6）で点の上限 200 のままだと 15.5〜15.7 ms（中央値 16.1〜16.5）、拡大縮小の間 100 点にして **13.7〜13.8 ms**（中央値 14.1〜14.8）。同じ条件でスライダー 12.1〜12.4・パン 12.5〜12.7・長押しドラッグ 3.7 ms。ピンの線 1 本（250 点）は約 1.5 ms で、最初の計画（250 点）では負荷の高いときにスライダー 1 回が 18 ms になったため上限を 200 点に下げた
   - **オーナー確認の対象**（既定で実装。変えるときは 1 か所）: (1) ピンは **2 種類の併用**（ゴースト = 固定 / 重ね = 今の板・今のシナリオで描き直す。片方にするなら `ui/pins.ts` の `PinSource` の種類を減らす）、(2) ピンの線の既定は**期中 1 本**（切替で満期。`DEFAULT_PIN_LINE`）、(3) ピンは**保存しない**、(4) 保存一覧の行に **[重ねる]**（行のボタンが 7 個。代案はピンの行に [保存一覧から…] を置いて一覧を「重ねる」モードで開く）
-- カレンダーの写しの更新手順: **決定（2026-10-14、#14）** — 定期同期のワークフローが作る PR を確認してマージする（7.5）。同期が失敗したら（toml の形の変更など）ジョブの失敗で気付き、`scripts/calendarSync.ts` を直す
+- カレンダーの更新手順: **決定（2026-10-16、#39。#14 の定期同期を置き換え）** — 本番は開くたびに API から最新の版を読む（7.5）。同梱の版（`data/calendar/calendar.json`）は自動更新せず、必要なとき（期限切れが近い・新しい年の公表）に手で作り直して PR（README の手順）
 
 ### 13.5 リスク
 
@@ -952,7 +948,7 @@ F の推定・補間・ATM の判定はブラウザ（`model/`）。`sq_date`・
 | 先物の限月交代・SQ 当日の飛び | 損益の連続性が崩れる | 合成先物（5.1）。SQ 日は満了した限月を外す |
 | 引け後・寄り前の壊れた板 | 気配が無い板で評価する | 7.2 の判定をサーバーで。清算値を参照列に |
 | 板の無い限月の理論値が実勢とずれる | 判断を誤る | 「理論値（板なし）」の印。建値・IV を編集可 |
-| optionchan のテーブル関数・列・カレンダーの変更 | 壊れる | 契約節（4.1）、CI のスキーマ照合、カレンダーの定期同期（toml の形が変われば同期が失敗して通知。7.5）、「カレンダー期限切れ」の表示、R1・R2 |
+| optionchan のテーブル関数・列・カレンダーの変更 | 壊れる | 契約節（4.1）、CI のスキーマ照合（AC25 にビュー `trading_calendar_latest` を含む）、ブラウザのカレンダーの検証（壊れていれば同梱の版のまま。7.5）、「カレンダー期限切れ」の表示、R1・R2 |
 | BigQuery の 1 日 32 GiB を使い切る | optionchan のビューアーも止まる | `snapshot_at` キャッシュ、single-flight、512 MiB、ポーリングなし、SA 別監視（D8） |
 | apply SA の `run.admin` が optionchan のサービスに及ぶ（逆に optionchan の apply SA も simulator に及ぶ。対称） | 誤操作の影響範囲 | Environment の承認、state の分離、`infra/README.md` に明記（付録 B） |
 | JPX 由来データの利用範囲 | 公開の場所に置けない | IAP の後ろ。fixture は合成データ |
@@ -1017,6 +1013,15 @@ optionchan-gcp の bootstrap / prod を写すだけでは足りないもの。
 | テスト | `terraform test`（`infra/bootstrap/tests/`・`infra/prod/tests/`、モックのプロバイダ。資格情報なしで CI の `check` job で回る）: bootstrap は公開の拒否、WIF の条件、apply SA の subject、データセットの付与の型と role。prod は IAP 有効・`ingress`・IAM の検査が有効、`run.invoker` が IAP のサービスエージェント 1 件だけ、イメージが digest か `src-<20hex>` のタグ参照だけ、8.3 の値（AC11） |
 
 ## 変更履歴
+
+### 2026-10-16 取引カレンダーを API から（#39）
+
+- 7.5: 全面書き直し。ブラウザは本番で開いたときと [最新] で `/api/calendar` を読み、取れなければ同梱の版（`data/calendar/calendar.json`。`/api/calendar` と同じ形）。休業日 = 版の全行、確定の最終日 = `covered_until`。ヘッダの前提は「optionchan の版（<日付>）」/「同梱の版（<日付>）」。#14 の定期同期（`calendar-sync.yml`・`npm run calendar:sync`・`scripts/calendarSync.ts`・`scripts/syncCalendar.mjs`・`trading_calendar.json`・`holidays_jp.json`）と `ci.yml` の `workflow_dispatch` を廃止
+- 2.2: AC25 の対象にビュー `trading_calendar_latest` を明記
+- 3 章「休業日」・5.2: 一次情報を `trading_calendar_latest` に、SQ 日・取引最終日の休業日を「土日 ∪ 版の全行」に（toml の `closed_dates` と国民の祝日の CSV の記述を外す）。`listed_until` より後の月は土日だけ
+- 6.1: 前提の値「カレンダーの同期日」→「カレンダーの版の日付」
+- 7.1・7.4: `/api/calendar` をブラウザが読む（`loadCalendarJson`・`readsCalendar`、板と独立、届いたら足の市場を作り直す）。「#39 まで同梱の JSON」を削除
+- 13.1 K12・13.3 R3（済み）・13.4（カレンダーの更新手順）・13.5（カレンダーの変更のリスクの対策）
 
 ### 2026-10-16 性能の判定の分離（#32）
 

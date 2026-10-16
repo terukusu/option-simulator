@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'preact/hooks';
-import { axisOrigin, type Chain, type ChainJson, monthOf } from '../../data';
+import { axisOrigin, type Chain, type ChainJson, ChainLoadError, monthOf } from '../../data';
 import { DEFAULT_SETTINGS, type ModelSettings, type Scenario, ZERO_SCENARIO } from '../../model';
 import {
   addEntry,
@@ -24,7 +24,9 @@ import {
   initialSource,
   loadBoardFromApi,
   loadBoardFromUrl,
+  loadCalendarFromApi,
   loadFromFile,
+  readsCalendar,
   savedBoardLabel,
 } from '../load';
 import {
@@ -114,6 +116,7 @@ interface Loaded {
 export function App({ boot = NO_BOOT }: { boot?: Boot }) {
   const [state, dispatch] = useReducer(reduce, boot.read, bootState);
   const seq = useRef(0);
+  const calSeq = useRef(0);
   const { storage } = boot;
   const [notes, setNotes] = useState<PersistNote[]>(() => pushNote([], bootNote(boot.read)));
   const closeNote = useCallback(
@@ -188,8 +191,32 @@ export function App({ boot = NO_BOOT }: { boot?: Boot }) {
     (file: File) => load(file.name, async () => ({ chain: await loadFromFile(file) }), false),
     [load],
   );
-  // [最新]: API から読み直す（手動だけ。自動ポーリング・タイマーは入れない。7.3 (4)）
-  const onLatest = useCallback(() => load(API_LABEL, () => loadBoardFromApi(), true), [load]);
+  /**
+   * 取引カレンダー（/api/calendar）を読む。板の読み込みと独立（片方の失敗で他方を止めない）。
+   * 失敗したら同梱か前の API の版のまま（画面にエラーは出さない。前提の文言で分かる。7.5）
+   */
+  const loadCalendar = useCallback(async () => {
+    const id = ++calSeq.current;
+    try {
+      const calendar = await loadCalendarFromApi();
+      if (id !== calSeq.current) return;
+      dispatch({ type: 'calendarLoaded', calendar });
+    } catch (e) {
+      if (id !== calSeq.current) return;
+      if (e instanceof Error && e.name === 'AbortError') return;
+      // 本番で気付けるように種別だけを出す（ChainLoadError の文言は応答の本文を含まない）
+      console.warn(
+        `取引カレンダーを読めない（前の版のまま）: ${e instanceof ChainLoadError ? e.message : '不明なエラー'}`,
+      );
+      dispatch({ type: 'calendarFailed' });
+    }
+  }, []);
+  // [最新]: API から読み直す（手動だけ。自動ポーリング・タイマーは入れない。7.3 (4)）。
+  // カレンダーも並行に読む（本番の初回と [最新]、dev で API に切り替えたとき）
+  const onLatest = useCallback(() => {
+    if (readsCalendar({ kind: 'api' })) void loadCalendar();
+    void load(API_LABEL, () => loadBoardFromApi(), true);
+  }, [load, loadCalendar]);
 
   // ---- 作業の自動保存（#23）。新しい版の保存を見たら（開いたとき・別のタブの保存・書く直前の読み直し）、
   // このセッションでは書かない（開いたままの古い版のタブが新しい版の保存を上書きしない）
