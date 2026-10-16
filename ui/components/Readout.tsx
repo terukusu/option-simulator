@@ -6,7 +6,7 @@ export interface ReadoutProps {
 }
 
 /**
- * 読み取りの帯（シナリオ点の値。#52）。損益グラフの直下で sticky（グラフ・帯・シナリオ欄の範囲）。
+ * 読み取りの帯（シナリオ点の値。#52）。損益グラフの直下。上端に残るのは親のドック（.pnl-dock。#61）。
  * 連続して変わる値なので aria-live は付けない。値は ui/view/readout.ts の表示モデル。
  */
 function ReadoutView({ model }: ReadoutProps) {

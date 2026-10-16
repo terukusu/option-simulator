@@ -205,9 +205,13 @@ export function App() {
                 />
               ))}
             </section>
-            <section class="pane pane-side">
-              {/* グラフ・読み取りの帯（PnlChart の中）・シナリオ欄（帯の sticky はこの範囲だけ効く。#52） */}
-              <div class="pnl-group">
+            {/*
+              シミュレーター（損益グラフ・凡例・シナリオ）と詳細（ポジション以下）。幅の段階（#61。設計 6.1）:
+              スマホ・タブレットは 1 本の列（.pane-sim は display: contents。ドックの sticky はこの列全体で効く）、
+              PC（≥ 1200px）は .pane-side を display: contents にしてシミュレーターと詳細を別の列に並べる
+            */}
+            <div class="pane pane-side">
+              <div class="pane-sim">
                 <h2>損益グラフ</h2>
                 <PnlChart
                   base={pnlBase}
@@ -218,6 +222,7 @@ export function App() {
                   scenarioAtm={scenarioAtmView}
                   amountUnit={metrics.unit}
                   readout={readout}
+                  folded={state.pnlFolded}
                   dispatch={dispatch}
                 />
                 <ScenarioPanel
@@ -231,35 +236,37 @@ export function App() {
                   onZoom={onZoom}
                 />
               </div>
-              <Metrics
-                model={metrics}
-                unitSetting={state.metricsUnit}
-                feePerLot={feePerLot}
-                dispatch={dispatch}
-              />
-              <h2>スマイル {month ? `${month.id} 限` : ''}</h2>
-              {chain.months.map((m) => {
-                const active = m.id === state.monthId;
-                return (
-                  <Smile
-                    key={m.id}
-                    month={m}
-                    active={active}
-                    basis={atmBasis}
-                    axis={state.smileAxis}
-                    viewport={active ? state.smileViewport : null}
-                    pick={active && smilePick?.monthId === m.id ? smilePick.k : null}
-                    scenarioAtmK={
-                      active && scenarioAtmView?.monthId === m.id ? scenarioAtmView.k : null
-                    }
-                    dispatch={dispatch}
-                  />
-                );
-              })}
-              <Positions model={positions} dispatch={dispatch} />
-              {hedgeView && <Hedge model={hedgeView} dispatch={dispatch} />}
-              <LegForms chain={chain} dispatch={dispatch} />
-            </section>
+              <div class="pane pane-detail">
+                <Positions model={positions} dispatch={dispatch} />
+                <Metrics
+                  model={metrics}
+                  unitSetting={state.metricsUnit}
+                  feePerLot={feePerLot}
+                  dispatch={dispatch}
+                />
+                <h2>スマイル {month ? `${month.id} 限` : ''}</h2>
+                {chain.months.map((m) => {
+                  const active = m.id === state.monthId;
+                  return (
+                    <Smile
+                      key={m.id}
+                      month={m}
+                      active={active}
+                      basis={atmBasis}
+                      axis={state.smileAxis}
+                      viewport={active ? state.smileViewport : null}
+                      pick={active && smilePick?.monthId === m.id ? smilePick.k : null}
+                      scenarioAtmK={
+                        active && scenarioAtmView?.monthId === m.id ? scenarioAtmView.k : null
+                      }
+                      dispatch={dispatch}
+                    />
+                  );
+                })}
+                {hedgeView && <Hedge model={hedgeView} dispatch={dispatch} />}
+                <LegForms chain={chain} dispatch={dispatch} />
+              </div>
+            </div>
           </div>
         </>
       )}

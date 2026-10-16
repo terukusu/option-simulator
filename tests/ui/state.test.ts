@@ -259,6 +259,32 @@ describe('損益グラフの状態（#11 AC-8・AC-11）', () => {
   });
 });
 
+describe('損益グラフのたたむ / ひらく（#61）', () => {
+  const chain = normalizeChain(fixture('latest'));
+  const m1 = chain.months[0]?.id as string;
+  const k = chain.months[0]?.atm.B.pick?.k as number;
+  const add: Action = { type: 'addBoardLeg', expiry: m1, k, optionType: 'put', side: 'sell' };
+
+  it('初期はひらいている（false）、setPnlFolded で切り替える', () => {
+    expect(initialState.pnlFolded).toBe(false);
+    const folded = reduce(loaded(chain), { type: 'setPnlFolded', folded: true });
+    expect(folded.pnlFolded).toBe(true);
+    expect(reduce(folded, { type: 'setPnlFolded', folded: false }).pnlFolded).toBe(false);
+  });
+
+  it('板の読み直し・足の追加・全クリアでは保つ', () => {
+    const s = run(loaded(chain), { type: 'setPnlFolded', folded: true }, add);
+    expect(s.pnlFolded).toBe(true);
+    expect(reduce(s, { type: 'loaded', chain, label: 'again' }).pnlFolded).toBe(true);
+    expect(reduce(s, { type: 'clearLegs' }).pnlFolded).toBe(true);
+  });
+
+  it('同じ値なら状態を変えない', () => {
+    const s = loaded(chain);
+    expect(reduce(s, { type: 'setPnlFolded', folded: false })).toBe(s);
+  });
+});
+
 describe('シナリオ・手数料・単位の状態（#6）', () => {
   const chain = normalizeChain(fixture('latest'));
   const base = loaded(chain);

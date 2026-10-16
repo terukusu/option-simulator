@@ -26,6 +26,7 @@ import {
   type PnlBase,
   type PnlChartModel,
   type PnlYSettings,
+  pnlChartHeight,
   pnlChartModel,
   pnlDomains,
   pnlViewDomain,
@@ -810,5 +811,20 @@ describe('横軸の初期範囲に満期の BEP（AC-12）', () => {
     expect(hi).toBeLessThanOrEqual(base.full[1]);
     // 初期表示のグラフに満期の BEP の印が 2 つ
     expect(chartOf(base).breakevens.map((b) => b.x)).toEqual([62_195, 72_305]);
+  });
+});
+
+describe('描画域の高さ（#61）', () => {
+  it('スマホ（ビューポート < 720px）は幅に依らず 180px', () => {
+    expect(pnlChartHeight(320, true)).toBe(180);
+    expect(pnlChartHeight(559, true)).toBe(180);
+    expect(pnlChartHeight(800, true)).toBe(180);
+  });
+
+  it('それ以外は描画域の幅 < 560px で 220px、以上で 260px', () => {
+    expect(pnlChartHeight(400, false)).toBe(220);
+    expect(pnlChartHeight(559, false)).toBe(220);
+    expect(pnlChartHeight(560, false)).toBe(260);
+    expect(pnlChartHeight(900, false)).toBe(260);
   });
 });
