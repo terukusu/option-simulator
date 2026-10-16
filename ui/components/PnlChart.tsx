@@ -1,11 +1,28 @@
 import type { ComponentChildren } from 'preact';
-import { useMemo, useState } from 'preact/hooks';
+import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import type { Scenario } from '../../model';
 import { type Domain, pixelToValue, zoom } from '../chart/scale';
+import {
+  MAX_PINS,
+  PIN_MAX_SAMPLES,
+  PIN_SETTLE_MS,
+  type PinLineMode,
+  type PinNo,
+  pinAddError,
+} from '../pins';
 import { type Action, parsePremiumN, parseYRange } from '../state';
 import { fmtNum } from '../view/format';
 import { PHONE_QUERY } from '../view/layout';
 import { AMOUNT_UNIT_LABEL, type AmountUnit } from '../view/metrics';
+import {
+  cachedPinLines,
+  type PinLineCacheEntry,
+  type PinLineData,
+  type PinTarget,
+  pinLabels,
+  pinListModel,
+  pinSampleCap,
+} from '../view/pins';
 import {
   dateLine,
   PNL_MARGIN,
@@ -15,6 +32,7 @@ import {
   type PnlYSettings,
   pnlChartHeight,
   pnlChartModel,
+  pnlViewDomain,
   todayLine,
   Y_UNIT_LABEL,
 } from '../view/pnlChart';
@@ -53,7 +71,17 @@ export interface PnlChartProps {
    * 浅い比較で描き直しを省くので、App は表示モデルが変わったときだけ作り直した要素を渡す
    */
   tabs?: ComponentChildren;
+  /** ピン（#22。App が解決した描く対象。番号順でなく追加順） */
+  pins: readonly PinTarget[];
+  /** ピンの線（期中 / 満期） */
+  pinLine: PinLineMode;
+  /** 重ねられるタブ（作業中以外。pinned = 重ね済み） */
+  pinTabs: ReadonlyArray<{ id: number; name: string; legCount: number; pinned: boolean }>;
+  /** [今の線を残す]（App が今の基礎・シナリオ・タブ名・板の時刻からゴーストを作る） */
+  onPinCurrent: () => void;
 }
+
+const PIN_LINE_LABEL: Record<PinLineMode, string> = { period: '期中', expiry: '満期' };
 
 const LINE_LABEL: Record<PnlLineKind, string> = {
   expiry: '満期（SQ）',
@@ -84,6 +112,10 @@ function PnlChartView({
   folded,
   dispatch,
   tabs,
+  pins,
+  pinLine,
+  pinTabs,
+  onPinCurrent,
 }: PnlChartProps) {
   const { ref, width } = useWidth(480);
   // スマホは 180px（ドックの下でページをスクロールできる高さを残す。#61）
@@ -107,6 +139,35 @@ function PnlChartView({
     // ΔX は指定日の線に効かないので追わない
     [base, viewport, plotWidth, days, dSigma, skew, beta, ivDynamics, ivShift],
   );
+  // ピンの線（#22）: 前回分を使い回す（ゴーストはスライダー・長押しドラッグで作り直さない。重ねは ΔX 以外のシナリオで
+  // 作り直す）。表示範囲・幅・線の切替が変わったら作り直す。拡大縮小（表示範囲の幅が変わる）のフレームは点数を
+  // PIN_ZOOM_MAX_SAMPLES に下げ、止まって PIN_SETTLE_MS 経ったら通常の点数で描き直す（S1。止まった後の値は同じ）
+  const domain = base ? pnlViewDomain(base, viewport) : null;
+  const lo = domain ? domain[0] : Number.NaN;
+  const hi = domain ? domain[1] : Number.NaN;
+  const pinCache = useRef<Map<PinNo, PinLineCacheEntry>>(new Map());
+  const pinSpan = useRef<number | null>(null);
+  const [pinSettle, setPinSettle] = useState(0);
+  const pinData = useMemo(() => {
+    const dom: Domain | null = Number.isFinite(lo) && Number.isFinite(hi) ? [lo, hi] : null;
+    const cap = pinSampleCap(pinSpan.current, dom);
+    pinSpan.current = dom ? hi - lo : null;
+    const next = cachedPinLines(pinCache.current, pins, dom, plotWidth, pinLine, cap);
+    pinCache.current = next;
+    const lines: PinLineData[] = [];
+    for (const t of pins) {
+      const d = next.get(t.no)?.data;
+      if (d) lines.push(d);
+    }
+    return { lines, coarse: cap < PIN_MAX_SAMPLES && lines.length > 0 };
+    // pinSettle: 拡大縮小が止まった後の描き直しの合図（幅は同じなので通常の点数になる）
+  }, [pins, lo, hi, plotWidth, pinLine, pinSettle]);
+  useEffect(() => {
+    if (!pinData.coarse) return;
+    // 次の拡大縮小のフレームが来たら取り消して待ち直す（操作が止まってから 1 回だけ描き直す）
+    const id = setTimeout(() => setPinSettle((n) => n + 1), PIN_SETTLE_MS);
+    return () => clearTimeout(id);
+  }, [pinData]);
   const model = useMemo(
     () =>
       pnlChartModel({
@@ -119,9 +180,20 @@ function PnlChartView({
         todayYs,
         dateYs,
         scenarioAtm,
+        pins: pinData.lines,
       }),
-    [base, scenario, viewport, pnlY, plotWidth, plotHeight, todayYs, dateYs, scenarioAtm],
+    [base, scenario, viewport, pnlY, plotWidth, plotHeight, todayYs, dateYs, scenarioAtm, pinData],
   );
+  const pinMarks = useMemo(() => pinLabels(model), [model]);
+  const scenarioX = base
+    ? base.ctx.x0 + (Number.isFinite(scenario.dX) ? scenario.dX : 0)
+    : Number.NaN;
+  const pinRows = useMemo(
+    () => pinListModel({ targets: pins, mode: pinLine, scenarioX, unit: amountUnit }),
+    [pins, pinLine, scenarioX, amountUnit],
+  );
+  const [pinOpen, setPinOpen] = useState(false);
+  const pinFull = pinAddError(pins);
   // シナリオ点の縦線と線の交点・金額のラベル（#52。ΔX = 0 でも X₀ 上に出す）
   const marks = useMemo(
     () => scenarioMarks({ base, scenario, chart: model, unit: amountUnit }),
@@ -159,6 +231,12 @@ function PnlChartView({
   const [nError, setNError] = useState<string | null>(null);
 
   const noLegs = !base;
+  // 足を 0 本にしたら、開いているピンの行を閉じる（ピンが 0 本なら [ピン] も押せなくなるため。#22 N3）。
+  // ピンが残っていれば [ピン] で開き直せる
+  const pinDisabled = noLegs && pins.length === 0;
+  useEffect(() => {
+    if (noLegs) setPinOpen(false);
+  }, [noLegs]);
 
   const setMode = (mode: PnlYMode) => {
     if (mode === 'manual' && !pnlY.manual) {
@@ -298,6 +376,16 @@ function PnlChartView({
           </fieldset>
           <button
             type="button"
+            class="pnl-pin-open"
+            aria-expanded={pinOpen}
+            disabled={pinDisabled}
+            title="今の線を残す・ほかのタブを重ねる（最大 3 本）"
+            onClick={() => setPinOpen((v) => !v)}
+          >
+            ピン {pins.length}/{MAX_PINS}
+          </button>
+          <button
+            type="button"
             class="pnl-fold"
             aria-expanded={!folded}
             onClick={() => dispatch({ type: 'setPnlFolded', folded: !folded })}
@@ -305,6 +393,61 @@ function PnlChartView({
             {folded ? 'ひらく' : 'たたむ'}
           </button>
         </div>
+        {pinOpen && (
+          // ピンの行（#22。ブラウザの confirm / prompt は使わない。Esc で閉じる）
+          <fieldset
+            class="pin-tools"
+            aria-label="ピン"
+            onKeyDown={(e) => {
+              if (e.key === 'Escape') {
+                e.preventDefault();
+                setPinOpen(false);
+              }
+            }}
+          >
+            <button
+              type="button"
+              disabled={noLegs || pinFull !== null}
+              title={pinFull ?? (noLegs ? '足が無い' : '今の期中の線をその時点の値で残す（固定）')}
+              onClick={onPinCurrent}
+            >
+              今の線を残す
+            </button>
+            {pinTabs.map((t) => (
+              <button
+                type="button"
+                key={t.id}
+                disabled={pinFull !== null || t.pinned || t.legCount === 0}
+                title={
+                  t.pinned
+                    ? '重ねている'
+                    : t.legCount === 0
+                      ? '足が無い'
+                      : (pinFull ?? `タブ ${t.name} を今の板・今のシナリオで重ねる`)
+                }
+                onClick={() => dispatch({ type: 'addPin', source: { kind: 'tab', tabId: t.id } })}
+              >
+                {t.name} を重ねる
+              </button>
+            ))}
+            <fieldset class="seg" aria-label="ピンの線">
+              {(['period', 'expiry'] as const).map((m) => (
+                <button
+                  type="button"
+                  key={m}
+                  aria-pressed={pinLine === m}
+                  onClick={() => dispatch({ type: 'setPinLine', line: m })}
+                >
+                  {PIN_LINE_LABEL[m]}
+                </button>
+              ))}
+            </fieldset>
+            <button type="button" onClick={() => setPinOpen(false)}>
+              閉じる
+            </button>
+            {pinFull !== null && <span class="note">{pinFull}</span>}
+          </fieldset>
+        )}
         {errors.length > 0 && (
           <p class="field-error" role="alert">
             {errors.join(' / ')}
@@ -399,6 +542,10 @@ function PnlChartView({
                     y2={bottom}
                   />
                 )}
+                {/* ピンの線（#22。今の線の下に描く。色と線種と番号で区別する） */}
+                {model.pins.map((p) => (
+                  <path key={`pin${p.no}`} class={`pnl-pin p${p.no}`} d={p.d} />
+                ))}
                 {model.lines.map((l) => (
                   <path key={l.kind} class={`pnl-line ${l.kind}`} d={l.d} />
                 ))}
@@ -433,6 +580,11 @@ function PnlChartView({
                   y={m.labelY}
                 >
                   {m.text}
+                </text>
+              ))}
+              {pinMarks.map((l) => (
+                <text key={`pl${l.no}`} class={`pnl-pin-label p${l.no}`} x={l.x} y={l.y}>
+                  {l.text}
                 </text>
               ))}
             </svg>
@@ -484,6 +636,50 @@ function PnlChartView({
           </span>
         )}
       </p>
+      {pinRows.length > 0 && (
+        // ピンの一覧（#22。凡例の行。名前は JSX のテキストだけ）
+        <div class="pin-list-wrap">
+          <p class="note pin-list-head">
+            ピン（線 = {PIN_LINE_LABEL[pinLine]}・金額は {AMOUNT_UNIT_LABEL[amountUnit]}
+            ・保存しない = 再読み込みで消える）{' '}
+            <button type="button" onClick={() => dispatch({ type: 'clearPins' })}>
+              全部外す
+            </button>
+          </p>
+          <ul class="pin-list">
+            {pinRows.map((r) => (
+              <li key={r.no} class={r.drawn ? 'pin-row' : 'pin-row off'}>
+                <svg
+                  class="pin-swatch"
+                  width={28}
+                  height={10}
+                  viewBox="0 0 28 10"
+                  aria-hidden="true"
+                >
+                  <line class={`pnl-pin p${r.no}`} x1={1} y1={5} x2={27} y2={5} />
+                </svg>
+                <strong class={`pin-no p${r.no}`}>{r.mark}</strong>
+                <span class="tag">{r.kindLabel}</span>
+                <span class="pin-name">{r.name}</span>
+                <span class="note">{r.cond}</span>
+                <span>満期の最大損失 {r.maxLossText}</span>
+                <span>
+                  {r.premiumLabel} {r.premiumText}
+                </span>
+                <span>シナリオ点 {r.atScenarioText}</span>
+                {r.note && <span class="note warn">{r.note}</span>}
+                <button
+                  type="button"
+                  aria-label={`ピン ${r.mark} を外す`}
+                  onClick={() => dispatch({ type: 'removePin', no: r.no })}
+                >
+                  外す
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
     </>
   );
 }

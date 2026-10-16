@@ -33,6 +33,15 @@ import { CALENDAR } from './calendar';
 import type { Domain } from './chart/scale';
 import { refreshLegMarkets } from './legMarket';
 import { cleanName } from './names';
+import {
+  addPin,
+  DEFAULT_PIN_LINE,
+  dropTabPins,
+  type Pin,
+  type PinLineMode,
+  type PinSource,
+  removePin,
+} from './pins';
 import { parseNum } from './view/format';
 import { DEFAULT_HEDGE, HEDGE_TARGET_MAX, type HedgeSettings, hedgeContracts } from './view/hedge';
 import { DEFAULT_PNL_Y, type PnlYSettings } from './view/pnlChart';
@@ -123,6 +132,13 @@ export interface State {
   tabs: TabSlot[];
   activeTab: number;
   nextTabId: number;
+  /**
+   * 損益グラフのピン（#22。ui/pins.ts）。保存しない（再読み込みで消える）。
+   * 不変条件: 本数 ≤ MAX_PINS・番号が重複しない・tab の重ねのタブが存在し、同じタブの重ねは 1 本まで
+   */
+  pins: readonly Pin[];
+  /** ピンの線（期中 / 満期。全ピン共通。保存しない） */
+  pinLine: PinLineMode;
 }
 
 export type MetricsUnitSetting = 'auto' | 'yen' | 'thousand';
@@ -183,6 +199,8 @@ export const initialState: State = {
   tabs: [{ id: 1, name: 'A', saved: null }],
   activeTab: 1,
   nextTabId: 2,
+  pins: [],
+  pinLine: DEFAULT_PIN_LINE,
 };
 
 /** 足の編集（画面の入力を検証済みの値にしたもの）。 */
@@ -261,7 +279,15 @@ export type Action =
   /** タブを閉じる（最後の 1 個は閉じない。作業中なら右隣・無ければ左隣へ切り替える） */
   | { type: 'closeTab'; id: number }
   /** タブの名前を変える（正規化して空・他のタブと同じ名前なら何もしない） */
-  | { type: 'renameTab'; id: number; name: string };
+  | { type: 'renameTab'; id: number; name: string }
+  /**
+   * ピンを足す（#22。source は App が作る: ゴーストは今の基礎・シナリオの参照、重ねはタブの id か保存の足の写し）。
+   * 上限・同じタブの重ね・無いタブ・作業中のタブの重ねは何もしない
+   */
+  | { type: 'addPin'; source: PinSource }
+  | { type: 'removePin'; no: number }
+  | { type: 'clearPins' }
+  | { type: 'setPinLine'; line: PinLineMode };
 
 function errorText(e: unknown): string {
   return e instanceof Error ? e.message : '足を追加できない';
@@ -585,10 +611,34 @@ export function reduce(state: State, action: Action): State {
         if (!neighbor) return state;
         s = switchTo(state, neighbor.id);
       }
-      return { ...s, tabs: s.tabs.filter((t) => t.id !== action.id) };
+      // 閉じたタブを重ねたピンも外す（#22）
+      return {
+        ...s,
+        tabs: s.tabs.filter((t) => t.id !== action.id),
+        pins: dropTabPins(s.pins, action.id),
+      };
     }
     case 'renameTab':
       return renameTab(state, action.id, action.name);
+    case 'addPin': {
+      const pins = addPin(
+        state.pins,
+        action.source,
+        state.tabs.map((t) => t.id),
+        state.activeTab,
+      );
+      return pins === state.pins ? state : { ...state, pins };
+    }
+    case 'removePin': {
+      const pins = removePin(state.pins, action.no);
+      return pins === state.pins ? state : { ...state, pins };
+    }
+    case 'clearPins':
+      return state.pins.length === 0 ? state : { ...state, pins: [] };
+    case 'setPinLine':
+      return (action.line === 'period' || action.line === 'expiry') && action.line !== state.pinLine
+        ? { ...state, pinLine: action.line }
+        : state;
     case 'setHedge':
       // 不正な値を含む更新は丸ごと無視する（部分的に反映しない）
       return validHedgePatch(action.patch, state.chain)

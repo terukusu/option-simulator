@@ -14,16 +14,27 @@ import {
   serializeWorkspace,
   toSaved,
 } from '../../ui/persist';
+import type { PinNo } from '../../ui/pins';
 import { type Action, initialState, reduce, type State, type UiLeg } from '../../ui/state';
 import { atmStrike, boardRows } from '../../ui/view/board';
 import { bookListModel } from '../../ui/view/bookList';
 import { headerModel } from '../../ui/view/header';
 import { metricsModel } from '../../ui/view/metrics';
 import {
+  cachedPinLines,
+  type PinLineCacheEntry,
+  type PinLineData,
+  type PinTarget,
+  pinLabels,
+  pinListModel,
+  pinSampleCap,
+} from '../../ui/view/pins';
+import {
   DEFAULT_PNL_Y,
   dateLine,
   pnlChartModel,
   pnlDomains,
+  pnlViewDomain,
   todayLine,
 } from '../../ui/view/pnlChart';
 import { positionModel } from '../../ui/view/position';
@@ -459,5 +470,237 @@ describe('性能（#71 タブの切り替え）', () => {
       `#71 足 200 本のタブへの切り替え: ${best.toFixed(2)} ms（うち reduce ${bestReduce.toFixed(2)} ms）`,
     );
     expect(s.legs).toHaveLength(200);
+  });
+});
+
+/**
+ * #22 AC8: ピン 3 本（足 10 本）があるときの 1 フレーム。
+ * (1) 重ね 3 本でのスライダー 1 回: ピンの線（重ねは ΔX 以外のシナリオで作り直す。4px ごと・最大 PIN_MAX_SAMPLES = 200 点）+
+ *     グラフの表示モデル（今の線 + ピンの path・縦軸の自動）+ 番号ラベル + 凡例の行 + 指標 + テール表
+ * (2) ゴースト 3 本でのパン 1 フレーム: 表示範囲を毎回ずらし、ピンの線 3 本と今の 3 本の線を作り直す
+ * (3) ゴースト 3 本での拡大縮小 1 フレーム: 表示範囲の幅を毎回変える（点数は PIN_ZOOM_MAX_SAMPLES。S1）
+ * 長押しドラッグ（ΔX だけ）はピンの線を作り直さない（cachedPinLines の使い回し。tests/ui/pins.test.ts）。
+ */
+describe('性能（#22 AC8: ピン 3 本）', () => {
+  const { ctx, rows } = makeMarket();
+  const legs = preparePosition(PERF_LEGS, ctx);
+  const board = {
+    months: [
+      { F: M1.F, rows: rows[M1.id] ?? [] },
+      { F: M2.F, rows: rows[M2.id] ?? [] },
+    ],
+  };
+  const base = pnlDomains(board, legs, ctx);
+  if (!base) throw new Error('損益グラフの基礎が作れない');
+  // ピンの基礎は足 10 本ずつ（重ねは別の基礎 = 同じ足を別に準備したもの）
+  const pinBases = [1, 2, 3].map(() => {
+    const b = pnlDomains(board, preparePosition(PERF_LEGS, ctx), ctx);
+    if (!b) throw new Error('ピンの基礎が作れない');
+    return b;
+  });
+  const scenario0 = { ...ZERO_SCENARIO, days: 5 };
+  const today = todayLine(base, null, 1000, scenario0);
+  const target = (i: number, kind: PinTarget['kind'], sc: typeof scenario0): PinTarget => ({
+    no: (i + 1) as PinNo,
+    kind,
+    name: `P${i}`,
+    base: pinBases[i] ?? null,
+    scenario: { ...sc, dX: 0 },
+    period: 'date',
+    active: false,
+    legCount: 10,
+    excluded: 0,
+    boardSnapshotAt: null,
+  });
+  const median = (xs: number[]): number => {
+    const a = [...xs].sort((p, q) => p - q);
+    return a[Math.floor(a.length / 2)] ?? Number.NaN;
+  };
+  const linesOf = (cache: Map<PinNo, PinLineCacheEntry>, ts: PinTarget[]): PinLineData[] =>
+    ts
+      .map((t) => cache.get(t.no)?.data)
+      .filter((d): d is PinLineData => d !== null && d !== undefined);
+
+  let tick = 0;
+  let cache = new Map<PinNo, PinLineCacheEntry>();
+  function slide(): number {
+    tick = (tick + 1) % 40;
+    const scenario = {
+      ...scenario0,
+      days: 5 + tick * 0.5,
+      dX: -tick * 100,
+      dSigma: tick * 0.5,
+      skew: (tick % 10) * 0.5,
+    };
+    const targets = [0, 1, 2].map((i) => target(i, 'tab', scenario));
+    const domain = pnlViewDomain(base as NonNullable<typeof base>, null);
+    cache = cachedPinLines(cache, targets, domain, 1000, 'period');
+    const m = pnlChartModel({
+      base,
+      scenario,
+      viewport: null,
+      pnlY: DEFAULT_PNL_Y,
+      plotWidth: 1000,
+      plotHeight: 260,
+      todayYs: today,
+      pins: linesOf(cache, targets),
+    });
+    const labels = pinLabels(m);
+    const mm = metricsModel({ base, scenario, unit: 'auto' });
+    const list = pinListModel({
+      targets,
+      mode: 'period',
+      scenarioX: ctx.x0 + scenario.dX,
+      unit: mm.unit,
+    });
+    return m.pins.length + labels.length + list.length + mm.tail.rows.length + m.lines.length;
+  }
+
+  it(`重ね 3 本でのスライダー 1 回が ${BUDGET_MS} ms 以内（30 回の最小値）`, () => {
+    expect(slide()).toBeGreaterThan(9);
+    for (let i = 0; i < 20; i++) slide();
+    const times: number[] = [];
+    for (let i = 0; i < 30; i++) {
+      const t0 = performance.now();
+      slide();
+      times.push(performance.now() - t0);
+    }
+    const best = Math.min(...times);
+    console.info(
+      `#22 重ね 3 本でのスライダー 1 回: ${best.toFixed(2)} ms（中央値 ${median(times).toFixed(2)} ms）`,
+    );
+    expect(best).toBeLessThan(BUDGET_MS);
+  });
+
+  let shift = 0;
+  let gcache = new Map<PinNo, PinLineCacheEntry>();
+  const ghosts = [0, 1, 2].map((i) => target(i, 'ghost', { ...scenario0, days: 3 + i, dSigma: i }));
+  function pan(): number {
+    shift = (shift + 37) % 1000;
+    const lo = (base?.initial[0] ?? 0) + shift;
+    const viewport: [number, number] = [lo, lo + 20_000];
+    const domain = pnlViewDomain(base as NonNullable<typeof base>, viewport);
+    gcache = cachedPinLines(gcache, ghosts, domain, 1000, 'period');
+    const m = pnlChartModel({
+      base,
+      scenario: scenario0,
+      viewport,
+      pnlY: DEFAULT_PNL_Y,
+      plotWidth: 1000,
+      plotHeight: 260,
+      pins: linesOf(gcache, ghosts),
+    });
+    return m.pins.length + pinLabels(m).length + m.lines.length + (m.pins[0]?.d.length ?? 0);
+  }
+
+  it(`ゴースト 3 本でのパン 1 フレームが ${BUDGET_MS} ms 以内（30 回の最小値）`, () => {
+    expect(pan()).toBeGreaterThan(8);
+    for (let i = 0; i < 20; i++) pan();
+    const times: number[] = [];
+    for (let i = 0; i < 30; i++) {
+      const t0 = performance.now();
+      pan();
+      times.push(performance.now() - t0);
+    }
+    const best = Math.min(...times);
+    console.info(
+      `#22 ゴースト 3 本でのパン 1 フレーム: ${best.toFixed(2)} ms（中央値 ${median(times).toFixed(2)} ms）`,
+    );
+    expect(best).toBeLessThan(BUDGET_MS);
+  });
+
+  // 拡大縮小（ホイール・ピンチ・ボタン）: 表示範囲の幅を毎フレーム変える。格子を使い回せないので、画面と同じく
+  // pinSampleCap で点数を PIN_ZOOM_MAX_SAMPLES に下げる（止まった後の通常の点数での描き直しは 1 回だけ。#22 S1）
+  let zstep = 0;
+  let zspan: number | null = null;
+  let zcache = new Map<PinNo, PinLineCacheEntry>();
+  function zoomFrame(): number {
+    zstep = (zstep + 1) % 20;
+    const lo = (base?.initial[0] ?? 0) + zstep * 150;
+    const viewport: [number, number] = [lo, lo + 16_000 + zstep * 300];
+    const domain = pnlViewDomain(base as NonNullable<typeof base>, viewport);
+    const cap = pinSampleCap(zspan, domain);
+    zspan = domain[1] - domain[0];
+    zcache = cachedPinLines(zcache, ghosts, domain, 1000, 'period', cap);
+    const m = pnlChartModel({
+      base,
+      scenario: scenario0,
+      viewport,
+      pnlY: DEFAULT_PNL_Y,
+      plotWidth: 1000,
+      plotHeight: 260,
+      pins: linesOf(zcache, ghosts),
+    });
+    return m.pins.length + pinLabels(m).length + m.lines.length + (m.pins[0]?.d.length ?? 0);
+  }
+
+  it(`ゴースト 3 本での拡大縮小 1 フレームが ${BUDGET_MS} ms 以内（30 回の最小値）`, () => {
+    expect(zoomFrame()).toBeGreaterThan(8);
+    for (let i = 0; i < 20; i++) zoomFrame();
+    const times: number[] = [];
+    for (let i = 0; i < 30; i++) {
+      const t0 = performance.now();
+      zoomFrame();
+      times.push(performance.now() - t0);
+    }
+    const best = Math.min(...times);
+    console.info(
+      `#22 ゴースト 3 本での拡大縮小 1 フレーム: ${best.toFixed(2)} ms（中央値 ${median(times).toFixed(2)} ms）`,
+    );
+    expect(best).toBeLessThan(BUDGET_MS);
+  });
+
+  it(`ピン 3 本での長押しドラッグ 1 フレームが ${BUDGET_MS} ms 以内（ピンの線は使い回し）`, () => {
+    const date = dateLine(base, null, 1000, scenario0);
+    const targets = [0, 1, 2].map((i) => target(i, i === 0 ? 'ghost' : 'tab', scenario0));
+    const domain = pnlViewDomain(base, null);
+    let c = cachedPinLines(new Map(), targets, domain, 1000, 'period');
+    let t = 0;
+    const frame = () => {
+      t = (t + 1) % 40;
+      const scenario = { ...scenario0, dX: -2_000 + t * 100 };
+      const c2 = cachedPinLines(c, targets, domain, 1000, 'period');
+      c = c2;
+      const m = pnlChartModel({
+        base,
+        scenario,
+        viewport: null,
+        pnlY: DEFAULT_PNL_Y,
+        plotWidth: 1000,
+        plotHeight: 260,
+        todayYs: today,
+        dateYs: date,
+        pins: linesOf(c2, targets),
+      });
+      const mm = metricsModel({ base, scenario, unit: 'auto' });
+      const marks = scenarioMarks({ base, scenario, chart: m, unit: mm.unit });
+      const r = readoutModel({ base, metrics: mm, scenario });
+      const list = pinListModel({
+        targets,
+        mode: 'period',
+        scenarioX: ctx.x0 + scenario.dX,
+        unit: mm.unit,
+      });
+      return (
+        m.pins.length +
+        (marks?.marks.length ?? 0) +
+        r.text.x.length +
+        list.length +
+        pinLabels(m).length
+      );
+    };
+    expect(frame()).toBeGreaterThan(6);
+    for (let i = 0; i < 20; i++) frame();
+    const times: number[] = [];
+    for (let i = 0; i < 30; i++) {
+      const t0 = performance.now();
+      frame();
+      times.push(performance.now() - t0);
+    }
+    const best = Math.min(...times);
+    console.info(
+      `#22 ピン 3 本での長押しドラッグ 1 フレーム: ${best.toFixed(2)} ms（中央値 ${median(times).toFixed(2)} ms）`,
+    );
+    expect(best).toBeLessThan(BUDGET_MS);
   });
 });

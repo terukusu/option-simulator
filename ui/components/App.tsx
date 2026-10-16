@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'preact/hooks';
 import { axisOrigin, type Chain, type ChainJson, monthOf } from '../../data';
-import { DEFAULT_SETTINGS, type ModelSettings, ZERO_SCENARIO } from '../../model';
+import { DEFAULT_SETTINGS, type ModelSettings, type Scenario, ZERO_SCENARIO } from '../../model';
 import {
   addEntry,
   bookKey,
@@ -41,6 +41,7 @@ import {
   toSaved,
   WORKSPACE_KEY,
 } from '../persist';
+import { MAX_PINS, PINS_FULL_TEXT } from '../pins';
 import {
   encodeShareUrl,
   isShareHash,
@@ -68,6 +69,7 @@ import {
   shareNote,
   shareReplaceConfirmText,
 } from '../view/persistNote';
+import { ghostSource, overlayBases, resolvePins } from '../view/pins';
 import { pnlDomains, zoomViewport } from '../view/pnlChart';
 import { positionModel } from '../view/position';
 import { readoutModel } from '../view/readout';
@@ -434,6 +436,8 @@ export function App({ boot = NO_BOOT }: { boot?: Boot }) {
       chain && positions ? pnlDomains(chain, positions.prepared, positions.ctx, settings) : null,
     [chain, positions, settings],
   );
+  const pnlBaseRef = useRef(pnlBase);
+  pnlBaseRef.current = pnlBase;
   // 指標・テール表（スライダーの操作ごと。グラフの表示モデルと合わせて 1 フレームの予算に収める）
   const metrics = useMemo(
     () => metricsModel({ base: pnlBase, scenario: state.scenario, unit: state.metricsUnit }),
@@ -484,6 +488,48 @@ export function App({ boot = NO_BOOT }: { boot?: Boot }) {
     const pick = scenarioAtmMark(month, atmBasis, axisOrigin(chain, atmBasis), dX, basisMode);
     return pick ? { monthId: month.id, k: pick.k, F: month.F } : null;
   }, [chain, month, atmBasis, dX, basisMode]);
+
+  // ---- ピン（#22）。重ねの基礎は板・足・評価の設定・タブが変わったときだけ作る（スライダーでは作り直さない）
+  const { pins, pinLine } = state;
+  const pinOverlays = useMemo(
+    () =>
+      overlayBases(pins, {
+        chain,
+        tabs: state.tabs,
+        activeTab: state.activeTab,
+        atmBasis,
+        calendar,
+        settings,
+      }),
+    [pins, chain, state.tabs, state.activeTab, atmBasis, calendar, settings],
+  );
+  // 重ねの線のシナリオ（今のシナリオ。ΔX は線の形に効かないので追わない = 長押しドラッグで作り直さない）
+  const { days, dSigma, skew, beta, ivDynamics, ivShift } = scenario;
+  const lineScenario = useMemo<Scenario>(
+    () => ({ days, dX: 0, dSigma, skew, beta, ivDynamics, ivShift }),
+    [days, dSigma, skew, beta, ivDynamics, ivShift],
+  );
+  const pinTargets = useMemo(
+    () =>
+      resolvePins(pins, {
+        tabs: state.tabs,
+        activeTab: state.activeTab,
+        scenario: lineScenario,
+        overlays: pinOverlays,
+      }),
+    [pins, state.tabs, state.activeTab, lineScenario, pinOverlays],
+  );
+  // [今の線を残す]: 今の基礎・シナリオの参照をそのまま持つ（不変オブジェクト。保存しない）
+  const pinCurrent = useCallback(() => {
+    const s = stateRef.current;
+    const src = ghostSource(
+      pnlBaseRef.current,
+      s.scenario,
+      s.tabs.find((t) => t.id === s.activeTab)?.name ?? '',
+      s.chain ? s.chain.snapshotAt : null,
+    );
+    if (src) dispatch({ type: 'addPin', source: src });
+  }, []);
 
   // ---- ポジ帳の操作（読み直し → 純関数 → 書く。失敗したら state を変えず知らせる）
   const commit = useCallback(
@@ -596,6 +642,29 @@ export function App({ boot = NO_BOOT }: { boot?: Boot }) {
     (id: string) => openEntry(id, 'openPositionInNewTab'),
     [openEntry],
   );
+  // [重ねる]（#22）: 保存した足の写しを今の板・今のシナリオ・今の設定で重ねる（ピンが上限なら一覧に理由を出す）
+  const onBookOverlay = useCallback(
+    (id: string) => {
+      if (stateRef.current.pins.length >= MAX_PINS) {
+        setBookMsg({ text: PINS_FULL_TEXT, warn: true });
+        return false;
+      }
+      const read = loadBook(storage);
+      setBookRead(read);
+      const e = read.kind === 'ok' ? read.book.entries.find((x) => x.id === id) : undefined;
+      if (e?.status !== 'ok') {
+        setBookMsg({ text: BOOK_FAIL_TEXT.notFound, warn: true });
+        return false;
+      }
+      dispatch({
+        type: 'addPin',
+        source: { kind: 'saved', name: e.name, legs: e.ws.position.legs },
+      });
+      setBookOpen(false);
+      return true;
+    },
+    [storage],
+  );
   const onBookExport = useCallback(() => {
     const read = loadBook(storage);
     setBookRead(read);
@@ -679,6 +748,19 @@ export function App({ boot = NO_BOOT }: { boot?: Boot }) {
       />
     ),
     [tabsView, openBook, makeShareUrl, subscribeShare],
+  );
+  // 重ねられるタブ（作業中以外）
+  const pinTabs = useMemo(
+    () =>
+      tabsView.tabs
+        .filter((t) => !t.active)
+        .map((t) => ({
+          id: t.id,
+          name: t.name,
+          legCount: t.legCount,
+          pinned: pins.some((p) => p.kind === 'tab' && p.tabId === t.id),
+        })),
+    [tabsView, pins],
   );
   const bookCount =
     bookRead.kind === 'ok' ? bookRead.book.entries.length : bookRead.kind === 'empty' ? 0 : null;
@@ -794,6 +876,10 @@ export function App({ boot = NO_BOOT }: { boot?: Boot }) {
                   folded={state.pnlFolded}
                   dispatch={dispatch}
                   tabs={tabsBar}
+                  pins={pinTargets}
+                  pinLine={pinLine}
+                  pinTabs={pinTabs}
+                  onPinCurrent={pinCurrent}
                 />
                 <ScenarioPanel
                   scenario={state.scenario}
@@ -859,6 +945,8 @@ export function App({ boot = NO_BOOT }: { boot?: Boot }) {
           onOpen={onBookOpenEntry}
           onOpenNewTab={onBookOpenNewTab}
           canAddTab={tabsView.canAdd}
+          onOverlay={onBookOverlay}
+          canPin={pins.length < MAX_PINS}
           tabName={tabsView.active.name}
           onOverwrite={onBookOverwrite}
           onDuplicate={onBookDuplicate}

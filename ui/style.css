@@ -12,6 +12,10 @@
   --bid: #2f855a;
   --ask: #c53030;
   --mid: #2b6cb0;
+  /* ピンの線（#22。今の線・シナリオ点・X₀ と別の 3 色。色だけに頼らず線種と番号でも区別する） */
+  --pin1: #805ad5;
+  --pin2: #2c7a7b;
+  --pin3: #b83280;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -21,6 +25,9 @@
     --bid: #68d391;
     --ask: #fc8181;
     --mid: #90cdf4;
+    --pin1: #b794f4;
+    --pin2: #4fd1c5;
+    --pin3: #f687b3;
   }
 }
 
@@ -1177,6 +1184,107 @@ button.q.noquote {
 
 .pnl-mark-label.today {
   fill: var(--muted);
+}
+
+/* ---------------------------------------------------------------- ピン（#22） */
+
+.pnl-pin {
+  fill: none;
+  stroke-linejoin: round;
+  stroke-opacity: 0.9;
+  stroke-width: 1.5;
+}
+
+.pnl-pin.p1 {
+  stroke: var(--pin1);
+  stroke-dasharray: 6 3;
+}
+
+.pnl-pin.p2 {
+  stroke: var(--pin2);
+  stroke-dasharray: 2 2;
+}
+
+.pnl-pin.p3 {
+  stroke: var(--pin3);
+  stroke-dasharray: 8 3 2 3;
+}
+
+.pnl-pin-label {
+  dominant-baseline: central;
+  font-size: 11px;
+  font-weight: 700;
+  paint-order: stroke;
+  pointer-events: none;
+  stroke: Canvas;
+  stroke-linejoin: round;
+  stroke-width: 3px;
+  text-anchor: end;
+}
+
+.pnl-pin-label.p1,
+.pin-no.p1 {
+  color: var(--pin1);
+  fill: var(--pin1);
+}
+
+.pnl-pin-label.p2,
+.pin-no.p2 {
+  color: var(--pin2);
+  fill: var(--pin2);
+}
+
+.pnl-pin-label.p3,
+.pin-no.p3 {
+  color: var(--pin3);
+  fill: var(--pin3);
+}
+
+/* ピンの行（操作行の下。折り返す） */
+fieldset.pin-tools {
+  align-items: center;
+  border: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  margin: 0;
+  min-width: 0;
+  padding: 4px 0 0;
+}
+
+/* ピンの一覧（凡例の行。ドックの外で流れる。横にはみ出さず折り返す） */
+.pin-list-head button {
+  margin-left: 4px;
+}
+
+.pin-list {
+  font-size: 0.85rem;
+  list-style: none;
+  margin: 2px 0 6px;
+  padding: 0;
+}
+
+.pin-row {
+  align-items: center;
+  border-top: 1px solid var(--line);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 10px;
+  overflow-wrap: anywhere;
+  padding: 3px 0;
+}
+
+.pin-swatch {
+  flex: none;
+}
+
+.pin-row.off .pin-swatch {
+  opacity: 0.35;
+}
+
+.pin-name {
+  font-weight: 600;
+  min-width: 0;
 }
 
 /* 読み取りの帯（シナリオ点の値。#52）: 上端に残るのは親のドック（.pnl-dock。#61） */
