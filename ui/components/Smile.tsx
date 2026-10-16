@@ -1,7 +1,7 @@
 import { useMemo } from 'preact/hooks';
 import type { ChainMonth } from '../../data';
 import type { AtmBasis } from '../../model';
-import { type Domain, linear, niceTicks, zoom } from '../chart/scale';
+import { type Domain, fitTicks, linear, niceTicks, zoom } from '../chart/scale';
 import type { Action } from '../state';
 import { fmtNum } from '../view/format';
 import {
@@ -20,6 +20,8 @@ import { useWidth } from './useWidth';
 
 const HEIGHT = 240;
 const M = { left: 40, right: 12, top: 10, bottom: 26 };
+/** 横軸の刻みの下限（ラベルの書式の桁: K は整数、moneyness は 0.1%、デルタは小数 2 桁。#55） */
+const X_TICK_MIN_STEP: Record<SmileAxis, number> = { k: 1, moneyness: 0.001, delta: 0.01 };
 
 export interface SmileProps {
   month: ChainMonth;
@@ -58,9 +60,16 @@ function SmileView({
 
   const sx = linear(model.domain, [M.left, width - M.right]);
   const sy = linear(model.yDomain, [HEIGHT - M.bottom, M.top]);
-  const xTicks = niceTicks(model.domain[0], model.domain[1], width < 420 ? 3 : 5);
-  const yTicks = niceTicks(model.yDomain[0], model.yDomain[1], 4);
   const range: Domain = [M.left, width - M.right];
+  // 横軸はラベルが重ならない範囲で最も細かい刻み（#55。刻みは 1・2・5 × 10^n でラベルの書式の桁に合う）
+  const xTicks = fitTicks(
+    model.domain[0],
+    model.domain[1],
+    range[1] - range[0],
+    (t) => axisTickLabel(axis, t),
+    { minStepFor: () => X_TICK_MIN_STEP[axis] },
+  );
+  const yTicks = niceTicks(model.yDomain[0], model.yDomain[1], 4);
 
   // ホイール・ドラッグ・ピンチ・キー（損益グラフと共用）。タップで最寄りの行使価格を選ぶ
   useChartGestures(ref, {

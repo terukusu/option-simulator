@@ -4,11 +4,13 @@ import {
   clipSegment,
   type Domain,
   extent,
+  fitTicks,
   linear,
   niceTicks,
   panBy,
   pinchViewport,
   pixelToValue,
+  tickLabelPx,
   wheelFactor,
   zoom,
   zoomAt,
@@ -29,6 +31,57 @@ describe('scale（グラフの座標の純関数）', () => {
     const t = niceTicks(-0.123, 0.31, 5);
     expect(t).toEqual([-0.1, 0, 0.1, 0.2, 0.3]);
     expect(niceTicks(Number.NaN, 1)).toEqual([]);
+  });
+
+  describe('fitTicks（横軸の目盛り。#55）', () => {
+    const yen = (v: number) => v.toLocaleString('en-US');
+    const opts = { mantissas: [1, 2, 2.5, 5], minStepFor: (m: number) => (m === 2.5 ? 10 : 1) };
+    const gaps = (t: number[]) => t.slice(1).map((v, i) => v - (t[i] as number));
+    // 必要な間隔 = 最も広いラベルの推定幅 + 12px
+    const need = (t: number[]) => Math.max(...t.map((v) => tickLabelPx(yen(v)))) + 12;
+
+    it.each([
+      // [lo, hi, 幅 px]
+      [40_000, 73_000, 320],
+      [40_000, 73_000, 1_000],
+      [60_000, 75_000, 320],
+      [0, 200_000, 320],
+      [0, 200_000, 1_000],
+      [66_000, 68_000, 600],
+      [47_750, 87_875, 400],
+    ])('[%d, %d] 幅 %d px: 重ならず、間隔は必要な幅の 2 倍未満', (lo, hi, px) => {
+      const t = fitTicks(lo, hi, px, yen, opts);
+      expect(t.length).toBeGreaterThanOrEqual(2);
+      const steps = new Set(gaps(t));
+      expect(steps.size).toBe(1);
+      const stepPx = ((gaps(t)[0] as number) / (hi - lo)) * px;
+      expect(stepPx).toBeGreaterThanOrEqual(need(t));
+      expect(stepPx).toBeLessThan(need(t) * 2 + 1e-9);
+      expect(t[0]).toBeGreaterThanOrEqual(lo);
+      expect(t[t.length - 1]).toBeLessThanOrEqual(hi);
+    });
+
+    it('旧方式（固定 3 本）で 1〜2 個に落ちた範囲でも、幅に見合う本数を出す', () => {
+      // 旧: niceTicks(40,000, 73,000, 3) は刻み 20,000 で 2 個
+      expect(fitTicks(40_000, 73_000, 320, yen, opts)).toEqual([
+        40_000, 45_000, 50_000, 55_000, 60_000, 65_000, 70_000,
+      ]);
+      // 広い画面ほど細かい
+      expect(fitTicks(40_000, 73_000, 1_000, yen, opts).length).toBeGreaterThan(
+        fitTicks(40_000, 73_000, 320, yen, opts).length,
+      );
+    });
+
+    it('2.5 は 10 円以上だけ・下限の刻み・不正な入力', () => {
+      expect(fitTicks(0, 10, 1_000, yen, opts)).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+      expect(fitTicks(0, 0.05, 1_000, (v) => v.toFixed(2), { minStepFor: () => 0.01 })).toEqual([
+        0, 0.01, 0.02, 0.03, 0.04, 0.05,
+      ]);
+      expect(fitTicks(Number.NaN, 1, 100, yen)).toEqual([]);
+      expect(tickLabelPx('67,500')).toBeCloseTo(32);
+      expect(fitTicks(0, 1, 0, yen)).toEqual([]);
+      expect(fitTicks(5, 5, 100, yen)).toEqual([5]);
+    });
   });
 
   it('extent: 有限値だけ', () => {
