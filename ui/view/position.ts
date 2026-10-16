@@ -31,8 +31,8 @@ import {
   type Side,
   ZERO_SCENARIO,
 } from '../../model';
-import type { UiLeg } from '../state';
-import { fmtDate } from './format';
+import { parseQty, type UiLeg } from '../state';
+import { fmtDate, fmtNum } from './format';
 
 export const PRODUCT_LABEL: Record<Product, string> = {
   op_large: 'ラージ OP',
@@ -234,4 +234,63 @@ export function positionModel(
     };
   });
   return { rows, ctx, prepared: ok };
+}
+
+// ---------------------------------------------------------------- 1 行の簡易表示（#62）
+
+/** 1 行の文言の売買（1 文字） */
+export const SIDE_SHORT: Record<Side, string> = { buy: '買', sell: '売' };
+
+/** 行に出す印の短縮ラベル（全文は詳細に LEG_MARK_LABEL で出す） */
+export const LEG_MARK_SHORT: Record<LegMark, { text: string; warn: boolean }> = {
+  no_board: { text: '手入力', warn: false },
+  no_quote: { text: '気配なし', warn: true },
+  unstable_iv: { text: 'IV 不安定', warn: true },
+  extrapolated: { text: '外挿', warn: false },
+  interpolated: { text: '補間', warn: false },
+  forward_from_future: { text: 'F 代用', warn: false },
+  future_manual: { text: '建値手入力', warn: false },
+  no_price: { text: '価格なし', warn: true },
+};
+
+/** 建値: 整数は桁区切り、小数は小数第 2 位まで（末尾の 0 は付けない。丸めて別の値に見せない）。 */
+export function fmtEntry(v: number): string {
+  if (Number.isInteger(v)) return fmtNum(v);
+  const frac = String(v).split('.')[1] ?? '';
+  return fmtNum(v, Math.min(2, Math.max(1, frac.length)));
+}
+
+/** 1 行の文言（OP `売 P 64,000 ×1 @810`、先物 `ミニ先物 2026-12 買 ×1 @67,880`）。 */
+export function legSummary(row: PositionRow): string {
+  const tail = `×${fmtNum(row.qty)} @${fmtEntry(row.entry)}`;
+  return row.kind === 'option'
+    ? `${SIDE_SHORT[row.side]} ${row.optionType} ${fmtNum(row.strike)} ${tail}`
+    : `${row.productLabel} ${row.month} ${SIDE_SHORT[row.side]} ${tail}`;
+}
+
+/** 足の名前（ボタンの aria-label 用。売買を含めない＝切り替えても名前が変わらない）。 */
+export function legName(row: PositionRow): string {
+  return row.kind === 'option'
+    ? `${row.month} ${row.optionType} ${fmtNum(row.strike)}`
+    : `${row.productLabel} ${row.month}`;
+}
+
+/** 行に小さく出す印（全文は詳細）。 */
+export function legBadges(row: PositionRow): { text: string; warn: boolean }[] {
+  const out = row.marks.map((m) => LEG_MARK_SHORT[m]);
+  if (row.ivEdited) out.push({ text: 'IV 編集', warn: false });
+  if (row.calendarUnconfirmed) out.push({ text: '休業日未確定', warn: false });
+  if (row.error) out.push({ text: 'エラー', warn: true });
+  return out;
+}
+
+/** 枚数 ±1（parseQty と同じ範囲。範囲外は null）。 */
+export function stepQty(qty: number, delta: 1 | -1): number | null {
+  const r = parseQty(String(qty + delta));
+  return r.ok ? r.value : null;
+}
+
+/** 売買の切り替え */
+export function toggledSide(side: Side): Side {
+  return side === 'buy' ? 'sell' : 'buy';
 }

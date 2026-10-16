@@ -12,7 +12,16 @@ import {
 } from '../../model';
 import { CALENDAR } from '../../ui/calendar';
 import { type Action, initialState, reduce, type State } from '../../ui/state';
-import { positionModel } from '../../ui/view/position';
+import {
+  fmtEntry,
+  legBadges,
+  legName,
+  legSummary,
+  type PositionRow,
+  positionModel,
+  stepQty,
+  toggledSide,
+} from '../../ui/view/position';
 import { fixture } from '../support/fixtures';
 
 /** AC-12・AC-13: ポジション一覧（AC27・AC17）と建値ずれ。合成の板（架空の値）。 */
@@ -282,5 +291,138 @@ describe('建値ずれ（AC-13）', () => {
     expect(rs?.mismatchYen).toBeCloseTo(-(rb?.mismatchYen as number), 9);
     expect(rs?.mismatchYen).toBeCloseTo(pnlAtZero(sell, 0), 6);
     expect(rb?.mismatchYen).toBeCloseTo(pnlAtZero(buy, 0), 6);
+  });
+});
+
+describe('1 行の簡易表示（#62）', () => {
+  /** 最小の PositionRow（値は架空） */
+  function row(over: Partial<PositionRow>): PositionRow {
+    return {
+      id: 1,
+      kind: 'option',
+      product: 'op_large',
+      productLabel: 'ラージ OP',
+      month: '2026-11',
+      optionType: 'P',
+      strike: 64000,
+      side: 'sell',
+      sideLabel: '売り',
+      qty: 1,
+      entry: 810,
+      iv: 0.2,
+      ivEdited: false,
+      anchorSource: 'entry',
+      greeks: null,
+      mismatchYen: 0,
+      mismatchNote: null,
+      marks: [],
+      markLabels: [],
+      warnings: [],
+      sqDate: '2026-11-13',
+      calendarUnconfirmed: false,
+      state: null,
+      error: null,
+      ...over,
+    };
+  }
+
+  it('OP: 売 P 64,000 ×1 @810（限月は文言に入れない）', () => {
+    expect(legSummary(row({}))).toBe('売 P 64,000 ×1 @810');
+    expect(legSummary(row({ side: 'buy', optionType: 'C', strike: 70000, qty: 1200 }))).toBe(
+      '買 C 70,000 ×1,200 @810',
+    );
+  });
+
+  it('先物: ミニ先物 2026-12 買 ×1 @67,880', () => {
+    const f = row({
+      kind: 'future',
+      product: 'fut_mini',
+      productLabel: 'ミニ先物',
+      month: '2026-12',
+      optionType: null,
+      strike: null,
+      side: 'buy',
+      entry: 67880,
+    });
+    expect(legSummary(f)).toBe('ミニ先物 2026-12 買 ×1 @67,880');
+  });
+
+  it('建値の小数は丸めて別の値に見せない（小数第 2 位まで、末尾 0 なし）', () => {
+    expect(fmtEntry(810.5)).toBe('810.5');
+    expect(fmtEntry(810.25)).toBe('810.25');
+    expect(fmtEntry(1234.125)).toBe('1,234.13');
+    expect(fmtEntry(67880)).toBe('67,880');
+    expect(fmtEntry(0)).toBe('0');
+    expect(legSummary(row({ entry: 810.5 }))).toBe('売 P 64,000 ×1 @810.5');
+  });
+
+  it('足の名前（aria-label 用）は売買を含めない', () => {
+    expect(legName(row({}))).toBe('2026-11 P 64,000');
+    expect(legName(row({ side: 'buy' }))).toBe('2026-11 P 64,000');
+    expect(
+      legName(
+        row({ kind: 'future', productLabel: 'ミニ先物', month: '2026-12', optionType: null }),
+      ),
+    ).toBe('ミニ先物 2026-12');
+  });
+
+  it('行の印: 短縮ラベル、警告は warn', () => {
+    expect(legBadges(row({}))).toEqual([]);
+    expect(legBadges(row({ marks: ['unstable_iv'] }))).toEqual([{ text: 'IV 不安定', warn: true }]);
+    expect(legBadges(row({ marks: ['no_board'], ivEdited: true }))).toEqual([
+      { text: '手入力', warn: false },
+      { text: 'IV 編集', warn: false },
+    ]);
+    expect(legBadges(row({ calendarUnconfirmed: true, error: 'x' }))).toEqual([
+      { text: '休業日未確定', warn: false },
+      { text: 'エラー', warn: true },
+    ]);
+  });
+
+  it('読み直した板に限月が無い足は行に「エラー」', () => {
+    const s = run({ type: 'addBoardLeg', expiry: m1.id, k: atm1, optionType: 'put', side: 'sell' });
+    const other = normalizeChain(fixture('latest'));
+    other.months.splice(0, 1);
+    const r = positionModel(other, s.legs, 'B', CALENDAR).rows[0];
+    expect(legBadges(r as PositionRow)).toContainEqual({ text: 'エラー', warn: true });
+  });
+
+  it('枚数 ±1: 1 未満・上限超えにしない（parseQty と同じ範囲）', () => {
+    expect(stepQty(1, -1)).toBeNull();
+    expect(stepQty(1, 1)).toBe(2);
+    expect(stepQty(2, -1)).toBe(1);
+    expect(stepQty(100_000, 1)).toBeNull();
+    expect(stepQty(99_999, 1)).toBe(100_000);
+  });
+
+  it('枚数 ±1 を reducer に渡すと足の枚数が変わる', () => {
+    let s = run({ type: 'addBoardLeg', expiry: m1.id, k: atm1, optionType: 'put', side: 'sell' });
+    const id = s.legs[0]?.id as number;
+    s = reduce(s, { type: 'editLeg', id, patch: { qty: stepQty(1, 1) as number } });
+    expect(s.legs[0]?.leg.qty).toBe(2);
+    expect(positionModel(chain, s.legs, 'B', CALENDAR).rows[0]?.qty).toBe(2);
+  });
+
+  it('売⇄買: 建値・IV 編集は変えず、Δ と建値ずれの符号が反転', () => {
+    expect(toggledSide('buy')).toBe('sell');
+    expect(toggledSide('sell')).toBe('buy');
+    const k = atm1 - 2000;
+    let s = run({ type: 'addBoardLeg', expiry: m1.id, k, optionType: 'put', side: 'sell' });
+    const id = s.legs[0]?.id as number;
+    s = reduce(s, { type: 'editLeg', id, patch: { iv: 0.3 } });
+    const before = positionModel(chain, s.legs, 'B', CALENDAR).rows[0] as PositionRow;
+    s = reduce(s, { type: 'editLeg', id, patch: { side: toggledSide(before.side) } });
+    const after = positionModel(chain, s.legs, 'B', CALENDAR).rows[0] as PositionRow;
+    expect(after.side).toBe('buy');
+    expect(after.sideLabel).toBe('買い');
+    expect(after.entry).toBe(before.entry);
+    expect(after.ivEdited).toBe(true);
+    expect(after.iv).toBeCloseTo(before.iv as number, 12);
+    // 売り put の Δ は正、買いでは負
+    expect(before.greeks?.deltaLarge).toBeGreaterThan(0);
+    expect(after.greeks?.deltaLarge).toBeLessThan(0);
+    expect(Math.abs(before.mismatchYen as number)).toBeGreaterThan(1);
+    expect(after.mismatchYen).toBeCloseTo(-(before.mismatchYen as number), 6);
+    expect(legSummary(after).startsWith('買 P')).toBe(true);
   });
 });

@@ -585,51 +585,121 @@ button.q.noquote {
   justify-content: space-between;
 }
 
-/* 1 ペインの幅に全列は収まらないので、どの幅でも足ごとのカードにする（見出しは data-label） */
-.positions-table thead {
-  display: none;
-}
-
-.positions-table,
-.positions-table tbody {
-  display: block;
+/* 足は 1 本 1 行（#62）。行を押すと詳細を開く。幅によらず同じ形 */
+.leg-list {
   font-size: 0.85em;
   font-variant-numeric: tabular-nums;
+  list-style: none;
+  margin: 0;
+  padding: 0;
 }
 
-.positions-table tr {
+.leg-row {
   border: 1px solid var(--line);
   border-radius: 4px;
-  display: grid;
-  gap: 2px 8px;
-  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
-  margin-bottom: 6px;
-  padding: 4px;
+  margin-bottom: 4px;
+  padding: 2px 4px;
 }
 
-.positions-table tr.warn-row {
+.leg-row.warn-row {
   border-color: var(--warn);
 }
 
-.positions-table td {
-  display: block;
-  padding: 0;
-  vertical-align: top;
+.leg-line {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 4px;
 }
 
-.positions-table td[data-label]::before {
+.leg-toggle {
+  background: none;
+  border: none;
+  color: inherit;
+  align-items: baseline;
+  column-gap: 6px;
+  cursor: pointer;
+  display: flex;
+  flex: 1 1 0;
+  flex-wrap: wrap;
+  font-size: 1em;
+  min-width: 0;
+  padding: 2px 0;
+  text-align: left;
+}
+
+.leg-toggle .leg-summary::before {
+  color: var(--muted);
+  content: "▸";
+  display: inline-block;
+  font-weight: normal;
+  width: 1em;
+}
+
+.leg-toggle[aria-expanded="true"] .leg-summary::before {
+  content: "▾";
+}
+
+.leg-summary {
+  font-weight: 600;
+  min-width: 0;
+}
+
+.leg-month {
+  white-space: nowrap;
+}
+
+/* 行の印（.tag の左の余白を消す。.tag より後に置く。レビュー S1: 子孫セレクタにしない） */
+.leg-badge {
+  margin-left: 0;
+}
+
+.leg-ops {
+  display: flex;
+  gap: 2px;
+  margin-left: auto;
+}
+
+.leg-ops button {
+  font-size: 1em;
+  min-width: 2em;
+  padding: 2px 6px;
+}
+
+/* タッチでは押せる面を広げる（レビュー N5。行の高さは 64px 以内に収める） */
+@media (pointer: coarse) {
+  .leg-ops button {
+    min-height: 36px;
+    min-width: 36px;
+  }
+}
+
+.leg-detail {
+  border-top: 1px solid var(--line);
+  display: grid;
+  gap: 2px 8px;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  margin-top: 2px;
+  padding: 4px 0 2px;
+}
+
+.leg-detail [data-label]::before {
   color: var(--muted);
   content: attr(data-label);
   display: block;
   font-size: 0.8em;
 }
 
-.positions-table input {
+.leg-detail .leg-marks {
+  grid-column: 1 / -1;
+}
+
+.leg-detail input {
   text-align: right;
   width: 6em;
 }
 
-.positions-table .note.block {
+.leg-detail .note.block {
   white-space: normal;
 }
 
