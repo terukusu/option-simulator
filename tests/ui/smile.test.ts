@@ -212,6 +212,22 @@ describe('スマイルからの足の追加（#11 AC-10・M3）', () => {
       expect(stepStrike(m, ks[0] as number, -5)).toBe(ks[0]);
       expect(stepStrike(m, ks[ks.length - 1] as number, 1)).toBe(ks[ks.length - 1]);
     });
+
+    it.each(AXES)('軸 %s: ATM が表示範囲の外なら、範囲の中央に最も近い点から始める', (axis) => {
+      const full = smileModel(month, 'B', axis);
+      const atm = month.atm.B.pick?.k as number;
+      // ATM より 2,000〜4,000 円下の点だけを表示する
+      const xs = full.strikeXs
+        .filter((s) => s.k <= atm - 2000 && s.k >= atm - 4000)
+        .map((s) => s.x);
+      const m = smileModel(month, 'B', axis, [Math.min(...xs), Math.max(...xs)]);
+      expect(m.strikeXs.some((s) => s.k === atm)).toBe(false);
+      const mid = (m.domain[0] + m.domain[1]) / 2;
+      const nearest = [...m.strikeXs].sort((a, b) => Math.abs(a.x - mid) - Math.abs(b.x - mid))[0];
+      expect(stepStrike(m, null, 1)).toBe(nearest?.k);
+      // 表示範囲の外の選択（ATM）からも中央の点へ
+      expect(stepStrike(m, atm, -1)).toBe(nearest?.k);
+    });
   });
 
   it('選択 → 売り = boardOptionLeg と同じ足（OTM 側・建値 bid）、買い = 建値 ask', () => {
