@@ -94,7 +94,7 @@ URL 共有（#72、2026-10-16）: M8 のうち **URL（圧縮 JSON）** を入�
 | AC9 テンプレート: 「2 限月、1σ 外のストラングル売り」が [テンプレート] → [ストラングル売り] → [限月・距離を確認して適用] の 3 操作で入る | U1 を手で通す |
 | AC10 スマホ: 幅 360px で板・グラフ・スライダーが横スクロールなしで使える | iOS Safari / Android Chrome |
 | AC11 セキュリティ: `allUsers` 公開なし（A 案なら IAP）、CSP 違反なし、ビルド後の `index.html` にインライン script / style 属性 / 外部 URL が無い | Terraform のテスト、CI の成果物検査、ブラウザのコンソール |
-| AC12 汎用: clone した人が README の手順で `file` アダプタと自分の GCP で動かせる。リポジトリに個人の値が無い | 別環境で実行。`grep` のテスト |
+| AC12 汎用: clone した人が README の手順で `file` アダプタと自分の GCP で動かせる。リポジトリに個人の値が無い | 別環境で実行。`.github/scripts/repo-values-check.sh`（CI の `check`） |
 | AC13 スケール（損益グラフ）: 横軸を初期範囲から板の最遠の行使価格まで連続に広げ縮められ、縦軸を自動 / 手動 / プレミアム基準で切り替えられる。ホイール・ドラッグ（PC）、ピンチ・ドラッグ（スマホ）、リセットが効く | ブラウザで操作。範囲計算は単体テスト |
 | AC14 スケール（スマイル・板）: スマイルの横軸を 3 種で切替、翼を拡大しても補間 / 外挿の印が区別できる。板は 322 行でもスクロールで収まり、「ATM へ戻る」「OTM 度 30% へ」「ask ≤ 50 円」が効く | ブラウザで操作（PC・スマホ） |
 | AC15 小さい損益: (a) 受取 3 万円の売り（30% OTM put 1 枚 @ 30 円）で縦軸「プレミアム基準 ±5 倍」にすると折れ点と BEP が見える、(b) 支払 5 千円の買い（5 円の put 1 枚）で指標が円単位で出て掛け金と倍率が見える | 固定の板で U4 を通す |
@@ -592,7 +592,7 @@ F の推定・補間・ATM の判定はブラウザ（`model/`）。`sq_date`・
 
 - 1 回 ≒ 152 MiB ≒ 0.0009 USD（東京のオンデマンド $6.25 / TiB）。BigQuery の結果キャッシュは立会中（テーブルが毎分更新）は効かない
 - 抑制: (1) サーバーのキャッシュキーは **`snapshot_at`**（実装は `(snapshot_at, finished_at)`。再処理で書き直されたら取り直す。`latest_runs` だけを TTL 10 秒で引き、変わったときだけ板を取る。使えない板も「不採用」として覚える）。(2) **single-flight**（同時リクエストを 1 本にまとめる。`latest_runs`・板・カレンダー）。(3) `MAX_BYTES_BILLED` **512 MiB**（既定かつ上限。超える値は起動時にエラー）。全ジョブにパラメータ化（`ScalarQueryParameter`）と `maximum_bytes_billed`。(4) ブラウザは自動ポーリングしない（手動の [最新] だけ）。(5) `?at=` は後段（7.1。#33 では 400）。(6) `Cache-Control: private, max-age=60`、`ETag` = `"<snapshot_at>-<finished_at>-<reason>-<カレンダーの版>"`（UTC の秒）、`If-None-Match` で 304、gzip
-- optionchan のプロジェクトは **1 日 32 GiB のクエリ量上限**（runbook「コスト」）。1 回 150 MB なら 1 日 200 回で上限。手動操作だけなら 1 日 20〜50 回。監視は `INFORMATION_SCHEMA.JOBS` の SA 別集計（D8）
+- optionchan のプロジェクトは **1 日 32 GiB のクエリ量上限**（runbook「コスト」）。1 回 150 MB なら 1 日 200 回で上限。手動操作だけなら 1 日 20〜50 回。監視は BigQuery の監査ログ（Cloud Logging の `jobChange`）を simulator の SA で絞った日ごとの集計（D8。手順は `api/README.md`「クエリ量の監視」。`INFORMATION_SCHEMA.JOBS_BY_PROJECT` は最小のスキャンが 512 MiB を超えるので使わない）
 - 後段の候補（費用をさらに下げる）: optionchan の ingest が最新板の JSON を GCS に書く / 最新だけの小さい表を持つ（R4）
 - 採らない案: 生 HTML（GCS）を直接解析（optionchan の内部形式に結合する）
 
@@ -1013,6 +1013,13 @@ optionchan-gcp の bootstrap / prod を写すだけでは足りないもの。
 | テスト | `terraform test`（`infra/bootstrap/tests/`・`infra/prod/tests/`、モックのプロバイダ。資格情報なしで CI の `check` job で回る）: bootstrap は公開の拒否、WIF の条件、apply SA の subject、データセットの付与の型と role。prod は IAP 有効・`ingress`・IAM の検査が有効、`run.invoker` が IAP のサービスエージェント 1 件だけ、イメージが digest か `src-<20hex>` のタグ参照だけ、8.3 の値（AC11） |
 
 ## 変更履歴
+
+### 2026-10-16 本番の受け入れ確認（#40）
+
+- 2.2 AC12: 検証方法を `.github/scripts/repo-values-check.sh`（CI の `check`）に。追跡しているファイルの形の検査（`run.app` のホスト名・許可リスト外のドメインのメール・ホームのパス・10 桁以上のプロジェクト番号・トークン / 鍵 / 署名の形）と、オーナー名・プロジェクト番号・プロジェクト ID の値の検査。出力はファイル名・行番号・検査名だけ。repository variables の値は公開リポジトリの Actions のログに伏せられずに出るので、`check` には vars を渡さず（オーナー名と secret の WIF プロバイダから取った番号をマスクして使う）、プロジェクト ID の値は既に job の env にある `terraform-plan` で検査する
+- 7.3: 監視の手段を BigQuery の監査ログ（`jobChange`）の SA 別・日ごとの集計に（`INFORMATION_SCHEMA.JOBS_BY_PROJECT` は最小のスキャンが 512 MiB を超えて読めない）。D8 の決定 (a) は変えない
+- 8.3: 初回デプロイの順序は最後の「確認」まで済み（閲覧者はサービス単位 user 1 件、bootstrap・prod の plan は差分なし。bootstrap の 2 回目の apply は追加の作業なし）
+- 受け入れの判定（読み取り。件数だけ）: AC11 の IAM と入口 = `allUsers` / `allAuthenticatedUsers` がサービス・IAP・プロジェクトで 0 件、`run.invoker` は IAP のサービスエージェント 1 件、IAP 有効・`ingress = all`、未認証の `/api/chain`・`/` は 302 → pass。AC12 の clone（`npm ci && npm run build`・イメージの検査・`file` の Flask で `/api/chain` 200）→ pass。7.3 の監視 = 直近の 3 日で 1 日の課金量の最大 0.75 GiB（上限の約 2%）、1 ジョブの最大 20 MiB、エラー 0 → pass。AC1 = サーバーの latency は 16 件すべて 3 秒超（中央値 約 9 秒、全件キャッシュ miss）で **未達**、改善は #95。AC2 は `api/README.md` の期待の表を 7.2 の規則と取り込みの止まる時間帯に合わせて直し（夜間の引け後は 45 分を過ぎると `closed`）、時間帯ごとの確認と AC11 の CSP 違反はオーナーのブラウザで確かめる
 
 ### 2026-10-16 取引カレンダーを API から（#39）
 

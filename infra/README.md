@@ -188,6 +188,8 @@ $TF -chdir=infra/bootstrap apply -input=false b.tfplan; rm -f infra/bootstrap/b.
 
 目安は create 1 件 / 閲覧者（`google_iap_web_cloud_run_service_iam_member.simulator_access[...]`）、他 0。アドレスにメールが入るので、要約は件数だけを記録する。`allUsers`・`allAuthenticatedUsers`・`domain:` は変数の検証で拒否される。閲覧者を外すときは一覧から消して同じ手順（delete 1）。
 
+確認は prod の「確認」の閲覧者の種類別の件数（と `allUsers` / `allAuthenticatedUsers` の 0 件）。
+
 ## prod（Cloud Run simulator）
 
 `infra/prod/simulator.tf`（#36）。イメージはリポジトリ直下の `Dockerfile`（API と画面の `dist/` を 1 つに）。
@@ -255,9 +257,18 @@ curl -sf -H "Authorization: Bearer $(gcloud auth print-access-token)" \
 # run.invoker は IAP のサービスエージェント 1 件だけ: [{"role":"roles/run.invoker","m":["serviceAccount:service-<num>@gcp-sa-iap.iam.gserviceaccount.com"]}]
 gcloud run services get-iam-policy simulator --region=$L --project="$P" --format=json \
   | jq -c '[.bindings[] | {role, m: [.members[] | sub("[0-9]+"; "<num>")]}]'
-# 未認証の呼び出しが IAP で止まる（302 / 401 / 403。200 でない）。URL は表示しない
+# 未認証の呼び出しが止まる（200 でない）。URL は表示しない。/api/chain と / は IAP の 302（ログインへ）。
+# /healthz は Cloud Run の予約パス（末尾が z）なので外からは 404（起動プローブはコンテナの中で届く）
 U=$(gcloud run services describe simulator --region=$L --project="$P" --format='value(status.url)')
-curl -s -o /dev/null -w '%{http_code}\n' "$U/healthz"
+for path in /healthz /api/chain /; do curl -s -o /dev/null -w '%{http_code}\n' "$U$path"; done
+# allUsers / allAuthenticatedUsers がサービス・IAP・プロジェクトの IAM のどれにも無い（0 0 0）
+PUB='[.bindings[]?.members[] | select(. == "allUsers" or . == "allAuthenticatedUsers")] | length'
+gcloud run services get-iam-policy simulator --region=$L --project="$P" --format=json | jq "$PUB"
+gcloud iap web get-iam-policy --resource-type=cloud-run --service=simulator --region=$L --project="$P" --format=json | jq "$PUB"
+gcloud projects get-iam-policy "$P" --format=json | jq "$PUB"
+# サービス単位の閲覧者（iap.httpsResourceAccessor）の種類別の件数。user: / group: だけで 1 件以上（例 {"user":1}）。メールは出さない
+gcloud iap web get-iam-policy --resource-type=cloud-run --service=simulator --region=$L --project="$P" --format=json \
+  | jq -c '[.bindings[]? | select(.role == "roles/iap.httpsResourceAccessor") | .members[] | split(":")[0]] | group_by(.) | map({key: .[0], value: length}) | from_entries'
 # デプロイ後 10 分の ERROR ログ 0 件
 gcloud logging read 'resource.type="cloud_run_revision" AND resource.labels.service_name="simulator" AND severity>=ERROR' \
   --project="$P" --freshness=10m --limit=20 --format='value(timestamp,severity,jsonPayload.message)' | wc -l
