@@ -3,7 +3,9 @@
  * 設計 docs/design.md 6.1・13.4。名前は JSX のテキスト / 属性で入れる（ここでは文字列として組み立てるだけ）。
  */
 
+import { type ShareMake, URL_MAX, URL_WARN } from '../share';
 import { MAX_TABS, sanitizeTabName, type TabSlot } from '../state';
+import { fmtNum } from './format';
 
 export interface TabView {
   id: number;
@@ -115,4 +117,53 @@ export function tabKeyTarget(ids: readonly number[], current: number, key: strin
     default:
       return null;
   }
+}
+
+// ---------------------------------------------------------------- URL 共有（#72）の文言
+
+/** [URL をコピー] の結果の 1 行（warn = 注意の色） */
+export interface ShareCopyMessage {
+  text: string;
+  warn: boolean;
+}
+
+const chars = (n: number) => `${fmtNum(n)} 字`;
+
+/** [URL をコピー] を押せない理由（押せるなら null）。足 0 本・このブラウザで作れない。 */
+export function shareCopyDisabled(legCount: number, supported: boolean): string | null {
+  if (legCount === 0) return '足が無い';
+  return supported ? null : SHARE_UNSUPPORTED_TEXT;
+}
+
+export const SHARE_UNSUPPORTED_TEXT =
+  'このブラウザでは URL を作れない（iOS 16.4 以上・最新のブラウザで使う）';
+export const SHARE_PREPARING_TEXT = 'URL を作っている…';
+export const SHARE_FALLBACK_TEXT = 'コピーできない。下の欄を選んでコピーする';
+
+/** URL を作れなかった・長すぎるときの文言（作れたなら null）。 */
+export function shareMakeError(make: ShareMake): string | null {
+  switch (make.kind) {
+    case 'ok':
+      return null;
+    case 'tooLong':
+      return `足が多すぎて URL にできない（${chars(make.length)}。上限 ${chars(URL_MAX)}）。保存一覧の書き出しを使う`;
+    case 'unsupported':
+      return SHARE_UNSUPPORTED_TEXT;
+    case 'failed':
+      return 'URL を作れなかった';
+  }
+}
+
+/** コピーしたとき（fallback = クリップボードに書けず欄に出した）の文言。長い URL は注意を添える。 */
+export function shareCopiedMessage(
+  make: Extract<ShareMake, { kind: 'ok' }>,
+  fallback: boolean,
+): ShareCopyMessage {
+  const head = fallback ? SHARE_FALLBACK_TEXT : `コピーした（${chars(make.length)}）`;
+  return make.long
+    ? {
+        text: `${head}。長い URL（${chars(URL_WARN)} 超）はアプリによっては途中で切れる。切れたら開くときに「読めなかった」と出る`,
+        warn: true,
+      }
+    : { text: head, warn: fallback };
 }

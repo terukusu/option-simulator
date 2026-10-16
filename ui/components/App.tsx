@@ -41,7 +41,16 @@ import {
   toSaved,
   WORKSPACE_KEY,
 } from '../persist';
-import { reduce } from '../state';
+import {
+  encodeShareUrl,
+  isShareHash,
+  readShareHash,
+  type SharedPosition,
+  shareOpenAction,
+  shareOpenMode,
+  shareSupported,
+} from '../share';
+import { MAX_TABS, reduce } from '../state';
 import { readKey, removeKey, writeKey } from '../storage';
 import { BOOK_FAIL_TEXT, bookListModel, exportDoneText, importDoneText } from '../view/bookList';
 import { headerModel, keptBoardNote } from '../view/header';
@@ -56,6 +65,8 @@ import {
   type PersistNoteKind,
   pushNote,
   saveFailedNote,
+  shareNote,
+  shareReplaceConfirmText,
 } from '../view/persistNote';
 import { pnlDomains, zoomViewport } from '../view/pnlChart';
 import { positionModel } from '../view/position';
@@ -320,6 +331,72 @@ export function App({ boot = NO_BOOT }: { boot?: Boot }) {
     [],
   );
 
+  // ---- URL 共有（#72）。開いたとき・フラグメントが変わったときに `#p=` を読む。扱いを決めた時点でフラグメントを消す
+  // （再読み込みで二重に開かない・壊れた知らせを繰り返さない。replaceState は hashchange を起こさない）
+  const [pendingShare, setPendingShare] = useState<SharedPosition | null>(null);
+  const shareSeq = useRef(0);
+  // URL から入れるのは足と名前だけ（受け手のシナリオ・手数料・先物の basis・表示の設定は変えない。URL は他人から来る入力）
+  const openShared = useCallback((shared: SharedPosition, mode: 'replace' | 'newTab') => {
+    dispatch(shareOpenAction(shared, mode));
+  }, []);
+  useEffect(() => {
+    const onHash = () => {
+      const hash = window.location.hash;
+      if (!isShareHash(hash)) return;
+      try {
+        window.history.replaceState(
+          window.history.state,
+          '',
+          window.location.pathname + window.location.search,
+        );
+      } catch {
+        // 消せなくても開く（再読み込みでもう一度開くだけ）
+      }
+      // 新しい URL を開いたら前の確認の行（上限のときの [置き換える]）は捨てる。壊れた URL でも残さない
+      // （残すと [置き換える] で前の URL のポジションが開き、どの URL の確認かが分からなくなる）
+      setPendingShare(null);
+      const id = ++shareSeq.current;
+      readShareHash(hash)
+        .catch(() => ({ kind: 'invalid' as const }))
+        .then((read) => {
+          if (id !== shareSeq.current) return;
+          if (read.kind !== 'ok') {
+            setNotes((ns) => pushNote(ns, shareNote(read)));
+            return;
+          }
+          const s = stateRef.current;
+          const mode = shareOpenMode(s.tabs.length, s.legs.length);
+          if (mode === 'full') {
+            // タブが上限: 作業中のタブを置き換えるかを知らせの行で確かめる（confirm() を使わない）
+            setNotes((ns) => dropNote(ns, 'shared'));
+            setPendingShare(read.shared);
+            return;
+          }
+          setPendingShare(null);
+          openShared(read.shared, mode);
+          setNotes((ns) => pushNote(ns, shareNote(read, mode)));
+        });
+    };
+    onHash();
+    window.addEventListener('hashchange', onHash);
+    return () => window.removeEventListener('hashchange', onHash);
+  }, [openShared]);
+  const confirmShare = useCallback(() => {
+    if (!pendingShare) return;
+    const s = stateRef.current;
+    // 確かめている間にタブが減った・作業中のタブが空になったら置き換えずに開く
+    const mode = shareOpenMode(s.tabs.length, s.legs.length) === 'newTab' ? 'newTab' : 'replace';
+    openShared(pendingShare, mode);
+    setPendingShare(null);
+    setNotes((ns) => pushNote(ns, shareNote({ kind: 'ok', shared: pendingShare }, mode)));
+  }, [pendingShare, openShared]);
+  const makeShareUrl = useCallback(() => {
+    const s = stateRef.current;
+    const name = s.tabs.find((t) => t.id === s.activeTab)?.name ?? '';
+    const { origin, pathname, search } = window.location;
+    return encodeShareUrl(toSaved(s, Date.now()), name, origin + pathname + search);
+  }, []);
+
   // 開いたら 1 回だけ読む（本番 = API、dev = 合成の latest）
   useEffect(() => {
     const first = initialSource(import.meta.env.DEV);
@@ -577,9 +654,31 @@ export function App({ boot = NO_BOOT }: { boot?: Boot }) {
     () => tabsModel(savedTabs, activeTab, curLegs.length),
     [savedTabs, activeTab, curLegs.length],
   );
+  // 作業中のタブの中身（URL に入るもの）が変わったら、⋯ メニューを開いている間だけ URL を作り直す（#72）。
+  // 帯（WorkTabs）には props で渡さず購読にする（スライダーの 1 刻みごとに帯の memo を外して描き直さない。
+  // メニューを閉じている間は購読者がいないので何もしない）
+  const shareListeners = useRef(new Set<() => void>());
+  useEffect(() => {
+    for (const f of shareListeners.current) f();
+  }, [curLegs, curScenario, feePerLot, futureBasis, savedTabs, activeTab]);
+  const subscribeShare = useCallback((f: () => void) => {
+    shareListeners.current.add(f);
+    return () => {
+      shareListeners.current.delete(f);
+    };
+  }, []);
   const tabsBar = useMemo(
-    () => <WorkTabs view={tabsView} dispatch={dispatch} onSaveToBook={openBook} />,
-    [tabsView, openBook],
+    () => (
+      <WorkTabs
+        view={tabsView}
+        dispatch={dispatch}
+        onSaveToBook={openBook}
+        makeShareUrl={makeShareUrl}
+        shareSupported={shareSupported()}
+        subscribeShare={subscribeShare}
+      />
+    ),
+    [tabsView, openBook, makeShareUrl, subscribeShare],
   );
   const bookCount =
     bookRead.kind === 'ok' ? bookRead.book.entries.length : bookRead.kind === 'empty' ? 0 : null;
@@ -601,8 +700,24 @@ export function App({ boot = NO_BOOT }: { boot?: Boot }) {
         {/* 板が無くても保存一覧を開ける（書き出し・削除・名前の変更・読み込み。[開く] は板を読んでから） */}
         <BookButton count={bookCount} onOpen={openBook} />
       </div>
-      {notes.length > 0 && (
+      {(notes.length > 0 || pendingShare) && (
         <div class="persist-notes">
+          {pendingShare && (
+            <p class="note warn share-confirm" role="alert">
+              {shareReplaceConfirmText(
+                MAX_TABS,
+                pendingShare.legs.length,
+                tabsView.active.name,
+                curLegs.length,
+              )}
+              <button type="button" class="danger" onClick={confirmShare}>
+                置き換える
+              </button>
+              <button type="button" onClick={() => setPendingShare(null)}>
+                やめる
+              </button>
+            </p>
+          )}
           {notes.map((n) => (
             <p key={n.kind} class={n.warn ? 'note warn' : 'note'} role="status">
               {n.text}

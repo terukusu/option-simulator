@@ -234,22 +234,25 @@ export type Action =
   | { type: 'setHedge'; patch: Partial<HedgeSettings> }
   /**
    * ポジ帳の項目を開く（#70）: 足・シナリオ・評価の設定（手数料・先物の basis）を置き換える。表示の設定は今のまま。
-   * 値は ui/persist.ts の検証を通ったもの
+   * 値は ui/persist.ts の検証を通ったもの。シナリオ・手数料・basis が null なら今のまま（URL 共有 #72 は足と名前だけ）
    */
   | {
       type: 'openPosition';
       legs: ReadonlyArray<Omit<UiLeg, 'id'>>;
-      scenario: Scenario;
-      feePerLot: number;
-      futureBasis: ModelSettings['futureBasis'];
+      scenario: Scenario | null;
+      feePerLot: number | null;
+      futureBasis: ModelSettings['futureBasis'] | null;
+      /** 開いたタブの名前（URL 共有 #72。renameTab と同じ規則: 正規化して空・他のタブと同じなら今の名前のまま） */
+      name?: string;
     }
-  /** 保存一覧の項目を新しいタブで開く（#71。上限なら何もしない。作業中のタブは残す） */
+  /** 保存一覧の項目・URL 共有を新しいタブで開く（#71・#72。上限なら何もしない。作業中のタブは残す） */
   | {
       type: 'openPositionInNewTab';
       legs: ReadonlyArray<Omit<UiLeg, 'id'>>;
-      scenario: Scenario;
-      feePerLot: number;
-      futureBasis: ModelSettings['futureBasis'];
+      scenario: Scenario | null;
+      feePerLot: number | null;
+      futureBasis: ModelSettings['futureBasis'] | null;
+      name?: string;
     }
   /** タブを足す（作業中のタブの右隣。empty = 足 0 本、copy = 作業中の足の写し）。上限なら何もしない */
   | { type: 'addTab'; mode: 'empty' | 'copy' }
@@ -385,6 +388,18 @@ function addTabWith(
   tabs.splice(at + 1, 0, slot);
   return { ...loadLegs(state, legs, scenario), tabs, activeTab: id, nextTabId: id + 1 };
 }
+
+/** タブの名前を変える（正規化して空・同じ・他のタブと同じ名前なら state のまま）。 */
+function renameTab(state: State, id: number, raw: string): State {
+  const name = sanitizeTabName(raw);
+  const cur = state.tabs.find((t) => t.id === id);
+  if (!cur || name === '' || name === cur.name) return state;
+  // 他のタブと同じ名前にはしない（読み取り readWorkspace は重複を別の文字に変えるので、ここで作らない）
+  if (state.tabs.some((t) => t.id !== id && t.name === name)) return state;
+  return { ...state, tabs: state.tabs.map((t) => (t.id === id ? { ...t, name } : t)) };
+}
+
+const renameActive = (state: State, raw: string): State => renameTab(state, state.activeTab, raw);
 
 export function reduce(state: State, action: Action): State {
   switch (action.type) {
@@ -543,9 +558,10 @@ export function reduce(state: State, action: Action): State {
           ? loadLegs(state, action.legs, action.scenario)
           : addTabWith(state, action.legs, action.scenario);
       if (next === null) return state;
+      const named = action.name === undefined ? next : renameActive(next, action.name);
       return {
-        ...next,
-        feePerLot: validFee(feePerLot) ? feePerLot : state.feePerLot,
+        ...named,
+        feePerLot: feePerLot !== null && validFee(feePerLot) ? feePerLot : state.feePerLot,
         futureBasis:
           futureBasis === 'fixed' || futureBasis === 'decay' ? futureBasis : state.futureBasis,
         pnlViewport: null,
@@ -571,17 +587,8 @@ export function reduce(state: State, action: Action): State {
       }
       return { ...s, tabs: s.tabs.filter((t) => t.id !== action.id) };
     }
-    case 'renameTab': {
-      const name = sanitizeTabName(action.name);
-      const cur = state.tabs.find((t) => t.id === action.id);
-      if (!cur || name === '' || name === cur.name) return state;
-      // 他のタブと同じ名前にはしない（読み取り readWorkspace は重複を別の文字に変えるので、ここで作らない）
-      if (state.tabs.some((t) => t.id !== action.id && t.name === name)) return state;
-      return {
-        ...state,
-        tabs: state.tabs.map((t) => (t.id === action.id ? { ...t, name } : t)),
-      };
-    }
+    case 'renameTab':
+      return renameTab(state, action.id, action.name);
     case 'setHedge':
       // 不正な値を含む更新は丸ごと無視する（部分的に反映しない）
       return validHedgePatch(action.patch, state.chain)

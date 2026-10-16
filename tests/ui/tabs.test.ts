@@ -5,6 +5,11 @@ import {
   closeConfirmText,
   openInNewTabError,
   renameError,
+  SHARE_FALLBACK_TEXT,
+  SHARE_UNSUPPORTED_TEXT,
+  shareCopiedMessage,
+  shareCopyDisabled,
+  shareMakeError,
   TAB_NAME_EMPTY_TEXT,
   TAB_NAME_TAKEN_TEXT,
   TABS_FULL_TEXT,
@@ -118,5 +123,41 @@ describe('openInNewTabError（保存一覧の [新しいタブで開く]）', ()
     expect(openInNewTabError(MAX_TABS + 1)).toBe(TABS_FULL_TEXT);
     expect(openInNewTabError(MAX_TABS - 1)).toBeNull();
     expect(openInNewTabError(1)).toBeNull();
+  });
+});
+
+/** #72: [URL をコピー] の文言（数だけ。URL の中身を入れない）。 */
+describe('URL をコピー', () => {
+  const ok = (length: number, long: boolean) =>
+    ({ kind: 'ok', url: `https://example.invalid/#p=1.${'A'.repeat(4)}`, length, long }) as const;
+
+  it('押せない理由: 足 0 本・このブラウザで作れない', () => {
+    expect(shareCopyDisabled(0, true)).toBe('足が無い');
+    expect(shareCopyDisabled(3, false)).toBe(SHARE_UNSUPPORTED_TEXT);
+    expect(shareCopyDisabled(3, true)).toBeNull();
+  });
+
+  it('コピーした（字数）。長い URL は注意を添える。欄に出したときは選んでコピーする旨', () => {
+    expect(shareCopiedMessage(ok(812, false), false)).toEqual({
+      text: 'コピーした（812 字）',
+      warn: false,
+    });
+    const long = shareCopiedMessage(ok(2345, true), false);
+    expect(long.warn).toBe(true);
+    expect(long.text).toMatch(/^コピーした（2,345 字）。長い URL（2,000 字 超）/);
+    expect(shareCopiedMessage(ok(812, false), true)).toEqual({
+      text: SHARE_FALLBACK_TEXT,
+      warn: true,
+    });
+    expect(long.text).not.toContain('#p=');
+  });
+
+  it('作れない理由: 長すぎる（字数と上限）・非対応・失敗。作れたら null', () => {
+    expect(shareMakeError({ kind: 'tooLong', length: 9123 })).toBe(
+      '足が多すぎて URL にできない（9,123 字。上限 8,000 字）。保存一覧の書き出しを使う',
+    );
+    expect(shareMakeError({ kind: 'unsupported' })).toBe(SHARE_UNSUPPORTED_TEXT);
+    expect(shareMakeError({ kind: 'failed' })).toBe('URL を作れなかった');
+    expect(shareMakeError(ok(800, false))).toBeNull();
   });
 });

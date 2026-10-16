@@ -989,6 +989,30 @@ button.q.noquote {
   color: var(--warn);
 }
 
+/* URL 共有（#72）: コピーの結果の 1 行と、コピーできないときの読み取り専用の欄（幅いっぱい。横スクロールさせない） */
+.work-tabs-menu .share-msg {
+  flex: 1 1 100%;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.work-tabs-menu .share-msg.warn {
+  color: var(--warn);
+}
+
+.work-tabs-menu input.share-url {
+  box-sizing: border-box;
+  flex: 1 1 100%;
+  min-width: 0;
+  width: 100%;
+}
+
+/* URL のポジションで作業中のタブを置き換えるかの確認（知らせの行の中。#72） */
+.share-confirm .danger {
+  border-color: var(--warn);
+  color: var(--warn);
+}
+
 /*
  * キーボードでフォーカスした要素をドックの下に隠さない（レビューの指摘。#61）。ページの上端からドックの高さ（タブの帯 +
  * 操作行 + 描画域 + 帯）より少し大きい範囲を「見えていない」扱いにする。PC はシミュレーターが別の列なので不要

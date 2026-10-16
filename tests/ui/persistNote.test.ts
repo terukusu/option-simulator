@@ -9,6 +9,8 @@ import {
   OTHER_TAB_NOTE,
   pushNote,
   saveFailedNote,
+  shareNote,
+  shareReplaceConfirmText,
 } from '../../ui/view/persistNote';
 
 const ui = {
@@ -148,5 +150,63 @@ describe('persistNote', () => {
     expect(dropNote(ns, 'saveFailed').map((n) => n.kind)).toEqual(['otherTab']);
     const none = pushNote([], OTHER_TAB_NOTE);
     expect(dropNote(none, 'saveFailed')).toBe(none);
+  });
+});
+
+/** #72: URL 共有を開いた・読めなかった知らせ（固定の文 + 数・時刻だけ。URL の名前を入れない）。 */
+describe('shareNote', () => {
+  const SAVED = Date.parse('2026-11-02T12:47:00Z'); // JST 21:47
+  const SNAP = Date.parse('2026-11-02T21:31:00+09:00');
+  const pos = position(3, SNAP);
+  const shared = {
+    legs: pos.legs,
+    scenario: ZERO_SCENARIO,
+    feePerLot: 0,
+    futureBasis: 'fixed' as const,
+    name: '<b>偽の知らせ</b>',
+    savedAt: SAVED,
+    boardSnapshotAt: SNAP,
+  };
+
+  it('開いた: 開いた先・足の本数・共有の時刻・板の時刻。名前は入れない', () => {
+    const n = shareNote({ kind: 'ok', shared }, 'newTab');
+    expect(n).toEqual({
+      kind: 'shared',
+      text: 'URL のポジションを新しいタブで開いた（足 3 本。共有 2026-11-02 21:47、そのときの板 2026-11-02 21:31）。建値は共有時のまま。シナリオ・手数料・先物の basis は今のまま（URL の値は使わない）',
+      warn: false,
+    });
+    expect(shareNote({ kind: 'ok', shared }, 'replace')?.text).toMatch(
+      /^URL のポジションを作業中のタブで開いた/,
+    );
+    const bare = shareNote({
+      kind: 'ok',
+      shared: { ...shared, savedAt: null, boardSnapshotAt: null },
+    });
+    expect(bare?.text).toMatch(/^URL のポジションを作業中のタブで開いた（足 3 本）。/);
+    expect(n?.text).not.toContain('偽');
+  });
+
+  it('読めない理由ごとの注意（作業は変えていない）。#p= でなければ出さない', () => {
+    expect(shareNote({ kind: 'none' })).toBeNull();
+    for (const kind of [
+      'invalid',
+      'tooLong',
+      'tooLarge',
+      'newer',
+      'noLegs',
+      'unsupported',
+    ] as const) {
+      const n = shareNote({ kind });
+      expect(n?.kind).toBe('shared');
+      expect(n?.warn).toBe(true);
+    }
+    expect(shareNote({ kind: 'invalid' })?.text).toContain('壊れているか途中で切れている');
+    expect(shareNote({ kind: 'newer' })?.text).toContain('新しい版で作った URL');
+  });
+
+  it('上限のときの確認の文言（受け手のタブの名前・足の本数）', () => {
+    expect(shareReplaceConfirmText(6, 3, 'C', 2)).toBe(
+      'タブは 6 個まで。URL のポジション（足 3 本）を開くと作業中のタブ C（足 2 本）が置き換わる（保存一覧に無い内容は消える）',
+    );
   });
 });
