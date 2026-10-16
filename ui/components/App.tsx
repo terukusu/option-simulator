@@ -147,7 +147,7 @@ export function App() {
   return (
     <div class="app">
       <div class="topbar">
-        <h1>option-simulator</h1>
+        <h1>OP Simulator</h1>
         <Loader
           fixtures={DEV_FIXTURES}
           sourceLabel={sourceLabel}
