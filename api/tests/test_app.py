@@ -3,11 +3,13 @@
 import gzip
 import json
 import re
+import threading
 from datetime import timedelta
 
 import pytest
 from support import Clock, FakeRunner, World, jst, load_fixture, synth_board
 
+from simulator_api import bq
 from simulator_api import settings as st
 from simulator_api.app import SECURITY_HEADERS, create_app
 
@@ -126,6 +128,7 @@ def test_chain_logs_served(capsys):
     recs = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
     served = [r for r in recs if r["event"] == "chain_served"][-1]
     assert served["reason"] == "latest" and served["board_reads"] == 1 and served["snapshot_at"]
+    assert isinstance(served["elapsed_ms"], int) and served["elapsed_ms"] >= 0
 
 
 def test_calendar_endpoint():
@@ -226,3 +229,42 @@ def test_clock_is_used_for_freshness():
     client, _, clock = make()
     clock.advance(timedelta(hours=3).total_seconds())
     assert client.get("/api/chain").get_json()["reason"] == "closed"
+
+
+# ---- 起動時の BigQuery の準備（#95） ----
+
+def test_warm_does_not_block_startup(monkeypatch):
+    # 準備が終わらないままでも create_app が返り、/healthz が 200
+    release, entered = threading.Event(), threading.Event()
+
+    def stuck(self):
+        entered.set()
+        release.wait(5)
+        raise RuntimeError("not ready")
+
+    threads = []
+    start_warm = bq.BigQueryRunner.start_warm
+    monkeypatch.setattr(bq.BigQueryRunner, "_new_client", stuck)
+    monkeypatch.setattr(bq.BigQueryRunner, "start_warm", lambda self: threads.append(start_warm(self)))
+    try:
+        app = create_app(cfg=CFG)
+        assert entered.wait(5)  # 準備はバックグラウンドで始まっている
+        res = app.test_client().get("/healthz")
+        assert res.status_code == 200 and res.data == b"ok\n"
+        assert len(threads) == 1 and threads[0].is_alive()
+    finally:
+        release.set()
+        for t in threads:
+            t.join(5)
+
+
+def test_warm_only_for_default_runner(monkeypatch, tmp_path):
+    started = []
+    monkeypatch.setattr(bq.BigQueryRunner, "start_warm", lambda self: started.append(self))
+    make()  # runner を渡す（テスト）
+    f = tmp_path / "chain.json"
+    f.write_text(json.dumps(load_fixture("night_early")), encoding="utf-8")
+    create_app(cfg=st.Settings(data_source="file", chain_file=f))
+    assert started == []
+    create_app(cfg=CFG)
+    assert len(started) == 1

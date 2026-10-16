@@ -1,6 +1,9 @@
-"""BigQuery の実行（AC-4 の maximum_bytes_billed、AC-5 のパラメータ化）。クライアントは偽物。"""
+"""BigQuery の実行（AC-4 の maximum_bytes_billed、AC-5 のパラメータ化、#95 の query_and_wait・起動時の準備）。
+クライアントは偽物。"""
 
 import json
+import threading
+import time
 from datetime import UTC, date, datetime, timedelta
 
 import pytest
@@ -12,18 +15,16 @@ from simulator_api.service import ChainService
 CFG = st.Settings(project="example-project", dataset="example_dataset", location="asia-northeast1")
 
 
-class FakeJob:
-    total_bytes_billed = 10485760
+class FakeRows:
+    """query_and_wait の戻り値（RowIterator）の偽物"""
+
     total_bytes_processed = 1234
-    cache_hit = False
 
     def __init__(self, rows):
         self.rows = rows
-        self.timeout = None
 
-    def result(self, timeout=None):
-        self.timeout = timeout
-        return [FakeRow(r) for r in self.rows]
+    def __iter__(self):
+        return iter([FakeRow(r) for r in self.rows])
 
 
 class FakeRow:
@@ -35,13 +36,17 @@ class FakeRow:
 
 
 class FakeClient:
+    """query（jobs.insert + result）は持たない（旧経路を使ったら AttributeError）"""
+
     def __init__(self, rows=()):
         self.queries = []
         self.rows = list(rows)
 
-    def query(self, sql, job_config=None, location=None):
-        self.queries.append((sql, job_config, location))
-        return FakeJob(self.rows)
+    def query_and_wait(self, sql, *, job_config=None, location=None, wait_timeout=None, api_timeout=None):
+        q = {"sql": sql, "job_config": job_config, "location": location}
+        q.update(wait_timeout=wait_timeout, api_timeout=api_timeout)
+        self.queries.append(q)
+        return FakeRows(self.rows)
 
 
 def test_all_sql_loaded_with_identifiers_only():
@@ -72,8 +77,10 @@ def test_job_config_has_limits_and_parameters(capsys):
     end = datetime(2026, 10, 13, 12, 46, 8, tzinfo=UTC)
     rows = runner("latest_runs", {"start_at": start, "end_at": end})
     assert rows == [{"snapshot_at": datetime(2026, 10, 13, 12, 31, tzinfo=UTC)}]
-    sql, cfg, location = client.queries[0]
-    assert location == "asia-northeast1"
+    q = client.queries[0]
+    sql, cfg = q["sql"], q["job_config"]
+    assert q["location"] == "asia-northeast1"
+    assert q["wait_timeout"] == st.JOB_TIMEOUT_SECONDS == 20
     assert cfg.maximum_bytes_billed == 536870912
     assert cfg.use_legacy_sql is False
     assert int(cfg.job_timeout_ms) == st.JOB_TIMEOUT_SECONDS * 1000
@@ -85,7 +92,9 @@ def test_job_config_has_limits_and_parameters(capsys):
     assert "@start_at" in sql and "@end_at" in sql
     rec = json.loads(capsys.readouterr().out.splitlines()[-1])
     assert rec["event"] == "bq_job" and rec["name"] == "latest_runs"
-    assert rec["total_bytes_billed"] == 10485760 and rec["total_bytes_processed"] == 1234
+    assert rec["total_bytes_processed"] == 1234 and rec["rows"] == 1 and isinstance(rec["elapsed_ms"], int)
+    # query_and_wait の結果は課金量・キャッシュの有無を持たない（課金量の監視は監査ログ）
+    assert "total_bytes_billed" not in rec and "cache_hit" not in rec
     assert "sql" not in rec and "2026" not in json.dumps(rec)
 
 
@@ -97,7 +106,8 @@ def test_every_job_has_maximum_bytes_billed():
     for name in contract.QUERY_NAMES:
         runner(name, {} if name == "trading_calendar" else {"start_at": t, "end_at": t + timedelta(seconds=1)})
     assert len(client.queries) == len(contract.QUERY_NAMES)
-    assert all(c.maximum_bytes_billed == 1048576 for _, c, _ in client.queries)
+    assert all(q["job_config"].maximum_bytes_billed == 1048576 for q in client.queries)
+    assert all(q["wait_timeout"] == st.JOB_TIMEOUT_SECONDS for q in client.queries)
 
 
 def test_param_types():
@@ -122,3 +132,101 @@ def test_service_passes_only_timestamp_parameters():
         for v in params.values():
             assert isinstance(v, datetime) and v.tzinfo is not None
             bq.param_type(v)
+
+
+def test_client_is_created_once_under_concurrency(monkeypatch):
+    created = []
+
+    def new_client(self):
+        time.sleep(0.05)  # 生成中に他のスレッドが来るように
+        created.append(1)
+        return FakeClient()
+
+    monkeypatch.setattr(bq.BigQueryRunner, "_new_client", new_client)
+    runner = bq.BigQueryRunner(CFG)
+    barrier = threading.Barrier(8)
+    got = []
+
+    def work():
+        barrier.wait()
+        got.append(runner.client)
+
+    threads = [threading.Thread(target=work) for _ in range(8)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(10)
+    assert len(created) == 1
+    assert len(got) == 8 and all(c is got[0] for c in got)
+
+
+def test_warm_does_not_run_jobs(monkeypatch, capsys):
+    fake = FakeClient()
+    monkeypatch.setattr(bq.BigQueryRunner, "_new_client", lambda self: fake)
+    runner = bq.BigQueryRunner(CFG)
+    thread = runner.start_warm()
+    assert thread.daemon
+    thread.join(10)
+    assert runner._client is fake and fake.queries == []
+    recs = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
+    assert [r["event"] for r in recs] == ["bq_warm"]
+    assert recs[0]["severity"] == "INFO" and isinstance(recs[0]["elapsed_ms"], int)
+
+
+def test_warm_failure_is_logged_and_retried(monkeypatch, capsys):
+    def broken(self):
+        raise RuntimeError("secret detail")
+
+    monkeypatch.setattr(bq.BigQueryRunner, "_new_client", broken)
+    runner = bq.BigQueryRunner(CFG)
+    runner.warm()  # 例外を外に出さない
+    out = capsys.readouterr().out
+    recs = [json.loads(line) for line in out.splitlines()]
+    assert [r["event"] for r in recs] == ["bq_warm_failed"]
+    assert recs[0]["severity"] == "WARNING" and recs[0]["error_type"] == "RuntimeError"
+    assert "secret detail" not in out
+    assert runner._client is None
+    # 最初の要求で作り直す
+    fake = FakeClient()
+    monkeypatch.setattr(bq.BigQueryRunner, "_new_client", lambda self: fake)
+    runner("trading_calendar", {})
+    assert len(fake.queries) == 1
+
+
+def test_concurrent_calls_fit_connection_pool():
+    # 同時に走る呼び出しは requests の接続プール（既定 10）以内（超えると urllib3 が "Connection pool is full"）
+    from requests.adapters import DEFAULT_POOLSIZE
+
+    assert st.BQ_CONCURRENCY == DEFAULT_POOLSIZE
+
+    class SlowClient(FakeClient):
+        def __init__(self):
+            super().__init__()
+            self.lock = threading.Lock()
+            self.running = self.peak = 0
+            self.release = threading.Event()
+
+        def query_and_wait(self, sql, **kw):
+            with self.lock:
+                self.running += 1
+                self.peak = max(self.peak, self.running)
+            self.release.wait(5)
+            with self.lock:
+                self.running -= 1
+            return super().query_and_wait(sql, **kw)
+
+    client = SlowClient()
+    runner = bq.BigQueryRunner(CFG, client=client)
+    n = st.BQ_CONCURRENCY + 2  # 要求のスレッド 8 + 候補内の並列 4
+    threads = [threading.Thread(target=runner, args=("trading_calendar", {})) for _ in range(n)]
+    for t in threads:
+        t.start()
+    deadline = time.monotonic() + 5
+    while client.peak < st.BQ_CONCURRENCY and time.monotonic() < deadline:
+        time.sleep(0.01)
+    time.sleep(0.1)
+    assert client.peak == st.BQ_CONCURRENCY
+    client.release.set()
+    for t in threads:
+        t.join(10)
+    assert len(client.queries) == n
