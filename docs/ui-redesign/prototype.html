@@ -1,0 +1,1682 @@
+<!doctype html>
+<html lang="ja" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>OP Simulator — UI 再設計 試作品</title>
+<meta name="description" content="日経225オプションの戦略検討ツールの UI 再設計の試作品。値はすべて架空。">
+<style>
+/* ===== tokens ===== */
+:root {
+  color-scheme: dark;
+  --bg: #0e1116;
+  --s1: #151921;
+  --s2: #1b2029;
+  --s3: #232a36;
+  --s4: #2b3340;
+  --line: #262d3a;
+  --line-2: #3a4455;
+  --ink: #e6e9ef;
+  --ink-2: #a3acbb;
+  --ink-3: #6b7484;
+  --accent: #3987e5;
+  --accent-ink: #9cc4f5;
+  --accent-fill: rgba(57, 135, 229, 0.16);
+  --handle: #d95926;
+  --handle-fill: rgba(217, 89, 38, 0.22);
+  --expiry: #e6e9ef;
+  --today: #8b94a5;
+  --pin1: #199e70;
+  --pin2: #9085e9;
+  --pin3: #d55181;
+  --gain: #2fb483;
+  --loss: #ef6b6b;
+  --warn: #d9962a;
+  --gain-fill: rgba(47, 180, 131, 0.14);
+  --loss-fill: rgba(239, 107, 107, 0.16);
+  --bid: #55c796;
+  --ask: #ef8585;
+  --shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
+  --font: "Inter", "Hiragino Sans", "Noto Sans JP", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+  --r: 10px;
+  --r-sm: 6px;
+  --top-h: 48px;
+  --dock-h: 56px;
+}
+:root[data-theme="light"] {
+  color-scheme: light;
+  --bg: #eef0f3;
+  --s1: #ffffff;
+  --s2: #f6f7f9;
+  --s3: #eceef2;
+  --s4: #e1e4ea;
+  --line: #dde1e7;
+  --line-2: #c4cad4;
+  --ink: #12161c;
+  --ink-2: #4f5867;
+  --ink-3: #8b94a3;
+  --accent: #2a78d6;
+  --accent-ink: #1c5cab;
+  --accent-fill: rgba(42, 120, 214, 0.14);
+  --handle: #e05a1f;
+  --handle-fill: rgba(235, 104, 52, 0.2);
+  --expiry: #12161c;
+  --today: #6b7380;
+  --pin1: #1baf7a;
+  --pin2: #6250d6;
+  --pin3: #d8578a;
+  --gain: #0f8a5c;
+  --loss: #d13f3f;
+  --warn: #a86b00;
+  --gain-fill: rgba(27, 175, 122, 0.14);
+  --loss-fill: rgba(227, 73, 72, 0.14);
+  --bid: #0f8a5c;
+  --ask: #d13f3f;
+  --shadow: 0 12px 40px rgba(20, 30, 50, 0.18);
+}
+
+/* ===== base ===== */
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; }
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font);
+  font-size: 14px;
+  line-height: 1.35;
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden;
+  font-variant-numeric: tabular-nums;
+  -webkit-tap-highlight-color: transparent;
+}
+button, input, select { font: inherit; color: inherit; }
+button { cursor: pointer; }
+.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.mono { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+.muted { color: var(--ink-2); }
+.faint { color: var(--ink-3); }
+.gain { color: var(--gain); }
+.loss { color: var(--loss); }
+.warn { color: var(--warn); }
+.nowrap { white-space: nowrap; }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+[hidden] { display: none !important; }
+
+/* ===== controls ===== */
+.btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  height: 32px; padding: 0 12px;
+  border: 1px solid var(--line-2); border-radius: var(--r-sm);
+  background: var(--s2); color: var(--ink);
+  white-space: nowrap; user-select: none;
+}
+.btn:hover { background: var(--s3); }
+.btn:active { transform: translateY(1px); }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+.btn.ghost { background: transparent; border-color: transparent; color: var(--ink-2); }
+.btn.ghost:hover { background: var(--s3); color: var(--ink); }
+.btn.icon { width: 32px; padding: 0; justify-content: center; }
+.btn.sm { height: 26px; padding: 0 8px; font-size: 12px; }
+.btn:disabled { opacity: 0.4; cursor: default; }
+
+.seg {
+  display: inline-flex; background: var(--s3); border-radius: var(--r-sm); padding: 2px; gap: 2px;
+  white-space: nowrap; flex: 0 0 auto;
+}
+.seg > button {
+  border: 0; background: transparent; color: var(--ink-2);
+  height: 26px; padding: 0 10px; border-radius: 5px; font-size: 12.5px; white-space: nowrap;
+}
+.seg > button[aria-pressed="true"], .seg > button[aria-selected="true"] { background: var(--s1); color: var(--ink); box-shadow: 0 1px 2px rgba(0,0,0,.25); }
+
+.chip {
+  display: inline-flex; align-items: center; gap: 4px;
+  height: 28px; padding: 0 10px; border-radius: 999px;
+  border: 1px solid var(--line-2); background: transparent; color: var(--ink-2);
+  font-size: 12.5px; white-space: nowrap; flex: 0 0 auto;
+}
+.chip:hover { color: var(--ink); background: var(--s3); }
+.chip[aria-pressed="true"] { background: var(--accent-fill); border-color: var(--accent); color: var(--accent-ink); }
+.chip.warnchip[aria-pressed="true"] { background: rgba(217,150,42,.15); border-color: var(--warn); color: var(--warn); }
+.chiprow { display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; padding: 2px 0; }
+.chiprow::-webkit-scrollbar { display: none; }
+
+.stepper {
+  display: inline-grid; grid-template-columns: 28px 1fr 28px; align-items: center;
+  height: 36px; border: 1px solid var(--line-2); border-radius: var(--r-sm); background: var(--s2);
+  min-width: 0; user-select: none; touch-action: none;
+}
+.stepper > button { border: 0; background: transparent; height: 100%; color: var(--ink-2); font-size: 16px; }
+.stepper > button:hover { color: var(--ink); background: var(--s3); }
+.stepper > .val { text-align: center; cursor: ew-resize; display: flex; flex-direction: column; line-height: 1.05; padding: 0 4px; min-width: 0; }
+.stepper > .val b { font-weight: 600; font-size: 14px; white-space: nowrap; }
+.stepper > .val small { font-size: 10px; color: var(--ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.stepper.hot > .val b { color: var(--accent-ink); }
+
+.field { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.field > label { font-size: 11px; color: var(--ink-3); white-space: nowrap; }
+.input {
+  height: 32px; padding: 0 8px; border: 1px solid var(--line-2); border-radius: var(--r-sm);
+  background: var(--s1); color: var(--ink); min-width: 0; width: 100%;
+}
+.input:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+
+.tag {
+  display: inline-block; font-size: 10.5px; line-height: 16px; padding: 0 6px; border-radius: 4px;
+  background: var(--s3); color: var(--ink-2); white-space: nowrap;
+}
+.tag.warn { background: rgba(217,150,42,.15); color: var(--warn); }
+.tag.ok { background: var(--gain-fill); color: var(--gain); }
+.tag.bad { background: var(--loss-fill); color: var(--loss); }
+.dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--gain); }
+.dot.warn { background: var(--warn); }
+
+.kbd {
+  font-family: var(--mono); font-size: 10.5px; color: var(--ink-3);
+  border: 1px solid var(--line-2); border-radius: 4px; padding: 0 4px; line-height: 16px;
+}
+
+/* ===== top bar ===== */
+.top {
+  height: var(--top-h); display: flex; align-items: center; gap: 10px;
+  padding: 0 12px; border-bottom: 1px solid var(--line); background: var(--s1);
+}
+.top .brand { font-weight: 700; letter-spacing: .02em; white-space: nowrap; }
+.top .brand small { color: var(--ink-3); font-weight: 500; margin-left: 4px; }
+.boxtabs { display: flex; gap: 4px; align-items: center; flex: 0 1 auto; min-width: 0; overflow: hidden; }
+.boxtab {
+  display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 10px;
+  border-radius: var(--r-sm); border: 1px solid transparent; background: transparent; color: var(--ink-2);
+  max-width: 9em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.boxtab[aria-selected="true"] { background: var(--s3); color: var(--ink); border-color: var(--line-2); }
+.boxtab .n { font-size: 11px; color: var(--ink-3); background: var(--s4); border-radius: 999px; padding: 0 6px; line-height: 16px; }
+.boxtab[aria-selected="true"] .n { color: var(--ink-2); }
+.market-pill {
+  margin-left: auto; display: inline-flex; align-items: center; gap: 8px;
+  height: 30px; padding: 0 10px; border-radius: 999px; background: var(--s2); border: 1px solid var(--line);
+  color: var(--ink-2); font-size: 12.5px; white-space: nowrap; min-width: 0; overflow: hidden;
+}
+.market-pill b { color: var(--ink); font-weight: 600; }
+.market-pill .ellip { overflow: hidden; text-overflow: ellipsis; }
+
+/* ===== layout ===== */
+.layout {
+  height: calc(100dvh - var(--top-h));
+  display: grid;
+  min-height: 0;
+}
+section.panel { min-height: 0; min-width: 0; display: flex; flex-direction: column; }
+.panel-head {
+  display: flex; align-items: center; gap: 8px; height: 40px; padding: 0 12px;
+  border-bottom: 1px solid var(--line); flex: 0 0 auto;
+}
+.panel-head h2 { font-size: 13px; font-weight: 600; margin: 0; white-space: nowrap; }
+.panel-head .sub { color: var(--ink-3); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.panel-head .spacer { flex: 1; }
+.panel-body { flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; }
+
+/* --- stage --- */
+.stage { background: var(--s1); position: relative; display: flex; flex-direction: column; min-height: 0; container-type: inline-size; }
+.stage-head { display: flex; align-items: center; gap: 8px; padding: 6px 12px 0; flex: 0 0 auto; min-width: 0; }
+.legend { display: flex; gap: 10px; font-size: 12px; color: var(--ink-2); white-space: nowrap; overflow: hidden; }
+.legend span { display: inline-flex; align-items: center; gap: 5px; }
+.legend i { display: inline-block; width: 16px; height: 0; border-top: 2px solid; }
+.legend i.exp { border-color: var(--expiry); }
+.legend i.sc { border-color: var(--accent); }
+.legend i.td { border-color: var(--today); border-top-style: dashed; }
+.legend i.p1 { border-color: var(--pin1); border-top-style: dashed; }
+.legend i.p2 { border-color: var(--pin2); border-top-style: dotted; }
+.legend i.p3 { border-color: var(--pin3); border-top-style: dashed; }
+.legend i.heat { width: 40px; height: 8px; border: 0; border-radius: 2px; background: linear-gradient(90deg, var(--loss), var(--s1), var(--gain)); }
+.stage-tools { margin-left: auto; display: flex; gap: 4px; align-items: center; flex: 0 0 auto; }
+
+.stage-body { flex: 1; min-height: 120px; display: grid; grid-template-columns: 1fr 34px; position: relative; }
+.chart { position: relative; min-width: 0; min-height: 0; touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; outline: none; }
+.chart:focus-visible { box-shadow: inset 0 0 0 2px var(--accent); border-radius: 6px; }
+.chart svg, .chart canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.chart.grabbing { cursor: grabbing; }
+.chart.hover-handle { cursor: ew-resize; }
+.chart .ax text { fill: var(--ink-3); font-size: 10.5px; font-family: var(--mono); }
+.chart .grid line { stroke: var(--line); stroke-width: 1; }
+.chart .zero { stroke: var(--line-2); stroke-width: 1; }
+.chart .l-exp { fill: none; stroke: var(--expiry); stroke-width: 2; stroke-linejoin: round; }
+.chart .l-sc { fill: none; stroke: var(--accent); stroke-width: 2.25; }
+.chart .l-td { fill: none; stroke: var(--today); stroke-width: 1.5; stroke-dasharray: 5 4; }
+.chart .l-pin { fill: none; stroke-width: 1.75; }
+.chart .fill-gain { fill: var(--gain-fill); }
+.chart .fill-loss { fill: var(--loss-fill); }
+.chart .vline { stroke: var(--handle); stroke-width: 1.25; stroke-dasharray: 3 3; }
+.chart .x0 { stroke: var(--ink-3); stroke-width: 1; stroke-dasharray: 2 3; }
+.chart .atm2 { stroke: var(--pin2); stroke-width: 1; stroke-dasharray: 2 3; }
+.chart .handle { fill: var(--handle); stroke: var(--s1); stroke-width: 2; }
+.chart .handle-ring { fill: none; stroke: var(--handle); stroke-width: 1.25; opacity: .55; }
+.chart .grip { fill: var(--handle); }
+.chart .xpt circle { stroke: var(--s1); stroke-width: 1.5; }
+.chart .xpt text { font-size: 11px; font-family: var(--mono); font-weight: 600; paint-order: stroke; stroke: var(--s1); stroke-width: 3px; stroke-linejoin: round; }
+.chart .xpt .exp { fill: var(--expiry); }
+.chart .xpt .sc { fill: var(--accent); }
+.chart .xpt .td { fill: var(--today); }
+.chart .bep { fill: var(--s1); stroke: var(--expiry); stroke-width: 1.5; }
+.chart .legmark { fill: var(--ink-2); }
+.chart .legmark.sell { fill: var(--s1); stroke: var(--ink-2); stroke-width: 1.5; }
+.chart .legmark.sel { fill: var(--handle); stroke: var(--handle); }
+.chart .legtxt { fill: var(--ink-3); font-size: 10px; font-family: var(--mono); }
+.chart .pinlbl { font-size: 11px; font-family: var(--mono); font-weight: 600; paint-order: stroke; stroke: var(--s1); stroke-width: 3px; }
+.chart .cross { stroke: var(--ink); stroke-width: 1; opacity: .8; }
+.chart .empty { fill: var(--ink-3); font-size: 13px; }
+
+.ivrail { position: relative; border-left: 1px solid var(--line); touch-action: none; user-select: none; display: flex; flex-direction: column; align-items: center; }
+.ivrail .track { position: absolute; left: 50%; top: 22px; bottom: 22px; width: 2px; background: var(--line-2); transform: translateX(-50%); border-radius: 2px; }
+.ivrail .zero { position: absolute; left: 8px; right: 8px; height: 1px; background: var(--ink-3); }
+.ivrail .knob { position: absolute; left: 50%; width: 20px; height: 20px; border-radius: 50%; background: var(--s1); border: 2px solid var(--accent); transform: translate(-50%, -50%); cursor: ns-resize; }
+.ivrail .knob::after { content: ""; position: absolute; inset: -10px; }
+.ivrail .lbl { position: absolute; left: 0; right: 0; text-align: center; font-size: 10px; color: var(--ink-3); font-family: var(--mono); }
+.ivrail .lbl.top { top: 4px; } .ivrail .lbl.bot { bottom: 4px; }
+.ivrail .cur { position: absolute; right: 36px; transform: translateY(-50%); font-size: 11px; font-family: var(--mono); background: var(--s3); border-radius: 4px; padding: 1px 5px; color: var(--accent-ink); white-space: nowrap; pointer-events: none; }
+.ivrail.hot .knob { background: var(--accent); }
+
+/* time rail */
+.timerail { height: 44px; position: relative; margin: 0 12px; touch-action: none; user-select: none; flex: 0 0 auto; }
+.timerail .track { position: absolute; left: 0; right: 0; top: 14px; height: 6px; border-radius: 3px; background: var(--s3); }
+.timerail .fillbar { position: absolute; left: 0; top: 14px; height: 6px; border-radius: 3px; background: var(--accent); opacity: .7; }
+.timerail .mark { position: absolute; top: 10px; width: 2px; height: 14px; background: var(--ink-3); transform: translateX(-50%); }
+.timerail .mark.sq { background: var(--ink-2); }
+.timerail .mtxt { position: absolute; top: 26px; transform: translateX(-50%); font-size: 10px; color: var(--ink-3); white-space: nowrap; font-family: var(--mono); }
+.timerail .mtxt.right { transform: translateX(-100%); }
+.timerail .mtxt.left { transform: none; }
+.timerail .knob { position: absolute; top: 17px; width: 22px; height: 22px; border-radius: 50%; background: var(--s1); border: 2px solid var(--accent); transform: translate(-50%, -50%); cursor: ew-resize; z-index: 2; }
+.timerail .knob::after { content: ""; position: absolute; inset: -10px; }
+.timerail.hot .knob { background: var(--accent); }
+.timerail .cur { position: absolute; top: -2px; transform: translate(-50%, -100%); font-size: 11px; font-family: var(--mono); color: var(--accent-ink); background: var(--s3); border-radius: 4px; padding: 1px 6px; white-space: nowrap; pointer-events: none; }
+
+/* readout */
+.readout {
+  display: grid; grid-auto-flow: column; grid-template-columns: minmax(0, 1.6fr); grid-auto-columns: minmax(0, 1fr); gap: 8px;
+  padding: 8px 12px 10px; border-top: 1px solid var(--line); flex: 0 0 auto; min-width: 0;
+}
+.ro { min-width: 0; }
+.ro .k { font-size: 10.5px; color: var(--ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; letter-spacing: .02em; }
+.ro .v { font-family: var(--mono); font-size: 18px; font-weight: 600; white-space: nowrap; line-height: 1.15; font-variant-numeric: tabular-nums; }
+.ro .v small { font-size: 11px; color: var(--ink-3); font-weight: 500; margin-left: 2px; }
+.ro.hero .v { font-size: 26px; }
+.ro .s { font-size: 10.5px; color: var(--ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-family: var(--mono); }
+.ro.sc .k { color: var(--accent-ink); }
+
+
+/* scenario bar / panel */
+.scenario { background: var(--s1); border-top: 1px solid var(--line); container-type: inline-size; }
+.scn-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; padding: 10px 12px; }
+.scn-row { display: flex; gap: 6px; align-items: center; padding: 0 12px 10px; min-width: 0; }
+.scn-row .chiprow { flex: 1; min-width: 0; }
+.scn-row .right { margin-left: auto; display: flex; gap: 6px; flex: 0 0 auto; }
+details.adv { border-top: 1px solid var(--line); }
+details.adv summary { padding: 8px 12px; font-size: 12px; color: var(--ink-2); cursor: pointer; list-style: none; display: flex; align-items: center; gap: 8px; }
+details.adv summary::before { content: "▸"; color: var(--ink-3); }
+details.adv[open] summary::before { content: "▾"; }
+details.adv summary .vals { color: var(--ink-3); font-family: var(--mono); font-size: 11px; margin-left: auto; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.adv-body { display: flex; flex-wrap: wrap; gap: 10px 18px; padding: 0 12px 12px; align-items: center; }
+.adv-body .lab { font-size: 11px; color: var(--ink-3); margin-right: 6px; }
+.adv-body .item { display: inline-flex; align-items: center; gap: 6px; }
+
+/* --- market (board / smile) --- */
+.market { background: var(--s1); border-right: 1px solid var(--line); }
+.board-tools { display: flex; flex-direction: column; gap: 6px; padding: 8px 12px; border-bottom: 1px solid var(--line); flex: 0 0 auto; }
+.board-tools .row { display: flex; gap: 6px; align-items: center; min-width: 0; }
+.board-tools .row .chiprow { flex: 1; min-width: 0; }
+.board-wrap { flex: 1; min-height: 0; overflow: auto; position: relative; }
+table.board { border-collapse: collapse; width: 100%; font-family: var(--mono); font-size: 12px; }
+table.board th { position: sticky; top: 0; background: var(--s2); color: var(--ink-3); font-weight: 500; font-size: 10.5px; text-align: right; padding: 6px 6px; border-bottom: 1px solid var(--line); z-index: 1; white-space: nowrap; }
+table.board th.k { text-align: center; }
+table.board td { text-align: right; padding: 0 5px; height: 30px; white-space: nowrap; border-bottom: 1px solid var(--line); color: var(--ink-2); }
+table.board td.k { text-align: center; color: var(--ink); font-weight: 600; position: relative; }
+table.board tr.atm td { background: var(--accent-fill); }
+table.board tr.atm td.k { color: var(--accent-ink); }
+table.board tr.hit td { animation: hit .9s ease-out; }
+@keyframes hit { from { background: var(--handle-fill); } to { background: transparent; } }
+table.board td.q { padding: 0; }
+table.board td.q button { width: 100%; height: 30px; border: 0; background: transparent; text-align: right; padding: 0 8px; font: inherit; border-radius: 0; }
+table.board td.q button.bid { color: var(--bid); }
+table.board td.q button.ask { color: var(--ask); }
+table.board td.q button:hover { background: var(--s3); }
+table.board td.q button:active { background: var(--handle-fill); }
+table.board td.iv, table.board td.d { color: var(--ink-3); font-size: 11.5px; }
+table.board .legbadge { position: absolute; left: 2px; top: 50%; transform: translateY(-50%); font-size: 9px; background: var(--handle); color: #fff; border-radius: 3px; padding: 0 3px; line-height: 13px; font-family: var(--font); }
+table.board td.k .legbadge.c { left: auto; right: 2px; }
+table.board .flag { font-size: 9px; color: var(--warn); margin-left: 2px; }
+.board-foot { padding: 6px 12px; font-size: 11px; color: var(--ink-3); border-top: 1px solid var(--line); display: flex; gap: 10px; white-space: nowrap; overflow: hidden; }
+
+.smile-wrap { flex: 1; min-height: 160px; position: relative; touch-action: none; user-select: none; }
+.smile-wrap svg { position: absolute; inset: 0; width: 100%; height: 100%; }
+.smile-wrap .ax text { fill: var(--ink-3); font-size: 10.5px; font-family: var(--mono); }
+.smile-wrap .grid line { stroke: var(--line); }
+.smile-wrap .curve { fill: none; stroke: var(--accent); stroke-width: 1.75; }
+.smile-wrap .curve.ext { stroke-dasharray: 3 3; opacity: .7; }
+.smile-wrap .pt { fill: var(--accent); }
+.smile-wrap .pt.bid { fill: var(--bid); } .smile-wrap .pt.ask { fill: var(--ask); }
+.smile-wrap .pt.x { stroke: var(--warn); fill: none; }
+.smile-wrap .atm { stroke: var(--handle); stroke-dasharray: 3 3; }
+.smile-wrap .atm2 { stroke: var(--pin2); stroke-dasharray: 2 3; }
+.smile-wrap .sel { stroke: var(--ink); stroke-width: 1; }
+.smile-wrap .sellbl { fill: var(--ink); font-size: 11px; font-family: var(--mono); font-weight: 600; paint-order: stroke; stroke: var(--s1); stroke-width: 3px; }
+.smile-act { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-top: 1px solid var(--line); flex: 0 0 auto; min-height: 48px; }
+.smile-act .k { font-family: var(--mono); font-weight: 600; white-space: nowrap; }
+.smile-act .hint { color: var(--ink-3); font-size: 12px; }
+
+/* --- bench (positions / metrics) --- */
+.bench { background: var(--s1); border-left: 1px solid var(--line); }
+.sec { border-bottom: 1px solid var(--line); }
+.sec-head { position: sticky; top: 0; z-index: 2; background: var(--s1); display: flex; align-items: center; gap: 8px; height: 38px; padding: 0 12px; border-bottom: 1px solid var(--line); }
+.sec-head h3 { font-size: 12.5px; font-weight: 600; margin: 0; white-space: nowrap; }
+.sec-head .sub { color: var(--ink-3); font-size: 11.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; font-family: var(--mono); }
+.sec-head .spacer { flex: 1; }
+
+.legs { list-style: none; margin: 0; padding: 0; }
+.leg { border-bottom: 1px solid var(--line); }
+.leg-row { display: grid; grid-template-columns: 1fr auto auto; align-items: center; gap: 8px; padding: 6px 8px 6px 12px; min-height: 48px; }
+.leg-main { min-width: 0; cursor: pointer; display: flex; flex-direction: column; gap: 2px; }
+.leg-title { display: flex; align-items: baseline; gap: 6px; white-space: nowrap; min-width: 0; }
+.leg-title .side { font-size: 10.5px; font-weight: 700; padding: 0 5px; border-radius: 4px; line-height: 16px; }
+.leg-title .side.s { background: var(--loss-fill); color: var(--loss); }
+.leg-title .side.b { background: var(--gain-fill); color: var(--gain); }
+.leg-title .name { font-family: var(--mono); font-weight: 600; font-size: 14px; }
+.leg-title .px { font-family: var(--mono); color: var(--ink-2); font-size: 12.5px; }
+.leg-sub { display: flex; gap: 6px; align-items: center; font-size: 11px; color: var(--ink-3); white-space: nowrap; overflow: hidden; font-family: var(--mono); }
+.leg-sub .month { color: var(--ink-3); }
+.leg .qty { display: inline-grid; grid-template-columns: 26px 30px 26px; height: 30px; border: 1px solid var(--line-2); border-radius: var(--r-sm); background: var(--s2); overflow: hidden; }
+.leg .qty button { border: 0; background: transparent; color: var(--ink-2); font-size: 14px; }
+.leg .qty button:hover { background: var(--s3); color: var(--ink); }
+.leg .qty .n { display: flex; align-items: center; justify-content: center; font-family: var(--mono); font-weight: 600; font-size: 13px; }
+.leg .ops { display: flex; gap: 2px; }
+.leg.sel .leg-row { background: var(--handle-fill); }
+.leg-detail { display: grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap: 8px 10px; padding: 4px 12px 12px; background: var(--s2); font-size: 11.5px; }
+.leg-detail .kv .k { color: var(--ink-3); font-size: 10.5px; }
+.leg-detail .kv .v { font-family: var(--mono); white-space: nowrap; }
+.leg-detail .kv input { width: 100%; height: 28px; }
+.leg-detail .flags { grid-column: 1 / -1; color: var(--ink-2); }
+.empty-state { padding: 22px 16px; text-align: center; color: var(--ink-3); font-size: 12.5px; display: flex; flex-direction: column; gap: 10px; align-items: center; }
+
+.hedge { display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: center; padding: 8px 12px; font-size: 12.5px; }
+.hedge .big { font-family: var(--mono); font-weight: 600; }
+.hedge .sep { color: var(--ink-3); }
+
+.kv-grid { display: grid; grid-template-columns: 1fr auto; gap: 0; }
+.kv-grid > div { padding: 6px 12px; border-bottom: 1px solid var(--line); min-width: 0; }
+.kv-grid > .k { color: var(--ink-2); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.kv-grid > .v { font-family: var(--mono); text-align: right; white-space: nowrap; font-size: 12.5px; }
+.kv-grid > .v small { color: var(--ink-3); font-size: 10.5px; }
+.metric-tiles { display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: 8px; padding: 10px 12px; }
+.tile { background: var(--s2); border-radius: var(--r-sm); padding: 8px 10px; min-width: 0; }
+.tile .k { font-size: 10.5px; color: var(--ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tile .v { font-family: var(--mono); font-weight: 600; font-size: 15px; white-space: nowrap; }
+.tile .s { font-size: 10.5px; color: var(--ink-3); font-family: var(--mono); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+table.tail { width: 100%; border-collapse: collapse; font-family: var(--mono); font-size: 12px; }
+table.tail th { color: var(--ink-3); font-weight: 500; font-size: 10.5px; text-align: right; padding: 6px 12px 4px; }
+table.tail th:first-child { text-align: left; }
+table.tail td { text-align: right; padding: 5px 12px; border-top: 1px solid var(--line); white-space: nowrap; }
+table.tail td:first-child { text-align: left; color: var(--ink-2); }
+table.tail td small { color: var(--ink-3); font-size: 10.5px; display: block; }
+table.tail td.loss { color: var(--loss); }
+table.tail td.gain { color: var(--gain); }
+table.tail td.bar { position: relative; }
+table.tail td .barfill { position: absolute; left: 0; top: 6px; bottom: 6px; background: var(--loss-fill); z-index: 0; }
+table.tail td .txt { position: relative; z-index: 1; }
+
+.pins { padding: 6px 12px; display: flex; flex-direction: column; gap: 4px; font-size: 12px; }
+.pin { display: flex; gap: 8px; align-items: center; white-space: nowrap; min-width: 0; }
+.pin .nm { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.pin .sw { width: 18px; border-top: 2px dashed; flex: 0 0 auto; }
+
+/* ===== dock (phone / tablet nav) ===== */
+.dock { display: none; }
+.dock button { flex: 1; border: 0; background: transparent; color: var(--ink-3); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; font-size: 10.5px; height: 100%; min-width: 0; }
+.dock button .ic { font-size: 18px; line-height: 1; }
+.dock button[aria-selected="true"] { color: var(--accent-ink); }
+.dock button .cnt { position: absolute; margin-left: 28px; margin-top: -26px; background: var(--handle); color: #fff; border-radius: 999px; font-size: 9px; padding: 0 5px; line-height: 14px; }
+
+/* ===== popovers, sheets, toast, palette ===== */
+.menu {
+  position: fixed; z-index: 50; min-width: 220px; background: var(--s2); border: 1px solid var(--line-2);
+  border-radius: var(--r); box-shadow: var(--shadow); padding: 6px; display: flex; flex-direction: column;
+}
+.menu button { display: flex; align-items: center; gap: 10px; width: 100%; border: 0; background: transparent; color: var(--ink); padding: 8px 10px; border-radius: var(--r-sm); text-align: left; white-space: nowrap; }
+.menu button:hover { background: var(--s3); }
+.menu button .kbd { margin-left: auto; }
+.menu hr { border: 0; border-top: 1px solid var(--line); margin: 4px 0; }
+.menu .mlabel { font-size: 10.5px; color: var(--ink-3); padding: 6px 10px 2px; }
+.scrim { position: fixed; inset: 0; z-index: 40; background: rgba(0,0,0,.35); }
+
+dialog.sheet { border: 0; padding: 0; background: var(--s2); color: var(--ink); border-radius: var(--r); box-shadow: var(--shadow); width: min(520px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); }
+dialog.sheet::backdrop { background: rgba(0,0,0,.45); }
+.sheet-head { display: flex; align-items: center; gap: 8px; padding: 12px 16px; border-bottom: 1px solid var(--line); }
+.sheet-head h2 { margin: 0; font-size: 14px; }
+.sheet-body { padding: 12px 16px; overflow: auto; max-height: calc(100dvh - 120px); }
+.setrow { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--line); }
+.setrow .k { font-size: 13px; }
+.setrow .k small { display: block; color: var(--ink-3); font-size: 11px; margin-top: 2px; }
+.booklist { display: flex; flex-direction: column; gap: 8px; }
+.bookrow { background: var(--s1); border: 1px solid var(--line); border-radius: var(--r-sm); padding: 8px 10px; display: flex; flex-direction: column; gap: 6px; }
+.bookrow .t { display: flex; gap: 8px; align-items: center; font-weight: 600; }
+.bookrow .m { font-size: 11.5px; color: var(--ink-3); font-family: var(--mono); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bookrow .ops { display: flex; gap: 4px; flex-wrap: wrap; }
+
+.toasts { position: fixed; left: 50%; bottom: calc(var(--dock-h) + 12px); transform: translateX(-50%); z-index: 60; display: flex; flex-direction: column; gap: 6px; pointer-events: none; }
+.toast { background: var(--s4); color: var(--ink); padding: 8px 14px; border-radius: 999px; font-size: 12.5px; box-shadow: var(--shadow); white-space: nowrap; animation: toastin .18s ease-out; }
+@keyframes toastin { from { opacity: 0; transform: translateY(6px); } }
+
+.palette { position: fixed; inset: 0; z-index: 70; background: rgba(0,0,0,.4); display: flex; align-items: flex-start; justify-content: center; padding-top: 12vh; }
+.palette .box { width: min(560px, calc(100vw - 32px)); background: var(--s2); border: 1px solid var(--line-2); border-radius: var(--r); box-shadow: var(--shadow); overflow: hidden; }
+.palette input { width: 100%; height: 46px; border: 0; border-bottom: 1px solid var(--line); background: transparent; padding: 0 16px; font-size: 15px; outline: none; }
+.palette ul { list-style: none; margin: 0; padding: 6px; max-height: 50vh; overflow: auto; }
+.palette li { padding: 8px 10px; border-radius: var(--r-sm); display: flex; gap: 10px; align-items: center; cursor: pointer; }
+.palette li[aria-selected="true"] { background: var(--s3); }
+.palette li .kbd { margin-left: auto; }
+.palette li small { color: var(--ink-3); }
+
+.hintbtn { width: 18px; height: 18px; border-radius: 50%; border: 1px solid var(--line-2); background: transparent; color: var(--ink-3); font-size: 11px; padding: 0; line-height: 16px; }
+.hintbtn:hover { color: var(--ink); }
+
+/* ===== responsive ===== */
+/* PC >= 1200 */
+@media (min-width: 1200px) {
+  .layout {
+    grid-template-columns: minmax(340px, 30%) minmax(0, 1fr) minmax(360px, min(28%, 420px));
+    grid-template-rows: minmax(0, 1fr) minmax(0, 1.3fr) auto;
+    grid-template-areas:
+      "market stage positions"
+      "market stage metrics"
+      "market scenario metrics";
+  }
+  .market { grid-area: market; }
+  .stage { grid-area: stage; }
+  .scenario { grid-area: scenario; }
+  section.positions { grid-area: positions; }
+  section.metrics { grid-area: metrics; border-top: 1px solid var(--line); }
+  .scenario .scn-row { padding-top: 0; }
+  .panel.m-sel { display: flex; }
+  .dock { display: none; }
+  section.smile, section.board { display: none; }
+  .layout[data-market="board"] section.board { display: flex; }
+  .layout[data-market="smile"] section.smile { display: flex; }
+  .market-seg { display: inline-flex; }
+  .stage-body { min-height: 300px; }
+}
+/* tablet 720-1199 */
+@media (min-width: 720px) and (max-width: 1199.98px) {
+  .layout {
+    grid-template-columns: minmax(0, 1.15fr) minmax(320px, 0.85fr);
+    grid-template-rows: auto minmax(0, 1fr) auto;
+    grid-template-areas:
+      "stage dock"
+      "stage panel"
+      "scenario panel";
+  }
+  .stage { grid-area: stage; }
+  .scenario { grid-area: scenario; }
+  .dock { grid-area: dock; display: flex; height: 44px; border-left: 1px solid var(--line); border-bottom: 1px solid var(--line); background: var(--s1); }
+  .dock button .ic { display: none; }
+  .dock button { font-size: 12.5px; }
+  section.panel.side { grid-area: panel; display: none; border-left: 1px solid var(--line); }
+  .layout[data-panel="positions"] section.positions,
+  .layout[data-panel="board"] section.board,
+  .layout[data-panel="metrics"] section.metrics,
+  .layout[data-panel="smile"] section.smile { display: flex; }
+  .layout[data-panel="scenario"] section.scenario { display: flex; }
+  .scenario { display: flex; }
+  .market-seg { display: none; }
+  .dock button[data-panel="scenario"] { display: none; }
+  .readout .ro.x2 { display: none; }
+  .scn-grid { grid-template-columns: repeat(5, minmax(0,1fr)); }
+}
+/* phone < 720 */
+@media (max-width: 719.98px) {
+  :root { --top-h: 44px; }
+  .top { padding: 0 10px; gap: 8px; }
+  .top .brand small { display: none; }
+  .top .market-pill { display: none; }
+  .top .pill-mini { display: inline-flex; }
+  .layout {
+    grid-template-rows: minmax(0, 1fr) auto var(--dock-h);
+    grid-template-areas: "stage" "sheet" "dock";
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .stage { grid-area: stage; }
+  .dock { grid-area: dock; display: flex; border-top: 1px solid var(--line); background: var(--s1); padding-bottom: env(safe-area-inset-bottom); position: relative; }
+  section.panel.side, section.scenario { grid-area: sheet; display: none; border-top: 1px solid var(--line-2); border-radius: 14px 14px 0 0; background: var(--s2); position: relative; }
+  .layout[data-sheet="hidden"] section.panel.side, .layout[data-sheet="hidden"] section.scenario { display: none !important; }
+  .layout[data-panel="positions"] section.positions,
+  .layout[data-panel="board"] section.board,
+  .layout[data-panel="metrics"] section.metrics,
+  .layout[data-panel="smile"] section.smile,
+  .layout[data-panel="scenario"] section.scenario { display: flex; }
+  .layout[data-sheet="peek"] section.panel.side, .layout[data-sheet="peek"] section.scenario { height: 42dvh; }
+  .layout[data-sheet="full"] { grid-template-rows: auto minmax(0, 1fr) var(--dock-h); }
+  .layout[data-sheet="full"] .stage-body { min-height: 0; height: 92px; }
+  .layout[data-sheet="full"] .timerail, .layout[data-sheet="full"] .stage-head, .layout[data-sheet="full"] .ivrail { display: none; }
+  .layout[data-sheet="full"] .stage-body { grid-template-columns: 1fr; }
+  .layout[data-sheet="full"] .readout { padding: 4px 12px 6px; }
+  .layout[data-sheet="full"] .readout .ro.x1, .layout[data-sheet="full"] .readout .ro.x2 { display: none; }
+  .layout[data-sheet="full"] .ro.hero .v { font-size: 20px; }
+  .layout[data-sheet="full"] .ro .v { font-size: 15px; }
+  .grabber { display: block; width: 36px; height: 4px; border-radius: 2px; background: var(--line-2); margin: 6px auto 0; cursor: ns-resize; }
+  .grabber::after { content: ""; position: absolute; left: 0; right: 0; top: 0; height: 20px; }
+  .panel-head { height: 36px; }
+  .readout { gap: 6px; padding: 6px 12px 8px; }
+  .readout .ro.x1, .readout .ro.x2 { display: none; }
+  .ro.hero .v { font-size: 24px; }
+  .ro .v { font-size: 16px; }
+  .scn-grid { grid-template-columns: repeat(3, minmax(0,1fr)); }
+  .stage-body { grid-template-columns: 1fr 30px; }
+  .legend { font-size: 11px; gap: 8px; }
+  .legend .lg-pin { display: none; }
+  .stage-tools .pc { display: none; }
+  .market-seg { display: none; }
+  .leg-detail { grid-template-columns: repeat(2, minmax(0,1fr)); }
+  .metric-tiles { grid-template-columns: repeat(2, minmax(0,1fr)); }
+  .toasts { bottom: calc(var(--dock-h) + 8px); }
+  .timerail { margin: 0 10px; }
+}
+@media (min-width: 720px) {
+  .grabber { display: none; }
+  .top .pill-mini { display: none; }
+}
+
+/* container queries (stage / scenario の幅で決める) */
+@container (max-width: 680px) { .readout .ro.x2 { display: none; } }
+@container (max-width: 560px) { .readout .ro.x1 { display: none; } .stage-tools .pc.zb { display: none; } }
+@container (max-width: 599px) { .scn-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+
+/* motion */
+@media (prefers-reduced-motion: no-preference) {
+  .chart .l-exp, .chart .l-sc, .chart .l-td { transition: d .22s ease-out; }
+  .chart.live .l-exp, .chart.live .l-sc, .chart.live .l-td { transition: none; }
+  .ro .v { transition: color .2s; }
+}
+
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="brand">OP Sim<small>試作</small></div>
+  <div class="boxtabs" id="boxtabs" role="tablist" aria-label="作業中のポジション"></div>
+  <div class="market-pill" id="pill"></div>
+  <span class="market-pill pill-mini" id="pill-mini" style="margin-left:auto"></span>
+  <button class="btn sm" id="refresh" title="最新の板を読む">最新</button>
+  <button class="btn ghost icon" id="theme-btn" title="テーマ">☾</button>
+  <button class="btn ghost icon" id="top-more" title="メニュー" aria-haspopup="menu">⋯</button>
+</header>
+
+<main class="layout" id="layout" data-panel="positions" data-sheet="peek" data-market="board">
+
+  <!-- ===== stage ===== -->
+  <section class="stage panel" id="stage" aria-label="損益グラフ">
+    <div class="stage-head">
+      <div class="legend" id="legend"></div>
+      <div class="stage-tools">
+        <span class="seg pc" id="mode-seg"><button data-mode="line" aria-pressed="true">線</button><button data-mode="heat">面</button></span>
+        <button class="btn ghost sm pc" id="pin-btn" aria-haspopup="menu">ピン 0/3</button>
+        <button class="btn ghost icon sm pc zb" id="zoom-out" title="縮小">−</button>
+        <button class="btn ghost icon sm pc zb" id="zoom-in" title="拡大">+</button>
+        <button class="btn ghost icon sm pc zb" id="zoom-reset" title="表示をリセット">⟲</button>
+        <button class="btn ghost icon sm" id="stage-more" title="グラフの設定" aria-haspopup="menu">⋯</button>
+      </div>
+    </div>
+    <div class="stage-body">
+      <div class="chart" id="chart" tabindex="0" aria-label="損益グラフ。横軸 原資産、縦軸 損益。長押しでシナリオ点をつかむ。← → で ΔX、↑ ↓ で Δσ、[ ] で経過日数">
+        <canvas id="heat" hidden></canvas>
+        <svg xmlns="http://www.w3.org/2000/svg"></svg>
+      </div>
+      <div class="ivrail" id="ivrail" aria-label="IV 平行移動 Δσ" role="slider"></div>
+    </div>
+    <div class="timerail" id="timerail" aria-label="経過日数 d" role="slider"></div>
+    <div class="readout" id="readout" aria-label="シナリオ点の値"></div>
+  </section>
+
+  <!-- ===== scenario ===== -->
+  <section class="scenario panel" id="scenario" aria-label="シナリオ">
+    <div class="grabber"></div>
+    <div class="scn-grid" id="scn-grid"></div>
+    <div class="scn-row"><div class="chiprow" id="scn-presets"></div></div>
+    <div class="scn-row"><span class="faint" style="font-size:11px;white-space:nowrap">評価時刻</span><div class="chiprow" id="scn-eval"></div></div>
+    <details class="adv">
+      <summary>モデルの前提 <span class="vals" id="adv-vals"></span></summary>
+      <div class="adv-body">
+        <span class="item"><span class="lab">IV の動き方</span><span class="seg" id="adv-sticky"><button data-v="strike">sticky strike</button><button data-v="moneyness">sticky moneyness</button></span></span>
+        <span class="item"><span class="lab">先物の basis</span><span class="seg" id="adv-basis"><button data-v="fixed">固定</button><button data-v="decay">減衰</button></span></span>
+        <span class="item"><span class="lab">ΔX の単位</span><span class="seg" id="adv-dx"><button data-v="pct">%</button><button data-v="yen">円</button></span></span>
+      </div>
+    </details>
+  </section>
+
+  <!-- ===== positions (bench) ===== -->
+  <section class="bench panel side positions" id="positions" aria-label="ポジション">
+    <div class="grabber"></div>
+    <div class="panel-head"><h2>ポジション</h2><span class="sub" id="pos-sub"></span><span class="spacer"></span><button class="btn ghost icon sm" id="pos-menu" aria-haspopup="menu" title="ポジションの操作">⋯</button></div>
+    <div class="panel-body">
+      <ul class="legs" id="legs"></ul>
+      <div class="sec">
+        <div class="sec-head"><h3>デルタヘッジ</h3><span class="sub">先物で目標 Δ に合わせる</span></div>
+        <div class="hedge" id="hedge"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===== metrics ===== -->
+  <section class="bench panel side metrics" id="metrics" aria-label="指標">
+    <div class="grabber"></div>
+    <div class="panel-head"><h2>指標 · テール</h2><span class="sub">満期とシナリオ点</span></div>
+    <div class="panel-body" id="metrics-body"></div>
+  </section>
+
+  <!-- ===== board (market) ===== -->
+  <section class="market panel side board" id="board" aria-label="板">
+    <div class="grabber"></div>
+    <div class="board-tools">
+      <div class="row">
+        <span class="seg" id="month-seg"><button data-m="2026-11">11月限</button><button data-m="2026-12">12月限</button></span>
+        <span class="seg" id="target-seg"><button data-t="put">put</button><button data-t="call">call</button></span>
+        <span class="spacer" style="flex:1"></span>
+        <span class="seg market-seg" id="market-seg"><button data-mk="board">板</button><button data-mk="smile">スマイル</button></span>
+      </div>
+      <div class="row">
+        <button class="btn sm" data-jump="atm">ATM</button>
+        <div class="chiprow">
+          <button class="chip" data-jump="otm10">OTM 10%</button><button class="chip" data-jump="otm20">20%</button><button class="chip" data-jump="otm30">30%</button><button class="chip" data-jump="otm40">40%</button>
+          <button class="chip" data-jump="delta0.05">|Δ| .05</button><button class="chip" data-jump="delta0.1">.10</button><button class="chip" data-jump="delta0.2">.20</button><button class="chip" data-jump="delta0.3">.30</button>
+          <button class="chip warnchip" id="filter-ask" aria-pressed="false">ask ≤ 50 円</button>
+        </div>
+      </div>
+    </div>
+    <div class="board-wrap" id="board-wrap"></div>
+    <div class="board-foot" id="board-foot"></div>
+  </section>
+
+  <!-- ===== smile (market) ===== -->
+  <section class="market panel side smile" id="smile" aria-label="スマイル">
+    <div class="grabber"></div>
+    <div class="board-tools">
+      <div class="row">
+        <span class="seg" id="smile-axis"><button data-ax="k">行使価格</button><button data-ax="moneyness">moneyness</button><button data-ax="delta">Δ</button></span>
+        <span class="spacer" style="flex:1"></span>
+        <span class="seg market-seg"><button data-mk="board">板</button><button data-mk="smile">スマイル</button></span>
+      </div>
+    </div>
+    <div class="smile-wrap" id="smile-wrap"><svg xmlns="http://www.w3.org/2000/svg"></svg></div>
+    <div class="smile-act" id="smile-act"></div>
+    <div class="board-foot"><span>● mid</span><span class="gain">● bid</span><span class="loss">● ask</span><span>× IV 不安定</span><span style="color:var(--handle)">┆ ATM</span></div>
+  </section>
+
+  <!-- ===== dock ===== -->
+  <nav class="dock" aria-label="パネル">
+    <button data-panel="positions"><span class="ic">≡</span>ポジ<span class="cnt" id="dock-pos-n"></span></button>
+    <button data-panel="board"><span class="ic">▤</span>板</button>
+    <button data-panel="scenario"><span class="ic">◐</span>シナリオ</button>
+    <button data-panel="metrics"><span class="ic">Σ</span>指標</button>
+    <button data-panel="smile"><span class="ic">◡</span>スマイル</button>
+  </nav>
+</main>
+
+<dialog class="sheet" id="settings">
+  <div class="sheet-head"><h2>設定</h2><span style="flex:1"></span><button class="btn ghost icon" data-close aria-label="閉じる">×</button></div>
+  <div class="sheet-body" id="set-body"></div>
+</dialog>
+<dialog class="sheet" id="book">
+  <div class="sheet-head"><h2>保存したポジション</h2><span class="faint" style="font-size:12px">この端末に保存</span><span style="flex:1"></span><button class="btn sm primary" id="book-save">作業中のタブを保存</button><button class="btn ghost icon" data-close aria-label="閉じる">×</button></div>
+  <div class="sheet-body" id="book-body"></div>
+</dialog>
+<div class="palette" id="palette" hidden><div class="box"><input placeholder="コマンド・足・シナリオ…（Ctrl/⌘ + K）" aria-label="コマンド"><ul></ul></div></div>
+<div class="toasts" id="toasts"></div>
+
+<script>
+/* option-simulator UI 再設計 試作品 — すべて架空の値。計算は Black-76 の簡易版。 */
+'use strict';
+
+/* ===================== utils ===================== */
+const $ = (s, el = document) => el.querySelector(s);
+const $$ = (s, el = document) => Array.from(el.querySelectorAll(s));
+const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+const DAY = 86400000;
+function fmt(v, d = 0) {
+  if (v == null || Number.isNaN(v)) return '—';
+  if (!Number.isFinite(v)) return v > 0 ? '+∞' : '−∞';
+  const s = Math.abs(v).toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d });
+  const zero = Number(s.replace(/,/g, '')) === 0;
+  return (v < 0 && !zero ? '−' : '') + s;
+}
+function fsg(v, d = 0) {
+  const s = fmt(v, d);
+  return v > 0 && !/^0(\.0+)?$/.test(s) ? '+' + s : s;
+}
+function pad2(n) { return String(n).padStart(2, '0'); }
+function jst(date) { return new Date(date.getTime() + 9 * 3600000); }
+function fmtMD(date) { const d = jst(date); return `${d.getUTCMonth() + 1}/${d.getUTCDate()}`; }
+function fmtMDHM(date) { const d = jst(date); return `${d.getUTCMonth() + 1}/${d.getUTCDate()} ${pad2(d.getUTCHours())}:${pad2(d.getUTCMinutes())}`; }
+function fmtYMD(date) { const d = jst(date); return `${d.getUTCFullYear()}-${pad2(d.getUTCMonth() + 1)}-${pad2(d.getUTCDate())}`; }
+const WD = ['日', '月', '火', '水', '木', '金', '土'];
+function fmtWd(date) { return WD[jst(date).getUTCDay()]; }
+
+/* ===================== model (Black-76) ===================== */
+function ncdf(x) {
+  const t = 1 / (1 + 0.2316419 * Math.abs(x));
+  const d = 0.3989422804014327 * Math.exp(-x * x / 2);
+  const p = d * t * (0.3193815 + t * (-0.3565638 + t * (1.781478 + t * (-1.821256 + t * 1.330274))));
+  return x > 0 ? 1 - p : p;
+}
+const R = 0.005;
+function b76(F, K, T, iv, cp) {
+  if (T <= 0) return Math.max(0, cp === 'C' ? F - K : K - F);
+  const sT = iv * Math.sqrt(T);
+  const d1 = (Math.log(F / K) + 0.5 * iv * iv * T) / sT;
+  const d2 = d1 - sT;
+  const df = Math.exp(-R * T);
+  return cp === 'C' ? df * (F * ncdf(d1) - K * ncdf(d2)) : df * (K * ncdf(-d2) - F * ncdf(-d1));
+}
+function b76Delta(F, K, T, iv, cp) {
+  if (T <= 0) return cp === 'C' ? (F > K ? 1 : 0) : (F < K ? -1 : 0);
+  const sT = iv * Math.sqrt(T);
+  const d1 = (Math.log(F / K) + 0.5 * iv * iv * T) / sT;
+  const df = Math.exp(-R * T);
+  return cp === 'C' ? df * ncdf(d1) : -df * ncdf(-d1);
+}
+function impliedVol(price, F, K, T, cp) {
+  const intrinsic = Math.max(0, cp === 'C' ? F - K : K - F) * Math.exp(-R * T);
+  if (T <= 0 || price <= intrinsic + 1e-9) return null;
+  let lo = 0.01, hi = 3;
+  for (let i = 0; i < 60; i++) {
+    const mid = (lo + hi) / 2;
+    if (b76(F, K, T, mid, cp) > price) hi = mid; else lo = mid;
+  }
+  return (lo + hi) / 2;
+}
+
+/* ===================== market (synthetic, fictional) ===================== */
+const BOARD_AT = new Date('2026-10-13T21:31:00+09:00');
+const SPOT = { price: 67777, at: new Date('2026-10-13T15:45:00+09:00') };
+const FUT = { month: '2026-12', price: 67880, at: new Date('2026-10-13T21:25:00+09:00'), sq: '2026-12-11' };
+function dOf(iso) { return (new Date(iso).getTime() - BOARD_AT.getTime()) / DAY; }
+const MONTHS = [
+  { id: '2026-11', label: '11月限', F: 67812, Ferr: 8, base: 0.251, skew: -0.42, curv: 1.6, ltd: '2026-11-12', sq: '2026-11-13', dLtd: dOf('2026-11-12T15:45:00+09:00'), dSq: dOf('2026-11-13T09:00:00+09:00') },
+  { id: '2026-12', label: '12月限', F: 67885, Ferr: 9, base: 0.258, skew: -0.38, curv: 1.3, ltd: '2026-12-10', sq: '2026-12-11', dLtd: dOf('2026-12-10T15:45:00+09:00'), dSq: dOf('2026-12-11T09:00:00+09:00') },
+];
+const M = Object.fromEntries(MONTHS.map(m => [m.id, m]));
+function smileIv(m, K, F = m.F) { const x = Math.log(K / F); return Math.max(0.05, m.base + m.skew * x + m.curv * x * x); }
+function tickOf(p) { return p < 100 ? 1 : 5; }
+function makeRows(m) {
+  const rows = [];
+  const T = m.dSq / 365;
+  for (let K = 58000; K <= 78000; K += 250) {
+    const iv = smileIv(m, K);
+    const row = { K, iv };
+    for (const cp of ['C', 'P']) {
+      const mid = b76(m.F, K, T, iv, cp);
+      const tk = tickOf(mid);
+      const hs = Math.max(tk, Math.round(mid * 0.004 / tk) * tk);
+      const bid = Math.max(0, Math.floor((mid - hs) / tk) * tk);
+      const ask = Math.ceil((mid + hs) / tk) * tk;
+      const unstable = ask <= 5;
+      row[cp] = { bid, ask, mid, bidIv: impliedVol(bid, m.F, K, T, cp), askIv: impliedVol(ask, m.F, K, T, cp), delta: b76Delta(m.F, K, T, iv, cp), unstable };
+    }
+    rows.push(row);
+  }
+  m.rows = rows;
+  m.byK = Object.fromEntries(rows.map(r => [r.K, r]));
+}
+MONTHS.forEach(makeRows);
+function atmK(m) { const ref = state.atmBasis === 'B' ? m.F : FUT.price; let best = null; for (const r of m.rows) if (best === null || Math.abs(r.K - ref) < Math.abs(best - ref)) best = r.K; return best; }
+function refPrice(m) { return state.atmBasis === 'B' ? m.F : FUT.price; }
+const X0 = MONTHS[0].F;
+const PRODUCTS = { large: { label: 'ラージ先物', mult: 1000 }, mini: { label: 'ミニ先物', mult: 100 }, micro: { label: 'マイクロ先物', mult: 10 } };
+
+/* ===================== state ===================== */
+let nextId = 1;
+const state = {
+  tabs: [], active: 0, nextTab: 0,
+  scn: { d: 0, dX: 0, dSigma: 0, skew: 0, beta: 1, sticky: 'strike' },
+  basis: 'fixed', fee: 0, unit: 'auto', atmBasis: 'B', yMode: 'auto', yN: 5,
+  month: '2026-11', target: 'put', filterAsk: false,
+  smileAxis: 'k', smilePick: null,
+  pins: [], pinLine: 'period',
+  hedge: { target: 0, at: 'base', contract: '2026-12' },
+  view: null, mode: 'line', dxUnit: 'pct',
+  ui: { panel: 'positions', sheet: 'peek', market: 'board', theme: 'dark', selLeg: null, openLeg: null },
+  book: [],
+};
+const tab = () => state.tabs[state.active];
+const legs = () => tab().legs;
+
+function mkOptLeg(monthId, cp, K, side, entry, qty = 1) {
+  const m = M[monthId];
+  const iv = impliedVol(entry, m.F, K, m.dSq / 365, cp);
+  const flags = [];
+  if (iv == null) flags.push('建値ずれ');
+  if (m.byK[K]?.[cp].unstable) flags.push('IV 不安定');
+  return { id: nextId++, kind: 'opt', month: monthId, cp, K, side, qty, entry, iv: iv ?? smileIv(m, K), ivEdited: false, flags, mult: 1000 };
+}
+function mkFutLeg(product, month, side, entry, qty = 1) {
+  return { id: nextId++, kind: 'fut', product, month, side, qty, entry, mult: PRODUCTS[product].mult, flags: month === FUT.month ? [] : ['建値手入力'] };
+}
+function newTab(name, legsArr = []) { const t = { id: state.nextTab++, name, legs: legsArr }; return t; }
+function freeName() { for (const c of 'ABCDEFGHIJKLMNOPQRSTUVWXYZ') if (!state.tabs.some(t => t.name === c)) return c; return '?'; }
+
+/* initial fictional positions */
+(function seed() {
+  const nov = M['2026-11'];
+  const A = newTab('A', [
+    mkOptLeg('2026-11', 'P', 64000, -1, nov.byK[64000].P.bid),
+    mkOptLeg('2026-11', 'C', 70500, -1, nov.byK[70500].C.bid),
+  ]);
+  const B = newTab('B', [
+    mkOptLeg('2026-11', 'P', 67750, +1, nov.byK[67750].P.ask),
+    mkOptLeg('2026-11', 'P', 67250, -1, nov.byK[67250].P.bid),
+  ]);
+  state.tabs = [A, B];
+  state.book = [
+    { id: 1, name: '11月 ストラングル', legs: A.legs.map(l => ({ ...l })), savedAt: '2026-10-13 21:40' },
+    { id: 2, name: 'IC 63/64–70.5/71.5', legs: [mkOptLeg('2026-11', 'P', 64000, -1, nov.byK[64000].P.bid), mkOptLeg('2026-11', 'P', 63000, +1, nov.byK[63000].P.ask), mkOptLeg('2026-11', 'C', 70500, -1, nov.byK[70500].C.bid), mkOptLeg('2026-11', 'C', 71500, +1, nov.byK[71500].C.ask)], savedAt: '2026-10-12 11:02' },
+  ];
+})();
+
+/* ===================== evaluation ===================== */
+function legValue(leg, X, d, s, fee = state.fee) {
+  const m = M[leg.month];
+  const basisM = (leg.kind === 'fut' ? FUT.price : m.F) - X0;
+  let Fp = X + basisM;
+  if (leg.kind === 'fut') {
+    if (state.basis === 'decay') { const mSq = M[FUT.month]?.dSq ?? 59; const k = clamp(1 - d / mSq, 0, 1); Fp = X + basisM * k; }
+    return leg.side * leg.qty * leg.mult * (Fp - leg.entry) - fee * leg.qty;
+  }
+  const T = Math.max(0, m.dSq - d) / 365;
+  let iv = leg.iv;
+  if (s.sticky === 'moneyness') iv += smileIv(m, leg.K * m.F / Fp) - smileIv(m, leg.K);
+  const pct = (X / X0 - 1) * 100;
+  iv += s.dSigma / 100 + s.beta * (-pct) / 100;
+  iv += (s.skew / 100) * (-(leg.K / Fp - 1) / 0.10);
+  iv = Math.max(0.01, iv);
+  const price = b76(Fp, leg.K, T, iv, leg.cp);
+  return leg.side * leg.qty * leg.mult * (price - leg.entry) - fee * leg.qty;
+}
+function pnlAt(X, d, s, ls = legs()) { let v = 0; for (const l of ls) v += legValue(l, X, d, s); return v; }
+const EXP_D = 9999;
+const ZERO = { d: 0, dX: 0, dSigma: 0, skew: 0, beta: 1, sticky: 'strike' };
+function todayScn() { return { ...ZERO, beta: state.scn.beta, sticky: state.scn.sticky }; }
+function expiryAt(X, ls = legs()) { let v = 0; for (const l of ls) v += legValue({ ...l }, X, EXP_D, ZERO); return v; }
+function scnOn() { const s = state.scn; return s.d > 0 || s.dSigma !== 0 || s.skew !== 0; }
+function xs() { return X0 + state.scn.dX; }
+function greeksAt(X, d, s, ls = legs()) {
+  const h = 10;
+  const v0 = pnlAt(X, d, s, ls);
+  const dUp = pnlAt(X + h, d, s, ls), dDn = pnlAt(X - h, d, s, ls);
+  const delta = (dUp - dDn) / (2 * h) / 1000;
+  const d2 = (pnlAt(X + 60, d, s, ls) - pnlAt(X + 40, d, s, ls)) / 20 / 1000;
+  const d1 = (pnlAt(X - 40, d, s, ls) - pnlAt(X - 60, d, s, ls)) / 20 / 1000;
+  const gamma = d2 - d1;
+  const theta = pnlAt(X, d + 1, s, ls) - v0;
+  const vega = pnlAt(X, d, { ...s, dSigma: s.dSigma + 1 }, ls) - v0;
+  return { delta, gamma, theta, vega, v: v0 };
+}
+function premium(ls = legs()) {
+  let recv = 0, pay = 0, feeT = 0;
+  for (const l of ls) { if (l.kind !== 'opt') continue; const a = l.entry * l.qty * l.mult; if (l.side < 0) recv += a; else pay += a; }
+  for (const l of ls) feeT += state.fee * l.qty;
+  return { recv, pay, net: recv - pay, feeT, stake: pay > recv ? pay - recv + feeT : 0 };
+}
+function amountUnit() { if (state.unit !== 'auto') return state.unit; const p = premium(); return p.recv + p.pay >= 100000 ? 'thousand' : 'yen'; }
+function amt(v, signed = true) {
+  const u = amountUnit();
+  if (!Number.isFinite(v)) return fmt(v);
+  if (u === 'thousand') { const t = v / 1000; return (signed ? fsg : fmt)(t, Math.abs(v) < 100000 ? 1 : 0); }
+  return (signed ? fsg : fmt)(v, 0);
+}
+function unitLabel() { return amountUnit() === 'thousand' ? '千円' : '円'; }
+function expiryStats() {
+  const ls = legs(); if (!ls.length) return null;
+  const Ks = ls.filter(l => l.kind === 'opt').map(l => l.K);
+  const lo = Math.min(X0 * 0.55, ...Ks) - 2000, hi = Math.max(X0 * 1.35, ...Ks) + 2000;
+  let maxP = -Infinity, minP = Infinity, minX = null, maxX = null;
+  const n = 1400, pts = [];
+  for (let i = 0; i <= n; i++) { const X = lo + (hi - lo) * i / n; const v = expiryAt(X); pts.push([X, v]); if (v > maxP) { maxP = v; maxX = X; } if (v < minP) { minP = v; minX = X; } }
+  let netCall = 0; for (const l of ls) { if (l.kind === 'fut') netCall += l.side * l.qty * l.mult / 1000; else if (l.cp === 'C') netCall += l.side * l.qty; }
+  let callInf = netCall > 0 ? 1 : netCall < 0 ? -1 : 0;
+  const bep = [];
+  for (let i = 1; i < pts.length; i++) { const [x1, y1] = pts[i - 1], [x2, y2] = pts[i]; if ((y1 < 0 && y2 >= 0) || (y1 >= 0 && y2 < 0)) bep.push(Math.round(x1 + (x2 - x1) * (-y1) / (y2 - y1))); }
+  return { maxP: callInf > 0 ? Infinity : maxP, minP: callInf < 0 ? -Infinity : minP, maxX, minX, bep, callInf };
+}
+function scnBep() {
+  const ls = legs(); if (!ls.length) return [];
+  const s = state.scn, out = [];
+  let prev = null;
+  for (let X = X0 * 0.7; X <= X0 * 1.25; X += 25) { const v = pnlAt(X, s.d, s, ls); if (prev && ((prev[1] < 0 && v >= 0) || (prev[1] >= 0 && v < 0))) out.push(Math.round(prev[0] + 25 * (-prev[1]) / (v - prev[1]))); prev = [X, v]; }
+  return out;
+}
+function evalTime() { return new Date(BOARD_AT.getTime() + state.scn.d * DAY); }
+function maxDays() { const ms = new Set(legs().map(l => l.month)); let d = 0; for (const id of ms) if (M[id]) d = Math.max(d, M[id].dSq); if (!d) d = M[state.month].dSq; return d; }
+
+/* ===================== pins ===================== */
+function resolvePin(p) {
+  if (p.kind === 'ghost') return p.pts;
+  const src = p.kind === 'tab' ? state.tabs.find(t => t.id === p.tabId) : p;
+  if (!src) return null;
+  if (p.kind === 'tab' && src === tab()) return null;
+  return src.legs;
+}
+
+/* ===================== chart ===================== */
+const chartEl = $('#chart');
+const svg = $('#chart svg');
+const cv = $('#heat');
+let plotW = 300, plotH = 200;
+const PM = { l: 50, r: 10, t: 12, b: 22 };
+function initView() {
+  const Ks = legs().filter(l => l.kind === 'opt').map(l => l.K);
+  let lo, hi;
+  if (Ks.length) { lo = Math.min(...Ks, X0); hi = Math.max(...Ks, X0); const w = Math.max((hi - lo) * 0.18, X0 * 0.025); lo -= w; hi += w; }
+  else { lo = X0 * 0.94; hi = X0 * 1.06; }
+  return [lo, hi];
+}
+function view() { if (!state.view) state.view = initView(); return state.view; }
+function xPx(X) { const [lo, hi] = view(); return PM.l + (X - lo) / (hi - lo) * plotW; }
+function pxX(px) { const [lo, hi] = view(); return lo + (px - PM.l) / plotW * (hi - lo); }
+function niceStep(range, maxTicks) { const raw = range / maxTicks; const p = Math.pow(10, Math.floor(Math.log10(raw))); for (const m of [1, 2, 2.5, 5, 10]) if (m * p >= raw) return m * p; return 10 * p; }
+let lastCurves = null;
+function sampleCurve(fn, n) { const [lo, hi] = view(); const out = []; for (let i = 0; i <= n; i++) { const X = lo + (hi - lo) * i / n; out.push([X, fn(X)]); } return out; }
+function pathOf(pts, yPx) { let d = ''; for (let i = 0; i < pts.length; i++) { const x = xPx(pts[i][0]).toFixed(1), y = yPx(pts[i][1]).toFixed(1); d += (i ? 'L' : 'M') + x + ' ' + y; } return d; }
+function areaOf(pts, yPx, y0, sign) {
+  let d = '', open = false;
+  for (let i = 0; i < pts.length; i++) {
+    const v = pts[i][1]; const ok = sign > 0 ? v > 0 : v < 0;
+    const x = xPx(pts[i][0]).toFixed(1), y = yPx(ok ? v : 0).toFixed(1);
+    if (ok && !open) { d += `M${x} ${y0.toFixed(1)}L${x} ${y}`; open = true; }
+    else if (ok) d += `L${x} ${y}`;
+    else if (open) { d += `L${x} ${y0.toFixed(1)}Z`; open = false; }
+  }
+  if (open) { const x = xPx(pts[pts.length - 1][0]).toFixed(1); d += `L${x} ${y0.toFixed(1)}Z`; }
+  return d;
+}
+function renderChart() {
+  const w = chartEl.clientWidth, h = chartEl.clientHeight;
+  if (!w || !h) return;
+  plotW = Math.max(40, w - PM.l - PM.r); plotH = Math.max(40, h - PM.t - PM.b);
+  svg.setAttribute('viewBox', `0 0 ${w} ${h}`);
+  const ls = legs();
+  const [lo, hi] = view();
+  const s = state.scn;
+  const n = Math.min(360, Math.max(60, Math.round(plotW / 2)));
+  const exp = ls.length ? sampleCurve(X => expiryAt(X), n) : [];
+  const today = ls.length ? sampleCurve(X => pnlAt(X, 0, todayScn()), n) : [];
+  const sc = ls.length && scnOn() ? sampleCurve(X => pnlAt(X, s.d, s), n) : null;
+  const pinCurves = state.pins.map(p => { const src = resolvePin(p); if (!src) return null; if (p.kind === 'ghost') return src.filter(pt => pt[0] >= lo && pt[0] <= hi); return sampleCurve(X => state.pinLine === 'expiry' ? expiryAt(X, src) : pnlAt(X, s.d, s, src), n); });
+  lastCurves = { exp, today, sc };
+  let ymin = 0, ymax = 0;
+  if (ls.length) {
+    const all = [exp, today, sc || [], ...pinCurves.filter(Boolean)];
+    if (state.yMode === 'premium') { const p = premium(); const b = Math.abs(p.net) * state.yN || 0; if (b) { ymin = -b; ymax = b; } else for (const c of all) for (const [, v] of c) { ymin = Math.min(ymin, v); ymax = Math.max(ymax, v); } }
+    else for (const c of all) for (const [, v] of c) { ymin = Math.min(ymin, v); ymax = Math.max(ymax, v); }
+    if (ymin === ymax) { ymin -= 1000; ymax += 1000; }
+    const pad = (ymax - ymin) * 0.1; ymin -= pad; ymax += pad;
+  } else { ymin = -1; ymax = 1; }
+  const yPx = v => PM.t + (ymax - v) / (ymax - ymin) * plotH;
+  const kyen = (ymax - ymin) >= 100000;
+  let out = '';
+  // grid + axes
+  const xs_ = niceStep(hi - lo, Math.max(3, plotW / 90));
+  out += '<g class="grid">';
+  for (let X = Math.ceil(lo / xs_) * xs_; X <= hi; X += xs_) out += `<line x1="${xPx(X).toFixed(1)}" x2="${xPx(X).toFixed(1)}" y1="${PM.t}" y2="${PM.t + plotH}"/>`;
+  const heat = state.mode === 'heat' && ls.length;
+  const md = maxDays();
+  const dPx = d => PM.t + plotH - d / md * plotH;
+  const ys_ = heat ? niceStep(md, Math.max(2, plotH / 48)) : niceStep(ymax - ymin, Math.max(2, plotH / 48));
+  if (heat) for (let d = 0; d <= md; d += ys_) out += `<line x1="${PM.l}" x2="${PM.l + plotW}" y1="${dPx(d).toFixed(1)}" y2="${dPx(d).toFixed(1)}"/>`;
+  else for (let v = Math.ceil(ymin / ys_) * ys_; v <= ymax; v += ys_) out += `<line x1="${PM.l}" x2="${PM.l + plotW}" y1="${yPx(v).toFixed(1)}" y2="${yPx(v).toFixed(1)}"/>`;
+  out += '</g><g class="ax">';
+  for (let X = Math.ceil(lo / xs_) * xs_; X <= hi; X += xs_) out += `<text x="${xPx(X).toFixed(1)}" y="${h - 7}" text-anchor="middle">${fmt(X)}</text>`;
+  if (heat) for (let d = 0; d <= md; d += ys_) out += `<text x="${PM.l - 6}" y="${(dPx(d) + 3.5).toFixed(1)}" text-anchor="end">${fmt(d)}</text>`;
+  else for (let v = Math.ceil(ymin / ys_) * ys_; v <= ymax; v += ys_) out += `<text x="${PM.l - 6}" y="${(yPx(v) + 3.5).toFixed(1)}" text-anchor="end">${kyen ? fmt(v / 1000, ys_ < 1000 ? 1 : 0) : fmt(v)}</text>`;
+  out += `<text x="${PM.l - 6}" y="${PM.t + 2}" text-anchor="end" style="font-size:9.5px">${heat ? '日' : kyen ? '千円' : '円'}</text>`;
+  out += '</g>';
+  if (!ls.length) {
+    out += `<text class="empty" x="${w / 2}" y="${h / 2}" text-anchor="middle">板の bid（売り）/ ask（買い）を押して足を入れる</text>`;
+    svg.innerHTML = out; cv.hidden = true; return;
+  }
+  // heat mode
+  if (state.mode === 'heat') { renderHeat(w, h); cv.hidden = false; } else cv.hidden = true;
+  const y0 = yPx(0);
+  if (!heat) out += `<line class="zero" x1="${PM.l}" x2="${PM.l + plotW}" y1="${y0.toFixed(1)}" y2="${y0.toFixed(1)}"/>`;
+  if (state.mode === 'line') {
+    const main = sc || today;
+    out += `<path class="fill-gain" d="${areaOf(main, yPx, y0, +1)}"/><path class="fill-loss" d="${areaOf(main, yPx, y0, -1)}"/>`;
+    pinCurves.forEach((c, i) => { if (!c) return; const p = state.pins[i]; out += `<path class="l-pin" style="stroke:var(--pin${p.no});stroke-dasharray:${['6 3', '2 2', '8 3 2 3'][p.no - 1]}" d="${pathOf(c, yPx)}"/>`; });
+    out += `<path class="l-exp" d="${pathOf(exp, yPx)}"/>`;
+    out += `<path class="l-td" d="${pathOf(today, yPx)}"/>`;
+    if (sc) out += `<path class="l-sc" d="${pathOf(sc, yPx)}"/>`;
+    pinCurves.forEach((c, i) => { if (!c || !c.length) return; const p = state.pins[i]; const last = c[c.length - 1]; const y = clamp(yPx(last[1]), PM.t + 8, PM.t + plotH - 4); const arrow = yPx(last[1]) < PM.t ? '↑' : yPx(last[1]) > PM.t + plotH ? '↓' : ''; out += `<text class="pinlbl" style="fill:var(--pin${p.no})" x="${PM.l + plotW - 4}" y="${y.toFixed(1)}" text-anchor="end">${['①', '②', '③'][p.no - 1]}${arrow}</text>`; });
+    // BEP + leg markers
+    const st = expiryStats();
+    for (const b of st.bep) if (b >= lo && b <= hi) out += `<path class="bep" transform="translate(${xPx(b).toFixed(1)} ${y0.toFixed(1)})" d="M0 -5L5 0L0 5L-5 0Z"/>`;
+  }
+  const axisY = PM.t + plotH;
+  for (const l of ls) {
+    if (l.kind !== 'opt') continue;
+    const x = xPx(l.K - (M[l.month].F - X0)); if (x < PM.l || x > PM.l + plotW) continue;
+    const tri = l.cp === 'C' ? `M${x.toFixed(1)} ${axisY - 9}L${(x + 5).toFixed(1)} ${axisY - 1}L${(x - 5).toFixed(1)} ${axisY - 1}Z` : `M${x.toFixed(1)} ${axisY - 1}L${(x + 5).toFixed(1)} ${axisY - 9}L${(x - 5).toFixed(1)} ${axisY - 9}Z`;
+    out += `<path class="legmark ${l.side < 0 ? 'sell' : ''} ${state.ui.selLeg === l.id ? 'sel' : ''}" data-leg="${l.id}" d="${tri}"><title>${legTitle(l)}</title></path>`;
+    if (l.qty > 1) out += `<text class="legtxt" x="${(x + 7).toFixed(1)}" y="${axisY - 2}">×${l.qty}</text>`;
+  }
+  // X0 line
+  out += `<line class="x0" x1="${xPx(X0).toFixed(1)}" x2="${xPx(X0).toFixed(1)}" y1="${PM.t}" y2="${axisY}"/>`;
+  out += `<text class="legtxt" x="${(xPx(X0) - 3).toFixed(1)}" y="${PM.t + 10}" text-anchor="end">X₀</text>`;
+  // scenario ATM
+  if (s.dX !== 0) { const m = M[state.month]; const sh = (xs() + (m.F - X0)); let bk = null; for (const r of m.rows) if (bk === null || Math.abs(r.K - sh) < Math.abs(bk - sh)) bk = r.K; const px = xPx(bk - (m.F - X0)); if (px >= PM.l && px <= PM.l + plotW) out += `<line class="atm2" x1="${px.toFixed(1)}" x2="${px.toFixed(1)}" y1="${PM.t}" y2="${axisY}"/>`; }
+  // scenario point
+  const X = xs(), px = xPx(X);
+  if (px >= PM.l - 1 && px <= PM.l + plotW + 1) {
+    out += `<line class="vline" x1="${px.toFixed(1)}" x2="${px.toFixed(1)}" y1="${PM.t}" y2="${axisY}"/>`;
+    if (state.mode === 'line') {
+      const pts = [];
+      pts.push({ cls: 'exp', lbl: '満', v: expiryAt(X) });
+      if (sc) pts.push({ cls: 'sc', lbl: '指', v: pnlAt(X, s.d, s) });
+      pts.push({ cls: 'td', lbl: '今', v: pnlAt(X, 0, todayScn()) });
+      const placed = [];
+      const right = px + 16 + 90 <= PM.l + plotW;
+      for (const p of pts) {
+        const y = yPx(p.v); const inside = y >= PM.t && y <= axisY;
+        let ly = clamp(y, PM.t + 8, axisY - 4);
+        for (const q of placed) if (Math.abs(q - ly) < 13) ly = q + 13 * Math.sign(ly - q || 1);
+        ly = clamp(ly, PM.t + 8, axisY - 4); placed.push(ly);
+        if (inside) out += `<g class="xpt"><circle class="${p.cls}" cx="${px.toFixed(1)}" cy="${y.toFixed(1)}" r="4"/></g>`;
+        out += `<g class="xpt"><text class="${p.cls}" x="${(right ? px + 16 : px - 16).toFixed(1)}" y="${(ly + 4).toFixed(1)}" text-anchor="${right ? 'start' : 'end'}">${p.lbl} ${amt(p.v)}${inside ? '' : y < PM.t ? ' ▲' : ' ▼'}</text></g>`;
+      }
+      const hv = sc ? pnlAt(X, s.d, s) : pnlAt(X, 0, todayScn());
+      const hy = clamp(yPx(hv), PM.t, axisY);
+      out += `<circle class="handle-ring" cx="${px.toFixed(1)}" cy="${hy.toFixed(1)}" r="11"/><circle class="handle" cx="${px.toFixed(1)}" cy="${hy.toFixed(1)}" r="6"/>`;
+    } else {
+      const dy = PM.t + plotH - (s.d / maxDays()) * plotH;
+      out += `<line class="cross" x1="${PM.l}" x2="${PM.l + plotW}" y1="${dy.toFixed(1)}" y2="${dy.toFixed(1)}"/>`;
+      out += `<circle class="handle" cx="${px.toFixed(1)}" cy="${dy.toFixed(1)}" r="6"/>`;
+      const v = pnlAt(X, s.d, s);
+      out += `<g class="xpt"><text class="sc" x="${(px + 10).toFixed(1)}" y="${(dy - 8).toFixed(1)}">${amt(v)} ${unitLabel()} · d ${fmt(s.d)}</text></g>`;
+    }
+    out += `<path class="grip" d="M${(px - 7).toFixed(1)} ${axisY + 2}L${(px + 7).toFixed(1)} ${axisY + 2}L${px.toFixed(1)} ${axisY + 9}Z"/>`;
+  }
+  svg.innerHTML = out;
+}
+function renderHeat(w, h) {
+  const ctx = cv.getContext('2d');
+  const dpr = 1;
+  cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr);
+  const nx = 72, ny = 36; const [lo, hi] = view(); const md = maxDays(); const s = state.scn;
+  const vals = new Float32Array(nx * ny); let vmax = 1;
+  for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) { const X = lo + (hi - lo) * (i + 0.5) / nx; const d = md * (j + 0.5) / ny; const v = pnlAt(X, d, s); vals[j * nx + i] = v; vmax = Math.max(vmax, Math.abs(v)); }
+  const img = ctx.createImageData(nx, ny);
+  const light = document.documentElement.dataset.theme === 'light';
+  for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) {
+    const v = vals[j * nx + i] / vmax; const t = Math.pow(Math.abs(v), 0.6);
+    const k = ((ny - 1 - j) * nx + i) * 4;
+    const [r, g, b] = v >= 0 ? (light ? [16, 138, 92] : [47, 180, 131]) : (light ? [209, 63, 63] : [239, 107, 107]);
+    img.data[k] = r; img.data[k + 1] = g; img.data[k + 2] = b; img.data[k + 3] = Math.round(20 + 190 * t);
+  }
+  const off = document.createElement('canvas'); off.width = nx; off.height = ny; off.getContext('2d').putImageData(img, 0, 0);
+  ctx.clearRect(0, 0, cv.width, cv.height);
+  ctx.imageSmoothingEnabled = true;
+  ctx.drawImage(off, PM.l * dpr, PM.t * dpr, plotW * dpr, plotH * dpr);
+}
+function legTitle(l) { return l.kind === 'opt' ? `${l.side < 0 ? '売' : '買'} ${l.cp} ${fmt(l.K)} ×${l.qty} @${fmt(l.entry)} ${l.month}` : `${PRODUCTS[l.product].label} ${l.month} ${l.side < 0 ? '売' : '買'} ×${l.qty} @${fmt(l.entry)}`; }
+
+/* ---- chart gestures ---- */
+(function chartGestures() {
+  let press = null, timer = null, mode = null, pinch = null, lastTap = 0;
+  const ptrs = new Map();
+  function setDxFromPx(px, offset = 0) {
+    const X = pxX(px) - offset;
+    const dX = clamp(Math.round((X - X0) / 10) * 10, Math.ceil(-X0 * 0.4 / 10) * 10, Math.floor(X0 * 0.2 / 10) * 10);
+    state.scn.dX = dX;
+  }
+  function setDFromPy(py) { const md = maxDays(); const d = clamp((PM.t + plotH - py) / plotH * md, 0, md); state.scn.d = Math.round(d * 2) / 2; }
+  chartEl.addEventListener('pointerdown', e => {
+    if (!legs().length) return;
+    chartEl.setPointerCapture(e.pointerId);
+    ptrs.set(e.pointerId, { x: e.offsetX, y: e.offsetY });
+    if (ptrs.size === 2) { clearTimeout(timer); mode = 'pinch'; const [a, b] = [...ptrs.values()]; pinch = { d0: Math.abs(a.x - b.x) || 1, v0: view().slice(), c: (a.x + b.x) / 2 }; return; }
+    const px = xPx(xs());
+    const nearHandle = Math.abs(e.offsetX - px) <= 14;
+    press = { x: e.offsetX, y: e.offsetY, t: Date.now(), v0: view().slice(), off: nearHandle ? pxX(e.offsetX) - xs() : 0 };
+    mode = null;
+    if (nearHandle || state.mode === 'heat') { mode = 'grab'; chartEl.classList.add('grabbing', 'live'); if (state.mode === 'heat') { setDxFromPx(e.offsetX); setDFromPy(e.offsetY); render(); } return; }
+    timer = setTimeout(() => { if (press && !mode) { mode = 'grab'; chartEl.classList.add('grabbing', 'live'); setDxFromPx(e.offsetX); render(); if (navigator.vibrate) navigator.vibrate(8); } }, 450);
+  });
+  chartEl.addEventListener('pointermove', e => {
+    if (ptrs.has(e.pointerId)) ptrs.set(e.pointerId, { x: e.offsetX, y: e.offsetY });
+    if (mode === 'pinch' && ptrs.size === 2) { const [a, b] = [...ptrs.values()]; const d = Math.abs(a.x - b.x) || 1; const f = pinch.d0 / d; const [lo, hi] = pinch.v0; const cX = lo + (pinch.c - PM.l) / plotW * (hi - lo); state.view = [cX - (cX - lo) * f, cX + (hi - cX) * f]; render({ chartOnly: true }); return; }
+    if (!press) { chartEl.classList.toggle('hover-handle', Math.abs(e.offsetX - xPx(xs())) <= 14 && state.mode === 'line'); return; }
+    const dx = e.offsetX - press.x, dy = e.offsetY - press.y;
+    if (!mode && Math.hypot(dx, dy) >= 6) { clearTimeout(timer); mode = 'pan'; chartEl.classList.add('live'); }
+    if (mode === 'pan') { const [lo, hi] = press.v0; const sh = -dx / plotW * (hi - lo); state.view = [lo + sh, hi + sh]; render({ chartOnly: true }); }
+    else if (mode === 'grab') { setDxFromPx(e.offsetX, press.off); if (state.mode === 'heat') setDFromPy(e.offsetY); render(); }
+  });
+  function up(e) {
+    ptrs.delete(e.pointerId); clearTimeout(timer);
+    if (mode === 'pinch') { if (ptrs.size < 2) { mode = null; pinch = null; } return; }
+    if (press && !mode) { const now = Date.now(); if (now - lastTap < 300) { state.view = null; render(); lastTap = 0; } else lastTap = now; }
+    press = null; mode = null; chartEl.classList.remove('grabbing', 'live');
+  }
+  chartEl.addEventListener('pointerup', up); chartEl.addEventListener('pointercancel', up);
+  chartEl.addEventListener('wheel', e => { e.preventDefault(); if (!legs().length) return; const [lo, hi] = view(); if (Math.abs(e.deltaX) > Math.abs(e.deltaY)) { const sh = e.deltaX / plotW * (hi - lo); state.view = [lo + sh, hi + sh]; } else { const f = e.deltaY > 0 ? 1.15 : 0.87; const cX = pxX(e.offsetX); state.view = [cX - (cX - lo) * f, cX + (hi - cX) * f]; } render({ chartOnly: true }); }, { passive: false });
+  chartEl.addEventListener('contextmenu', e => e.preventDefault());
+  chartEl.addEventListener('click', e => { const t = e.target.closest('[data-leg]'); if (t) { const id = Number(t.dataset.leg); state.ui.selLeg = state.ui.selLeg === id ? null : id; state.ui.openLeg = state.ui.selLeg; if (state.ui.selLeg) { state.ui.panel = 'positions'; if (state.ui.sheet === 'hidden') state.ui.sheet = 'peek'; } render(); } });
+  chartEl.addEventListener('keydown', e => {
+    const s = state.scn; let hit = true;
+    const step = e.shiftKey ? 1000 : 100;
+    if (e.key === 'ArrowLeft') s.dX = clamp(s.dX - step, -X0 * 0.4, X0 * 0.2);
+    else if (e.key === 'ArrowRight') s.dX = clamp(s.dX + step, -X0 * 0.4, X0 * 0.2);
+    else if (e.key === 'ArrowUp') s.dSigma = clamp(s.dSigma + 0.5, -10, 40);
+    else if (e.key === 'ArrowDown') s.dSigma = clamp(s.dSigma - 0.5, -10, 40);
+    else if (e.key === ']') s.d = clamp(s.d + 1, 0, maxDays());
+    else if (e.key === '[') s.d = clamp(s.d - 1, 0, maxDays());
+    else if (e.key === 'r' || e.key === 'R') { state.view = null; }
+    else if (e.key === '+' || e.key === '=') zoomBy(0.8);
+    else if (e.key === '-') zoomBy(1.25);
+    else if (e.key === '0') { Object.assign(s, { d: 0, dX: 0, dSigma: 0, skew: 0 }); }
+    else hit = false;
+    if (hit) { e.preventDefault(); render(); }
+  });
+})();
+function zoomBy(f) { const [lo, hi] = view(); const c = (lo + hi) / 2; state.view = [c - (c - lo) * f, c + (hi - c) * f]; }
+
+/* ---- rails ---- */
+const ivrail = $('#ivrail'), timerail = $('#timerail');
+function renderRails() {
+  const s = state.scn;
+  // IV rail: -10 .. +40 (top = +40)
+  const H = ivrail.clientHeight, top = 22, bot = H - 22;
+  const y = bot - (s.dSigma + 10) / 50 * (bot - top);
+  const y0 = bot - 10 / 50 * (bot - top);
+  ivrail.innerHTML = `<div class="lbl top">+40</div><div class="track"></div><div class="zero" style="top:${y0.toFixed(1)}px"></div><div class="knob" style="top:${y.toFixed(1)}px"></div><div class="cur" style="top:${y.toFixed(1)}px">Δσ ${fsg(s.dSigma, 1)}pt</div><div class="lbl bot">−10</div>`;
+  ivrail.classList.toggle('hot', s.dSigma !== 0);
+  // time rail
+  const W = timerail.clientWidth, md = maxDays();
+  const x = d => (d / md) * W;
+  let out = `<div class="track"></div><div class="fillbar" style="width:${x(s.d).toFixed(1)}px"></div>`;
+  out += `<div class="mark" style="left:0"></div><div class="mtxt left" style="left:0">今 ${fmtMD(BOARD_AT)}</div>`;
+  const ms = new Set(legs().map(l => l.month)); if (!ms.size) ms.add(state.month);
+  for (const id of ms) { const m = M[id]; if (!m || m.dSq > md + 0.01) continue; out += `<div class="mark" style="left:${x(m.dLtd).toFixed(1)}px" title="${m.label} 取引最終日 15:45" data-d="${m.dLtd}"></div><div class="mark sq" style="left:${x(m.dSq).toFixed(1)}px" data-d="${m.dSq}"></div><div class="mtxt ${m.dSq >= md - 0.01 ? 'right' : ''}" style="left:${x(m.dSq).toFixed(1)}px" data-d="${m.dSq}">${m.label} SQ ${fmtMD(new Date(m.sq))}</div>`; }
+  const et = evalTime();
+  out += `<div class="knob" style="left:${x(s.d).toFixed(1)}px"></div><div class="cur" style="left:${clamp(x(s.d), 40, W - 48).toFixed(1)}px">d ${fmt(s.d, Number.isInteger(s.d) ? 0 : 1)} 日 · ${fmtMDHM(et)}（${fmtWd(et)}）</div>`;
+  timerail.innerHTML = out; timerail.classList.toggle('hot', s.d > 0);
+  const cur = timerail.querySelector('.cur'); if (cur) { const cw = cur.offsetWidth; cur.style.left = clamp(x(s.d), cw / 2, W - cw / 2).toFixed(1) + 'px'; }
+}
+(function railGestures() {
+  let drag = null;
+  ivrail.addEventListener('pointerdown', e => { ivrail.setPointerCapture(e.pointerId); drag = true; ivrail.classList.add('live'); chartEl.classList.add('live'); mv(e); });
+  function mv(e) { if (!drag) return; const H = ivrail.clientHeight, top = 22, bot = H - 22; const v = (bot - e.offsetY) / (bot - top) * 50 - 10; state.scn.dSigma = clamp(Math.round(v * 2) / 2, -10, 40); render(); }
+  ivrail.addEventListener('pointermove', mv);
+  ivrail.addEventListener('pointerup', () => { drag = null; chartEl.classList.remove('live'); }); ivrail.addEventListener('pointercancel', () => { drag = null; chartEl.classList.remove('live'); });
+  ivrail.addEventListener('dblclick', () => { state.scn.dSigma = 0; render(); });
+  let tdrag = null, t0 = null;
+  timerail.addEventListener('pointerdown', e => { const mk = e.target.closest('[data-d]'); if (mk) { state.scn.d = Number(mk.dataset.d); render(); toast(`評価時刻を ${fmtMDHM(evalTime())} に`); return; } timerail.setPointerCapture(e.pointerId); tdrag = true; t0 = e.offsetX; chartEl.classList.add('live'); tmv(e); });
+  function tmv(e) { if (!tdrag) return; const W = timerail.clientWidth; const d = clamp(e.offsetX / W * maxDays(), 0, maxDays()); state.scn.d = Math.round(d); render(); }
+  timerail.addEventListener('pointermove', tmv);
+  timerail.addEventListener('pointerup', () => { tdrag = null; chartEl.classList.remove('live'); }); timerail.addEventListener('pointercancel', () => { tdrag = null; chartEl.classList.remove('live'); });
+})();
+
+/* ===================== readout ===================== */
+function renderReadout() {
+  const el = $('#readout'); const ls = legs(); const s = state.scn; const X = xs();
+  if (!ls.length) { el.innerHTML = `<div class="ro hero"><div class="k">指定日の損益</div><div class="v faint">—</div></div><div class="ro"><div class="k">満期</div><div class="v faint">—</div></div><div class="ro"><div class="k">Δ</div><div class="v faint">—</div></div>`; return; }
+  const g = greeksAt(X, s.d, s);
+  const vSc = pnlAt(X, s.d, s), vExp = expiryAt(X), vTd = pnlAt(X, 0, todayScn());
+  const cls = v => v > 0 ? 'gain' : v < 0 ? 'loss' : '';
+  const u = unitLabel();
+  el.innerHTML = `
+    <div class="ro hero sc"><div class="k">損益 · ${scnOn() ? `指定日 d ${fmt(s.d, Number.isInteger(s.d) ? 0 : 1)}（${fmtMD(evalTime())}）` : '今日（シナリオ 0）'}</div><div class="v ${cls(vSc)}">${amt(vSc)}<small>${u}</small></div><div class="s">X ${fmt(X)}（${fsg(s.dX)} / ${fsg(s.dX / X0 * 100, 1)}%）${s.dSigma ? ` · Δσ ${fsg(s.dSigma, 1)}pt` : ''}</div></div>
+    <div class="ro"><div class="k">満期（SQ）</div><div class="v ${cls(vExp)}">${amt(vExp)}<small>${u}</small></div><div class="s">今日 ${amt(vTd)}</div></div>
+    <div class="ro"><div class="k">Δ ラージ（ミニ）</div><div class="v">${fsg(g.delta, 2)}<small>(${fsg(g.delta * 10, 1)})</small></div><div class="s">Γ ${fsg(g.gamma, 3)} /100円</div></div>
+    <div class="ro x1"><div class="k">Θ / 日</div><div class="v ${cls(g.theta)}">${amt(g.theta)}<small>${u}</small></div></div>
+    <div class="ro x1"><div class="k">V / pt</div><div class="v ${cls(g.vega)}">${amt(g.vega)}<small>${u}</small></div></div>
+    <div class="ro x2"><div class="k">受取 − 支払</div><div class="v">${amt(premium().net)}<small>${u}</small></div><div class="s">手数料 ${fmt(state.fee)} 円/枚</div></div>`;
+}
+
+/* ===================== scenario panel ===================== */
+function stepperHtml(id, label, val, sub, hot) { return `<div class="stepper ${hot ? 'hot' : ''}" data-step="${id}"><button data-dir="-1" aria-label="${label} を減らす">−</button><div class="val"><b>${val}</b><small>${sub}</small></div><button data-dir="1" aria-label="${label} を増やす">+</button></div>`; }
+function renderScenario() {
+  const s = state.scn;
+  const dxv = state.dxUnit === 'pct' ? fsg(s.dX / X0 * 100, 1) + '%' : fsg(s.dX) + '円';
+  $('#scn-grid').innerHTML =
+    stepperHtml('d', '経過日数', fmt(s.d, Number.isInteger(s.d) ? 0 : 1) + ' 日', 'd ' + fmtMD(evalTime()), s.d > 0) +
+    stepperHtml('dX', '原資産', dxv, 'X ' + fmt(xs()), s.dX !== 0) +
+    stepperHtml('dSigma', 'IV', fsg(s.dSigma, 1) + ' pt', 'Δσ 平行', s.dSigma !== 0) +
+    stepperHtml('skew', 'スキュー', fsg(s.skew, 1), 'Δs pt/10%', s.skew !== 0) +
+    stepperHtml('beta', 'β', fmt(s.beta, 1), 'β pt/1%', s.beta !== 1);
+  const presets = [['急落', -10, 20, 3], ['下落', -5, 8, 1], ['反発', 5, -5, -1]];
+  let chips = presets.map(([n, x, v, k]) => { const on = Math.abs(s.dX - Math.round(X0 * x / 100 / 10) * 10) < 1 && s.dSigma === v && s.skew === k; return `<button class="chip" aria-pressed="${on}" data-preset="${x},${v},${k}">${n} <span class="faint">${fsg(x)}% / ${fsg(v)}pt / ${fsg(k)}</span></button>`; }).join('');
+  chips += `<button class="chip" data-reset>リセット</button>`;
+  const ms = [...new Set(legs().map(l => l.month))].map(id => M[id]).filter(Boolean);
+  const evs = (ms.length ? ms : [M[state.month]]).flatMap(m => [`<button class="chip" data-d="${m.dLtd}" aria-pressed="${Math.abs(s.d - m.dLtd) < 0.01}">${m.label} 最終日 15:45</button>`, `<button class="chip" data-d="${m.dSq}" aria-pressed="${Math.abs(s.d - m.dSq) < 0.01}">${m.label} SQ 9:00</button>`]).join('');
+  $('#scn-presets').innerHTML = chips;
+  $('#scn-eval').innerHTML = evs;
+  $('#adv-vals').textContent = `${s.sticky === 'strike' ? 'sticky strike' : 'sticky moneyness'} · basis ${state.basis === 'fixed' ? '固定' : '減衰'} · ΔX ${state.dxUnit === 'pct' ? '%' : '円'}`;
+  $$('#adv-sticky button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.v === s.sticky)));
+  $$('#adv-basis button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.v === state.basis)));
+  $$('#adv-dx button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.v === state.dxUnit)));
+}
+const STEP = { d: [1, 0, null], dX: [null, null, null], dSigma: [0.5, -10, 40], skew: [0.5, -5, 5], beta: [0.1, 0, 10] };
+function stepScn(id, dir, mult = 1) {
+  const s = state.scn;
+  if (id === 'd') s.d = clamp(Math.round(s.d + dir * mult), 0, maxDays());
+  else if (id === 'dX') { const st = state.dxUnit === 'pct' ? Math.round(X0 * 0.005 / 10) * 10 : 100; s.dX = clamp(s.dX + dir * st * mult, Math.ceil(-X0 * 0.4 / 10) * 10, Math.floor(X0 * 0.2 / 10) * 10); }
+  else { const [st, lo, hi] = STEP[id]; s[id] = clamp(Math.round((s[id] + dir * st * mult) * 10) / 10, lo, hi); }
+}
+(function scenarioEvents() {
+  const root = $('#scenario');
+  root.addEventListener('click', e => {
+    const b = e.target.closest('button'); if (!b) return;
+    if (b.dataset.dir) { const id = b.closest('[data-step]').dataset.step; stepScn(id, Number(b.dataset.dir)); render(); return; }
+    if (b.dataset.preset) { const [x, v, k] = b.dataset.preset.split(',').map(Number); state.scn.dX = Math.round(X0 * x / 100 / 10) * 10; state.scn.dSigma = v; state.scn.skew = k; render(); return; }
+    if (b.hasAttribute('data-reset')) { Object.assign(state.scn, { d: 0, dX: 0, dSigma: 0, skew: 0, beta: 1, sticky: 'strike' }); render(); toast('シナリオをリセット'); return; }
+    if (b.dataset.d) { state.scn.d = Number(b.dataset.d); render(); return; }
+    if (b.closest('#adv-sticky')) { state.scn.sticky = b.dataset.v; render(); return; }
+    if (b.closest('#adv-basis')) { state.basis = b.dataset.v; render(); return; }
+    if (b.closest('#adv-dx')) { state.dxUnit = b.dataset.v; render(); return; }
+  });
+  // scrub on stepper value
+  let scrub = null;
+  root.addEventListener('pointerdown', e => { const v = e.target.closest('.val'); if (!v) return; const st = v.closest('[data-step]'); scrub = { id: st.dataset.step, x: e.clientX, acc: 0 }; st.setPointerCapture(e.pointerId); chartEl.classList.add('live'); });
+  root.addEventListener('pointermove', e => { if (!scrub) return; const dx = e.clientX - scrub.x; const steps = Math.trunc(dx / 8); if (steps !== scrub.acc) { stepScn(scrub.id, Math.sign(steps - scrub.acc), Math.abs(steps - scrub.acc)); scrub.acc = steps; render(); } });
+  const end = () => { scrub = null; chartEl.classList.remove('live'); };
+  root.addEventListener('pointerup', end); root.addEventListener('pointercancel', end);
+  root.addEventListener('wheel', e => { const v = e.target.closest('.val'); if (!v) return; e.preventDefault(); stepScn(v.closest('[data-step]').dataset.step, e.deltaY < 0 ? 1 : -1); render(); }, { passive: false });
+})();
+
+/* ===================== positions panel ===================== */
+let posKey = '';
+function legKey() { return legs().map(l => `${l.id}:${l.qty}:${l.side}:${l.entry}:${l.iv}`).join('|') + `#${state.ui.selLeg}/${state.ui.openLeg}/${state.fee}/${state.unit}/${state.hedge.target}/${state.hedge.at}/${state.hedge.contract}/${state.active}`; }
+function renderPositions(force) {
+  const k = legKey(); if (!force && k === posKey) return; posKey = k;
+  const ls = legs(); const p = premium();
+  $('#pos-sub').textContent = ls.length ? `${ls.length} 本 · ${p.net >= 0 ? '受取' : '掛け金'} ${amt(Math.abs(p.net >= 0 ? p.net : p.stake), false)} ${unitLabel()}` : '足なし';
+  const list = $('#legs');
+  if (!ls.length) { list.innerHTML = `<li class="empty-state">足がありません。<br>板の <span class="gain">bid</span>（売り）/ <span class="loss">ask</span>（買い）を押すと入ります。<button class="btn sm" data-go="board">板を開く</button></li>`; }
+  else list.innerHTML = ls.map(l => {
+    const sideCls = l.side < 0 ? 's' : 'b';
+    const name = l.kind === 'opt' ? `${l.cp} ${fmt(l.K)}` : `${PRODUCTS[l.product].label}`;
+    const g = l.kind === 'opt' ? greeksAt(X0, 0, ZERO, [{ ...l }]) : null;
+    const flags = l.flags.map(f => `<span class="tag warn">${f}</span>`).join('') + (l.ivEdited ? '<span class="tag">IV 編集</span>' : '');
+    const open = state.ui.openLeg === l.id;
+    return `<li class="leg ${state.ui.selLeg === l.id ? 'sel' : ''}" data-id="${l.id}">
+      <div class="leg-row">
+        <div class="leg-main" data-toggle role="button" aria-expanded="${open}">
+          <div class="leg-title"><span class="side ${sideCls}">${l.side < 0 ? '売' : '買'}</span><span class="name">${name}</span><span class="px">@${fmt(l.entry, Number.isInteger(l.entry) ? 0 : 2)}</span></div>
+          <div class="leg-sub"><span class="month">${l.month}</span>${l.kind === 'opt' ? `<span>IV ${fmt(l.iv * 100, 1)}</span><span>Δ ${fsg(g.delta, 2)}</span>` : ''}${flags}</div>
+        </div>
+        <div class="qty"><button data-q="-1" ${l.qty <= 1 ? 'disabled' : ''} aria-label="枚数を減らす">−</button><div class="n">${l.qty}</div><button data-q="1" aria-label="枚数を増やす">+</button></div>
+        <div class="ops"><button class="btn ghost icon sm" data-flip title="売⇄買">⇄</button><button class="btn ghost icon sm" data-del title="削除">×</button></div>
+      </div>
+      ${open ? legDetail(l, g) : ''}
+    </li>`;
+  }).join('');
+  renderHedge();
+}
+function legDetail(l, g) {
+  if (l.kind === 'fut') return `<div class="leg-detail"><div class="kv"><div class="k">商品</div><div class="v">${PRODUCTS[l.product].label} ${l.month}</div></div><div class="kv"><div class="k">建値</div><div class="v"><input class="input" data-f="entry" value="${l.entry}"></div></div><div class="kv"><div class="k">乗数</div><div class="v">${l.mult}</div></div><div class="kv"><div class="k">Δ ラージ</div><div class="v">${fsg(l.side * l.qty * l.mult / 1000, 2)}</div></div></div>`;
+  const m = M[l.month];
+  const mid = m.byK[l.K]?.[l.cp].mid ?? 0;
+  const theo = b76(m.F, l.K, m.dSq / 365, smileIv(m, l.K), l.cp);
+  return `<div class="leg-detail">
+    <div class="kv"><div class="k">建値</div><div class="v"><input class="input" data-f="entry" value="${l.entry}"></div></div>
+    <div class="kv"><div class="k">IV %</div><div class="v"><input class="input" data-f="iv" value="${fmt(l.iv * 100, 1)}"></div></div>
+    <div class="kv"><div class="k">Δ ラージ（ミニ）</div><div class="v">${fsg(g.delta, 3)} (${fsg(g.delta * 10, 2)})</div></div>
+    <div class="kv"><div class="k">Γ / 100円</div><div class="v">${fsg(g.gamma, 4)}</div></div>
+    <div class="kv"><div class="k">Θ 円/日</div><div class="v">${fsg(g.theta)}</div></div>
+    <div class="kv"><div class="k">V 円/pt</div><div class="v">${fsg(g.vega)}</div></div>
+    <div class="kv"><div class="k">スプレッドコスト</div><div class="v">${fsg(-Math.abs(l.entry - mid) * l.qty * l.mult)}</div></div>
+    <div class="kv"><div class="k">SQ 日</div><div class="v">${m.sq}</div></div>
+    <div class="flags">${l.flags.length ? '印: ' + l.flags.join('・') : ''} 理論値 ${fmt(theo, 1)} · mid ${fmt(mid)}</div>
+  </div>`;
+}
+function hedgeCalc() {
+  const s = state.scn; const h = state.hedge;
+  const at = h.at === 'base' ? { X: X0, d: 0, s: ZERO } : { X: xs(), d: s.d, s };
+  const g = legs().length ? greeksAt(at.X, at.d, at.s) : { delta: 0 };
+  const need = h.target - g.delta;
+  const mini = Math.round(need * 10), large = Math.round(need);
+  return { delta: g.delta, need, mini, large, restMini: need - mini / 10, restLarge: need - large, micro: Math.round(need * 100) };
+}
+function renderHedge() {
+  const h = hedgeCalc(); const st = state.hedge;
+  const price = FUT.price;
+  $('#hedge').innerHTML = `
+    <span>現在 Δ <span class="big">${fsg(h.delta, 2)}</span><span class="faint"> 枚（ミニ ${fsg(h.delta * 10, 1)}）</span></span><span class="sep">→</span>
+    <span>目標 <span class="big">${fsg(st.target, 1)}</span></span>
+    <span class="seg"><button data-at="base" aria-pressed="${st.at === 'base'}">適用前</button><button data-at="scn" aria-pressed="${st.at === 'scn'}">シナリオ時点</button></span>
+    <span class="sep">·</span>
+    <span>ミニ <b class="big">${fsg(h.mini)} 枚</b><span class="faint">（残り ${fsg(h.restMini, 2)}）</span> <button class="btn sm" data-hedge="mini" ${h.mini === 0 ? 'disabled' : ''}>追加</button></span>
+    <span>ラージ <b class="big">${fsg(h.large)} 枚</b><span class="faint">（残り ${fsg(h.restLarge, 2)}）</span> <button class="btn sm" data-hedge="large" ${h.large === 0 ? 'disabled' : ''}>追加</button></span>
+    ${h.mini === 0 && h.micro !== 0 ? `<span class="faint">マイクロ換算 ${fsg(h.micro)} 枚</span>` : ''}
+    <span class="faint">${FUT.month} 先物 @${fmt(price)}</span>`;
+}
+(function positionEvents() {
+  const root = $('#positions');
+  root.addEventListener('click', e => {
+    const b = e.target.closest('button, [data-toggle]'); if (!b) return;
+    const li = e.target.closest('.leg'); const id = li ? Number(li.dataset.id) : null; const l = legs().find(x => x.id === id);
+    if (b.dataset.go) { goPanel(b.dataset.go); return; }
+    if (b.hasAttribute('data-toggle')) { state.ui.openLeg = state.ui.openLeg === id ? null : id; state.ui.selLeg = state.ui.openLeg; render(); return; }
+    if (b.dataset.q && l) { l.qty = clamp(l.qty + Number(b.dataset.q), 1, 100000); render(); return; }
+    if (b.hasAttribute('data-flip') && l) { l.side = -l.side; render(); toast(`${legTitle(l)} に切替（建値は保持）`); return; }
+    if (b.hasAttribute('data-del') && l) { tab().legs = legs().filter(x => x.id !== id); if (state.ui.selLeg === id) state.ui.selLeg = null; render(); toast('足を消した', { undo: () => { tab().legs.push(l); render(); } }); return; }
+    if (b.dataset.at) { state.hedge.at = b.dataset.at; render(); return; }
+    if (b.dataset.hedge) { const h = hedgeCalc(); const n = b.dataset.hedge === 'mini' ? h.mini : h.large; legs().push(mkFutLeg(b.dataset.hedge, FUT.month, Math.sign(n), FUT.price, Math.abs(n))); render(); toast(`${PRODUCTS[b.dataset.hedge].label} ${fsg(n)} 枚を追加`); return; }
+    if (b.id === 'pos-menu') { openMenu(b, [['全クリア', () => { const old = legs(); tab().legs = []; render(); toast('全部消した', { undo: () => { tab().legs = old; render(); } }); }], ['先物 / 手入力の足を追加…', () => openAddLeg()], ['保存一覧に保存', () => saveToBook()], ['URL をコピー', () => toast('URL をコピーした（842 字）')], null, ['ヘッジの目標 Δ…', () => { const v = window.prompt('目標 Δ（ラージ換算）', state.hedge.target); if (v != null && !Number.isNaN(Number(v))) { state.hedge.target = clamp(Number(v), -1000, 1000); render(); } }]]); return; }
+  });
+  root.addEventListener('change', e => { const inp = e.target.closest('input[data-f]'); if (!inp) return; const li = inp.closest('.leg'); const l = legs().find(x => x.id === Number(li.dataset.id)); const v = Number(inp.value.replace(/,/g, '')); if (!Number.isFinite(v)) { inp.setCustomValidity('数値'); return; } if (inp.dataset.f === 'entry') { l.entry = v; if (l.kind === 'opt') { const iv = impliedVol(v, M[l.month].F, l.K, M[l.month].dSq / 365, l.cp); if (iv != null && !l.ivEdited) l.iv = iv; } } else { l.iv = v / 100; l.ivEdited = true; } render(); });
+})();
+
+/* ===================== board panel ===================== */
+let boardKey = '';
+function renderBoard(force) {
+  const m = M[state.month]; const atm = atmK(m);
+  const legSig = legs().filter(l => l.kind === 'opt').map(l => `${l.month}${l.cp}${l.K}${l.side}${l.qty}`).join(',');
+  const bw = $('#board-wrap').clientWidth; const cols = bw >= 540 ? 9 : bw >= 410 ? 7 : 5; const pc = cols >= 7;
+  const k = `${state.month}|${state.target}|${state.filterAsk}|${state.atmBasis}|${legSig}|${cols}`;
+  $$('#month-seg button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.m === state.month)));
+  $$('#target-seg button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.t === state.target)));
+  $('#filter-ask').setAttribute('aria-pressed', String(state.filterAsk));
+  $('#board-foot').innerHTML = `<span>F <b>${fmt(m.F)}</b> ±${m.Ferr}</span><span>ATM ${fmt(atm)}（${state.atmBasis === 'B' ? '合成先物' : 'ラージ先物'}）</span><span>SQ ${m.sq}</span><span class="faint">bid = 売り · ask = 買い</span>`;
+  if (!force && k === boardKey) return; boardKey = k;
+  const rows = [...m.rows].reverse().filter(r => !state.filterAsk || r[state.target === 'put' ? 'P' : 'C'].ask <= 50);
+  const d9 = cols === 9;
+  const legMap = {}; for (const l of legs()) if (l.kind === 'opt' && l.month === m.id) { legMap[l.K] = legMap[l.K] || {}; legMap[l.K][l.cp] = (legMap[l.K][l.cp] || 0) + l.side * l.qty; }
+  const badge = (K, cp) => legMap[K]?.[cp] ? `<span class="legbadge ${cp === 'C' ? 'c' : ''}">${legMap[K][cp] < 0 ? '売' : '買'}${Math.abs(legMap[K][cp])}</span>` : '';
+  const ivs = q => q.bidIv == null && q.askIv == null ? '—' : `${q.bidIv == null ? '—' : fmt(q.bidIv * 100, 1)}/${q.askIv == null ? '—' : fmt(q.askIv * 100, 1)}`;
+  const cell = (r, cp) => { const q = r[cp]; return `<td class="q"><button class="bid" data-k="${r.K}" data-cp="${cp}" data-side="-1">${fmt(q.bid)}</button></td><td class="q"><button class="ask" data-k="${r.K}" data-cp="${cp}" data-side="1">${fmt(q.ask)}</button></td>`; };
+  let html = '<table class="board"><thead><tr>';
+  if (pc) html += `${d9 ? '<th class="pc">Δ</th>' : ''}<th class="pc">IV</th><th class="pc">C bid</th><th class="pc">C ask</th><th class="k">K</th><th class="pc">P bid</th><th class="pc">P ask</th><th class="pc">IV</th>${d9 ? '<th class="pc">Δ</th>' : ''}`;
+  else html += `<th class="k ph">K</th><th class="ph">bid</th><th class="ph">ask</th><th class="ph">IV b/a</th><th class="ph">Δ</th>`;
+  html += '</tr></thead><tbody>';
+  for (const r of rows) {
+    const cls = r.K === atm ? 'atm' : '';
+    html += `<tr class="${cls}" data-k="${r.K}">`;
+    if (pc) html += `${d9 ? `<td class="d pc">${fsg(r.C.delta, 2)}</td>` : ''}<td class="iv pc">${ivs(r.C)}${r.C.unstable ? '<span class="flag">×</span>' : ''}</td>${cell(r, 'C')}<td class="k">${badge(r.K, 'P')}${fmt(r.K)}${badge(r.K, 'C')}</td>${cell(r, 'P')}<td class="iv pc">${ivs(r.P)}${r.P.unstable ? '<span class="flag">×</span>' : ''}</td>${d9 ? `<td class="d pc">${fsg(r.P.delta, 2)}</td>` : ''}`;
+    else { const cp = state.target === 'put' ? 'P' : 'C'; html += `<td class="k ph">${badge(r.K, cp)}${fmt(r.K)}</td>${cell(r, cp)}<td class="iv ph">${ivs(r[cp])}${r[cp].unstable ? '<span class="flag">×</span>' : ''}</td><td class="d ph">${fsg(r[cp].delta, 2)}</td>`; }
+    html += '</tr>';
+  }
+  html += '</tbody></table>';
+  $('#board-wrap').innerHTML = html;
+  requestAnimationFrame(() => scrollBoardTo(atm, false));
+}
+function scrollBoardTo(K, flash = true) {
+  const wrap = $('#board-wrap'); const tr = wrap.querySelector(`tr[data-k="${K}"]`); if (!tr) return;
+  wrap.scrollTop = tr.offsetTop - wrap.clientHeight / 2 + tr.offsetHeight / 2;
+  if (flash) { tr.classList.remove('hit'); void tr.offsetWidth; tr.classList.add('hit'); }
+}
+(function boardEvents() {
+  const root = $('#board');
+  root.addEventListener('click', e => {
+    const b = e.target.closest('button'); if (!b) return;
+    const m = M[state.month];
+    if (b.dataset.m) { state.month = b.dataset.m; state.smilePick = null; render(); return; }
+    if (b.dataset.t) { state.target = b.dataset.t; render(); return; }
+    if (b.id === 'filter-ask') { state.filterAsk = !state.filterAsk; render(); return; }
+    if (b.dataset.jump) {
+      const j = b.dataset.jump; let K = null;
+      if (j === 'atm') K = atmK(m);
+      else if (j.startsWith('otm')) { const p = Number(j.slice(3)) / 100; const ref = refPrice(m); const t = state.target === 'put' ? ref * (1 - p) : ref * (1 + p); K = nearestK(m, t); }
+      else if (j.startsWith('delta')) { const d = Number(j.slice(5)); const cp = state.target === 'put' ? 'P' : 'C'; let best = null; for (const r of m.rows) if (best === null || Math.abs(Math.abs(r[cp].delta) - d) < Math.abs(Math.abs(best[cp].delta) - d)) best = r; K = best.K; }
+      if (state.filterAsk && K != null && !(m.byK[K][state.target === 'put' ? 'P' : 'C'].ask <= 50)) { state.filterAsk = false; render(); }
+      if (K != null) scrollBoardTo(K);
+      return;
+    }
+    if (b.dataset.k && b.dataset.cp) { addFromBoard(state.month, b.dataset.cp, Number(b.dataset.k), Number(b.dataset.side)); return; }
+  });
+})();
+function nearestK(m, t) { let best = null; for (const r of m.rows) if (best === null || Math.abs(r.K - t) < Math.abs(best - t)) best = r.K; return best; }
+function addFromBoard(monthId, cp, K, side) {
+  const q = M[monthId].byK[K][cp]; const entry = side < 0 ? q.bid : q.ask;
+  const l = mkOptLeg(monthId, cp, K, side, entry);
+  legs().push(l); state.ui.selLeg = l.id; render();
+  toast(`${side < 0 ? '売' : '買'} ${cp} ${fmt(K)} @${fmt(entry)} を追加`, { undo: () => { tab().legs = legs().filter(x => x.id !== l.id); render(); } });
+}
+
+/* ===================== smile panel ===================== */
+const smileEl = $('#smile-wrap'); const smileSvg = $('#smile-wrap svg');
+function renderSmile() {
+  const w = smileEl.clientWidth, h = smileEl.clientHeight; if (!w || !h) return;
+  const m = M[state.month]; const SM = { l: 38, r: 12, t: 12, b: 24 }; const pw = w - SM.l - SM.r, ph = h - SM.t - SM.b;
+  smileSvg.setAttribute('viewBox', `0 0 ${w} ${h}`);
+  const ref = refPrice(m); const atm = atmK(m);
+  const rows = m.rows.filter(r => r.K >= X0 * 0.72 && r.K <= X0 * 1.18);
+  const ax = state.smileAxis;
+  const xv = K => ax === 'k' ? K : ax === 'moneyness' ? (K / ref - 1) * 100 : -b76Delta(m.F, K, m.dSq / 365, smileIv(m, K), 'P');
+  const xsv = rows.map(r => xv(r.K)); const lo = Math.min(...xsv), hi = Math.max(...xsv);
+  const X = v => SM.l + (v - lo) / (hi - lo) * pw;
+  const ivs = rows.flatMap(r => { const q = r.K < ref ? r.P : r.C; return [q.bidIv, q.askIv, r.iv].filter(v => v != null).map(v => v * 100); });
+  let ylo = Math.min(...ivs), yhi = Math.max(...ivs); const pad = (yhi - ylo) * 0.12; ylo -= pad; yhi += pad;
+  const Y = v => SM.t + (yhi - v) / (yhi - ylo) * ph;
+  let out = '<g class="grid">';
+  const ys = niceStep(yhi - ylo, 5);
+  for (let v = Math.ceil(ylo / ys) * ys; v <= yhi; v += ys) out += `<line x1="${SM.l}" x2="${SM.l + pw}" y1="${Y(v).toFixed(1)}" y2="${Y(v).toFixed(1)}"/>`;
+  out += '</g><g class="ax">';
+  for (let v = Math.ceil(ylo / ys) * ys; v <= yhi; v += ys) out += `<text x="${SM.l - 5}" y="${(Y(v) + 3.5).toFixed(1)}" text-anchor="end">${fmt(v)}</text>`;
+  const nx = 5; for (let i = 0; i <= nx; i++) { const v = lo + (hi - lo) * i / nx; out += `<text x="${X(v).toFixed(1)}" y="${h - 7}" text-anchor="${i === 0 ? 'start' : i === nx ? 'end' : 'middle'}">${ax === 'k' ? fmt(Math.round(v / 250) * 250) : ax === 'moneyness' ? fsg(v, 0) + '%' : fmt(v, 2)}</text>`; }
+  out += '</g>';
+  out += `<path class="curve" d="${rows.map((r, i) => (i ? 'L' : 'M') + X(xv(r.K)).toFixed(1) + ' ' + Y(r.iv * 100).toFixed(1)).join('')}"/>`;
+  out += `<line class="atm" x1="${X(xv(atm)).toFixed(1)}" x2="${X(xv(atm)).toFixed(1)}" y1="${SM.t}" y2="${SM.t + ph}"/>`;
+  if (state.scn.dX !== 0) { const k2 = nearestK(m, atm + state.scn.dX); out += `<line class="atm2" x1="${X(xv(k2)).toFixed(1)}" x2="${X(xv(k2)).toFixed(1)}" y1="${SM.t}" y2="${SM.t + ph}"/>`; }
+  for (const r of rows) { const q = r.K < ref ? r.P : r.C; const x = X(xv(r.K)).toFixed(1); if (q.unstable) { out += `<path class="pt x" d="M${x - 3} ${Y(r.iv * 100) - 3}l6 6m0 -6l-6 6" transform="translate(0 0)" data-k="${r.K}"/>`; continue; } if (q.bidIv != null) out += `<circle class="pt bid" cx="${x}" cy="${Y(q.bidIv * 100).toFixed(1)}" r="2" data-k="${r.K}"/>`; if (q.askIv != null) out += `<circle class="pt ask" cx="${x}" cy="${Y(q.askIv * 100).toFixed(1)}" r="2" data-k="${r.K}"/>`; out += `<circle class="pt" cx="${x}" cy="${Y(r.iv * 100).toFixed(1)}" r="2.6" data-k="${r.K}"/>`; }
+  if (state.smilePick) { const K = state.smilePick; const x = X(xv(K)).toFixed(1); out += `<line class="sel" x1="${x}" x2="${x}" y1="${SM.t}" y2="${SM.t + ph}"/><text class="sellbl" x="${x}" y="${SM.t + 10}" text-anchor="middle">${fmt(K)}</text>`; }
+  smileSvg.innerHTML = out;
+  smileEl._map = { rows, X, xv };
+  $$('#smile-axis button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.ax === state.smileAxis)));
+  const act = $('#smile-act');
+  if (state.smilePick) { const K = state.smilePick; const cp = K < ref ? 'P' : 'C'; const q = m.byK[K][cp]; act.innerHTML = `<span class="k">${fmt(K)} ${cp === 'P' ? 'put' : 'call'}</span><span class="faint">IV ${fmt(m.byK[K].iv * 100, 1)}</span><span class="spacer" style="flex:1"></span><button class="btn sm" data-add="-1">売り <b class="gain">${fmt(q.bid)}</b></button><button class="btn sm" data-add="1">買い <b class="loss">${fmt(q.ask)}</b></button><button class="btn ghost icon sm" data-clear>×</button>`; }
+  else act.innerHTML = `<span class="hint">点をタップで行使価格を選ぶ · 長押しで連続 · <span class="kbd">,</span> <span class="kbd">.</span></span>`;
+}
+(function smileEvents() {
+  let press = null, scrub = false;
+  function pickAt(px) { const mp = smileEl._map; if (!mp) return null; let best = null, bd = 1e9; for (const r of mp.rows) { const d = Math.abs(mp.X(mp.xv(r.K)) - px); if (d < bd) { bd = d; best = r.K; } } return bd <= 12 || scrub ? best : null; }
+  smileEl.addEventListener('pointerdown', e => { smileEl.setPointerCapture(e.pointerId); press = { x: e.offsetX, t: Date.now() }; scrub = false; press.timer = setTimeout(() => { scrub = true; state.smilePick = pickAt(e.offsetX); renderSmile(); }, 450); });
+  smileEl.addEventListener('pointermove', e => { if (!press) return; if (scrub) { const k = pickAt(e.offsetX); if (k && k !== state.smilePick) { state.smilePick = k; renderSmile(); } } else if (Math.abs(e.offsetX - press.x) > 6) { clearTimeout(press.timer); } });
+  smileEl.addEventListener('pointerup', e => { if (!press) return; clearTimeout(press.timer); if (!scrub && Math.abs(e.offsetX - press.x) <= 6) { const k = pickAt(e.offsetX); state.smilePick = k === state.smilePick ? null : k; renderSmile(); } press = null; scrub = false; });
+  $('#smile').addEventListener('click', e => { const b = e.target.closest('button'); if (!b) return; if (b.dataset.ax) { state.smileAxis = b.dataset.ax; renderSmile(); } else if (b.dataset.add) { const m = M[state.month]; const K = state.smilePick; const cp = K < refPrice(m) ? 'P' : 'C'; addFromBoard(state.month, cp, K, Number(b.dataset.add)); } else if (b.hasAttribute('data-clear')) { state.smilePick = null; renderSmile(); } });
+})();
+
+/* ===================== metrics panel ===================== */
+function renderMetrics() {
+  const ls = legs(); const el = $('#metrics-body');
+  if (!ls.length) { el.innerHTML = '<div class="empty-state">足を入れると指標とテール表が出ます</div>'; return; }
+  const st = expiryStats(); const p = premium(); const s = state.scn; const X = xs(); const u = unitLabel();
+  const g = greeksAt(X, s.d, s); const vSc = pnlAt(X, s.d, s);
+  const bep2 = scnBep();
+  const base = p.net >= 0 ? p.net : p.stake;
+  const ratio = v => base ? `×${fmt(Math.abs(v) / base, 1)}` : '';
+  const tail = [-5, -10, -20, -30, -40].map(pc => { const Xp = X0 * (1 + pc / 100); const a = expiryAt(Xp); const b = pnlAt(Xp, s.d, s); return { pc, Xp, a, b }; });
+  const tmax = Math.max(1, ...tail.flatMap(t => [Math.abs(t.a), Math.abs(t.b)]));
+  const cls = v => v > 0 ? 'gain' : v < 0 ? 'loss' : '';
+  el.innerHTML = `
+    <div class="metric-tiles">
+      <div class="tile"><div class="k">満期 最大利益</div><div class="v ${cls(st.maxP)}">${amt(st.maxP)} <small>${u}</small></div><div class="s">${Number.isFinite(st.maxP) ? 'X ' + fmt(st.maxX) : 'call 側 ∞'}</div></div>
+      <div class="tile"><div class="k">満期 最大損失</div><div class="v ${cls(st.minP)}">${amt(st.minP)} <small>${u}</small></div><div class="s">${Number.isFinite(st.minP) ? 'X ' + fmt(st.minX) : 'call 側 −∞'}</div></div>
+      <div class="tile"><div class="k">満期 BEP</div><div class="v">${st.bep.length ? st.bep.map(b => fmt(b)).join(' / ') : 'なし'}</div><div class="s">指定日 ${bep2.length ? bep2.map(b => fmt(b)).join(' / ') : 'なし'}</div></div>
+      <div class="tile"><div class="k">${p.net >= 0 ? '受取 − 支払' : '掛け金'}</div><div class="v">${amt(p.net >= 0 ? p.net : p.stake)} <small>${u}</small></div><div class="s">受取 ${amt(p.recv, false)} / 支払 ${amt(p.pay, false)} / 手数料 ${amt(p.feeT, false)}</div></div>
+      <div class="tile"><div class="k">指定日 + シナリオ</div><div class="v ${cls(vSc)}">${amt(vSc)} <small>${u}</small></div><div class="s">d ${fmt(s.d)} · ΔX ${fsg(s.dX)} · Δσ ${fsg(s.dSigma, 1)} · Δs ${fsg(s.skew, 1)}</div></div>
+      <div class="tile"><div class="k">合計グリーク（シナリオ点）</div><div class="v">Δ ${fsg(g.delta, 2)}</div><div class="s">Γ ${fsg(g.gamma, 3)} · Θ ${amt(g.theta)} · V ${amt(g.vega)}</div></div>
+    </div>
+    <div class="sec-head"><h3>テール表</h3><span class="sub">損益（${u}）と倍率（基準 ${amt(base, false)}）</span></div>
+    <table class="tail"><thead><tr><th>原資産</th><th>SQ</th><th>指定日 + シナリオ</th></tr></thead><tbody>
+    ${tail.map(t => `<tr><td>${fsg(t.pc)}%<small>${fmt(t.Xp)}</small></td><td class="bar ${cls(t.a)}"><div class="barfill" style="width:${(Math.abs(t.a) / tmax * 100).toFixed(0)}%;${t.a >= 0 ? 'background:var(--gain-fill)' : ''}"></div><span class="txt">${amt(t.a)}<small>${ratio(t.a)}</small></span></td><td class="bar ${cls(t.b)}"><div class="barfill" style="width:${(Math.abs(t.b) / tmax * 100).toFixed(0)}%;${t.b >= 0 ? 'background:var(--gain-fill)' : ''}"></div><span class="txt">${amt(t.b)}<small>${ratio(t.b)}</small></span></td></tr>`).join('')}
+    </tbody></table>
+    <div class="faint" style="padding:8px 12px;font-size:11px">指定日の列: d・Δσ・Δs・β・sticky はシナリオのまま、原資産だけ各行の値。β は各行の下落率で効く。</div>`;
+}
+
+/* ===================== top: tabs, pins, menus ===================== */
+function renderTop() {
+  $('#boxtabs').innerHTML = state.tabs.map((t, i) => `<button class="boxtab" role="tab" aria-selected="${i === state.active}" data-i="${i}" title="${t.name}（足 ${t.legs.length} 本）">${t.name}${t.legs.length ? `<span class="n">${t.legs.length}</span>` : ''}</button>`).join('') + `<button class="btn ghost icon sm" id="tab-add" title="タブを追加" ${state.tabs.length >= 6 ? 'disabled' : ''}>＋</button>`;
+  const m = M[state.month];
+  $('#pill').innerHTML = `<span class="dot"></span><span class="ellip">板 ${fmtMDHM(BOARD_AT)}</span><span class="tag">最新</span><span class="ellip">F <b>${fmt(m.F)}</b> · ATM <b>${fmt(atmK(m))}</b> · 先物 ${fmt(FUT.price)}</span>`;
+  $('#pill-mini').innerHTML = `<span class="dot"></span><span>${fmtMDHM(BOARD_AT).slice(-5)}</span>`;
+  // legend + pins
+  const s = state.scn;
+  let lg = '';
+  if (state.mode === 'heat' && legs().length) lg = `<span><i class="heat"></i>損益の面（横 原資産 · 縦 経過日数）</span>`;
+  else { lg = `<span><i class="exp"></i>満期</span>`; if (scnOn()) lg += `<span><i class="sc"></i>指定日 + シナリオ</span>`; lg += `<span><i class="td"></i>今日</span>`; }
+  for (const p of state.pins) lg += `<span class="lg-pin" title="${p.cond}"><i class="p${p.no}"></i>${['①', '②', '③'][p.no - 1]} ${p.name}<button class="btn ghost icon sm" style="height:18px;width:18px" data-unpin="${p.no}" aria-label="ピン ${p.no} を外す">×</button></span>`;
+  $('#legend').innerHTML = lg;
+  $('#pin-btn').textContent = `ピン ${state.pins.length}/3`;
+  $$('#mode-seg button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.mode === state.mode)));
+  $$('#market-seg button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.mk === state.ui.market)));
+  $$('.dock button').forEach(b => { b.setAttribute('aria-selected', String(b.dataset.panel === state.ui.panel && state.ui.sheet !== 'hidden')); });
+  $('#dock-pos-n').textContent = legs().length || ''; $('#dock-pos-n').hidden = !legs().length;
+  const lay = $('#layout'); lay.dataset.panel = state.ui.panel; lay.dataset.sheet = state.ui.sheet; lay.dataset.market = state.ui.market;
+}
+$('#boxtabs').addEventListener('click', e => {
+  const b = e.target.closest('button'); if (!b) return;
+  if (b.id === 'tab-add') { openMenu(b, [['空のタブ', () => { state.tabs.push(newTab(freeName())); state.active = state.tabs.length - 1; state.view = null; render(); }], ['このタブを複製', () => { state.tabs.push(newTab(freeName(), legs().map(l => ({ ...l, id: nextId++ })))); state.active = state.tabs.length - 1; render(); }]]); return; }
+  const i = Number(b.dataset.i);
+  if (i === state.active) { openMenu(b, [['名前を変える…', () => { const v = window.prompt('タブの名前（12 字まで）', tab().name); if (v && v.trim()) { tab().name = v.trim().slice(0, 12); render(); } }], ['保存一覧に保存', saveToBook], ['URL をコピー', () => toast('URL をコピーした（842 字）')], null, ['閉じる', () => { if (state.tabs.length <= 1) return; state.tabs.splice(state.active, 1); state.active = Math.min(state.active, state.tabs.length - 1); state.pins = state.pins.filter(p => p.kind !== 'tab' || state.tabs.some(t => t.id === p.tabId)); render(); }]]); return; }
+  state.active = i; state.ui.selLeg = null; state.ui.openLeg = null; render();
+});
+$('#boxtabs').addEventListener('keydown', e => { if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') { const n = state.tabs.length; state.active = (state.active + (e.key === 'ArrowRight' ? 1 : n - 1)) % n; render(); $$('.boxtab')[state.active]?.focus(); } });
+function addPin(p) { if (state.pins.length >= 3) { toast('ピンは 3 本まで（外すと追加できる）'); return; } const used = new Set(state.pins.map(x => x.no)); const no = [1, 2, 3].find(n => !used.has(n)); state.pins.push({ ...p, no }); render(); toast(`ピン ${['①', '②', '③'][no - 1]} ${p.name}`); }
+function ghostPin() { const s = state.scn; const [lo, hi] = [X0 * 0.55, X0 * 1.35]; const pts = []; for (let i = 0; i <= 600; i++) { const X = lo + (hi - lo) * i / 600; pts.push([X, scnOn() ? pnlAt(X, s.d, s) : pnlAt(X, 0, todayScn())]); } addPin({ kind: 'ghost', pts, name: `固定 ${tab().name}`, cond: `板 ${fmtMDHM(BOARD_AT)} 時点 · d ${fmt(s.d)} 日 · Δσ ${fsg(s.dSigma, 1)}pt · Δs ${fsg(s.skew, 1)}` }); }
+$('#pin-btn').addEventListener('click', e => {
+  const items = [['今の線を残す（固定）', ghostPin]];
+  for (const t of state.tabs) if (t !== tab() && t.legs.length && !state.pins.some(p => p.kind === 'tab' && p.tabId === t.id)) items.push([`${t.name} を重ねる（足 ${t.legs.length} 本）`, () => addPin({ kind: 'tab', tabId: t.id, name: `タブ ${t.name}`, cond: '今の板・今のシナリオ' })]);
+  items.push(null, [`ピンの線: ${state.pinLine === 'period' ? '期中 → 満期に' : '満期 → 期中に'}`, () => { state.pinLine = state.pinLine === 'period' ? 'expiry' : 'period'; render(); }]);
+  if (state.pins.length) items.push(['全部外す', () => { state.pins = []; render(); }]);
+  openMenu(e.currentTarget, items);
+});
+$('#legend').addEventListener('click', e => { const b = e.target.closest('[data-unpin]'); if (b) { state.pins = state.pins.filter(p => p.no !== Number(b.dataset.unpin)); render(); } });
+$('#mode-seg').addEventListener('click', e => { const b = e.target.closest('button'); if (b) { state.mode = b.dataset.mode; render(); } });
+$('#market-seg').addEventListener('click', e => { const b = e.target.closest('button'); if (b) { state.ui.market = b.dataset.mk; render(); } });
+$('#zoom-in').addEventListener('click', () => { zoomBy(0.8); render(); });
+$('#zoom-out').addEventListener('click', () => { zoomBy(1.25); render(); });
+$('#zoom-reset').addEventListener('click', () => { state.view = null; render(); });
+$('#stage-more').addEventListener('click', e => openMenu(e.currentTarget, [['縦軸: 自動', () => { state.yMode = 'auto'; render(); }], ['縦軸: プレミアム ±5 倍', () => { state.yMode = 'premium'; render(); }], null, ['損益の面を表示 / 線に戻す', () => { state.mode = state.mode === 'line' ? 'heat' : 'line'; render(); }], ['グラフのキー操作…', showKeys]]));
+$('#top-more').addEventListener('click', e => openMenu(e.currentTarget, [['保存一覧…', openBook], ['URL をコピー', () => toast('URL をコピーした（842 字）')], ['書き出し（JSON）', () => toast('option-simulator-positions-….json を書き出した')], ['読み込み…', () => toast('（試作では省略）')], null, ['最新の板を読む', () => toast('板 ' + fmtMDHM(BOARD_AT) + '（最新）')], ['ファイルを開く…', () => toast('（試作では省略）')], null, ['設定…', openSettings], ['テーマ: ' + ({ dark: 'ダーク', light: 'ライト', auto: '自動' })[state.ui.theme], () => { state.ui.theme = state.ui.theme === 'dark' ? 'light' : state.ui.theme === 'light' ? 'auto' : 'dark'; applyTheme(); render(); }], ['キー操作 / ヘルプ', showKeys]]));
+$('#refresh').addEventListener('click', () => toast('板 ' + fmtMDHM(BOARD_AT) + '（最新・約 15 分遅れ）'));
+$('#theme-btn').addEventListener('click', () => { state.ui.theme = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark'; applyTheme(); render(); });
+
+/* dock (phone / tablet) */
+$('.dock').addEventListener('click', e => { const b = e.target.closest('button'); if (!b) return; goPanel(b.dataset.panel, true); });
+function goPanel(p, fromDock = false) {
+  if (fromDock && state.ui.panel === p && window.innerWidth < 720) state.ui.sheet = state.ui.sheet === 'hidden' ? 'peek' : 'hidden';
+  else { state.ui.panel = p; if (state.ui.sheet === 'hidden') state.ui.sheet = 'peek'; }
+  render();
+}
+(function grabbers() {
+  $$('.grabber').forEach(g => {
+    let y0 = null;
+    g.addEventListener('pointerdown', e => { y0 = e.clientY; g.setPointerCapture(e.pointerId); });
+    g.addEventListener('pointerup', e => { if (y0 == null) return; const dy = e.clientY - y0; y0 = null; if (dy < -30) state.ui.sheet = 'full'; else if (dy > 30) state.ui.sheet = state.ui.sheet === 'full' ? 'peek' : 'hidden'; else state.ui.sheet = state.ui.sheet === 'full' ? 'peek' : 'full'; render(); });
+  });
+})();
+
+/* ===================== menus / dialogs / toasts ===================== */
+let menuEl = null;
+function closeMenu() { if (menuEl) { menuEl.remove(); menuEl = null; } $('#scrim')?.remove(); }
+function openMenu(anchor, items) {
+  closeMenu();
+  const scrim = document.createElement('div'); scrim.className = 'scrim'; scrim.id = 'scrim'; scrim.style.background = 'transparent'; scrim.addEventListener('pointerdown', closeMenu); document.body.appendChild(scrim);
+  const m = document.createElement('div'); m.className = 'menu'; m.setAttribute('role', 'menu');
+  m.innerHTML = items.map(it => it === null ? '<hr>' : `<button role="menuitem">${it[0]}</button>`).join('');
+  const fns = items.filter(Boolean).map(it => it[1]);
+  m.querySelectorAll('button').forEach((b, i) => b.addEventListener('click', () => { closeMenu(); fns[i](); }));
+  document.body.appendChild(m); menuEl = m;
+  const r = anchor.getBoundingClientRect(); const mw = m.offsetWidth, mh = m.offsetHeight;
+  let left = Math.min(r.left, window.innerWidth - mw - 8), top = r.bottom + 6; if (top + mh > window.innerHeight - 8) top = Math.max(8, r.top - mh - 6);
+  m.style.left = left + 'px'; m.style.top = top + 'px';
+  m.querySelector('button')?.focus();
+}
+document.addEventListener('keydown', e => { if (e.key === 'Escape') { closeMenu(); closePalette(); } });
+function toast(msg, opt = {}) {
+  const box = $('#toasts'); const t = document.createElement('div'); t.className = 'toast'; t.textContent = msg;
+  if (opt.undo) { const b = document.createElement('button'); b.className = 'btn sm'; b.style.marginLeft = '10px'; b.style.pointerEvents = 'auto'; b.textContent = '元に戻す'; b.addEventListener('click', () => { opt.undo(); t.remove(); }); t.appendChild(b); }
+  box.appendChild(t); setTimeout(() => t.remove(), opt.undo ? 5000 : 2200);
+}
+const settingsDlg = $('#settings');
+function openSettings() {
+  $('#set-body').innerHTML = `
+    <div class="setrow"><div class="k">ATM の基準<small>板の ATM 行・スマイルの ATM 線・ジャンプの基準</small></div><span class="seg" data-set="atmBasis"><button data-v="B" aria-pressed="${state.atmBasis === 'B'}">合成先物</button><button data-v="A" aria-pressed="${state.atmBasis === 'A'}">ラージ先物</button></span></div>
+    <div class="setrow"><div class="k">金額の単位<small>自動 = 受取 + 支払が 10 万円以上なら千円</small></div><span class="seg" data-set="unit"><button data-v="auto" aria-pressed="${state.unit === 'auto'}">自動</button><button data-v="yen" aria-pressed="${state.unit === 'yen'}">円</button><button data-v="thousand" aria-pressed="${state.unit === 'thousand'}">千円</button></span></div>
+    <div class="setrow"><div class="k">手数料（円 / 枚）<small>損益・指標・テール表に効く</small></div><input class="input" style="width:110px" id="set-fee" value="${state.fee}" inputmode="numeric"></div>
+    <div class="setrow"><div class="k">損益グラフの縦軸</div><span class="seg" data-set="yMode"><button data-v="auto" aria-pressed="${state.yMode === 'auto'}">自動</button><button data-v="premium" aria-pressed="${state.yMode === 'premium'}">±N 倍</button></span></div>
+    <div class="setrow"><div class="k">先物の basis<small>固定 = 先物と X の差を一定に / 減衰 = 先物の SQ で 0 へ</small></div><span class="seg" data-set="basis"><button data-v="fixed" aria-pressed="${state.basis === 'fixed'}">固定</button><button data-v="decay" aria-pressed="${state.basis === 'decay'}">減衰</button></span></div>
+    <div class="setrow"><div class="k">テーマ</div><span class="seg" data-set="theme"><button data-v="auto" aria-pressed="${state.ui.theme === 'auto'}">自動</button><button data-v="dark" aria-pressed="${state.ui.theme === 'dark'}">ダーク</button><button data-v="light" aria-pressed="${state.ui.theme === 'light'}">ライト</button></span></div>
+    <div class="setrow"><div class="k">前提<small>金利 0.5% · 評価時刻 = 板の時刻 + d · 取引カレンダー 同期 2026-10-14（確定 2027-06-30 まで）</small></div><span class="faint">変更不可</span></div>`;
+  settingsDlg.showModal();
+}
+settingsDlg.addEventListener('click', e => { const b = e.target.closest('button'); if (!b) return; if (b.hasAttribute('data-close')) { settingsDlg.close(); return; } const seg = b.closest('[data-set]'); if (!seg) return; const k = seg.dataset.set; if (k === 'theme') { state.ui.theme = b.dataset.v; applyTheme(); } else state[k] = b.dataset.v; seg.querySelectorAll('button').forEach(x => x.setAttribute('aria-pressed', String(x === b))); render(); });
+settingsDlg.addEventListener('change', e => { if (e.target.id === 'set-fee') { const v = Number(e.target.value); if (Number.isFinite(v) && v >= 0 && v <= 100000) { state.fee = v; render(); } } });
+const bookDlg = $('#book');
+function saveToBook() { if (!legs().length) { toast('足が 0 本のタブは保存できない'); return; } state.book.unshift({ id: Date.now(), name: `${legs()[0].month} ${legs().slice(0, 3).map(l => (l.side < 0 ? '売' : '買') + (l.kind === 'opt' ? l.cp + fmt(l.K) : 'ミニ')).join(' ')}`, legs: legs().map(l => ({ ...l })), savedAt: fmtMDHM(new Date()) }); toast('保存一覧に保存した'); }
+function openBook() {
+  $('#book-body').innerHTML = `<div class="booklist">${state.book.map(b => { const p = premium(b.legs); const st = (() => { const save = tab().legs; tab().legs = b.legs; const r = expiryStats(); tab().legs = save; return r; })(); return `<div class="bookrow" data-id="${b.id}"><div class="t">${b.name}${b.legs === legs() ? '<span class="tag">作業中</span>' : ''}</div><div class="m">${b.legs[0]?.month ?? ''} · 足 ${b.legs.length} 本 · ${p.net >= 0 ? '受取' : '掛け金'} ${amt(Math.abs(p.net >= 0 ? p.net : p.stake), false)} ${unitLabel()} · 最大損失 ${amt(st?.minP ?? 0)} · 保存 ${b.savedAt}</div><div class="ops"><button class="btn sm" data-op="open">開く</button><button class="btn sm" data-op="newtab">新しいタブで開く</button><button class="btn sm" data-op="pin">重ねる</button><button class="btn sm ghost" data-op="del">削除</button></div></div>`; }).join('') || '<div class="empty-state">保存したポジションは無い</div>'}</div>`;
+  bookDlg.showModal();
+}
+bookDlg.addEventListener('click', e => { const b = e.target.closest('button'); if (!b) return; if (b.hasAttribute('data-close')) { bookDlg.close(); return; } if (b.id === 'book-save') { saveToBook(); openBook(); return; } const row = b.closest('.bookrow'); const item = state.book.find(x => x.id === Number(row.dataset.id)); const op = b.dataset.op; if (op === 'open') { tab().legs = item.legs.map(l => ({ ...l, id: nextId++ })); state.view = null; bookDlg.close(); render(); toast(`「${item.name}」を開いた（建値は保存時のまま）`); } else if (op === 'newtab') { state.tabs.push(newTab(freeName(), item.legs.map(l => ({ ...l, id: nextId++ })))); state.active = state.tabs.length - 1; state.view = null; bookDlg.close(); render(); } else if (op === 'pin') { bookDlg.close(); addPin({ kind: 'saved', legs: item.legs.map(l => ({ ...l })), name: `保存 ${item.name}`, cond: '今の板・今のシナリオ・今の設定' }); } else if (op === 'del') { state.book = state.book.filter(x => x !== item); openBook(); } });
+function openAddLeg() { const v = window.prompt('先物の足: 商品(mini/large/micro) 限月 売買(+1/-1) 枚数 建値 を空白区切り', 'mini 2026-12 1 1 67880'); if (!v) return; const [p, mo, sd, q, px] = v.trim().split(/\s+/); if (!PRODUCTS[p]) return; legs().push(mkFutLeg(p, mo, Number(sd) < 0 ? -1 : 1, Number(px) || FUT.price, Number(q) || 1)); render(); }
+function showKeys() { window.alert(['グラフにフォーカスがあるとき:', '← → : ΔX ∓100 円（Shift で 1,000 円）', '↑ ↓ : Δσ ±0.5pt', '[ ] : 経過日数 ±1 日', '0 : シナリオを 0 に', '+ − : 拡大・縮小、R : 表示をリセット', '', '全体: Ctrl/⌘ + K : コマンド、1〜5 : パネル、T : テーマ'].join('\n')); }
+
+/* command palette */
+const palEl = $('#palette'); const palInput = $('#palette input'); const palList = $('#palette ul');
+function commands() {
+  const c = [
+    ['シナリオ: 急落 −10% / +20pt / +3', () => { state.scn.dX = Math.round(X0 * -0.1 / 10) * 10; state.scn.dSigma = 20; state.scn.skew = 3; }],
+    ['シナリオ: 反発 +5% / −5pt / −1', () => { state.scn.dX = Math.round(X0 * 0.05 / 10) * 10; state.scn.dSigma = -5; state.scn.skew = -1; }],
+    ['シナリオ: リセット', () => Object.assign(state.scn, { d: 0, dX: 0, dSigma: 0, skew: 0, beta: 1, sticky: 'strike' })],
+    ['評価時刻: 11月限 SQ 9:00', () => { state.scn.d = M['2026-11'].dSq; }],
+    ['評価時刻: 11月限 取引最終日 15:45', () => { state.scn.d = M['2026-11'].dLtd; }],
+    ['ピン: 今の線を残す', ghostPin],
+    ['グラフ: 損益の面（ヒートマップ）に切替', () => { state.mode = state.mode === 'line' ? 'heat' : 'line'; }],
+    ['グラフ: 表示をリセット', () => { state.view = null; }],
+    ['板: ATM へ', () => { goPanel('board'); setTimeout(() => scrollBoardTo(atmK(M[state.month])), 50); }],
+    ['板: put / call を切替', () => { state.target = state.target === 'put' ? 'call' : 'put'; goPanel('board'); }],
+    ['タブ: 空のタブを追加', () => { state.tabs.push(newTab(freeName())); state.active = state.tabs.length - 1; state.view = null; }],
+    ['保存一覧を開く', openBook], ['設定を開く', openSettings], ['テーマを切替', () => { state.ui.theme = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark'; applyTheme(); }],
+  ];
+  const m = M[state.month];
+  for (const K of [atmK(m) - 2000, atmK(m) - 1000, atmK(m) + 1000, atmK(m) + 2000]) for (const cp of ['P', 'C']) for (const sd of [-1, 1]) c.push([`足: ${sd < 0 ? '売' : '買'} ${cp} ${fmt(K)} @${fmt(sd < 0 ? m.byK[K][cp].bid : m.byK[K][cp].ask)}（${m.label}）`, () => addFromBoard(m.id, cp, K, sd)]);
+  return c;
+}
+let palItems = [], palSel = 0;
+function openPalette() { palEl.hidden = false; palInput.value = ''; renderPalette(); palInput.focus(); }
+function closePalette() { palEl.hidden = true; }
+function renderPalette() { const q = palInput.value.trim().toLowerCase(); palItems = commands().filter(c => !q || c[0].toLowerCase().includes(q)).slice(0, 12); palSel = clamp(palSel, 0, Math.max(0, palItems.length - 1)); palList.innerHTML = palItems.map((c, i) => `<li aria-selected="${i === palSel}" data-i="${i}">${c[0]}</li>`).join('') || '<li><small>該当なし</small></li>'; }
+palInput.addEventListener('input', () => { palSel = 0; renderPalette(); });
+palInput.addEventListener('keydown', e => { if (e.key === 'ArrowDown') { palSel = Math.min(palSel + 1, palItems.length - 1); renderPalette(); e.preventDefault(); } else if (e.key === 'ArrowUp') { palSel = Math.max(palSel - 1, 0); renderPalette(); e.preventDefault(); } else if (e.key === 'Enter') { const it = palItems[palSel]; closePalette(); if (it) { it[1](); render(); } } });
+palList.addEventListener('click', e => { const li = e.target.closest('li[data-i]'); if (!li) return; const it = palItems[Number(li.dataset.i)]; closePalette(); it[1](); render(); });
+palEl.addEventListener('click', e => { if (e.target === palEl) closePalette(); });
+document.addEventListener('keydown', e => {
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); openPalette(); return; }
+  if (e.target.matches('input, textarea, select') || !palEl.hidden) return;
+  if (e.key >= '1' && e.key <= '5') { goPanel(['positions', 'board', 'scenario', 'metrics', 'smile'][Number(e.key) - 1]); }
+  else if (e.key === 't' || e.key === 'T') { state.ui.theme = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark'; applyTheme(); render(); }
+  else if (e.key === 'g') { chartEl.focus(); }
+});
+
+/* theme */
+const mq = window.matchMedia('(prefers-color-scheme: light)');
+function applyTheme() { const t = state.ui.theme === 'auto' ? (mq.matches ? 'light' : 'dark') : state.ui.theme; document.documentElement.dataset.theme = t; $('#theme-btn').textContent = t === 'dark' ? '☾' : '☀'; }
+mq.addEventListener('change', () => { if (state.ui.theme === 'auto') { applyTheme(); render(); } });
+try { const h = new URLSearchParams(location.search); if (h.get('theme')) state.ui.theme = h.get('theme'); if (h.get('panel')) state.ui.panel = h.get('panel'); if (h.get('sheet')) state.ui.sheet = h.get('sheet'); if (h.get('mode')) state.mode = h.get('mode'); if (h.get('market')) state.ui.market = h.get('market'); if (h.get('d')) state.scn.d = Number(h.get('d')); if (h.get('dx')) state.scn.dX = Number(h.get('dx')); if (h.get('ds')) state.scn.dSigma = Number(h.get('ds')); } catch { }
+
+/* ===================== render ===================== */
+let raf = null;
+function render(opt = {}) {
+  if (raf) return; raf = requestAnimationFrame(() => {
+    raf = null;
+    renderChart(); renderRails(); renderReadout();
+    if (opt.chartOnly) return;
+    renderTop(); renderScenario(); renderPositions(); renderBoard(); renderMetrics(); renderSmile();
+  });
+}
+new ResizeObserver(() => { boardKey = ''; render(); }).observe(chartEl);
+new ResizeObserver(() => renderSmile()).observe(smileEl);
+window.addEventListener('resize', () => { boardKey = ''; render(); });
+applyTheme();
+render();
+renderBoard(true); renderPositions(true);
+
+</script>
+</body>
+</html>
