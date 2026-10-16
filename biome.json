@@ -10,7 +10,8 @@
       "!fixtures/synthetic",
       "!data/calendar",
       "!api/.venv",
-      "!.optionchan"
+      "!.optionchan",
+      "!docs/ui-redesign"
     ]
   },
   "formatter": {
