@@ -3,8 +3,9 @@
  * 設計 docs/design.md M8・13.4（#70）。
  *
  * - 保存は端末ごと（localStorage の 1 キーに全件）。I/O は ui/bookIo.ts、画面は ui/components/Book.tsx
- * - 入れ物は版つき（`schema_version`）。項目の中身は #23 の作業の形式（版つき）そのもので、検証・読み替えは
- *   ui/persist.ts の readWorkspaceValue と共有する（作業の版を上げたときもポジ帳の項目が同じ読み替えで読める）
+ * - 入れ物は版つき（`schema_version`）。項目の中身は 1 ポジションの文書（#23 の作業の形式 版 1 = `POSITION_DOC_VERSION`）
+ *   そのもので、検証・読み替えは ui/persist.ts の readWorkspaceValue と共有する。#71 で作業のキーは版 2（タブの並び）に
+ *   上がったが、項目・書き出すファイルは 1 ポジションの文書の版 1 のまま（ロールバックした画面でも一覧を読める）
  * - 外から来た値として扱う（localStorage・読み込むファイル）: 既知のキーだけで組み立て直す・`own()` で読む・
  *   配列の長さと文字数を先に切る。名前は制御文字・双方向の制御を除いて 40 字。表示は JSX のテキストだけ
  * - 読めない項目・新しい版の項目は勝手に消さない（読んだ値のまま書き戻す。削除だけできる）
@@ -14,17 +15,18 @@
  */
 
 import type { Leg, Scenario } from '../model';
+import { cleanName, clipCodePoints } from './names';
 import {
   isObj,
   type Obj,
   own,
+  POSITION_DOC_VERSION,
   readTime,
   readWorkspaceValue,
   type SavedWorkspaceV1,
   savedFromWorkspace,
   savedLeg,
   savedScenario,
-  WORKSPACE_SCHEMA_VERSION,
   type Workspace,
 } from './persist';
 import { fmtDateTime, fmtNum } from './view/format';
@@ -107,31 +109,14 @@ export type BookOp =
 
 // ---------------------------------------------------------------- 名前
 
-/** 除く文字: 制御文字（C0・DEL・C1）と双方向の制御・方向の印（ALM・LRM・RLM・LRE〜RLO・LRI〜PDI） */
-function unsafeChar(cp: number): boolean {
-  return (
-    cp <= 0x1f ||
-    (cp >= 0x7f && cp <= 0x9f) ||
-    cp === 0x061c ||
-    cp === 0x200e ||
-    cp === 0x200f ||
-    (cp >= 0x202a && cp <= 0x202e) ||
-    (cp >= 0x2066 && cp <= 0x2069)
-  );
-}
-
 /** 先頭から max コードポイントまで（サロゲートペアを割らない）。 */
 export function clipName(s: string, max: number = NAME_MAX): string {
-  const cps = Array.from(s);
-  return cps.length <= max ? s : cps.slice(0, Math.max(max, 0)).join('');
+  return clipCodePoints(s, max);
 }
 
-/** 名前の正規化: 制御文字・双方向の制御を除き、前後の空白を取り、40 字で切る（空なら空文字）。 */
+/** 名前の正規化: 制御文字・双方向の制御を除き、前後の空白を取り、40 字で切る（空なら空文字。ui/names.ts）。 */
 export function sanitizeName(s: string): string {
-  const kept = Array.from(s)
-    .filter((c) => !unsafeChar(c.codePointAt(0) ?? 0))
-    .join('');
-  return clipName(kept.trim()).trim();
+  return cleanName(s, NAME_MAX);
 }
 
 const SIDE_SHORT = { buy: '買', sell: '売' } as const;
@@ -263,7 +248,7 @@ function readEntry(raw: unknown, index: number, seen: Set<string>): BookEntry {
   if (!isObj(raw)) return bad('invalid');
   const wsRaw = own(raw, 'workspace');
   const v = workspaceVersion(wsRaw);
-  if (v !== null && v > WORKSPACE_SCHEMA_VERSION) return bad('newer');
+  if (v !== null && v > POSITION_DOC_VERSION) return bad('newer');
   const ws = readOpenable(wsRaw);
   if (ws === 'newer') return bad('newer');
   if (!ws) return bad('invalid');

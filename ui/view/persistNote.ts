@@ -48,16 +48,29 @@ export function bootNote(read: ReadResult): PersistNote | null {
           warn: true,
         };
       }
-      const n = saved.position?.legs.length ?? 0;
-      if (n === 0) return null;
+      const active = saved.tabs[saved.active] ?? saved.tabs[0];
+      const n = active?.position.legs.length ?? 0;
+      const total = saved.tabs.reduce((a, t) => a + t.position.legs.length, 0);
+      // 一部のタブを捨てた: 注意として出す（残りを復元した）
+      if (read.droppedTabs > 0) {
+        return {
+          kind: 'dropped',
+          text: `保存したタブ ${read.droppedTabs} 個を読めなかった（形式が壊れている）。残りのタブ ${saved.tabs.length} 個を復元した`,
+          warn: true,
+        };
+      }
+      if (total === 0) return null;
       const at = saved.savedAt === null ? '' : `。保存 ${fmtDateTime(saved.savedAt)}`;
-      const board =
-        saved.position?.boardSnapshotAt == null
-          ? ''
-          : `、そのときの板 ${fmtDateTime(saved.position.boardSnapshotAt)}`;
+      const snap = active?.position.boardSnapshotAt ?? null;
+      const board = snap === null ? '' : `、そのときの板 ${fmtDateTime(snap)}`;
+      // タブが 1 個なら #23 と同じ文。複数なら個数と作業中のタブを添える（名前は入れない。保存した値を反射しない）
+      const what =
+        saved.tabs.length > 1
+          ? `タブ ${saved.tabs.length} 個・作業中のタブの足 ${n} 本`
+          : `足 ${n} 本`;
       return {
         kind: 'restored',
-        text: `前回の作業を復元した（足 ${n} 本${at}${board}）。建値は保存時のまま`,
+        text: `前回の作業を復元した（${what}${at}${board}）。建値は保存時のまま`,
         warn: false,
       };
     }

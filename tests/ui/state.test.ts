@@ -4,6 +4,9 @@ import type { OptionLeg, OptionType } from '../../model';
 import {
   type Action,
   initialState,
+  type LegPatch,
+  MAX_TABS,
+  nextTabName,
   parseContract,
   parseDays,
   parseEntry,
@@ -14,10 +17,15 @@ import {
   parseStrike,
   parseYRange,
   reduce,
+  SCENARIO_PER_TAB,
   type State,
+  sanitizeTabName,
+  TAB_NAME_MAX,
+  type UiLeg,
   validEntry,
 } from '../../ui/state';
 import { fixture } from '../support/fixtures';
+import { rng } from '../support/synthChain';
 
 function loaded(chain: Chain): State {
   return reduce(initialState, { type: 'loaded', chain, label: 'latest' });
@@ -616,5 +624,447 @@ describe('ポジ帳の項目を開く（#70 openPosition）', () => {
     expect(s.feePerLot).toBe(10);
     expect(s.scenario).toEqual(initialState.scenario);
     expect(s.futureBasis).toBe('fixed');
+  });
+});
+
+/** #71: 作業中のポジションのタブ（BOX タブ）。 */
+describe('作業中のポジションのタブ（#71）', () => {
+  const chain = normalizeChain(fixture('latest'));
+  const m0 = chain.months[0];
+  if (!m0) throw new Error('限月が無い');
+  const ks = m0.rows.map((r) => r.k);
+  const mid = Math.floor(ks.length / 2);
+  const k = (i: number) => ks[mid + i] ?? 0;
+  const board = (i: number, optionType: OptionType, side: 'buy' | 'sell'): Action => ({
+    type: 'addBoardLeg',
+    expiry: m0.id,
+    k: k(i),
+    optionType,
+    side,
+  });
+
+  /** 不変条件: 作業中の slot がちょうど 1 つで saved は null、他は非 null、1 ≤ 個数 ≤ MAX_TABS、id は重複なし */
+  function invariant(s: State): void {
+    const active = s.tabs.filter((t) => t.id === s.activeTab);
+    expect(active).toHaveLength(1);
+    expect(active[0]?.saved).toBeNull();
+    for (const t of s.tabs) if (t.id !== s.activeTab) expect(t.saved).not.toBeNull();
+    expect(s.tabs.length).toBeGreaterThanOrEqual(1);
+    expect(s.tabs.length).toBeLessThanOrEqual(MAX_TABS);
+    expect(new Set(s.tabs.map((t) => t.id)).size).toBe(s.tabs.length);
+    expect(s.tabs.every((t) => t.id < s.nextTabId)).toBe(true);
+    expect(s.legs.map((l) => l.id)).toEqual([...s.legs.map((l) => l.id)].sort((a, b) => a - b));
+    expect(s.nextId).toBeGreaterThan(Math.max(0, ...s.legs.map((l) => l.id)));
+  }
+
+  /** タブ A に足 2 本（売 P・売 C） */
+  function withA(): State {
+    return run(loaded(chain), board(-2, 'put', 'sell'), board(2, 'call', 'sell'));
+  }
+
+  it('初期状態: タブ「A」1 個が作業中', () => {
+    expect(initialState.tabs).toEqual([{ id: 1, name: 'A', saved: null }]);
+    expect(initialState.activeTab).toBe(1);
+    invariant(initialState);
+  });
+
+  it('空のタブを足すと右隣に作って切り替え、A の足・建値は退避される', () => {
+    const a = withA();
+    const s = reduce(a, { type: 'addTab', mode: 'empty' });
+    invariant(s);
+    expect(s.tabs.map((t) => t.name)).toEqual(['A', 'B']);
+    expect(s.activeTab).toBe(2);
+    expect(s.legs).toEqual([]);
+    expect(s.nextId).toBe(1);
+    expect(s.pnlViewport).toBeNull();
+    const savedA = s.tabs[0]?.saved;
+    expect(savedA?.legs.map((l) => l.leg)).toEqual(a.legs.map((l) => l.leg));
+    expect(savedA?.boardSnapshotAt).toBe(chain.snapshotAt);
+    // 板・表示・評価の設定は共通
+    expect(s.chain).toBe(a.chain);
+    expect(s.monthId).toBe(a.monthId);
+    expect(s.feePerLot).toBe(a.feePerLot);
+  });
+
+  it('切り替え: B の足は A に混ざらず、戻すと A の足・建値・id 1..n が元のまま（AC3）', () => {
+    const a = run(withA(), { type: 'editLeg', id: 1, patch: { entry: 123, qty: 3 } });
+    const b = run(a, { type: 'addTab', mode: 'empty' }, board(0, 'put', 'buy'));
+    expect(b.legs).toHaveLength(1);
+    const back = reduce(b, { type: 'switchTab', id: 1 });
+    invariant(back);
+    expect(back.activeTab).toBe(1);
+    expect(back.legs.map((l) => l.leg)).toEqual(a.legs.map((l) => l.leg));
+    expect(back.legs.map((l) => l.id)).toEqual([1, 2]);
+    expect(back.nextId).toBe(3);
+    expect(back.legs[0]?.leg.entry).toBe(123);
+    // B は退避されている（足 1 本）
+    expect(back.tabs[1]?.saved?.legs.map((l) => l.leg)).toEqual(b.legs.map((l) => l.leg));
+    // 足を追加すると作業中のタブだけに入る
+    const more = reduce(back, board(1, 'call', 'buy'));
+    expect(more.legs).toHaveLength(3);
+    expect(more.tabs[1]?.saved?.legs).toHaveLength(1);
+  });
+
+  it('シナリオは共通（既定）: 切り替えてもシナリオは今のまま', () => {
+    expect(SCENARIO_PER_TAB).toBe(false);
+    const a = run(withA(), { type: 'setScenario', patch: { days: 3, dX: -800 } });
+    const b = run(a, { type: 'addTab', mode: 'empty' });
+    expect(b.scenario).toEqual(a.scenario);
+    const b2 = run(b, { type: 'setScenario', patch: { dSigma: 5 } });
+    const back = reduce(b2, { type: 'switchTab', id: 1 });
+    expect(back.scenario).toEqual(b2.scenario);
+  });
+
+  it('複製: 同じ足で別のタブ、片方の建値を変えても他方は変わらない', () => {
+    const a = withA();
+    const c = reduce(a, { type: 'addTab', mode: 'copy' });
+    invariant(c);
+    expect(c.tabs.map((t) => t.name)).toEqual(['A', 'B']);
+    expect(c.legs.map((l) => l.leg)).toEqual(a.legs.map((l) => l.leg));
+    const edited = reduce(c, { type: 'editLeg', id: 1, patch: { entry: 999 } });
+    expect(edited.tabs[0]?.saved?.legs[0]?.leg.entry).toBe(a.legs[0]?.leg.entry);
+    const back = reduce(edited, { type: 'switchTab', id: 1 });
+    expect(back.legs[0]?.leg.entry).toBe(a.legs[0]?.leg.entry);
+    expect(back.tabs[1]?.saved?.legs[0]?.leg.entry).toBe(999);
+  });
+
+  it('横軸の表示範囲は切り替えで保ち、足 0 本のタブへ切り替えたら初期範囲。スマイルの選択・足のエラーは消す', () => {
+    const a = run(
+      withA(),
+      { type: 'addTab', mode: 'copy' },
+      {
+        type: 'setPnlViewport',
+        viewport: [60000, 70000],
+      },
+    );
+    const s = run(
+      a,
+      { type: 'pickSmile', pick: { monthId: m0.id, k: k(0) } },
+      {
+        type: 'switchTab',
+        id: 1,
+      },
+    );
+    expect(s.pnlViewport).toEqual([60000, 70000]);
+    expect(s.smilePick).toBeNull();
+    const e = run(s, { type: 'addTab', mode: 'empty' });
+    expect(e.pnlViewport).toBeNull();
+    const toEmpty = run(
+      e,
+      { type: 'setPnlViewport', viewport: [1, 2] },
+      { type: 'switchTab', id: 1 },
+    );
+    expect(toEmpty.pnlViewport).toEqual([1, 2]);
+    const back = reduce(toEmpty, { type: 'switchTab', id: e.activeTab });
+    expect(back.legs).toEqual([]);
+    expect(back.pnlViewport).toBeNull();
+  });
+
+  it(`上限 ${MAX_TABS} 個: それ以上は足さない（新しいタブで開くも）。名前は空いている最初の文字`, () => {
+    let s = withA();
+    for (let i = 0; i < MAX_TABS + 2; i++) s = reduce(s, { type: 'addTab', mode: 'empty' });
+    invariant(s);
+    expect(s.tabs).toHaveLength(MAX_TABS);
+    expect(s.tabs.map((t) => t.name)).toEqual(['A', 'B', 'C', 'D', 'E', 'F']);
+    const full = reduce(s, {
+      type: 'openPositionInNewTab',
+      legs: [],
+      scenario: s.scenario,
+      feePerLot: 5,
+      futureBasis: 'fixed',
+    });
+    expect(full).toBe(s);
+    // B を閉じてから足すと「B」が空いている
+    const reopened = run(s, { type: 'closeTab', id: 2 }, { type: 'addTab', mode: 'empty' });
+    expect(reopened.tabs.map((t) => t.name)).toContain('B');
+    invariant(reopened);
+  });
+
+  it('足すタブは作業中のタブの右隣', () => {
+    const s = run(
+      withA(),
+      { type: 'addTab', mode: 'empty' }, // B（id 2）
+      { type: 'switchTab', id: 1 },
+      { type: 'addTab', mode: 'empty' }, // C は A の右
+    );
+    expect(s.tabs.map((t) => t.name)).toEqual(['A', 'C', 'B']);
+    invariant(s);
+  });
+
+  it('閉じる: 最後の 1 個は閉じない。作業中を閉じたら右隣（無ければ左隣）へ。作業中でないタブはそのまま消す', () => {
+    const one = withA();
+    expect(reduce(one, { type: 'closeTab', id: 1 })).toBe(one);
+    expect(reduce(one, { type: 'closeTab', id: 9 })).toBe(one);
+    const three = run(
+      one,
+      { type: 'addTab', mode: 'empty' },
+      board(0, 'put', 'buy'),
+      { type: 'addTab', mode: 'empty' },
+      { type: 'switchTab', id: 2 },
+    );
+    // B（真ん中・作業中）を閉じる → 右隣の C
+    const c = reduce(three, { type: 'closeTab', id: 2 });
+    invariant(c);
+    expect(c.tabs.map((t) => t.name)).toEqual(['A', 'C']);
+    expect(c.activeTab).toBe(3);
+    expect(c.legs).toEqual([]);
+    // C（右端・作業中）を閉じる → 左隣の A（足 2 本が戻る）
+    const a = reduce(c, { type: 'closeTab', id: 3 });
+    invariant(a);
+    expect(a.activeTab).toBe(1);
+    expect(a.legs.map((l) => l.leg)).toEqual(one.legs.map((l) => l.leg));
+    // 作業中でないタブを閉じても作業中の足はそのまま
+    const other = reduce(three, { type: 'closeTab', id: 1 });
+    expect(other.legs).toBe(three.legs);
+    expect(other.tabs.map((t) => t.name)).toEqual(['B', 'C']);
+  });
+
+  it('名前の変更: 制御文字・双方向の制御を除き 12 字で切る。空・無いタブは state のまま', () => {
+    const s = reduce(withA(), {
+      type: 'renameTab',
+      id: 1,
+      name: '  ‮<img src=x onerror=alert(1)>\u0007 ',
+    });
+    expect(s.tabs[0]?.name).toBe('<img src=x o');
+    expect(Array.from(s.tabs[0]?.name ?? '')).toHaveLength(TAB_NAME_MAX);
+    const a = withA();
+    expect(reduce(a, { type: 'renameTab', id: 1, name: ' ‏ ' })).toBe(a);
+    expect(reduce(a, { type: 'renameTab', id: 9, name: 'X' })).toBe(a);
+    expect(reduce(a, { type: 'renameTab', id: 1, name: 'A' })).toBe(a);
+    expect(sanitizeTabName('😀'.repeat(20))).toBe('😀'.repeat(12));
+  });
+
+  it('名前の変更: 他のタブと同じ名前（正規化した後で比べる）は断る。自分の今の名前・空いている名前は変えられる', () => {
+    const s = run(withA(), { type: 'addTab', mode: 'empty' }, { type: 'addTab', mode: 'empty' });
+    expect(s.tabs.map((t) => t.name)).toEqual(['A', 'B', 'C']);
+    expect(reduce(s, { type: 'renameTab', id: 3, name: 'A' })).toBe(s);
+    expect(reduce(s, { type: 'renameTab', id: 3, name: ' B\u200e ' })).toBe(s);
+    // 作業中でないタブの名前の変更も同じ規則
+    expect(reduce(s, { type: 'renameTab', id: 1, name: 'C' })).toBe(s);
+    const renamed = run(
+      s,
+      { type: 'renameTab', id: 3, name: 'ヘッジ案' },
+      { type: 'renameTab', id: 1, name: 'C' },
+    );
+    expect(renamed.tabs.map((t) => t.name)).toEqual(['C', 'B', 'ヘッジ案']);
+  });
+
+  it('nextTabName: A〜Z のうち使われていない最初の 1 文字', () => {
+    expect(nextTabName([])).toBe('A');
+    expect(nextTabName([{ name: 'A' }, { name: 'C' }])).toBe('B');
+    expect(nextTabName(Array.from('ABCDEFGHIJKLMNOPQRSTUVWXYZ', (name) => ({ name })))).toBe('1');
+  });
+
+  it('新しいタブで開く: 作業中のタブを残し、右隣に読み込む（手数料・basis・シナリオは置き換え）', () => {
+    const a = withA();
+    const scenario = { ...a.scenario, days: 4 };
+    const legs = a.legs.slice(0, 1).map(({ id: _id, ...rest }) => rest);
+    const s = reduce(a, {
+      type: 'openPositionInNewTab',
+      legs,
+      scenario,
+      feePerLot: 77,
+      futureBasis: 'decay',
+    });
+    invariant(s);
+    expect(s.tabs.map((t) => t.name)).toEqual(['A', 'B']);
+    expect(s.legs.map((l) => l.leg)).toEqual(legs.map((l) => l.leg));
+    expect(s.legs.map((l) => l.id)).toEqual([1]);
+    expect(s.scenario).toEqual(scenario);
+    expect(s.feePerLot).toBe(77);
+    expect(s.futureBasis).toBe('decay');
+    expect(s.tabs[0]?.saved?.legs).toHaveLength(2);
+    // [開く]（openPosition）は作業中のタブを置き換え、タブは増えない
+    const replaced = reduce(a, {
+      type: 'openPosition',
+      legs,
+      scenario,
+      feePerLot: 0,
+      futureBasis: 'fixed',
+    });
+    expect(replaced.tabs).toEqual(a.tabs);
+    expect(replaced.legs).toHaveLength(1);
+  });
+
+  it('板の読み直しは作業中のタブの足の市場だけ作り直し、他のタブは切り替えたときに今の板で作り直す', () => {
+    const manual: Action = {
+      type: 'addManualLeg',
+      input: {
+        product: 'op_large',
+        expiry: '2027-01',
+        type: 'call',
+        k: 70000,
+        side: 'buy',
+        entry: 500,
+        iv: 0.25,
+      },
+    };
+    const s = run(loaded(chain), manual, { type: 'addTab', mode: 'empty' });
+    const night = normalizeChain(fixture('night_early'));
+    const reloaded = reduce(s, { type: 'loaded', chain: night, label: 'x' });
+    // 退避した足は前の板の市場のまま
+    expect(reloaded.tabs[0]?.saved?.legs[0]?.optionMarket?.market.forward).toBe(chain.future.price);
+    const back = reduce(reloaded, { type: 'switchTab', id: 1 });
+    expect(back.legs[0]?.optionMarket?.market.forward).toBe(night.future.price);
+  });
+
+  it('性質: ランダムな操作列でも不変条件を保ち、各タブの足の入力値はタブごとのモデルと常に一致する（AC3）', () => {
+    // 決まった種の擬似乱数（再現できる。tests/support の mulberry32）
+    const next = rng(71);
+    const rnd = (n: number) => Math.floor(next() * n);
+    /** 足の入力値と、手入力の OP の足の F・限月、先物の足の限月（板は変えないので切り替えても同じになる） */
+    type LegView = {
+      leg: UiLeg['leg'];
+      marks: UiLeg['marks'];
+      optionExpiry: string | null;
+      forward: number | null;
+      futureContract: string | null;
+    };
+    const view = (l: Omit<UiLeg, 'id'>): LegView => ({
+      leg: l.leg,
+      marks: l.marks,
+      optionExpiry: l.optionMarket?.expiry ?? null,
+      forward: l.optionMarket?.market.forward ?? null,
+      futureContract: l.futureMarket?.contract ?? null,
+    });
+    /** reducer とは別に書いた足の編集（テストのモデル） */
+    const patched = (v: LegView, p: LegPatch): LegView => {
+      const leg = { ...v.leg };
+      if (p.qty !== undefined) leg.qty = p.qty;
+      if (p.entry !== undefined) leg.entry = p.entry;
+      if (p.side !== undefined) leg.side = p.side;
+      if (leg.kind === 'option' && p.iv !== undefined) {
+        if (p.iv === null) delete leg.iv;
+        else leg.iv = p.iv;
+      }
+      return { ...v, leg };
+    };
+    const tabLegs = (s: State, id: number): LegView[] => {
+      if (id === s.activeTab) return s.legs.map(view);
+      return (s.tabs.find((t) => t.id === id)?.saved?.legs ?? []).map(view);
+    };
+
+    let s = loaded(chain);
+    // モデル: タブ id → 足の入力値（タブの並びは s.tabs と同じ集合）
+    const model = new Map<number, LegView[]>([[s.activeTab, []]]);
+    const seen = new Set<string>();
+    for (let step = 0; step < 600; step++) {
+      const before = s;
+      const r = rnd(12);
+      const ids = s.tabs.map((t) => t.id);
+      const pick = ids[rnd(ids.length)] ?? 1;
+      const legId = s.legs[rnd(Math.max(s.legs.length, 1))]?.id;
+      let a: Action;
+      if (r === 0) a = { type: 'addTab', mode: rnd(2) === 0 ? 'empty' : 'copy' };
+      else if (r === 1 || r === 2) a = { type: 'switchTab', id: pick };
+      else if (r === 3) a = { type: 'closeTab', id: pick };
+      else if (r === 4) a = { type: 'renameTab', id: pick, name: `n${rnd(100)}` };
+      else if (r === 5 && legId !== undefined) a = { type: 'removeLeg', id: legId };
+      else if (r === 6 && legId !== undefined) {
+        // 枚数・建値・売買・IV の編集（IV は取り消し = null も）
+        const patch: LegPatch = {};
+        if (rnd(2) === 0) patch.qty = 1 + rnd(5);
+        if (rnd(2) === 0) patch.entry = 1 + rnd(1000);
+        if (rnd(2) === 0) patch.side = rnd(2) === 0 ? 'buy' : 'sell';
+        if (rnd(2) === 0) patch.iv = rnd(4) === 0 ? null : (10 + rnd(40)) / 100;
+        a = { type: 'editLeg', id: legId, patch };
+      } else if (r === 7)
+        // 手入力の OP の足（板に無い限月。F は板の先物から作る）
+        a = {
+          type: 'addManualLeg',
+          input: {
+            product: 'op_large',
+            expiry: '2027-01',
+            type: rnd(2) === 0 ? 'call' : 'put',
+            k: 60000 + 500 * rnd(20),
+            side: rnd(2) === 0 ? 'buy' : 'sell',
+            entry: 1 + rnd(900),
+            iv: (10 + rnd(30)) / 100,
+          },
+        };
+      else if (r === 8)
+        // 先物の足（板の先物・限月違い）
+        a = {
+          type: 'addFutureLeg',
+          input:
+            rnd(2) === 0
+              ? { side: rnd(2) === 0 ? 'buy' : 'sell', qty: 1 + rnd(3) }
+              : { product: 'fut_micro', contract: '2027-03', side: 'sell', qty: 1 + rnd(4) },
+        };
+      else a = board(rnd(9) - 4, rnd(2) === 0 ? 'put' : 'call', rnd(2) === 0 ? 'buy' : 'sell');
+      s = reduce(s, a);
+      invariant(s);
+      expect(s.legError).toBeNull();
+      seen.add(a.type);
+
+      // モデルを更新する（reducer の結果を使うのは新しく足した足の中身だけ）
+      const cur = model.get(before.activeTab) ?? [];
+      switch (a.type) {
+        case 'addTab':
+          if (before.tabs.length < MAX_TABS)
+            model.set(before.nextTabId, a.mode === 'copy' ? cur.slice() : []);
+          break;
+        case 'closeTab':
+          if (before.tabs.length > 1) model.delete(a.id);
+          break;
+        case 'removeLeg':
+          model.set(
+            before.activeTab,
+            cur.filter((_, i) => before.legs[i]?.id !== a.id),
+          );
+          break;
+        case 'editLeg': {
+          const { id, patch } = a;
+          model.set(
+            before.activeTab,
+            cur.map((v, i) => (before.legs[i]?.id === id ? patched(v, patch) : v)),
+          );
+          break;
+        }
+        case 'addBoardLeg':
+        case 'addManualLeg':
+        case 'addFutureLeg': {
+          const added = s.legs.slice(before.legs.length);
+          expect(added).toHaveLength(1);
+          expect(s.legs.slice(0, before.legs.length).map(view)).toEqual(cur);
+          model.set(before.activeTab, [...cur, ...added.map(view)]);
+          break;
+        }
+        default:
+          break;
+      }
+      // 全タブ（作業中・退避中とも）の足がモデルと一致する。切り替えて戻した側も含む
+      expect([...model.keys()].sort((x, y) => x - y)).toEqual(
+        s.tabs.map((t) => t.id).sort((x, y) => x - y),
+      );
+      for (const t of s.tabs) expect(tabLegs(s, t.id)).toEqual(model.get(t.id));
+      // 名前は重複しない（renameTab は他のタブと同じ名前を断る）
+      expect(new Set(s.tabs.map((t) => t.name)).size).toBe(s.tabs.length);
+      // 切り替え・足す・閉じる以外の操作では、作業中でないタブの中身は同じ参照のまま
+      if (a.type !== 'addTab' && a.type !== 'switchTab' && a.type !== 'closeTab') {
+        for (const t of s.tabs) {
+          if (t.id === s.activeTab) continue;
+          expect(t.saved).toBe(before.tabs.find((x) => x.id === t.id)?.saved);
+        }
+      }
+    }
+    // 操作列が全種類の操作を含み、手入力の足・先物の足・IV の編集を含むタブを往復している
+    expect([...seen].sort()).toEqual(
+      [
+        'addBoardLeg',
+        'addFutureLeg',
+        'addManualLeg',
+        'addTab',
+        'closeTab',
+        'editLeg',
+        'removeLeg',
+        'renameTab',
+        'switchTab',
+      ].sort(),
+    );
+    const all = [...model.values()].flat();
+    expect(all.some((v) => v.forward !== null)).toBe(true);
+    expect(all.some((v) => v.futureContract !== null)).toBe(true);
+    expect(all.some((v) => v.leg.kind === 'option' && v.leg.iv !== undefined)).toBe(true);
   });
 });

@@ -1,0 +1,122 @@
+import { describe, expect, it } from 'vitest';
+import { ZERO_SCENARIO } from '../../model';
+import { MAX_TABS, type TabSlot } from '../../ui/state';
+import {
+  closeConfirmText,
+  openInNewTabError,
+  renameError,
+  TAB_NAME_EMPTY_TEXT,
+  TAB_NAME_TAKEN_TEXT,
+  TABS_FULL_TEXT,
+  tabKeyTarget,
+  tabsModel,
+} from '../../ui/view/tabs';
+
+const leg = {
+  leg: {
+    kind: 'future' as const,
+    product: 'fut_mini' as const,
+    contract: '2026-12',
+    side: 'buy' as const,
+    qty: 1,
+    entry: 67880,
+  },
+  marks: [],
+};
+
+function slot(id: number, name: string, legs: number | null): TabSlot {
+  return {
+    id,
+    name,
+    saved:
+      legs === null
+        ? null
+        : {
+            legs: Array.from({ length: legs }, () => leg),
+            scenario: ZERO_SCENARIO,
+            boardSnapshotAt: null,
+          },
+  };
+}
+
+/** #71 AC1・AC2・AC8: タブの帯の表示モデル。 */
+describe('tabsModel', () => {
+  it('名前・足の本数（作業中は State の足、他は退避した足。0 本は出さない）・aria の文言', () => {
+    const v = tabsModel([slot(1, 'A', 3), slot(2, 'B', null), slot(3, 'C', 0)], 2, 2);
+    expect(v.tabs.map((t) => [t.name, t.legCount, t.countText, t.active])).toEqual([
+      ['A', 3, '3', false],
+      ['B', 2, '2', true],
+      ['C', 0, null, false],
+    ]);
+    expect(v.tabs.map((t) => t.label)).toEqual(['A（足 3 本）', 'B（足 2 本）', 'C（足なし）']);
+    expect(v.active.name).toBe('B');
+    expect(v.canAdd).toBe(true);
+    expect(v.canClose).toBe(true);
+    expect(v.addTitle).toBe('タブを足す');
+  });
+
+  it(`上限 ${MAX_TABS} 個で ＋ を押せない（理由を title に）。1 個なら閉じられない`, () => {
+    const full = Array.from({ length: MAX_TABS }, (_, i) =>
+      slot(i + 1, String(i), i === 0 ? null : 1),
+    );
+    const v = tabsModel(full, 1, 0);
+    expect(v.canAdd).toBe(false);
+    expect(v.addTitle).toBe(TABS_FULL_TEXT);
+    expect(TABS_FULL_TEXT).toBe('タブは 6 個まで');
+    expect(tabsModel([slot(1, 'A', null)], 1, 0).canClose).toBe(false);
+  });
+
+  it('名前は文字列のまま（HTML として扱わない。表示は JSX のテキスト）', () => {
+    const v = tabsModel([slot(1, '<b>x</b>', null)], 1, 1);
+    expect(v.tabs[0]?.name).toBe('<b>x</b>');
+    expect(v.tabs[0]?.label).toBe('<b>x</b>（足 1 本）');
+  });
+});
+
+describe('closeConfirmText', () => {
+  it('足があれば確認の文言、無ければ null（すぐ閉じる）', () => {
+    expect(closeConfirmText('B', 3)).toBe('タブ B（足 3 本）を閉じる。保存一覧に無い内容は消える');
+    expect(closeConfirmText('B', 0)).toBeNull();
+  });
+});
+
+describe('tabKeyTarget（←/→・Home/End）', () => {
+  const ids = [1, 4, 7];
+  it('←/→ は隣（端では反対の端へ回る）、Home/End は端、他のキーは null', () => {
+    expect(tabKeyTarget(ids, 4, 'ArrowRight')).toBe(7);
+    expect(tabKeyTarget(ids, 7, 'ArrowRight')).toBe(1);
+    expect(tabKeyTarget(ids, 4, 'ArrowLeft')).toBe(1);
+    expect(tabKeyTarget(ids, 1, 'ArrowLeft')).toBe(7);
+    expect(tabKeyTarget(ids, 4, 'Home')).toBe(1);
+    expect(tabKeyTarget(ids, 4, 'End')).toBe(7);
+    expect(tabKeyTarget(ids, 4, 'Enter')).toBeNull();
+    expect(tabKeyTarget(ids, 9, 'ArrowRight')).toBeNull();
+    expect(tabKeyTarget([], 1, 'Home')).toBeNull();
+  });
+});
+
+describe('renameError（名前の変更を断る理由。reducer の renameTab と同じ規則）', () => {
+  const tabs = [
+    { id: 1, name: 'A' },
+    { id: 2, name: 'ヘッジ案' },
+  ];
+  it('空（正規化した後）・他のタブと同じ名前は断る。自分の今の名前・空いている名前は null', () => {
+    expect(TAB_NAME_EMPTY_TEXT).toBe('名前を入れる');
+    expect(TAB_NAME_TAKEN_TEXT).toBe('同じ名前のタブがある');
+    expect(renameError(tabs, 1, ' ‏ ')).toBe(TAB_NAME_EMPTY_TEXT);
+    expect(renameError(tabs, 1, 'ヘッジ案')).toBe(TAB_NAME_TAKEN_TEXT);
+    expect(renameError(tabs, 1, ' ヘッジ案\u0007 ')).toBe(TAB_NAME_TAKEN_TEXT);
+    expect(renameError(tabs, 2, 'A')).toBe(TAB_NAME_TAKEN_TEXT);
+    expect(renameError(tabs, 1, 'A')).toBeNull();
+    expect(renameError(tabs, 1, 'B')).toBeNull();
+  });
+});
+
+describe('openInNewTabError（保存一覧の [新しいタブで開く]）', () => {
+  it(`タブが ${MAX_TABS} 個なら理由（一覧を閉じずに出す）、それ未満は null`, () => {
+    expect(openInNewTabError(MAX_TABS)).toBe(TABS_FULL_TEXT);
+    expect(openInNewTabError(MAX_TABS + 1)).toBe(TABS_FULL_TEXT);
+    expect(openInNewTabError(MAX_TABS - 1)).toBeNull();
+    expect(openInNewTabError(1)).toBeNull();
+  });
+});

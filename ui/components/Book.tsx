@@ -9,6 +9,7 @@ import {
   MARK_BASIS_TEXT,
   requestOpen,
 } from '../view/bookList';
+import { TABS_FULL_TEXT } from '../view/tabs';
 import { Hint } from './Hint';
 
 export interface BookMessage {
@@ -29,6 +30,12 @@ export interface BookProps {
   /** 各操作は成功したら true（確認・名前の入力を閉じる） */
   onSave: (name: string) => boolean;
   onOpen: (id: string) => boolean;
+  /** 新しいタブで開く（#71。作業中のタブは残す。確認しない） */
+  onOpenNewTab: (id: string) => boolean;
+  /** タブを足せる（上限未満） */
+  canAddTab: boolean;
+  /** 作業中のタブの名前（[開く] の確認の文言・保存の説明） */
+  tabName: string;
   onOverwrite: (id: string) => boolean;
   onDuplicate: (id: string) => boolean;
   onRename: (id: string, name: string) => boolean;
@@ -53,7 +60,7 @@ export function BookButton({ count, onOpen }: { count: number | null; onOpen: ()
 }
 
 export function Book(props: BookProps) {
-  const { view, legCount, message, hasBoard } = props;
+  const { view, legCount, message, hasBoard, canAddTab, tabName } = props;
   const ref = useRef<HTMLDialogElement>(null);
   const titleId = useId();
   const [name, setName] = useState(props.defaultName);
@@ -114,7 +121,7 @@ export function Book(props: BookProps) {
 
   const confirmRow = (c: BookConfirm, rowName: string) => (
     <div class="book-confirm" role="alert">
-      <span>{confirmText(c, rowName, legCount)}</span>
+      <span>{confirmText(c, rowName, legCount, tabName)}</span>
       <span class="book-ops">
         <button type="button" class="danger" onClick={() => confirmed(c)}>
           {CONFIRM_LABEL[c.kind]}
@@ -145,8 +152,9 @@ export function Book(props: BookProps) {
         <Hint label="保存したポジション">
           この端末（ブラウザ）にだけ保存する。別の端末へは [書き出し] / [読み込み…]。 評価損益 =
           保存した建値のまま{MARK_BASIS_TEXT}で評価し、その項目の手数料（1 枚あたり × 枚数）を引く。
-          Δ・満期の最大損失は今の板で計算。開くと足・シナリオ・手数料・先物の basis
-          が置き換わる（表示の設定は今のまま）。
+          Δ・満期の最大損失は今の板で計算。[開く] は作業中のタブの足と、シナリオ・手数料・先物の
+          basis（全タブ共通）を置き換える（表示の設定は今のまま）。[新しいタブで開く]
+          は作業中のタブを残してタブを足す。保存・上書きは作業中のタブ（{tabName}）を保存する。
         </Hint>
         <button type="button" class="book-close" onClick={() => ref.current?.close()}>
           閉じる
@@ -202,6 +210,7 @@ export function Book(props: BookProps) {
         <button type="button" disabled={readonly || legCount === 0} onClick={save}>
           保存
         </button>
+        <span class="note">作業中のタブ {tabName}</span>
         {legCount === 0 && <span class="note">足が無い（足を追加すると保存できる）</span>}
       </div>
 
@@ -342,6 +351,25 @@ export function Book(props: BookProps) {
                           onClick={() => open(row)}
                         >
                           開く
+                        </button>
+                        <button
+                          type="button"
+                          aria-label={`${row.name} を新しいタブで開く`}
+                          disabled={readonly || !hasBoard || !canAddTab}
+                          title={
+                            !hasBoard
+                              ? '板が無いので開けない（板を読むと開ける）'
+                              : canAddTab
+                                ? undefined
+                                : TABS_FULL_TEXT
+                          }
+                          onClick={() => {
+                            setConfirm(null);
+                            setRenaming(null);
+                            props.onOpenNewTab(row.id);
+                          }}
+                        >
+                          新しいタブで開く
                         </button>
                         <button
                           type="button"

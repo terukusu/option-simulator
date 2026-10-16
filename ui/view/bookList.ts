@@ -383,11 +383,21 @@ export function requestOpen(unsaved: boolean, id: string): BookConfirm | 'open' 
   return unsaved ? { kind: 'open', id } : 'open';
 }
 
-/** 確認の文言（名前は JSX のテキストで入れる。ここでは文字列として組み立てるだけ）。 */
-export function confirmText(c: BookConfirm, name: string, legCount: number): string {
+/**
+ * 確認の文言（名前は JSX のテキストで入れる。ここでは文字列として組み立てるだけ）。
+ * tabName = 作業中のタブの名前（#71。渡せば [開く] が置き換えるタブを書く）。
+ */
+export function confirmText(
+  c: BookConfirm,
+  name: string,
+  legCount: number,
+  tabName?: string,
+): string {
   switch (c.kind) {
     case 'open':
-      return `作業中の足 ${legCount} 本は保存一覧に無い。「${name}」を開くと置き換わる（作業の自動保存は 1 つだけ）`;
+      return tabName === undefined
+        ? `作業中の足 ${legCount} 本は保存一覧に無い。「${name}」を開くと置き換わる（作業の自動保存は 1 つだけ）`
+        : `作業中のタブ ${tabName} の足 ${legCount} 本は保存一覧に無い。「${name}」を開くとこのタブが置き換わる（残すなら [新しいタブで開く]）`;
     case 'overwrite':
       return `「${name}」を作業中の内容（足 ${legCount} 本）で上書きする？`;
     case 'remove':

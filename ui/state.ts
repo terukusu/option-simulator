@@ -32,6 +32,7 @@ import {
 import { CALENDAR } from './calendar';
 import type { Domain } from './chart/scale';
 import { refreshLegMarkets } from './legMarket';
+import { cleanName } from './names';
 import { parseNum } from './view/format';
 import { DEFAULT_HEDGE, HEDGE_TARGET_MAX, type HedgeSettings, hedgeContracts } from './view/hedge';
 import { DEFAULT_PNL_Y, type PnlYSettings } from './view/pnlChart';
@@ -45,6 +46,28 @@ export interface UiLeg {
   optionMarket?: { expiry: string; market: OptionExpiryMarket };
   /** 先物の足の市場（板の先物と限月違い・先物価格なし） */
   futureMarket?: { contract: string; market: FutureMarket };
+}
+
+/**
+ * 作業中でないタブの中身（検証済みの position。ui/persist.ts の Workspace['position'] と同じ形。#71）。
+ * 足は id を持たない（切り替えて作業中にするときに 1..n を振る）。
+ */
+export interface TabPosition {
+  legs: ReadonlyArray<Omit<UiLeg, 'id'>>;
+  /** そのタブのシナリオ（共通のシナリオのときは退避したときの写し。保存形式はタブごとに持つ） */
+  scenario: Scenario;
+  /** 退避したときの板のスナップショット時刻（epoch ミリ秒。板が無ければ null） */
+  boardSnapshotAt: number | null;
+}
+
+/** 作業中のポジションのタブ（BOX タブ。#71。設計 6.1・13.4） */
+export interface TabSlot {
+  /** 画面の key・aria 用（保存しない。開くたびに 1..n） */
+  id: number;
+  /** 名前（sanitizeTabName 済み。外から来た値でも制御文字・双方向の制御を含まない） */
+  name: string;
+  /** 作業中のタブは null（中身は State の legs / scenario）、他のタブは退避した position */
+  saved: TabPosition | null;
 }
 
 export interface LoadErrorView {
@@ -93,12 +116,43 @@ export interface State {
   calendar: Calendar;
   /** デルタヘッジのパネル（目標 Δ・評価点・限月。M12・5.8） */
   hedge: HedgeSettings;
+  /**
+   * 作業中のポジションのタブ（#71）。作業中のタブの中身は上の legs・nextId・scenario で、他のタブは saved に退避する。
+   * 不変条件: activeTab の slot がちょうど 1 つでその saved は null、他は非 null。1 ≤ 個数 ≤ MAX_TABS
+   */
+  tabs: TabSlot[];
+  activeTab: number;
+  nextTabId: number;
 }
 
 export type MetricsUnitSetting = 'auto' | 'yen' | 'thousand';
 
 /** 手数料の上限（1 枚あたり円） */
 export const FEE_MAX = 100_000;
+
+/** タブの個数の上限（オーナー確認の対象。#71） */
+export const MAX_TABS = 6;
+/** タブの名前の長さの上限（コードポイント数。オーナー確認の対象） */
+export const TAB_NAME_MAX = 12;
+/**
+ * シナリオをタブごとに持つか（#71 D3。オーナー確認の対象）。false = 全タブ共通（作業中のシナリオを全タブに使う）。
+ * 保存形式はどちらでもタブごとに `position.scenario` を持つので、ここを変えても版は上げない
+ */
+export const SCENARIO_PER_TAB: boolean = false;
+
+/** タブの名前の正規化（制御文字・双方向の制御を除き、前後の空白を取り、12 字で切る。空なら空文字）。 */
+export function sanitizeTabName(s: string): string {
+  return cleanName(s, TAB_NAME_MAX);
+}
+
+const TAB_LETTERS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+
+/** 新しいタブの既定の名前: A〜Z のうち使われていない最初の 1 文字（全部使われていれば番号）。 */
+export function nextTabName(taken: ReadonlyArray<{ name: string }>): string {
+  const used = new Set(taken.map((t) => t.name));
+  for (const c of TAB_LETTERS) if (!used.has(c)) return c;
+  for (let n = 1; ; n++) if (!used.has(String(n))) return String(n);
+}
 
 export const initialState: State = {
   chain: null,
@@ -126,6 +180,9 @@ export const initialState: State = {
   legError: null,
   calendar: CALENDAR,
   hedge: DEFAULT_HEDGE,
+  tabs: [{ id: 1, name: 'A', saved: null }],
+  activeTab: 1,
+  nextTabId: 2,
 };
 
 /** 足の編集（画面の入力を検証済みの値にしたもの）。 */
@@ -185,7 +242,23 @@ export type Action =
       scenario: Scenario;
       feePerLot: number;
       futureBasis: ModelSettings['futureBasis'];
-    };
+    }
+  /** 保存一覧の項目を新しいタブで開く（#71。上限なら何もしない。作業中のタブは残す） */
+  | {
+      type: 'openPositionInNewTab';
+      legs: ReadonlyArray<Omit<UiLeg, 'id'>>;
+      scenario: Scenario;
+      feePerLot: number;
+      futureBasis: ModelSettings['futureBasis'];
+    }
+  /** タブを足す（作業中のタブの右隣。empty = 足 0 本、copy = 作業中の足の写し）。上限なら何もしない */
+  | { type: 'addTab'; mode: 'empty' | 'copy' }
+  /** タブを切り替える（作業中を退避して対象を読み込む。板・表示・横軸の表示範囲は保つ） */
+  | { type: 'switchTab'; id: number }
+  /** タブを閉じる（最後の 1 個は閉じない。作業中なら右隣・無ければ左隣へ切り替える） */
+  | { type: 'closeTab'; id: number }
+  /** タブの名前を変える（正規化して空・他のタブと同じ名前なら何もしない） */
+  | { type: 'renameTab'; id: number; name: string };
 
 function errorText(e: unknown): string {
   return e instanceof Error ? e.message : '足を追加できない';
@@ -240,6 +313,77 @@ function validHedgePatch(p: Partial<HedgeSettings>, chain: Chain | null): boolea
       p.contract === null ||
       (chain !== null && hedgeContracts(chain).includes(p.contract)))
   );
+}
+
+const validFee = (v: number) => Number.isFinite(v) && v >= 0 && v <= FEE_MAX;
+
+/**
+ * position（id の無い足とシナリオ）を作業中の足に読み込む（openPosition・switchTab・閉じたあとの切り替えが共有）。
+ * 足の id は 1..n に振り直す（restoreState と同じ）。板があれば足の市場を今の板から作り直す（loaded と同じ規則。
+ * 板の足で限月が板に無ければ行のエラーで残る）。scenario が null なら今のシナリオのまま
+ */
+function loadLegs(
+  state: State,
+  src: ReadonlyArray<Omit<UiLeg, 'id'>>,
+  scenario: Scenario | null,
+): State {
+  const legs: UiLeg[] = src.map((l, i) => ({ ...l, id: i + 1 }));
+  return {
+    ...state,
+    legs: state.chain ? refreshLegMarkets(state.chain, legs, state.calendar.holidays) : legs,
+    nextId: legs.length + 1,
+    scenario: scenario !== null && validScenarioPatch(scenario) ? scenario : state.scenario,
+    smilePick: null,
+    legError: null,
+  };
+}
+
+/** 作業中のタブの中身を退避の形にする（足の写し。id を除く）。 */
+export function stashActive(state: State): TabPosition {
+  return {
+    legs: state.legs.map(({ id: _id, ...rest }) => rest),
+    scenario: state.scenario,
+    boardSnapshotAt: state.chain ? state.chain.snapshotAt : null,
+  };
+}
+
+/** 作業中のタブを id のタブに切り替える（同じ id・無い id は state のまま）。 */
+function switchTo(state: State, id: number): State {
+  if (id === state.activeTab) return state;
+  const target = state.tabs.find((t) => t.id === id);
+  if (!target?.saved) return state;
+  const stash = stashActive(state);
+  const tabs = state.tabs.map((t) =>
+    t.id === state.activeTab ? { ...t, saved: stash } : t.id === id ? { ...t, saved: null } : t,
+  );
+  const loaded = loadLegs(
+    state,
+    target.saved.legs,
+    SCENARIO_PER_TAB ? target.saved.scenario : null,
+  );
+  return {
+    ...loaded,
+    tabs,
+    activeTab: id,
+    // 横軸の表示範囲は保つ（同じ範囲で見比べる。オーナー確認の対象）。足 0 本のタブなら初期範囲（removeLeg と同じ）
+    pnlViewport: loaded.legs.length === 0 ? null : state.pnlViewport,
+  };
+}
+
+/** 作業中のタブの右隣に新しいタブを作って切り替える（上限なら null）。 */
+function addTabWith(
+  state: State,
+  legs: ReadonlyArray<Omit<UiLeg, 'id'>>,
+  scenario: Scenario | null,
+): State | null {
+  if (state.tabs.length >= MAX_TABS) return null;
+  const stash = stashActive(state);
+  const id = state.nextTabId;
+  const slot: TabSlot = { id, name: nextTabName(state.tabs), saved: null };
+  const at = state.tabs.findIndex((t) => t.id === state.activeTab);
+  const tabs = state.tabs.map((t) => (t.id === state.activeTab ? { ...t, saved: stash } : t));
+  tabs.splice(at + 1, 0, slot);
+  return { ...loadLegs(state, legs, scenario), tabs, activeTab: id, nextTabId: id + 1 };
 }
 
 export function reduce(state: State, action: Action): State {
@@ -322,9 +466,7 @@ export function reduce(state: State, action: Action): State {
       // d・ΔX・Δσ・Δs を 0 に（β・動き方は設定として保つ）
       return { ...state, scenario: { ...state.scenario, days: 0, dX: 0, dSigma: 0, skew: 0 } };
     case 'setFee':
-      return Number.isFinite(action.fee) && action.fee >= 0 && action.fee <= FEE_MAX
-        ? { ...state, feePerLot: action.fee }
-        : state;
+      return validFee(action.fee) ? { ...state, feePerLot: action.fee } : state;
     case 'setFutureBasis':
       return (action.basis === 'fixed' || action.basis === 'decay') &&
         action.basis !== state.futureBasis
@@ -392,25 +534,52 @@ export function reduce(state: State, action: Action): State {
       return { ...state, legs: [], pnlViewport: null };
     case 'clearLegError':
       return state.legError === null ? state : { ...state, legError: null };
-    case 'openPosition': {
-      // 足の id は 1..n に振り直す（restoreState と同じ）。板があれば足の市場を今の板から作り直す（loaded と同じ規則。
-      // 板の足で限月が板に無ければ行のエラーで残る）
-      const legs: UiLeg[] = action.legs.map((l, i) => ({ ...l, id: i + 1 }));
-      const { feePerLot, futureBasis, scenario } = action;
+    case 'openPosition':
+    case 'openPositionInNewTab': {
+      // 作業中のタブを置き換える（openPosition）か、新しいタブを足して読み込む（#71。上限なら何もしない）
+      const { feePerLot, futureBasis } = action;
+      const next =
+        action.type === 'openPosition'
+          ? loadLegs(state, action.legs, action.scenario)
+          : addTabWith(state, action.legs, action.scenario);
+      if (next === null) return state;
       return {
-        ...state,
-        legs: state.chain ? refreshLegMarkets(state.chain, legs, state.calendar.holidays) : legs,
-        nextId: legs.length + 1,
-        scenario: validScenarioPatch(scenario) ? scenario : state.scenario,
-        feePerLot:
-          Number.isFinite(feePerLot) && feePerLot >= 0 && feePerLot <= FEE_MAX
-            ? feePerLot
-            : state.feePerLot,
+        ...next,
+        feePerLot: validFee(feePerLot) ? feePerLot : state.feePerLot,
         futureBasis:
           futureBasis === 'fixed' || futureBasis === 'decay' ? futureBasis : state.futureBasis,
         pnlViewport: null,
-        smilePick: null,
-        legError: null,
+      };
+    }
+    case 'addTab': {
+      // 複製は作業中の足の写し（足は reducer が置き換えで更新するので共有しても書き換わらないが、写しで持つ）
+      const legs = action.mode === 'copy' ? stashActive(state).legs : [];
+      const next = addTabWith(state, legs, null);
+      if (next === null) return state;
+      return { ...next, pnlViewport: legs.length === 0 ? null : state.pnlViewport };
+    }
+    case 'switchTab':
+      return switchTo(state, action.id);
+    case 'closeTab': {
+      const i = state.tabs.findIndex((t) => t.id === action.id);
+      if (i < 0 || state.tabs.length <= 1) return state;
+      let s = state;
+      if (action.id === state.activeTab) {
+        const neighbor = state.tabs[i + 1] ?? state.tabs[i - 1];
+        if (!neighbor) return state;
+        s = switchTo(state, neighbor.id);
+      }
+      return { ...s, tabs: s.tabs.filter((t) => t.id !== action.id) };
+    }
+    case 'renameTab': {
+      const name = sanitizeTabName(action.name);
+      const cur = state.tabs.find((t) => t.id === action.id);
+      if (!cur || name === '' || name === cur.name) return state;
+      // 他のタブと同じ名前にはしない（読み取り readWorkspace は重複を別の文字に変えるので、ここで作らない）
+      if (state.tabs.some((t) => t.id !== action.id && t.name === name)) return state;
+      return {
+        ...state,
+        tabs: state.tabs.map((t) => (t.id === action.id ? { ...t, name } : t)),
       };
     }
     case 'setHedge':

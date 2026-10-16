@@ -424,4 +424,12 @@ describe('確認・知らせ（AC6・AC7）', () => {
     expect(BOOK_FAIL_TEXT.full).toBe('保存一覧は 100 件まで。不要な項目を削除してから');
     expect(BOOK_FAIL_TEXT.fileTooLarge).toBe('ファイルが大きすぎる（2 MB まで）');
   });
+
+  it('作業中のタブの名前を渡すと、[開く] が置き換えるタブと [新しいタブで開く] を書く（#71）', () => {
+    expect(confirmText({ kind: 'open', id: 'x' }, 'P', 3, 'B')).toBe(
+      '作業中のタブ B の足 3 本は保存一覧に無い。「P」を開くとこのタブが置き換わる（残すなら [新しいタブで開く]）',
+    );
+    // 開く以外の文言はタブの名前で変わらない
+    expect(confirmText({ kind: 'remove', id: 'x' }, 'P', 0, 'B')).toBe('「P」を削除する？');
+  });
 });

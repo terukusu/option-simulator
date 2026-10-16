@@ -907,18 +907,101 @@ button.q.noquote {
 }
 
 /*
- * キーボードでフォーカスした要素をドックの下に隠さない（レビューの指摘。#61）。ページの上端からドックの高さ（操作行 +
- * 描画域 + 帯）より少し大きい範囲を「見えていない」扱いにする。PC はシミュレーターが別の列なので不要
+ * 作業中のポジションのタブ（BOX タブ。#71。設計 6.1）: ドックの 1 行目。1 行に収める（折り返さない）。
+ * タブは縮めて名前を省略し（全文は title・aria-label）、幅 360px でも 6 個 + ＋ + ⋯ が横スクロールしない
+ */
+.work-tabs {
+  padding: 2px 0 4px;
+}
+
+.work-tabs-bar {
+  align-items: stretch;
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 2px;
+  min-width: 0;
+}
+
+.work-tabs-list {
+  display: flex;
+  flex: 0 1 auto;
+  flex-wrap: nowrap;
+  gap: 2px;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.work-tab {
+  align-items: baseline;
+  display: inline-flex;
+  flex: 0 1 auto;
+  gap: 3px;
+  max-width: 8em;
+  min-width: 2.75em;
+  overflow: hidden;
+  padding: 2px 6px;
+  white-space: nowrap;
+}
+
+.work-tab-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.work-tab-count {
+  color: var(--muted);
+  flex: none;
+  font-size: 0.8em;
+}
+
+.work-tab[aria-selected="true"] {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: Canvas;
+  font-weight: 600;
+}
+
+.work-tab[aria-selected="true"] .work-tab-count {
+  color: inherit;
+}
+
+.work-tab-add,
+.work-tab-more {
+  flex: none;
+  padding: 2px 8px;
+}
+
+.work-tabs-menu {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  padding-top: 4px;
+}
+
+.work-tabs-menu input {
+  width: 8em;
+}
+
+.work-tabs-menu .danger {
+  border-color: var(--warn);
+  color: var(--warn);
+}
+
+/*
+ * キーボードでフォーカスした要素をドックの下に隠さない（レビューの指摘。#61）。ページの上端からドックの高さ（タブの帯 +
+ * 操作行 + 描画域 + 帯）より少し大きい範囲を「見えていない」扱いにする。PC はシミュレーターが別の列なので不要
  */
 @media (max-width: 1199.98px) {
   html {
-    scroll-padding-top: 340px;
+    scroll-padding-top: 370px;
   }
 }
 
 @media (max-width: 719.98px) {
   html {
-    scroll-padding-top: 300px;
+    scroll-padding-top: 330px;
   }
 }
 

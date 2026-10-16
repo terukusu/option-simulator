@@ -33,7 +33,12 @@ import {
   serializeBook,
   uniqueName,
 } from '../../ui/book';
-import { type SavedWorkspaceV1, toSaved, WORKSPACE_KEY } from '../../ui/persist';
+import {
+  type SavedWorkspaceV1,
+  serializeWorkspace,
+  toSaved,
+  WORKSPACE_KEY,
+} from '../../ui/persist';
 import { type Action, initialState, reduce, type State } from '../../ui/state';
 import { fixture } from '../support/fixtures';
 import bookV1 from './saved/book-v1.json';
@@ -555,5 +560,40 @@ describe('別のタブ', () => {
     expect(bookStorageChange(BOOK_KEY)).toBe(true);
     expect(bookStorageChange(null)).toBe(true);
     expect(bookStorageChange(WORKSPACE_KEY)).toBe(false);
+  });
+});
+
+/** #71: 作業のキーは版 2（タブの並び）になったが、保存一覧の項目・書き出すファイルは 1 ポジションの文書の版 1 のまま。 */
+describe('BOX タブ（#71）との関係', () => {
+  it('タブが複数でも保存するのは作業中のタブ 1 つ（版 1）。book-v1 の fixture は今も読める', () => {
+    const two = run(
+      strangle(),
+      { type: 'addTab', mode: 'empty' },
+      {
+        type: 'addBoardLeg',
+        expiry: '2026-11',
+        k: 60000,
+        optionType: 'put',
+        side: 'buy',
+      },
+    );
+    const r = addEntry(EMPTY_BOOK, savedOf(two), '', NOW, newId());
+    if (!r.ok) throw new Error(r.reason);
+    const entry = (JSON.parse(r.text) as { entries: Array<{ workspace: Record<string, unknown> }> })
+      .entries[0];
+    expect(entry?.workspace.schema_version).toBe(1);
+    expect(entry?.workspace).not.toHaveProperty('tabs');
+    const first = r.book.entries[0];
+    expect(first?.status === 'ok' && first.ws.position.legs.length).toBe(1);
+    const read = readBook(JSON.stringify(bookV1));
+    expect(read.kind === 'ok' && read.book.entries.every((e) => e.status === 'ok')).toBe(true);
+  });
+
+  it('作業のキー（版 2）の文字列は読み込めない（1 ポジションの文書・保存一覧ではない）', () => {
+    const text = serializeWorkspace(strangle(), NOW);
+    expect(importIntoBook(EMPTY_BOOK, text, NOW, newId)).toEqual({
+      ok: false,
+      reason: 'importInvalid',
+    });
   });
 });

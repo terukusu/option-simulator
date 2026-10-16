@@ -10,8 +10,14 @@
  *   足の市場は保存するが、板を読んだら今の板から作り直す（ui/legMarket.ts）
  *
  * #70（ポジ帳）・#71（BOX タブ）・#72（URL 共有）は `position`（足 + シナリオ + 板の時刻）を 1 単位として使う。
- * #70 は項目ごとに作業の形式（版つき）を丸ごと持ち、readWorkspaceValue で同じ検証・読み替えを通す（ui/book.ts）。
- * 項目を足すときは版を上げ、MIGRATIONS に読み替えを足し、tests/ui/saved/ の古い版の fixture は変えない。
+ *
+ * 版は 2 種類ある（#71）:
+ * - 作業のキー（`WORKSPACE_SCHEMA_VERSION` = 2）: タブの並び `{ active, tabs: [{ name, position }], ui }`。版 1 の保存は
+ *   MIGRATIONS[1] でタブ 1 個「A」に読み替える。readWorkspace / serializeWorkspace / restoreWorkspace / bootState
+ * - 1 ポジションの文書（`POSITION_DOC_VERSION` = 1。#23 の作業の形式 版 1 そのもの）: 保存一覧の項目・書き出す
+ *   ファイル・#72 の単位。toSaved / readWorkspaceValue / readPositionDoc / savedFromWorkspace / restoreState
+ *   （作業のキーの版を上げても、保存一覧・ファイルはこちらの版のままなので古い画面でも読める）
+ * 項目を足すときはどちらかの版を上げ、読み替えを足し、tests/ui/saved/ の古い版の fixture は変えない。
  */
 
 import {
@@ -39,8 +45,13 @@ import {
   FEE_MAX,
   initialState,
   isContractId,
+  MAX_TABS,
   type MetricsUnitSetting,
+  nextTabName,
+  SCENARIO_PER_TAB,
   type State,
+  sanitizeTabName,
+  type TabSlot,
   type UiLeg,
   validEntry,
   validIv,
@@ -56,8 +67,13 @@ export const WORKSPACE_KEY = 'option-simulator.workspace';
 /** 最後に取れた板のキー */
 export const BOARD_KEY = 'option-simulator.lastBoard';
 
-export const WORKSPACE_SCHEMA_VERSION = 1;
+/** 作業のキーの版（#71 でタブの並びの版 2） */
+export const WORKSPACE_SCHEMA_VERSION = 2;
+/** 1 ポジションの文書の版（保存一覧の項目・書き出すファイル。#23 の作業の形式 版 1 のまま） */
+export const POSITION_DOC_VERSION = 1;
 export const BOARD_SCHEMA_VERSION = 1;
+/** 読むときのタブの個数の上限（これを超える保存はタブの並びが壊れているとみなす。巨大な配列で固まらない） */
+export const MAX_TABS_READ = 20;
 
 /** 保存する足の本数の上限（壊れた・巨大な値で固まらない） */
 export const MAX_SAVED_LEGS = 200;
@@ -128,6 +144,25 @@ export interface SavedWorkspaceV1 {
   ui: SavedUiV1;
 }
 
+// ---------------------------------------------------------------- 作業のキーの形式（版 2。#71）
+
+export interface SavedTabV2 {
+  name: string;
+  /** 1 ポジションの文書の position と同じ形（シナリオもタブごとに持つ。共通のシナリオなら全タブ同じ値） */
+  position: SavedPositionV1;
+}
+
+export interface SavedWorkspaceV2 {
+  schema_version: 2;
+  /** 保存した時刻（ISO 8601） */
+  saved_at: string;
+  /** 作業中のタブの位置（tabs の添字） */
+  active: number;
+  tabs: SavedTabV2[];
+  /** 板・表示・評価の設定（全タブ共通） */
+  ui: SavedUiV1;
+}
+
 // ---------------------------------------------------------------- 書き出し
 
 /** 足の入力値の保存形（キーの順を固定する。#70 のポジ帳の変更判定も使う）。 */
@@ -153,7 +188,7 @@ export function savedLeg(leg: Leg): SavedOptionLegV1 | SavedFutureLegV1 {
 
 const finiteOrNull = (v: number): number | null => (Number.isFinite(v) ? v : null);
 
-function toSavedLeg(ui: UiLeg): SavedLegV1 {
+function toSavedLeg(ui: Omit<UiLeg, 'id'>): SavedLegV1 {
   const out: SavedLegV1 = { leg: savedLeg(ui.leg), marks: [...ui.marks] };
   if (ui.optionMarket) {
     const m = ui.optionMarket.market;
@@ -205,20 +240,75 @@ function body(state: State): { legs: SavedLegV1[]; scenario: Scenario; ui: Saved
   };
 }
 
+/** 作業中でないタブの保存のシナリオ（共通のシナリオなら作業中のシナリオ、タブごとなら退避した値）。 */
+function tabScenario(state: State, t: TabSlot): Scenario {
+  return savedScenario(SCENARIO_PER_TAB && t.saved ? t.saved.scenario : state.scenario);
+}
+
+const isoOrNull = (t: number | null): string | null =>
+  t === null ? null : new Date(t).toISOString();
+
+/** 全タブの position（作業中のタブは state の足・シナリオ・今の板の時刻）。 */
+function tabsBody(state: State, b: ReturnType<typeof body>): SavedTabV2[] {
+  return state.tabs.map((t) => ({
+    name: t.name,
+    position:
+      t.saved === null
+        ? {
+            board_snapshot_at: state.chain ? state.chain.snapshotAtText : null,
+            legs: b.legs,
+            scenario: b.scenario,
+          }
+        : {
+            board_snapshot_at: isoOrNull(t.saved.boardSnapshotAt),
+            legs: t.saved.legs.map(toSavedLeg),
+            scenario: tabScenario(state, t),
+          },
+  }));
+}
+
 /**
  * 変更の判定に使う文字列（同じなら書かない。開いているだけのタブが他のタブの保存を上書きしないため）。
  * 保存の時刻・板の時刻と、板を読むたびに今の板から作り直す足の市場・市場の印は含めない
- * （利用者が変えたものだけ: 足の入力値・シナリオ・設定）。
+ * （利用者が変えたものだけ: 作業中のタブ・各タブの名前・足の入力値・シナリオ・設定）。
  */
 export function persistKey(state: State): string {
   const b = body(state);
-  return JSON.stringify({ legs: b.legs.map((l) => l.leg), scenario: b.scenario, ui: b.ui });
+  return JSON.stringify({
+    active: activeIndex(state),
+    tabs: tabsBody(state, b).map((t) => ({
+      name: t.name,
+      legs: t.position.legs.map((l) => l.leg),
+      scenario: t.position.scenario,
+    })),
+    ui: b.ui,
+  });
 }
 
-export function toSaved(state: State, now: number): SavedWorkspaceV1 {
+function activeIndex(state: State): number {
+  return Math.max(
+    state.tabs.findIndex((t) => t.id === state.activeTab),
+    0,
+  );
+}
+
+/** 作業のキーに書く形（版 2。全タブ）。 */
+export function toSavedWorkspace(state: State, now: number): SavedWorkspaceV2 {
   const b = body(state);
   return {
     schema_version: WORKSPACE_SCHEMA_VERSION,
+    saved_at: new Date(now).toISOString(),
+    active: activeIndex(state),
+    tabs: tabsBody(state, b),
+    ui: b.ui,
+  };
+}
+
+/** 作業中のタブ 1 つの 1 ポジションの文書（版 1。保存一覧の保存・上書きが使う）。 */
+export function toSaved(state: State, now: number): SavedWorkspaceV1 {
+  const b = body(state);
+  return {
+    schema_version: POSITION_DOC_VERSION,
     saved_at: new Date(now).toISOString(),
     position: {
       board_snapshot_at: state.chain ? state.chain.snapshotAtText : null,
@@ -229,8 +319,9 @@ export function toSaved(state: State, now: number): SavedWorkspaceV1 {
   };
 }
 
+/** 作業のキーに書く文字列（版 2）。 */
 export function serializeWorkspace(state: State, now: number): string {
-  return JSON.stringify(toSaved(state, now));
+  return JSON.stringify(toSavedWorkspace(state, now));
 }
 
 // ---------------------------------------------------------------- 読み取り・検証
@@ -262,7 +353,8 @@ export interface Workspace {
   ui: UiPrefs;
 }
 
-export type ReadResult =
+/** 1 ポジションの文書の読み取りの結果 */
+export type DocReadResult =
   /** 保存が無い */
   | { kind: 'empty' }
   /** 読めない（JSON でない・版が無い / 知らない古い版）。次の変更で上書きしてよい */
@@ -271,6 +363,30 @@ export type ReadResult =
   | { kind: 'newer'; version: number }
   /** 読めた。dropped = 足・シナリオを捨てた */
   | { kind: 'ok'; saved: Workspace; dropped: boolean };
+
+/** 検証済みの position */
+export type WorkspacePosition = NonNullable<Workspace['position']>;
+
+/** 検証済みの作業のキー（版 2。#71） */
+export interface TabsWorkspace {
+  savedAt: number | null;
+  /** 読めたタブ（壊れたタブは除いた。最大 MAX_TABS 個。0 個 = 全部捨てた） */
+  tabs: Array<{ name: string; position: WorkspacePosition }>;
+  /** 作業中のタブの添字（tabs の範囲内。tabs が空なら 0） */
+  active: number;
+  ui: UiPrefs;
+}
+
+/** 作業のキーの読み取りの結果 */
+export type ReadResult =
+  | { kind: 'empty' }
+  | { kind: 'invalid' }
+  | { kind: 'newer'; version: number }
+  /**
+   * 読めた。dropped = 足・シナリオを全部捨てた（タブが 1 個も読めない。設定だけ戻す）、
+   * droppedTabs = 読めずに捨てたタブの個数（残りは復元する）
+   */
+  | { kind: 'ok'; saved: TabsWorkspace; dropped: boolean; droppedTabs: number };
 
 export type Obj = Record<string, unknown>;
 
@@ -546,20 +662,33 @@ function readUi(v: unknown): UiPrefs {
 }
 
 /**
- * 古い版 → 次の版の読み替え（キー = 読み替え前の版）。版 1 が最初の版なので今は空。
- * 版 2 を入れるときは `1: (raw) => ...` を足し、tests/ui/saved/workspace-v1.json を v2 へ読み替えるテストを足す。
+ * 作業のキーの古い版 → 次の版の読み替え（キー = 読み替え前の版）。
+ * 1 → 2（#71）: 1 つの作業をタブ 1 個「A」にする（position・ui をそのまま移す。余計なキーは写さない）。
+ * tests/ui/saved/workspace-v1.json（変えない）が版 2 に読み替わることをテストで固定する。
  */
-export const MIGRATIONS: Readonly<Record<number, (raw: Obj) => Obj>> = {};
+export const MIGRATIONS: Readonly<Record<number, (raw: Obj) => Obj>> = {
+  1: (raw) => ({
+    schema_version: 2,
+    saved_at: own(raw, 'saved_at'),
+    active: 0,
+    tabs: [{ name: 'A', position: own(raw, 'position') }],
+    ui: own(raw, 'ui'),
+  }),
+};
 
-/** 古い版を今の版まで読み替える（途中の版の読み替えが無ければ null）。 */
+/** 1 ポジションの文書の古い版 → 次の版の読み替え。版 1 が最初の版なので今は空。 */
+export const POSITION_MIGRATIONS: Readonly<Record<number, (raw: Obj) => Obj>> = {};
+
+/** 古い版を to の版まで読み替える（途中の版の読み替えが無ければ null）。 */
 export function migrate(
   raw: Obj,
   version: number,
   to: number = WORKSPACE_SCHEMA_VERSION,
+  steps: Readonly<Record<number, (raw: Obj) => Obj>> = MIGRATIONS,
 ): Obj | null {
   let cur = raw;
   for (let v = version; v < to; v++) {
-    const step = Object.hasOwn(MIGRATIONS, v) ? MIGRATIONS[v] : undefined;
+    const step = Object.hasOwn(steps, v) ? steps[v] : undefined;
     if (!step) return null;
     cur = step(cur);
   }
@@ -608,28 +737,89 @@ export function isNewerBoard(text: string | null): boolean {
   return v !== null && v > BOARD_SCHEMA_VERSION;
 }
 
-/** 保存した作業を読む（localStorage の値。無ければ null）。 */
-export function readWorkspace(text: string | null): ReadResult {
-  if (text === null) return { kind: 'empty' };
-  let raw: unknown;
+/** JSON の文字列を読む（無ければ undefined を返さず empty、JSON でなければ invalid）。 */
+function parseText(
+  text: string | null,
+): { ok: true; raw: unknown } | { ok: false; kind: 'empty' | 'invalid' } {
+  if (text === null) return { ok: false, kind: 'empty' };
   try {
-    raw = JSON.parse(text);
+    return { ok: true, raw: JSON.parse(text) };
   } catch {
-    return { kind: 'invalid' };
+    return { ok: false, kind: 'invalid' };
   }
-  return readWorkspaceValue(raw);
 }
 
 /**
- * JSON.parse した値を作業として検証する（readWorkspace の本体。#70 のポジ帳の項目・読み込むファイルも
- * これで検証する）。
+ * 保存した作業（作業のキー。localStorage の値。無ければ empty）を読む（版 2。版 1 は MIGRATIONS[1] で読み替え）。
+ * タブごとに検証し、不正なタブはタブごと捨てる（足が 1 本だけ消えて損益の形が黙って変わるのを防ぐ #23 の原則を
+ * タブの単位に）。タブの並びが壊れている（配列でない・MAX_TABS_READ 超）なら全部捨てて設定だけ戻す。
  */
-export function readWorkspaceValue(raw: unknown): ReadResult {
+export function readWorkspace(text: string | null): ReadResult {
+  const p = parseText(text);
+  if (!p.ok) return { kind: p.kind };
+  const { raw } = p;
   if (!isObj(raw)) return { kind: 'invalid' };
   const version = own(raw, 'schema_version');
   if (typeof version !== 'number' || !Number.isInteger(version)) return { kind: 'invalid' };
   if (version > WORKSPACE_SCHEMA_VERSION) return { kind: 'newer', version };
   const cur = migrate(raw, version);
+  if (!cur) return { kind: 'invalid' };
+  const ui = readUi(own(cur, 'ui'));
+  const savedAt = readTime(own(cur, 'saved_at'));
+  const rawTabs = own(cur, 'tabs');
+  if (!Array.isArray(rawTabs) || rawTabs.length === 0 || rawTabs.length > MAX_TABS_READ) {
+    return {
+      kind: 'ok',
+      saved: { savedAt, tabs: [], active: 0, ui },
+      dropped: true,
+      droppedTabs: 0,
+    };
+  }
+  const rawActive = own(cur, 'active');
+  const tabs: TabsWorkspace['tabs'] = [];
+  let active = 0;
+  let droppedTabs = 0;
+  rawTabs.forEach((t, i) => {
+    const position = isObj(t) ? readPosition(own(t, 'position')) : null;
+    if (!position) {
+      droppedTabs++;
+      return;
+    }
+    if (tabs.length >= MAX_TABS) return;
+    if (i === rawActive) active = tabs.length;
+    const rawName = isObj(t) ? own(t, 'name') : undefined;
+    tabs.push({ name: typeof rawName === 'string' ? sanitizeTabName(rawName) : '', position });
+  });
+  // 空の名前・重複した名前は空いている文字にする（タブを名前で見分けられるように）
+  const named: TabsWorkspace['tabs'] = [];
+  for (const t of tabs) {
+    const name = t.name !== '' && !named.some((n) => n.name === t.name) ? t.name : '';
+    named.push({ ...t, name });
+  }
+  for (const t of named) if (t.name === '') t.name = nextTabName(named);
+  return {
+    kind: 'ok',
+    saved: { savedAt, tabs: named, active, ui },
+    dropped: named.length === 0,
+    droppedTabs: named.length === 0 ? 0 : droppedTabs,
+  };
+}
+
+/** 1 ポジションの文書の文字列を読む（readWorkspaceValue の前に JSON.parse。テスト・読み込みの補助）。 */
+export function readPositionDoc(text: string | null): DocReadResult {
+  const p = parseText(text);
+  return p.ok ? readWorkspaceValue(p.raw) : { kind: p.kind };
+}
+
+/**
+ * JSON.parse した値を 1 ポジションの文書（版 1）として検証する（#70 のポジ帳の項目・読み込むファイル）。
+ */
+export function readWorkspaceValue(raw: unknown): DocReadResult {
+  if (!isObj(raw)) return { kind: 'invalid' };
+  const version = own(raw, 'schema_version');
+  if (typeof version !== 'number' || !Number.isInteger(version)) return { kind: 'invalid' };
+  if (version > POSITION_DOC_VERSION) return { kind: 'newer', version };
+  const cur = migrate(raw, version, POSITION_DOC_VERSION, POSITION_MIGRATIONS);
   if (!cur) return { kind: 'invalid' };
   const position = readPosition(own(cur, 'position'));
   return {
@@ -647,7 +837,7 @@ export function savedFromWorkspace(ws: Workspace, fallbackTime: number): SavedWo
   const b = body(restoreState(initialState, ws));
   const snap = ws.position?.boardSnapshotAt ?? null;
   return {
-    schema_version: WORKSPACE_SCHEMA_VERSION,
+    schema_version: POSITION_DOC_VERSION,
     saved_at: new Date(ws.savedAt ?? fallbackTime).toISOString(),
     position: {
       board_snapshot_at: snap === null ? null : new Date(snap).toISOString(),
@@ -658,7 +848,10 @@ export function savedFromWorkspace(ws: Workspace, fallbackTime: number): SavedWo
   };
 }
 
-/** 保存した作業を state に入れる（板を読む前。限月・ヘッジの限月は最初の loaded が板に合わせる）。 */
+/**
+ * 1 ポジションの文書を state に入れる（作業中のタブの足・シナリオと設定。タブの並びは base のまま。
+ * 板を読む前。限月・ヘッジの限月は最初の loaded が板に合わせる）。
+ */
 export function restoreState(base: State, saved: Workspace): State {
   const legs: UiLeg[] = (saved.position?.legs ?? []).map((l, i) => ({ ...l, id: i + 1 }));
   return {
@@ -670,9 +863,32 @@ export function restoreState(base: State, saved: Workspace): State {
   };
 }
 
-/** 開いたときの state（読めた作業があれば復元、無ければ初期状態）。 */
+/**
+ * 作業のキー（全タブ）を state に入れる。タブの id は 1..n、作業中のタブの足・シナリオを State の欄に、他のタブは
+ * 退避の形で持つ。タブが 1 個も読めなければ設定だけ戻し、タブは空の「A」1 個。
+ */
+export function restoreWorkspace(base: State, saved: TabsWorkspace): State {
+  const active = saved.tabs[saved.active] ?? saved.tabs[0];
+  const s = restoreState(base, {
+    savedAt: saved.savedAt,
+    position: active?.position ?? null,
+    ui: saved.ui,
+  });
+  if (saved.tabs.length === 0 || !active) {
+    return { ...s, tabs: [{ id: 1, name: 'A', saved: null }], activeTab: 1, nextTabId: 2 };
+  }
+  const activeAt = saved.tabs.indexOf(active);
+  const tabs: TabSlot[] = saved.tabs.map((t, i) => ({
+    id: i + 1,
+    name: t.name,
+    saved: i === activeAt ? null : t.position,
+  }));
+  return { ...s, tabs, activeTab: activeAt + 1, nextTabId: tabs.length + 1 };
+}
+
+/** 開いたときの state（読めた作業があれば全タブを復元、無ければ初期状態）。 */
 export function bootState(read: ReadResult, base: State = initialState): State {
-  return read.kind === 'ok' ? restoreState(base, read.saved) : base;
+  return read.kind === 'ok' ? restoreWorkspace(base, read.saved) : base;
 }
 
 // ---------------------------------------------------------------- 最後に取れた板

@@ -62,6 +62,7 @@ import { positionModel } from '../view/position';
 import { readoutModel } from '../view/readout';
 import { evalTimeTargets } from '../view/scenario';
 import { scenarioAtmMark } from '../view/scenarioAtm';
+import { openInNewTabError, tabsModel } from '../view/tabs';
 import { Board } from './Board';
 import { Book, BookButton, type BookMessage } from './Book';
 import { Header } from './Header';
@@ -73,6 +74,7 @@ import { PnlChart } from './PnlChart';
 import { Positions } from './Positions';
 import { ScenarioPanel } from './ScenarioPanel';
 import { Smile } from './Smile';
+import { WorkTabs } from './WorkTabs';
 
 /** dev サーバーだけが配る合成の板（本番のビルドではこの分岐ごと消える） */
 const DEV_FIXTURES: readonly string[] = import.meta.env.DEV
@@ -250,6 +252,8 @@ export function App({ boot = NO_BOOT }: { boot?: Boot }) {
     pnlY,
     pnlFolded,
     hedge: savedHedge,
+    tabs: savedTabs,
+    activeTab,
   } = state;
   const baseChain = useRef(loadedChain);
   // 保存の対象が変わったときだけ走る（値は stateRef から読む）
@@ -280,6 +284,8 @@ export function App({ boot = NO_BOOT }: { boot?: Boot }) {
     pnlY,
     pnlFolded,
     savedHedge,
+    savedTabs,
+    activeTab,
   ]);
 
   // タブを閉じる・隠すときは保留中の書き込みをすぐ書く（iOS Safari は unload が来ないことがある。
@@ -478,8 +484,15 @@ export function App({ boot = NO_BOOT }: { boot?: Boot }) {
       ),
     [commit],
   );
-  const onBookOpenEntry = useCallback(
-    (id: string) => {
+  const openEntry = useCallback(
+    (id: string, type: 'openPosition' | 'openPositionInNewTab') => {
+      // [新しいタブで開く] でタブが上限なら一覧を閉じずに理由を出す（reducer は上限で何もしないため）
+      const full =
+        type === 'openPositionInNewTab' ? openInNewTabError(stateRef.current.tabs.length) : null;
+      if (full !== null) {
+        setBookMsg({ text: full, warn: true });
+        return false;
+      }
       // 開く直前に読み直す（別のタブで変わった・消えた項目を開かない）
       const read = loadBook(storage);
       setBookRead(read);
@@ -489,7 +502,7 @@ export function App({ boot = NO_BOOT }: { boot?: Boot }) {
         return false;
       }
       dispatch({
-        type: 'openPosition',
+        type,
         legs: e.ws.position.legs,
         scenario: e.ws.position.scenario,
         feePerLot: e.ws.ui.feePerLot,
@@ -499,6 +512,12 @@ export function App({ boot = NO_BOOT }: { boot?: Boot }) {
       return true;
     },
     [storage],
+  );
+  // [開く] は作業中のタブを置き換える。[新しいタブで開く] はタブを足す（#71。上限なら一覧に理由を出して開かない）
+  const onBookOpenEntry = useCallback((id: string) => openEntry(id, 'openPosition'), [openEntry]);
+  const onBookOpenNewTab = useCallback(
+    (id: string) => openEntry(id, 'openPositionInNewTab'),
+    [openEntry],
   );
   const onBookExport = useCallback(() => {
     const read = loadBook(storage);
@@ -552,6 +571,15 @@ export function App({ boot = NO_BOOT }: { boot?: Boot }) {
       feePerLot,
       futureBasis,
     ],
+  );
+  // 作業中のポジションのタブ（#71）。PnlChart は浅い比較で描き直しを省くので、表示モデルが変わったときだけ要素を作る
+  const tabsView = useMemo(
+    () => tabsModel(savedTabs, activeTab, curLegs.length),
+    [savedTabs, activeTab, curLegs.length],
+  );
+  const tabsBar = useMemo(
+    () => <WorkTabs view={tabsView} dispatch={dispatch} onSaveToBook={openBook} />,
+    [tabsView, openBook],
   );
   const bookCount =
     bookRead.kind === 'ok' ? bookRead.book.entries.length : bookRead.kind === 'empty' ? 0 : null;
@@ -650,6 +678,7 @@ export function App({ boot = NO_BOOT }: { boot?: Boot }) {
                   readout={readout}
                   folded={state.pnlFolded}
                   dispatch={dispatch}
+                  tabs={tabsBar}
                 />
                 <ScenarioPanel
                   scenario={state.scenario}
@@ -663,7 +692,9 @@ export function App({ boot = NO_BOOT }: { boot?: Boot }) {
                 />
               </div>
               <div class="pane pane-detail">
+                {/* 行ごとの下書きをタブの間で持ち越さない（足の id はタブごとに 1..n。#71） */}
                 <Positions
+                  key={activeTab}
                   model={positions}
                   dispatch={dispatch}
                   bookCount={bookCount}
@@ -711,6 +742,9 @@ export function App({ boot = NO_BOOT }: { boot?: Boot }) {
           onClose={closeBook}
           onSave={onBookSave}
           onOpen={onBookOpenEntry}
+          onOpenNewTab={onBookOpenNewTab}
+          canAddTab={tabsView.canAdd}
+          tabName={tabsView.active.name}
           onOverwrite={onBookOverwrite}
           onDuplicate={onBookDuplicate}
           onRename={onBookRename}

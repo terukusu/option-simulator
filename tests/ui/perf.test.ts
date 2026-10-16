@@ -9,12 +9,12 @@ import { refreshLegMarkets } from '../../ui/legMarket';
 import {
   readSavedBoard,
   readWorkspace,
-  restoreState,
+  restoreWorkspace,
   serializeBoard,
   serializeWorkspace,
   toSaved,
 } from '../../ui/persist';
-import { initialState, type UiLeg } from '../../ui/state';
+import { type Action, initialState, reduce, type State, type UiLeg } from '../../ui/state';
 import { atmStrike, boardRows } from '../../ui/view/board';
 import { bookListModel } from '../../ui/view/bookList';
 import { headerModel } from '../../ui/view/header';
@@ -26,9 +26,11 @@ import {
   pnlDomains,
   todayLine,
 } from '../../ui/view/pnlChart';
+import { positionModel } from '../../ui/view/position';
 import { readoutModel } from '../../ui/view/readout';
 import { scenarioMarks } from '../../ui/view/scenarioMarks';
 import { smileModel } from '../../ui/view/smile';
+import { tabsModel } from '../../ui/view/tabs';
 import { M1, M2, makeMarket } from '../support/market';
 import { PERF_LEGS } from '../support/perfPosition';
 
@@ -248,7 +250,7 @@ describe('性能（#23 作業・板の保存）', () => {
     const text = serializeWorkspace(state, 0);
     const r = readWorkspace(text);
     if (r.kind !== 'ok') throw new Error('読めない');
-    return restoreState(initialState, r.saved).legs.length + text.length;
+    return restoreWorkspace(initialState, r.saved).legs.length + text.length;
   }
 
   it(`足 10 本の保存の直列化 + 読み取り + 復元が ${BUDGET_MS} ms 以内（30 回の最小値）`, () => {
@@ -352,5 +354,110 @@ describe('性能（#70 ポジ帳の一覧の要約）', () => {
     }
     console.info(`#70 ポジ帳の一覧（50 件 × 足 10 本）: ${best.toFixed(2)} ms・${read.chars} 字`);
     expect(best).toBeLessThan(BUDGET_MS);
+  });
+});
+
+/**
+ * #71 AC9: タブの切り替え 1 回（reduce switchTab = 退避 + 足の市場の作り直し、ポジションの表示モデル・損益グラフの
+ * 基礎と 3 本の線・指標・テール表・読み取りの帯・タブの帯）が、322 行 × 2 限月の板・足 10 本 ↔ 足 4 本で予算以内。
+ * 足 200 本のタブへの切り替えは記録のみ。
+ */
+describe('性能（#71 タブの切り替え）', () => {
+  const chain = normalizeChain(buildWideChainJson());
+  const [m1, m2] = chain.months;
+  if (!m1 || !m2) throw new Error('限月が足りない');
+  const ids: Record<string, string> = { [M1.id]: m1.id, [M2.id]: m2.id, FUT: chain.future.id };
+  // 先物の足は足の市場が要るので今の板から作る（#70 の計測と同じ）
+  const legs10 = refreshLegMarkets(
+    chain,
+    PERF_LEGS.map((leg, i) => ({
+      id: i + 1,
+      leg:
+        leg.kind === 'option'
+          ? { ...leg, expiry: ids[leg.expiry] ?? leg.expiry }
+          : { ...leg, contract: ids[leg.contract] ?? leg.contract },
+      marks: [],
+    })),
+    CALENDAR.holidays,
+  ).map(({ id: _id, ...rest }) => rest);
+  const open = (type: 'openPosition' | 'openPositionInNewTab', legs: typeof legs10): Action => ({
+    type,
+    legs,
+    scenario,
+    feePerLot: 0,
+    futureBasis: 'fixed',
+  });
+  const scenario = { ...ZERO_SCENARIO, days: 5, dX: -500 };
+  // タブ A = 足 10 本、タブ B = 足 4 本
+  let state = [
+    { type: 'loaded', chain, label: 'perf' } as Action,
+    open('openPosition', legs10),
+    open('openPositionInNewTab', legs10.slice(0, 4)),
+  ].reduce(reduce, initialState);
+
+  function evaluate(s: State): number {
+    const pm = positionModel(s.chain ?? chain, s.legs, s.atmBasis, s.calendar);
+    const base = pnlDomains(s.chain ?? chain, pm.prepared, pm.ctx);
+    if (!base) return pm.rows.length;
+    const m = pnlChartModel({
+      base,
+      scenario: s.scenario,
+      viewport: s.pnlViewport,
+      pnlY: s.pnlY,
+      plotWidth: 1000,
+      plotHeight: 260,
+    });
+    const mm = metricsModel({ base, scenario: s.scenario, unit: 'auto' });
+    const r = readoutModel({ base, metrics: mm, scenario: s.scenario });
+    const tv = tabsModel(s.tabs, s.activeTab, s.legs.length);
+    return pm.rows.length + m.lines.length + mm.tail.rows.length + r.text.x.length + tv.tabs.length;
+  }
+
+  function switchOnce(): number {
+    const other = state.tabs.find((t) => t.id !== state.activeTab);
+    if (!other) throw new Error('タブが無い');
+    state = reduce(state, { type: 'switchTab', id: other.id });
+    return evaluate(state);
+  }
+
+  it(`足 10 本 ↔ 足 4 本の切り替え 1 回が ${BUDGET_MS} ms 以内（30 回の最小値）`, () => {
+    expect(state.tabs).toHaveLength(2);
+    expect(state.legs).toHaveLength(4);
+    switchOnce();
+    expect(state.legs).toHaveLength(10);
+    expect(state.legs.every((l) => !l.marks.includes('no_board'))).toBe(true);
+    for (let i = 0; i < 20; i++) switchOnce();
+    let best = Number.POSITIVE_INFINITY;
+    for (let i = 0; i < 30; i++) {
+      const t0 = performance.now();
+      switchOnce();
+      best = Math.min(best, performance.now() - t0);
+    }
+    console.info(`#71 タブの切り替え（足 10 本 ↔ 4 本）: ${best.toFixed(2)} ms`);
+    expect(best).toBeLessThan(BUDGET_MS);
+  });
+
+  it('足 200 本のタブへの切り替え（記録のみ）', () => {
+    const many = Array.from({ length: 20 }, () => legs10).flat();
+    let s = reduce(state, open('openPositionInNewTab', many));
+    expect(s.legs).toHaveLength(200);
+    const big = s.activeTab;
+    const small = s.tabs[0]?.id ?? 1;
+    let best = Number.POSITIVE_INFINITY;
+    let bestReduce = Number.POSITIVE_INFINITY;
+    for (let i = 0; i < 5; i++) {
+      s = reduce(s, { type: 'switchTab', id: small });
+      const t0 = performance.now();
+      s = reduce(s, { type: 'switchTab', id: big });
+      const t1 = performance.now();
+      evaluate(s);
+      best = Math.min(best, performance.now() - t0);
+      bestReduce = Math.min(bestReduce, t1 - t0);
+    }
+    // 評価（ポジションの表示モデル・損益グラフ）は足 200 本を 1 つのタブで持つときと同じ量。切り替えの増分は reduce だけ
+    console.info(
+      `#71 足 200 本のタブへの切り替え: ${best.toFixed(2)} ms（うち reduce ${bestReduce.toFixed(2)} ms）`,
+    );
+    expect(s.legs).toHaveLength(200);
   });
 });
