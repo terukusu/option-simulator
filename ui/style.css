@@ -72,6 +72,87 @@ p {
   color: var(--warn);
 }
 
+/* ---------------------------------------------------------------- 説明の吹き出し（ⓘ。#63。設計 6.1） */
+
+/*
+ * 吹き出しは置いた行（.hint-host）の下に、行の幅に収めて出す（style 属性を使わない。位置はクラスだけ）。
+ * .hint・.hint-btn は位置の基準にしない（基準は行）。行の右半分の ⓘ は .end で行の右端に揃える
+ */
+.hint-host {
+  position: relative;
+}
+
+.hint-btn {
+  background: none;
+  border: 0;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 1em;
+  line-height: 1;
+  padding: 0 2px;
+}
+
+.hint-btn:hover,
+.hint-btn[aria-expanded="true"] {
+  color: var(--accent);
+}
+
+/* タッチでは押せる面を見えない枠で広げる（行の高さは増やさない） */
+@media (pointer: coarse) {
+  .hint-btn {
+    position: relative;
+  }
+
+  .hint-btn::after {
+    content: "";
+    inset: -8px;
+    position: absolute;
+  }
+}
+
+.hint-pop {
+  background: Canvas;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  box-shadow: 0 2px 8px color-mix(in srgb, CanvasText 25%, transparent);
+  color: CanvasText;
+  display: block;
+  font-size: 0.85rem;
+  font-weight: normal;
+  left: 0;
+  line-height: 1.5;
+  max-width: min(320px, 100%);
+  padding: 6px 8px;
+  position: absolute;
+  text-align: left;
+  top: 100%;
+  white-space: normal;
+  width: max-content;
+  z-index: 2;
+}
+
+/* display を書いたので hidden を明示する */
+.hint-pop[hidden] {
+  display: none;
+}
+
+.hint-pop.end {
+  left: auto;
+  right: 0;
+}
+
+/* 見出しと ⓘ の行（h3 の中に ⓘ を入れない。開いた文が見出しの名前に混ざるため） */
+.sub-head {
+  align-items: center;
+  display: flex;
+  gap: 4px;
+  margin: 0 0 4px;
+}
+
+.sub-head h3 {
+  margin: 0;
+}
+
 .tag {
   border: 1px solid var(--line);
   border-radius: 4px;
@@ -585,6 +666,11 @@ button.q.noquote {
   justify-content: space-between;
 }
 
+/* ⓘ は見出しの横に寄せ、全クリアを右端に残す */
+.positions-head .hint {
+  margin-right: auto;
+}
+
 /* 足は 1 本 1 行（#62）。行を押すと詳細を開く。幅によらず同じ形 */
 .leg-list {
   font-size: 0.85em;
@@ -720,9 +806,14 @@ button.q.noquote {
 }
 
 .leg-form h3,
+.leg-form .sub-head,
 .leg-form .note,
 .leg-form .field-error {
   flex-basis: 100%;
+}
+
+.leg-form .sub-head h3 {
+  flex-basis: auto;
 }
 
 .leg-form label {
@@ -910,6 +1001,11 @@ button.q.noquote {
   color: var(--accent);
 }
 
+/* 損益グラフの縦軸の単位（目盛りは数字だけなので常に出す。「縦軸」と単位を分けて折り返さない。#63） */
+.lg.y-unit {
+  white-space: nowrap;
+}
+
 /* シナリオ点の縦線のつかむ域（透明の太線。#52） */
 .pnl-scn-hit {
   cursor: ew-resize;
@@ -1064,6 +1160,13 @@ button.q.noquote {
   flex-wrap: wrap;
   gap: 4px 12px;
   margin: 4px 0;
+}
+
+/* basis の切替と ⓘ を 1 組にする（ⓘ だけが次の行へ折り返さない） */
+.scn-basis {
+  align-items: center;
+  display: inline-flex;
+  gap: 4px;
 }
 
 .scn-beta input,

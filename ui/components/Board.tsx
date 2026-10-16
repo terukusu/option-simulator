@@ -21,6 +21,7 @@ import {
   sideMarkLabels,
 } from '../view/board';
 import { fmtIvPct, fmtNum } from '../view/format';
+import { Hint } from './Hint';
 import { pure } from './pure';
 
 type AddLeg = (k: number, type: OptionType, side: Side) => void;
@@ -370,7 +371,12 @@ function BoardView({ chain, month, active, basis, target, filterAsk, dispatch }:
           ask ≤ {ASK_FILTER_YEN} 円
         </button>
       </div>
-      <p class="note">bid = 売り、ask = 買い で足を追加。Δ はスマイルの IV での値。</p>
+      <p class="note hint-host">
+        板の使い方{' '}
+        <Hint label="板の使い方">
+          bid = 売り、ask = 買い で足を追加。Δ はスマイルの IV での値。
+        </Hint>
+      </p>
       {sides.map((side) => (
         <BoardTable
           key={side ?? 'full'}

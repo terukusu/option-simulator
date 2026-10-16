@@ -17,6 +17,7 @@ import {
   stepSlider,
   toDisplay,
 } from '../view/scenario';
+import { Hint } from './Hint';
 
 /** パネルの + / − の拡大・縮小の倍率（損益グラフのボタンと同じ） */
 const ZOOM_IN = 0.8;
@@ -206,7 +207,7 @@ export function ScenarioPanel(props: ScenarioPanelProps) {
           onZoom={onZoom}
         />
       ))}
-      <div class="scn-opts">
+      <div class="scn-opts hint-host">
         <fieldset class="seg" aria-label="ΔX の単位">
           {(['pct', 'yen'] as const).map((u) => (
             <button
@@ -244,29 +245,31 @@ export function ScenarioPanel(props: ScenarioPanelProps) {
             </button>
           ))}
         </fieldset>
-        <fieldset class="seg" aria-label="先物の basis">
-          {FUTURE_BASIS.map((b) => (
-            <button
-              type="button"
-              key={b.v}
-              aria-pressed={futureBasis === b.v}
-              onClick={() => dispatch({ type: 'setFutureBasis', basis: b.v })}
-            >
-              {b.label}
-            </button>
-          ))}
-        </fieldset>
+        <div class="scn-basis">
+          <fieldset class="seg" aria-label="先物の basis">
+            {FUTURE_BASIS.map((b) => (
+              <button
+                type="button"
+                key={b.v}
+                aria-pressed={futureBasis === b.v}
+                onClick={() => dispatch({ type: 'setFutureBasis', basis: b.v })}
+              >
+                {b.label}
+              </button>
+            ))}
+          </fieldset>
+          <Hint label="先物の basis">
+            先物 basis: 先物の足をその SQ より前に評価するとき F = X' + basis。減衰は先物の SQ で 0
+            へ線形。
+          </Hint>
+        </div>
       </div>
       {betaError && (
         <p class="field-error" role="alert">
           {betaError}
         </p>
       )}
-      <p class="note">
-        先物 basis: 先物の足をその SQ より前に評価するとき F = X' + basis。減衰は先物の SQ で 0
-        へ線形。
-      </p>
-      <div class="scn-eval">
+      <div class="scn-eval hint-host">
         {targets.length > 1 && (
           <label>
             対象{' '}
@@ -296,10 +299,12 @@ export function ScenarioPanel(props: ScenarioPanelProps) {
         >
           取引最終日 15:45
         </button>
-        <span class="note block">
+        <span class="note">
           評価時刻 = {fmtDateTime(evalInstant(evalTime, Math.min(scenario.days, maxDays)))}
-          （板の時刻 + d）。キー: ← → 1 刻み、Shift で 10 刻み、R で既定値、+ / −
-          で損益グラフの拡大・縮小
+          （板の時刻 + d）{' '}
+          <Hint label="スライダーのキー操作">
+            キー: ← → 1 刻み、Shift で 10 刻み、R で既定値、+ / − で損益グラフの拡大・縮小
+          </Hint>
         </span>
       </div>
     </div>

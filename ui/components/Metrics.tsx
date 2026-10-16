@@ -8,6 +8,7 @@ import {
   fmtRatio,
   type MetricsModel,
 } from '../view/metrics';
+import { Hint } from './Hint';
 import { pure } from './pure';
 
 const UNIT_LABEL: Record<MetricsUnitSetting, string> = {
@@ -108,9 +109,12 @@ function MetricsView({ model, unitSetting, feePerLot, dispatch }: MetricsProps) 
         <p class="note">足を追加すると指標が出ます</p>
       ) : (
         <>
-          <p class="note">
+          <p class="note hint-host">
             金額の単位: {AMOUNT_UNIT_LABEL[u]}
-            {model.unitAuto ? '（自動: 受取 + 支払が 10 万円以上なら千円）' : '（固定）'}
+            {model.unitAuto ? '（自動）' : '（固定）'}{' '}
+            <Hint label="金額の単位">
+              自動: 受取 + 支払が 10 万円以上なら千円、未満なら円。単位の切替で固定にできる
+            </Hint>
           </p>
           <dl class="metrics-list">
             <dt>満期 最大利益</dt>
@@ -198,7 +202,13 @@ function MetricsView({ model, unitSetting, feePerLot, dispatch }: MetricsProps) 
               ))}
             </ul>
           </details>
-          <h3>テール表</h3>
+          <div class="sub-head hint-host">
+            <h3>テール表</h3>
+            <Hint label="テール表">
+              指定日の列 = d・Δσ・Δs・β・動き方はシナリオのまま、原資産だけを各行の値にして再評価（β
+              は行ごとの下落率で IV を上げる）
+            </Hint>
+          </div>
           <table class="tail-table">
             <caption class="note">
               損益（{AMOUNT_UNIT_LABEL[u]}）と倍率 ×|損益 /{' '}
@@ -234,10 +244,6 @@ function MetricsView({ model, unitSetting, feePerLot, dispatch }: MetricsProps) 
               ))}
             </tbody>
           </table>
-          <p class="note">
-            指定日の列 = d・Δσ・Δs・β・動き方はシナリオのまま、原資産だけを各行の値にして再評価（β
-            は行ごとの下落率で IV を上げる）
-          </p>
         </>
       )}
     </div>
