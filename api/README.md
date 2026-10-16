@@ -76,7 +76,7 @@ gcloud logging read 'resource.type="cloud_run_revision" AND resource.labels.serv
   --project="$P" --freshness=1d --format='value(timestamp,jsonPayload.reason,jsonPayload.snapshot_at,jsonPayload.cache)'
 ```
 
-ログは 1 行 1 件の JSON（`src/simulator_api/log.py`。`message` と `event` がイベント名）。`chain_served` の `cache` は `miss`（板を読んだ）/ `hit`、`board_reads` は板を読んだ回数。`bq_job`（`name`・`elapsed_ms`・`total_bytes_billed`）も同じ形で読める。同じ `snapshot_at` の 2 回目のリクエストで `bq_job` が `latest_runs` だけなら、キャッシュが効いている。
+ログは 1 行 1 件の JSON（`src/simulator_api/log.py`。`message` と `event` がイベント名）。`chain_served` の `cache` は `miss`（板を読んだ）/ `hit`、`board_reads` は板を読んだ回数。`elapsed_ms` は要求の始めから応答の組み立てまで（BigQuery の待ちを含む）。`bq_job`（`name`・`elapsed_ms`・`rows`・`total_bytes_processed`。課金量は下の監査ログで見る）も同じ形で読める。ワーカーの起動時に BigQuery の Client を作る準備（ジョブは出さない）が終わると `bq_warm`（`elapsed_ms`）、失敗すると `bq_warm_failed`（`error_type` だけ。最初の要求で作り直す）。同じ `snapshot_at` の 2 回目のリクエストで `bq_job` が `latest_runs` だけなら、キャッシュが効いている。
 
 ## クエリ量の監視（7.3・D8）
 
@@ -94,3 +94,36 @@ gcloud logging read "protoPayload.serviceName=\"bigquery.googleapis.com\" AND pr
 ```
 
 目安: 1 日の課金量がプロジェクトの 1 日の上限 32 GiB の 10%（3.2 GiB）未満、1 ジョブの最大が 512 MiB（`MAX_BYTES_BILLED_LIMIT`）以下、`errors` が 0。課金量は 1 ジョブ 10 MiB の最小課金を含むので、処理量より大きめに出る（上限の判定では安全側）。`region-asia-northeast1.INFORMATION_SCHEMA.JOBS_BY_PROJECT` は 1 日に絞っても最小のスキャンが 512 MiB を超え、`--maximum_bytes_billed=536870912` の下では読めないので使わない。
+
+## 本番の latency の確認（AC1）
+
+2.2 の AC1（取引時間中に開くと 3 秒以内。コールドスタートを除く）を本番のログで判定する。コールドスタート = そのインスタンス（`labels.instanceId`）の `STARTUP HTTP probe succeeded` より前に受けた要求で、それ以外（インスタンスで 1 回目の要求を含む）はすべて数える。`/api/chain` のリクエストログ（200 / 304）を、同じインスタンスで受付から応答までの間に出た `chain_served` と組にして、`cache`（`miss` / `hit`）ごとに `httpRequest.latency` の中央値・p90 と `chain_served.elapsed_ms` の中央値を出す。出力は件数と秒だけ（URL・プロジェクトは出さない）:
+
+```sh
+P=$(gcloud config get-value project)
+cat > /tmp/ac1.jq <<'JQ'
+def ts: sub("\\.[0-9]+Z$"; "Z") | fromdateiso8601;
+def frac: (capture("\\.(?<f>[0-9]+)Z$").f // "0") | ("0." + .) | tonumber;
+def t: (.timestamp | ts) + (.timestamp | frac);
+def pct(p): sort as $s | ($s | length) as $n | if $n == 0 then null else $s[(((p * $n) | ceil) - 1) | if . < 0 then 0 else . end] end;
+def med: sort as $s | ($s | length) as $n | if $n == 0 then null elif $n % 2 == 1 then $s[($n - 1) / 2] else ($s[$n/2 - 1] + $s[$n/2]) / 2 end;
+. as $all
+| [ $all[] | select(.textPayload? // "" | test("STARTUP HTTP probe succeeded")) | {i: .labels.instanceId, t: t} ] as $probes
+| [ $all[] | select(.jsonPayload.event? == "chain_served") | {i: .labels.instanceId, t: t, cache: .jsonPayload.cache, ms: .jsonPayload.elapsed_ms} ] as $served
+| [ $all[] | select(.httpRequest? and (.httpRequest.status == 200 or .httpRequest.status == 304)) | {i: .labels.instanceId, t: t, lat: (.httpRequest.latency | rtrimstr("s") | tonumber)}
+    | . as $r
+    | ($probes | map(select(.i == $r.i)) | map(.t) | min) as $p
+    | ($served | map(select(.i == $r.i and .t >= $r.t and .t <= $r.t + $r.lat + 1)) | first) as $s
+    | $r + {cold: ($p == null or $r.t < $p), cache: ($s.cache // "unknown"), ms: $s.ms} ]
+| map(select(.cold | not)) as $warm
+| ["miss", "hit"][] as $c
+| ($warm | map(select(.cache == $c))) as $g
+| "\($c) n=\($g | length) median_s=\($g | map(.lat) | med) p90_s=\($g | map(.lat) | pct(0.9)) elapsed_ms_median=\($g | map(.ms // empty) | med)"
+JQ
+gcloud logging read 'resource.type="cloud_run_revision" AND resource.labels.service_name="simulator" AND (httpRequest.requestUrl:"/api/chain" OR jsonPayload.event="chain_served" OR textPayload:"STARTUP HTTP probe succeeded")' \
+  --project="$P" --freshness=3d --limit=5000 --format=json | jq -r -f /tmp/ac1.jq
+```
+
+- リクエストログの `timestamp` は受付の時刻。起動プローブのログが保持期間・`--freshness` の外にあるインスタンスの要求はコールドスタート扱い（判定から外れる側）になる
+- 特定のリビジョンだけを見るときは、フィルタに `AND resource.labels.revision_name="<REVISION>"` を足す（`gcloud run services describe simulator --region=asia-northeast1 --project="$P" --format='value(status.latestReadyRevisionName)'`）
+- 1 要求の BigQuery の内訳は、同じ取得に `OR jsonPayload.event="bq_job"` を足し、受付から `chain_served` までの同じインスタンスの `bq_job` を `name` ごとに数える（`latest_runs`・`future_price`・`option_price`・`spot_price` 各 1、カレンダーのキャッシュが無いときだけ `trading_calendar`。板の読み直しのある要求は候補ごとに `future_price` → `option_price`・`spot_price`）。`option_price` と `spot_price` は同時に走る（`bq_job` の時刻は終了、開始 = 終了 − `elapsed_ms`）

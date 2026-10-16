@@ -41,6 +41,10 @@ CALENDAR_TTL_SECONDS = 3600  # trading_calendar_latest
 BOARD_CACHE_SIZE = 16  # 板の LRU（キー = (snapshot_at, finished_at)）
 REQUEST_BUDGET_SECONDS = 40  # 1 リクエストの BigQuery 待ちの合計（gunicorn の --timeout 60 より短く）
 JOB_TIMEOUT_SECONDS = 20  # 1 ジョブの待ち上限
+QUERY_THREADS = 4  # 候補内の並列（カレンダー・現物を別のスレッドで読む）。ChainService ごと
+# 1 プロセスで同時に走る BigQuery の呼び出しの上限。requests の接続プールの既定の大きさ（DEFAULT_POOLSIZE）と同じにし、
+# 要求のスレッド（gunicorn --threads 8）+ QUERY_THREADS が同時に読んでもプールを超えない（超えると urllib3 が WARNING）
+BQ_CONCURRENCY = 10
 DELAYED_MINUTES = 15  # JPX のページの遅れ（板の JSON の delayed_minutes）
 
 DATA_SOURCES = ("bigquery", "file")

@@ -287,7 +287,9 @@ def test_no_runs_is_503():
     svc, runner, _ = service(World(), jst(2026, 10, 13, 21, 31))
     with pytest.raises(Unavailable):
         svc.chain()
-    assert runner.names() == ["latest_runs"]
+    # 板・先物・現物は読まない（カレンダーは latest_runs と同時に読み始めるので 0〜1 回。#95）
+    assert [n for n in runner.names() if n != "trading_calendar"] == ["latest_runs"]
+    assert runner.count("trading_calendar") <= 1
 
 
 def test_no_candidates_is_503():
@@ -319,10 +321,10 @@ def test_latest_runs_window_is_14_days():
     w = World().add(at, synth_board(at), 30000.0)
     svc, runner, _ = service(w, now)
     svc.chain()
-    name, params = runner.calls[0]
-    assert name == "latest_runs"
-    assert params == {"start_at": now - timedelta(days=14), "end_at": now + timedelta(seconds=1)}
+    # カレンダーは latest_runs と同時に読むので、順序ではなく名前で探す（#95）
+    runs = [p for n, p in runner.calls if n == "latest_runs"]
+    assert runs == [{"start_at": now - timedelta(days=14), "end_at": now + timedelta(seconds=1)}]
     # 板・先物・現物は 1 秒の窓
-    for n, p in runner.calls[1:]:
-        if n != "trading_calendar":
+    for n, p in runner.calls:
+        if n not in ("latest_runs", "trading_calendar"):
             assert p == {"start_at": at, "end_at": at + timedelta(seconds=1)}

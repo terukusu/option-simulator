@@ -6,6 +6,7 @@
 
 import json
 import threading
+from collections import defaultdict
 from datetime import UTC, date, datetime, timedelta, timezone
 
 from conftest import REPO_ROOT
@@ -133,13 +134,19 @@ class FakeRunner:
     """runner の偽物。World をテーブル関数の窓 [start_at, end_at) で引き、呼び出し（名前とパラメータ）を記録する。
 
     errors: 名前 → 例外（その名前の呼び出しで投げる）。gate: threading.Event（セットされるまで待つ。同時実行の検査）
+    gates: 名前 → threading.Event（その名前の呼び出しだけ止める）。started: 名前 → 呼び出しの開始で set される Event。
+    events: ("start" | "end", 名前) の順の記録（end は例外でも記録する）
     """
 
-    def __init__(self, world: World, errors=None, gate: threading.Event | None = None):
+    def __init__(self, world: World, errors=None, gate: threading.Event | None = None,
+                 gates: dict[str, threading.Event] | None = None):
         self.world = world
         self.errors = errors or {}
         self.gate = gate
+        self.gates = gates or {}
         self.calls: list[tuple[str, dict]] = []
+        self.events: list[tuple[str, str]] = []
+        self.started: defaultdict[str, threading.Event] = defaultdict(threading.Event)
         self._lock = threading.Lock()
 
     def names(self) -> list[str]:
@@ -152,12 +159,29 @@ class FakeRunner:
     def reset(self):
         with self._lock:
             self.calls.clear()
+            self.events.clear()
+
+    def ended(self, name: str) -> bool:
+        with self._lock:
+            return ("end", name) in self.events
 
     def __call__(self, name, params):
         with self._lock:
             self.calls.append((name, dict(params)))
+            self.events.append(("start", name))
+            started = self.started[name]
+        started.set()
+        try:
+            return self._answer(name, params)
+        finally:
+            with self._lock:
+                self.events.append(("end", name))
+
+    def _answer(self, name, params):
         if self.gate is not None:
             self.gate.wait(5)
+        if name in self.gates:
+            self.gates[name].wait(5)
         if name in self.errors:
             raise self.errors[name]
         w = self.world

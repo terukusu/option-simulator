@@ -69,6 +69,7 @@ def create_app(runner=None, clock=None, monotonic=None, cfg: st.Settings | None 
     else:
         if runner is None:
             runner = bq.BigQueryRunner(cfg)
+            runner.start_warm()  # import・Client・トークンをバックグラウンドで（起動プローブ・/ を待たせない）
         service = ChainService(runner, clock or _now, monotonic or time.monotonic)
 
     @app.after_request

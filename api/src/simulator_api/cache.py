@@ -76,6 +76,10 @@ class TTLCache:
     def _store(self, value):
         self._value, self._at = value, self._monotonic()
 
+    def fresh(self) -> bool:
+        """期限内の値があるか（ロックなしの目安。読み込むかどうかの判断だけに使い、値は get で取る）"""
+        return self._lookup()[0]
+
     def stale(self):
         """期限に関わらず最後に読めた値（一度も読めていなければ None）"""
         return self._value if self._at is not None else None

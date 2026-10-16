@@ -140,8 +140,8 @@ def test_ten_concurrent_requests_read_board_once():
     for t in threads:
         t.join(10)
     assert not errors and len(results) == 10
-    assert runner.count("latest_runs") == 1
-    assert runner.count("option_price") == 1
+    for name in ("latest_runs", "future_price", "option_price", "spot_price", "trading_calendar"):
+        assert runner.count(name) == 1, name
     assert len({r.json_bytes for r in results}) == 1
 
 
@@ -166,7 +166,8 @@ class SlowRunner(FakeRunner):
         self.seconds = seconds
 
     def __call__(self, name, params):
-        self.clock.advance(self.seconds)
+        with self._lock:  # カレンダー・現物は別のスレッドから同時に呼ばれる
+            self.clock.advance(self.seconds)
         return super().__call__(name, params)
 
 
@@ -182,7 +183,7 @@ def test_request_budget_stops_reading():
     svc = ChainService(runner, clock, monotonic=clock.monotonic)
     with pytest.raises(Unavailable):
         svc.chain()
-    # latest_runs（9）+ カレンダー（18）+ 先物（27）+ 板（36）+ 次の先物（45 > 40 で止まる手前の確認）
+    # latest_runs とカレンダー（同時、計 18）+ 先物（27）+ 板と現物（同時、計 45）+ 次の先物（45 > 40 で止まる）
     assert runner.count("option_price") <= 2
 
 
@@ -199,3 +200,149 @@ def test_calendar_stale_on_error_and_503_when_never_loaded():
     clock.advance(3601)
     assert svc.calendar().etag == first.etag  # 古い版を使う
     assert runner.count("trading_calendar") == 3
+
+
+# ---- 候補内の並列（#95）: カレンダーは latest_runs と、現物は板と同時に読む ----
+
+def start_chain(svc):
+    """別スレッドで chain() を呼ぶ。戻り値: (スレッド, 結果の dict（"result" か "error"）)"""
+    out = {}
+
+    def work():
+        try:
+            out["result"] = svc.chain()
+        except Exception as e:  # noqa: BLE001
+            out["error"] = e
+
+    t = threading.Thread(target=work)
+    t.start()
+    return t, out
+
+
+def test_calendar_loads_concurrently_with_latest_runs():
+    fx, w, now = fixture_world("latest")
+    clock = Clock(now)
+    gate = threading.Event()
+    runner = FakeRunner(w, gates={"latest_runs": gate})
+    svc = ChainService(runner, clock, monotonic=clock.monotonic)
+    t, out = start_chain(svc)
+    try:
+        # latest_runs が終わらないうちにカレンダーが始まる（同時に実行中）
+        assert runner.started["trading_calendar"].wait(5)
+        assert runner.started["latest_runs"].wait(5) and not runner.ended("latest_runs")
+    finally:
+        gate.set()
+        t.join(10)
+    assert out["result"].reason == "latest"
+    # カレンダーが新しいときは読まない
+    runner.reset()
+    clock.advance(11)
+    assert svc.chain().reason == "latest"
+    assert runner.count("trading_calendar") == 0
+    assert runner.count("latest_runs") == 1
+
+
+def test_option_and_spot_load_concurrently_after_future():
+    fx, w, now = fixture_world("latest")
+    clock = Clock(now)
+    gate = threading.Event()
+    runner = FakeRunner(w, gates={"option_price": gate})
+    svc = ChainService(runner, clock, monotonic=clock.monotonic)
+    t, out = start_chain(svc)
+    try:
+        assert runner.started["spot_price"].wait(5)
+        assert runner.started["option_price"].wait(5) and not runner.ended("option_price")
+    finally:
+        gate.set()
+        t.join(10)
+    assert out["result"].reason == "latest"
+    ev = runner.events
+    assert ev.index(("end", "future_price")) < ev.index(("start", "option_price"))
+    assert ev.index(("end", "future_price")) < ev.index(("start", "spot_price"))
+
+
+def counts(runner):
+    return {n: runner.count(n) for n in ("latest_runs", "future_price", "option_price", "spot_price",
+                                         "trading_calendar")}
+
+
+def test_job_counts_unchanged_by_parallel_loads():
+    # (a) 使える最新の板: 各 1
+    fx, w, now = fixture_world("latest")
+    clock = Clock(now)
+    runner = FakeRunner(w)
+    svc = ChainService(runner, clock, monotonic=clock.monotonic)
+    assert svc.chain().reason == "latest"
+    assert counts(runner) == {"latest_runs": 1, "future_price": 1, "option_price": 1, "spot_price": 1,
+                              "trading_calendar": 1}
+    # (b) 同じ snapshot_at の 2 回目: latest_runs だけ
+    runner.reset()
+    clock.advance(11)
+    svc.chain()
+    assert runner.names() == ["latest_runs"]
+
+    at = jst(2026, 10, 13, 21, 31)
+    prev = at - timedelta(minutes=1)
+    # (c) 先物が NULL の候補: その候補の板・現物は読まない
+    w = World()
+    w.add(prev, synth_board(prev), 30000.0, 30100.0)
+    w.add(at, synth_board(at), None, 30100.0)
+    clock = Clock(at + timedelta(minutes=15))
+    runner = FakeRunner(w)
+    assert ChainService(runner, clock, monotonic=clock.monotonic).chain().snapshot_at == prev
+    assert counts(runner) == {"latest_runs": 1, "future_price": 2, "option_price": 1, "spot_price": 1,
+                              "trading_calendar": 1}
+    # (d) 先物は使えるが板が不採用の候補: その候補の現物が 1 本増える（板は今と同じ）
+    w = World()
+    w.add(prev, synth_board(prev), 30000.0, 30100.0)
+    w.add(at, synth_board(at, quoted=10), 30000.0, 30100.0)
+    clock = Clock(at + timedelta(minutes=15))
+    runner = FakeRunner(w)
+    assert ChainService(runner, clock, monotonic=clock.monotonic).chain().snapshot_at == prev
+    assert counts(runner) == {"latest_runs": 1, "future_price": 2, "option_price": 2, "spot_price": 2,
+                              "trading_calendar": 1}
+
+
+@pytest.mark.parametrize("failing,slow", [("spot_price", "option_price"), ("option_price", "spot_price")])
+def test_parallel_failure_is_not_cached(failing, slow):
+    # (a) / (b): 片方が失敗したら、もう片方の終わりを待ってから例外。板はキャッシュしない
+    fx, w, now = fixture_world("latest")
+    clock = Clock(now)
+    gate = threading.Event()
+    runner = FakeRunner(w, errors={failing: RuntimeError("secret detail")}, gates={slow: gate})
+    svc = ChainService(runner, clock, monotonic=clock.monotonic)
+    t, out = start_chain(svc)
+    try:
+        assert runner.started[failing].wait(5)
+        assert runner.started[slow].wait(5)
+        t.join(0.2)
+        assert t.is_alive() and not out  # 遅い方が終わるまで返らない
+    finally:
+        gate.set()
+        t.join(10)
+    assert isinstance(out["error"], RuntimeError)
+    assert runner.ended(slow)
+    runner.errors = {}
+    runner.gates = {}
+    runner.reset()
+    clock.advance(11)
+    assert svc.chain().reason == "latest"
+    assert runner.count("option_price") == 1 and runner.count("spot_price") == 1
+
+
+def test_parallel_calendar_failure_uses_stale_or_fails(capsys):
+    # (c) カレンダーの失敗: 古い版があれば古い版で返す（calendar_stale）、一度も読めていなければ例外
+    fx, w, now = fixture_world("latest")
+    clock = Clock(now)
+    runner = FakeRunner(w)
+    svc = ChainService(runner, clock, monotonic=clock.monotonic)
+    first = svc.chain()
+    runner.errors = {"trading_calendar": RuntimeError("secret detail")}
+    clock.advance(3601)
+    second = svc.chain()  # 1 時間後なので reason は変わりうる。ETag の末尾（カレンダーの版）が同じ
+    assert second.etag.strip('"').rsplit("-", 1)[1] == first.etag.strip('"').rsplit("-", 1)[1]
+    out = capsys.readouterr().out
+    assert '"event": "calendar_stale"' in out and "secret detail" not in out
+    runner = FakeRunner(w, errors={"trading_calendar": RuntimeError("x")})
+    with pytest.raises(RuntimeError):
+        ChainService(runner, clock, monotonic=clock.monotonic).chain()

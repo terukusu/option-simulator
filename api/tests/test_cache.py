@@ -42,6 +42,18 @@ def test_ttl_cache_error_is_not_cached_and_stale_is_used():
         c.get(lambda: (_ for _ in ()).throw(RuntimeError("x")))
 
 
+def test_ttl_cache_fresh():
+    mono = Mono()
+    c = TTLCache(10, monotonic=mono)
+    assert c.fresh() is False  # 空
+    c.get(lambda: "a")
+    mono.t = 9.9
+    assert c.fresh() is True  # TTL 内
+    mono.t = 10.0
+    assert c.fresh() is False  # 期限切れ（古い値はある）
+    assert c.stale() == "a"
+
+
 def concurrently(n, fn):
     results, errors = [], []
     barrier = threading.Barrier(n)

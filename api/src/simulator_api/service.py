@@ -8,9 +8,13 @@ runner: (name, params) -> 行（dict）のリスト。name は sql/<name>.sql、
   (reason, カレンダーの版) ごとに 1 回だけ作る → 同じ snapshot_at の 2 回目は latest_runs だけ
 - カレンダー: TTL CALENDAR_TTL_SECONDS + single-flight。読めなければ古い版（WARNING）、一度も読めていなければ失敗
 - 1 リクエストの BigQuery 待ちの合計が REQUEST_BUDGET_SECONDS を超えたら次のクエリを出さずに Unavailable
-- 候補の評価: 先物（安い）を先に読み、価格が NULL / 0 以下なら板を読まない。板が使えたら現物を読む
+- 候補の評価: 先物（安い）を先に読み、価格が NULL / 0 以下なら板も現物も読まない。先物が使えたら板と現物を同時に
+  読み、板が不採用なら現物は捨てる（読み直しの候補ごとに現物 1 本が増えうる）
+- 並列: カレンダー（新しくないときだけ）は latest_runs と、現物は板と同時に、ChainService ごとの上限付きのスレッド
+  （QUERY_THREADS）で読む。片方が失敗したら両方の終わりを待ってから例外（キャッシュしない）
 """
 
+import concurrent.futures
 import gzip
 import json
 import threading
@@ -95,6 +99,9 @@ class ChainService:
         self._calendar = TTLCache(st.CALENDAR_TTL_SECONDS, monotonic)
         self._calendar_payloads: dict = {}
         self._boards = LRUCache(st.BOARD_CACHE_SIZE)
+        # プールのタスク（カレンダー・現物）はプールの他のタスクを待たない（カレンダーの single-flight の leader は
+        # 必ず実行中）ので詰まらない
+        self._pool = concurrent.futures.ThreadPoolExecutor(max_workers=st.QUERY_THREADS, thread_name_prefix="bq")
 
     def _query(self, budget: _Budget, name: str, params: dict) -> list[dict]:
         budget.check()
@@ -133,17 +140,25 @@ class ChainService:
         future = futures[0] if futures else None
         if future is None or not usable.future_ok(future.get("price")):
             return _Board(usable=False, board_read=False, **base)
-        options = self._query(budget, "option_price", window)
+        spot_f = self._pool.submit(self._query, budget, "spot_price", window)
+        try:
+            options = self._query(budget, "option_price", window)
+        except BaseException:
+            concurrent.futures.wait([spot_f])  # 現物の終わりを待ってから（結果・例外は捨てる）
+            raise
         counter["board_reads"] += 1
         if not usable.board_ok(options, future["price"]):
+            concurrent.futures.wait([spot_f])
             return _Board(usable=False, board_read=True, **base)
-        spots = self._query(budget, "spot_price", window)
+        spots = spot_f.result()  # 失敗ならそのまま例外（板はキャッシュしない）
         return _Board(usable=True, board_read=True, months=chain.parse_board(options), future=future,
                       spot=spots[0] if spots else None, **base)
 
     def chain(self) -> ChainResult:
+        started = self.monotonic()
         budget = _Budget(self.monotonic)
         now = self.clock()
+        cal_f = None if self._calendar.fresh() else self._pool.submit(self._calendar_value, budget)
         rows = self._runs.get(lambda: self._query(
             budget, "latest_runs",
             {"start_at": now - timedelta(days=st.SEARCH_DAYS), "end_at": now + ONE_SECOND}))
@@ -159,10 +174,11 @@ class ChainService:
             sel = usable.select(runs, now, evaluate)
         except usable.NoUsableBoard as e:
             raise Unavailable(str(e)) from None
-        cal = self._calendar_value(budget)
+        cal = cal_f.result() if cal_f is not None else self._calendar_value(budget)
         payload = sel.evaluation.payload.render(sel.reason, cal)
         log("INFO", "chain_served", snapshot_at=chain.instant(sel.run.snapshot_at), reason=sel.reason,
-            board_reads=counter["board_reads"], cache="miss" if counter["board_reads"] else "hit")
+            board_reads=counter["board_reads"], cache="miss" if counter["board_reads"] else "hit",
+            elapsed_ms=round((self.monotonic() - started) * 1000))
         return ChainResult(payload.json_bytes, payload.gzip_bytes, payload.etag, reason=sel.reason,
                            snapshot_at=sel.run.snapshot_at)
 
