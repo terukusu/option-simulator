@@ -4,6 +4,7 @@
  */
 
 import type { ReadResult } from '../persist';
+import type { ShareRead } from '../share';
 import type { WriteResult } from '../storage';
 import { fmtDateTime } from './format';
 
@@ -13,7 +14,9 @@ export type PersistNoteKind =
   | 'invalid'
   | 'newer'
   | 'saveFailed'
-  | 'otherTab';
+  | 'otherTab'
+  /** URL 共有（#72）を開いた・読めなかった */
+  | 'shared';
 
 export interface PersistNote {
   kind: PersistNoteKind;
@@ -103,6 +106,65 @@ export const OTHER_TAB_NOTE: PersistNote = {
   text: '別のタブで作業が保存された。このタブで操作すると、このタブの内容で上書きする（取り込むにはページを再読み込み）',
   warn: true,
 };
+
+/**
+ * URL 共有（#72）を開いた・読めなかったときの知らせ（扱わなければ null）。opened = 開いた先（ok のときだけ）。
+ * 固定の文 + 数・時刻だけ（URL の中の名前・建値などの文字列は入れない。開いたタブは帯で分かる）。
+ */
+export function shareNote(
+  read: ShareRead,
+  opened: 'replace' | 'newTab' | null = null,
+): PersistNote | null {
+  const warn = (text: string): PersistNote => ({ kind: 'shared', text, warn: true });
+  switch (read.kind) {
+    case 'none':
+      return null;
+    case 'invalid':
+      return warn(
+        'URL のポジションを読めなかった（壊れているか途中で切れている）。作業は変えていない',
+      );
+    case 'tooLong':
+      return warn('URL が長すぎて読まない。作業は変えていない');
+    case 'tooLarge':
+      return warn('URL の中身が大きすぎて読まない。作業は変えていない');
+    case 'newer':
+      return warn(
+        '新しい版で作った URL は読めない（ページを再読み込みして新しい版で開く）。作業は変えていない',
+      );
+    case 'noLegs':
+      return warn('URL に足が無い。作業は変えていない');
+    case 'unsupported':
+      return warn(
+        'このブラウザでは URL のポジションを開けない（iOS 16.4 以上・最新のブラウザで開く）',
+      );
+    case 'ok': {
+      const { shared } = read;
+      const where = opened === 'newTab' ? '新しいタブで' : '作業中のタブで';
+      const at = shared.savedAt === null ? '' : `。共有 ${fmtDateTime(shared.savedAt)}`;
+      const board =
+        shared.boardSnapshotAt === null
+          ? ''
+          : `、そのときの板 ${fmtDateTime(shared.boardSnapshotAt)}`;
+      return {
+        kind: 'shared',
+        text: `URL のポジションを${where}開いた（足 ${shared.legs.length} 本${at}${board}）。建値は共有時のまま。シナリオ・手数料・先物の basis は今のまま（URL の値は使わない）`,
+        warn: false,
+      };
+    }
+  }
+}
+
+/**
+ * タブが上限のとき URL のポジションで作業中のタブを置き換えるかの確認の文言（名前は受け手のタブの名前）。
+ */
+export function shareReplaceConfirmText(
+  maxTabs: number,
+  legCount: number,
+  activeName: string,
+  activeLegCount: number,
+): string {
+  return `タブは ${maxTabs} 個まで。URL のポジション（足 ${legCount} 本）を開くと作業中のタブ ${activeName}（足 ${activeLegCount} 本）が置き換わる（保存一覧に無い内容は消える）`;
+}
 
 /** 知らせを足す（同じ種類は置き換え。並びは足した順）。 */
 export function pushNote(notes: readonly PersistNote[], note: PersistNote | null): PersistNote[] {
