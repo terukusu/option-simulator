@@ -12,7 +12,9 @@ import {
   type ReadResult,
   readSavedBoard,
   readWorkspace,
+  readWorkspaceValue,
   restoreState,
+  savedFromWorkspace,
   savedVersion,
   serializeBoard,
   serializeWorkspace,
@@ -622,5 +624,25 @@ describe('最後に取れた板の保存', () => {
     const broken = rawFixture('latest');
     delete broken.months;
     expect(readSavedBoard(JSON.stringify({ ...good, chain: broken }))).toBeNull();
+  });
+});
+
+describe('作業の値の検証の切り出し（#70 readWorkspaceValue・savedFromWorkspace）', () => {
+  it('readWorkspace と同じ結果（JSON.parse の後を共有する）', () => {
+    for (const text of [JSON.stringify(v1), '[]', '{"schema_version":9}', '{"schema_version":1}']) {
+      expect(readWorkspaceValue(JSON.parse(text))).toEqual(readWorkspace(text));
+    }
+    expect(readWorkspaceValue(null)).toEqual({ kind: 'invalid' });
+  });
+
+  it('検証済みの作業を保存の形に戻すと、同じ作業に読める（余計なキーを写さない）', () => {
+    const { saved } = ok(readWorkspace(JSON.stringify({ ...v1, extra: '<x>' })));
+    const back = savedFromWorkspace(saved, 0);
+    expect(Object.keys(back)).toEqual(['schema_version', 'saved_at', 'position', 'ui']);
+    expect(ok(readWorkspaceValue(back)).saved).toEqual(saved);
+    expect(back.position.board_snapshot_at).toBe('2026-11-02T12:31:00.000Z');
+    expect(savedFromWorkspace({ ...saved, savedAt: null }, NOW).saved_at).toBe(
+      new Date(NOW).toISOString(),
+    );
   });
 });

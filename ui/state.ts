@@ -174,7 +174,18 @@ export type Action =
   | { type: 'removeLeg'; id: number }
   | { type: 'clearLegs' }
   | { type: 'clearLegError' }
-  | { type: 'setHedge'; patch: Partial<HedgeSettings> };
+  | { type: 'setHedge'; patch: Partial<HedgeSettings> }
+  /**
+   * ポジ帳の項目を開く（#70）: 足・シナリオ・評価の設定（手数料・先物の basis）を置き換える。表示の設定は今のまま。
+   * 値は ui/persist.ts の検証を通ったもの
+   */
+  | {
+      type: 'openPosition';
+      legs: ReadonlyArray<Omit<UiLeg, 'id'>>;
+      scenario: Scenario;
+      feePerLot: number;
+      futureBasis: ModelSettings['futureBasis'];
+    };
 
 function errorText(e: unknown): string {
   return e instanceof Error ? e.message : '足を追加できない';
@@ -381,6 +392,27 @@ export function reduce(state: State, action: Action): State {
       return { ...state, legs: [], pnlViewport: null };
     case 'clearLegError':
       return state.legError === null ? state : { ...state, legError: null };
+    case 'openPosition': {
+      // 足の id は 1..n に振り直す（restoreState と同じ）。板があれば足の市場を今の板から作り直す（loaded と同じ規則。
+      // 板の足で限月が板に無ければ行のエラーで残る）
+      const legs: UiLeg[] = action.legs.map((l, i) => ({ ...l, id: i + 1 }));
+      const { feePerLot, futureBasis, scenario } = action;
+      return {
+        ...state,
+        legs: state.chain ? refreshLegMarkets(state.chain, legs, state.calendar.holidays) : legs,
+        nextId: legs.length + 1,
+        scenario: validScenarioPatch(scenario) ? scenario : state.scenario,
+        feePerLot:
+          Number.isFinite(feePerLot) && feePerLot >= 0 && feePerLot <= FEE_MAX
+            ? feePerLot
+            : state.feePerLot,
+        futureBasis:
+          futureBasis === 'fixed' || futureBasis === 'decay' ? futureBasis : state.futureBasis,
+        pnlViewport: null,
+        smilePick: null,
+        legError: null,
+      };
+    }
     case 'setHedge':
       // 不正な値を含む更新は丸ごと無視する（部分的に反映しない）
       return validHedgePatch(action.patch, state.chain)

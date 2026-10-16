@@ -10,6 +10,7 @@
  *   足の市場は保存するが、板を読んだら今の板から作り直す（ui/legMarket.ts）
  *
  * #70（ポジ帳）・#71（BOX タブ）・#72（URL 共有）は `position`（足 + シナリオ + 板の時刻）を 1 単位として使う。
+ * #70 は項目ごとに作業の形式（版つき）を丸ごと持ち、readWorkspaceValue で同じ検証・読み替えを通す（ui/book.ts）。
  * 項目を足すときは版を上げ、MIGRATIONS に読み替えを足し、tests/ui/saved/ の古い版の fixture は変えない。
  */
 
@@ -129,7 +130,8 @@ export interface SavedWorkspaceV1 {
 
 // ---------------------------------------------------------------- 書き出し
 
-function savedLeg(leg: Leg): SavedOptionLegV1 | SavedFutureLegV1 {
+/** 足の入力値の保存形（キーの順を固定する。#70 のポジ帳の変更判定も使う）。 */
+export function savedLeg(leg: Leg): SavedOptionLegV1 | SavedFutureLegV1 {
   if (leg.kind === 'future') {
     const { product, contract, side, qty, entry } = leg;
     return { kind: 'future', product, contract, side, qty, entry };
@@ -164,20 +166,25 @@ function toSavedLeg(ui: UiLeg): SavedLegV1 {
   return out;
 }
 
+/** シナリオの保存形（キーの順を固定する）。 */
+export function savedScenario(scenario: Scenario): Scenario {
+  return {
+    days: scenario.days,
+    dX: scenario.dX,
+    dSigma: scenario.dSigma,
+    skew: scenario.skew,
+    beta: scenario.beta,
+    ivDynamics: scenario.ivDynamics,
+    ivShift: scenario.ivShift,
+  };
+}
+
 /** 保存の中身のうち、変わったら書く部分（保存の時刻・板の時刻を除く）。 */
 function body(state: State): { legs: SavedLegV1[]; scenario: Scenario; ui: SavedUiV1 } {
   const { scenario, pnlY, hedge } = state;
   return {
     legs: state.legs.map(toSavedLeg),
-    scenario: {
-      days: scenario.days,
-      dX: scenario.dX,
-      dSigma: scenario.dSigma,
-      skew: scenario.skew,
-      beta: scenario.beta,
-      ivDynamics: scenario.ivDynamics,
-      ivShift: scenario.ivShift,
-    },
+    scenario: savedScenario(scenario),
     ui: {
       atm_basis: state.atmBasis,
       month_id: state.monthId,
@@ -265,15 +272,15 @@ export type ReadResult =
   /** 読めた。dropped = 足・シナリオを捨てた */
   | { kind: 'ok'; saved: Workspace; dropped: boolean };
 
-type Obj = Record<string, unknown>;
+export type Obj = Record<string, unknown>;
 
 /** 普通のオブジェクト（配列・null でない）か。 */
-function isObj(v: unknown): v is Obj {
+export function isObj(v: unknown): v is Obj {
   return typeof v === 'object' && v !== null && !Array.isArray(v);
 }
 
 /** 自分のキーの値だけ読む（`__proto__` などの継承した値を読まない）。 */
-function own(o: Obj, key: string): unknown {
+export function own(o: Obj, key: string): unknown {
   return Object.hasOwn(o, key) ? o[key] : undefined;
 }
 
@@ -441,7 +448,7 @@ function readScenario(v: unknown): Scenario | null {
 }
 
 /** ISO 8601 の時刻 → epoch ミリ秒（読めなければ null）。 */
-function readTime(v: unknown): number | null {
+export function readTime(v: unknown): number | null {
   if (typeof v !== 'string' || v.length > 64) return null;
   const t = Date.parse(v);
   return Number.isFinite(t) ? t : null;
@@ -610,6 +617,14 @@ export function readWorkspace(text: string | null): ReadResult {
   } catch {
     return { kind: 'invalid' };
   }
+  return readWorkspaceValue(raw);
+}
+
+/**
+ * JSON.parse した値を作業として検証する（readWorkspace の本体。#70 のポジ帳の項目・読み込むファイルも
+ * これで検証する）。
+ */
+export function readWorkspaceValue(raw: unknown): ReadResult {
   if (!isObj(raw)) return { kind: 'invalid' };
   const version = own(raw, 'schema_version');
   if (typeof version !== 'number' || !Number.isInteger(version)) return { kind: 'invalid' };
@@ -621,6 +636,25 @@ export function readWorkspace(text: string | null): ReadResult {
     kind: 'ok',
     saved: { savedAt: readTime(own(cur, 'saved_at')), position, ui: readUi(own(cur, 'ui')) },
     dropped: position === null,
+  };
+}
+
+/**
+ * 検証済みの作業を保存の形に戻す（#70 のポジ帳が項目を書き直すとき。余計なキーを写さない）。
+ * 保存の時刻が読めなかった項目は fallbackTime。板の時刻は ISO 8601（UTC）で書く。
+ */
+export function savedFromWorkspace(ws: Workspace, fallbackTime: number): SavedWorkspaceV1 {
+  const b = body(restoreState(initialState, ws));
+  const snap = ws.position?.boardSnapshotAt ?? null;
+  return {
+    schema_version: WORKSPACE_SCHEMA_VERSION,
+    saved_at: new Date(ws.savedAt ?? fallbackTime).toISOString(),
+    position: {
+      board_snapshot_at: snap === null ? null : new Date(snap).toISOString(),
+      legs: b.legs,
+      scenario: b.scenario,
+    },
+    ui: b.ui,
   };
 }
 

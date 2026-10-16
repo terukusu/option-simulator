@@ -3,16 +3,20 @@ import { normalizeChain } from '../../data';
 import { preparePosition } from '../../model/position';
 import { ZERO_SCENARIO } from '../../model/scenario';
 import { buildWideChainJson } from '../../scripts/synthBoard';
+import { addEntry, type Book, type BookRead, EMPTY_BOOK, serializeBook } from '../../ui/book';
 import { CALENDAR } from '../../ui/calendar';
+import { refreshLegMarkets } from '../../ui/legMarket';
 import {
   readSavedBoard,
   readWorkspace,
   restoreState,
   serializeBoard,
   serializeWorkspace,
+  toSaved,
 } from '../../ui/persist';
 import { initialState, type UiLeg } from '../../ui/state';
 import { atmStrike, boardRows } from '../../ui/view/board';
+import { bookListModel } from '../../ui/view/bookList';
 import { headerModel } from '../../ui/view/header';
 import { metricsModel } from '../../ui/view/metrics';
 import {
@@ -281,5 +285,72 @@ describe('性能（#23 作業・板の保存）', () => {
       `#23 板の保存（322 行 × 2）: ${text.length} 字・直列化 ${ser.toFixed(2)} ms・読み取り（検証 + 正規化）${read.toFixed(2)} ms`,
     );
     expect(text.length).toBeGreaterThan(0);
+  });
+});
+
+/**
+ * #70 AC10: ポジ帳の一覧（50 件 × 足 10 本）の要約（足の市場の作り直し・満期の最大損失・Δ・今の板での評価損益）が
+ * 予算以内。ダイアログを開いたとき・板 / 項目が変わったときだけ走る（フレームごとには走らない）。
+ */
+describe('性能（#70 ポジ帳の一覧の要約）', () => {
+  const chain = normalizeChain(buildWideChainJson());
+  const [m1, m2] = chain.months;
+  if (!m1 || !m2) throw new Error('限月が足りない');
+  const ids: Record<string, string> = { [M1.id]: m1.id, [M2.id]: m2.id, FUT: chain.future.id };
+  // 先物の足は足の市場が要る（保存の形の検証）ので今の板から作る
+  const raw: UiLeg[] = PERF_LEGS.map((leg, i) => ({
+    id: i + 1,
+    leg:
+      leg.kind === 'option'
+        ? { ...leg, expiry: ids[leg.expiry] ?? leg.expiry }
+        : { ...leg, contract: ids[leg.contract] ?? leg.contract },
+    marks: [],
+  }));
+  const legs = refreshLegMarkets(chain, raw, CALENDAR.holidays);
+  const state = { ...initialState, chain, legs, nextId: legs.length + 1 };
+  let book: Book = EMPTY_BOOK;
+  for (let i = 0; i < 50; i++) {
+    const r = addEntry(book, toSaved(state, i), `P${i}`, i, `id${i}`);
+    if (!r.ok) throw new Error(r.reason);
+    book = r.book;
+  }
+  const read: BookRead = { kind: 'ok', book, chars: serializeBook(book).length };
+
+  function list(): number {
+    const v = bookListModel({
+      chain,
+      read,
+      atmBasis: 'B',
+      calendar: CALENDAR,
+      unitSetting: 'auto',
+      currentKey: '',
+      legCount: 0,
+    });
+    return v.rows.length;
+  }
+
+  it(`50 件 × 足 10 本の一覧の表示モデルが ${BUDGET_MS} ms 以内（30 回の最小値）`, () => {
+    expect(list()).toBe(50);
+    const v = bookListModel({
+      chain,
+      read,
+      atmBasis: 'B',
+      calendar: CALENDAR,
+      unitSetting: 'auto',
+      currentKey: '',
+      legCount: 0,
+    });
+    // 全ての足が今の板で評価できる（計測が空振りしていない）
+    expect(v.rows[0]?.markText).not.toBe('—');
+    expect(v.rows[0]?.note).toBeNull();
+    for (let i = 0; i < 20; i++) list();
+    let best = Number.POSITIVE_INFINITY;
+    for (let i = 0; i < 30; i++) {
+      const t0 = performance.now();
+      list();
+      best = Math.min(best, performance.now() - t0);
+    }
+    console.info(`#70 ポジ帳の一覧（50 件 × 足 10 本）: ${best.toFixed(2)} ms・${read.chars} 字`);
+    expect(best).toBeLessThan(BUDGET_MS);
   });
 });

@@ -524,3 +524,97 @@ describe('保存した板のフォールバック（#23）', () => {
     expect(ok.chain).toBe(chain);
   });
 });
+
+describe('ポジ帳の項目を開く（#70 openPosition）', () => {
+  const chain = normalizeChain(fixture('latest'));
+  const scenario = { ...initialState.scenario, days: 2, dX: -500 };
+  const legA = {
+    leg: {
+      kind: 'option' as const,
+      product: 'op_large' as const,
+      type: 'put' as const,
+      expiry: '2026-11',
+      strike: 64000,
+      side: 'sell' as const,
+      qty: 1,
+      entry: 780,
+      mid: 792.5,
+    },
+    marks: [],
+  };
+  // 板の足で限月が板に無い（足の市場を持たない）
+  const legOff = { ...legA, leg: { ...legA.leg, expiry: '2026-09' } };
+
+  it('足・シナリオ・手数料・basis を置き換え、表示の設定は今のまま。id は 1..n', () => {
+    const before = run(
+      { ...initialState, atmBasis: 'A', metricsUnit: 'thousand' },
+      { type: 'loaded', chain, label: 'latest' },
+      { type: 'addBoardLeg', expiry: '2026-12', k: 60000, optionType: 'put', side: 'buy' },
+      { type: 'addBoardLeg', expiry: '2026-12', k: 62500, optionType: 'put', side: 'buy' },
+      { type: 'setPnlViewport', viewport: [60000, 70000] },
+      { type: 'pickSmile', pick: { monthId: '2026-11', k: 64000 } },
+    );
+    const s = reduce(before, {
+      type: 'openPosition',
+      legs: [legA, legOff],
+      scenario,
+      feePerLot: 120,
+      futureBasis: 'decay',
+    });
+    expect(s.legs.map((l) => l.id)).toEqual([1, 2]);
+    expect(s.nextId).toBe(3);
+    expect(s.legs[0]?.leg).toEqual(legA.leg);
+    expect(s.scenario).toEqual(scenario);
+    expect(s.feePerLot).toBe(120);
+    expect(s.futureBasis).toBe('decay');
+    expect(s.atmBasis).toBe('A');
+    expect(s.metricsUnit).toBe('thousand');
+    expect(s.monthId).toBe(before.monthId);
+    expect(s.pnlViewport).toBeNull();
+    expect(s.smilePick).toBeNull();
+    // 限月が板に無い足は消さずに残す（行のエラー。AC9）
+    expect(s.legs[1]?.leg).toEqual(legOff.leg);
+  });
+
+  it('板があれば足の市場を今の板から作り直す（手入力の足の F を板の先物で代用）', () => {
+    const manual = {
+      leg: { ...legA.leg, expiry: '2027-01', type: 'call' as const, strike: 70000, iv: 0.25 },
+      marks: ['no_board' as const, 'forward_from_future' as const],
+      optionMarket: {
+        expiry: '2027-01',
+        market: { sqTime: 1799999000000, forward: Number.NaN, smile: null },
+      },
+    };
+    const s = run(
+      initialState,
+      { type: 'loaded', chain, label: 'latest' },
+      { type: 'openPosition', legs: [manual], scenario, feePerLot: 0, futureBasis: 'fixed' },
+    );
+    expect(s.legs[0]?.optionMarket?.market.forward).toBe(chain.future.price);
+    // 板が無ければ保存した市場のまま
+    const s0 = reduce(initialState, {
+      type: 'openPosition',
+      legs: [manual],
+      scenario,
+      feePerLot: 0,
+      futureBasis: 'fixed',
+    });
+    expect(s0.legs[0]?.optionMarket?.market.forward).toBeNaN();
+  });
+
+  it('範囲外の手数料・シナリオは今の値のまま（検証済みの値だけ来るが守る）', () => {
+    const s = reduce(
+      { ...initialState, feePerLot: 10 },
+      {
+        type: 'openPosition',
+        legs: [legA],
+        scenario: { ...scenario, dSigma: 999 },
+        feePerLot: -1,
+        futureBasis: 'x' as never,
+      },
+    );
+    expect(s.feePerLot).toBe(10);
+    expect(s.scenario).toEqual(initialState.scenario);
+    expect(s.futureBasis).toBe('fixed');
+  });
+});

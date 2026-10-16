@@ -1,0 +1,133 @@
+{
+  "schema_version": 1,
+  "entries": [
+    {
+      "id": "0b7e2c1a-5d4f-4e8a-9c3b-1f2e3d4c5b6a",
+      "name": "11月 ストラングル",
+      "created_at": "2026-10-13T12:40:00.000Z",
+      "workspace": {
+        "schema_version": 1,
+        "saved_at": "2026-10-13T12:45:00.000Z",
+        "position": {
+          "board_snapshot_at": "2026-10-13T21:31:00+09:00",
+          "legs": [
+            {
+              "leg": {
+                "kind": "option",
+                "product": "op_large",
+                "type": "put",
+                "expiry": "2026-11",
+                "strike": 64000,
+                "side": "sell",
+                "qty": 1,
+                "entry": 780,
+                "mid": 792.5
+              },
+              "marks": []
+            },
+            {
+              "leg": {
+                "kind": "option",
+                "product": "op_large",
+                "type": "call",
+                "expiry": "2026-11",
+                "strike": 70500,
+                "side": "sell",
+                "qty": 1,
+                "entry": 840,
+                "mid": 850
+              },
+              "marks": []
+            }
+          ],
+          "scenario": {
+            "days": 0,
+            "dX": 0,
+            "dSigma": 0,
+            "skew": 0,
+            "beta": 1,
+            "ivDynamics": "sticky_strike",
+            "ivShift": "absolute"
+          }
+        },
+        "ui": {
+          "atm_basis": "B",
+          "month_id": "2026-11",
+          "target": "put",
+          "filter_ask": false,
+          "smile_axis": "k",
+          "fee_per_lot": 50,
+          "future_basis": "fixed",
+          "metrics_unit": "auto",
+          "pnl_y": { "mode": "auto", "manual": null, "n": 5 },
+          "pnl_folded": false,
+          "hedge": { "target": 0, "at": "base", "contract": null }
+        }
+      }
+    },
+    {
+      "id": "7c9d8e6f-1a2b-4c3d-8e4f-5a6b7c8d9e0f",
+      "name": "先物 + 手入力のコール",
+      "created_at": "2026-10-12T03:00:00.000Z",
+      "workspace": {
+        "schema_version": 1,
+        "saved_at": "2026-10-12T03:10:00.000Z",
+        "position": {
+          "board_snapshot_at": null,
+          "legs": [
+            {
+              "leg": {
+                "kind": "future",
+                "product": "fut_mini",
+                "contract": "2026-12",
+                "side": "buy",
+                "qty": 2,
+                "entry": 67500
+              },
+              "marks": [],
+              "future_market": { "sq_time": 1797379200000, "price": 67500 }
+            },
+            {
+              "leg": {
+                "kind": "option",
+                "product": "op_large",
+                "type": "call",
+                "expiry": "2027-01",
+                "strike": 70000,
+                "side": "buy",
+                "qty": 1,
+                "entry": 500,
+                "iv": 0.25,
+                "mid": null
+              },
+              "marks": ["no_board", "forward_from_future"],
+              "option_market": { "sq_time": 1799999000000, "forward": null }
+            }
+          ],
+          "scenario": {
+            "days": 2.5,
+            "dX": -1200,
+            "dSigma": 3,
+            "skew": 0.5,
+            "beta": 1.2,
+            "ivDynamics": "sticky_moneyness",
+            "ivShift": "relative"
+          }
+        },
+        "ui": {
+          "atm_basis": "A",
+          "month_id": "2026-12",
+          "target": "call",
+          "filter_ask": true,
+          "smile_axis": "delta",
+          "fee_per_lot": 300,
+          "future_basis": "decay",
+          "metrics_unit": "thousand",
+          "pnl_y": { "mode": "premium", "manual": [-50000, 80000], "n": 3 },
+          "pnl_folded": true,
+          "hedge": { "target": 1, "at": "scenario", "contract": "2027-03" }
+        }
+      }
+    }
+  ]
+}

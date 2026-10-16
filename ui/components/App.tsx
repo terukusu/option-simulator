@@ -2,6 +2,22 @@ import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'p
 import { axisOrigin, type Chain, type ChainJson, monthOf } from '../../data';
 import { DEFAULT_SETTINGS, type ModelSettings, ZERO_SCENARIO } from '../../model';
 import {
+  addEntry,
+  bookKey,
+  bookStorageChange,
+  clearBook,
+  defaultName,
+  duplicateEntry,
+  exportBook,
+  IMPORT_MAX_BYTES,
+  importIntoBook,
+  overwriteEntry,
+  removeEntry,
+  renameEntry,
+} from '../book';
+import { type CommitResult, commitBook, loadBook, newBookId } from '../bookIo';
+import { downloadText } from '../download';
+import {
   API_LABEL,
   describeLoadError,
   fixtureUrl,
@@ -22,10 +38,12 @@ import {
   serializeBoard,
   serializeWorkspace,
   storageChange,
+  toSaved,
   WORKSPACE_KEY,
 } from '../persist';
 import { reduce } from '../state';
 import { readKey, removeKey, writeKey } from '../storage';
+import { BOOK_FAIL_TEXT, bookListModel, exportDoneText, importDoneText } from '../view/bookList';
 import { headerModel, keptBoardNote } from '../view/header';
 import { hedgeModel } from '../view/hedge';
 import { metricsModel } from '../view/metrics';
@@ -45,6 +63,7 @@ import { readoutModel } from '../view/readout';
 import { evalTimeTargets } from '../view/scenario';
 import { scenarioAtmMark } from '../view/scenarioAtm';
 import { Board } from './Board';
+import { Book, BookButton, type BookMessage } from './Book';
 import { Header } from './Header';
 import { Hedge } from './Hedge';
 import { LegForms } from './LegForms';
@@ -86,6 +105,10 @@ export function App({ boot = NO_BOOT }: { boot?: Boot }) {
     (kind: PersistNoteKind) => setNotes((ns) => ns.filter((n) => n.kind !== kind)),
     [],
   );
+  // ---- 保存一覧（ポジ帳。#70）。件数のために開いたとき 1 回読み、操作のたびに読み直してから書く（ui/bookIo.ts）
+  const [bookRead, setBookRead] = useState(() => loadBook(storage));
+  const [bookOpen, setBookOpen] = useState(false);
+  const [bookMsg, setBookMsg] = useState<BookMessage | null>(null);
   // 読み込みの失敗で保存した板を使うかの判定に、その時点の板の有無を読む
   const chainRef = useRef(state.chain);
   chainRef.current = state.chain;
@@ -266,6 +289,8 @@ export function App({ boot = NO_BOOT }: { boot?: Boot }) {
       if (document.visibilityState === 'hidden') flush();
     };
     const onStorage = (e: StorageEvent) => {
+      // ポジ帳は別のキー（#70）。別のタブの変更を読み直す（一覧・件数）
+      if (bookStorageChange(e.key)) setBookRead(loadBook(storage));
       if (blocked.current) return;
       const change = storageChange(e.key, e.newValue);
       if (change === 'newer') block();
@@ -279,7 +304,7 @@ export function App({ boot = NO_BOOT }: { boot?: Boot }) {
       document.removeEventListener('visibilitychange', onHide);
       window.removeEventListener('storage', onStorage);
     };
-  }, [block, flush]);
+  }, [block, flush, storage]);
 
   // 保留中の書き込みの timer を後始末する（App はアンマウントしないが、残さない）
   useEffect(
@@ -377,6 +402,160 @@ export function App({ boot = NO_BOOT }: { boot?: Boot }) {
     return pick ? { monthId: month.id, k: pick.k, F: month.F } : null;
   }, [chain, month, atmBasis, dX, basisMode]);
 
+  // ---- ポジ帳の操作（読み直し → 純関数 → 書く。失敗したら state を変えず知らせる）
+  const commit = useCallback(
+    (
+      op: Parameters<typeof commitBook>[1],
+      doneText: (r: Extract<CommitResult, { ok: true }>) => string | null,
+      opts?: { allowInvalid?: boolean },
+    ): boolean => {
+      const r = commitBook(storage, op, opts);
+      setBookRead(r.read);
+      if (r.ok) {
+        const text = doneText(r);
+        setBookMsg(text ? { text, warn: false } : null);
+        return true;
+      }
+      setBookMsg({ text: BOOK_FAIL_TEXT[r.reason], warn: true });
+      return false;
+    },
+    [storage],
+  );
+  const openBook = useCallback(() => {
+    setBookRead(loadBook(storage));
+    setBookMsg(null);
+    setBookOpen(true);
+  }, [storage]);
+  const closeBook = useCallback(() => setBookOpen(false), []);
+  const onBookSave = useCallback(
+    (name: string) => {
+      const now = Date.now();
+      return commit(
+        (b) => addEntry(b, toSaved(stateRef.current, now), name, now, newBookId()),
+        () => '保存した',
+      );
+    },
+    [commit],
+  );
+  const onBookOverwrite = useCallback(
+    (id: string) =>
+      commit(
+        (b) => overwriteEntry(b, id, toSaved(stateRef.current, Date.now())),
+        () => '上書きした',
+      ),
+    [commit],
+  );
+  const onBookDuplicate = useCallback(
+    (id: string) =>
+      commit(
+        (b) => duplicateEntry(b, id, Date.now(), newBookId()),
+        () => '複製した',
+      ),
+    [commit],
+  );
+  const onBookRename = useCallback(
+    (id: string, name: string) =>
+      commit(
+        (b) => renameEntry(b, id, name),
+        () => null,
+      ),
+    [commit],
+  );
+  const onBookRemove = useCallback(
+    (id: string) =>
+      commit(
+        (b) => removeEntry(b, id),
+        () => '削除した',
+      ),
+    [commit],
+  );
+  const onBookClear = useCallback(
+    () =>
+      commit(
+        () => clearBook(),
+        () => '空にした',
+        { allowInvalid: true },
+      ),
+    [commit],
+  );
+  const onBookOpenEntry = useCallback(
+    (id: string) => {
+      // 開く直前に読み直す（別のタブで変わった・消えた項目を開かない）
+      const read = loadBook(storage);
+      setBookRead(read);
+      const e = read.kind === 'ok' ? read.book.entries.find((x) => x.id === id) : undefined;
+      if (e?.status !== 'ok') {
+        setBookMsg({ text: BOOK_FAIL_TEXT.notFound, warn: true });
+        return false;
+      }
+      dispatch({
+        type: 'openPosition',
+        legs: e.ws.position.legs,
+        scenario: e.ws.position.scenario,
+        feePerLot: e.ws.ui.feePerLot,
+        futureBasis: e.ws.ui.futureBasis,
+      });
+      setBookOpen(false);
+      return true;
+    },
+    [storage],
+  );
+  const onBookExport = useCallback(() => {
+    const read = loadBook(storage);
+    setBookRead(read);
+    if (read.kind !== 'ok') return;
+    const out = exportBook(read.book, Date.now());
+    downloadText(out.text, out.filename);
+    setBookMsg({ text: exportDoneText(out.count, out.skipped), warn: false });
+  }, [storage]);
+  const onBookImport = useCallback(
+    (file: File) => {
+      if (file.size > IMPORT_MAX_BYTES) {
+        setBookMsg({ text: BOOK_FAIL_TEXT.fileTooLarge, warn: true });
+        return;
+      }
+      file.text().then(
+        (text) =>
+          commit(
+            (b) => importIntoBook(b, text, Date.now(), newBookId),
+            (r) => importDoneText(r.added ?? 0, r.skipped ?? 0),
+          ),
+        () => setBookMsg({ text: BOOK_FAIL_TEXT.importInvalid, warn: true }),
+      );
+    },
+    [commit],
+  );
+  // 一覧の要約は開いている間だけ（板・項目・ATM 基準・単位が変わったときだけ作り直す）
+  const { legs: curLegs, scenario: curScenario } = state;
+  const bookView = useMemo(
+    () =>
+      bookOpen
+        ? bookListModel({
+            chain,
+            read: bookRead,
+            atmBasis,
+            calendar,
+            unitSetting: metricsUnit,
+            currentKey: bookKey(curLegs, curScenario, feePerLot, futureBasis),
+            legCount: curLegs.length,
+          })
+        : null,
+    [
+      bookOpen,
+      chain,
+      bookRead,
+      atmBasis,
+      calendar,
+      metricsUnit,
+      curLegs,
+      curScenario,
+      feePerLot,
+      futureBasis,
+    ],
+  );
+  const bookCount =
+    bookRead.kind === 'ok' ? bookRead.book.entries.length : bookRead.kind === 'empty' ? 0 : null;
+
   return (
     <div class="app">
       <div class="topbar">
@@ -391,6 +570,8 @@ export function App({ boot = NO_BOOT }: { boot?: Boot }) {
           onFile={onFile}
           onLatest={onLatest}
         />
+        {/* 板が無くても保存一覧を開ける（書き出し・削除・名前の変更・読み込み。[開く] は板を読んでから） */}
+        <BookButton count={bookCount} onOpen={openBook} />
       </div>
       {notes.length > 0 && (
         <div class="persist-notes">
@@ -482,7 +663,12 @@ export function App({ boot = NO_BOOT }: { boot?: Boot }) {
                 />
               </div>
               <div class="pane pane-detail">
-                <Positions model={positions} dispatch={dispatch} />
+                <Positions
+                  model={positions}
+                  dispatch={dispatch}
+                  bookCount={bookCount}
+                  onOpenBook={openBook}
+                />
                 <Metrics
                   model={metrics}
                   unitSetting={state.metricsUnit}
@@ -514,6 +700,25 @@ export function App({ boot = NO_BOOT }: { boot?: Boot }) {
             </div>
           </div>
         </>
+      )}
+      {bookView && (
+        <Book
+          view={bookView}
+          legCount={curLegs.length}
+          hasBoard={chain !== null}
+          defaultName={defaultName(curLegs.map((l) => l.leg))}
+          message={bookMsg}
+          onClose={closeBook}
+          onSave={onBookSave}
+          onOpen={onBookOpenEntry}
+          onOverwrite={onBookOverwrite}
+          onDuplicate={onBookDuplicate}
+          onRename={onBookRename}
+          onRemove={onBookRemove}
+          onClear={onBookClear}
+          onExport={onBookExport}
+          onImport={onBookImport}
+        />
       )}
     </div>
   );
