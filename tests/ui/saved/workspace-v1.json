@@ -1,0 +1,73 @@
+{
+  "schema_version": 1,
+  "saved_at": "2026-11-02T12:47:00.000Z",
+  "position": {
+    "board_snapshot_at": "2026-11-02T21:31:00+09:00",
+    "legs": [
+      {
+        "leg": {
+          "kind": "option",
+          "product": "op_large",
+          "type": "put",
+          "expiry": "2026-11",
+          "strike": 64000,
+          "side": "sell",
+          "qty": 2,
+          "entry": 810,
+          "mid": 815
+        },
+        "marks": ["interpolated"]
+      },
+      {
+        "leg": {
+          "kind": "option",
+          "product": "op_large",
+          "type": "call",
+          "expiry": "2027-01",
+          "strike": 70000,
+          "side": "buy",
+          "qty": 1,
+          "entry": 500,
+          "iv": 0.25,
+          "mid": null
+        },
+        "marks": ["no_board", "forward_from_future"],
+        "option_market": { "sq_time": 1799999000000, "forward": null }
+      },
+      {
+        "leg": {
+          "kind": "future",
+          "product": "fut_mini",
+          "contract": "2026-12",
+          "side": "buy",
+          "qty": 3,
+          "entry": 67880
+        },
+        "marks": [],
+        "future_market": { "sq_time": 1797000000000, "price": 67880 }
+      }
+    ],
+    "scenario": {
+      "days": 2.5,
+      "dX": -1200,
+      "dSigma": 3,
+      "skew": 0.5,
+      "beta": 1.2,
+      "ivDynamics": "sticky_moneyness",
+      "ivShift": "relative"
+    }
+  },
+  "ui": {
+    "atm_basis": "A",
+    "month_id": "2026-12",
+    "target": "call",
+    "filter_ask": true,
+    "smile_axis": "delta",
+    "fee_per_lot": 300,
+    "future_basis": "decay",
+    "metrics_unit": "thousand",
+    "pnl_y": { "mode": "premium", "manual": [-50000, 80000], "n": 3 },
+    "pnl_folded": true,
+    "hedge": { "target": 1, "at": "scenario", "contract": "2027-03" }
+  }
+}

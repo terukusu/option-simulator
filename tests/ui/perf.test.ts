@@ -4,6 +4,14 @@ import { preparePosition } from '../../model/position';
 import { ZERO_SCENARIO } from '../../model/scenario';
 import { buildWideChainJson } from '../../scripts/synthBoard';
 import { CALENDAR } from '../../ui/calendar';
+import {
+  readSavedBoard,
+  readWorkspace,
+  restoreState,
+  serializeBoard,
+  serializeWorkspace,
+} from '../../ui/persist';
+import { initialState, type UiLeg } from '../../ui/state';
 import { atmStrike, boardRows } from '../../ui/view/board';
 import { headerModel } from '../../ui/view/header';
 import { metricsModel } from '../../ui/view/metrics';
@@ -220,5 +228,58 @@ describe('性能（#52 AC-10: 長押しドラッグの 1 フレーム）', () =>
     }
     console.info(`#52 長押しドラッグの 1 フレーム: ${best.toFixed(2)} ms`);
     expect(best).toBeLessThan(BUDGET_MS);
+  });
+});
+
+/**
+ * #23: 作業の保存（足 10 本の直列化 → 読み取り・検証 → 復元）。保存は操作が止まってから 500ms 後に 1 回
+ * （スライダーの 1 フレームでは走らない）だが、1 回の書き込みでも予算に収まること。
+ * 板の保存（322 行 × 2 限月）の直列化・読み取りの時間と大きさも出す（読み取りは開いたときの失敗だけ）。
+ */
+describe('性能（#23 作業・板の保存）', () => {
+  const legs: UiLeg[] = PERF_LEGS.map((leg, i) => ({ id: i + 1, leg, marks: [] }));
+  const state = { ...initialState, legs, nextId: legs.length + 1 };
+
+  function roundTrip(): number {
+    const text = serializeWorkspace(state, 0);
+    const r = readWorkspace(text);
+    if (r.kind !== 'ok') throw new Error('読めない');
+    return restoreState(initialState, r.saved).legs.length + text.length;
+  }
+
+  it(`足 10 本の保存の直列化 + 読み取り + 復元が ${BUDGET_MS} ms 以内（30 回の最小値）`, () => {
+    expect(PERF_LEGS).toHaveLength(10);
+    for (let i = 0; i < 10; i++) roundTrip();
+    let best = Number.POSITIVE_INFINITY;
+    for (let i = 0; i < 30; i++) {
+      const t0 = performance.now();
+      roundTrip();
+      best = Math.min(best, performance.now() - t0);
+    }
+    console.info(
+      `#23 作業の保存（足 10 本）: ${best.toFixed(3)} ms・${serializeWorkspace(state, 0).length} 字`,
+    );
+    expect(best).toBeLessThan(BUDGET_MS);
+  });
+
+  it('板（322 行 × 2 限月）の保存の直列化・読み取りの時間と大きさ（記録のみ）', () => {
+    const json = buildWideChainJson();
+    let text = '';
+    let ser = Number.POSITIVE_INFINITY;
+    let read = Number.POSITIVE_INFINITY;
+    for (let i = 0; i < 5; i++) {
+      const t0 = performance.now();
+      text = serializeBoard(json, 0, 'API');
+      const t1 = performance.now();
+      const back = readSavedBoard(text);
+      const t2 = performance.now();
+      expect(back?.chain.months).toHaveLength(2);
+      ser = Math.min(ser, t1 - t0);
+      read = Math.min(read, t2 - t1);
+    }
+    console.info(
+      `#23 板の保存（322 行 × 2）: ${text.length} 字・直列化 ${ser.toFixed(2)} ms・読み取り（検証 + 正規化）${read.toFixed(2)} ms`,
+    );
+    expect(text.length).toBeGreaterThan(0);
   });
 });

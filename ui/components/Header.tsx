@@ -25,6 +25,7 @@ export function Header({
     <header class="header">
       <p class="head-line">
         <strong>板 {model.snapshot}</strong>（{model.delay}）<span class="tag">{model.reason}</span>
+        {model.boardStale && <span class="tag warn">古い板</span>}
         {model.fetched && (
           <span class="note">
             取得 {model.fetched}

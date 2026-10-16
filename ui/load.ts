@@ -7,6 +7,7 @@
 
 import {
   type Chain,
+  type ChainJson,
   ChainLoadError,
   createBigQueryAdapter,
   createFileAdapter,
@@ -20,6 +21,11 @@ export const MAX_ERROR_LINES = 20;
 
 /** API から読んだ板のデータ元のラベル（Loader の「表示中」・ヘッダの取得時刻に出す） */
 export const API_LABEL = 'API';
+
+/** 保存した最後の板で表示しているときのデータ元の表示（#23） */
+export function savedBoardLabel(label: string): string {
+  return `保存した板（${label}）`;
+}
 
 export type InitialSource = { kind: 'fixture'; name: 'latest' } | { kind: 'api' };
 
@@ -39,15 +45,33 @@ export function fixtureUrl(name: string): string {
   return `/fixtures/${encodeURIComponent(name)}.json`;
 }
 
+/** 読み込んだ板（正規化した板と、保存に使う検証済みの板 JSON。#23）。 */
+export interface LoadedBoard {
+  chain: Chain;
+  json: ChainJson;
+}
+
+function board(json: ChainJson): LoadedBoard {
+  return { chain: normalizeChain(json, { r: DEFAULT_RATE }), json };
+}
+
+/** URL（dev の合成の fixture）から板を読む。 */
+export async function loadBoardFromUrl(url: string, signal?: AbortSignal): Promise<LoadedBoard> {
+  return board(await createFileAdapter({ url }).loadChain(signal ? { signal } : {}));
+}
+
+/** API（`/api/chain`）から最新の板を読む。 */
+export async function loadBoardFromApi(signal?: AbortSignal): Promise<LoadedBoard> {
+  return board(await createBigQueryAdapter().loadChain(signal ? { signal } : {}));
+}
+
 export async function loadFromUrl(url: string, signal?: AbortSignal): Promise<Chain> {
-  const json = await createFileAdapter({ url }).loadChain(signal ? { signal } : {});
-  return normalizeChain(json, { r: DEFAULT_RATE });
+  return (await loadBoardFromUrl(url, signal)).chain;
 }
 
 /** API（`/api/chain`）から最新の板を読んで正規化する。 */
 export async function loadFromApi(signal?: AbortSignal): Promise<Chain> {
-  const json = await createBigQueryAdapter().loadChain(signal ? { signal } : {});
-  return normalizeChain(json, { r: DEFAULT_RATE });
+  return (await loadBoardFromApi(signal)).chain;
 }
 
 export async function loadFromFile(file: Blob & { name?: string }): Promise<Chain> {

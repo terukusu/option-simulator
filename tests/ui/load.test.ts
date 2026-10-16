@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { ChainLoadError } from '../../data';
-import { describeLoadError, initialSource, loaderNote, MAX_ERROR_LINES } from '../../ui/load';
+import {
+  describeLoadError,
+  initialSource,
+  loaderNote,
+  MAX_ERROR_LINES,
+  savedBoardLabel,
+} from '../../ui/load';
 
 /** #34 AC-1: 最初に読むデータ元。 */
 describe('initialSource', () => {
@@ -66,5 +72,12 @@ describe('loaderNote', () => {
     expect(loaderNote(false, 'API')).toBe('表示中: API');
     expect(loaderNote(false, null)).toBe('');
     expect(loaderNote(false, '')).toBe('');
+  });
+});
+
+/** #23: 保存した板で表示しているときのデータ元。 */
+describe('savedBoardLabel', () => {
+  it('「保存した板（<データ元>）」', () => {
+    expect(savedBoardLabel('API')).toBe('保存した板（API）');
   });
 });

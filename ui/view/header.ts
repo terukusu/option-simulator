@@ -37,15 +37,23 @@ export function reasonNote(chain: Chain): string | null {
   }
 }
 
-/** 読み込みに失敗したとき、前の板を表示し続けている旨（板が無ければ null）。 */
-export function keptBoardNote(fetchedAt: number | null): string | null {
-  return fetchedAt === null ? null : `前の板のまま（取得 ${fmtTime(fetchedAt)}）`;
+/**
+ * 読み込みに失敗したとき、前の板を表示し続けている旨（板が無ければ null）。
+ * stale = localStorage に保存した最後の板を表示している（数日前のことがあるので日付つき。#23）。
+ */
+export function keptBoardNote(fetchedAt: number | null, stale = false): string | null {
+  if (fetchedAt === null) return null;
+  return stale
+    ? `保存した板を表示（取得 ${fmtDateTime(fetchedAt)}）`
+    : `前の板のまま（取得 ${fmtTime(fetchedAt)}）`;
 }
 
 /** 読み込みの情報（取得時刻・データ元のラベル）。App の state から渡す */
 export interface LoadInfo {
   fetchedAt?: number | null;
   label?: string | null;
+  /** 保存した最後の板（「古い板」の印・日付つきの取得時刻。#23） */
+  stale?: boolean;
 }
 
 export type ForwardKind = 'synthetic' | 'future' | 'future_other_month' | 'none';
@@ -97,6 +105,8 @@ export interface HeaderModel {
   fetched: string | null;
   /** データ元のラベル（API・fixture 名・ファイル名）。未指定は null */
   loadedFrom: string | null;
+  /** 保存した最後の板を表示している（「古い板」のタグ。取得時刻は日付つき。#23） */
+  boardStale: boolean;
   spot: { price: string; time: string };
   future: { contract: string; price: string; time: string; sqDate: string };
   basis: AtmBasis;
@@ -178,8 +188,14 @@ export function headerModel(
     reason: REASON_LABEL[chain.reason] ?? chain.reason,
     reasonNote: reasonNote(chain),
     source: chain.source,
-    fetched: load.fetchedAt == null ? null : fmtTime(load.fetchedAt),
+    fetched:
+      load.fetchedAt == null
+        ? null
+        : load.stale
+          ? fmtDateTime(load.fetchedAt)
+          : fmtTime(load.fetchedAt),
     loadedFrom: load.label ?? null,
+    boardStale: load.stale === true,
     spot: { price: fmtNum(chain.spot.price, 0), time: fmtTime(chain.spot.priceTime) },
     future: {
       contract: chain.future.id,

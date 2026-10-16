@@ -273,6 +273,18 @@ select {
   margin: 24px 0;
 }
 
+/* 作業の保存・復元の知らせ（topbar の下の 1 行ずつ。長い文言も折り返す。#23） */
+.persist-notes p {
+  margin: 2px 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.persist-notes button {
+  font-size: 0.9em;
+  margin-left: 6px;
+}
+
 .header {
   border-bottom: 1px solid var(--line);
   padding-bottom: 6px;
