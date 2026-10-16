@@ -494,7 +494,7 @@ export function pnlChartModel(input: PnlChartInput): PnlChartModel {
   const yt = niceTicks(yDomain[0], yDomain[1], 5);
   const yStep = yt.length > 1 ? (yt[1] as number) - (yt[0] as number) : 0;
   // 横軸はラベルが重ならない範囲で最も細かい刻み（#55）。2.5 は 10 円以上だけ（行使価格の 250 円刻みと揃う）
-  const xt = fitTicks(lo, hi, pw, xTickLabel, X_TICK_OPTIONS);
+  const xt = fitTicks(lo, hi, pw, xTickLabel, { ...X_TICK_OPTIONS, widthSample: base.full });
 
   return {
     empty: false,

@@ -67,7 +67,7 @@ function SmileView({
     model.domain[1],
     range[1] - range[0],
     (t) => axisTickLabel(axis, t),
-    { minStepFor: () => X_TICK_MIN_STEP[axis] },
+    { minStepFor: () => X_TICK_MIN_STEP[axis], widthSample: model.fullDomain },
   );
   const yTicks = niceTicks(model.yDomain[0], model.yDomain[1], 4);
 

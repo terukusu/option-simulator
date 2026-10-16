@@ -72,6 +72,21 @@ describe('scale（グラフの座標の純関数）', () => {
       );
     });
 
+    it('幅を変えずにパンしても刻みが変わらない（全域の両端で幅を見積もる）', () => {
+      // スマイルの moneyness 軸のラベル（ui/view/smile.ts の axisTickLabel と同じ形）
+      const pct = (v: number) => {
+        const p = Math.round(v * 1000) / 10;
+        return `${p > 0 ? '+' : ''}${p}%`;
+      };
+      const full = [-0.4, 0.2] as const;
+      const stepOf = (lo: number) => {
+        const t = fitTicks(lo, lo + 0.1, 320, pct, { minStepFor: () => 0.001, widthSample: full });
+        return Number(((t[1] as number) - (t[0] as number)).toFixed(6));
+      };
+      const steps = new Set([-0.4, -0.25, -0.15, -0.05, 0, 0.1].map(stepOf));
+      expect(steps.size).toBe(1);
+    });
+
     it('2.5 は 10 円以上だけ・下限の刻み・不正な入力', () => {
       expect(fitTicks(0, 10, 1_000, yen, opts)).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
       expect(fitTicks(0, 0.05, 1_000, (v) => v.toFixed(2), { minStepFor: () => 0.01 })).toEqual([

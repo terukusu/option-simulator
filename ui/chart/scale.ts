@@ -44,6 +44,12 @@ export interface FitTicksOptions {
   minStepFor?: (mantissa: number) => number;
   /** ラベルの間の最小の余白（px） */
   gapPx?: number;
+  /**
+   * ラベルの幅の見積もりに加える値（グラフの全域の両端など）。刻みの格子に丸めてからラベルにする。
+   * 表示中の目盛りだけで見積もると、範囲の幅を変えずにパンしただけで桁数が変わって刻みが切り替わる（ちらつく）ので、
+   * 全域の両端を入れて「幅と全域だけで刻みが決まる」ようにする
+   */
+  widthSample?: readonly number[];
 }
 
 /** ラベルの間の余白の既定（px） */
@@ -51,7 +57,8 @@ export const TICK_GAP_PX = 12;
 
 /**
  * 目盛りのラベルの推定幅（px）。グラフの文字は 10px（style.css）。数字は約 0.56em、カンマ・ピリオドは約 0.28em、
- * それ以外（%・+・−・P・C・空白）は広めに 0.65em と見積もる（実際より少し広め = 重なる側に外さない）。
+ * それ以外（%・+・−・P・C・空白）は 0.65em と見積もる（% 単体は実際より狭いが、+・空白を広めに取るので
+ * 「+12.5%」でも誤差は 1px 程度。余白 12px で吸収する）。
  */
 export function tickLabelPx(label: string): number {
   let w = 0;
@@ -63,7 +70,7 @@ export function tickLabelPx(label: string): number {
  * 横軸の目盛り: ラベルが重ならない範囲で最も細かい、きりのよい刻み（#55）。
  * 刻みは「仮数 × 10^n」を細かい方から試し、画面上の間隔（step / 幅 × px）が「最も広いラベルの推定幅（tickLabelPx）+ 余白」以上になる
  * 最初のものにする。本数はグラフの幅で決まる（広い画面ほど細かい）。仮数の比が最大 2.5（1・2・5）/ 2（1・2・2.5・5）なので、
- * 間隔は必要な幅の 2.5 倍未満に収まる。
+ * 間隔は通常、必要な幅の 2.5 倍未満に収まる（minStepFor の下限で切られたときを除く）。
  */
 export function fitTicks(
   lo: number,
@@ -91,14 +98,23 @@ export function fitTicks(
       if (stepPx < gapPx) continue;
       const ticks = stepTicks(lo, hi, step);
       last = ticks;
-      const widest = ticks.reduce((w, v) => Math.max(w, tickLabelPx(label(v))), 0);
+      let widest = ticks.reduce((w, v) => Math.max(w, tickLabelPx(label(v))), 0);
+      for (const v of opts.widthSample ?? []) {
+        if (Number.isFinite(v)) widest = Math.max(widest, tickLabelPx(label(snapTo(v, step))));
+      }
       if (stepPx >= widest + gapPx) return ticks;
     }
   }
   return last;
 }
 
-/** [lo, hi] に入る step の倍数。 */
+/** step の格子に丸めた値（浮動小数の誤差を刻みの桁で落とす）。 */
+function snapTo(v: number, step: number): number {
+  const digits = Math.max(0, -Math.floor(Math.log10(step)) + 1);
+  return Number((Math.round(v / step) * step).toFixed(digits));
+}
+
+/** [lo, hi] に入る step の倍数（最大 101 個で打ち切る。間隔は 12px 以上なので、描画幅 1,200px 超でないと届かない）。 */
 function stepTicks(lo: number, hi: number, step: number): number[] {
   const out: number[] = [];
   const start = Math.ceil(lo / step - 1e-9) * step;
