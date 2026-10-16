@@ -1,0 +1,133 @@
+/*
+ * 新しい画面（?ui=next）のトークン（docs/ui-redesign.md §7・§10.1）。
+ * 色の値（hex・rgb / hsl の関数・色の名前）を書けるのは、この下の 2 つのテーマの定義の中だけ
+ * （tests/ui/cssTokens.test.ts が確かめる）。足りない色は役割の名前でここに足す。
+ * html[data-theme] には JS（ui/next/useTheme.ts・ui/main.tsx）が解決した値（dark / light）を入れる。
+ */
+
+:root,
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  /* 7.1 面と文字 */
+  --bg: #0e1116;
+  --s1: #151921;
+  --s2: #1b2029;
+  --s3: #232a36;
+  --s4: #2b3340;
+  --line: #262d3a;
+  --line-2: #3a4455;
+  --ink: #e6e9ef;
+  --ink-2: #a3acbb;
+  --ink-3: #6b7484;
+  /* 7.2 意味の色 */
+  --expiry: var(--ink);
+  --accent: #3987e5;
+  --accent-ink: #9cc4f5;
+  --accent-fill: rgba(57, 135, 229, 0.16);
+  --today: #8b94a5;
+  --handle: #d95926;
+  --handle-fill: rgba(217, 89, 38, 0.22);
+  --pin1: #199e70;
+  --pin2: #9085e9;
+  --pin3: #d55181;
+  --gain: #2fb483;
+  --loss: #ef6b6b;
+  --gain-fill: rgba(47, 180, 131, 0.14);
+  --loss-fill: rgba(239, 107, 107, 0.16);
+  --warn: #d9962a;
+  --warn-fill: rgba(217, 150, 42, 0.15);
+  --bid: #55c796;
+  --ask: #ef8585;
+  /* 試作品が直書きしていた色の役割（§10.1） */
+  --on-accent: #ffffff;
+  --scrim: rgba(0, 0, 0, 0.35);
+  --backdrop: rgba(0, 0, 0, 0.45);
+  --shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.25);
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+  --bg: #eef0f3;
+  --s1: #ffffff;
+  --s2: #f6f7f9;
+  --s3: #eceef2;
+  --s4: #e1e4ea;
+  --line: #dde1e7;
+  --line-2: #c4cad4;
+  --ink: #12161c;
+  --ink-2: #4f5867;
+  --ink-3: #8b94a3;
+  --expiry: var(--ink);
+  --accent: #2a78d6;
+  --accent-ink: #1c5cab;
+  --accent-fill: rgba(42, 120, 214, 0.14);
+  --today: #6b7380;
+  --handle: #e05a1f;
+  --handle-fill: rgba(235, 104, 52, 0.2);
+  --pin1: #1baf7a;
+  --pin2: #6250d6;
+  --pin3: #d8578a;
+  --gain: #0f8a5c;
+  --loss: #d13f3f;
+  --gain-fill: rgba(27, 175, 122, 0.14);
+  --loss-fill: rgba(227, 73, 72, 0.14);
+  --warn: #a86b00;
+  --warn-fill: rgba(168, 107, 0, 0.14);
+  --bid: #0f8a5c;
+  --ask: #d13f3f;
+  --on-accent: #ffffff;
+  --scrim: rgba(0, 0, 0, 0.25);
+  --backdrop: rgba(0, 0, 0, 0.35);
+  --shadow: 0 12px 40px rgba(20, 30, 50, 0.18);
+  --shadow-sm: 0 1px 2px rgba(20, 30, 50, 0.15);
+}
+
+/* 色でないトークン（テーマで変わらない） */
+:root {
+  --font:
+    "Inter", "Hiragino Sans", "Noto Sans JP", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+  /* 文字の大きさ（7.3） */
+  --fs-body: 14px;
+  --fs-sub: 12.5px;
+  --fs-sm: 11px;
+  --fs-xs: 10.5px;
+  --fs-hero: 26px;
+  --fs-ro: 18px;
+  /* 間隔（4 の倍数） */
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 20px;
+  --sp-6: 24px;
+  /* 角丸 */
+  --r: 10px;
+  --r-sm: 6px;
+  --r-sheet: 14px;
+  /* 高さ */
+  --top-h: 48px;
+  --dock-h: 56px;
+  /* 動き（§6） */
+  --dur-fast: 120ms;
+  --dur: 180ms;
+  --dur-line: 220ms;
+  --ease: cubic-bezier(0.2, 0, 0, 1);
+}
+
+@media (max-width: 719.98px) {
+  :root {
+    --fs-hero: 24px;
+    --fs-ro: 16px;
+    --top-h: 44px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --dur-fast: 0ms;
+    --dur: 0ms;
+    --dur-line: 0ms;
+  }
+}

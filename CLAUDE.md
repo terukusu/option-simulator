@@ -9,6 +9,7 @@
 - `data/calendar/`: 取引カレンダーの同梱の版（`calendar.json`。`/api/calendar` と同じ形。API から取れないときに使う）。自動更新はせず、手で作り直して PR（手順は README の「取引カレンダー」）。形の検査と休業日の集合は `data/calendar.ts`
 - `fixtures/synthetic/`: 合成の固定の板（架空の値。`scripts/synthBoard.ts` から `npm run fixtures` で作る。手で編集しない）
 - `ui/`: 画面（TypeScript + Vite + Preact 10）。状態と reducer は `ui/state.ts`、表示モデルは `ui/view/` の純関数（Preact に依存しない。`tests/ui/` で確かめる）、グラフの座標と拡大・パンの規則は `ui/chart/scale.ts`、ジェスチャー（ドラッグ・ピンチ・タップ・損益グラフの長押し / つかむ）の状態機械は `ui/chart/gesture.ts`（どちらも純関数）、DOM のイベントは損益グラフとスマイルで共用のフック `ui/components/useChartGestures.ts`、部品（`ui/components/`）は表示モデルを描くだけ。板・入力値は JSX のテキスト / 属性で入れ、HTML 文字列を DOM に入れる API と `style` 属性（JSX の style prop を含む）を使わない（CSP）
+  - 再設計の新しい画面（docs/ui-redesign.md）は `ui/next/`（入口は `?ui=next`。`ui/entry.ts`）。CSS は `ui/next/next.css`（トークンは `ui/next/css/tokens.css`。旧 `ui/style.css` とは排他で、新しい画面では旧 CSS を無効にする）、共通部品は `ui/next/parts/`、状態と保存は旧画面と共有の `ui/components/useAppController.ts`、見た目の状態は `ui/view/shell.ts`。規約は docs/ui-redesign.md 10.1。旧の部品を新しい画面に置かない
 - `api/`: 板（`/api/chain`）とカレンダー（`/api/calendar`）の JSON を返す Python 3.13（Flask / gunicorn、uv.lock）。optionchan の BigQuery を読むだけ（書き込まない）。使える板の判定は `api/src/simulator_api/usable.py` の純関数（定数は `settings.py` の上部）、optionchan との契約（使う列・型）は `contract.py` に 1 か所。テストは pytest と偽の runner（合成の板）。手順は `api/README.md`
 - `infra/`: Terraform（terraform 1.16.4・google 8.4.0）。`infra/bootstrap` は所有者が手元で apply する WIF・SA・state バケット・Artifact Registry・`optionchan_tokyo` の読み取り（非権威的）・IAP の閲覧許可、`infra/prod` は CI（`.github/workflows/deploy.yml`、Environment `prod` の承認後）が apply する Cloud Run `simulator`（IAP）と IAP のサービスエージェントの `run.invoker`。付与は追加型（`*_iam_member`）だけ。テストは `infra/*/tests/`（`terraform test`、モックのプロバイダ）。手順・構成は `infra/README.md`
 
@@ -21,6 +22,7 @@
 - Node は 22（`.node-version`）。依存はバージョン固定（`package-lock.json` をコミット）
 - 確認: `npm ci && npm run typecheck && npm run lint && npm run fixtures:check && npm test`（CI と同じ。lint は Biome、整形は `npm run format`）。性能に関わる変更は負荷の低いときに `npm run perf`（16 ms の判定。性能テストの 2 ファイルだけを並列なしで。`npm test`・CI の性能テストは 200 ms）。API は `cd api && uv run --locked ruff check && uv run --locked pytest -q`（uv 0.12.19、Python 3.13）。Terraform は `terraform fmt -check -recursive infra` と、`infra/bootstrap`・`infra/prod` それぞれで `init -backend=false -input=false && validate && test`（手元は `mise exec terraform@1.16.4 -- terraform`。資格情報なし）。イメージ（リポジトリ直下の `Dockerfile`。context に入るものは `.dockerignore` の許可リストで、`.github/scripts/image.sh` の入力パスと同じにする）は `docker build -t simulator:local . && .github/scripts/image-check.sh simulator:local`
 - 画面: `npm run dev`（Vite の root は `ui/`。合成の板は `scripts/devFixtures.mjs` が dev サーバーでだけ配る）、`npm run build` で `dist/`（JSON を入れない）。322 行の板は `npm run fixtures -- --wide`（`fixtures/local/` に書く）
+- 画面の検査: `npm run ui:check`（Playwright の Chromium。初回に `npx playwright install chromium`。CI に入らない手元の検査で、新しい画面の縦・横スクロール 0px と折り返しの件数を出す。`--parts --max-wraps 0`・`--flows`・`--legacy`。新しい画面を触る PR には出力を貼る）。色のトークンの検査は `tests/ui/cssTokens.test.ts`（`npm test` に入る）
 
 ## リポジトリに置くもの / 置かないもの
 

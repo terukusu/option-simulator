@@ -8,3 +8,5 @@
 
 /** スマホの幅（損益グラフの描画域を 180px にする。ui/view/pnlChart.ts の pnlChartHeight） */
 export const PHONE_QUERY = '(max-width: 719.98px)';
+/** PC の幅（市場 | 舞台 + シナリオ | 作業台 の 3 列。新しい画面 ui/next/ の CSS の `@media (min-width: 1200px)`） */
+export const PC_QUERY = '(min-width: 1200px)';

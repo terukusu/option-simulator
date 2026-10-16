@@ -1,0 +1,374 @@
+/*
+ * 骨組み（docs/ui-redesign.md §2・§10.1・§11-7）: トップバー → 知らせの行 → 本体（3 段階のグリッド）。
+ * 本体 .layout の data-panel・data-sheet・data-market（ui/view/shell.ts の状態）で領域を出し分ける。
+ * ページはスクロールしない。スクロールは各パネルの .panel-body だけ。
+ */
+
+.screen {
+  display: grid;
+  grid-template-rows: var(--top-h) auto minmax(0, 1fr);
+  height: 100dvh;
+  min-height: 0;
+}
+
+/* ===== トップバー ===== */
+.top {
+  grid-row: 1;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding: 0 var(--sp-3);
+  border-bottom: 1px solid var(--line);
+  background: var(--s1);
+}
+
+.top .brand {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  font-size: var(--fs-body);
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.top .spacer {
+  flex: 1;
+}
+
+/* ===== 知らせの行（暫定。#87 でトーストとトップバーのタグへ移す） ===== */
+.notices {
+  grid-row: 2;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  max-height: 30dvh;
+  padding: 6px var(--sp-3);
+  overflow: auto;
+  overscroll-behavior: contain;
+  border-bottom: 1px solid var(--line);
+  background: var(--s1);
+}
+
+.notice {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  color: var(--ink-2);
+  font-size: var(--fs-sub);
+}
+
+.notice.warn {
+  color: var(--warn);
+}
+
+.notice > .acts {
+  display: inline-flex;
+  gap: 6px;
+  margin-left: auto;
+}
+
+/* ===== 本体 ===== */
+.layout {
+  grid-row: 3;
+  display: grid;
+  min-height: 0;
+  min-width: 0;
+}
+
+section.panel {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  background: var(--s1);
+}
+
+.panel-head {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: var(--sp-2);
+  height: 40px;
+  min-width: 0;
+  padding: 0 var(--sp-3);
+  border-bottom: 1px solid var(--line);
+}
+
+.panel-head h2 {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.panel-head .sub {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--ink-3);
+  font-size: 12px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.panel-head .spacer {
+  flex: 1;
+}
+
+.panel-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  container-type: inline-size;
+}
+
+/* ===== ドック（スマホ / タブレットのパネル切替） ===== */
+.dock {
+  display: none;
+}
+
+.dock > button {
+  position: relative;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  min-width: 0;
+  height: 100%;
+  border: 0;
+  background: transparent;
+  color: var(--ink-3);
+  font-size: var(--fs-xs);
+  white-space: nowrap;
+}
+
+.dock > button[aria-pressed="true"] {
+  color: var(--accent-ink);
+}
+
+.dock .ic {
+  font-size: 18px;
+  line-height: 1;
+}
+
+.dock .cnt {
+  position: absolute;
+  top: 4px;
+  left: calc(50% + 6px);
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--handle);
+  color: var(--on-accent);
+  font-size: 9px;
+  line-height: 14px;
+}
+
+/* ===== シートのつまみ（スマホだけ JS が出す） ===== */
+.grabber {
+  display: block;
+  flex: 0 0 auto;
+  width: 100%;
+  height: 18px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: ns-resize;
+  touch-action: none;
+}
+
+.grabber::before {
+  display: block;
+  width: 36px;
+  height: 4px;
+  margin: 0 auto;
+  border-radius: 2px;
+  background: var(--line-2);
+  content: "";
+}
+
+/* ===== PC ≥ 1200: 市場 | 舞台 + シナリオ | 作業台 ===== */
+@media (min-width: 1200px) {
+  .layout {
+    grid-template-columns: minmax(340px, 30%) minmax(0, 1fr) minmax(360px, min(28%, 420px));
+    grid-template-rows: minmax(0, 1fr) minmax(0, 1.3fr) auto;
+    grid-template-areas:
+      "market stage positions"
+      "market stage metrics"
+      "market scenario metrics";
+  }
+
+  section.stage {
+    grid-area: stage;
+  }
+
+  section.scenario {
+    grid-area: scenario;
+    border-top: 1px solid var(--line);
+  }
+
+  section.positions {
+    grid-area: positions;
+    border-left: 1px solid var(--line);
+  }
+
+  section.metrics {
+    grid-area: metrics;
+    border-top: 1px solid var(--line);
+    border-left: 1px solid var(--line);
+  }
+
+  section.board,
+  section.smile {
+    display: none;
+    grid-area: market;
+    border-right: 1px solid var(--line);
+  }
+
+  .layout[data-market="board"] section.board,
+  .layout[data-market="smile"] section.smile {
+    display: flex;
+  }
+}
+
+/* ===== タブレット 720〜1199: 舞台 + シナリオ | ドック + パネル 1 枚 ===== */
+@media (min-width: 720px) and (max-width: 1199.98px) {
+  .layout {
+    grid-template-columns: minmax(0, 1.15fr) minmax(320px, 0.85fr);
+    grid-template-rows: auto minmax(0, 1fr) auto;
+    grid-template-areas:
+      "stage dock"
+      "stage panel"
+      "scenario panel";
+  }
+
+  section.stage {
+    grid-area: stage;
+  }
+
+  section.scenario {
+    grid-area: scenario;
+    border-top: 1px solid var(--line);
+  }
+
+  .dock {
+    display: flex;
+    grid-area: dock;
+    height: 44px;
+    border-bottom: 1px solid var(--line);
+    border-left: 1px solid var(--line);
+    background: var(--s1);
+  }
+
+  .dock > button {
+    flex-direction: row;
+    gap: 6px;
+    font-size: var(--fs-sub);
+  }
+
+  .dock .ic {
+    display: none;
+  }
+
+  .dock .cnt {
+    position: static;
+  }
+
+  section.panel.side {
+    display: none;
+    grid-area: panel;
+    border-left: 1px solid var(--line);
+  }
+
+  .layout[data-panel="positions"] section.positions,
+  .layout[data-panel="board"] section.board,
+  .layout[data-panel="metrics"] section.metrics,
+  .layout[data-panel="smile"] section.smile {
+    display: flex;
+  }
+}
+
+/* ===== スマホ < 720: 舞台 / シート / ドック ===== */
+@media (max-width: 719.98px) {
+  .top {
+    gap: var(--sp-2);
+    padding: 0 10px;
+  }
+
+  .notices {
+    padding: var(--sp-1) 10px;
+  }
+
+  .layout {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr) auto var(--dock-h);
+    grid-template-areas:
+      "stage"
+      "sheet"
+      "dock";
+  }
+
+  section.stage {
+    grid-area: stage;
+  }
+
+  .dock {
+    display: flex;
+    grid-area: dock;
+    padding-bottom: env(safe-area-inset-bottom);
+    border-top: 1px solid var(--line);
+    background: var(--s1);
+  }
+
+  section.panel.side,
+  section.scenario {
+    display: none;
+    grid-area: sheet;
+    border-top: 1px solid var(--line-2);
+    border-radius: var(--r-sheet) var(--r-sheet) 0 0;
+    background: var(--s2);
+  }
+
+  .layout[data-panel="positions"] section.positions,
+  .layout[data-panel="board"] section.board,
+  .layout[data-panel="metrics"] section.metrics,
+  .layout[data-panel="smile"] section.smile,
+  .layout[data-panel="scenario"] section.scenario {
+    display: flex;
+  }
+
+  .layout[data-sheet="hidden"] section.panel.side,
+  .layout[data-sheet="hidden"] section.scenario {
+    display: none;
+  }
+
+  .layout[data-sheet="peek"] section.panel.side,
+  .layout[data-sheet="peek"] section.scenario {
+    height: 42dvh;
+  }
+
+  /* 全開: 舞台はミニ（92px）。[たたむ] は無い（§11-7） */
+  .layout[data-sheet="full"] {
+    grid-template-rows: auto minmax(0, 1fr) var(--dock-h);
+  }
+
+  .layout[data-sheet="full"] section.stage {
+    height: 92px;
+  }
+
+  .panel-head {
+    height: 36px;
+  }
+
+  .toasts {
+    bottom: calc(var(--dock-h) + var(--sp-2));
+  }
+}

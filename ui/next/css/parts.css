@@ -1,0 +1,449 @@
+/*
+ * 共通部品（docs/ui-redesign.md §5・§5.1。部品は ui/next/parts/）。クラス名は試作品
+ * （docs/ui-redesign/prototype.html）に合わせる。値・ラベル・ボタン・セグメント・チップは折り返さない。
+ * 状態は ARIA 属性 → data-* → 短い修飾クラスの順で表す。
+ */
+
+/* ===== ボタン ===== */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 var(--sp-3);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-sm);
+  background: var(--s2);
+  color: var(--ink);
+  white-space: nowrap;
+  user-select: none;
+  flex: 0 0 auto;
+}
+
+.btn:hover {
+  background: var(--s3);
+}
+
+.btn:active {
+  transform: translateY(1px);
+}
+
+.btn.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--on-accent);
+}
+
+.btn.ghost {
+  background: transparent;
+  border-color: transparent;
+  color: var(--ink-2);
+}
+
+.btn.ghost:hover {
+  background: var(--s3);
+  color: var(--ink);
+}
+
+.btn.icon {
+  width: 32px;
+  padding: 0;
+}
+
+.btn.sm {
+  height: 26px;
+  padding: 0 var(--sp-2);
+  font-size: 12px;
+}
+
+.btn.icon.sm {
+  width: 26px;
+  padding: 0;
+}
+
+.btn:disabled {
+  opacity: 0.4;
+  transform: none;
+}
+
+/* ===== セグメント（2〜3 択の排他） ===== */
+.seg {
+  display: inline-flex;
+  flex: 0 0 auto;
+  gap: 2px;
+  padding: 2px;
+  border-radius: var(--r-sm);
+  background: var(--s3);
+  white-space: nowrap;
+}
+
+.seg > button {
+  height: 26px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--ink-2);
+  font-size: var(--fs-sub);
+  white-space: nowrap;
+}
+
+.seg > button:hover:not(:disabled) {
+  color: var(--ink);
+}
+
+.seg > button[aria-pressed="true"] {
+  background: var(--s1);
+  color: var(--ink);
+  box-shadow: var(--shadow-sm);
+}
+
+.seg > button:disabled {
+  opacity: 0.4;
+}
+
+/* ===== チップ（トグル・1 回の操作） ===== */
+.chip {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+  gap: var(--sp-1);
+  height: 28px;
+  padding: 0 10px;
+  border: 1px solid var(--line-2);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--ink-2);
+  font-size: var(--fs-sub);
+  white-space: nowrap;
+}
+
+.chip:hover:not(:disabled) {
+  background: var(--s3);
+  color: var(--ink);
+}
+
+.chip[aria-pressed="true"] {
+  border-color: var(--accent);
+  background: var(--accent-fill);
+  color: var(--accent-ink);
+}
+
+.chip.warn[aria-pressed="true"] {
+  border-color: var(--warn);
+  background: var(--warn-fill);
+  color: var(--warn);
+}
+
+.chip:disabled {
+  opacity: 0.4;
+}
+
+.chiprow {
+  display: flex;
+  gap: 6px;
+  min-width: 0;
+  padding: 2px 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.chiprow::-webkit-scrollbar {
+  display: none;
+}
+
+/* ===== ステッパー（− / 値 / +） ===== */
+.stepper {
+  display: inline-grid;
+  grid-template-columns: 28px minmax(0, 1fr) 28px;
+  align-items: center;
+  min-width: 0;
+  height: 36px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-sm);
+  background: var(--s2);
+  user-select: none;
+}
+
+.stepper > button {
+  height: 100%;
+  border: 0;
+  background: transparent;
+  color: var(--ink-2);
+  font-size: 16px;
+}
+
+.stepper > button:hover:not(:disabled) {
+  background: var(--s3);
+  color: var(--ink);
+}
+
+.stepper > button:disabled {
+  opacity: 0.35;
+}
+
+.stepper > .val {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  padding: 0 var(--sp-1);
+  line-height: 1.05;
+  text-align: center;
+}
+
+.stepper > .val b {
+  font-family: var(--mono);
+  font-size: var(--fs-body);
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.stepper > .val small {
+  overflow: hidden;
+  color: var(--ink-3);
+  font-size: 10px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.stepper.hot > .val b {
+  color: var(--accent-ink);
+}
+
+/* ===== タグ（印） ===== */
+.tag {
+  display: inline-block;
+  padding: 0 6px;
+  border-radius: 4px;
+  background: var(--s3);
+  color: var(--ink-2);
+  font-size: var(--fs-xs);
+  line-height: 16px;
+  white-space: nowrap;
+}
+
+.tag.warn {
+  background: var(--warn-fill);
+  color: var(--warn);
+}
+
+.tag.ok {
+  background: var(--gain-fill);
+  color: var(--gain);
+}
+
+.tag.bad {
+  background: var(--loss-fill);
+  color: var(--loss);
+}
+
+.kbd {
+  padding: 0 var(--sp-1);
+  border: 1px solid var(--line-2);
+  border-radius: 4px;
+  color: var(--ink-3);
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+  line-height: 16px;
+}
+
+/* ===== メニュー / ポップオーバー（ボタンの親に対する絶対配置。左右は .start / .end） ===== */
+.menu-wrap,
+.pop-wrap {
+  position: relative;
+  display: inline-flex;
+  flex: 0 0 auto;
+}
+
+.menu {
+  position: absolute;
+  top: calc(100% + var(--sp-1));
+  left: 0;
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+  min-width: 220px;
+  padding: 6px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--r);
+  background: var(--s2);
+  box-shadow: var(--shadow);
+}
+
+.menu.end,
+.popover.end {
+  right: 0;
+  left: auto;
+}
+
+.menu > button {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  height: 36px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--ink);
+  text-align: left;
+  white-space: nowrap;
+}
+
+.menu > button:hover:not([aria-disabled="true"]),
+.menu > button:focus-visible {
+  background: var(--s3);
+  outline: none;
+}
+
+.menu > button[aria-disabled="true"] {
+  opacity: 0.4;
+}
+
+.menu > button .mark {
+  width: 1em;
+  color: var(--accent-ink);
+  text-align: center;
+}
+
+.menu > button .kbd {
+  margin-left: auto;
+}
+
+.popover {
+  position: absolute;
+  top: calc(100% + var(--sp-1));
+  left: 0;
+  z-index: 50;
+  width: max-content;
+  max-width: min(320px, calc(100vw - 32px));
+  padding: 10px var(--sp-3);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r);
+  background: var(--s2);
+  color: var(--ink-2);
+  font-size: var(--fs-sub);
+  box-shadow: var(--shadow);
+}
+
+.hintbtn {
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 1px solid var(--line-2);
+  border-radius: 50%;
+  background: transparent;
+  color: var(--ink-3);
+  font-size: var(--fs-sm);
+  line-height: 16px;
+}
+
+.hintbtn:hover {
+  color: var(--ink);
+}
+
+/* ===== ダイアログ ===== */
+dialog.sheet {
+  width: min(520px, calc(100vw - 32px));
+  max-height: calc(100dvh - 32px);
+  padding: 0;
+  border: 0;
+  border-radius: var(--r);
+  background: var(--s2);
+  color: var(--ink);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+
+dialog.sheet[open] {
+  display: flex;
+  flex-direction: column;
+}
+
+dialog.sheet::backdrop {
+  background: var(--backdrop);
+}
+
+.sheet-head {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-3) var(--sp-4);
+  border-bottom: 1px solid var(--line);
+}
+
+.sheet-head h2 {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  font-size: var(--fs-body);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.sheet-body {
+  flex: 1;
+  min-height: 0;
+  padding: var(--sp-3) var(--sp-4);
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+
+/* ===== トースト（下中央・ドックの上） ===== */
+.toasts {
+  position: fixed;
+  bottom: calc(var(--dock-h) + var(--sp-3));
+  left: 50%;
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  max-width: calc(100vw - 16px);
+  transform: translateX(-50%);
+  pointer-events: none;
+}
+
+.toast {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  max-width: 100%;
+  padding: var(--sp-2) 14px;
+  border-radius: 999px;
+  background: var(--s4);
+  color: var(--ink);
+  font-size: var(--fs-sub);
+  white-space: nowrap;
+  box-shadow: var(--shadow);
+  pointer-events: auto;
+  animation: toast-in var(--dur) var(--ease);
+}
+
+.toast > .txt {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.toast > button {
+  flex: 0 0 auto;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--accent-ink);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}

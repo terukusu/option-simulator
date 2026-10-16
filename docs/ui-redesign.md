@@ -259,7 +259,7 @@ option-simulator の画面を「書類」から「計器」に作り直すため
 
 ## 7. 色と文字（トークン）
 
-ダーク基調。ライトは同じ役割名で値だけ差し替える。手動の切替（自動 / ダーク / ライト）を `html[data-theme]` に持ち、`prefers-color-scheme` は「自動」のときだけ見る。
+ダーク基調。ライトは同じ役割名で値だけ差し替える。テーマの設定は 端末に合わせる（自動）/ ダーク / ライト の 3 つで、`html[data-theme]` には **解決した値**（`dark` / `light`）を JS が入れる。`prefers-color-scheme` は「端末に合わせる」のときだけ見る（7.4）。トークンの実物は `ui/next/css/tokens.css`（#81）
 
 ### 7.1 面と文字
 
@@ -294,6 +294,14 @@ option-simulator の画面を「書類」から「計器」に作り直すため
 - 数値: `ui-monospace, "SF Mono", Menlo, Consolas`（読み取り・板・足の名前・ステッパー・レールの吹き出し）
 - サイズ: 本文 14 / 副 12.5 / 小 11 / 極小 10.5。読み取りの主役 26、他 18（スマホ 24 / 16）
 - 余白: 4 の倍数。パネルの左右 12、行の高さ 30（板）/ 48（足）/ 36（ステッパー）
+
+### 7.4 テーマの保存と解決・表に無いトークン（#81）
+
+- **保存**: 作業の保存（`option-simulator.workspace` の版 2）には入れず、端末の設定の別のキー **`option-simulator.prefs`**（版 1: `{ "schema_version": 1, "theme": "auto" | "dark" | "light" }`）に置く。テーマは端末の見た目の設定で、ポジションと一緒に保存一覧・書き出し・URL に載せる値ではないため（作業の版を上げると保存一覧・ファイルとの関係（#70・#71）まで動く）。読み取り・検証・書き出しは純関数 `ui/prefs.ts`（`ui/persist.ts` と同じ流儀: JSON でない・値が不正 → 既定の「端末に合わせる」、版 > 1 → 読まず、このセッションでは書かない）、I/O は `ui/storage.ts`
+- **解決**: `ui/main.tsx` が描く前に 1 回読み、`html[data-theme]` に解決した値を入れる（ちらつかない）。以後は `ui/next/useTheme.ts` が設定と `matchMedia('(prefers-color-scheme: light)')` の change を見て入れ直す。`color-scheme` は `tokens.css` のテーマの定義が合わせる。別のタブの変更は次に開いたときに反映（`storage` イベントは見ない）
+- 旧画面（`?ui=next` なし）は `option-simulator.prefs` を読まない（旧画面のテーマは今のまま `prefers-color-scheme`）
+- 7.1・7.2 の表に無いが、試作品が直書きしていた色は役割の名前でトークンにした（値は `tokens.css`。ダーク / ライトの両方に持つ）: `--accent-ink`（選択・強調の文字）・`--accent-fill`（選択の面）・`--handle-fill`（ハンドル・足の選択の面）・`--bid` / `--ask`（板の気配の文字）・`--warn-fill`（印・絞り込み中の面）・`--on-accent`（強調色の上の文字・バッジ）・`--scrim`（メニュー・パレットの下敷き）・`--backdrop`（ダイアログの背景）・`--shadow` / `--shadow-sm`（浮いた面・セグメントの選択の影）
+- 色でないトークン: 文字 `--font`・`--mono`・`--fs-body`(14)・`--fs-sub`(12.5)・`--fs-sm`(11)・`--fs-xs`(10.5)・`--fs-hero`(26 / スマホ 24)・`--fs-ro`(18 / スマホ 16)、間隔 `--sp-1`(4)〜`--sp-6`(24)、角丸 `--r`(10)・`--r-sm`(6)・`--r-sheet`(14)、高さ `--top-h`(48 / スマホ 44)・`--dock-h`(56)、動き `--dur-fast`(120ms)・`--dur`(180ms)・`--dur-line`(220ms)・`--ease`（`prefers-reduced-motion: reduce` で時間を 0 に）
 
 ---
 
@@ -346,7 +354,7 @@ option-simulator の画面を「書類」から「計器」に作り直すため
 
 | 段 | Issue の単位 | 依存 | 並列 |
 |---|---|---|---|
-| **0 土台** | (a) デザイントークン（`style.css` の `:root` と `[data-theme]`、テーマ切替の状態 `ui.theme` と保存）(b) 共通部品（seg / chip / stepper / menu / toast / dialog / popover）と折り返しの規則 (c) 3 段階のグリッド（`body` 固定、舞台 / シナリオ / 作業台 / 市場 / ドック / シートの状態 `ui.panel` `ui.sheet` `ui.market`） | なし | a / b / c は並列可（c は a の変数名に合わせる） |
+| **0 土台** | (a) デザイントークン（`ui/next/css/tokens.css` の `:root` と `[data-theme]`。旧 `style.css` とは排他）とテーマの切替・保存（端末の設定 `option-simulator.prefs`。7.4）(b) 共通部品（seg / chip / stepper / menu / toast / dialog / popover）と折り返しの規則 (c) 3 段階のグリッド（`body` 固定、舞台 / シナリオ / 作業台 / 市場 / ドック / シート。画面の状態 panel / sheet / market は新しい画面のローカル `ui/view/shell.ts`。保存しない）。**#81 で a / b / c を 1 本で入れた**（10.1） | なし | a / b / c は並列可（c は a の変数名に合わせる） |
 | **1 舞台** | (d) 描画域の改修: ハンドル・足マーカー・塗り・ラベルの位置・X₀（`ui/view/pnlChart.ts` の出力に足マーカーと塗りのパスを足す）(e) IV レール・時間レール（`ui/view/scenario.ts` の `sliderSpec` を使う。目盛りは `evalTimeTargets`）(f) 読み取り（`readoutModel` をそのまま大きな数字に）(g) 面モード（新規 `ui/view/pnlSurface.ts`: 格子の評価 + canvas。ドラッグ時の粗い格子） | 0 | d / e / f は並列可。g は d の後 |
 | **2 シナリオ** | (h) ステッパー（スクラブ・ホイール・数値入力）とプリセット・評価時刻のチップ、「モデルの前提」折りたたみ | 0 | 1 と並列可 |
 | **3 作業台** | (i) ポジションの行の見た目（枚数ステッパー・⇄・×・トースト [元に戻す]）と詳細 (j) ヘッジ 1 行 (k) 指標のタイルとテール表のバー (l) 足の追加ダイアログ | 0 | i / j / k / l は並列可 |
@@ -357,6 +365,23 @@ option-simulator の画面を「書類」から「計器」に作り直すため
 
 - 各段は「スマホ 390 / タブレット 900 / PC 1280・1440・1800 のスクリーンショット」と「幅 360 で横スクロールなし」を AC にする
 - 既存の `tests/ui/` は表示モデルのテストなので、そのまま通るはず。追加するのは `pnlSurface`（格子の値）と、折り返しの規則（主要な行の `scrollWidth`）の Playwright の確認
+
+### 10.1 段 0 で決めた実装の規約（#81。後続の #82〜#91 が従う）
+
+- **入口**: 新しい画面は `?ui=next` だけ（`ui/entry.ts` の `uiVariant`。`ui` がちょうど `next`）。`ui/main.tsx` は保存した作業を 1 回読んでから、旧画面なら今までどおり `App` を描き、新しい画面なら (1) 起動時にある `link[rel="stylesheet"]`（旧 CSS）を集め、(2) テーマを `html[data-theme]` に入れ、(3) `import('./next/main')` が解決した（= 新しい CSS を読み終えた）後に旧 CSS を `disabled` にして描く（読めなければ旧画面を描く）。`ui/index.html` は変えない。旧 CSS の無効化は #91 で消す暫定
+- **置き場所**: 新しい画面は `ui/next/` だけ。領域の部品は `ui/next/regions/<Region>.tsx`（`Stage`・`Scenario`・`Positions`・`Metrics`・`Board`・`Smile`。#82 以降が作る）、共通部品は `ui/next/parts/`、表示のロジックは `ui/view/` の純関数（Preact に依存しない、`tests/ui/` で固める）。旧の部品（`ui/components/*`）を新しい画面に置かない（旧 CSS が効かない）。逆に新しい部品を旧画面に置かない。DOM・CSS を持たないフック（`useAppController`・`useMediaQuery`）は共有してよい
+- **状態**: 作業の状態・保存・共有は `ui/components/useAppController.ts`（旧 `App.tsx` から切り出した。旧画面と同じ `ui/state.ts` の reducer・自動保存・別のタブ・URL 共有・保存一覧の操作・表示モデルの useMemo）。新しい画面だけの見た目の状態は `NextApp` のローカル（`ui/view/shell.ts` 型の純関数 reducer。保存しない）。保存の形式（作業の版 2・保存一覧・URL）を変えるときは設計書を先に直す
+- **CSS**: `ui/next/next.css` が `css/tokens.css` → `base.css` → `parts.css` → `shell.css` → 領域ごとの `css/<region>.css`（後続が末尾に足す）を `@import`。クラス名は試作品に合わせる（`.layout`・`.panel`・`.panel-head`・`.panel-body`・`.dock`・`.seg`・`.chip`・`.chiprow`・`.stepper`・`.menu`・`.toasts` / `.toast`・`dialog.sheet`・`.tag`・`.ro`・`.tile`・`.leg-row`・`table.board`）。状態は ARIA 属性（`aria-pressed`・`aria-expanded`・`aria-checked`・`aria-disabled`）→ `data-*` 属性 → 短い修飾クラス（`.hot`・`.warn`・`.end`）の順で表す。BEM・CSS Modules は使わない
+- **色**: `ui/next/**/*.css` で色の値（hex・`rgb()`・`hsl()`・色の名前）を書けるのは `tokens.css` のテーマの定義（`:root, :root[data-theme="dark"]` と `:root[data-theme="light"]`）の中だけ。`color-mix()` もトークン同士。足りない色は役割の名前で `tokens.css` に足す（7.4）。`tests/ui/cssTokens.test.ts`（CI に入る）が (a) 色の置き場所 (b) 7.1・7.2 の表の値（テストの中に写した定数。表を直したらテストも直す）(c) `var(--x)` の名前がすべて定義済み、を確かめる
+- **幅の段階**: CSS は `@media (max-width: 719.98px)` / `(min-width: 720px) and (max-width: 1199.98px)` / `(min-width: 1200px)`。JS は `PHONE_QUERY`・`PC_QUERY`（`ui/view/layout.ts`）と `layoutTier`（`ui/view/shell.ts`）。パネルの中の詰め方はコンテナクエリ（`.panel-body` が `container-type: inline-size`）
+- **画面の状態の規則**（`ui/view/shell.ts`）: 既定 positions / peek / board。ドックの別のボタン → そのパネル（hidden なら peek）、開いている同じボタン → hidden。つまみ（スマホ、見えているシートの先頭に 1 つ）は離したときの縦の移動量で決め、6px 未満はタップ（peek ⇄ full）、40px 以上で 1 段（下: full → peek → hidden、上: peek → full）、その間は何もしない。hidden ではつまみが無い。タブレットで scenario は選べない（positions に読み替える）。出し分けは `.layout[data-panel][data-sheet][data-market]` と CSS
+- **CSP**: `style` 属性・JSX の `style` prop・HTML 文字列を DOM に入れる API を使わない。位置・大きさが動くもの（シート・ハンドル・レールのつまみ・メニューの左右）は `data-*` / クラスの付け替えか SVG の属性。シートは指に追従させない
+- **折り返し**: 5.1。値・ラベル・ボタン・セグメント・チップは `white-space: nowrap`。ボタンの中でアイコンと文字を縦に積むときは文字を `span` に入れる（直下のテキストにしない）
+- **ページはスクロールしない**: `html, body { height: 100%; overflow: hidden }`、画面は `100dvh` のグリッド（トップバー → 知らせの行 → 本体）。スクロールは `.panel-body`（`overflow: auto; overscroll-behavior: contain`）だけ
+- **メニュー・ポップオーバー**: `overflow` を切らない親（トップバー・`.panel-head`）に置く。ボタンの親に対する絶対配置 + `.end`（ボタンが画面の右半分なら右端に揃える）。開くのは同時に 1 つ（`ui/next/parts/overlay.ts`）。メニューのキーは `ui/view/menu.ts`、ポップオーバーの開閉は `ui/view/hint.ts` の `hintNext`
+- **部品の API**: `Seg`・`Chip` / `ChipRow`・`Stepper`（規則は `ui/view/stepper.ts`。スクラブ・ホイール・数値入力は #83）・`Menu`・`Popover`・`Dialog`・`useToasts` / `Toasts`（規則は `ui/view/toast.ts`。2.2 秒・[元に戻す] 付き 5 秒・同じ種類は置き換え・最大 3 件）。部品の見本は dev だけの `?ui=next&parts`（`ui/next/dev/PartsGallery.tsx`。本番のビルドに入らない）
+- **検査**: `npm run ui:check`（`scripts/uiCheck.mjs`。Playwright の Chromium。CI に入れない。入れるかは #91 で決める）が 360×780・390×844・900×1100・1440×900 × ダーク / ライト（スマホはシート 3 段階）のページの縦・横スクロール（body が `overflow: hidden` で切っているはみ出しも数える）と折り返しの件数を出す。新しい画面で縦か横が 0 より大きければ失敗。`--parts`（部品の見本）・`--legacy`（旧画面）・`--flows`（保存・共有・テーマ・キーボードの手順）・`--dom`・`--shots`・`--max-wraps`・`--url`。各子の PR に `npm run ui:check` と `npm run ui:check -- --parts --max-wraps 0` の出力を貼り、縦・横 0px を保ち、折り返しの件数を増やさない
+- **知らせ**: #81 の時点の知らせ（保存・共有を開く確認・読み込み中 / 失敗・足を追加できない）はトップバーの下の行に旧画面と同じ文で出す暫定。#87 でトーストとトップバーのタグへ移す
 
 ---
 
@@ -393,3 +418,12 @@ option-simulator の画面を「書類」から「計器」に作り直すため
 - URL のクエリで状態を作れる（撮影用）: `?theme=light` `?panel=board` `?sheet=full` `?mode=heat` `?market=smile` `?d=5&dx=-2000&ds=4`
 - 撮影: 390×844（ダーク / ライトの板 / シナリオ / 指標の全開）、900×1100、1280×800、1440×900（ダーク / ライト / 面）。`docs/ui-redesign/proto-*.png`
 - 計算は簡易版（β の式・sticky moneyness の近似・BEP の格子探索）なので、数値は本番と一致しない。見せ方・触り方の確認にだけ使う
+
+---
+
+## 変更履歴
+
+### 2026-10-17 段 0 の土台（#81）
+
+- 7: `html[data-theme]` は解決した値。7.4 を新設（テーマの保存は端末のキー `option-simulator.prefs` の版 1、作業の保存には入れない。表に無い役割の色・色でないトークンの名前と値）
+- 10: 段 0 の行を実装に合わせて直した（トークンは `ui/next/css/tokens.css`、テーマは作業の状態でなく端末の設定、panel / sheet / market は新しい画面のローカルで保存しない）。10.1 を新設（入口・置き場所・状態・CSS・色・幅・画面の状態の規則・CSP・折り返し・メニュー・部品・検査の規約）

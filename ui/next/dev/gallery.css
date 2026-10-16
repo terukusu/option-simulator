@@ -1,0 +1,76 @@
+/* 部品の見本（dev だけ。PartsGallery.tsx が import する。本番のビルドに入らない） */
+
+.parts-gallery {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+  height: 100%;
+  padding: var(--sp-4);
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+
+.parts-gallery h1 {
+  font-size: 16px;
+  white-space: nowrap;
+}
+
+.gal-sec {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  padding: var(--sp-3);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  background: var(--s1);
+}
+
+.gal-sec h2 {
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.gal-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+.gal-spacer {
+  flex: 1;
+}
+
+.gal-note {
+  color: var(--ink-3);
+  font-size: var(--fs-sub);
+}
+
+.gal-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+.gal-narrow {
+  width: min(100%, 280px);
+}
+
+.gal-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: var(--sp-2);
+}
+
+.menu.gal-static {
+  position: static;
+  width: min(100%, 260px);
+  box-shadow: none;
+}
+
+.toast.gal-static {
+  align-self: flex-start;
+  animation: none;
+  box-shadow: none;
+}
