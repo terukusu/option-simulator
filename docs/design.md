@@ -872,6 +872,7 @@ F の推定・補間・ATM の判定はブラウザ（`model/`）。`sq_date`・
   - `fetch` のキャッシュ: `bigquery` は `no-cache` + `redirect: 'manual'`、`file` は `no-store`。自動ポーリングなし（[最新] だけ。読み込み中は無効）
 - 保存（**決定（2026-10-16、#23）**）
   - キー（origin ごと）: 作業 `option-simulator.workspace`、最後の板 `option-simulator.lastBoard`。版はキーでなく値の `schema_version` に持つ（古い版を同じキーで読み替える）
+  - 端末の設定（#81）: `option-simulator.prefs`（版 1 `{ schema_version: 1, theme: 'auto' | 'dark' | 'light' }`。新しい画面 `?ui=next` のテーマだけ。作業・保存一覧・URL には載せない。読み取りは `ui/prefs.ts` で、JSON でない・値が不正 → 既定 `auto`、版 > 1 → 読まず、このセッションでは書かない。旧画面は読まない。docs/ui-redesign.md 7.4）
   - #71 で作業のキーは版 2（タブの並び）に上げた（下の「BOX タブ」）。以下の版 1 の形式は、タブ 1 個分の `position` と保存一覧の項目（1 ポジションの文書）にそのまま残る
   - 作業の形式（版 1）: `{ schema_version: 1, saved_at: ISO, position: { board_snapshot_at, legs: [{ leg, marks, option_market?, future_market? }], scenario }, ui: { atm_basis, month_id, target, filter_ask, smile_axis, fee_per_lot, future_basis, metrics_unit, pnl_y, pnl_folded, hedge } }`。`leg` は model/ の `Leg`（評価前の入力: 建値・枚数・売買・IV の編集・mid）そのもの。足の id・評価結果・板・表示範囲・選択・開閉は保存しない。`position` は #70〜#72 が 1 単位として使う
   - 読み取り（`ui/persist.ts` の純関数）: JSON でない・版が整数でない → 読めない（次の変更で上書きしてよい）。版 > 1 → 読まない・**このセッションでは書かない**（新しい版のアプリから戻したときに新しい版の保存を消さない）。開いたあとも、別のタブの `storage` イベントで新しい版の保存を見たとき、または書く直前の読み直し（`isNewerWorkspace`）で新しい版が入っていたときは、そのセッションでは以後書かない（新しい版をデプロイしたあと、開いたままの古い版のタブが新しい版の保存を上書きしない。この守りは古い版＝今の版 1 のコードに入れておく必要がある）。保存した板も、新しい版の板は読めなくても消さない。版 < 1 → `MIGRATIONS` を順に掛ける（版 1 では空。版を上げるときは読み替えを足し、`tests/ui/saved/workspace-v<n>.json` の古い版の fixture は変えない）。既知のキーだけで新しいオブジェクトを組み立てる（余計なキー・`__proto__` は写さない）。範囲は入力の検証と同じ（枚数 1〜100,000 の整数、建値 0〜1e9（入力の `parseEntry` と同じ上限）、IV 0〜1,000%、K 正の整数、限月 `YYYY-MM`、手数料 0〜100,000、N 0〜1,000、目標 Δ ±1,000、シナリオは reducer の範囲）。**足・シナリオは 1 つでも不正なら `position` ごと捨てる**（足が 1 本だけ消えて損益の形が黙って変わるのを防ぐ）。表示の設定は項目ごとに既定へ。足は 200 本まで、未知の印は捨てる
@@ -1014,6 +1015,11 @@ optionchan-gcp の bootstrap / prod を写すだけでは足りないもの。
 | テスト | `terraform test`（`infra/bootstrap/tests/`・`infra/prod/tests/`、モックのプロバイダ。資格情報なしで CI の `check` job で回る）: bootstrap は公開の拒否、WIF の条件、apply SA の subject、データセットの付与の型と role。prod は IAP 有効・`ingress`・IAM の検査が有効、`run.invoker` が IAP のサービスエージェント 1 件だけ、イメージが digest か `src-<20hex>` のタグ参照だけ、8.3 の値（AC11） |
 
 ## 変更履歴
+
+### 2026-10-17 新しい画面の土台（#81）
+
+- 13.4「保存」: 端末の設定のキー `option-simulator.prefs`（版 1。新しい画面のテーマ）を足す。作業のキー・版・形式は変えない
+- 画面の再設計（docs/ui-redesign.md）の段 0（`?ui=next` の入口・トークン・共通部品・3 段階の骨組み・`npm run ui:check`）の規約は docs/ui-redesign.md 10.1。既定の画面（`?ui=next` なし）は変えない
 
 ### 2026-10-16 API の待ちを縮める（#95）
 
