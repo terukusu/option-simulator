@@ -5,7 +5,7 @@ optionchan の BigQuery（データセット `optionchan_tokyo` のテーブル�
 | エンドポイント | 内容 |
 |---|---|
 | `GET /api/chain` | 使える最新の板（7.2）を JSON 版 1（`data/chainTypes.ts`）で。`reason` = `latest` / `pre_open` / `after_close` / `closed`。`?at=` は後段（400） |
-| `GET /api/calendar` | 取引カレンダーの最新版 `{schema_version, source, version_at, covered_until, listed_until, days: [{date, is_trading_day, status, name}]}`（日付の昇順） |
+| `GET /api/calendar` | 取引カレンダーの最新版 `{schema_version, source, version_at, covered_until, listed_until, days: [{date, is_trading_day, status, name}]}`（日付の昇順）。画面は本番で開いたときと [最新] で読む（取れなければ同梱の版。#39） |
 | `GET /healthz` | 設定の読み込みだけ（BigQuery に触れない） |
 | `/`・`/assets/<path>` | `STATIC_DIR` があるときだけ、Vite のビルド成果物（`dist/`）を配る |
 
@@ -15,7 +15,7 @@ optionchan の BigQuery（データセット `optionchan_tokyo` のテーブル�
 
 | 名前 | 既定 | 意味 |
 |---|---|---|
-| `DATA_SOURCE` | `bigquery` | `bigquery` か `file`（`file` は `CHAIN_FILE` の JSON をそのまま `/api/chain` で返す。GCP なしで動かす用。`/api/calendar` は 503） |
+| `DATA_SOURCE` | `bigquery` | `bigquery` か `file`（`file` は `CHAIN_FILE` の JSON をそのまま `/api/chain` で返す。GCP なしで動かす用。`/api/calendar` は 503 で、画面は同梱の取引カレンダーを使う） |
 | `GCP_PROJECT` | なし（`bigquery` のとき必須） | BigQuery のプロジェクト ID |
 | `BQ_DATASET` | `optionchan_tokyo` | データセット |
 | `BQ_LOCATION` | `asia-northeast1` | ロケーション |

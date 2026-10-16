@@ -15,8 +15,7 @@
     "test": "vitest run",
     "perf": "node scripts/perf.mjs",
     "fixtures": "node scripts/fixtures.mjs",
-    "fixtures:check": "node scripts/fixtures.mjs --check",
-    "calendar:sync": "node scripts/syncCalendar.mjs"
+    "fixtures:check": "node scripts/fixtures.mjs --check"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.14",

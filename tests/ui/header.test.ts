@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { buildCalendar, normalizeChain } from '../../data';
-import holidaysJson from '../../data/calendar/holidays_jp.json';
-import tradingJson from '../../data/calendar/trading_calendar.json';
+import bundledJson from '../../data/calendar/calendar.json';
 import { CALENDAR } from '../../ui/calendar';
 import { fmtNum } from '../../ui/view/format';
 import {
+  calendarAssumption,
   headerModel,
   keptBoardNote,
   REASON_LABEL,
@@ -45,7 +45,7 @@ describe('ヘッダの表示モデル', () => {
       expect(a.months[i]?.atmK).toBe(m.atm.A.pick?.k);
     });
     expect(h.assumptions[2]).toBe(
-      `取引カレンダー: optionchan から同期（${CALENDAR.syncedOn}）・確定 ${CALENDAR.confirmedUntil} まで`,
+      `取引カレンダー: 同梱の版（${CALENDAR.versionOn}）・確定 ${CALENDAR.coveredUntil} まで`,
     );
     expect(h.calendarExpired).toBe(false);
     expect(h.calendarWarning).toBeNull();
@@ -101,7 +101,7 @@ describe('ヘッダの表示モデル', () => {
 describe('ヘッダの前提: 取引カレンダー', () => {
   const chain = normalizeChain(fixture('latest'));
   const withCoveredUntil = (d: string) =>
-    buildCalendar({ ...tradingJson, covered_until: d }, holidaysJson);
+    buildCalendar({ ...bundledJson, covered_until: d }, 'bundled');
 
   it('評価時刻が covered_until 当日 → 「カレンダー期限切れ」は出ない', () => {
     const h = headerModel(chain, 'B', withCoveredUntil('2026-10-13'));
@@ -120,7 +120,7 @@ describe('ヘッダの前提: 取引カレンダー', () => {
   });
 
   it('壊れたカレンダー → 例外を出さず「読めない」と「カレンダー期限切れ」', () => {
-    const broken = buildCalendar(tradingJson, { holidays: 'x' });
+    const broken = buildCalendar({ ...bundledJson, days: 'x' }, 'bundled');
     const h = headerModel(chain, 'B', broken);
     expect(h.assumptions).toContain('取引カレンダー: 読めない（SQ 日は土日だけで計算）');
     expect(h.calendarExpired).toBe(true);
@@ -200,5 +200,49 @@ describe('ヘッダ: 取得時刻・データ元・reason の理由', () => {
     expect(h.fetched).toBe('2026-10-13 21:47');
     expect(h.loadedFrom).toBe('保存した板（API）');
     expect(headerModel(chain, 'B', CALENDAR, { fetchedAt: FETCHED }).boardStale).toBe(false);
+  });
+});
+
+/** AC-7（#39）: 前提の文言（API の版 / 同梱の版 / 読めない / 期限切れ）。架空の版（日付は公開の休業日）。 */
+describe('calendarAssumption', () => {
+  // 2026-10-13T23:30:00Z = 2026-10-14 08:30 JST（版の日付は JST）
+  const json = {
+    schema_version: 1,
+    source: 'bigquery',
+    version_at: '2026-10-13T23:30:00Z',
+    covered_until: '2027-06-30',
+    listed_until: '2027-12-31',
+    days: [{ date: '2027-01-01', is_trading_day: false, status: 'confirmed', name: '元日' }],
+  };
+  const t = Date.parse('2026-10-13T12:31:00Z'); // 2026-10-13 21:31 JST
+
+  it('(a) API の版: 版の日付（version_at の JST の日付）と確定の最終日', () => {
+    const r = calendarAssumption(buildCalendar(json, 'api'), t);
+    expect(r.text).toBe('取引カレンダー: optionchan の版（2026-10-14）・確定 2027-06-30 まで');
+    expect(r.warning).toBeNull();
+  });
+
+  it('(b) 同梱の版: 同梱と分かる文（API の版の文と異なる）', () => {
+    const r = calendarAssumption(buildCalendar(json, 'bundled'), t);
+    expect(r.text).toBe('取引カレンダー: 同梱の版（2026-10-14）・確定 2027-06-30 まで');
+    expect(r.text).not.toBe(calendarAssumption(buildCalendar(json, 'api'), t).text);
+    expect(r.warning).toBeNull();
+  });
+
+  it('(c) 読めない: 「読めない」と「カレンダー期限切れ（カレンダーを読めない）」（API・同梱とも）', () => {
+    for (const origin of ['api', 'bundled'] as const) {
+      const r = calendarAssumption(buildCalendar({ ...json, schema_version: 2 }, origin), t);
+      expect(r.text).toBe('取引カレンダー: 読めない（SQ 日は土日だけで計算）');
+      expect(r.warning).toBe('カレンダー期限切れ（カレンダーを読めない）');
+    }
+  });
+
+  it('(d) 評価時刻が covered_until より後 → 期限切れの警告', () => {
+    const c = buildCalendar({ ...json, covered_until: '2026-10-12' }, 'api');
+    const r = calendarAssumption(c, t);
+    expect(r.text).toBe('取引カレンダー: optionchan の版（2026-10-14）・確定 2026-10-12 まで');
+    expect(r.warning).toBe(
+      'カレンダー期限切れ（評価時刻が 2026-10-12 より後。休業日が漏れている可能性）',
+    );
   });
 });

@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { buildCalendar, buildMarketContext, normalizeChain } from '../../data';
-import holidaysJson from '../../data/calendar/holidays_jp.json';
-import tradingJson from '../../data/calendar/trading_calendar.json';
+import bundledJson from '../../data/calendar/calendar.json';
 import {
   discountedIntrinsic,
   evaluatePosition,
@@ -139,7 +138,7 @@ describe('ポジション一覧', () => {
     expect(mini).toMatchObject({ sqDate: chain.future.sqDate, calendarUnconfirmed: false });
   });
 
-  it('板の無い限月の手入力の足は、その限月の SQ 日をコミット済みのカレンダーから求める', () => {
+  it('板の無い限月の手入力の足は、その限月の SQ 日を同梱のカレンダーから求める', () => {
     const s = reduce(state, { type: 'addManualLeg', input: manual('2027-01') });
     const row = positionModel(chain, s.legs, 'B', CALENDAR).rows[5];
     expect(row?.markLabels).toContain('板なし（手入力）');
@@ -148,9 +147,9 @@ describe('ポジション一覧', () => {
     expect(row?.greeks).not.toBeNull();
   });
 
-  it('コミット済みのカレンダーで、第 2 金曜が確定の最終日より後の限月には「休業日未確定」', () => {
-    // 確定の最終日の翌月以降で最初の限月（同期でカレンダーが延びても成り立つように求める）
-    const until = CALENDAR.confirmedUntil as string;
+  it('同梱のカレンダーで、第 2 金曜が確定の最終日より後の限月には「休業日未確定」', () => {
+    // 確定の最終日の翌月以降で最初の限月（同梱の版を作り直してカレンダーが延びても成り立つように求める）
+    const until = CALENDAR.coveredUntil as string;
     let y = Number(until.slice(0, 4));
     let m = Number(until.slice(5, 7)) + 1;
     if (m > 12) {
@@ -163,14 +162,14 @@ describe('ポジション一覧', () => {
   });
 });
 
-/** AC-6（#14）: 取引カレンダーの反映。確定の最終日を 2027-06-30 に固定したカレンダー（祝日はコミット済み）。 */
+/** AC-6（#14）・AC-3（#39）: 取引カレンダーの反映。確定の最終日を 2027-06-30 に固定したカレンダー（休業日は同梱の版）。 */
 describe('取引カレンダーの反映（SQ 日・休業日未確定）', () => {
-  const cal = buildCalendar({ ...tradingJson, covered_until: '2027-06-30' }, holidaysJson);
+  const cal = buildCalendar({ ...bundledJson, covered_until: '2027-06-30' }, 'bundled');
   const base: State = { ...run(), calendar: cal };
 
   it('前提: 確定の最終日 = 2027-06-30', () => {
     expect(cal.ok).toBe(true);
-    expect(cal.confirmedUntil).toBe('2027-06-30');
+    expect(cal.coveredUntil).toBe('2027-06-30');
   });
 
   it('板の無い 2027-02 限の手入力の足: SQ 日 2027-02-12（第 2 金曜）、印なし', () => {
@@ -209,8 +208,16 @@ describe('取引カレンダーの反映（SQ 日・休業日未確定）', () =
     expect(rows.map((r) => r.sqDate)).toEqual(['2027-09-10', '2027-09-10']);
   });
 
+  it('掲載範囲（listed_until）より後の 2028-02 限: 土日だけで SQ 日 2028-02-11（祝日は版に無い）、「休業日未確定」', () => {
+    expect(cal.listedUntil).toBe('2027-12-31');
+    const s = reduce(base, { type: 'addManualLeg', input: manual('2028-02') });
+    const row = positionModel(chain, s.legs, 'B', cal).rows[0];
+    expect(row?.sqDate).toBe('2028-02-11');
+    expect(row?.calendarUnconfirmed).toBe(true);
+  });
+
   it('壊れたカレンダー: 例外を出さず、SQ 日は土日だけで計算、暦から求めた足は全部「休業日未確定」', () => {
-    const broken = buildCalendar({ broken: true }, holidaysJson);
+    const broken = buildCalendar({ broken: true }, 'bundled');
     const b: State = { ...run(), calendar: broken };
     let s = reduce(b, { type: 'addManualLeg', input: manual('2027-02') });
     s = reduce(s, {

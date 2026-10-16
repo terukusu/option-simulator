@@ -1,11 +1,11 @@
 /**
- * 取引カレンダー（optionchan から同期）と国民の祝日の一覧。設計 docs/design.md 5.2・7.5。
+ * 取引カレンダー（`/api/calendar` の版 = optionchan の trading_calendar_latest）。設計 docs/design.md 5.2・7.5。
  *
- * - 同期した JSON（data/calendar/*.json。`npm run calendar:sync` が書く生成物）の形を検証し、
- *   SQ 日・取引最終日の判定に使う休業日の集合（closed_dates ∪ 祝日。土日は model/time.ts が常に休業日扱い）と
- *   「確定の最終日」（2 つの covered_until の早い方）を作る
+ * - `/api/calendar` の JSON（同梱の版 data/calendar/calendar.json も同じ形）の形を検証し、
+ *   SQ 日・取引最終日の判定に使う休業日の集合（版の全行。is_trading_day を問わない。土日は model/time.ts が
+ *   常に休業日扱い）と「確定の最終日」（covered_until）を作る
  * - 壊れていても例外を出さない（ok = false、休業日なし = 土日だけ、期限切れ扱い）
- * - 純関数。JSON の import は ui/calendar.ts だけ（同期スクリプトも書く前にここの検証を通す）
+ * - 純関数。同梱の JSON の import は ui/calendar.ts だけ、API の読み込みは data/adapter.ts
  */
 
 import { secondFriday } from '../model/time';
@@ -13,57 +13,53 @@ import type { ValidationResult } from './chainJson';
 
 export const CALENDAR_SCHEMA_VERSION = 1;
 
-export interface CalendarSource {
-  /** 取得元の名前（URL は入れない） */
-  name: string;
-  /** 取得した内容（バイト列）の SHA-256（16 進 64 桁） */
-  sha256: string;
-  /** 取得日時（ISO 8601） */
-  fetched_at: string;
-}
-
-/** data/calendar/trading_calendar.json（optionchan の config/trading_calendar.toml から） */
-export interface TradingCalendarJson {
-  schema_version: 1;
-  source: CalendarSource;
-  /** 休業日を漏れなく書いた最終日（YYYY-MM-DD） */
-  covered_until: string;
-  /** 平日の休業日（昇順・重複なし。covered_until より後の「予定」の日も含む） */
-  closed_dates: string[];
-}
-
-export interface HolidayEntry {
+/** 版の 1 行（平日の休業日・祝日取引の実施日など。土日は入らないこともある） */
+export interface CalendarDayJson {
   date: string;
+  /** 取引日か（祝日取引の実施日は true。SQ 日・取引最終日の判定では問わない） */
+  is_trading_day: boolean;
+  /** confirmed / planned など（値は問わない） */
+  status: string;
   name: string;
 }
 
-/** data/calendar/holidays_jp.json（内閣府「国民の祝日」の CSV から） */
-export interface HolidaysJson {
+/** `/api/calendar` の応答（api/src/simulator_api/calendar.py の calendar_json） */
+export interface CalendarJson {
   schema_version: 1;
-  source: CalendarSource;
-  /** 収録の最終日（CSV の最終年の 12/31） */
+  /** 取得元（"bigquery"。検証しない） */
+  source?: unknown;
+  /** 版の日時（ISO 8601、オフセットつき） */
+  version_at: string;
+  /** 休業日を確定で書いた最終日（YYYY-MM-DD） */
   covered_until: string;
-  /** 祝日（振替休日・国民の休日を含む。昇順・重複なし） */
-  holidays: HolidayEntry[];
+  /** 掲載の最終日（YYYY-MM-DD） */
+  listed_until: string;
+  /** 版の全行（日付の昇順・重複なし） */
+  days: CalendarDayJson[];
 }
+
+/** 版の出どころ: API から読んだ版か、ビルドに同梱した版か */
+export type CalendarOrigin = 'api' | 'bundled';
 
 export interface Calendar {
-  /** 2 つの JSON がどちらも形の検査に通った */
+  /** 形の検査に通った */
   ok: boolean;
   errors: string[];
-  /** SQ 日・取引最終日の判定に使う休業日（closed_dates ∪ 祝日。壊れていれば空） */
+  /** SQ 日・取引最終日の判定に使う休業日 = 版の全行の date（is_trading_day を問わない。壊れていれば空） */
   holidays: ReadonlySet<string>;
-  /** 取引カレンダーの covered_until（期限切れの判定） */
+  /** 確定の最終日 = covered_until（期限切れ・「休業日未確定」の判定。壊れていれば null） */
   coveredUntil: string | null;
-  /** 確定の最終日 = 取引カレンダーと祝日の一覧の covered_until の早い方 */
-  confirmedUntil: string | null;
-  /** 取引カレンダーを同期した日（fetched_at の JST の日付） */
-  syncedOn: string | null;
+  /** 掲載の最終日 = listed_until */
+  listedUntil: string | null;
+  /** 版の日時（version_at。同じ版かの比較に使う） */
+  versionAt: string | null;
+  /** 版の日付（version_at の JST の日付。ヘッダに出す） */
+  versionOn: string | null;
+  origin: CalendarOrigin;
 }
 
 const ISO_DATE = /^(\d{4})-(\d{2})-(\d{2})$/;
 const ISO_INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d{1,9})?)?(Z|[+-]\d{2}:\d{2})$/;
-const SHA256 = /^[0-9a-f]{64}$/;
 const JST_OFFSET_MS = 9 * 3_600_000;
 const MAX_ERRORS = 50;
 
@@ -96,27 +92,6 @@ function asObject(v: unknown, path: string, e: Errors): Record<string, unknown> 
   return v as Record<string, unknown>;
 }
 
-function checkHeader(o: Record<string, unknown>, e: Errors): void {
-  if (o.schema_version !== CALENDAR_SCHEMA_VERSION) {
-    e.add('$.schema_version', `${CALENDAR_SCHEMA_VERSION} でない`);
-  }
-  const s = asObject(o.source, '$.source', e);
-  if (s) {
-    if (typeof s.name !== 'string' || s.name === '') e.add('$.source.name', '空でない文字列でない');
-    if (typeof s.sha256 !== 'string' || !SHA256.test(s.sha256)) {
-      e.add('$.source.sha256', '16 進 64 桁でない');
-    }
-    if (
-      typeof s.fetched_at !== 'string' ||
-      !ISO_INSTANT.test(s.fetched_at) ||
-      !Number.isFinite(Date.parse(s.fetched_at))
-    ) {
-      e.add('$.source.fetched_at', 'ISO 8601 の日時でない');
-    }
-  }
-  if (!isIsoDate(o.covered_until)) e.add('$.covered_until', '実在する YYYY-MM-DD でない');
-}
-
 /** 日付の配列が実在の日付で厳密に昇順（重複なし）か。 */
 function checkAscendingDates(dates: unknown[], path: (i: number) => string, e: Errors): void {
   let prev: string | null = null;
@@ -130,79 +105,84 @@ function checkAscendingDates(dates: unknown[], path: (i: number) => string, e: E
   });
 }
 
-export function validateTradingCalendarJson(v: unknown): ValidationResult<TradingCalendarJson> {
-  const e = new Errors();
-  const o = asObject(v, '$', e);
-  if (o) {
-    checkHeader(o, e);
-    if (!Array.isArray(o.closed_dates)) e.add('$.closed_dates', '配列でない');
-    else checkAscendingDates(o.closed_dates, (i) => `$.closed_dates[${i}]`, e);
-  }
-  return e.list.length === 0
-    ? { ok: true, value: v as TradingCalendarJson }
-    : { ok: false, errors: e.list };
+/** ISO 8601 の日時（オフセットつき）か。日付の部分は実在の日、時刻は 00:00〜23:59（:60 は不可）。 */
+function isIsoInstant(v: unknown): v is string {
+  if (typeof v !== 'string' || !ISO_INSTANT.test(v) || !isIsoDate(v.slice(0, 10))) return false;
+  const hh = Number(v.slice(11, 13));
+  const mm = Number(v.slice(14, 16));
+  const ss = v[16] === ':' ? Number(v.slice(17, 19)) : 0;
+  const off = /([+-])(\d{2}):(\d{2})$/.exec(v);
+  if (off && (Number(off[2]) > 23 || Number(off[3]) > 59)) return false;
+  return hh <= 23 && mm <= 59 && ss <= 59 && Number.isFinite(Date.parse(v));
 }
 
-export function validateHolidaysJson(v: unknown): ValidationResult<HolidaysJson> {
+/** `/api/calendar` の JSON の形の検査。status の値・source・余分なキーは見ない。 */
+export function validateCalendarJson(v: unknown): ValidationResult<CalendarJson> {
   const e = new Errors();
   const o = asObject(v, '$', e);
   if (o) {
-    checkHeader(o, e);
-    if (!Array.isArray(o.holidays)) e.add('$.holidays', '配列でない');
+    if (o.schema_version !== CALENDAR_SCHEMA_VERSION) {
+      e.add('$.schema_version', `${CALENDAR_SCHEMA_VERSION} でない`);
+    }
+    if (!isIsoInstant(o.version_at)) e.add('$.version_at', 'ISO 8601 の日時でない');
+    if (!isIsoDate(o.covered_until)) e.add('$.covered_until', '実在する YYYY-MM-DD でない');
+    if (!isIsoDate(o.listed_until)) e.add('$.listed_until', '実在する YYYY-MM-DD でない');
+    if (!Array.isArray(o.days)) e.add('$.days', '配列でない');
     else {
       const dates: unknown[] = [];
-      o.holidays.forEach((h, i) => {
-        const ho = asObject(h, `$.holidays[${i}]`, e);
-        dates.push(ho?.date);
-        if (ho && (typeof ho.name !== 'string' || ho.name === '')) {
-          e.add(`$.holidays[${i}].name`, '空でない文字列でない');
+      o.days.forEach((d, i) => {
+        const p = `$.days[${i}]`;
+        const x = asObject(d, p, e);
+        dates.push(x?.date);
+        if (!x) return;
+        if (typeof x.is_trading_day !== 'boolean') e.add(`${p}.is_trading_day`, 'boolean でない');
+        if (typeof x.status !== 'string' || x.status === '') {
+          e.add(`${p}.status`, '空でない文字列でない');
         }
+        if (typeof x.name !== 'string') e.add(`${p}.name`, '文字列でない');
       });
-      checkAscendingDates(dates, (i) => `$.holidays[${i}].date`, e);
+      checkAscendingDates(dates, (i) => `$.days[${i}].date`, e);
     }
   }
   return e.list.length === 0
-    ? { ok: true, value: v as HolidaysJson }
+    ? { ok: true, value: v as CalendarJson }
     : { ok: false, errors: e.list };
 }
 
-/** 2 つの JSON から画面で使うカレンダーを作る。壊れていても例外を出さない。 */
-export function buildCalendar(trading: unknown, holidays: unknown): Calendar {
-  const t = validateTradingCalendarJson(trading);
-  const h = validateHolidaysJson(holidays);
-  if (!t.ok || !h.ok) {
+/** `/api/calendar` の形の JSON から画面で使うカレンダーを作る。壊れていても例外を出さない。 */
+export function buildCalendar(json: unknown, origin: CalendarOrigin): Calendar {
+  const r = validateCalendarJson(json);
+  if (!r.ok) {
     return {
       ok: false,
-      errors: [
-        ...(t.ok ? [] : t.errors.map((x) => `trading_calendar.json ${x}`)),
-        ...(h.ok ? [] : h.errors.map((x) => `holidays_jp.json ${x}`)),
-      ],
+      errors: r.errors,
       holidays: new Set(),
       coveredUntil: null,
-      confirmedUntil: null,
-      syncedOn: null,
+      listedUntil: null,
+      versionAt: null,
+      versionOn: null,
+      origin,
     };
   }
-  const set = new Set<string>(t.value.closed_dates);
-  for (const x of h.value.holidays) set.add(x.date);
-  const a = t.value.covered_until;
-  const b = h.value.covered_until;
+  const v = r.value;
   return {
     ok: true,
     errors: [],
-    holidays: set,
-    coveredUntil: a,
-    confirmedUntil: a < b ? a : b,
-    syncedOn: jstDate(Date.parse(t.value.source.fetched_at)),
+    holidays: new Set(v.days.map((d) => d.date)),
+    coveredUntil: v.covered_until,
+    listedUntil: v.listed_until,
+    versionAt: v.version_at,
+    versionOn: jstDate(Date.parse(v.version_at)),
+    origin,
   };
 }
 
 /**
  * その限月の SQ 日・取引最終日が確定した休業日で求まるか。SQ 日・取引最終日の決定に使う日は
- * すべて第 2 金曜以前なので、第 2 金曜が確定の最終日以前なら両方確定（設計 7.5）。
+ * すべて第 2 金曜以前なので、第 2 金曜が確定の最終日（covered_until）以前なら両方確定（設計 7.5）。
  */
 export function isExpiryConfirmed(cal: Calendar, year: number, month: number): boolean {
-  return cal.ok && cal.confirmedUntil !== null && secondFriday(year, month) <= cal.confirmedUntil;
+  return cal.ok && cal.coveredUntil !== null && secondFriday(year, month) <= cal.coveredUntil;
 }
 
 /** 評価時刻（epoch ミリ秒）の JST の日付が covered_until より後なら期限切れ。壊れていれば期限切れ。 */

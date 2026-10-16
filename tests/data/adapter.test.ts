@@ -3,6 +3,7 @@ import {
   ChainLoadError,
   createBigQueryAdapter,
   createFileAdapter,
+  loadCalendarJson,
   loadNormalizedChain,
 } from '../../data/adapter';
 import { RAW_FIXTURES } from '../support/fixtures';
@@ -186,6 +187,116 @@ describe('bigquery アダプタの応答の扱い（#34）', () => {
     expect(e.kind).toBe('invalid');
     expect(e.status).toBeNull();
     expect(e.errors).toEqual(['a']);
+  });
+});
+
+/** #39 AC-4: 取引カレンダー（/api/calendar）。fetch は偽物、版は架空（日付は公開の休業日）。 */
+describe('loadCalendarJson（/api/calendar を読む）', () => {
+  interface Init {
+    signal?: AbortSignal;
+    cache?: RequestCache;
+    redirect?: RequestRedirect;
+  }
+  const calText = JSON.stringify({
+    schema_version: 1,
+    source: 'bigquery',
+    version_at: '2026-10-14T08:30:00+09:00',
+    covered_until: '2027-06-30',
+    listed_until: '2027-12-31',
+    days: [
+      { date: '2026-12-31', is_trading_day: false, status: 'confirmed', name: '年末休業日' },
+      { date: '2027-01-01', is_trading_day: false, status: 'planned', name: '元日' },
+    ],
+  });
+
+  function recorder(res: { ok: boolean; status: number; type?: string; body?: string }) {
+    const calls: { url: string; init: Init | undefined }[] = [];
+    const fetch = async (url: string, init?: Init) => {
+      calls.push({ url, init });
+      return {
+        ok: res.ok,
+        status: res.status,
+        ...(res.type !== undefined ? { type: res.type } : {}),
+        text: async () => res.body ?? '',
+      };
+    };
+    return { fetch, calls };
+  }
+
+  it('(a) 200 → 検証済みの版', async () => {
+    const { fetch } = recorder({ ok: true, status: 200, body: calText });
+    const json = await loadCalendarJson({ fetch });
+    expect(json.covered_until).toBe('2027-06-30');
+    expect(json.days.map((d) => d.date)).toEqual(['2026-12-31', '2027-01-01']);
+  });
+
+  it("(b) URL は /api/calendar、init は cache: 'no-cache'・redirect: 'manual'（signal も渡す）", async () => {
+    const { fetch, calls } = recorder({ ok: true, status: 200, body: calText });
+    await loadCalendarJson({ fetch });
+    const ctl = new AbortController();
+    await loadCalendarJson({ fetch, signal: ctl.signal });
+    expect(calls.map((c) => c.url)).toEqual(['/api/calendar', '/api/calendar']);
+    expect(calls[0]?.init).toEqual({ cache: 'no-cache', redirect: 'manual' });
+    expect(calls[1]?.init).toEqual({ cache: 'no-cache', redirect: 'manual', signal: ctl.signal });
+  });
+
+  it('(c) 503 → kind http・status 503。応答の本文を含めない', async () => {
+    const { fetch } = recorder({ ok: false, status: 503, body: '{"error":"secret detail"}' });
+    const e = await loadCalendarJson({ fetch }).catch((x) => x);
+    expect(e).toBeInstanceOf(ChainLoadError);
+    expect(e.kind).toBe('http');
+    expect(e.status).toBe(503);
+    expect(e.message).toBe('カレンダーを読めない（api: HTTP 503）');
+    expect(e.message).not.toMatch(/secret/);
+    expect(e.errors).toEqual([]);
+  });
+
+  it.each([
+    ['opaqueredirect', { ok: false, status: 0, type: 'opaqueredirect' }],
+    ['401', { ok: false, status: 401, body: 'login page' }],
+  ])('(d) %s → ログイン切れ（kind auth）', async (_name, res) => {
+    const { fetch } = recorder(res);
+    const e = await loadCalendarJson({ fetch }).catch((x) => x);
+    expect(e).toBeInstanceOf(ChainLoadError);
+    expect(e.kind).toBe('auth');
+    expect(e.message).toBe('ログインが切れた（api）');
+    expect(e.message).not.toMatch(/login page/);
+  });
+
+  it('(e) 通信エラー（例外）→ kind network', async () => {
+    const e = await loadCalendarJson({
+      fetch: async () => {
+        throw new TypeError('Failed to fetch secret-host');
+      },
+    }).catch((x) => x);
+    expect(e).toBeInstanceOf(ChainLoadError);
+    expect(e.kind).toBe('network');
+    expect(e.message).toBe('カレンダーを読めない（api: 通信エラー）');
+    expect(e.message).not.toMatch(/secret/);
+  });
+
+  it('(f) AbortError はそのまま投げる', async () => {
+    const abort = new DOMException('aborted', 'AbortError');
+    await expect(
+      loadCalendarJson({
+        fetch: async () => {
+          throw abort;
+        },
+      }),
+    ).rejects.toBe(abort);
+  });
+
+  it.each([
+    ['検証に落ちる', '{"schema_version":1}', '$.version_at'],
+    ['JSON として解析できない', '<html>login</html>', '$'],
+  ])('(g) 壊れた JSON（%s）→ kind invalid・明細つき', async (_name, body, path) => {
+    const { fetch } = recorder({ ok: true, status: 200, body });
+    const e = await loadCalendarJson({ fetch }).catch((x) => x);
+    expect(e).toBeInstanceOf(ChainLoadError);
+    expect(e.kind).toBe('invalid');
+    expect(e.message).toBe('カレンダーの JSON が不正（api）');
+    expect(e.message).not.toMatch(/login/);
+    expect(e.errors.some((x: string) => x.startsWith(`${path}:`))).toBe(true);
   });
 });
 

@@ -18,10 +18,9 @@ npm run typecheck
 npm run lint
 npm test
 npm run dev        # 画面（ui/）。合成の板 latest.json を既定で読み、night_early / pre_open に切替、[最新] で API（/api を 127.0.0.1:8080 の手元の Flask へプロキシ。api/README.md の DATA_SOURCE=file）、手元の JSON はファイル選択
-npm run build      # dist/（合成の板は入らない。本番の画面は開いたら 1 回 /api/chain を読み、以降は [最新] で読み直す。ファイル選択も使える）
+npm run build      # dist/（合成の板は入らない。本番の画面は開いたら 1 回 /api/chain と /api/calendar を読み、以降は [最新] で読み直す。ファイル選択も使える）
 npm run fixtures   # 合成の板 JSON（fixtures/synthetic/）を作り直す。CI は fixtures:check で一致を検査
 npm run fixtures -- --wide  # 322 行 × 2 限月の板を fixtures/local/synthetic_wide.json に書く（性能の確認用。コミットしない）
-OPTIONCHAN_CALENDAR_URL=<URL> npm run calendar:sync  # 取引カレンダーと国民の祝日を data/calendar/ に同期（下の「取引カレンダー」）
 ```
 
 API（`api/`。Python 3.13 + Flask。uv 0.12.19）。手順の詳細・環境変数は [`api/README.md`](api/README.md)。
@@ -69,14 +68,18 @@ docker build -t simulator:local . && .github/scripts/image-check.sh simulator:lo
 - スマイル: OTM 側の bid / ask / mid の IV と σ_smile の線（節点区間は実線、補間・外挿は点線、不安定は ×）、ATM の縦線。横軸は行使価格 / moneyness / デルタ。点（× を含む）をタップ / クリックすると最寄りの行使価格（12px 以内）を選び、下の操作行「K 64,000 put: [売り（bid）] [買い（ask）]」で板と同じ規則の足が入る（ドラッグでは選ばない。限月の切替・板の読み直しで消える）
 - ポジション: 足ごとの商品・限月・売買・枚数・建値・IV・Δ（ラージ / ミニ）・Γ・Θ・V・建値ずれ・SQ 日・印。枚数・建値・IV・売買を編集できる。先物の足（既定ミニ）と板の無い限月の OP の足（手入力）を追加できる。保存はまだ無い（再読み込みで消える）
 - デルタヘッジ（ポジションの下。#19）: 目標 Δ（ラージ換算、既定 0）に要るミニ・ラージ先物の枚数（符号つき）と追加後の残りを出し、[追加] で先物の足（既定はミニ・板の先物の限月・建値は板の先物価格）が入る。評価点はシナリオ適用前（ポジション一覧の Δ）/ シナリオ時点（指標のシナリオ点）。限月は板の OP の限月も選べる（建値の初期値はその月の合成先物）。ミニが 0 枚ならマイクロ換算を併記。枚数は足・シナリオ・目標の変更ごとに出し直す（再ヘッジ）
-- 板の無い限月の足の SQ 日は取引カレンダー（下）で求める。その限月の第 2 金曜が確定の最終日より後なら「休業日未確定」。ヘッダの前提に同期日と確定の最終日、評価時刻がカレンダーの `covered_until` を過ぎたら「カレンダー期限切れ」
+- 板の無い限月の足の SQ 日は取引カレンダー（下）で求める。その限月の第 2 金曜が確定の最終日より後なら「休業日未確定」。ヘッダの前提にカレンダーの版（optionchan の版 / 同梱の版）の日付と確定の最終日、評価時刻がカレンダーの `covered_until` を過ぎたら「カレンダー期限切れ」
 
 ## 取引カレンダー
 
-板の無い限月の SQ 日・取引最終日は、休業日 = 土日 ∪ optionchan の `config/trading_calendar.toml` の `closed_dates` ∪ 国民の祝日で求める（`docs/design.md` 5.2・7.5）。どちらも `data/calendar/` の JSON（`npm run calendar:sync` が書く生成物。手で編集しない）をビルドに入れる。ビルドはネットワークに出ない。
+板の無い限月の SQ 日・取引最終日は、休業日 = 土日 ∪ 取引カレンダーの版（optionchan の BigQuery のビュー `trading_calendar_latest`）の全行の日付で求める（`docs/design.md` 5.2・7.5）。
 
-- **同期**: `OPTIONCHAN_CALENDAR_URL=<URL> npm run calendar:sync`。`<URL>` は自分の optionchan のリポジトリの toml の raw URL（例 `https://raw.githubusercontent.com/<OWNER>/<REPO>/<BRANCH>/config/trading_calendar.toml`）。国民の祝日は内閣府の CSV（既定の URL。`HOLIDAYS_CSV_URL` で上書き可）。内容が同じなら書き換えない。取得・形の検査に失敗したら何も書かずに exit 1（2 ファイルはまとめて書き、書き込みの途中で失敗したら元に戻す）。URL は出力しない
-- **定期同期**（`.github/workflows/calendar-sync.yml`。毎週月曜 + 手動）: **secret** `OPTIONCHAN_CALENDAR_URL`（必須。`gh secret set OPTIONCHAN_CALENDAR_URL`。Actions のログではマスクされる。未設定ならワークフローは警告だけで成功終了）と、任意でリポジトリ変数 `HOLIDAYS_CSV_URL` を設定し、Settings → Actions → General の「Allow GitHub Actions to create and approve pull requests」を有効にする。差分があればブランチ `calendar-sync` の PR ができる（PR は 1 本。差分が無くなれば閉じる）。差分（`covered_until`・`closed_dates`・祝日）を optionchan の toml・内閣府の公表と見比べてマージする
-  - `GITHUB_TOKEN` で作った PR には `pull_request` の CI が走らないので、ワークフローが `ci.yml` を `workflow_dispatch` で起動して `check` を付ける。付いていなければ `gh workflow run ci.yml --ref calendar-sync`
-  - 同期が失敗したら（toml の形の変更など）ジョブが失敗する。`scripts/calendarSync.ts` の検査と toml を見比べて直す
-- **祝日の一覧の更新**: 同じワークフローで自動（内閣府は例年 2 月ごろに翌年分を公表）。収録期間が短くなる CSV は取り込まない
+- **本番**: 画面は開いたときと [最新] で `/api/calendar`（API が BigQuery から読んだ最新の版）を読む。ヘッダの前提は「取引カレンダー: optionchan の版（<版の日付>）・確定 <covered_until> まで」
+- **取れないとき**: 同梱の版（`data/calendar/calendar.json`。`/api/calendar` と同じ形）を使う。dev の合成の板・ファイル選択・`DATA_SOURCE=file` の Flask（`/api/calendar` は 503）でも同梱の版で動く（BigQuery 無しで使える）。前提は「取引カレンダー: 同梱の版（<版の日付>）・…」
+- **同梱の版の作り直し**（自動更新はしない。期限切れが近いとき・新しい年の休業日が公表されたとき）: BigQuery を読める手元（ADC）で API を起動し、`/api/calendar` だけを呼んで書く（読むのはビュー 1 本・十数 KB。板は読まない）。`npm test` で検証・全月の SQ 日の検査・合成の板の日付との一致を確かめてから PR にする
+
+  ```sh
+  cd api && GCP_PROJECT=<PROJECT_ID> uv run --locked flask --app simulator_api.app run -p 8080   # 別の端末で
+  curl -sf http://127.0.0.1:8080/api/calendar | python3 -m json.tool --no-ensure-ascii --indent 2 > data/calendar/calendar.json
+  npm test
+  ```

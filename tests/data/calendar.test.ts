@@ -3,15 +3,14 @@ import {
   buildCalendar,
   isCalendarExpired,
   isExpiryConfirmed,
-  validateHolidaysJson,
-  validateTradingCalendarJson,
+  validateCalendarJson,
 } from '../../data/calendar';
-import holidaysJson from '../../data/calendar/holidays_jp.json';
-import tradingJson from '../../data/calendar/trading_calendar.json';
+import bundledJson from '../../data/calendar/calendar.json';
 import {
   isBusinessDay,
   jstInstant,
   lastTradingDay,
+  monthlyExpiry,
   nextBusinessDay,
   secondFriday,
   sqDate,
@@ -19,102 +18,315 @@ import {
 import { RAW_FIXTURES } from '../support/fixtures';
 
 /**
- * AC-3（#14）: コミット済みの取引カレンダー（optionchan から同期）と国民の祝日の一覧。
- * 板の値は合成の固定 JSON（架空の値）。
+ * #39: 取引カレンダー（`/api/calendar` の形。同梱の版 data/calendar/calendar.json も同じ形）。
+ * 板の値は合成の固定 JSON（架空の値）。テストの版の日付は公開の祝日・休業日。
  */
 
-const cal = buildCalendar(tradingJson, holidaysJson);
+const cal = buildCalendar(bundledJson, 'bundled');
 
-/** 合成のカレンダー JSON（buildCalendar の境界の確認用。日付は例） */
-function synthTrading(over: Record<string, unknown> = {}) {
+/** 架空の版（`/api/calendar` の形。日付は公開の祝日・休業日） */
+function synthCalendar(over: Record<string, unknown> = {}): Record<string, unknown> {
   return {
     schema_version: 1,
-    source: {
-      name: 'test',
-      sha256: 'a'.repeat(64),
-      fetched_at: '2026-10-13T15:30:00Z',
-    },
+    source: 'bigquery',
+    version_at: '2026-10-14T08:30:00+09:00',
     covered_until: '2027-06-30',
-    closed_dates: ['2026-12-31', '2027-01-01'],
-    ...over,
-  };
-}
-
-function synthHolidays(over: Record<string, unknown> = {}) {
-  return {
-    schema_version: 1,
-    source: { name: 'test', sha256: 'b'.repeat(64), fetched_at: '2026-10-13T15:30:00Z' },
-    covered_until: '2027-12-31',
-    holidays: [
-      { date: '2027-01-01', name: '元日' },
-      { date: '2027-02-11', name: '建国記念の日' },
+    listed_until: '2027-12-31',
+    days: [
+      { date: '2026-12-31', is_trading_day: false, status: 'confirmed', name: '年末休業日' },
+      { date: '2027-01-01', is_trading_day: false, status: 'confirmed', name: '元日' },
+      { date: '2027-02-11', is_trading_day: true, status: 'confirmed', name: '建国記念の日' },
     ],
     ...over,
   };
 }
 
-describe('コミット済みのカレンダー', () => {
-  it('形の検査に通る（日付の形式・昇順・重複なし・covered_until が日付）', () => {
-    const t = validateTradingCalendarJson(tradingJson);
-    const h = validateHolidaysJson(holidaysJson);
-    expect(t.ok ? [] : t.errors).toEqual([]);
-    expect(h.ok ? [] : h.errors).toEqual([]);
-    expect(cal.ok).toBe(true);
-    expect(cal.errors).toEqual([]);
+const day = (date: unknown, over: Record<string, unknown> = {}) => ({
+  date,
+  is_trading_day: false,
+  status: 'confirmed',
+  name: '休業日',
+  ...over,
+});
+
+describe('AC-1: validateCalendarJson・buildCalendar（検証）', () => {
+  it('(a) 正しい版 → ok = true、休業日 = 全行、確定 = covered_until、掲載 = listed_until、版の日付', () => {
+    const c = buildCalendar(synthCalendar(), 'api');
+    expect(c.ok).toBe(true);
+    expect(c.errors).toEqual([]);
+    expect([...c.holidays]).toEqual(['2026-12-31', '2027-01-01', '2027-02-11']);
+    expect(c.coveredUntil).toBe('2027-06-30');
+    expect(c.listedUntil).toBe('2027-12-31');
+    expect(c.versionAt).toBe('2026-10-14T08:30:00+09:00');
+    expect(c.versionOn).toBe('2026-10-14');
+    expect(c.origin).toBe('api');
   });
 
-  it('確定の最終日 = covered_until と祝日の収録の最終日の早い方', () => {
-    const min = [tradingJson.covered_until, holidaysJson.covered_until].sort()[0];
-    expect(cal.confirmedUntil).toBe(min);
-    expect(cal.coveredUntil).toBe(tradingJson.covered_until);
-    // 祝日の一覧は少なくとも 2026-01-01〜2027-12-31 を含む（Issue の「やること 3」）
-    expect(holidaysJson.covered_until >= '2027-12-31').toBe(true);
-    expect((holidaysJson.holidays[0]?.date ?? '9999') <= '2026-01-01').toBe(true);
+  it('版の日付は version_at の JST の日付（UTC の表記でも）', () => {
+    // 2026-10-13T15:30Z = 10/14 00:30 JST
+    expect(
+      buildCalendar(synthCalendar({ version_at: '2026-10-13T15:30:00Z' }), 'api').versionOn,
+    ).toBe('2026-10-14');
   });
 
-  it('休業日 = closed_dates ∪ 祝日', () => {
-    for (const d of tradingJson.closed_dates) expect(cal.holidays.has(d)).toBe(true);
-    for (const h of holidaysJson.holidays) expect(cal.holidays.has(h.date)).toBe(true);
-    expect(cal.holidays.has('2027-02-11')).toBe(true); // 建国記念の日
-    expect(cal.holidays.has('2023-08-11')).toBe(true); // 山の日
+  it.each([
+    '2026-10-14T08:30:00+09:00',
+    '2026-10-13T23:30:00Z',
+    '2026-10-13T23:30Z',
+    '2026-10-13T23:59:59.123Z',
+    '2028-02-29T00:00:00-05:00',
+  ])('version_at %s は通る', (version_at) => {
+    expect(validateCalendarJson(synthCalendar({ version_at })).ok).toBe(true);
   });
 
-  it('2027-02 限: SQ 日 2027-02-12、取引最終日 2027-02-10（2/11 の祝日を避ける）', () => {
-    expect(sqDate(2027, 2, cal.holidays)).toBe('2027-02-12');
-    expect(lastTradingDay(2027, 2, cal.holidays)).toBe('2027-02-10');
+  it('days が空でも ok（休業日は土日だけ）', () => {
+    const c = buildCalendar(synthCalendar({ days: [] }), 'api');
+    expect(c.ok).toBe(true);
+    expect(c.holidays.size).toBe(0);
   });
 
-  it('2026-11 限・2026-12 限: SQ 日 2026-11-13・2026-12-11', () => {
-    expect(sqDate(2026, 11, cal.holidays)).toBe('2026-11-13');
-    expect(sqDate(2026, 12, cal.holidays)).toBe('2026-12-11');
-  });
+  const omit = (k: string) => {
+    const o = synthCalendar();
+    delete o[k];
+    return o;
+  };
 
-  it('確定の最終日までの全月: 取引最終日の翌営業日 = SQ 日、SQ 日・取引最終日は休業日でない', () => {
-    const closed = new Set(tradingJson.closed_dates);
-    const holidays = new Set(holidaysJson.holidays.map((h) => h.date));
-    const weekend = (d: string) => [0, 6].includes(new Date(`${d}T00:00:00Z`).getUTCDay());
-    let n = 0;
-    for (let y = 2020; ; y++) {
-      let done = false;
-      for (let m = 1; m <= 12; m++) {
-        if (secondFriday(y, m) > (cal.confirmedUntil as string)) {
-          done = true;
-          break;
-        }
-        const sq = sqDate(y, m, cal.holidays);
-        const ltd = lastTradingDay(y, m, cal.holidays);
-        expect(nextBusinessDay(ltd, cal.holidays)).toBe(sq);
-        for (const d of [sq, ltd]) {
-          expect(weekend(d), d).toBe(false);
-          expect(closed.has(d), d).toBe(false);
-          expect(holidays.has(d), d).toBe(false);
-          expect(isBusinessDay(d, cal.holidays)).toBe(true);
-        }
-        n++;
-      }
-      if (done) break;
+  it.each([
+    ['オブジェクトでない', 'x', '$'],
+    ['null', null, '$'],
+    ['配列', [], '$'],
+    ['schema_version が 2', synthCalendar({ schema_version: 2 }), '$.schema_version'],
+    ['schema_version が文字列', synthCalendar({ schema_version: '1' }), '$.schema_version'],
+    ['version_at が ISO 8601 の日時でない', synthCalendar({ version_at: '昨日' }), '$.version_at'],
+    ['version_at が日付だけ', synthCalendar({ version_at: '2026-10-14' }), '$.version_at'],
+    [
+      'version_at が実在しない日時',
+      synthCalendar({ version_at: '2026-13-01T00:00:00Z' }),
+      '$.version_at',
+    ],
+    ['version_at の欠落', omit('version_at'), '$.version_at'],
+    [
+      'version_at が実在しない日（2/30）',
+      synthCalendar({ version_at: '2026-02-30T00:00:00Z' }),
+      '$.version_at',
+    ],
+    [
+      'version_at が 24:00',
+      synthCalendar({ version_at: '2026-10-14T24:00:00+09:00' }),
+      '$.version_at',
+    ],
+    [
+      'version_at の分が 60',
+      synthCalendar({ version_at: '2026-10-14T08:60:00+09:00' }),
+      '$.version_at',
+    ],
+    [
+      'version_at の秒が 60',
+      synthCalendar({ version_at: '2026-10-14T08:30:60+09:00' }),
+      '$.version_at',
+    ],
+    [
+      'version_at のオフセットが不正',
+      synthCalendar({ version_at: '2026-10-14T08:30:00+24:00' }),
+      '$.version_at',
+    ],
+    [
+      'covered_until が実在しない日付',
+      synthCalendar({ covered_until: '2027-02-30' }),
+      '$.covered_until',
+    ],
+    ['covered_until が null', synthCalendar({ covered_until: null }), '$.covered_until'],
+    [
+      'listed_until が実在しない日付',
+      synthCalendar({ listed_until: '2027-12-32' }),
+      '$.listed_until',
+    ],
+    ['listed_until の欠落', omit('listed_until'), '$.listed_until'],
+    ['days が配列でない', synthCalendar({ days: 'x' }), '$.days'],
+    ['days の要素がオブジェクトでない', synthCalendar({ days: ['2027-01-01'] }), '$.days[0]'],
+    [
+      'days[].date が実在しない日付',
+      synthCalendar({ days: [day('2027-13-01')] }),
+      '$.days[0].date',
+    ],
+    ['days[].date の形式違い', synthCalendar({ days: [day('2027/01/01')] }), '$.days[0].date'],
+    [
+      'days が昇順でない',
+      synthCalendar({ days: [day('2027-01-01'), day('2026-12-31')] }),
+      '$.days[1].date',
+    ],
+    [
+      'days の重複',
+      synthCalendar({ days: [day('2027-01-01'), day('2027-01-01')] }),
+      '$.days[1].date',
+    ],
+    [
+      'is_trading_day が boolean でない',
+      synthCalendar({ days: [day('2027-01-01', { is_trading_day: 'false' })] }),
+      '$.days[0].is_trading_day',
+    ],
+    [
+      'status が文字列でない',
+      synthCalendar({ days: [day('2027-01-01', { status: 1 })] }),
+      '$.days[0].status',
+    ],
+    [
+      'status が空',
+      synthCalendar({ days: [day('2027-01-01', { status: '' })] }),
+      '$.days[0].status',
+    ],
+    [
+      'name が文字列でない',
+      synthCalendar({ days: [day('2027-01-01', { name: null })] }),
+      '$.days[0].name',
+    ],
+  ])('(b) %s → 例外なしで ok = false、明細つき、休業日は空・期限切れ扱い', (_n, v, path) => {
+    const r = validateCalendarJson(v);
+    expect(r.ok).toBe(false);
+    if (!r.ok)
+      expect(
+        r.errors.some((e) => e.startsWith(`${path}:`)),
+        r.errors.join('; '),
+      ).toBe(true);
+    for (const origin of ['api', 'bundled'] as const) {
+      const c = buildCalendar(v, origin);
+      expect(c.ok).toBe(false);
+      expect(c.errors.length).toBeGreaterThan(0);
+      expect(c.holidays.size).toBe(0);
+      expect(c.coveredUntil).toBeNull();
+      expect(c.listedUntil).toBeNull();
+      expect(c.versionAt).toBeNull();
+      expect(c.versionOn).toBeNull();
+      expect(c.origin).toBe(origin);
+      expect(isExpiryConfirmed(c, 2026, 11)).toBe(false);
+      expect(isCalendarExpired(c, jstInstant('2026-10-13', 21, 31))).toBe(true);
+      // 土日だけ: 2027-02 限は 2/11 を避けない
+      expect(monthlyExpiry(2027, 2, c.holidays).lastTradingDay).toBe('2027-02-11');
     }
-    expect(n).toBeGreaterThan(80); // 2020-01〜（7 年以上）
+  });
+
+  it('明細は最大 50 件', () => {
+    const days = Array.from({ length: 80 }, () => day('x'));
+    const r = validateCalendarJson(synthCalendar({ days }));
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.errors.length).toBe(50);
+  });
+
+  it('(c) status が未知の値でも通る', () => {
+    const c = buildCalendar(
+      synthCalendar({ days: [day('2027-01-01', { status: 'tentative' })] }),
+      'api',
+    );
+    expect(c.ok).toBe(true);
+    expect(c.holidays.has('2027-01-01')).toBe(true);
+  });
+
+  it('(d) 余分なキーは無視（ルート・行とも。source が無くても）', () => {
+    const o = synthCalendar({
+      extra: { a: 1 },
+      days: [day('2027-01-01', { day_type: 'national_holiday', note: 1 })],
+    });
+    delete o.source;
+    const c = buildCalendar(o, 'api');
+    expect(c.ok).toBe(true);
+    expect([...c.holidays]).toEqual(['2027-01-01']);
+  });
+});
+
+describe('AC-2: 休業日 = 版の全行（同梱の版）', () => {
+  it('is_trading_day = true の行も休業日に入る', () => {
+    const trading = bundledJson.days.filter((d) => d.is_trading_day);
+    expect(trading.length).toBeGreaterThan(0);
+    for (const d of trading) expect(cal.holidays.has(d.date), d.date).toBe(true);
+    expect(cal.holidays.size).toBe(bundledJson.days.length);
+  });
+
+  it.each([
+    [2023, 8, '2023-08-10', '2023-08-09'],
+    [2022, 8, '2022-08-12', '2022-08-10'],
+    [2021, 2, '2021-02-12', '2021-02-10'],
+    [2027, 2, '2027-02-12', '2027-02-10'],
+    [2027, 1, '2027-01-08', '2027-01-07'],
+  ])('%i-%i 限: SQ 日 %s・取引最終日 %s', (y, m, sq, ltd) => {
+    const e = monthlyExpiry(y, m, cal.holidays);
+    expect(e.sqDate).toBe(sq);
+    expect(e.lastTradingDay).toBe(ltd);
+  });
+
+  it('対照: is_trading_day = false の行だけを休業日にすると 2023-08 限・2027-02 限が違う値になる', () => {
+    const closedOnly = new Set(
+      bundledJson.days.filter((d) => !d.is_trading_day).map((d) => d.date),
+    );
+    const a = monthlyExpiry(2023, 8, closedOnly);
+    expect([a.sqDate, a.lastTradingDay]).toEqual(['2023-08-11', '2023-08-10']);
+    const b = monthlyExpiry(2027, 2, closedOnly);
+    expect([b.sqDate, b.lastTradingDay]).toEqual(['2027-02-12', '2027-02-11']);
+    expect([a.sqDate, a.lastTradingDay]).not.toEqual(['2023-08-10', '2023-08-09']);
+    expect([b.sqDate, b.lastTradingDay]).not.toEqual(['2027-02-12', '2027-02-10']);
+  });
+});
+
+describe('AC-3: 確定（covered_until）と掲載範囲（listed_until）の外', () => {
+  it('第 2 金曜がちょうど covered_until の月は確定、翌月は未確定', () => {
+    // 2027-05 の第 2 金曜は 5/14
+    expect(secondFriday(2027, 5)).toBe('2027-05-14');
+    const c = buildCalendar(synthCalendar({ covered_until: '2027-05-14' }), 'api');
+    expect(isExpiryConfirmed(c, 2027, 5)).toBe(true);
+    expect(isExpiryConfirmed(c, 2027, 6)).toBe(false);
+    const c2 = buildCalendar(synthCalendar({ covered_until: '2027-05-13' }), 'api');
+    expect(isExpiryConfirmed(c2, 2027, 5)).toBe(false);
+  });
+
+  it('listed_until より後の 2028-02 限: 土日だけで SQ 日 2028-02-11・取引最終日 2028-02-10、未確定', () => {
+    expect(cal.listedUntil).toBe('2027-12-31');
+    expect(cal.holidays.has('2028-02-11')).toBe(false);
+    expect(sqDate(2028, 2, cal.holidays)).toBe('2028-02-11');
+    expect(lastTradingDay(2028, 2, cal.holidays)).toBe('2028-02-10');
+    expect(isExpiryConfirmed(cal, 2028, 2)).toBe(false);
+  });
+
+  it('期限切れ: covered_until 当日 23:59 JST は期限内、翌日 00:00 JST は期限切れ', () => {
+    const c = buildCalendar(synthCalendar({ covered_until: '2026-10-13' }), 'api');
+    expect(isCalendarExpired(c, jstInstant('2026-10-13', 23, 59))).toBe(false);
+    expect(isCalendarExpired(c, jstInstant('2026-10-14', 0, 0))).toBe(true);
+  });
+});
+
+describe('AC-8: 同梱の版（data/calendar/calendar.json）', () => {
+  it('data/calendar/ の JSON は 1 つで、検証に通る（origin = bundled）', () => {
+    const files = Object.keys(import.meta.glob('../../data/calendar/*.json'));
+    expect(files).toEqual(['../../data/calendar/calendar.json']);
+    const r = validateCalendarJson(bundledJson);
+    expect(r.ok ? [] : r.errors).toEqual([]);
+    expect(cal.ok).toBe(true);
+    expect(cal.origin).toBe('bundled');
+    expect(cal.coveredUntil).toBe(bundledJson.covered_until);
+    expect(cal.listedUntil).toBe(bundledJson.listed_until);
+  });
+
+  it('掲載の最初の月から確定の最終日までの全月: 取引最終日の翌営業日 = SQ 日、SQ 日・取引最終日は休業日でない', () => {
+    const weekend = (d: string) => [0, 6].includes(new Date(`${d}T00:00:00Z`).getUTCDay());
+    const first = bundledJson.days[0]?.date as string;
+    let y = Number(first.slice(0, 4));
+    let m = Number(first.slice(5, 7));
+    let n = 0;
+    while (secondFriday(y, m) <= (cal.coveredUntil as string)) {
+      const sq = sqDate(y, m, cal.holidays);
+      const ltd = lastTradingDay(y, m, cal.holidays);
+      expect(nextBusinessDay(ltd, cal.holidays)).toBe(sq);
+      for (const d of [sq, ltd]) {
+        expect(weekend(d), d).toBe(false);
+        expect(cal.holidays.has(d), d).toBe(false);
+        expect(isBusinessDay(d, cal.holidays)).toBe(true);
+      }
+      n++;
+      m++;
+      if (m > 12) {
+        m = 1;
+        y++;
+      }
+    }
+    expect(n).toBeGreaterThan(100); // 2018-01〜（9 年以上）
   });
 
   it('合成の固定 JSON 3 本の限月と先物の sq_date・last_trading_day が、カレンダーで求めた値と一致', () => {
@@ -134,106 +346,5 @@ describe('コミット済みのカレンダー', () => {
       }
     }
     expect(n).toBeGreaterThanOrEqual(9);
-  });
-});
-
-describe('validateTradingCalendarJson / validateHolidaysJson（壊れた入力）', () => {
-  it.each([
-    ['schema_version 違い', synthTrading({ schema_version: 2 })],
-    ['covered_until 欠落', (({ covered_until: _, ...rest }) => rest)(synthTrading())],
-    ['covered_until が日付でない', synthTrading({ covered_until: '2027-02-30' })],
-    ['closed_dates が降順', synthTrading({ closed_dates: ['2027-01-01', '2026-12-31'] })],
-    ['closed_dates の重複', synthTrading({ closed_dates: ['2026-12-31', '2026-12-31'] })],
-    ['closed_dates が日付でない', synthTrading({ closed_dates: ['2026/12/31'] })],
-    [
-      'sha256 が 64 桁の 16 進でない',
-      synthTrading({ source: { name: 'x', sha256: 'z', fetched_at: '2026-10-13T15:30:00Z' } }),
-    ],
-    [
-      'fetched_at が ISO 8601 でない',
-      synthTrading({ source: { name: 'x', sha256: 'a'.repeat(64), fetched_at: '昨日' } }),
-    ],
-    ['オブジェクトでない', 'x'],
-  ])('取引カレンダー: %s → エラー', (_name, v) => {
-    const r = validateTradingCalendarJson(v);
-    expect(r.ok).toBe(false);
-    if (!r.ok) expect(r.errors.length).toBeGreaterThan(0);
-  });
-
-  it.each([
-    [
-      '降順',
-      synthHolidays({
-        holidays: [
-          { date: '2027-02-11', name: 'a' },
-          { date: '2027-01-01', name: 'b' },
-        ],
-      }),
-    ],
-    [
-      '重複',
-      synthHolidays({
-        holidays: [
-          { date: '2027-01-01', name: 'a' },
-          { date: '2027-01-01', name: 'b' },
-        ],
-      }),
-    ],
-    ['名称が空', synthHolidays({ holidays: [{ date: '2027-01-01', name: '' }] })],
-    ['日付でない', synthHolidays({ holidays: [{ date: '2027-13-01', name: 'a' }] })],
-    ['covered_until 欠落', (({ covered_until: _, ...rest }) => rest)(synthHolidays())],
-  ])('祝日: %s → エラー', (_name, v) => {
-    expect(validateHolidaysJson(v).ok).toBe(false);
-  });
-});
-
-describe('buildCalendar・isExpiryConfirmed・isCalendarExpired', () => {
-  it('壊れたカレンダー → 例外なし、ok = false、休業日は空（土日だけ）、日付は null', () => {
-    for (const [t, h] of [
-      [null, synthHolidays()],
-      [synthTrading(), { broken: true }],
-      [synthTrading({ closed_dates: 'x' }), synthHolidays()],
-    ] as const) {
-      const c = buildCalendar(t, h);
-      expect(c.ok).toBe(false);
-      expect(c.errors.length).toBeGreaterThan(0);
-      expect(c.holidays.size).toBe(0);
-      expect(c.coveredUntil).toBeNull();
-      expect(c.confirmedUntil).toBeNull();
-      expect(c.syncedOn).toBeNull();
-      expect(isExpiryConfirmed(c, 2026, 11)).toBe(false);
-      expect(isCalendarExpired(c, jstInstant('2026-10-13', 21, 31))).toBe(true);
-    }
-  });
-
-  it('syncedOn は fetched_at の JST の日付', () => {
-    // 2026-10-13T15:30Z = 10/14 00:30 JST
-    expect(buildCalendar(synthTrading(), synthHolidays()).syncedOn).toBe('2026-10-14');
-  });
-
-  it('確定の最終日は 2 つの covered_until の早い方（祝日の方が短い場合も）', () => {
-    expect(buildCalendar(synthTrading(), synthHolidays()).confirmedUntil).toBe('2027-06-30');
-    const c = buildCalendar(
-      synthTrading({ covered_until: '2028-06-30' }),
-      synthHolidays({ covered_until: '2027-12-31' }),
-    );
-    expect(c.coveredUntil).toBe('2028-06-30');
-    expect(c.confirmedUntil).toBe('2027-12-31');
-  });
-
-  it('第 2 金曜がちょうど確定の最終日の月は確定、翌月は未確定', () => {
-    // 2027-05 の第 2 金曜は 5/14
-    expect(secondFriday(2027, 5)).toBe('2027-05-14');
-    const c = buildCalendar(synthTrading({ covered_until: '2027-05-14' }), synthHolidays());
-    expect(isExpiryConfirmed(c, 2027, 5)).toBe(true);
-    expect(isExpiryConfirmed(c, 2027, 6)).toBe(false);
-    const c2 = buildCalendar(synthTrading({ covered_until: '2027-05-13' }), synthHolidays());
-    expect(isExpiryConfirmed(c2, 2027, 5)).toBe(false);
-  });
-
-  it('期限切れ: covered_until 当日 23:59 JST は期限内、翌日 00:00 JST は期限切れ', () => {
-    const c = buildCalendar(synthTrading({ covered_until: '2026-10-13' }), synthHolidays());
-    expect(isCalendarExpired(c, jstInstant('2026-10-13', 23, 59))).toBe(false);
-    expect(isCalendarExpired(c, jstInstant('2026-10-14', 0, 0))).toBe(true);
   });
 });

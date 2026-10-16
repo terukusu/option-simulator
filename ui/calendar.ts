@@ -1,11 +1,14 @@
 /**
- * 画面で使う取引カレンダー（ビルド時にコミット済みの JSON をバンドルに入れる。ネットワークに出ない）。
- * JSON は `npm run calendar:sync` が書く生成物（data/calendar/）。形の検証・休業日の集合は data/calendar.ts。
- * 壊れていても例外を出さない（CALENDAR.ok = false。画面は「カレンダー期限切れ」を出す）。
+ * 同梱の取引カレンダー（ビルド時にコミット済みの JSON をバンドルに入れる。`/api/calendar` と同じ形）。
+ * API から一度も取れていないとき（dev の合成の板・ファイル選択・`DATA_SOURCE=file` の Flask・通信の失敗）に使う。
+ * JSON（data/calendar/calendar.json）は手で作り直して PR にする（手順は README の「取引カレンダー」）。
+ * 形の検証・休業日の集合は data/calendar.ts。壊れていても例外を出さない（ok = false。画面は「カレンダー期限切れ」を出す）。
  */
 
 import { buildCalendar, type Calendar } from '../data';
-import holidaysJson from '../data/calendar/holidays_jp.json';
-import tradingJson from '../data/calendar/trading_calendar.json';
+import bundledJson from '../data/calendar/calendar.json';
 
-export const CALENDAR: Calendar = buildCalendar(tradingJson, holidaysJson);
+export const BUNDLED_CALENDAR: Calendar = buildCalendar(bundledJson, 'bundled');
+
+/** 初期状態とテストで使うカレンダー（= 同梱の版） */
+export const CALENDAR: Calendar = BUNDLED_CALENDAR;

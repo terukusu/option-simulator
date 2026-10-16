@@ -4,8 +4,6 @@ on:
   push:
     branches: [main]
   pull_request:
-  # 定期同期（calendar-sync.yml）の PR に check を付けるため（GITHUB_TOKEN の PR では pull_request が走らない）
-  workflow_dispatch:
 
 permissions:
   contents: read

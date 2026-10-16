@@ -121,7 +121,10 @@ export interface State {
   nextId: number;
   /** 足の追加フォームのエラー（data/ の例外の文言） */
   legError: string | null;
-  /** 取引カレンダー（板に無い限月の SQ 日を求める休業日。ui/calendar.ts。テストは差し替える） */
+  /**
+   * 取引カレンダー（板に無い限月の SQ 日を求める休業日）。初期は同梱の版（ui/calendar.ts）、
+   * /api/calendar が届いたら API の版（calendarLoaded）。テストは差し替える
+   */
   calendar: Calendar;
   /** デルタヘッジのパネル（目標 Δ・評価点・限月。M12・5.8） */
   hedge: HedgeSettings;
@@ -225,6 +228,10 @@ export type Action =
       error: LoadErrorView;
       fallback?: { chain: Chain; label: string; fetchedAt: number };
     }
+  /** 取引カレンダー（/api/calendar）が届いた。板と独立（7.5） */
+  | { type: 'calendarLoaded'; calendar: Calendar }
+  /** 取引カレンダーを読めなかった（何も変えない。同梱か前の API の版のまま） */
+  | { type: 'calendarFailed' }
   | { type: 'setBasis'; basis: AtmBasis }
   | { type: 'setMonth'; monthId: string }
   | { type: 'setTarget'; target: OptionType }
@@ -471,6 +478,28 @@ export function reduce(state: State, action: Action): State {
       // 前の板・取得時刻・データ元・古い板の印は保持する
       return { ...state, loading: false, loadError: action.error };
     }
+    case 'calendarLoaded': {
+      const { calendar } = action;
+      // 壊れた版で今の版を上書きしない。同じ API の版（304 の再検証）なら描き直さない
+      if (!calendar.ok) return state;
+      if (
+        state.calendar.origin === 'api' &&
+        calendar.origin === 'api' &&
+        state.calendar.versionAt === calendar.versionAt
+      ) {
+        return state;
+      }
+      return {
+        ...state,
+        calendar,
+        // 足の市場（手入力の足・限月違いの先物の足の SQ）を新しい休業日で作り直す。編集は変えない
+        legs: state.chain
+          ? refreshLegMarkets(state.chain, state.legs, calendar.holidays)
+          : state.legs,
+      };
+    }
+    case 'calendarFailed':
+      return state;
     case 'setBasis':
       return { ...state, atmBasis: action.basis };
     case 'setMonth':

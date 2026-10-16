@@ -1,0 +1,1041 @@
+{
+  "schema_version": 1,
+  "source": "bigquery",
+  "version_at": "2026-10-14T08:39:40+09:00",
+  "covered_until": "2027-06-30",
+  "listed_until": "2027-12-31",
+  "days": [
+    {
+      "date": "2018-01-01",
+      "is_trading_day": false,
+      "status": "confirmed",
+      "name": "元日"
+    },
+    {
+      "date": "2018-01-02",
+      "is_trading_day": false,
+      "status": "confirmed",
+      "name": "年始休業日"
+    },
+    {
+      "date": "2018-01-03",
+      "is_trading_day": false,
+      "status": "confirmed",
+      "name": "年始休業日"
+    },
+    {
+      "date": "2018-01-08",
+      "is_trading_day": false,
+      "status": "confirmed",
+      "name": "成人の日"
+    },
+    {
+      "date": "2018-02-12",
+      "is_trading_day": false,
+      "status": "confirmed",
+      "name": "休日"
+    },
+    {
+      "date": "2018-03-21",
+      "is_trading_day": false,
+      "status": "confirmed",
+      "name": "春分の日"
+    },
+    {
+      "date": "2018-04-30",
+      "is_trading_day": false,
+      "status": "confirmed",
+      "name": "休日"
+    },
+    {
+      "date": "2018-05-03",
+      "is_trading_day": false,
+      "status": "confirmed",
+      "name": "憲法記念日"
+    },
+    {
+      "date": "2018-05-04",
+      "is_trading_day": false,
+      "status": "confirmed",
+      "name": "みどりの日"
+    },
+    {
+      "date": "2018-07-16",
+      "is_trading_day": false,
+      "status": "confirmed",
+      "name": "海の日"
+    },
+    {
+      "date": "2018-09-17",
+      "is_trading_day": false,
+      "status": "confirmed",
+      "name": "敬老の日"
+    },
+    {
+      "date": "2018-09-24",
+      "is_trading_day": false,
+      "status": "confirmed",
+      "name": "休日"
+    },
+    {
+      "date": "2018-10-08",
+      "is_trading_day": false,
+      "status": "confirmed",
+      "name": "体育の日"
+    },
+    {
+      "date": "2018-11-23",
+      "is_trading_day": false,
+      "status": "confirmed",
+      "name": "勤労感謝の日"
+    },
+    {
+      "date": "2018-12-24",
+      "is_trading_day": false,
+      "status": "confirmed",
+      "name": "休日"
+    },
+    {
+      "date": "2018-12-31",
+      "is_trading_day": false,
+      "status": "confirmed",
+      "name": "年末休業日"
+    },
+    {
+      "date": "2019-01-01",
+      "is_trading_day": false,
+      "status": "confirmed",
+      "name": "元日"
+    },
+    {
+      "date": "2019-01-02",
+      "is_trading_day": false,
+      "status": "confirmed",
+      "name": "年始休業日"
+    },
+    {
+      "date": "2019-01-03",
+      "is_trading_day": false,
+      "status": "confirmed",
+      "name": "年始休業日"
+    },
+    {
+      "date": "2019-01-14",
+      "is_trading_day": false,
+      "status": "confirmed",
+      "name": "成人の日"
+    },
+    {
+      "date": "2019-02-11",
+      "is_trading_day": false,
+      "status": "confirmed",
+      "name": "建国記念の日"
+    },
+    {
+      "date": "2019-03-21",
+      "is_trading_day": false,
+      "status": "confirmed",
+      "name": "春分の日"
+    },
+    {
+      "date": "2019-04-29",
+      "is_trading_day": false,
+      "status": "confirmed",
+      "name": "昭和の日"
+    },
+    {
+      "date": "2019-04-30",
+      "is_trading_day": false,
+      "status": "confirmed",
+      "name": "休日"
+    },
+    {
+      "date": "2019-05-01",
+      "is_trading_day": false,
+      "status": "confirmed",
+      "name": "休日（祝日扱い）"
+    },
+    {
+      "date": "2019-05-02",
+      "is_trading_day": false,
+      "status": "confirmed",
+      "name": "休日"
+    },
+    {
+      "date": "2019-05-03",
+      "is_trading_day": false,
+      "status": "confirmed",
+      "name": "憲法記念日"
+    },
+    {
+      "date": "2019-05-06",
+      "is_trading_day": false,
+      "status": "confirmed",
+      "name": "休日"
+    },
+    {
+      "date": "2019-07-15",
+      "is_trading_day": false,
+      "status": "confirmed",
+      "name": "海の日"
+    },
+    {
+      "date": "2019-08-12",
+      "is_trading_day": false,
+      "status": "confirmed",
+      "name": "休日"
+    },
+    {
+      "date": "2019-09-16",
+      "is_trading_day": false,
+      "status": "confirmed",
+      "name": "敬老の日"
+    },
+    {
+      "date": "2019-09-23",
+      "is_trading_day": false,
+      "status": "confirmed",
+      "name": "秋分の日"
+    },
+    {
+      "date": "2019-10-14",
+      "is_trading_day": false,
+      "status": "confirmed",
+      "name": "体育の日（スポーツの日）"
+    },
+    {
+      "date": "2019-10-22",
+      "is_trading_day": false,
+      "status": "confirmed",
+      "name": "休日（祝日扱い）"
+    },
+    {
+      "date": "2019-11-04",
+      "is_trading_day": false,
+      "status": "confirmed",
+      "name": "休日"
+    },
+    {
+      "date": "2019-12-31",
+      "is_trading_day": false,
+      "status": "confirmed",
+      "name": "年末休業日"
+    },
+    {
+      "date": "2020-01-01",
+      "is_trading_day": false,
+      "status": "confirmed",
+      "name": "元日"
+    },
+    {
+      "date": "2020-01-02",
+      "is_trading_day": false,
+      "status": "confirmed",
+      "name": "年始休業日"
+    },
+    {
+      "date": "2020-01-03",
+      "is_trading_day": false,
+      "status": "confirmed",
+      "name": "年始休業日"
+    },
+    {
+      "date": "2020-01-13",
+      "is_trading_day": false,
+      "status": "confirmed",
+      "name": "成人の日"
+    },
+    {
+      "date": "2020-02-11",
+      "is_trading_day": false,
+      "status": "confirmed",
+      "name": "建国記念の日"
+    },
+    {
+      "date": "2020-02-24",
+      "is_trading_day": false,
+      "status": "confirmed",
+      "name": "休日"
+    },
+    {
+      "date": "2020-03-20",
+      "is_trading_day": false,
+      "status": "confirmed",
+      "name": "春分の日"
+    },
+    {
+      "date": "2020-04-29",
+      "is_trading_day": false,
+      "status": "confirmed",
+      "name": "昭和の日"
+    },
+    {
+      "date": "2020-05-04",
+      "is_trading_day": false,
+      "status": "confirmed",
+      "name": "みどりの日"
+    },
+    {
+      "date": "2020-05-05",
+      "is_trading_day": false,
+      "status": "confirmed",
+      "name": "こどもの日"
+    },
+    {
+      "date": "2020-05-06",
+      "is_trading_day": false,
+      "status": "confirmed",
+      "name": "休日"
+    },
+    {
+      "date": "2020-07-23",
+      "is_trading_day": false,
+      "status": "confirmed",
+      "name": "海の日"
+    },
+    {
+      "date": "2020-07-24",
+      "is_trading_day": false,
+      "status": "confirmed",
+      "name": "スポーツの日"
+    },
+    {
+      "date": "2020-08-10",
+      "is_trading_day": false,
+      "status": "confirmed",
+      "name": "山の日"
+    },
+    {
+      "date": "2020-09-21",
+      "is_trading_day": false,
+      "status": "confirmed",
+      "name": "敬老の日"
+    },
+    {
+      "date": "2020-09-22",
+      "is_trading_day": false,
+      "status": "confirmed",
+      "name": "秋分の日"
+    },
+    {
+      "date": "2020-11-03",
+      "is_trading_day": false,
+      "status": "confirmed",
+      "name": "文化の日"
+    },
+    {
+      "date": "2020-11-23",
+      "is_trading_day": false,
+      "status": "confirmed",
+      "name": "勤労感謝の日"
+    },
+    {
+      "date": "2020-12-31",
+      "is_trading_day": false,
+      "status": "confirmed",
+      "name": "年末休業日"
+    },
+    {
+      "date": "2021-01-01",
+      "is_trading_day": false,
+      "status": "confirmed",
+      "name": "元日"
+    },
+    {
+      "date": "2021-01-11",
+      "is_trading_day": false,
+      "status": "confirmed",
+      "name": "成人の日"
+    },
+    {
+      "date": "2021-02-11",
+      "is_trading_day": false,
+      "status": "confirmed",
+      "name": "建国記念の日"
+    },
+    {
+      "date": "2021-02-23",
+      "is_trading_day": false,
+      "status": "confirmed",
+      "name": "天皇誕生日"
+    },
+    {
+      "date": "2021-04-29",
+      "is_trading_day": false,
+      "status": "confirmed",
+      "name": "昭和の日"
+    },
+    {
+      "date": "2021-05-03",
+      "is_trading_day": false,
+      "status": "confirmed",
+      "name": "憲法記念日"
+    },
+    {
+      "date": "2021-05-04",
+      "is_trading_day": false,
+      "status": "confirmed",
+      "name": "みどりの日"
+    },
+    {
+      "date": "2021-05-05",
+      "is_trading_day": false,
+      "status": "confirmed",
+      "name": "こどもの日"
+    },
+    {
+      "date": "2021-07-22",
+      "is_trading_day": false,
+      "status": "confirmed",
+      "name": "海の日"
+    },
+    {
+      "date": "2021-07-23",
+      "is_trading_day": false,
+      "status": "confirmed",
+      "name": "スポーツの日"
+    },
+    {
+      "date": "2021-08-09",
+      "is_trading_day": false,
+      "status": "confirmed",
+      "name": "休日"
+    },
+    {
+      "date": "2021-09-20",
+      "is_trading_day": false,
+      "status": "confirmed",
+      "name": "敬老の日"
+    },
+    {
+      "date": "2021-09-23",
+      "is_trading_day": false,
+      "status": "confirmed",
+      "name": "秋分の日"
+    },
+    {
+      "date": "2021-11-03",
+      "is_trading_day": false,
+      "status": "confirmed",
+      "name": "文化の日"
+    },
+    {
+      "date": "2021-11-23",
+      "is_trading_day": false,
+      "status": "confirmed",
+      "name": "勤労感謝の日"
+    },
+    {
+      "date": "2021-12-31",
+      "is_trading_day": false,
+      "status": "confirmed",
+      "name": "年末休業日"
+    },
+    {
+      "date": "2022-01-03",
+      "is_trading_day": false,
+      "status": "confirmed",
+      "name": "年始休業日"
+    },
+    {
+      "date": "2022-01-10",
+      "is_trading_day": false,
+      "status": "confirmed",
+      "name": "成人の日"
+    },
+    {
+      "date": "2022-02-11",
+      "is_trading_day": false,
+      "status": "confirmed",
+      "name": "建国記念の日"
+    },
+    {
+      "date": "2022-02-23",
+      "is_trading_day": false,
+      "status": "confirmed",
+      "name": "天皇誕生日"
+    },
+    {
+      "date": "2022-03-21",
+      "is_trading_day": false,
+      "status": "confirmed",
+      "name": "春分の日"
+    },
+    {
+      "date": "2022-04-29",
+      "is_trading_day": false,
+      "status": "confirmed",
+      "name": "昭和の日"
+    },
+    {
+      "date": "2022-05-03",
+      "is_trading_day": false,
+      "status": "confirmed",
+      "name": "憲法記念日"
+    },
+    {
+      "date": "2022-05-04",
+      "is_trading_day": false,
+      "status": "confirmed",
+      "name": "みどりの日"
+    },
+    {
+      "date": "2022-05-05",
+      "is_trading_day": false,
+      "status": "confirmed",
+      "name": "こどもの日"
+    },
+    {
+      "date": "2022-07-18",
+      "is_trading_day": false,
+      "status": "confirmed",
+      "name": "海の日"
+    },
+    {
+      "date": "2022-08-11",
+      "is_trading_day": false,
+      "status": "confirmed",
+      "name": "山の日"
+    },
+    {
+      "date": "2022-09-19",
+      "is_trading_day": false,
+      "status": "confirmed",
+      "name": "敬老の日"
+    },
+    {
+      "date": "2022-09-23",
+      "is_trading_day": true,
+      "status": "confirmed",
+      "name": "秋分の日"
+    },
+    {
+      "date": "2022-10-10",
+      "is_trading_day": true,
+      "status": "confirmed",
+      "name": "スポーツの日"
+    },
+    {
+      "date": "2022-11-03",
+      "is_trading_day": true,
+      "status": "confirmed",
+      "name": "文化の日"
+    },
+    {
+      "date": "2022-11-23",
+      "is_trading_day": true,
+      "status": "confirmed",
+      "name": "勤労感謝の日"
+    },
+    {
+      "date": "2023-01-02",
+      "is_trading_day": false,
+      "status": "confirmed",
+      "name": "年始休業日"
+    },
+    {
+      "date": "2023-01-03",
+      "is_trading_day": true,
+      "status": "confirmed",
+      "name": "年始休業日"
+    },
+    {
+      "date": "2023-01-09",
+      "is_trading_day": false,
+      "status": "confirmed",
+      "name": "成人の日"
+    },
+    {
+      "date": "2023-02-23",
+      "is_trading_day": true,
+      "status": "confirmed",
+      "name": "天皇誕生日"
+    },
+    {
+      "date": "2023-03-21",
+      "is_trading_day": true,
+      "status": "confirmed",
+      "name": "春分の日"
+    },
+    {
+      "date": "2023-05-03",
+      "is_trading_day": true,
+      "status": "confirmed",
+      "name": "憲法記念日"
+    },
+    {
+      "date": "2023-05-04",
+      "is_trading_day": true,
+      "status": "confirmed",
+      "name": "みどりの日"
+    },
+    {
+      "date": "2023-05-05",
+      "is_trading_day": true,
+      "status": "confirmed",
+      "name": "こどもの日"
+    },
+    {
+      "date": "2023-07-17",
+      "is_trading_day": true,
+      "status": "confirmed",
+      "name": "海の日"
+    },
+    {
+      "date": "2023-08-11",
+      "is_trading_day": true,
+      "status": "confirmed",
+      "name": "山の日"
+    },
+    {
+      "date": "2023-09-18",
+      "is_trading_day": true,
+      "status": "confirmed",
+      "name": "敬老の日"
+    },
+    {
+      "date": "2023-10-09",
+      "is_trading_day": true,
+      "status": "confirmed",
+      "name": "スポーツの日"
+    },
+    {
+      "date": "2023-11-03",
+      "is_trading_day": false,
+      "status": "confirmed",
+      "name": "文化の日"
+    },
+    {
+      "date": "2023-11-23",
+      "is_trading_day": true,
+      "status": "confirmed",
+      "name": "勤労感謝の日"
+    },
+    {
+      "date": "2024-01-01",
+      "is_trading_day": false,
+      "status": "confirmed",
+      "name": "元日"
+    },
+    {
+      "date": "2024-01-02",
+      "is_trading_day": false,
+      "status": "confirmed",
+      "name": "年始休業日"
+    },
+    {
+      "date": "2024-01-03",
+      "is_trading_day": true,
+      "status": "confirmed",
+      "name": "年始休業日"
+    },
+    {
+      "date": "2024-01-08",
+      "is_trading_day": false,
+      "status": "confirmed",
+      "name": "成人の日"
+    },
+    {
+      "date": "2024-02-12",
+      "is_trading_day": true,
+      "status": "confirmed",
+      "name": "建国記念の日の振替休日"
+    },
+    {
+      "date": "2024-02-23",
+      "is_trading_day": true,
+      "status": "confirmed",
+      "name": "天皇誕生日"
+    },
+    {
+      "date": "2024-03-20",
+      "is_trading_day": true,
+      "status": "confirmed",
+      "name": "春分の日"
+    },
+    {
+      "date": "2024-04-29",
+      "is_trading_day": true,
+      "status": "confirmed",
+      "name": "昭和の日"
+    },
+    {
+      "date": "2024-05-03",
+      "is_trading_day": true,
+      "status": "confirmed",
+      "name": "憲法記念日"
+    },
+    {
+      "date": "2024-05-06",
+      "is_trading_day": true,
+      "status": "confirmed",
+      "name": "こどもの日の振替休日"
+    },
+    {
+      "date": "2024-07-15",
+      "is_trading_day": true,
+      "status": "confirmed",
+      "name": "海の日"
+    },
+    {
+      "date": "2024-08-12",
+      "is_trading_day": false,
+      "status": "confirmed",
+      "name": "山の日の振替休日"
+    },
+    {
+      "date": "2024-09-16",
+      "is_trading_day": false,
+      "status": "confirmed",
+      "name": "敬老の日"
+    },
+    {
+      "date": "2024-09-23",
+      "is_trading_day": true,
+      "status": "confirmed",
+      "name": "秋分の日の振替休日"
+    },
+    {
+      "date": "2024-10-14",
+      "is_trading_day": true,
+      "status": "confirmed",
+      "name": "スポーツの日"
+    },
+    {
+      "date": "2024-11-04",
+      "is_trading_day": false,
+      "status": "confirmed",
+      "name": "文化の日の振替休日"
+    },
+    {
+      "date": "2024-12-31",
+      "is_trading_day": false,
+      "status": "confirmed",
+      "name": "年末休業日"
+    },
+    {
+      "date": "2025-01-01",
+      "is_trading_day": false,
+      "status": "confirmed",
+      "name": "元日"
+    },
+    {
+      "date": "2025-01-02",
+      "is_trading_day": false,
+      "status": "confirmed",
+      "name": "年始休業日"
+    },
+    {
+      "date": "2025-01-03",
+      "is_trading_day": true,
+      "status": "confirmed",
+      "name": "年始休業日"
+    },
+    {
+      "date": "2025-01-13",
+      "is_trading_day": false,
+      "status": "confirmed",
+      "name": "成人の日"
+    },
+    {
+      "date": "2025-02-11",
+      "is_trading_day": true,
+      "status": "confirmed",
+      "name": "建国記念の日"
+    },
+    {
+      "date": "2025-02-24",
+      "is_trading_day": true,
+      "status": "confirmed",
+      "name": "天皇誕生日の振替休日"
+    },
+    {
+      "date": "2025-03-20",
+      "is_trading_day": true,
+      "status": "confirmed",
+      "name": "春分の日"
+    },
+    {
+      "date": "2025-04-29",
+      "is_trading_day": true,
+      "status": "confirmed",
+      "name": "昭和の日"
+    },
+    {
+      "date": "2025-05-05",
+      "is_trading_day": true,
+      "status": "confirmed",
+      "name": "こどもの日"
+    },
+    {
+      "date": "2025-05-06",
+      "is_trading_day": true,
+      "status": "confirmed",
+      "name": "みどりの日の振替休日"
+    },
+    {
+      "date": "2025-07-21",
+      "is_trading_day": true,
+      "status": "confirmed",
+      "name": "海の日"
+    },
+    {
+      "date": "2025-08-11",
+      "is_trading_day": true,
+      "status": "confirmed",
+      "name": "山の日"
+    },
+    {
+      "date": "2025-09-15",
+      "is_trading_day": false,
+      "status": "confirmed",
+      "name": "敬老の日"
+    },
+    {
+      "date": "2025-09-23",
+      "is_trading_day": true,
+      "status": "confirmed",
+      "name": "秋分の日"
+    },
+    {
+      "date": "2025-10-13",
+      "is_trading_day": true,
+      "status": "confirmed",
+      "name": "スポーツの日"
+    },
+    {
+      "date": "2025-11-03",
+      "is_trading_day": true,
+      "status": "confirmed",
+      "name": "文化の日"
+    },
+    {
+      "date": "2025-11-24",
+      "is_trading_day": true,
+      "status": "confirmed",
+      "name": "勤労感謝の日の振替休日"
+    },
+    {
+      "date": "2025-12-31",
+      "is_trading_day": false,
+      "status": "confirmed",
+      "name": "年末休業日"
+    },
+    {
+      "date": "2026-01-01",
+      "is_trading_day": false,
+      "status": "confirmed",
+      "name": "元日"
+    },
+    {
+      "date": "2026-01-02",
+      "is_trading_day": false,
+      "status": "confirmed",
+      "name": "年始休業日"
+    },
+    {
+      "date": "2026-01-12",
+      "is_trading_day": true,
+      "status": "confirmed",
+      "name": "成人の日"
+    },
+    {
+      "date": "2026-02-11",
+      "is_trading_day": true,
+      "status": "confirmed",
+      "name": "建国記念の日"
+    },
+    {
+      "date": "2026-02-23",
+      "is_trading_day": true,
+      "status": "confirmed",
+      "name": "天皇誕生日"
+    },
+    {
+      "date": "2026-03-20",
+      "is_trading_day": true,
+      "status": "confirmed",
+      "name": "春分の日"
+    },
+    {
+      "date": "2026-04-29",
+      "is_trading_day": true,
+      "status": "confirmed",
+      "name": "昭和の日"
+    },
+    {
+      "date": "2026-05-04",
+      "is_trading_day": true,
+      "status": "confirmed",
+      "name": "みどりの日"
+    },
+    {
+      "date": "2026-05-05",
+      "is_trading_day": true,
+      "status": "confirmed",
+      "name": "こどもの日"
+    },
+    {
+      "date": "2026-05-06",
+      "is_trading_day": true,
+      "status": "confirmed",
+      "name": "憲法記念日の振替休日"
+    },
+    {
+      "date": "2026-07-20",
+      "is_trading_day": true,
+      "status": "confirmed",
+      "name": "海の日"
+    },
+    {
+      "date": "2026-08-11",
+      "is_trading_day": true,
+      "status": "confirmed",
+      "name": "山の日"
+    },
+    {
+      "date": "2026-09-21",
+      "is_trading_day": true,
+      "status": "confirmed",
+      "name": "敬老の日"
+    },
+    {
+      "date": "2026-09-22",
+      "is_trading_day": true,
+      "status": "confirmed",
+      "name": "休日"
+    },
+    {
+      "date": "2026-09-23",
+      "is_trading_day": true,
+      "status": "confirmed",
+      "name": "秋分の日"
+    },
+    {
+      "date": "2026-10-12",
+      "is_trading_day": true,
+      "status": "confirmed",
+      "name": "スポーツの日"
+    },
+    {
+      "date": "2026-11-03",
+      "is_trading_day": true,
+      "status": "confirmed",
+      "name": "文化の日"
+    },
+    {
+      "date": "2026-11-23",
+      "is_trading_day": false,
+      "status": "confirmed",
+      "name": "勤労感謝の日"
+    },
+    {
+      "date": "2026-12-31",
+      "is_trading_day": false,
+      "status": "confirmed",
+      "name": "年末休業日"
+    },
+    {
+      "date": "2027-01-01",
+      "is_trading_day": false,
+      "status": "confirmed",
+      "name": "元日"
+    },
+    {
+      "date": "2027-01-11",
+      "is_trading_day": true,
+      "status": "confirmed",
+      "name": "成人の日"
+    },
+    {
+      "date": "2027-02-11",
+      "is_trading_day": true,
+      "status": "confirmed",
+      "name": "建国記念の日"
+    },
+    {
+      "date": "2027-02-23",
+      "is_trading_day": true,
+      "status": "confirmed",
+      "name": "天皇誕生日"
+    },
+    {
+      "date": "2027-03-22",
+      "is_trading_day": true,
+      "status": "confirmed",
+      "name": "春分の日の振替休日"
+    },
+    {
+      "date": "2027-04-29",
+      "is_trading_day": true,
+      "status": "confirmed",
+      "name": "昭和の日"
+    },
+    {
+      "date": "2027-05-03",
+      "is_trading_day": true,
+      "status": "confirmed",
+      "name": "憲法記念日"
+    },
+    {
+      "date": "2027-05-04",
+      "is_trading_day": true,
+      "status": "confirmed",
+      "name": "みどりの日"
+    },
+    {
+      "date": "2027-05-05",
+      "is_trading_day": true,
+      "status": "confirmed",
+      "name": "こどもの日"
+    },
+    {
+      "date": "2027-07-19",
+      "is_trading_day": true,
+      "status": "planned",
+      "name": "海の日"
+    },
+    {
+      "date": "2027-08-11",
+      "is_trading_day": true,
+      "status": "planned",
+      "name": "山の日"
+    },
+    {
+      "date": "2027-09-20",
+      "is_trading_day": false,
+      "status": "planned",
+      "name": "敬老の日"
+    },
+    {
+      "date": "2027-09-23",
+      "is_trading_day": true,
+      "status": "planned",
+      "name": "秋分の日"
+    },
+    {
+      "date": "2027-10-11",
+      "is_trading_day": true,
+      "status": "planned",
+      "name": "スポーツの日"
+    },
+    {
+      "date": "2027-11-03",
+      "is_trading_day": true,
+      "status": "planned",
+      "name": "文化の日"
+    },
+    {
+      "date": "2027-11-23",
+      "is_trading_day": true,
+      "status": "planned",
+      "name": "勤労感謝の日"
+    },
+    {
+      "date": "2027-12-31",
+      "is_trading_day": false,
+      "status": "planned",
+      "name": "年末休業日"
+    }
+  ]
+}

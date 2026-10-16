@@ -7,8 +7,11 @@
  * - `file`: 開発の既定。URL（Vite の dev サーバーが配る fixture など）か、ブラウザで選んだファイル（Blob）
  * - `bigquery`: 本番の既定（#34）。ブラウザからは同一オリジンの `/api/chain` を読む（サーバーは api/）
  * - 手入力は板を読まない（legs.ts の manualOptionLeg / futureLeg）
+ *
+ * 取引カレンダーは板と別に同一オリジンの `/api/calendar` を読む（loadCalendarJson。7.5）。
  */
 
+import { type CalendarJson, validateCalendarJson } from './calendar';
 import { type ChainJson, parseChainJson } from './chainJson';
 import { type Chain, type NormalizeOptions, normalizeChain } from './normalize';
 
@@ -27,7 +30,7 @@ export interface ChainAdapter {
 }
 
 /**
- * 読み込みの失敗の種別（画面の文言を分ける。ui/load.ts の describeLoadError）。
+ * 板とカレンダーの読み込みの失敗の種別（画面の文言を分ける。ui/load.ts の describeLoadError）。
  * - `invalid`: JSON の検証エラー（errors に明細）
  * - `http`: 2xx 以外（status あり）
  * - `auth`: IAP のログイン切れ（redirect: 'manual' の opaqueredirect か 401）
@@ -60,7 +63,7 @@ interface FetchInit {
   redirect?: RequestRedirect;
 }
 
-type FetchLike = (
+export type FetchLike = (
   input: string,
   init?: FetchInit,
 ) => Promise<{
@@ -83,6 +86,8 @@ async function fetchText(
   opts: LoadOptions,
   label: string,
   base: Omit<FetchInit, 'signal'>,
+  /** 何を読むか（エラーの文言の名詞） */
+  what: '板' | 'カレンダー' = '板',
 ): Promise<string> {
   const init: FetchInit = { ...base };
   if (opts.signal) init.signal = opts.signal;
@@ -91,7 +96,7 @@ async function fetchText(
     res = await fetchImpl(url, init);
   } catch (e) {
     if (e instanceof Error && e.name === 'AbortError') throw e;
-    throw new ChainLoadError(`板を読めない（${label}: 通信エラー）`, [], { kind: 'network' });
+    throw new ChainLoadError(`${what}を読めない（${label}: 通信エラー）`, [], { kind: 'network' });
   }
   // 応答の本文はエラーメッセージに入れない（サーバーの例外本文・ログイン画面を画面に反射しない）
   if (res.type === 'opaqueredirect' || res.status === 401) {
@@ -101,7 +106,7 @@ async function fetchText(
     });
   }
   if (!res.ok) {
-    throw new ChainLoadError(`板を読めない（${label}: HTTP ${res.status}）`, [], {
+    throw new ChainLoadError(`${what}を読めない（${label}: HTTP ${res.status}）`, [], {
       kind: 'http',
       status: res.status,
     });
@@ -157,6 +162,39 @@ export function createBigQueryAdapter(opts: BigQueryAdapterOptions = {}): ChainA
       return parseOrThrow(text, 'api');
     },
   };
+}
+
+export interface CalendarLoadOptions {
+  /** API の URL（既定は同一オリジンの /api/calendar） */
+  endpoint?: string;
+  fetch?: FetchLike;
+  signal?: AbortSignal;
+}
+
+/**
+ * 取引カレンダー（`/api/calendar`。optionchan の trading_calendar_latest の版）を読んで検証する（7.5）。
+ * fetch の作法は `/api/chain` と同じ（`cache: 'no-cache'` で再検証・`redirect: 'manual'` でログイン切れを検出）。
+ * 失敗は ChainLoadError（kind・status。応答の本文は入れない）。AbortError はそのまま投げる。
+ */
+export async function loadCalendarJson(opts: CalendarLoadOptions = {}): Promise<CalendarJson> {
+  const load: LoadOptions = opts.signal ? { signal: opts.signal } : {};
+  const text = await fetchText(
+    opts.fetch ?? defaultFetch,
+    opts.endpoint ?? '/api/calendar',
+    load,
+    'api',
+    { cache: 'no-cache', redirect: 'manual' },
+    'カレンダー',
+  );
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    throw new ChainLoadError('カレンダーの JSON が不正（api）', ['$: JSON として解析できない']);
+  }
+  const r = validateCalendarJson(parsed);
+  if (!r.ok) throw new ChainLoadError('カレンダーの JSON が不正（api）', r.errors);
+  return r.value;
 }
 
 /** 読んで正規化まで（UI の既定の経路）。 */

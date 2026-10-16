@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { type Chain, manualEntryDefault, normalizeChain } from '../../data';
-import type { OptionLeg, OptionType } from '../../model';
+import { buildCalendar, type Chain, manualEntryDefault, normalizeChain } from '../../data';
+import bundledJson from '../../data/calendar/calendar.json';
+import { monthlyExpiry, type OptionLeg, type OptionType } from '../../model';
+import { BUNDLED_CALENDAR } from '../../ui/calendar';
 import {
   type Action,
   initialState,
@@ -481,6 +483,120 @@ describe('取得時刻と読み直し（#34）', () => {
     expect(s.chain).toBeNull();
     expect(s.fetchedAt).toBeNull();
     expect(s.loadError?.message).toBe('x');
+  });
+});
+
+/**
+ * #39 AC-5: 取引カレンダー（/api/calendar）の読み込みの状態。板と独立。
+ * API の版は同梱の版に 2027-03-12（2027-03 限の第 2 金曜）の休業日を足した架空の版。
+ */
+describe('取引カレンダーの読み込み（#39）', () => {
+  const chain = normalizeChain(fixture('latest'));
+  const T1 = Date.parse('2026-10-13T21:47:00+09:00');
+  const extra = { date: '2027-03-12', is_trading_day: false, status: 'planned', name: '休業日' };
+  const apiJson = {
+    ...bundledJson,
+    version_at: '2026-10-15T08:30:00+09:00',
+    days: [...bundledJson.days, extra].sort((a, b) => (a.date < b.date ? -1 : 1)),
+  };
+  const apiCal = buildCalendar(apiJson, 'api');
+  const manual = {
+    product: 'op_large' as const,
+    expiry: '2027-03',
+    type: 'put' as const,
+    k: 60000,
+    side: 'sell' as const,
+    entry: 300,
+    iv: 0.3,
+  };
+  const withManual = () =>
+    run(
+      initialState,
+      { type: 'loaded', chain, label: 'API', fetchedAt: T1 },
+      { type: 'addManualLeg', input: manual },
+      { type: 'editLeg', id: 1, patch: { qty: 3, entry: 250, side: 'buy', iv: 0.28 } },
+    );
+
+  it('前提: 架空の API の版は検証に通り、2027-03 限の SQ 日が 03-12 → 03-11 に変わる', () => {
+    expect(apiCal.ok).toBe(true);
+    expect(monthlyExpiry(2027, 3, BUNDLED_CALENDAR.holidays).sqDate).toBe('2027-03-12');
+    expect(monthlyExpiry(2027, 3, apiCal.holidays).sqDate).toBe('2027-03-11');
+  });
+
+  it('(a) 初期状態のカレンダーは同梱の版', () => {
+    expect(initialState.calendar).toBe(BUNDLED_CALENDAR);
+    expect(initialState.calendar.origin).toBe('bundled');
+    expect(initialState.calendar.ok).toBe(true);
+  });
+
+  it('(b) 成功で API の版になり、手入力の OP の足の SQ 時刻が作り直される（編集は変わらない）', () => {
+    const before = withManual();
+    const leg0 = before.legs[0];
+    expect(leg0?.optionMarket?.market.sqTime).toBe(
+      monthlyExpiry(2027, 3, BUNDLED_CALENDAR.holidays).sqTime,
+    );
+    const after = reduce(before, { type: 'calendarLoaded', calendar: apiCal });
+    expect(after.calendar).toBe(apiCal);
+    const leg1 = after.legs[0];
+    expect(leg1?.optionMarket?.market.sqTime).toBe(monthlyExpiry(2027, 3, apiCal.holidays).sqTime);
+    expect(leg1?.optionMarket?.market.sqTime).not.toBe(leg0?.optionMarket?.market.sqTime);
+    // 建値・枚数・売買・IV の編集は同じ
+    expect(leg1?.leg).toEqual(leg0?.leg);
+    expect(leg1?.id).toBe(leg0?.id);
+    // 板・読み込みの状態は変えない
+    expect(after.chain).toBe(before.chain);
+    expect(after.loadError).toBe(before.loadError);
+    expect(after.loading).toBe(before.loading);
+    expect(after.fetchedAt).toBe(before.fetchedAt);
+  });
+
+  it('板が無いときの成功はカレンダーだけ置き換える', () => {
+    const s = reduce(initialState, { type: 'calendarLoaded', calendar: apiCal });
+    expect(s.calendar).toBe(apiCal);
+    expect(s.chain).toBeNull();
+    expect(s.legs).toBe(initialState.legs);
+  });
+
+  it('同じ API の版（再検証）なら state をそのまま返す。壊れた版では上書きしない', () => {
+    const s = reduce(withManual(), { type: 'calendarLoaded', calendar: apiCal });
+    expect(reduce(s, { type: 'calendarLoaded', calendar: buildCalendar(apiJson, 'api') })).toBe(s);
+    expect(reduce(s, { type: 'calendarLoaded', calendar: buildCalendar({}, 'api') })).toBe(s);
+  });
+
+  it('(c) 失敗で state は前のまま（同梱の版・前の API の版とも。板・足・板の読み込みエラーも同じ）', () => {
+    const bundled = withManual();
+    expect(reduce(bundled, { type: 'calendarFailed' })).toBe(bundled);
+    expect(reduce(bundled, { type: 'calendarFailed' }).calendar).toBe(BUNDLED_CALENDAR);
+    const api = reduce(bundled, { type: 'calendarLoaded', calendar: apiCal });
+    const failed = run(
+      api,
+      { type: 'loading' },
+      { type: 'loadFailed', error: { message: '板を読めない（通信エラー）', errors: [] } },
+    );
+    const s = reduce(failed, { type: 'calendarFailed' });
+    expect(s).toBe(failed);
+    expect(s.calendar).toBe(apiCal);
+    expect(s.chain).toBe(chain);
+    expect(s.legs).toBe(failed.legs);
+    expect(s.loadError?.message).toBe('板を読めない（通信エラー）');
+  });
+
+  it('(d) 板の読み込みの失敗・成功はカレンダーを変えない', () => {
+    const api = reduce(withManual(), { type: 'calendarLoaded', calendar: apiCal });
+    const failed = run(
+      api,
+      { type: 'loading' },
+      { type: 'loadFailed', error: { message: 'x', errors: [] } },
+    );
+    expect(failed.calendar).toBe(apiCal);
+    const again = reduce(failed, { type: 'loaded', chain, label: 'API', fetchedAt: T1 });
+    expect(again.calendar).toBe(apiCal);
+    // 板の読み直しでも足の市場は今のカレンダー（API の版）で作り直す
+    expect(again.legs[0]?.optionMarket?.market.sqTime).toBe(
+      monthlyExpiry(2027, 3, apiCal.holidays).sqTime,
+    );
+    const first = run(initialState, { type: 'loadFailed', error: { message: 'x', errors: [] } });
+    expect(first.calendar).toBe(BUNDLED_CALENDAR);
   });
 });
 

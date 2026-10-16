@@ -3,15 +3,19 @@
  * 本番は開いたら 1 回と [最新] で `bigquery` アダプタ（同一オリジンの /api/chain。#34）。
  * dev サーバーは合成の fixture（vite.config.ts のプラグインが配る）が既定で、API（Vite の /api プロキシ）にも切り替えられる。
  * ファイル選択（`file` アダプタ）はどちらでも使える。自動ポーリングはしない（7.3 (4)）。
+ * 取引カレンダー（/api/calendar）は API の板を読むときだけ、板と並行に独立して読む（readsCalendar。7.5）。
  */
 
 import {
+  buildCalendar,
+  type Calendar,
   type Chain,
   type ChainJson,
   ChainLoadError,
   createBigQueryAdapter,
   createFileAdapter,
   DEFAULT_RATE,
+  loadCalendarJson,
   normalizeChain,
 } from '../data';
 import type { LoadErrorView } from './state';
@@ -32,6 +36,14 @@ export type InitialSource = { kind: 'fixture'; name: 'latest' } | { kind: 'api' 
 /** 画面を開いたときに最初に読むデータ元（dev = 合成の latest、本番 = API）。 */
 export function initialSource(isDev: boolean): InitialSource {
   return isDev ? { kind: 'fixture', name: 'latest' } : { kind: 'api' };
+}
+
+/**
+ * そのデータ元を読むときに取引カレンダー（/api/calendar）も読むか。API（本番の初回・[最新]、dev で API に
+ * 切り替えたとき）だけ。dev の合成の板・ファイル選択では読まない（同梱の版のまま）。
+ */
+export function readsCalendar(source: InitialSource | { kind: 'file' }): boolean {
+  return source.kind === 'api';
 }
 
 /** 読み込みの行の文言（読み込み中 / 「表示中: <データ元>」。ファイルならその名前。#48）。 */
@@ -63,6 +75,11 @@ export async function loadBoardFromUrl(url: string, signal?: AbortSignal): Promi
 /** API（`/api/chain`）から最新の板を読む。 */
 export async function loadBoardFromApi(signal?: AbortSignal): Promise<LoadedBoard> {
   return board(await createBigQueryAdapter().loadChain(signal ? { signal } : {}));
+}
+
+/** API（`/api/calendar`）から取引カレンダーの版を読む（検証済み。失敗は ChainLoadError か AbortError）。 */
+export async function loadCalendarFromApi(signal?: AbortSignal): Promise<Calendar> {
+  return buildCalendar(await loadCalendarJson(signal ? { signal } : {}), 'api');
 }
 
 export async function loadFromUrl(url: string, signal?: AbortSignal): Promise<Chain> {
