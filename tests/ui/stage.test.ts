@@ -3,7 +3,7 @@ import { type Chain, normalizeChain } from '../../data';
 import { DEFAULT_SETTINGS, type ModelSettings, type Scenario, ZERO_SCENARIO } from '../../model';
 import { linear } from '../../ui/chart/scale';
 import { type Action, initialState, reduce, type State, type UiLeg } from '../../ui/state';
-import { fmtSigned } from '../../ui/view/format';
+import { fmtNum, fmtSigned } from '../../ui/view/format';
 import { fmtAmount, metricsModel } from '../../ui/view/metrics';
 import { metricTiles } from '../../ui/view/metricsPanel';
 import {
@@ -26,6 +26,7 @@ import {
 import { labelWidth, scenarioMarks } from '../../ui/view/scenarioMarks';
 import {
   bigReadout,
+  emptyStageGrid,
   IV_RAIL_MAX_RATE,
   IV_RAIL_PAD,
   ivRailBubble,
@@ -860,6 +861,107 @@ describe('IV レールの感度の上限（レビュー）', () => {
       expect(Math.abs(ivRailDragValue(0, dy + 1) - ivRailDragValue(0, dy))).toBeLessThanOrEqual(
         0.5,
       );
+    }
+  });
+});
+
+describe('emptyStageGrid（#111）', () => {
+  /** 架空の X₀ */
+  const X0 = 70_000;
+  const NUM = /^\d{1,3}(,\d{3})*$/;
+  const inside = (g: ReturnType<typeof emptyStageGrid>) => {
+    const { left, top, width, height } = g.plot;
+    for (const x of g.xLines) {
+      expect(x).toBeGreaterThanOrEqual(left - 1e-9);
+      expect(x).toBeLessThanOrEqual(left + width + 1e-9);
+    }
+    for (const y of [...g.yLines, g.zeroPy]) {
+      expect(y).toBeGreaterThanOrEqual(top - 1e-9);
+      expect(y).toBeLessThanOrEqual(top + height + 1e-9);
+    }
+  };
+
+  it('空の格子: X₀ があれば X₀ が横軸の範囲の内側で、横の目盛りの文言は足があるときと同じ書式', () => {
+    // 足があるときの横の目盛りの書式（合成の板のストラングル）
+    const full = chartOf(baseOf(strangle()), ZERO_SCENARIO);
+    expect(full.xTicks.length).toBeGreaterThan(0);
+    for (const t of full.xTicks) expect(t.label).toMatch(NUM);
+    for (const plotWidth of [292, 540, 1200]) {
+      const g = emptyStageGrid({ x0: X0, plotWidth, plotHeight: 200 });
+      expect(g.xTicks.length).toBeGreaterThanOrEqual(2);
+      const lo = X0 * 0.98;
+      const hi = X0 * 1.02;
+      expect(lo).toBeLessThan(X0);
+      expect(X0).toBeLessThan(hi);
+      let prev = -Infinity;
+      for (const t of g.xTicks) {
+        expect(t.v).toBeGreaterThanOrEqual(lo);
+        expect(t.v).toBeLessThanOrEqual(hi);
+        expect(t.v).toBeGreaterThan(prev);
+        prev = t.v;
+        expect(t.label).toBe(fmtNum(t.v, 0));
+        expect(t.label).toMatch(NUM);
+        expect(t.px).toBeCloseTo(
+          linear([lo, hi], [g.plot.left, g.plot.left + g.plot.width])(t.v),
+          9,
+        );
+      }
+      expect(g.xLines).toEqual(g.xTicks.map((t) => t.px));
+      inside(g);
+    }
+  });
+
+  it('空の格子: X₀ が NaN なら横の目盛りの文言なし・格子線は縦横とも 2 本以上', () => {
+    for (const x0 of [Number.NaN, 0, -1, Number.POSITIVE_INFINITY]) {
+      const g = emptyStageGrid({ x0, plotWidth: 292, plotHeight: 180 });
+      expect(g.xTicks).toEqual([]);
+      expect(g.xLines.length).toBeGreaterThanOrEqual(2);
+      expect(g.yLines.length).toBeGreaterThanOrEqual(2);
+      expect(g.xLines[0]).toBeCloseTo(g.plot.left, 9);
+      expect(g.xLines.at(-1)).toBeCloseTo(g.plot.left + g.plot.width, 9);
+      inside(g);
+    }
+  });
+
+  it('空の格子: 0 の線は描画域の内側（縦の中央）・縦の目盛りの文言なし', () => {
+    const g = emptyStageGrid({ x0: X0, plotWidth: 540, plotHeight: 220 });
+    expect(g.zeroPy).toBeGreaterThan(g.plot.top);
+    expect(g.zeroPy).toBeLessThan(g.plot.top + g.plot.height);
+    expect(g.zeroPy).toBeCloseTo(g.plot.top + g.plot.height / 2, 9);
+    expect(g.yLines[0]).toBeCloseTo(g.plot.top, 9);
+    expect(g.yLines.at(-1)).toBeCloseTo(g.plot.top + g.plot.height, 9);
+    // 縦の目盛り（値・文言・単位）を持たない
+    expect(Object.keys(g).sort()).toEqual(['plot', 'xLines', 'xTicks', 'yLines', 'zeroPy']);
+    // 描画域は pnlChartModel の空のときと同じ
+    const empty = pnlChartModel({
+      base: null,
+      scenario: ZERO_SCENARIO,
+      viewport: null,
+      pnlY: DEFAULT_PNL_Y,
+      plotWidth: 540,
+      plotHeight: 220,
+    });
+    expect(empty.empty).toBe(true);
+    expect(g.plot).toEqual(empty.plot);
+    expect(g.plot.left).toBe(PNL_MARGIN.left);
+  });
+
+  it('空の格子: 幅・高さが 1 でも例外なし・値はすべて有限', () => {
+    for (const x0 of [X0, Number.NaN]) {
+      for (const size of [1, 0, -5, Number.NaN]) {
+        const g = emptyStageGrid({ x0, plotWidth: size, plotHeight: size });
+        const all = [
+          ...Object.values(g.plot),
+          ...g.xLines,
+          ...g.yLines,
+          g.zeroPy,
+          ...g.xTicks.flatMap((t) => [t.v, t.px]),
+        ];
+        for (const v of all) expect(Number.isFinite(v)).toBe(true);
+        expect(g.plot.width).toBe(1);
+        expect(g.plot.height).toBe(1);
+        inside(g);
+      }
     }
   });
 });

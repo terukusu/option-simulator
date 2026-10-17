@@ -11,6 +11,7 @@ import { type PnlBase, type PnlChartModel, Y_UNIT_LABEL } from '../../view/pnlCh
 import { dXFromAxis } from '../../view/scenario';
 import type { ScenarioMarks } from '../../view/scenarioMarks';
 import {
+  emptyStageGrid,
   ivRailObstacle,
   legMarkers,
   MARKER_BAND_PX,
@@ -41,6 +42,8 @@ export function PnlPlot(p: {
   marks: ScenarioMarks | null;
   pinMarks: readonly PinLabel[];
   base: PnlBase | null;
+  /** 板の X₀（足 0 本でも板があれば決まる。無ければ NaN）。空の格子の横軸に使う（#111） */
+  boardX0: number;
   chain: Chain | null;
   scenario: Scenario;
   legs: readonly UiLeg[];
@@ -66,6 +69,18 @@ export function PnlPlot(p: {
     const obstacles = mini ? [] : [ivRailObstacle(dSigma, p.height, p.width + frame.offsetX)];
     return stageMarkLabels(marks, model, obstacles);
   }, [marks, model, mini, dSigma, p.height, p.width, frame.offsetX]);
+  // 足が無い（評価できる足が無い）ときの格子（#111。ミニは今のまま描かない）
+  const emptyGrid = useMemo(
+    () =>
+      model.empty && !mini
+        ? emptyStageGrid({
+            x0: p.boardX0,
+            plotWidth: frame.plotWidth,
+            plotHeight: frame.plotHeight,
+          })
+        : null,
+    [model.empty, mini, p.boardX0, frame.plotWidth, frame.plotHeight],
+  );
   const { plot } = model;
   const ox = frame.offsetX;
   const right = plot.left + plot.width;
@@ -137,6 +152,49 @@ export function PnlPlot(p: {
       role="application"
       aria-label="損益グラフ（ドラッグでパン、ホイール・ピンチで拡大、ダブルクリックでリセット、ハンドルをつかむか長押しして左右にドラッグでシナリオ点 ΔX、足のマーカーで足を選ぶ・長押しして横にドラッグで行使価格。キー: ← / → ΔX ∓100 円（Shift で 1,000 円）、↑ / ↓ Δσ ±0.5pt、[ / ] 経過日数 ∓1 日、0 シナリオを 0 に、+ / − 拡大縮小、R リセット）"
     >
+      {model.empty && emptyGrid && (
+        <svg width={p.width} height={p.height} viewBox={frame.viewBox} aria-hidden="true">
+          <g class="grid">
+            {emptyGrid.yLines.map((y, i) => (
+              <line
+                key={`y${i}`}
+                x1={emptyGrid.plot.left}
+                x2={emptyGrid.plot.left + emptyGrid.plot.width}
+                y1={y}
+                y2={y}
+              />
+            ))}
+            {emptyGrid.xLines.map((x, i) => (
+              <line
+                key={`x${i}`}
+                x1={x}
+                x2={x}
+                y1={emptyGrid.plot.top}
+                y2={emptyGrid.plot.top + emptyGrid.plot.height}
+              />
+            ))}
+          </g>
+          <g class="ax">
+            {emptyGrid.xTicks.map((t) => (
+              <text
+                key={`x${t.v}`}
+                class="tick-x"
+                x={t.px}
+                y={emptyGrid.plot.top + emptyGrid.plot.height + 17}
+              >
+                {t.label}
+              </text>
+            ))}
+          </g>
+          <line
+            class="zero"
+            x1={emptyGrid.plot.left}
+            x2={emptyGrid.plot.left + emptyGrid.plot.width}
+            y1={emptyGrid.zeroPy}
+            y2={emptyGrid.zeroPy}
+          />
+        </svg>
+      )}
       {model.empty ? (
         <p class="note">
           {p.legCount === 0

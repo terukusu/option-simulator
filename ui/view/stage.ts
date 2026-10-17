@@ -8,12 +8,21 @@
  */
 
 import type { ModelSettings, OptionType, Scenario, Side } from '../../model';
-import { type Domain, linear, pixelToValue } from '../chart/scale';
+import { type Domain, fitTicks, linear, pixelToValue } from '../chart/scale';
 import type { UiLeg } from '../state';
 import { DASH, fmtDateTime, fmtSigned } from './format';
 import { fmtAmount, type MetricsModel } from './metrics';
 import { type FullRow, premiumFullRows } from './metricsPanel';
-import { axisX, PNL_MARGIN, type PnlBase, type PnlChartModel } from './pnlChart';
+import {
+  axisX,
+  INITIAL_PAD_MIN_X0,
+  PNL_MARGIN,
+  type PnlBase,
+  type PnlChartModel,
+  type PnlTick,
+  X_TICK_OPTIONS,
+  xTickLabel,
+} from './pnlChart';
 import type { ReadoutModel } from './readout';
 import {
   daysToTarget,
@@ -429,6 +438,66 @@ export function stageFrame(width: number, height: number, mini: boolean): StageF
     offsetX: 0,
     offsetY: 0,
   };
+}
+
+// ---------------------------------------------------------------- 空の格子（#111）
+
+/** 足が無い（評価できる足が無い）ときの舞台の格子 */
+export interface EmptyStageGrid {
+  /** 描画域（pnlChartModel の空のときの plot と同じ） */
+  plot: { left: number; top: number; width: number; height: number };
+  /** 横軸の目盛り（X₀ があるときだけ。足があるときと同じ規則・書式） */
+  xTicks: PnlTick[];
+  /** 縦の格子線の x（画素） */
+  xLines: number[];
+  /** 横の格子線の y（画素。値なしの等間隔） */
+  yLines: number[];
+  /** 0 の線の y（描画域の縦の中央） */
+  zeroPy: number;
+}
+
+/** 横の格子の分割数（端を含めて 5 本） */
+export const EMPTY_GRID_Y_DIV = 4;
+/** X₀ が無いときの縦の格子線のおおよその間隔（px） */
+export const EMPTY_GRID_X_GAP_PX = 80;
+
+const finiteSize = (v: number) => (Number.isFinite(v) ? Math.max(v, 1) : 1);
+
+/**
+ * 足が無いときの舞台の格子（docs/ui-redesign.md §4.1・変更履歴 #111）。横軸は X₀ ± INITIAL_PAD_MIN_X0·X₀
+ * （足を 1 本入れたときの最小の初期幅と同じ）で、目盛りは足があるときと同じ fitTicks・書式。X₀ が決まらない
+ * （NaN・0 以下・非有限）ときは文言なしの等間隔の線だけ。縦は値なしの等間隔の線と中央の 0 の線（架空の金額を出さない）。
+ * どんな数値でも例外を出さず、すべての画素は描画域の内側。
+ */
+export function emptyStageGrid(input: {
+  x0: number;
+  plotWidth: number;
+  plotHeight: number;
+}): EmptyStageGrid {
+  const width = finiteSize(input.plotWidth);
+  const height = finiteSize(input.plotHeight);
+  const plot = { left: PNL_MARGIN.left, top: PNL_MARGIN.top, width, height };
+  const right = plot.left + width;
+  const yLines = Array.from(
+    { length: EMPTY_GRID_Y_DIV + 1 },
+    (_, i) => plot.top + (height * i) / EMPTY_GRID_Y_DIV,
+  );
+  const zeroPy = plot.top + height / 2;
+  const { x0 } = input;
+  if (Number.isFinite(x0) && x0 > 0) {
+    const pad = x0 * INITIAL_PAD_MIN_X0;
+    const lo = x0 - pad;
+    const hi = x0 + pad;
+    const sx = linear([lo, hi], [plot.left, right]);
+    const xTicks = fitTicks(lo, hi, width, xTickLabel, {
+      ...X_TICK_OPTIONS,
+      widthSample: [lo, hi],
+    }).map((v) => ({ v, px: sx(v), label: xTickLabel(v) }));
+    return { plot, xTicks, xLines: xTicks.map((t) => t.px), yLines, zeroPy };
+  }
+  const nx = clamp(Math.round(width / EMPTY_GRID_X_GAP_PX), 2, 12);
+  const xLines = Array.from({ length: nx + 1 }, (_, i) => plot.left + (width * i) / nx);
+  return { plot, xTicks: [], xLines, yLines, zeroPy };
 }
 
 // ---------------------------------------------------------------- 読み取り（大きな数字）
