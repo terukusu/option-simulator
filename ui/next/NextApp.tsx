@@ -1,4 +1,4 @@
-import { useCallback, useReducer, useState } from 'preact/hooks';
+import { useCallback, useEffect, useReducer, useRef, useState } from 'preact/hooks';
 import { type Boot, useAppController } from '../components/useAppController';
 import { useMediaQuery } from '../components/useMediaQuery';
 import type { PrefsRead } from '../prefs';
@@ -11,6 +11,7 @@ import type { DXUnit } from '../view/scenario';
 import { INITIAL_SHELL, layoutTier, shellReduce } from '../view/shell';
 import { Notices } from './Notices';
 import { Toasts, useToasts } from './parts/Toast';
+import { Positions } from './regions/Positions';
 import { Scenario } from './regions/Scenario';
 import { Stage } from './regions/Stage';
 import { Shell } from './Shell';
@@ -40,6 +41,7 @@ function boardNotice(
  * #81 の器（トップバー・知らせの行・見出し行・ドック）に、#82 で舞台（regions/Stage.tsx）を入れた。
  * 舞台で選んだ足（selectedLeg）はここのローカル（保存しない）。行使価格の変更はトーストの [元に戻す] で戻せる。
  * #83 でシナリオ（regions/Scenario.tsx）を入れた。ΔX の単位はここのローカル（保存しない。#87 の設定も同じ値を触る）。
+ * #84 でポジション（regions/Positions.tsx。key = 作業中のタブ）を入れた。タブが変わったら [元に戻す] 付きのトーストを閉じる。
  */
 export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
   const c = useAppController(boot);
@@ -60,7 +62,14 @@ export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
     },
     [tier],
   );
-  const { push } = toasts;
+  const { push, dropUndo } = toasts;
+  // タブが変わったら [元に戻す] 付きのトーストを閉じる（別のタブでは restoreLeg が何もしないボタンを残さない。#84）
+  const tabRef = useRef(state.activeTab);
+  useEffect(() => {
+    if (tabRef.current === state.activeTab) return;
+    tabRef.current = state.activeTab;
+    dropUndo();
+  }, [state.activeTab, dropUndo]);
   const onChangeStrike = useCallback(
     (id: number, k: number) => {
       const index = state.legs.findIndex((l) => l.id === id);
@@ -126,6 +135,17 @@ export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
           />
         }
         scenario={<Scenario c={c} dXUnit={dXUnit} onDXUnit={setDXUnit} />}
+        positions={
+          <Positions
+            key={state.activeTab}
+            c={c}
+            tier={tier}
+            send={send}
+            selectedLeg={selectedLeg}
+            onSelectLeg={setPicked}
+            push={push}
+          />
+        }
       />
       <Toasts toasts={toasts.toasts} onUndo={toasts.undo} />
     </div>
