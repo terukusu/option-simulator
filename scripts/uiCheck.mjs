@@ -7,11 +7,15 @@
 //
 //   npm run ui:check                       新しい画面（?ui=next）: 360 / 390 / 900 / 1440 × ダーク / ライト、
 //                                          スマホはシート hidden / peek / full × パネル 5 つ。各状態で舞台の読み取り
-//                                          （.readout .ro）が画面内に見えているか（スマホ 3・900 で 5・1440 で 6。#82）
+//                                          （.readout .ro）が画面内に見えているか（スマホ 3・900 で 5・1440 で 6。#82）。
+//                                          シナリオ（#83）の .stepper .val b・チップが切れていないか（scrollWidth ≤ clientWidth）を
+//                                          「モデルの前提」の閉 / 開の両方で（開いた状態は縦・横・折り返し・読み取りも測る）
 //   npm run ui:check -- --parts            部品の見本（?ui=next&parts。dev だけ）
 //   npm run ui:check -- --legacy           旧画面（?ui=next なし）
 //   npm run ui:check -- --flows            保存・共有・テーマ・キーボードの手順（#81 AC-11・AC-12）と舞台の手順
-//                                          （#82: ハンドル・IV / 時間レール・キー・足マーカー・Long Animation Frame）
+//                                          （#82: ハンドル・IV / 時間レール・キー・足マーカー・Long Animation Frame）とシナリオの手順
+//                                          （#83: ステッパーの ± / Shift / スクラブ / ホイール / キー / 数値入力・プリセット・評価時刻・
+//                                          前提・#82 のレールとの一致・Long Animation Frame。390×844 と 1440×900）
 //   --url <base>                           dev サーバーを起こさず、その URL を使う（例 http://127.0.0.1:5173/?ui=next&parts）
 //   --dom <file>                           body の下の要素の tag.class の並びを書き出す（旧画面が変わらないことの比較用）
 //   --shots <dir>                          スクリーンショットを書く（合成の板だけ。リポジトリに入れない）
@@ -260,6 +264,45 @@ async function readoutCheck(page, label, want) {
 }
 const readoutStats = { pass: 0, total: 0 };
 
+/**
+ * シナリオ（#83 AC-9）: 見えている section.scenario の .stepper .val b・.chip が切れていない（scrollWidth ≤ clientWidth）。
+ * 要約（.vals）は省略記号で可なので測らない。見えていなければ数えない
+ */
+async function scenarioCheck(page, label) {
+  const r = await page.evaluate(() => {
+    const sec = document.querySelector('section.scenario');
+    if (!sec || sec.getClientRects().length === 0) return null;
+    const els = [...sec.querySelectorAll('.stepper .val b, .chip')].filter(
+      (el) => el.getClientRects().length > 0,
+    );
+    const bad = els
+      .filter((el) => el.scrollWidth > el.clientWidth)
+      .map((el) => `「${el.textContent}」${el.scrollWidth}/${el.clientWidth}`);
+    return { n: els.length, bad };
+  });
+  if (r === null) return true;
+  const ok = r.n > 0 && r.bad.length === 0;
+  scenarioStats.total++;
+  if (ok) scenarioStats.pass++;
+  else failed = true;
+  if (!ok) console.log(`${label}: シナリオの値・チップ ${r.n} 個 ${r.bad.join('・')}  ← NG`);
+  return ok;
+}
+const scenarioStats = { pass: 0, total: 0 };
+
+/** 「モデルの前提」を開いて測り（縦・横・折り返し・読み取り・シナリオの切れ）、閉じて戻す */
+async function advOpenCheck(page, label, w, h, shotName, readouts) {
+  const summary = page.locator('section.scenario details.adv summary');
+  if ((await summary.count()) === 0 || !(await summary.isVisible())) return;
+  await summary.click();
+  await page.waitForTimeout(120);
+  await report(page, `${label} 前提を開く`, w, h, shotName);
+  await readoutCheck(page, `${label} 前提を開く ${w}x${h}`, readouts);
+  await scenarioCheck(page, `${label} 前提を開く ${w}x${h}`);
+  await summary.click();
+  await page.waitForTimeout(80);
+}
+
 const PANELS = ['positions', 'board', 'scenario', 'metrics', 'smile'];
 
 /** スマホの画面の状態（パネル・シート）をドックとつまみで作る（.layout の data-panel / data-sheet を読んで確かめる） */
@@ -333,13 +376,23 @@ async function measureAll() {
               continue;
             }
             await page.waitForTimeout(100);
-            await report(page, lbl, w, h, `${name}-${panel}-${sheet}`, false);
+            const scn = panel === 'scenario' && sheet !== 'hidden';
+            await report(page, lbl, w, h, `${name}-${panel}-${sheet}`, scn);
             await readoutCheck(page, `${lbl} ${w}x${h}`, 3);
+            if (scn) {
+              await scenarioCheck(page, `${lbl} ${w}x${h}`);
+              await advOpenCheck(page, lbl, w, h, `${name}-${panel}-${sheet}-adv`, 3);
+            }
           }
         }
       } else {
         await report(page, tag, w, h, name);
-        if (mode === 'next') await readoutCheck(page, `${tag} ${w}x${h}`, w >= 1200 ? 6 : 5);
+        if (mode === 'next') {
+          const want = w >= 1200 ? 6 : 5;
+          await readoutCheck(page, `${tag} ${w}x${h}`, want);
+          await scenarioCheck(page, `${tag} ${w}x${h}`);
+          await advOpenCheck(page, tag, w, h, `${name}-adv`, want);
+        }
       }
       if (domFile) domOut.push(`## ${w}x${h}${theme ? ` ${theme}` : ''}`, await domList(page));
       await ctx.close();
@@ -354,6 +407,9 @@ async function measureAll() {
       await pinCheck(w, h, true);
     }
     console.log(`読み取りの検査: ${readoutStats.pass} / ${readoutStats.total} 状態で pass`);
+    console.log(
+      `シナリオの値・チップの検査: ${scenarioStats.pass} / ${scenarioStats.total} 状態で pass`,
+    );
   }
 }
 
@@ -702,6 +758,8 @@ async function runFlows() {
 
   // #82 舞台の手順（AC-13・AC-14・AC-15）
   for (const vp of [phone, pc]) await stageFlows(vp);
+  // #83 シナリオの手順（AC-10・AC-11）
+  for (const vp of [phone, pc]) await scenarioFlows(vp);
 }
 
 // ---- 舞台の手順（#82）
@@ -978,6 +1036,396 @@ async function stageFlows(vp) {
       back?.strike === before?.strike && back?.entry === before?.entry,
       `${back?.strike} @${back?.entry}`,
     );
+  }
+  await ctx.close();
+}
+
+// ---- シナリオの手順（#83 AC-10・AC-11）
+async function scenarioFlows(vp) {
+  const tag = `${vp.width}x${vp.height}`;
+  const ctx = await newContext(vp, { [WORKSPACE_KEY]: twoLegs });
+  await ctx.addInitScript(LOAF_INIT);
+  const page = await ctx.newPage();
+  await page.goto(pageUrl('next'));
+  await waitReady(page, 'next');
+  if (vp.width <= PHONE_MAX) {
+    const ok = await setShell(page, 'scenario', 'peek');
+    check(`#83 ${tag} ドックで「シナリオ」を開く（peek）`, ok);
+  }
+  const saved = async () => {
+    await page.waitForTimeout(700); // 自動保存（500ms の debounce）
+    return page.evaluate((k) => {
+      try {
+        const ws = JSON.parse(localStorage.getItem(k) ?? 'null');
+        return {
+          scenario: ws?.tabs?.[ws.active]?.position?.scenario ?? null,
+          basis: ws?.ui?.future_basis ?? null,
+        };
+      } catch {
+        return { scenario: null, basis: null };
+      }
+    }, WORKSPACE_KEY);
+  };
+  const st = (f) => `section.scenario .stepper[data-name="${f}"]`;
+  const plus = (f) => `${st(f)} > button:last-child`;
+  const val = (f) => `${st(f)} > .val`;
+  const now = (f) =>
+    page.evaluate((s) => Number(document.querySelector(s)?.getAttribute('aria-valuenow')), val(f));
+  const center = async (sel) => {
+    const b = await page.locator(sel).first().boundingBox();
+    if (!b) throw new Error(`${sel} が無い`);
+    return { x: b.x + b.width / 2, y: b.y + b.height / 2 };
+  };
+  const loafOk = await page.evaluate(() => window.__loafOk === true);
+  const loafMark = () => page.evaluate(() => window.__loaf.length);
+  const loafSince = (i) =>
+    page.evaluate((n) => window.__loaf.slice(n).filter((d) => d > 50).length, i);
+  const close = (a, b, eps = 1e-6) => Math.abs(a - b) <= eps * Math.max(1, Math.abs(b));
+  const loafs = [];
+
+  // 始めにシナリオを 0 に（描画域にフォーカスして 0）
+  await page.focus('.chart');
+  await page.keyboard.press('0');
+  const s0 = (await saved()).scenario;
+  check(
+    `#83 ${tag} 描画域の 0 でシナリオが 0 に`,
+    s0?.dX === 0 && s0?.days === 0 && s0?.dSigma === 0 && s0?.skew === 0,
+    JSON.stringify(s0),
+  );
+
+  // (a) d の ＋ → +1、Shift + ＋ → +10（上限で止まる）
+  let pctHalf = 0;
+  {
+    await page.click(plus('days'));
+    const a = (await saved()).scenario;
+    check(`#83 AC-10(a) ${tag} d の ＋ → d +1`, a?.days === 1, `${a?.days}`);
+    const max = Number(await page.getAttribute(val('days'), 'aria-valuemax'));
+    await page.click(plus('days'), { modifiers: ['Shift'] });
+    const b = (await saved()).scenario;
+    const want = Math.min(11, max);
+    check(
+      `#83 AC-10(a) ${tag} Shift + ＋ → d +10（上限 ${max} で止まる）`,
+      b?.days === want && (await now('days')) === want,
+      `${b?.days} / 期待 ${want}`,
+    );
+    for (let i = 0; i < 5 && (await page.isEnabled(plus('days'))); i++) {
+      await page.click(plus('days'), { modifiers: ['Shift'] });
+    }
+    const c = (await saved()).scenario;
+    check(
+      `#83 AC-10(a) ${tag} Shift + ＋ を続けると上限 ${max} で止まる`,
+      c?.days === max,
+      `${c?.days}`,
+    );
+    // Δσ の値を右に 40px スクラブ → +2.5pt（5 段）
+    const v = await center(val('dSigma'));
+    await page.mouse.move(v.x, v.y);
+    await page.mouse.down();
+    await page.mouse.move(v.x + 40, v.y, { steps: 10 });
+    await page.mouse.up();
+    const d = (await saved()).scenario;
+    check(
+      `#83 AC-10(a) ${tag} Δσ の値を右に 40px スクラブ → +2.5pt`,
+      d?.dSigma === 2.5 && (await now('dSigma')) === 2.5,
+      `${d?.dSigma}`,
+    );
+    // Δs の値の上でホイール上 1 回 → +0.5
+    const k = await center(val('skew'));
+    await page.mouse.move(k.x, k.y);
+    await page.mouse.wheel(0, -100);
+    const e = (await saved()).scenario;
+    check(`#83 AC-10(a) ${tag} Δs の値の上でホイール上 1 回 → +0.5`, e?.skew === 0.5, `${e?.skew}`);
+    // ΔX にフォーカスして ↑ → +0.5%
+    await page.focus(val('dX'));
+    await page.keyboard.press('ArrowUp');
+    const f = (await saved()).scenario;
+    pctHalf = f?.dX ?? 0;
+    check(
+      `#83 AC-10(a) ${tag} ΔX にフォーカスして ↑ → +0.5%（状態 ${pctHalf} 円）`,
+      (await now('dX')) === 0.5 && pctHalf > 0,
+    );
+  }
+
+  // (b) ΔX の数値入力: -3 Enter → X₀ × −3%、-99 → 赤く保存は変わらない、Esc で元の表示
+  {
+    // X₀ = ΔX = 0 のときの副題の X'（整数に丸めた値）。合成の板の X₀ は整数でないので、丸めの分を許す
+    await page.focus(val('dX'));
+    await page.keyboard.press('r');
+    await page.waitForTimeout(100);
+    const sub = (await page.textContent(`${val('dX')} small`)) ?? '';
+    const x0 = Number((/X ([\d,]+)/.exec(sub)?.[1] ?? 'NaN').replaceAll(',', ''));
+    await page.dblclick(val('dX'));
+    const input = `${val('dX')} input`;
+    await page.waitForSelector(input);
+    await page.fill(input, '-3');
+    await page.keyboard.press('Enter');
+    const a = (await saved()).scenario;
+    const dX = a?.dX ?? Number.NaN;
+    check(
+      `#83 AC-10(b) ${tag} ΔX に -3 Enter → 保存の ΔX ${dX} = X₀ × −3%（X₀ ≈ ${x0}）`,
+      close(dX, pctHalf * -6) && Math.abs(dX - x0 * -0.03) <= 0.03 * 0.5 + 0.01,
+      `+0.5% の ${pctHalf} × −6 = ${pctHalf * -6}`,
+    );
+    const shown = await page.textContent(`${val('dX')} b`);
+    await page.dblclick(val('dX'));
+    await page.waitForSelector(input);
+    await page.fill(input, '-99');
+    const inv = await page.getAttribute(input, 'aria-invalid');
+    const alert =
+      (await page.textContent('section.scenario .scn-err[role="alert"]').catch(() => null)) ?? '';
+    const b = (await saved()).scenario;
+    check(
+      `#83 AC-10(b) ${tag} -99 → aria-invalid="true"・保存は変わらない`,
+      inv === 'true' && b?.dX === dX && alert.startsWith('原資産 ΔXは'),
+      `「${alert}」`,
+    );
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(100);
+    const back = await page.textContent(`${val('dX')} b`).catch(() => null);
+    const gone = (await page.locator(input).count()) === 0;
+    const err = await page.locator('section.scenario .scn-err').count();
+    check(
+      `#83 AC-10(b) ${tag} Esc で元の表示（${back}）`,
+      gone && back === shown && err === 0 && (await saved()).scenario?.dX === dX,
+    );
+  }
+
+  // (e) 前提: β の ＋ → 1.1、sticky moneyness、basis 減衰、ΔX 円（表示は円・状態の ΔX は同じ）
+  {
+    await page.click('section.scenario details.adv summary');
+    await page.click(plus('beta'));
+    const a = (await saved()).scenario;
+    check(`#83 AC-10(e) ${tag} 前提を開いて β の ＋ → 1.1`, a?.beta === 1.1, `${a?.beta}`);
+    await page.click(
+      'section.scenario .seg[aria-label="IV の動き方"] button:has-text("sticky moneyness")',
+    );
+    const b = (await saved()).scenario;
+    check(
+      `#83 AC-10(e) ${tag} sticky moneyness → ivDynamics = "sticky_moneyness"`,
+      b?.ivDynamics === 'sticky_moneyness',
+      `${b?.ivDynamics}`,
+    );
+    await page.click('section.scenario .seg[aria-label="先物の basis"] button:has-text("減衰")');
+    const c = await saved();
+    check(
+      `#83 AC-10(e) ${tag} basis 減衰 → future_basis = "decay"`,
+      c.basis === 'decay',
+      `${c.basis}`,
+    );
+    await page.click('section.scenario .seg[aria-label="ΔX の単位"] button:has-text("円")');
+    const d = (await saved()).scenario;
+    const text = (await page.textContent(`${val('dX')} b`)) ?? '';
+    const yen = await now('dX');
+    check(
+      `#83 AC-10(e) ${tag} ΔX 円 → 表示 ${text}・状態の ΔX は変わらない`,
+      text.endsWith(' 円') && yen === d?.dX && d?.dX === c.scenario?.dX,
+      `表示 ${yen} / 状態 ${d?.dX}`,
+    );
+    const vals = await page.textContent('section.scenario details.adv .vals');
+    check(
+      `#83 AC-10(e) ${tag} 前提の要約`,
+      vals === 'β 1.1 · sticky moneyness · basis 減衰 · ΔX 円',
+      `${vals}`,
+    );
+    await page.click('section.scenario .seg[aria-label="ΔX の単位"] button:has-text("%")');
+    await page.click('section.scenario details.adv summary');
+  }
+
+  // (c) [急落] → ΔX = X₀ × −10%・Δσ 20・Δs 3、[リセット] → d・ΔX・Δσ・Δs が 0 で β・IV の動き方は前のまま
+  {
+    await page.click('section.scenario .chip:has-text("急落")');
+    const a = (await saved()).scenario;
+    const pressed = await page.getAttribute(
+      'section.scenario .chip:has-text("急落")',
+      'aria-pressed',
+    );
+    check(
+      `#83 AC-10(c) ${tag} [急落] → ΔX ${a?.dX}（X₀ × −10%）・Δσ ${a?.dSigma}・Δs ${a?.skew}`,
+      close(a?.dX ?? Number.NaN, pctHalf * -20) &&
+        a?.dSigma === 20 &&
+        a?.skew === 3 &&
+        pressed === 'true',
+    );
+    await page.click('section.scenario .chip:has-text("リセット")');
+    const b = (await saved()).scenario;
+    check(
+      `#83 AC-10(c) ${tag} [リセット] → d・ΔX・Δσ・Δs が 0、β・IV の動き方は前のまま`,
+      b?.days === 0 &&
+        b?.dX === 0 &&
+        b?.dSigma === 0 &&
+        b?.skew === 0 &&
+        b?.beta === 1.1 &&
+        b?.ivDynamics === 'sticky_moneyness',
+      JSON.stringify(b),
+    );
+  }
+
+  // (d) 評価時刻の「SQ 9:00」→ d が daysToTarget の値で、#82 の時間レールの aria-valuenow と同じ
+  {
+    await page.click('section.scenario .chip:has-text("SQ 9:00")');
+    const a = (await saved()).scenario;
+    const rail = Number(await page.getAttribute('.timerail', 'aria-valuenow'));
+    const tick = Number(await page.getAttribute('.timerail .mark.sq', 'data-days'));
+    const pressed = await page.getAttribute(
+      'section.scenario .chip:has-text("SQ 9:00")',
+      'aria-pressed',
+    );
+    check(
+      `#83 AC-10(d) ${tag} 評価時刻の「SQ 9:00」→ d ${a?.days}・時間レール ${rail}・目盛り ${tick}`,
+      a?.days === rail && a?.days === tick && (await now('days')) === rail && pressed === 'true',
+    );
+
+    // レビュー B-1: 端数の d（上限）で数値入力を開き、何も打たずに Enter / フォーカスを外しても d は変わらない
+    const input = `${val('days')} input`;
+    const focused = () =>
+      page.waitForFunction((sel) => document.activeElement === document.querySelector(sel), input);
+    await page.dblclick(val('days'));
+    await focused();
+    await page.keyboard.press('Enter');
+    await page.waitForTimeout(100);
+    const b = (await saved()).scenario;
+    const closedEnter = (await page.locator(input).count()) === 0;
+    await page.dblclick(val('days'));
+    await focused();
+    await page.focus(val('dSigma'));
+    await page.waitForTimeout(100);
+    const c = (await saved()).scenario;
+    const closedBlur = (await page.locator(input).count()) === 0;
+    const errs = await page.locator('section.scenario .scn-err').count();
+    const stillPressed = await page.getAttribute(
+      'section.scenario .chip:has-text("SQ 9:00")',
+      'aria-pressed',
+    );
+    check(
+      `#83 B-1 ${tag} 数値入力を開いて何も打たずに Enter / フォーカスを外す → d ${c?.days} のまま`,
+      closedEnter &&
+        closedBlur &&
+        errs === 0 &&
+        b?.days === a?.days &&
+        c?.days === a?.days &&
+        stillPressed === 'true',
+      `Enter ${b?.days}${closedEnter ? '' : '（開いたまま）'}・blur ${c?.days}${closedBlur ? '' : '（開いたまま）'}・エラー ${errs}・押下 ${stillPressed}`,
+    );
+  }
+
+  // (f) #82 の IV レールを上に 40px → Δσ のステッパー = レール、Δσ の ＋ → レール +0.5
+  {
+    const k = await center('.ivrail .knob');
+    await page.mouse.move(k.x, k.y);
+    await page.mouse.down();
+    await page.mouse.move(k.x, k.y - 40, { steps: 20 });
+    await page.mouse.up();
+    await page.waitForTimeout(100);
+    const rail = Number(await page.getAttribute('.ivrail', 'aria-valuenow'));
+    const mine = await now('dSigma');
+    check(
+      `#83 AC-10(f) ${tag} IV レールを上に 40px → Δσ のステッパー ${mine} = レール ${rail}`,
+      rail > 0 && mine === rail && (await saved()).scenario?.dSigma === rail,
+    );
+    await page.click(plus('dSigma'));
+    await page.waitForTimeout(100);
+    const rail2 = Number(await page.getAttribute('.ivrail', 'aria-valuenow'));
+    check(
+      `#83 AC-10(f) ${tag} Δσ のステッパーの ＋ → レール ${rail} → ${rail2}`,
+      rail2 === rail + 0.5,
+    );
+  }
+
+  // レビュー B-2: ステッパーの外の操作（リセット・プリセット・評価時刻のチップ）で値が戻った後の [＋] / [−] と
+  // 数値入力の初期値は、今の値から作る（古い送った値を使わない）
+  {
+    const chip = (t) => page.click(`section.scenario .chip:has-text("${t}")`);
+    await chip('リセット');
+    await page.click(plus('dSigma'));
+    await chip('リセット');
+    await page.click(plus('dSigma'));
+    const a = (await saved()).scenario;
+    check(
+      `#83 B-2 ${tag} Δσ: ＋ → リセット → ＋ で 0.5（1 段だけ）`,
+      a?.dSigma === 0.5 && (await now('dSigma')) === 0.5,
+      `${a?.dSigma}`,
+    );
+    await chip('リセット');
+    await page.click(plus('dX'));
+    await chip('急落');
+    await page.click(plus('dX'));
+    const b = (await saved()).scenario;
+    check(
+      `#83 B-2 ${tag} ΔX: ＋ → [急落] → ＋ で −9.5%`,
+      close(b?.dX ?? Number.NaN, pctHalf * -19) && close(await now('dX'), -9.5, 1e-9),
+      `${b?.dX} / 期待 ${pctHalf * -19}`,
+    );
+    await chip('リセット');
+    await page.click(plus('days'));
+    await chip('最終日 15:45');
+    const lastDays = (await saved()).scenario?.days ?? Number.NaN;
+    await page.click(`${st('days')} > button:first-child`);
+    const c = (await saved()).scenario;
+    check(
+      `#83 B-2 ${tag} d: ＋ → 「最終日 15:45」→ − でチップの d − 1（${lastDays} → ${c?.days}）`,
+      close(c?.days ?? Number.NaN, lastDays - 1, 1e-9) && !Number.isInteger(lastDays),
+    );
+    await chip('リセット');
+    await page.click(plus('skew'));
+    await chip('リセット');
+    await page.dblclick(val('skew'));
+    const input = `${val('skew')} input`;
+    await page.waitForSelector(input);
+    const text = await page.inputValue(input);
+    await page.keyboard.press('Escape');
+    check(`#83 B-2 ${tag} Δs: ＋ → リセット → 数値入力の欄が 0.0`, text === '0.0', `「${text}」`);
+  }
+
+  // AC-11 長いフレーム: スクラブ 30 段・[＋] の長押し 2 秒・プリセットの切替 10 回
+  {
+    await page.click('section.scenario .chip:has-text("リセット")');
+    await page.waitForTimeout(100);
+    const v = await center(val('dSigma'));
+    const mark = await loafMark();
+    await page.mouse.move(v.x, v.y);
+    await page.mouse.down();
+    await page.mouse.move(v.x + 240, v.y, { steps: 60 });
+    await page.mouse.up();
+    const lfScrub = await loafSince(mark);
+    const scrubbed = (await saved()).scenario?.dSigma;
+    check(`#83 AC-11 ${tag} スクラブ 240px → Δσ +15（30 段）`, scrubbed === 15, `${scrubbed}`);
+
+    await page.click('section.scenario .chip:has-text("リセット")');
+    await page.waitForTimeout(100);
+    const p = await center(plus('dSigma'));
+    const mark2 = await loafMark();
+    await page.mouse.move(p.x, p.y);
+    await page.mouse.down();
+    await page.waitForTimeout(2000);
+    await page.mouse.up();
+    const lfHold = await loafSince(mark2);
+    const held = (await saved()).scenario?.dSigma ?? 0;
+    // 2 秒で 22 段（REPEAT_DELAY_MS 400・REPEAT_INTERVAL_MS 80）。タイマーの揺れを ±2 段許す
+    check(
+      `#83 AC-11 ${tag} [＋] の長押し 2 秒で連続 → Δσ ${held}（22 段 = 11pt の前後）`,
+      held >= 10 && held <= 12,
+    );
+
+    const mark3 = await loafMark();
+    const names = ['急落', '下落', '反発'];
+    for (let i = 0; i < 10; i++) {
+      await page.click(`section.scenario .chip:has-text("${names[i % 3]}")`);
+      await page.waitForTimeout(16);
+    }
+    const lfPreset = await loafSince(mark3);
+    loafs.push(`スクラブ ${lfScrub}`, `長押し ${lfHold}`, `プリセット ${lfPreset}`);
+    for (const [name, n] of [
+      ['スクラブ 30 段', lfScrub],
+      ['[＋] の長押し 2 秒', lfHold],
+      ['プリセットの切替 10 回', lfPreset],
+    ]) {
+      check(
+        `#83 AC-11 ${tag} ${name}で長いフレーム 0 件`,
+        loafOk && n === 0,
+        loafOk ? `${n} 件` : '未対応',
+      );
+    }
+    console.log(`      ${tag} シナリオの Long Animation Frame（50ms 超）: ${loafs.join('・')}`);
   }
   await ctx.close();
 }

@@ -213,6 +213,45 @@
   color: var(--accent-ink);
 }
 
+/* #83: スクラブ・数値入力・無効（gestures / edit / disabled を渡したときだけ） */
+.stepper[data-gestures] > .val {
+  cursor: ew-resize;
+  touch-action: pan-y;
+  -webkit-touch-callout: none;
+}
+
+.stepper:where([data-gestures]) > button {
+  touch-action: manipulation;
+  -webkit-touch-callout: none;
+}
+
+.stepper > .val input {
+  width: 100%;
+  min-width: 0;
+  height: 26px;
+  padding: 0 4px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-sm);
+  background: var(--s1);
+  font-family: var(--mono);
+  font-size: var(--fs-body);
+  text-align: center;
+  user-select: text;
+}
+
+.stepper > .val input[aria-invalid="true"] {
+  border-color: var(--loss);
+  color: var(--loss);
+}
+
+.stepper[aria-disabled="true"] {
+  opacity: 0.5;
+}
+
+.stepper[aria-disabled="true"] > .val {
+  cursor: default;
+}
+
 /* ===== タグ（印） ===== */
 .tag {
   display: inline-block;

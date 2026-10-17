@@ -27,7 +27,8 @@ const MARKET_OPTIONS = [
 
 /**
  * 本体の骨組み（docs/ui-redesign.md §2。状態は ui/view/shell.ts）。3 段階のグリッド・ドック・スマホのシート。
- * 舞台（凡例行 + .panel-body）は #82 の regions/Stage.tsx を stage で受ける。他の領域は見出し行だけ（#83〜#86 が入れる）。
+ * 舞台（凡例行 + .panel-body）は #82 の regions/Stage.tsx を stage で、シナリオ（見出し行 + .panel-body）は #83 の
+ * regions/Scenario.tsx を scenario で受ける。他の領域は見出し行だけ（#84〜#86 が入れる）。
  * 出し分けは .layout の data-panel・data-sheet・data-market と CSS（style 属性を使わない）。
  */
 export function Shell(p: {
@@ -37,6 +38,8 @@ export function Shell(p: {
   legCount: number;
   /** 舞台の中身（凡例行 + .panel-body。#82） */
   stage: ComponentChildren;
+  /** シナリオの中身（見出し行 + .panel-body。#83） */
+  scenario: ComponentChildren;
 }) {
   const { tier, state, send } = p;
   const panel = visiblePanel(state, tier);
@@ -62,8 +65,7 @@ export function Shell(p: {
       </section>
       <section class="scenario panel" aria-label="シナリオ">
         {grabber('scenario')}
-        <PanelHead title="シナリオ" />
-        <div class="panel-body" />
+        {p.scenario}
       </section>
       <section class="bench panel side positions" aria-label="ポジション">
         {grabber('positions')}

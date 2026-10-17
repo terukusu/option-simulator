@@ -7,9 +7,11 @@ import { fmtNum } from '../view/format';
 import { keptBoardNote } from '../view/header';
 import { PC_QUERY, PHONE_QUERY } from '../view/layout';
 import { shareReplaceConfirmText } from '../view/persistNote';
+import type { DXUnit } from '../view/scenario';
 import { INITIAL_SHELL, layoutTier, shellReduce } from '../view/shell';
 import { Notices } from './Notices';
 import { Toasts, useToasts } from './parts/Toast';
+import { Scenario } from './regions/Scenario';
 import { Stage } from './regions/Stage';
 import { Shell } from './Shell';
 import { TopBar } from './TopBar';
@@ -37,6 +39,7 @@ function boardNotice(
  * useAppController（キー・形式を変えない）、見た目の状態（パネル・シート・市場）はここのローカル（保存しない）。
  * #81 の器（トップバー・知らせの行・見出し行・ドック）に、#82 で舞台（regions/Stage.tsx）を入れた。
  * 舞台で選んだ足（selectedLeg）はここのローカル（保存しない）。行使価格の変更はトーストの [元に戻す] で戻せる。
+ * #83 でシナリオ（regions/Scenario.tsx）を入れた。ΔX の単位はここのローカル（保存しない。#87 の設定も同じ値を触る）。
  */
 export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
   const c = useAppController(boot);
@@ -47,6 +50,7 @@ export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
   const { pendingShare } = c;
   const toasts = useToasts();
   const [picked, setPicked] = useState<number | null>(null);
+  const [dXUnit, setDXUnit] = useState<DXUnit>('pct');
   // 足が消えたら選択を外す
   const selectedLeg = picked !== null && c.curLegs.some((l) => l.id === picked) ? picked : null;
   const onPickLeg = useCallback(
@@ -121,6 +125,7 @@ export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
             onChangeStrike={onChangeStrike}
           />
         }
+        scenario={<Scenario c={c} dXUnit={dXUnit} onDXUnit={setDXUnit} />}
       />
       <Toasts toasts={toasts.toasts} onUndo={toasts.undo} />
     </div>
