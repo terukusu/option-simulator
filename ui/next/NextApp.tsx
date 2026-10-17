@@ -47,6 +47,7 @@ import { Shell } from './Shell';
 import { TopBar } from './TopBar';
 import { ShareConfirm } from './top/ShareConfirm';
 import { ShareUrlDialog } from './top/ShareUrlDialog';
+import { useGlobalKeys } from './useGlobalKeys';
 import { useTheme } from './useTheme';
 
 /**
@@ -68,6 +69,7 @@ import { useTheme } from './useTheme';
  * #87 (C) で ⋯ に保存一覧・設定・書き出し / 読み込み…・全クリアを入れた。保存一覧の [上書き] は即実行 + [元に戻す]
  * （keep 付きのトースト。上書きの直前と書いた項目を控え、restoreEntry で書いたままのときだけ戻す）。保存一覧を
  * 開いている間はトーストをそのダイアログの中に描く（モーダルの外は押せない）。全クリアはポジションの ⋯ と同じ処理。
+ * #89 段 A で全体のキー（1〜5・G・T。useGlobalKeys）を入れた。
  */
 export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
   const c = useAppController(boot);
@@ -75,6 +77,8 @@ export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
   const theme = useTheme(prefs, boot.storage);
   const tier = layoutTier(useMediaQuery(PHONE_QUERY), useMediaQuery(PC_QUERY));
   const [shell, send] = useReducer(shellReduce, INITIAL_SHELL);
+  // 全体のキー 1〜5・G・T（#89 段 A。Ctrl / ⌘ + K は段 B で onPalette を渡すまで奪わない）
+  useGlobalKeys({ tier, send, resolvedTheme: theme.resolved, chooseTheme: theme.choose });
   const { pendingShare } = c;
   const toasts = useToasts();
   const [picked, setPicked] = useState<number | null>(null);

@@ -147,7 +147,7 @@ export function Positions(p: Props) {
         </Popover>
         <Menu label="ポジションの操作" button="⋯" items={items} />
       </PanelHead>
-      <div class="panel-body pos-body" ref={bodyRef}>
+      <div class="panel-body pos-body" ref={bodyRef} tabIndex={-1}>
         {rows.length === 0 ? (
           <div class="empty-state">
             <p>板の bid（売り）/ ask（買い）を押すか、⋯ の「足を追加…」で足を入れる</p>

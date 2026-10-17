@@ -129,7 +129,7 @@ export function Scenario(p: { c: AppController; dXUnit: DXUnit; onDXUnit: (u: DX
           </p>
         </Popover>
       </PanelHead>
-      <div class="panel-body scn-body">
+      <div class="panel-body scn-body" tabIndex={-1}>
         <div class="scn-grid">{view.steppers.map(stepper)}</div>
         {error !== null && (
           <p class="scn-err" role="alert">

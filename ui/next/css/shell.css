@@ -51,6 +51,15 @@ section.panel {
   background: var(--s1);
 }
 
+/*
+ * 全体のキー 1〜5 の行き先（#89。パネルのスクロールする枠 = .panel-body・板の .board-wrap。tabindex=-1）。
+ * 輪は内側（overflow で切れない・スクロールを出さない）。マウスのクリックでは :focus-visible にならず輪は出ない
+ */
+section.panel .panel-body:focus-visible,
+section.panel .board-wrap:focus-visible {
+  outline-offset: -2px;
+}
+
 .panel-head {
   display: flex;
   flex: 0 0 auto;

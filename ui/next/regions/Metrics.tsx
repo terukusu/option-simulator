@@ -89,7 +89,7 @@ function MetricsView({ model, feePerLot }: Props) {
           <p>{TAIL_HINT}</p>
         </Popover>
       </PanelHead>
-      <div class="panel-body mx-body">
+      <div class="panel-body mx-body" tabIndex={-1}>
         {view.empty ? (
           <div class="empty-state">
             <p>{METRICS_EMPTY_TEXT}</p>

@@ -221,6 +221,8 @@ const BoardTable = pure(function BoardTable(p: TableProps) {
   return (
     <div
       class={p.visible ? 'board-wrap' : 'board-wrap side-hidden'}
+      // 全体のキー 2 の行き先・クリックで ↓・PageDown がこの枠を動かす（#89。隠している側は持たない）
+      tabIndex={p.visible ? -1 : undefined}
       data-side={p.only ?? 'both'}
       aria-hidden={p.visible ? undefined : true}
     >

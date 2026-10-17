@@ -15,6 +15,11 @@ function setOpenId(id: string | null): void {
   for (const f of listeners) f();
 }
 
+/** いま開いているメニュー / ポップオーバーの id（無ければ null）。全体のキー（#89）が「ふさがっている」を読む */
+export function openOverlayId(): string | null {
+  return openId;
+}
+
 export function useOverlay(id: string): { open: boolean; setOpen: (open: boolean) => void } {
   const [open, setLocal] = useState(openId === id);
   useEffect(() => {

@@ -79,7 +79,11 @@
 //                                          390×844 と 1440×900）と面の上のドラッグの手順（#88 段 B AC-13・AC-14: ● のドラッグで
 //                                          ΔX と d が同時に動き保存・時間レール・副題と一致・離れた所のクリックで点がそこへ・横軸の
 //                                          目盛りが変わらない・線モードは横だけ・足マーカーのタップ・Long Animation Frame。390×844 と
-//                                          1440×900。390×844 のタッチのエミュレーションで 2 本目の指で押す前に戻りピンチで狭まる）
+//                                          1440×900。390×844 のタッチのエミュレーションで 2 本目の指で押す前に戻りピンチで狭まる）と
+//                                          全体のキーの手順（#89 段 A AC-A4: body から 1〜5 でパネルとスクロールする枠のフォーカス・G で描画域と
+//                                          → の ΔX +100・描画域の 0 はリセット・T で反転と prefs・設定 / ⋯ / 数値入力では効かない・
+//                                          板の行 / 指標のテール表のクリックと 2 / 4 の後の PageDown で枠が動く。
+//                                          390×844 と 1440×900、900×1100 は参考）
 //   --url <base>                           dev サーバーを起こさず、その URL を使う（例 http://127.0.0.1:5173/?ui=next&parts）
 //   --dom <file>                           body の下の要素の tag.class の並びを書き出す（旧画面が変わらないことの比較用）
 //   --shots <dir>                          スクリーンショットを書く（合成の板だけ。リポジトリに入れない）
@@ -1703,6 +1707,8 @@ async function runFlows() {
   // #88 段 B 面の上のドラッグの手順（AC-13・AC-14 [B]）とタッチのエミュレーション（AC-13(f)）
   for (const vp of [phone, pc]) await surfaceDragFlows(vp);
   await surfaceTouchFlow();
+  // #89 段 A 全体のキー 1〜5・G・T の手順（AC-A4）。900 は参考（AC に数えない。vitest の 15 マスが正）
+  for (const vp of [phone, pc, { width: 900, height: 1100 }]) await keyFlows(vp);
 }
 
 // ---- 舞台の手順（#82）
@@ -6053,6 +6059,259 @@ async function touchFlows() {
     );
     await ctx.close();
   }
+}
+
+// ---- #89 段 A 全体のキーの手順（AC-A4。docs/ui-redesign.md §4.6）
+/** 1〜5 → パネル（ui/view/keys.ts の PANEL_KEYS と同じ） */
+const KEY_PANELS = [
+  ['1', 'positions'],
+  ['2', 'board'],
+  ['3', 'scenario'],
+  ['4', 'metrics'],
+  ['5', 'smile'],
+];
+/** 1〜5 のフォーカスの行き先 = パネルのスクロールする枠（ui/next/useGlobalKeys.ts の PANEL_FOCUS と同じ） */
+const KEY_FOCUS = {
+  positions: 'main.layout > section.panel.positions > .panel-body',
+  board:
+    'main.layout > section.panel.board .board-month:not(.inactive) .board-wrap:not(.side-hidden)',
+  scenario: 'main.layout > section.panel.scenario > .panel-body',
+  metrics: 'main.layout > section.panel.metrics > .panel-body',
+  smile: 'main.layout > section.panel.smile > .panel-body',
+};
+
+async function keyFlows(vp) {
+  const tag = `${vp.width}x${vp.height}`;
+  const tier = vp.width <= PHONE_MAX ? 'phone' : vp.width >= 1200 ? 'pc' : 'tablet';
+  const ref = tier === 'tablet' ? '参考 ' : '';
+  const ctx = await newContext(vp, { [WORKSPACE_KEY]: twoLegs });
+  const page = await ctx.newPage();
+  await page.goto(pageUrl('next'));
+  await waitReady(page, 'next');
+  const shellNow = () =>
+    page.evaluate(() => {
+      const l = document.querySelector('.layout');
+      return {
+        panel: l?.getAttribute('data-panel') ?? null,
+        sheet: l?.getAttribute('data-sheet') ?? null,
+        market: l?.getAttribute('data-market') ?? null,
+        theme: document.documentElement.dataset.theme ?? null,
+      };
+    });
+  const activeIs = (sel) => page.evaluate((q) => document.activeElement?.matches(q) === true, sel);
+  const blur = () =>
+    page.evaluate(() => {
+      if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+    });
+  const press = async (key) => {
+    await page.keyboard.press(key);
+    await page.waitForTimeout(120);
+  };
+
+  // (a) body にフォーカス → 1〜5 を順に。スマホは hidden から始める
+  {
+    if (tier === 'phone') await setShell(page, 'positions', 'hidden');
+    await blur();
+    const startBody = await page.evaluate(() => document.activeElement === document.body);
+    const rows = [];
+    let ok = startBody;
+    let prev = await shellNow();
+    for (const [key, panel] of KEY_PANELS) {
+      await press(key);
+      const cur = await shellNow();
+      const focused = await activeIs(KEY_FOCUS[panel]);
+      let want = true;
+      if (tier === 'phone') want = cur.panel === panel && cur.sheet !== 'hidden';
+      else if (tier === 'tablet')
+        want = panel === 'scenario' ? cur.panel === prev.panel : cur.panel === panel;
+      else if (panel === 'board' || panel === 'smile') want = cur.market === panel;
+      else want = cur.market === prev.market;
+      ok = ok && want && focused;
+      rows.push(`${key}:${cur.panel}/${cur.sheet}/${cur.market}${focused ? '' : ' focus×'}`);
+      prev = cur;
+    }
+    check(
+      `#89 AC-A4(a) ${ref}${tag} body から 1〜5 → ${
+        tier === 'phone'
+          ? 'data-panel がそのパネル・sheet が hidden でない'
+          : tier === 'pc'
+            ? '2 / 5 で data-market が board / smile'
+            : '3 以外で data-panel がそのパネル'
+      }・activeElement がそのパネルのスクロールする枠`,
+      ok,
+      rows.join(' '),
+    );
+  }
+
+  // (b) G → 描画域、→ で ΔX +100
+  {
+    await blur();
+    await press('g');
+    const onChart = await activeIs('section.stage .chart');
+    await press('0');
+    const a = await savedScenario(page);
+    await press('ArrowRight');
+    const b = await savedScenario(page);
+    check(
+      `#89 AC-A4(b) ${ref}${tag} G で activeElement が .stage .chart、→ で ΔX +100`,
+      onChart && a !== null && b !== null && b.dX === a.dX + 100,
+      `focus ${onChart} / ΔX ${a?.dX} → ${b?.dX}`,
+    );
+  }
+
+  // (e) 描画域で 0 = シナリオのリセット、パネルは変わらない
+  {
+    await page.focus('section.stage .chart');
+    const before = await shellNow();
+    const a = await savedScenario(page);
+    await press('0');
+    const after = await shellNow();
+    const b = await savedScenario(page);
+    check(
+      `#89 AC-A4(e) ${ref}${tag} 描画域で 0 → ΔX ${a?.dX} → 0（リセット）・data-panel / data-market は同じ`,
+      a?.dX !== 0 &&
+        b?.dX === 0 &&
+        b?.dSigma === 0 &&
+        after.panel === before.panel &&
+        after.market === before.market &&
+        after.sheet === before.sheet,
+      `${JSON.stringify(before)} → ${JSON.stringify(after)}`,
+    );
+  }
+
+  // (c) T で反転・prefs、もう一度 T で戻る
+  {
+    await blur();
+    const prefs = () =>
+      page.evaluate((k) => {
+        try {
+          return JSON.parse(localStorage.getItem(k) ?? 'null')?.theme ?? null;
+        } catch {
+          return null;
+        }
+      }, PREFS_KEY);
+    const t0 = (await shellNow()).theme;
+    await press('t');
+    const t1 = (await shellNow()).theme;
+    const p1 = await prefs();
+    await press('T');
+    const t2 = (await shellNow()).theme;
+    const p2 = await prefs();
+    check(
+      `#89 AC-A4(c) ${ref}${tag} T で data-theme ${t0} → ${t1}（prefs ${p1}）、もう一度 T で ${t2}（prefs ${p2}）`,
+      t0 === 'dark' && t1 === 'light' && p1 === 'light' && t2 === 'dark' && p2 === 'dark',
+    );
+  }
+
+  // (d) 設定ダイアログ / ⋯ メニュー / ステッパーの数値入力では 1・G・T が効かない
+  {
+    const pressAll = async () => {
+      const before = await shellNow();
+      await page.evaluate(() => {
+        window.__keyFocus = document.activeElement;
+      });
+      for (const k of ['1', 'g', 't']) await press(k);
+      const after = await shellNow();
+      const same = await page.evaluate(() => document.activeElement === window.__keyFocus);
+      const ok =
+        before.panel === after.panel &&
+        before.market === after.market &&
+        before.sheet === after.sheet &&
+        before.theme === after.theme &&
+        same;
+      return { ok, detail: `${JSON.stringify(before)} → ${JSON.stringify(after)} focus ${same}` };
+    };
+    // (a) の後はスマイル（スマホ・タブレットは data-panel、PC は data-market）= 1 が効けば変わる
+
+    await openFromMore(page, '設定…', SET);
+    const dlgOpen = (await page.$(SET)) !== null;
+    const r1 = await pressAll();
+    await closeDialog(page);
+    check(
+      `#89 AC-A4(d) ${ref}${tag} 設定ダイアログを開いた状態で 1・G・T が効かない`,
+      dlgOpen && r1.ok,
+      r1.detail,
+    );
+
+    await page.click(MORE);
+    await page.waitForTimeout(120);
+    const menuOpen = (await page.$('header.top [role="menu"]')) !== null;
+    const r2 = await pressAll();
+    const stillOpen = (await page.$('header.top [role="menu"]')) !== null;
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(120);
+    check(
+      `#89 AC-A4(d) ${ref}${tag} ⋯ メニューを開いた状態で 1・G・T が効かない（メニューは開いたまま）`,
+      menuOpen && stillOpen && r2.ok,
+      r2.detail,
+    );
+
+    if (tier === 'phone') await setShell(page, 'scenario', 'peek');
+    const val = 'section.scenario .stepper[data-name="dX"] > .val';
+    await page.focus(val);
+    await page.keyboard.press('Enter');
+    const input = `${val} input`;
+    const hasInput = await page
+      .waitForSelector(input, { timeout: 2000 })
+      .then(() => true)
+      .catch(() => false);
+    const inInput = hasInput && (await activeIs(input));
+    const r3 = await pressAll();
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(120);
+    check(
+      `#89 AC-A4(d) ${ref}${tag} ステッパーの数値入力の欄で 1・G・T が効かない`,
+      inInput && r3.ok,
+      r3.detail,
+    );
+  }
+
+  // (f) 回帰（レビュー R1）: パネルの中をクリック → PageDown で枠が縦に動く。1〜5 の直後の PageDown も動く
+  for (const [key, panel, cell] of [
+    ['2', 'board', 'tbody tr:nth-child(3) .k'],
+    ['4', 'metrics', 'table.tail thead th'],
+  ]) {
+    const box = KEY_FOCUS[panel];
+    const top = () => page.evaluate((q) => document.querySelector(q)?.scrollTop ?? -1, box);
+    const reset = () =>
+      page.evaluate((q) => {
+        const el = document.querySelector(q);
+        if (el) el.scrollTop = 0;
+      }, box);
+    await blur();
+    await press(key);
+    await page.waitForTimeout(200);
+    const room = await page.evaluate((q) => {
+      const el = document.querySelector(q);
+      return el ? el.scrollHeight - el.clientHeight : -1;
+    }, box);
+    // クリック（ボタンでない所）→ PageDown
+    await reset();
+    await blur();
+    await page.click(`${box} ${cell}`);
+    await page.waitForTimeout(120);
+    const clickFocus = await activeIs(box);
+    await press('PageDown');
+    const byClick = await top();
+    // キー（2 / 4）→ PageDown
+    await reset();
+    await blur();
+    await press(key);
+    await press('PageDown');
+    const byKey = await top();
+    const what = panel === 'board' ? '板の行' : '指標のテール表';
+    if (room <= 0) {
+      // 枠が溢れない幅（900 の指標など）は動きようがないので記録だけ
+      console.log(`skip  #89 R1 ${ref}${tag} ${what}: 枠が溢れない（余白 ${room}px）`);
+      continue;
+    }
+    check(
+      `#89 R1 ${ref}${tag} ${what}をクリック → PageDown・${key} → PageDown で枠の scrollTop が増える`,
+      clickFocus && byClick > 0 && byKey > 0,
+      `余白 ${room}px・クリックでフォーカス ${clickFocus}・scrollTop ${byClick} / ${byKey}`,
+    );
+  }
+  await ctx.close();
 }
 
 try {
