@@ -8,16 +8,20 @@
  * - 色: 符号で gain / loss の RGB（引数）、不透明度 = A_MAX × (|v| / vmax)^0.6（0 で透明）。ImageData は使わず
  *   Uint8ClampedArray の RGBA を返す（描くのは ui/next/stage/SurfaceCanvas.tsx）
  * - 色の文字列は CSS 変数を getComputedStyle で読んだもの（parseCssColor）。このファイルに色の値を書かない
+ * - 面の上のドラッグ（#88 段 B。決定 3）: 指の位置 → (ΔX, d) は surfaceDragPatch（ΔX はハンドルと同じ dXFromAxis、
+ *   d は時間レールと同じ規則の surfaceDayAt）。面モードかどうかは surfaceActive
  */
 
 import { type Scenario, theoreticalPnl } from '../../model';
 import type { Domain } from '../chart/scale';
-import { niceTicks } from '../chart/scale';
+import { niceTicks, pixelToValue } from '../chart/scale';
 import { PIN_SETTLE_MS } from '../pins';
 import { DASH } from './format';
 import { AMOUNT_UNIT_LABEL, type AmountUnit, fmtAmount } from './metrics';
 import { clampDays, type PnlBase, type PnlChartModel, pnlViewDomain } from './pnlChart';
+import { dXFromAxis } from './scenario';
 import { labelWidth } from './scenarioMarks';
+import type { ChartMode } from './shell';
 import type { MarkObstacle, StageHandle } from './stage';
 
 const clamp = (v: number, lo: number, hi: number) => Math.min(Math.max(v, lo), hi);
@@ -383,4 +387,56 @@ export function surfaceLegend(vmax: number | null, unit: AmountUnit): SurfaceLeg
         ? `±${fmtAmount(vmax, unit)}${AMOUNT_UNIT_LABEL[unit]}`
         : null,
   };
+}
+
+// ---------------------------------------------------------------- 面モードの判定・面の上のドラッグ（段 B）
+
+/** 面モードで描くか（線モード・ミニ・空（評価できる足が無い）は false = 格子を作らない・線モードの表示） */
+export function surfaceActive(chart: ChartMode, mini: boolean, empty: boolean): boolean {
+  return chart === 'surface' && !mini && !empty;
+}
+
+/** この画素未満の動きは「その軸は動いていない」とみなして今の値を保つ（端数の d・格子の外の ΔX を丸めない） */
+const SURFACE_KEEP_PX = 0.5;
+
+export interface SurfaceDragInput {
+  /** 指の位置（.chart 要素の座標の画素） */
+  x: number;
+  y: number;
+  chart: PnlChartModel;
+  /** SVG の座標 − 要素の座標（StageFrame の offsetX / offsetY） */
+  offsetX: number;
+  offsetY: number;
+  x0: number;
+  maxDays: number;
+  scenario: Scenario;
+  /** 今の点の画素（要素の座標。無ければ null） */
+  pointPx: { x: number; y: number } | null;
+}
+
+/**
+ * 面の上の点の位置 → シナリオの patch（§4.1・決定 3）。位置は描画域に収め（軸の文字の上を押しても描画域の端）、
+ * ΔX = dXFromAxis（10 円の格子・範囲で止める）、d = surfaceDayAt（1 日の格子・上端とその外は maxDays そのもの）。
+ * 軸ごとに、位置が今の点の画素から 0.5px 未満なら今の値を保つ。変わる欄だけ。無ければ null。
+ */
+export function surfaceDragPatch(input: SurfaceDragInput): { dX?: number; days?: number } | null {
+  const { x, y, chart, offsetX, offsetY, x0, maxDays, scenario, pointPx } = input;
+  const { plot } = chart;
+  const out: { dX?: number; days?: number } = {};
+  if (Number.isFinite(x) && !(pointPx && Math.abs(x - pointPx.x) < SURFACE_KEEP_PX)) {
+    const range: Domain = [plot.left - offsetX, plot.left + plot.width - offsetX];
+    const px = clamp(x, range[0], range[1]);
+    const dX = dXFromAxis(pixelToValue(chart.domain, range, px), x0);
+    if (dX !== null && dX !== scenario.dX) out.dX = dX;
+  }
+  if (
+    maxDays > 0 &&
+    Number.isFinite(y) &&
+    !(pointPx && Math.abs(y - pointPx.y) < SURFACE_KEEP_PX)
+  ) {
+    const py = clamp(y + offsetY, plot.top, plot.top + plot.height);
+    const days = surfaceDayAt(py, plot, maxDays);
+    if (days !== scenario.days) out.days = days;
+  }
+  return out.dX === undefined && out.days === undefined ? null : out;
 }

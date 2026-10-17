@@ -76,7 +76,10 @@
 //                                          面モードの手順（#88 段 A AC-12・AC-14: canvas の矩形・描画域の中 / 外の画素・線が無い・
 //                                          色が --gain / --loss（ダーク / ライト）・キーで点が動きラベルと読み取りが一致・IV レールで
 //                                          色が変わる・線に戻す・ミニは線・再読み込みで線・Long Animation Frame・DPR 2 の backing。
-//                                          390×844 と 1440×900）
+//                                          390×844 と 1440×900）と面の上のドラッグの手順（#88 段 B AC-13・AC-14: ● のドラッグで
+//                                          ΔX と d が同時に動き保存・時間レール・副題と一致・離れた所のクリックで点がそこへ・横軸の
+//                                          目盛りが変わらない・線モードは横だけ・足マーカーのタップ・Long Animation Frame。390×844 と
+//                                          1440×900。390×844 のタッチのエミュレーションで 2 本目の指で押す前に戻りピンチで狭まる）
 //   --url <base>                           dev サーバーを起こさず、その URL を使う（例 http://127.0.0.1:5173/?ui=next&parts）
 //   --dom <file>                           body の下の要素の tag.class の並びを書き出す（旧画面が変わらないことの比較用）
 //   --shots <dir>                          スクリーンショットを書く（合成の板だけ。リポジトリに入れない）
@@ -1697,6 +1700,9 @@ async function runFlows() {
   // #88 段 A 面モードの表示の手順（AC-12・AC-14）
   for (const vp of [phone, pc]) await surfaceFlows(vp);
   await surfaceDprFlow();
+  // #88 段 B 面の上のドラッグの手順（AC-13・AC-14 [B]）とタッチのエミュレーション（AC-13(f)）
+  for (const vp of [phone, pc]) await surfaceDragFlows(vp);
+  await surfaceTouchFlow();
 }
 
 // ---- 舞台の手順（#82）
@@ -5606,6 +5612,273 @@ async function surfaceDprFlow() {
       px.inside > 0 &&
       px.outside === 0,
     `${JSON.stringify(r)}・中 ${px?.inside}・外 ${px?.outside}`,
+  );
+  await ctx.close();
+}
+
+/** 保存した作業の、作業中のタブの scenario（自動保存の 500ms の debounce を待つ） */
+async function savedScenario(page) {
+  await page.waitForTimeout(700);
+  return page.evaluate((k) => {
+    try {
+      const w = JSON.parse(localStorage.getItem(k) ?? 'null');
+      return w?.tabs?.[w.active]?.position?.scenario ?? null;
+    } catch {
+      return null;
+    }
+  }, WORKSPACE_KEY);
+}
+
+/** 横軸の目盛りの文字（表示範囲の判定。表示範囲は保存されないので目盛りで見る） */
+const xTickTexts = (page) =>
+  page.evaluate(() =>
+    [...document.querySelectorAll('section.stage .chart .ax .tick-x')].map((t) => t.textContent),
+  );
+const tickNum = (t) => Number(String(t ?? '').replace(/,/g, ''));
+
+/** 面の点（●）の中心（ページの座標） */
+async function surfaceDot(page) {
+  const b = await page.locator('section.stage .chart circle.handle').first().boundingBox();
+  return b ? { x: b.x + b.width / 2, y: b.y + b.height / 2 } : null;
+}
+
+/**
+ * #88 段 B（AC-13 (a)〜(e)・AC-14 [B]）: 面の上のドラッグで ΔX と d が同時に動く・離れた所のクリックでそこへ・
+ * 表示範囲は変わらない・線モードは横だけ・足マーカーのタップは今のまま。
+ */
+async function surfaceDragFlows(vp) {
+  const tag = `${vp.width}x${vp.height}`;
+  const phoneSize = vp.width <= PHONE_MAX;
+  const ctx = await newContext(vp, { [WORKSPACE_KEY]: twoLegs });
+  await ctx.addInitScript(LOAF_INIT);
+  const page = await ctx.newPage();
+  await page.goto(pageUrl('next'));
+  await waitReady(page, 'next');
+  const loafOk = await page.evaluate(() => window.__loafOk === true);
+  const loafMark = () => page.evaluate(() => window.__loaf.length);
+  const loafSince = (i) =>
+    page.evaluate((n) => window.__loaf.slice(n).filter((d) => d > 50).length, i);
+  const aria = (sel, attr = 'aria-valuenow') =>
+    page.evaluate(([s, a]) => Number(document.querySelector(s)?.getAttribute(a)), [sel, attr]);
+  const drag = async (from, dx, dy, steps) => {
+    await page.mouse.move(from.x, from.y);
+    await page.mouse.down();
+    await page.mouse.move(from.x + dx, from.y + dy, { steps });
+    await page.mouse.up();
+  };
+  await page.focus('.chart');
+  await page.keyboard.press('0');
+  await toSurface(page);
+  await page.waitForTimeout(150);
+  const ticks0 = await xTickTexts(page);
+  const maxDays = await aria('.timerail', 'aria-valuemax');
+
+  // (a) ● から右に 60px・上に 40px（30 steps）→ ΔX（10 円の倍数）と d（1 以上の整数か maxDays）が同時に
+  {
+    const dot = await surfaceDot(page);
+    if (!dot) throw new Error('面の点が無い');
+    await page.waitForTimeout(250);
+    const mark = await loafMark();
+    await drag(dot, 60, -40, 30);
+    await page.waitForTimeout(200);
+    const lf = await loafSince(mark);
+    const sc = await savedScenario(page);
+    const now = await aria('.timerail');
+    const sub = (await page.textContent('.ro[data-ro="date"] .s').catch(() => null)) ?? '';
+    const dX = sc?.dX ?? 0;
+    const d = sc?.days ?? -1;
+    const live = await page.locator('section.stage .chart.live').count();
+    check(
+      `#88 AC-13(a) ${tag} 面の ● を右 60px・上 40px → ΔX ${dX}・d ${d}（時間レール ${now}・副題と同じ）`,
+      dX !== 0 &&
+        dX % 10 === 0 &&
+        ((Number.isInteger(d) && d >= 1) || d === maxDays) &&
+        d === now &&
+        sub.includes(`(${signedText(dX)}/`) &&
+        live === 0,
+      `副題「${sub}」・.live ${live}`,
+    );
+    check(
+      `#88 AC-14 ${tag} 面の上のドラッグ 30 回の move で長いフレーム 0 件`,
+      loafOk && lf === 0,
+      loafOk ? `${lf} 件` : '未対応',
+    );
+    console.log(`      ${tag} 面の上のドラッグの Long Animation Frame（50ms 超）: ${lf}`);
+  }
+
+  // (b) 点から 100px 以上離れた描画域の点をクリック → ΔX・d がその位置の値へ（● がクリックの位置へ）
+  {
+    const before = await savedScenario(page);
+    const dot = await surfaceDot(page);
+    const g = await page.locator('section.stage .chart g.grid').first().boundingBox();
+    const xs = await page.evaluate(() =>
+      [...document.querySelectorAll('section.stage .chart .ax .tick-x')].map((t) => {
+        const r = t.getBoundingClientRect();
+        return [Number((t.textContent ?? '').replace(/,/g, '')), (r.left + r.right) / 2];
+      }),
+    );
+    if (!dot || !g || xs.length < 2) throw new Error('描画域・目盛りが無い');
+    const [[v1, p1], [v2, p2]] = [xs[0], xs[xs.length - 1]];
+    const pxPerYen = Math.abs(p2 - p1) / Math.abs(v2 - v1);
+    const pxPerDay = g.height / maxDays;
+    const fx = dot.x > g.x + g.width / 2 ? 0.2 : 0.65;
+    const fy = dot.y > g.y + g.height / 2 ? 0.25 : 0.7;
+    const at = { x: g.x + g.width * fx, y: g.y + g.height * fy };
+    const far = Math.hypot(at.x - dot.x, at.y - dot.y);
+    await page.mouse.click(at.x, at.y);
+    await page.waitForTimeout(150);
+    const sc = await savedScenario(page);
+    const moved = await surfaceDot(page);
+    const ex = moved ? Math.abs(moved.x - at.x) : Number.POSITIVE_INFINITY;
+    const ey = moved ? Math.abs(moved.y - at.y) : Number.POSITIVE_INFINITY;
+    check(
+      `#88 AC-13(b) ${tag} 点から ${far.toFixed(0)}px 離れた位置のクリック → ΔX ${before?.dX} → ${sc?.dX}・d ${before?.days} → ${sc?.days}、● がその位置（横 ${ex.toFixed(1)} ≤ ${(pxPerYen * 10 + 1).toFixed(1)}・縦 ${ey.toFixed(1)} ≤ ${(pxPerDay / 2 + 1).toFixed(1)}）`,
+      far >= 100 &&
+        sc?.dX !== before?.dX &&
+        sc?.days !== before?.days &&
+        ex <= pxPerYen * 10 + 1 &&
+        ey <= pxPerDay / 2 + 1,
+    );
+  }
+
+  // (c) ドラッグ・クリックの前後で表示範囲（横軸の目盛り）が同じ
+  {
+    const ticks1 = await xTickTexts(page);
+    check(
+      `#88 AC-13(c) ${tag} 面の 1 本のドラッグ・クリックで表示範囲（横軸の目盛り）が変わらない`,
+      ticks0.length > 1 && JSON.stringify(ticks0) === JSON.stringify(ticks1),
+      `${ticks0.join(' ')} → ${ticks1.join(' ')}`,
+    );
+  }
+
+  // (d) 線モード: d = 3 にしてハンドルを右 60px・上 40px → ΔX だけ変わり d は 3 のまま
+  {
+    await toSurface(page, '線');
+    await page.focus('.chart');
+    await page.keyboard.press('0');
+    for (let i = 0; i < 3; i++) await page.keyboard.press(']');
+    await page.waitForTimeout(150);
+    const h = await page.locator('section.stage .chart .handle-hit').first().boundingBox();
+    if (!h) throw new Error('ハンドルが無い');
+    await drag({ x: h.x + h.width / 2, y: h.y + h.height / 2 }, 60, -40, 20);
+    const sc = await savedScenario(page);
+    check(
+      `#88 AC-13(d) ${tag} 線モードでハンドルを右 60px・上 40px → ΔX ${sc?.dX} だけ、d ${sc?.days} は前のまま`,
+      (sc?.dX ?? 0) !== 0 && sc?.days === 3,
+    );
+  }
+
+  // (e) 面モードで足マーカーのタップ → ポジションのパネル（スマホは peek）・マーカーが強調（#82 と同じ）
+  {
+    await toSurface(page);
+    if (phoneSize) {
+      await setShell(page, 'board', 'hidden');
+      await page.waitForTimeout(150);
+    }
+    const before = await savedScenario(page);
+    const m = await page.locator('.legmark[data-leg-id="1"]').first().boundingBox();
+    if (!m) throw new Error('マーカーが無い');
+    await page.mouse.click(m.x + m.width / 2, m.y + m.height / 2);
+    await page.waitForTimeout(150);
+    const st = await page.evaluate(() => {
+      const l = document.querySelector('.layout');
+      return {
+        panel: l?.getAttribute('data-panel'),
+        sheet: l?.getAttribute('data-sheet'),
+        sel: document.querySelector('.legmark.sel')?.getAttribute('data-leg-id') ?? null,
+      };
+    });
+    const after = await savedScenario(page);
+    check(
+      `#88 AC-13(e) ${tag} 面モードで足マーカーのタップ → ポジションのパネル${phoneSize ? '（peek）' : ''}・強調・点は動かない`,
+      st.panel === 'positions' &&
+        (!phoneSize || st.sheet === 'peek') &&
+        st.sel === '1' &&
+        after?.dX === before?.dX &&
+        after?.days === before?.days,
+      `${JSON.stringify(st)}・${JSON.stringify({ dX: after?.dX, days: after?.days })}`,
+    );
+  }
+  await ctx.close();
+}
+
+/**
+ * #88 AC-13(f): タッチの端末のエミュレーション（390×844・CDP の Input.dispatchTouchEvent）で 1 本目の指で点を動かした
+ * 後に 2 本目の指 → ΔX・d が押す前（0・0）に戻り、2 本の指を広げると表示範囲が狭まる。ページ・シートは動かない。
+ */
+async function surfaceTouchFlow() {
+  const tag = '390x844 touch';
+  const ctx = await touchContext({ [WORKSPACE_KEY]: twoLegs });
+  const page = await ctx.newPage();
+  await page.goto(pageUrl('next'));
+  await waitReady(page, 'next');
+  await toSurface(page);
+  await page.focus('.chart');
+  await page.keyboard.press('0');
+  await page.waitForTimeout(200);
+  const shell0 = await page.evaluate(() => ({
+    sheet: document.querySelector('.layout')?.getAttribute('data-sheet'),
+    top: [...document.querySelectorAll('.layout > section')]
+      .map((e) => Math.round(e.getBoundingClientRect().top))
+      .join(','),
+    sy: window.scrollY,
+  }));
+  const ticks0 = (await xTickTexts(page)).map(tickNum);
+  const cx = () =>
+    page.evaluate(() =>
+      Number(document.querySelector('section.stage .chart circle.handle')?.getAttribute('cx')),
+    );
+  const cx0 = await cx();
+  const dot = await surfaceDot(page);
+  const c = await page.locator('section.stage .chart').first().boundingBox();
+  if (!dot || !c) throw new Error('面の点・描画域が無い');
+  const cdp = await ctx.newCDPSession(page);
+  const touch = (type, touchPoints) => cdp.send('Input.dispatchTouchEvent', { type, touchPoints });
+  // 1 本目: ● から右・上へ 10 回
+  const a = { x: Math.round(dot.x), y: Math.round(dot.y) };
+  await touch('touchStart', [{ x: a.x, y: a.y, id: 0 }]);
+  for (let i = 1; i <= 10; i++) {
+    await touch('touchMove', [{ x: a.x + i * 3, y: a.y - i * 3, id: 0 }]);
+    await page.waitForTimeout(16);
+  }
+  await page.waitForTimeout(200);
+  const cx1 = await cx();
+  // 2 本目: 描画域の中（1 本目の左）。2 本を左右に広げる
+  const f1 = { x: a.x + 30, y: a.y - 30 };
+  const f2 = { x: Math.round(Math.max(c.x + 20, f1.x - 80)), y: f1.y };
+  await touch('touchStart', [
+    { ...f1, id: 0 },
+    { ...f2, id: 1 },
+  ]);
+  for (let i = 1; i <= 10; i++) {
+    await touch('touchMove', [
+      { x: Math.min(f1.x + i * 4, c.x + c.width - 4), y: f1.y, id: 0 },
+      { x: Math.max(f2.x - i * 4, c.x + 4), y: f2.y, id: 1 },
+    ]);
+    await page.waitForTimeout(16);
+  }
+  await touch('touchEnd', []);
+  await page.waitForTimeout(300);
+  const sc = await savedScenario(page);
+  const ticks1 = (await xTickTexts(page)).map(tickNum);
+  const span = (t) => (t.length > 1 ? (t[t.length - 1] ?? 0) - (t[0] ?? 0) : Number.NaN);
+  const shell1 = await page.evaluate(() => ({
+    sheet: document.querySelector('.layout')?.getAttribute('data-sheet'),
+    top: [...document.querySelectorAll('.layout > section')]
+      .map((e) => Math.round(e.getBoundingClientRect().top))
+      .join(','),
+    sy: window.scrollY,
+  }));
+  check(
+    `#88 AC-13(f) ${tag} 1 本目で点が動き（cx ${cx0} → ${cx1}）、2 本目で ΔX・d が押す前に戻り（${sc?.dX}・${sc?.days}）、広げると表示範囲が狭まる（目盛りの幅 ${span(ticks0)} → ${span(ticks1)}）・ページとシートは動かない`,
+    cx1 !== cx0 &&
+      sc?.dX === 0 &&
+      sc?.days === 0 &&
+      span(ticks1) < span(ticks0) &&
+      shell1.sy === 0 &&
+      shell1.sheet === shell0.sheet &&
+      shell1.top === shell0.top,
+    `${JSON.stringify(shell0)} → ${JSON.stringify(shell1)}`,
   );
   await ctx.close();
 }

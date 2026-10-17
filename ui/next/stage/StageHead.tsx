@@ -39,7 +39,8 @@ export function StageHead(p: {
 }) {
   const { model, pnlY, pins, dispatch, scenario } = p;
   const legend = p.surfaceLegend;
-  const surf = p.chart === 'surface';
+  // 足が無い（評価できる足が無い）ときは面モードでも線モードの空の表示（[線 | 面] の押された状態は保つ）
+  const surf = p.chart === 'surface' && !model.empty;
   const chartSeg = (
     <Seg label="グラフの表示" value={p.chart} options={CHART_MODES} onChange={p.onChart} />
   );
@@ -208,8 +209,9 @@ export function StageHead(p: {
               <p>
                 Δσ {fmtNum(scenario.dSigma, 1)}pt・Δs {fmtNum(scenario.skew, 1)}・β{' '}
                 {fmtNum(scenario.beta, 1)}pt/1%・{DYNAMICS_LABEL[scenario.ivDynamics]}{' '}
-                は面の全体に効く。点 = シナリオ点（ΔX・d）。ΔX はハンドル・← →、d は時間レール・[
-                ]。
+                は面の全体に効く。点 = シナリオ点（ΔX・d）。点を押して動かすと ΔX と d
+                が同時に動く（離れた所を押すとそこへ。2 本指・横ホイールでパン）。キーは ← → ΔX、[ ]
+                d。
               </p>
             </>
           ) : (

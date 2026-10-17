@@ -1,5 +1,5 @@
 import type { RefObject } from 'preact';
-import { useEffect, useMemo, useState } from 'preact/hooks';
+import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import type { Chain } from '../../../data';
 import type { Scenario } from '../../../model';
 import { type Domain, pixelToValue } from '../../chart/scale';
@@ -15,6 +15,7 @@ import {
   type SurfaceColors,
   type SurfaceGrid,
   surfaceDayTicks,
+  surfaceDragPatch,
   surfaceImage,
   surfacePoint,
 } from '../../view/pnlSurface';
@@ -42,7 +43,7 @@ const KIND_CLASS = { expiry: 'expiry', date: 'date', today: 'today' } as const;
 const LINE_LABEL =
   '損益グラフ（ドラッグでパン、ホイール・ピンチで拡大、ダブルクリックでリセット、ハンドルをつかむか長押しして左右にドラッグでシナリオ点 ΔX、足のマーカーで足を選ぶ・長押しして横にドラッグで行使価格。キー: ← / → ΔX ∓100 円（Shift で 1,000 円）、↑ / ↓ Δσ ±0.5pt、[ / ] 経過日数 ∓1 日、0 シナリオを 0 に、+ / − 拡大縮小、R リセット）';
 const SURFACE_LABEL =
-  '損益の面（横 原資産・縦 経過日数・色 損益。ドラッグでパン、ホイール・ピンチで拡大、ダブルクリックでリセット、ハンドルをつかむか長押しして左右にドラッグでシナリオ点 ΔX、足のマーカーで足を選ぶ。キー: ← / → ΔX ∓100 円（Shift で 1,000 円）、↑ / ↓ Δσ ±0.5pt、[ / ] 経過日数 ∓1 日、0 シナリオを 0 に、+ / − 拡大縮小、R リセット）';
+  '損益の面（横 原資産・縦 経過日数・色 損益。描画域を押してドラッグでシナリオ点の ΔX と経過日数 d を同時に動かす、2 本指・横ホイールでパン、ホイール・ピンチで拡大、ダブルクリック / ダブルタップでリセット、足のマーカーで足を選ぶ・長押しして横にドラッグで行使価格。キー: ← / → ΔX ∓100 円（Shift で 1,000 円）、↑ / ↓ Δσ ±0.5pt、[ / ] 経過日数 ∓1 日、0 シナリオを 0 に、+ / − 拡大縮小、R リセット）';
 
 /** 面の両極の色（テーマの --gain / --loss を読む。読めなければ null = 面を描かない） */
 function readSurfaceColors(): SurfaceColors | null {
@@ -56,6 +57,8 @@ function readSurfaceColors(): SurfaceColors | null {
  * 舞台の描画域（docs/ui-redesign.md §4.1・§8。#82）。線・目盛り・BEP・X₀・シナリオ ATM・ピンは pnlChartModel の
  * 出力、ハンドル・塗り・足マーカー・ラベルの退避は ui/view/stage.ts。位置はすべて SVG の属性（style を使わない）。
  * ジェスチャーは useChartGestures（規則は ui/chart/gesture.ts）。ミニ（シート全開）は線だけで操作を受けない。
+ * 面モード（#88 段 B）: 描画域を押すとすぐ面の点をつかみ、位置 → (ΔX, d) を 1 フレーム 1 回の setScenario に入れる
+ * （surfaceDragPatch）。2 本目の指・cancel は押す前の値に戻す。つかんでいる間は .live。
  */
 export function PnlPlot(p: {
   chartRef: RefObject<HTMLDivElement>;
@@ -89,6 +92,15 @@ export function PnlPlot(p: {
   const { model, marks, base, scenario, frame, mini, dispatch } = p;
   const surfaceOn = p.surfaceOn && !mini && !model.empty;
   const [dragK, setDragK] = useState<{ id: number; k: number } | null>(null);
+  /** 面の点をつかんでいる間（.live）と、押す前の ΔX・d（取り消しで戻す） */
+  const [live, setLive] = useState(false);
+  const surfaceBefore = useRef<{ dX: number; days: number } | null>(null);
+  // つかんでいる間に面モードでなくなった（線へ・ミニ・足が無くなった）ら .live と押す前の値を捨てる
+  useEffect(() => {
+    if (surfaceOn) return;
+    surfaceBefore.current = null;
+    setLive(false);
+  }, [surfaceOn]);
   const handle = useMemo(() => stageHandle(model, marks), [model, marks]);
   // 面モードでは塗り・交点のラベルを作らない（描かない）
   const fill = useMemo(
@@ -173,6 +185,12 @@ export function PnlPlot(p: {
   const range: Domain = [plot.left - ox, right - ox];
   const x0 = base?.ctx.x0 ?? Number.NaN;
   const maxDays = base?.maxDays ?? 0;
+  /** 面の点の画素（要素の座標） */
+  const pointPx = point ? { x: point.px - ox, y: point.py - frame.offsetY } : null;
+  const endSurface = () => {
+    surfaceBefore.current = null;
+    setLive(false);
+  };
 
   /** 足の限月の板の行と F（行使価格の吸い付き） */
   const strikeAt = (id: number, x: number): number | null => {
@@ -191,12 +209,43 @@ export function PnlPlot(p: {
     range,
     disabled: model.empty || mini,
     onViewport: (v) => dispatch({ type: 'setPnlViewport', viewport: v }),
-    // ハンドル（ΔX = 0 でも X₀ 上）の ±14px で即つかむ。それ以外は長押しでつかむ → ΔX（10 円の格子）
-    scrub: { linePx: handle ? handle.px - ox : null, grabPx: STAGE_GRAB_PX },
-    onScrub: (px) => {
-      const dX = dXFromAxis(pixelToValue(model.domain, range, px), x0);
-      if (dX !== null && dX !== scenario.dX) dispatch({ type: 'setScenario', patch: { dX } });
-    },
+    // 線モード: ハンドル（ΔX = 0 でも X₀ 上）の ±14px で即つかむ。それ以外は長押しでつかむ → ΔX（10 円の格子）
+    // 面モード: 押すとすぐ面の点（点の ±14px は飛ばない）→ ΔX と d を同時に（scrub は渡さない）
+    ...(surfaceOn
+      ? {
+          surface: { pointPx, grabPx: STAGE_GRAB_PX },
+          onSurfaceStart: () => {
+            surfaceBefore.current = { dX: scenario.dX, days: scenario.days };
+            setLive(true);
+          },
+          onSurface: (x: number, y: number) => {
+            const patch = surfaceDragPatch({
+              x,
+              y,
+              chart: model,
+              offsetX: ox,
+              offsetY: frame.offsetY,
+              x0,
+              maxDays,
+              scenario,
+              pointPx,
+            });
+            if (patch) dispatch({ type: 'setScenario', patch });
+          },
+          onSurfaceEnd: endSurface,
+          onSurfaceCancel: () => {
+            const before = surfaceBefore.current;
+            if (before) dispatch({ type: 'setScenario', patch: before });
+            endSurface();
+          },
+        }
+      : {
+          scrub: { linePx: handle ? handle.px - ox : null, grabPx: STAGE_GRAB_PX },
+          onScrub: (px: number) => {
+            const dX = dXFromAxis(pixelToValue(model.domain, range, px), x0);
+            if (dX !== null && dX !== scenario.dX) dispatch({ type: 'setScenario', patch: { dX } });
+          },
+        }),
     arrowPan: false,
     onScrubKey: (key, shift) => {
       const r = stageKey(key, shift, scenario, { x0, maxDays });
@@ -244,7 +293,7 @@ export function PnlPlot(p: {
 
   return (
     <div
-      class={mini ? 'chart mini' : surfaceOn ? 'chart surf' : 'chart'}
+      class={mini ? 'chart mini' : surfaceOn ? (live ? 'chart surf live' : 'chart surf') : 'chart'}
       ref={p.chartRef}
       tabIndex={model.empty || mini ? -1 : 0}
       role="application"

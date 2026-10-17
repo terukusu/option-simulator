@@ -51,6 +51,7 @@ import {
 } from '../../ui/view/pnlChart';
 import {
   surfaceDayTicks,
+  surfaceDragPatch,
   surfaceGrid,
   surfaceImage,
   surfaceLegend,
@@ -1157,6 +1158,8 @@ describe('性能（#87 AC-8: タブを閉じて戻す）', () => {
  * 面の値の入力が変わるので粗い格子（48 × 24）を作り直し + 色のバッファ + 指定日の線（線の表示モデルは横軸・ハンドルに
  * 使う）+ 損益グラフの表示モデル + 交点 + 指標 + ハンドル + 面の点・縦の目盛り・凡例 + 足マーカー + 読み取り。
  * 記録のみ: 細かい格子（72 × 36）1 回 + 色（足 10 本）、粗い格子 + 色（足 200 本）、足 200 本の線モードの IV レールの 1 フレーム。
+ * #88 AC-8 (b)（段 B）: 面の上のドラッグの 1 フレーム（ΔX と d を同時に変える。面の格子・色は作り直さない = 使い回し）。
+ * 記録のみ: 面モードのパンの 1 フレーム（表示範囲が変わる = 粗い格子 + 色 + 今日の線 + 指定日の線 + 同じ一式）。
  */
 describe('性能（#88 AC-8: 面モードの 1 フレーム）', () => {
   const chain = normalizeChain(buildWideChainJson());
@@ -1282,6 +1285,94 @@ describe('性能（#88 AC-8: 面モードの 1 フレーム）', () => {
         return frame(base200, state200.legs, tick * 0.5, false);
       },
       { warmup: 1, runs: RECORD_RUNS },
+    );
+  });
+
+  /** 面の上のドラッグ・面モードのパンの 1 フレーム（格子を渡せば使い回し、null なら粗い格子を作る） */
+  function surfaceFrame(
+    scenario: typeof state10.scenario,
+    viewport: [number, number] | null,
+    grid: ReturnType<typeof surfaceGrid>,
+    today: number[] | null,
+  ) {
+    let acc = 0;
+    const g = grid ?? surfaceGrid(base10, scenario, viewport, 'coarse');
+    if (!g) throw new Error('格子が無い');
+    if (!grid) acc += surfaceImage(g, colors).data.length;
+    const m = pnlChartModel({
+      base: base10,
+      scenario,
+      viewport,
+      pnlY: DEFAULT_PNL_Y,
+      plotWidth: W,
+      plotHeight: H,
+      todayYs: today ?? todayLine(base10, viewport, W, scenario),
+      dateYs: dateLine(base10, viewport, W, scenario),
+    });
+    const mm = metricsModel({ base: base10, scenario, unit: 'auto' });
+    const marks = scenarioMarks({ base: base10, scenario, chart: m, unit: mm.unit });
+    const h = stageHandle(m, marks);
+    const p = surfacePoint({ base: base10, scenario, chart: m, handle: h, unit: mm.unit });
+    const ticks = surfaceDayTicks(m.plot, base10.maxDays);
+    const patch = surfaceDragPatch({
+      x: (p?.px ?? 0) + 7,
+      y: (p?.py ?? 0) - 5,
+      chart: m,
+      offsetX: 0,
+      offsetY: 0,
+      x0: base10.ctx.x0,
+      maxDays: base10.maxDays,
+      scenario,
+      pointPx: p ? { x: p.px, y: p.py } : null,
+    });
+    const ms = legMarkers(state10.legs, base10, m, { selected: 1, drag: null });
+    const r = readoutModel({ base: base10, metrics: mm, scenario });
+    const items = bigReadout(r, mm.premium, base10.ctx.evalTime, scenario.dSigma);
+    return (
+      acc +
+      g.values.length +
+      m.lines.length +
+      (p?.text.length ?? 0) +
+      ticks.length +
+      (patch ? 1 : 0) +
+      ms.length +
+      mm.tail.rows.length +
+      items.length
+    );
+  }
+
+  it(`面の上のドラッグ（ΔX と d）の 1 フレームが ${BUDGET_MS} ms 以内（30 回の最小値）`, () => {
+    const scenario0 = { ...state10.scenario, dSigma: 2 };
+    // 面の格子と今日の線は ΔX・d で作り直さない（usePnlSurface・usePnlChartModel の memo）
+    const grid = surfaceGrid(base10, scenario0, null, 'fine');
+    const today = todayLine(base10, null, W, scenario0);
+    let tick = 0;
+    const dragFrame = () => {
+      tick = (tick + 1) % 40;
+      const scenario = { ...scenario0, dX: -500 + tick * 10, days: tick % 20 };
+      return surfaceFrame(scenario, null, grid, today);
+    };
+    expect(grid).not.toBeNull();
+    expect(dragFrame()).toBeGreaterThan(1_000);
+    expectWithinBudget('#88 面の上のドラッグの 1 フレーム（足 10 本）', dragFrame, {
+      warmup: 20,
+      runs: 30,
+    });
+  });
+
+  it('面モードのパンの 1 フレーム（記録のみ）', () => {
+    const scenario = { ...state10.scenario, dSigma: 2 };
+    const [lo, hi] = pnlViewDomain(base10, null);
+    const w = (hi - lo) * 0.6;
+    let tick = 0;
+    record(
+      '#88 面モードのパンの 1 フレーム（粗い格子 + 色 + 線 2 本。足 10 本）',
+      () => {
+        tick = (tick + 1) % 40;
+        const a = lo + (hi - lo - w) * (tick / 40);
+        return surfaceFrame(scenario, [a, a + w], null, null);
+      },
+      { warmup: 5, runs: RECORD_RUNS },
     );
   });
 });

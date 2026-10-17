@@ -3,7 +3,7 @@ import { useLayoutEffect, useMemo } from 'preact/hooks';
 import type { Domain } from '../../chart/scale';
 import type { AppController } from '../../components/useAppController';
 import { usePnlChartModel } from '../../components/usePnlChartModel';
-import { surfaceLegend } from '../../view/pnlSurface';
+import { surfaceActive, surfaceLegend } from '../../view/pnlSurface';
 import type { ChartMode } from '../../view/shell';
 import { bigReadout, stageFrame } from '../../view/stage';
 import { BigReadout } from '../stage/BigReadout';
@@ -57,18 +57,17 @@ export function Stage(p: {
   useLayoutEffect(() => {
     if (yNow) yNow.current = yDomain;
   }, [yNow, yDomain]);
-  // 面モード（#88 段 A）: 格子は入力が変わったフレームは粗く、止まったら細かく（usePnlSurface）
-  const surfaceOn = p.chart === 'surface' && !mini;
+  // 面モード（#88）: 格子は入力が変わったフレームは粗く、止まったら細かく（usePnlSurface）。ミニ・空は線モードの表示
+  const surfaceOn = surfaceActive(p.chart, mini, model.empty);
   const grid = usePnlSurface({
-    on: surfaceOn && !model.empty,
+    on: surfaceOn,
     base,
     scenario,
     viewport: state.pnlViewport,
   });
   const legend = useMemo(
-    () =>
-      surfaceOn ? surfaceLegend(model.empty ? null : (grid?.vmax ?? null), metrics.unit) : null,
-    [surfaceOn, model.empty, grid, metrics.unit],
+    () => (surfaceOn ? surfaceLegend(grid?.vmax ?? null, metrics.unit) : null),
+    [surfaceOn, grid, metrics.unit],
   );
   const evalTime = base?.ctx.evalTime ?? null;
   const items = useMemo(
