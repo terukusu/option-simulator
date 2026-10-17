@@ -1,4 +1,5 @@
 import { useLayoutEffect, useRef, useState } from 'preact/hooks';
+import type { BookRead } from '../book';
 import { pure } from '../components/pure';
 import type { ThemePref } from '../prefs';
 import type { ShareMake } from '../share';
@@ -8,8 +9,9 @@ import type { MarketPillModel } from '../view/marketPill';
 import type { WarnTagKind, WarnTagsModel } from '../view/notices';
 import type { Tier } from '../view/shell';
 import type { TabsView } from '../view/tabs';
-import { Menu, type MenuItem } from './parts/Menu';
-import { BoxTabs } from './top/BoxTabs';
+import { type TopMenuKey, topMenuModel } from '../view/topMenu';
+import { Menu } from './parts/Menu';
+import { BoxTabs, toItems } from './top/BoxTabs';
 import { MarketPill } from './top/MarketPill';
 import { useShareCopy } from './top/useShareCopy';
 import { WarnTags } from './top/WarnTags';
@@ -44,17 +46,29 @@ export interface TopBarProps {
   subscribeShare: (f: () => void) => () => void;
   shareSupported: boolean;
   onShareResult: (r: ShareResult) => void;
+  /** ⋯ の保存一覧・設定・書き出し / 読み込み…・全クリア（#87 (C)。どれも参照が変わらない） */
+  bookCount: number | null;
+  bookState: BookRead['kind'];
+  onOpenBook: () => void;
+  /** タブのメニューの 保存一覧に保存…（名前の欄にフォーカスして開く） */
+  onSaveToBook: () => void;
+  onOpenSettings: () => void;
+  onExport: () => void;
+  onImport: (file: File) => void;
+  onClearLegs: () => void;
 }
 
 /**
  * トップバー（docs/ui-redesign.md §2.1。#87）: ブランド / BOX タブ / 市場ピル / 警告のタグ / [最新] / テーマ / ⋯。
  * スマホはブランドとテーマのボタンを CSS で隠す（テーマは ⋯ にある）。縮むのは BOX タブの帯だけ（#87 (B)）。
- * ⋯ は URL をコピー（#87 (B)）・ファイルを開く…（隠した file input をメニューの選択と同じイベントの中で click()）・
- * （dev）合成の板・テーマ。
+ * ⋯ は 保存一覧（N）… / URL をコピー / 書き出し / 読み込み… / ファイルを開く… /（dev）合成の板 / 全クリア / 設定… /
+ * テーマ（#87 (C)。行は ui/view/topMenu.ts）。ファイルを開く…・読み込み… は隠した file input をメニューの選択と
+ * 同じイベントの中で click()。
  * pure: 入力は NextApp の useMemo と参照の変わらない関数だけ（シナリオの操作で描き直さない）。
  */
 function TopBarView(p: TopBarProps) {
   const fileRef = useRef<HTMLInputElement>(null);
+  const importRef = useRef<HTMLInputElement>(null);
   const latestRef = useRef<HTMLButtonElement>(null);
   const topRef = useRef<HTMLElement>(null);
   // 警告のタグの最後の 1 つを閉じたら（タグごと消える）[最新] へ、[最新] が押せない（読み込み中）なら ⋯ へフォーカスを移す
@@ -83,37 +97,28 @@ function TopBarView(p: TopBarProps) {
     onCloseNote(kind);
   };
 
-  const theme = (sep: boolean): MenuItem[] =>
-    THEME_ITEMS.map((t, i) => ({
-      key: `theme-${t.theme}`,
-      label: t.label,
-      checked: p.theme === t.theme,
-      sep: sep && i === 0,
-      onSelect: () => p.onTheme(t.theme),
-    }));
-  const more: MenuItem[] = [
-    {
-      key: 'share',
-      label: 'URL をコピー',
-      title: share.item.title,
-      ...(share.item.disabled ? { disabled: true } : {}),
-      onSelect: share.copy,
+  const more = toItems<TopMenuKey>(
+    topMenuModel({
+      bookCount: p.bookCount,
+      bookState: p.bookState,
+      legCount: p.tabs.active.legCount,
+      share: share.item,
+      fixtures: p.fixtures,
+      sourceLabel: p.sourceLabel,
+      theme: p.theme,
+    }),
+    (k) => {
+      if (k === 'book') p.onOpenBook();
+      else if (k === 'share') share.copy();
+      else if (k === 'export') p.onExport();
+      else if (k === 'import') importRef.current?.click();
+      else if (k === 'file') fileRef.current?.click();
+      else if (k === 'clear') p.onClearLegs();
+      else if (k === 'settings') p.onOpenSettings();
+      else if (k.startsWith('fixture:')) p.onFixture(k.slice('fixture:'.length));
+      else if (k.startsWith('theme:')) p.onTheme(k.slice('theme:'.length) as ThemePref);
     },
-    {
-      key: 'file',
-      label: 'ファイルを開く…',
-      sep: true,
-      onSelect: () => fileRef.current?.click(),
-    },
-    ...p.fixtures.map((name, i) => ({
-      key: `fixture-${name}`,
-      label: `合成の板 ${name}`,
-      checked: p.sourceLabel === name,
-      sep: i === 0,
-      onSelect: () => p.onFixture(name),
-    })),
-    ...theme(true),
-  ];
+  );
   const themeItems = THEME_ITEMS.map((t) => ({
     key: t.theme,
     label: t.label,
@@ -131,6 +136,7 @@ function TopBarView(p: TopBarProps) {
         subscribeShare={p.subscribeShare}
         shareSupported={p.shareSupported}
         onShareResult={p.onShareResult}
+        onSaveToBook={p.onSaveToBook}
       />
       <MarketPill m={p.pill} tier={p.tier} noTag={p.tier === 'phone' && warn !== null} />
       {warn && <WarnTags m={warn} tier={p.tier} onClose={closeNote} />}
@@ -160,6 +166,20 @@ function TopBarView(p: TopBarProps) {
           const file = input.files?.[0];
           if (file) p.onFile(file);
           // 同じファイルをもう一度選べるように空にする（旧 Loader と同じ）
+          input.value = '';
+        }}
+      />
+      <input
+        type="file"
+        class="sr"
+        ref={importRef}
+        tabIndex={-1}
+        aria-hidden="true"
+        accept=".json,application/json"
+        onChange={(e) => {
+          const input = e.currentTarget;
+          const file = input.files?.[0];
+          if (file) p.onImport(file);
           input.value = '';
         }}
       />

@@ -1,20 +1,12 @@
-import { useState } from 'preact/hooks';
 import type { Scenario } from '../../../model';
-import type { Domain } from '../../chart/scale';
 import { MAX_PINS, type PinLineMode, pinAddError } from '../../pins';
-import { type Action, parsePremiumN, parseYRange } from '../../state';
+import type { Action } from '../../state';
 import { fmtNum } from '../../view/format';
 import { PIN_MARK, type PinTarget } from '../../view/pins';
-import type { PnlChartModel, PnlYMode, PnlYSettings } from '../../view/pnlChart';
+import type { PnlChartModel, PnlYSettings } from '../../view/pnlChart';
 import { Menu, type MenuItem } from '../parts/Menu';
 import { Popover } from '../parts/Popover';
-import { Seg } from '../parts/Seg';
-
-const Y_MODES = [
-  { value: 'auto', text: '自動' },
-  { value: 'premium', text: '±N 倍' },
-  { value: 'manual', text: '手動' },
-] as const;
+import { YAxisFields } from '../parts/YAxisFields';
 
 const fmtDays = (v: number) => String(Math.round(v * 100) / 100);
 const DYNAMICS_LABEL = { sticky_strike: 'sticky strike', sticky_moneyness: 'sticky moneyness' };
@@ -37,44 +29,6 @@ export function StageHead(p: {
   dispatch: (a: Action) => void;
 }) {
   const { model, pnlY, pins, dispatch, scenario } = p;
-  const [loText, setLoText] = useState('');
-  const [hiText, setHiText] = useState('');
-  const [rangeError, setRangeError] = useState<string | null>(null);
-  const [nText, setNText] = useState(String(pnlY.n));
-  const [nError, setNError] = useState<string | null>(null);
-
-  const setMode = (mode: PnlYMode) => {
-    if (mode === 'manual' && !pnlY.manual) {
-      // 手動に切り替えたら、いま見ている範囲から始める（旧画面と同じ）
-      const cur: Domain = [Math.round(model.yDomain[0]), Math.round(model.yDomain[1])];
-      setLoText(String(cur[0]));
-      setHiText(String(cur[1]));
-      setRangeError(null);
-      dispatch({ type: 'setPnlY', patch: { mode, manual: cur[0] < cur[1] ? cur : null } });
-      return;
-    }
-    if (mode === 'manual' && pnlY.manual) {
-      setLoText(String(pnlY.manual[0]));
-      setHiText(String(pnlY.manual[1]));
-    }
-    dispatch({ type: 'setPnlY', patch: { mode } });
-  };
-  const commitRange = (lo: string, hi: string) => {
-    const r = parseYRange(lo, hi);
-    if (r.ok) {
-      setRangeError(null);
-      dispatch({ type: 'setPnlY', patch: { manual: r.value } });
-    } else setRangeError(r.message);
-  };
-  const onN = (text: string) => {
-    setNText(text);
-    const r = parsePremiumN(text);
-    if (r.ok) {
-      setNError(null);
-      dispatch({ type: 'setPnlY', patch: { n: r.value } });
-    } else setNError(r.message);
-  };
-
   const pinFull = pinAddError(pins);
   const pinItems: MenuItem[] = [
     {
@@ -149,11 +103,6 @@ export function StageHead(p: {
       </button>
     </>
   );
-  const errors = [
-    pnlY.mode === 'manual' ? rangeError : null,
-    pnlY.mode === 'premium' ? nError : null,
-  ].filter((e): e is string => e !== null);
-
   return (
     <div class="stage-head">
       <div class="legend">
@@ -207,57 +156,7 @@ export function StageHead(p: {
         <span class="zb">{zoomButtons}</span>
         <Popover label="グラフの設定" button="⋯" buttonClass="btn ghost icon sm">
           <div class="stage-pop">
-            <div class="row">
-              <span class="lbl">縦軸</span>
-              <Seg label="縦軸" value={pnlY.mode} options={Y_MODES} onChange={setMode} />
-            </div>
-            {pnlY.mode === 'premium' && (
-              <label class="row">
-                <span class="lbl">N</span>
-                <input
-                  type="text"
-                  inputMode="decimal"
-                  size={5}
-                  value={nText}
-                  aria-invalid={nError !== null}
-                  onInput={(e) => onN(e.currentTarget.value)}
-                />
-              </label>
-            )}
-            {pnlY.mode === 'manual' && (
-              <div class="row">
-                <label>
-                  <span class="lbl">下限</span>
-                  <input
-                    type="text"
-                    inputMode="decimal"
-                    size={8}
-                    value={loText}
-                    aria-invalid={rangeError !== null}
-                    onInput={(e) => setLoText(e.currentTarget.value)}
-                    onChange={(e) => commitRange(e.currentTarget.value, hiText)}
-                  />
-                </label>
-                <label>
-                  <span class="lbl">上限</span>
-                  <input
-                    type="text"
-                    inputMode="decimal"
-                    size={8}
-                    value={hiText}
-                    aria-invalid={rangeError !== null}
-                    onInput={(e) => setHiText(e.currentTarget.value)}
-                    onChange={(e) => commitRange(loText, e.currentTarget.value)}
-                  />
-                </label>
-                <span class="lbl">円</span>
-              </div>
-            )}
-            {errors.length > 0 && (
-              <p class="field-error" role="alert">
-                {errors.join(' / ')}
-              </p>
-            )}
+            <YAxisFields pnlY={pnlY} current={() => model.yDomain} dispatch={dispatch} />
             <div class="row zb-in">
               <span class="lbl">表示</span>
               {zoomButtons}

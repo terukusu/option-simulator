@@ -17,11 +17,13 @@ import {
   exportBook,
   IMPORT_MAX_BYTES,
   importIntoBook,
+  type OkEntry,
   overwriteEntry,
   removeEntry,
   renameEntry,
+  restoreEntry,
 } from '../book';
-import { type CommitResult, commitBook, loadBook, newBookId } from '../bookIo';
+import { type CommitFail, type CommitResult, commitBook, loadBook, newBookId } from '../bookIo';
 import { downloadText } from '../download';
 import {
   API_LABEL,
@@ -96,6 +98,13 @@ export interface Boot {
 }
 
 const NO_BOOT: Boot = { storage: null, read: { kind: 'empty' } };
+
+/** 保存一覧の上書きを戻すための写し（#87 (C)。prev = 上書きの直前に読み直した項目、written = 書いた項目） */
+export interface OverwriteSnap {
+  name: string;
+  prev: OkEntry;
+  written: OkEntry;
+}
 
 /** 作業の保存の debounce（スライダーのドラッグ中は書かない。止まってから 1 回） */
 const SAVE_DELAY_MS = 500;
@@ -552,23 +561,42 @@ export function useAppController(boot: Boot = NO_BOOT) {
   }, []);
 
   // ---- ポジ帳の操作（読み直し → 純関数 → 書く。失敗したら state を変えず知らせる）
+  // commitWith: 書いて bookRead を更新するだけ（知らせは呼び出し側。#87 (C) の上書きを戻すトースト）
+  const commitWith = useCallback(
+    (op: Parameters<typeof commitBook>[1], opts?: { allowInvalid?: boolean }): CommitResult => {
+      const r = commitBook(storage, op, opts);
+      setBookRead(r.read);
+      return r;
+    },
+    [storage],
+  );
+  // commit: commitWith + 一覧の中の知らせ（bookMsg）。成功の文を返さなければ知らせを消す
+  const commitMsg = useCallback(
+    (
+      op: Parameters<typeof commitBook>[1],
+      doneText: (r: Extract<CommitResult, { ok: true }>) => string | null,
+      opts?: { allowInvalid?: boolean },
+    ): BookMessage => {
+      const r = commitWith(op, opts);
+      if (r.ok) {
+        const text = doneText(r);
+        const msg = { text: text ?? '', warn: false };
+        setBookMsg(text ? msg : null);
+        return msg;
+      }
+      const msg = { text: BOOK_FAIL_TEXT[r.reason], warn: true };
+      setBookMsg(msg);
+      return msg;
+    },
+    [commitWith],
+  );
   const commit = useCallback(
     (
       op: Parameters<typeof commitBook>[1],
       doneText: (r: Extract<CommitResult, { ok: true }>) => string | null,
       opts?: { allowInvalid?: boolean },
-    ): boolean => {
-      const r = commitBook(storage, op, opts);
-      setBookRead(r.read);
-      if (r.ok) {
-        const text = doneText(r);
-        setBookMsg(text ? { text, warn: false } : null);
-        return true;
-      }
-      setBookMsg({ text: BOOK_FAIL_TEXT[r.reason], warn: true });
-      return false;
-    },
-    [storage],
+    ): boolean => !commitMsg(op, doneText, opts).warn,
+    [commitMsg],
   );
   const openBook = useCallback(() => {
     setBookRead(loadBook(storage));
@@ -593,6 +621,38 @@ export function useAppController(boot: Boot = NO_BOOT) {
         () => '上書きした',
       ),
     [commit],
+  );
+  // [上書き] を即実行して戻すための写しを返す（#87 (C)。新しい画面の保存一覧。結果は NextApp のトースト）。
+  // 書き込みは onBookOverwrite と同じ。失敗は今と同じ文を一覧の中の知らせに出して null
+  const onBookOverwriteForUndo = useCallback(
+    (id: string): OverwriteSnap | null => {
+      const snap: { v: OverwriteSnap | null } = { v: null };
+      const r = commitWith((b) => {
+        const prev = b.entries.find((e) => e.id === id);
+        const res = overwriteEntry(b, id, toSaved(stateRef.current, Date.now()));
+        const written = res.ok ? res.book.entries.find((e) => e.id === id) : undefined;
+        snap.v =
+          prev?.status === 'ok' && written?.status === 'ok'
+            ? { name: prev.name, prev, written }
+            : null;
+        return res;
+      });
+      if (!r.ok) {
+        setBookMsg({ text: BOOK_FAIL_TEXT[r.reason], warn: true });
+        return null;
+      }
+      setBookMsg(null);
+      return snap.v;
+    },
+    [commitWith],
+  );
+  // 上書きを戻す（#87 (C)。null = 戻した。理由は呼び出し側のトースト。一覧の中の知らせは触らない）
+  const onBookRestoreEntry = useCallback(
+    (s: OverwriteSnap): CommitFail | null => {
+      const r = commitWith((b) => restoreEntry(b, s.prev, s.written));
+      return r.ok ? null : r.reason;
+    },
+    [commitWith],
   );
   const onBookDuplicate = useCallback(
     (id: string) =>
@@ -685,30 +745,39 @@ export function useAppController(boot: Boot = NO_BOOT) {
     },
     [storage],
   );
-  const onBookExport = useCallback(() => {
+  // 書き出し / 読み込み: 一覧の中の知らせ（bookMsg）に出し、同じ知らせを返す（#87 (C): ⋯ からはトーストに出す。
+  // 旧 Book は戻り値を捨てる）。書き出しは読めなければ何もしないで null
+  const onBookExport = useCallback((): BookMessage | null => {
     const read = loadBook(storage);
     setBookRead(read);
-    if (read.kind !== 'ok') return;
+    if (read.kind !== 'ok') return null;
     const out = exportBook(read.book, Date.now());
     downloadText(out.text, out.filename);
-    setBookMsg({ text: exportDoneText(out.count, out.skipped), warn: false });
+    const msg = { text: exportDoneText(out.count, out.skipped), warn: false };
+    setBookMsg(msg);
+    return msg;
   }, [storage]);
   const onBookImport = useCallback(
-    (file: File) => {
+    (file: File): Promise<BookMessage> => {
       if (file.size > IMPORT_MAX_BYTES) {
-        setBookMsg({ text: BOOK_FAIL_TEXT.fileTooLarge, warn: true });
-        return;
+        const msg = { text: BOOK_FAIL_TEXT.fileTooLarge, warn: true };
+        setBookMsg(msg);
+        return Promise.resolve(msg);
       }
-      file.text().then(
+      return file.text().then(
         (text) =>
-          commit(
+          commitMsg(
             (b) => importIntoBook(b, text, Date.now(), newBookId),
             (r) => importDoneText(r.added ?? 0, r.skipped ?? 0),
           ),
-        () => setBookMsg({ text: BOOK_FAIL_TEXT.importInvalid, warn: true }),
+        () => {
+          const msg = { text: BOOK_FAIL_TEXT.importInvalid, warn: true };
+          setBookMsg(msg);
+          return msg;
+        },
       );
     },
-    [commit],
+    [commitMsg],
   );
   // 一覧の要約は開いている間だけ（板・項目・ATM 基準・単位が変わったときだけ作り直す）
   const { legs: curLegs, scenario: curScenario } = state;
@@ -814,6 +883,8 @@ export function useAppController(boot: Boot = NO_BOOT) {
     closeBook,
     onBookSave,
     onBookOverwrite,
+    onBookOverwriteForUndo,
+    onBookRestoreEntry,
     onBookDuplicate,
     onBookRename,
     onBookRemove,

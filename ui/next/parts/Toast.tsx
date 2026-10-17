@@ -11,10 +11,11 @@ import {
 } from '../../view/toast';
 
 /**
- * トースト（docs/ui-redesign.md §5・§11-8。規則は ui/view/toast.ts）。下中央（ドックの上）・role="status"・折り返さない。
+ * トースト（docs/ui-redesign.md §5・§11-8。規則は ui/view/toast.ts）。下中央（ドックの上）・折り返さない。
  * タイマーは次に消える時刻まで 1 本だけ。
  * #87: 知らせのトースト（note 付き）は文を説明文（<p>）として折り返し、[閉じる]（onDismiss）を出す。
- * note の無いトーストの DOM は #81 のまま。警告の知らせのトーストは role="alert"（#87 (B)）。
+ * note の無いトーストの DOM は #81 のまま。#87 (C): .toasts は位置の箱だけにし、中に常設の読み上げの領域を 2 つ置く
+ * （.toast-alerts = role="alert" に警告の知らせ、.toast-log = role="status" にほか全部。各領域の中は古い順）。
  */
 export function useToasts(): {
   toasts: readonly Toast[];
@@ -72,34 +73,39 @@ export function Toasts(p: {
   onDismiss?: (id: number) => void;
 }) {
   const { onDismiss } = p;
+  const item = (t: Toast) =>
+    t.note ? (
+      <div
+        class={t.note === 'warn' ? 'toast note warn' : 'toast note'}
+        key={t.id}
+        data-kind={t.kind}
+      >
+        <p class="txt">{t.text}</p>
+        {onDismiss && (
+          <button type="button" aria-label="知らせを閉じる" onClick={() => onDismiss(t.id)}>
+            閉じる
+          </button>
+        )}
+      </div>
+    ) : (
+      <div class="toast" key={t.id}>
+        <span class="txt">{t.text}</span>
+        {t.undo && (
+          <button type="button" onClick={() => p.onUndo(t.id)}>
+            元に戻す
+          </button>
+        )}
+      </div>
+    );
+  // 読み上げの領域は常設の 2 つ（入れ子にしない。#87 (C)）: 警告の知らせ = alert、ほか = status（polite）
   return (
-    <div class="toasts" role="status" aria-live="polite">
-      {p.toasts.map((t) =>
-        t.note ? (
-          <div
-            class={t.note === 'warn' ? 'toast note warn' : 'toast note'}
-            key={t.id}
-            data-kind={t.kind}
-            role={t.note === 'warn' ? 'alert' : undefined}
-          >
-            <p class="txt">{t.text}</p>
-            {onDismiss && (
-              <button type="button" aria-label="知らせを閉じる" onClick={() => onDismiss(t.id)}>
-                閉じる
-              </button>
-            )}
-          </div>
-        ) : (
-          <div class="toast" key={t.id}>
-            <span class="txt">{t.text}</span>
-            {t.undo && (
-              <button type="button" onClick={() => p.onUndo(t.id)}>
-                元に戻す
-              </button>
-            )}
-          </div>
-        ),
-      )}
+    <div class="toasts">
+      <div class="toast-alerts" role="alert">
+        {p.toasts.filter((t) => t.note === 'warn').map(item)}
+      </div>
+      <div class="toast-log" role="status" aria-live="polite">
+        {p.toasts.filter((t) => t.note !== 'warn').map(item)}
+      </div>
     </div>
   );
 }

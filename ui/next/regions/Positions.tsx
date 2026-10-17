@@ -1,11 +1,10 @@
-import { useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks';
 import type { AppController } from '../../components/useAppController';
 import { type LegPatch, type Parsed, parseEntry, parseIvPct, parseQty } from '../../state';
 import { fmtNum } from '../../view/format';
 import type { HedgeAt } from '../../view/hedge';
 import { type PositionRow, SIDE_LABEL, toggledSide } from '../../view/position';
 import {
-  clearUndo,
   type DetailItem,
   flipToast,
   HEDGE_AT_OPTIONS,
@@ -43,6 +42,8 @@ interface Props {
   /** 行の詳細を開いたらその足を舞台でも選ぶ */
   onSelectLeg: (id: number) => void;
   push: (t: ToastInput) => void;
+  /** 全クリア（#87 (C): トップの ⋯ と同じ処理 = NextApp。[元に戻す] 付きのトースト） */
+  onClear: () => void;
 }
 
 const fmtQty = (v: number) => fmtNum(v);
@@ -97,12 +98,14 @@ export function Positions(p: Props) {
     if (u) push(undoToast(u));
   };
   const onClear = () => {
-    const u = clearUndo(state);
-    if (!u) return;
-    dispatch({ type: 'clearLegs' });
+    p.onClear();
     setOpen(new Set());
-    push(undoToast(u));
   };
+  // 足が 0 本になったら開いた行の集合を空にする（トップの ⋯ の全クリアの後の [元に戻す] で行が開いたまま戻らない）
+  const empty = rows.length === 0;
+  useEffect(() => {
+    if (empty) setOpen((o) => (o.size === 0 ? o : new Set()));
+  }, [empty]);
   const onFlip = (row: PositionRow) => {
     dispatch({ type: 'editLeg', id: row.id, patch: { side: toggledSide(row.side) } });
     push(flipToast(row));

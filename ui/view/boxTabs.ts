@@ -47,6 +47,8 @@ export interface MenuRow<K extends string = string> {
   title?: string;
   /** 前に区切り */
   sep?: boolean;
+  /** 選択中（radio の項目。#87 (C) の ⋯ のテーマ・合成の板） */
+  checked?: boolean;
 }
 
 /** [URL をコピー] の項目の状態 */
@@ -55,19 +57,19 @@ export interface ShareItemState {
   title: string;
 }
 
+export type TabMenuKey = 'rename' | 'copy' | 'save' | 'share' | 'close';
+
 /**
- * 作業中のタブのメニュー: 名前を変える… / 複製 / URL をコピー /（区切り）閉じる（最後の 1 個では出さない）。
- * 保存一覧に保存… は #87 (C) で 複製 の後に入る。
+ * 作業中のタブのメニュー: 名前を変える… / 複製 / 保存一覧に保存…（#87 (C)。常に押せる = 保存一覧を開くだけ）/
+ * URL をコピー /（区切り）閉じる（最後の 1 個では出さない）。
  */
-export function tabMenuModel(
-  view: TabsView,
-  share: ShareItemState,
-): MenuRow<'rename' | 'copy' | 'share' | 'close'>[] {
-  const rows: MenuRow<'rename' | 'copy' | 'share' | 'close'>[] = [
+export function tabMenuModel(view: TabsView, share: ShareItemState): MenuRow<TabMenuKey>[] {
+  const rows: MenuRow<TabMenuKey>[] = [
     { key: 'rename', label: '名前を変える…' },
     view.canAdd
       ? { key: 'copy', label: '複製' }
       : { key: 'copy', label: '複製', disabled: true, title: TABS_FULL_TEXT },
+    { key: 'save', label: '保存一覧に保存…' },
     { key: 'share', label: 'URL をコピー', disabled: share.disabled, title: share.title },
   ];
   if (view.canClose) rows.push({ key: 'close', label: '閉じる', sep: true });
@@ -127,17 +129,20 @@ export function shareResultView(r: ShareResult): ShareResultView {
 
 /**
  * 項目（帯の中の左端 itemLeft・幅 itemWidth）を見せる帯の scrollLeft（CSS px）。左に切れていれば左端を合わせ、
- * 右に切れていれば右端を合わせ、収まっていれば今のまま。帯より広ければ左端。非有限の入力は今のまま
+ * 右に切れていれば右端を合わせ、収まっていれば今のまま。帯より広ければ左端。非有限の入力は今のまま。
+ * pad（#87 (C)。帯の padding。フォーカスの輪が帯の端で切れない）を左は引き（0 未満にしない）、右は足す。非有限は 0
  */
 export function revealScrollLeft(
   scrollLeft: number,
   viewWidth: number,
   itemLeft: number,
   itemWidth: number,
+  pad = 0,
 ): number {
   if (![scrollLeft, viewWidth, itemLeft, itemWidth].every(Number.isFinite)) return scrollLeft;
-  if (itemLeft < scrollLeft || itemWidth > viewWidth) return itemLeft;
+  const p = Number.isFinite(pad) ? pad : 0;
+  if (itemLeft < scrollLeft || itemWidth > viewWidth) return Math.max(0, itemLeft - p);
   const right = itemLeft + itemWidth;
-  if (right > scrollLeft + viewWidth) return right - viewWidth;
+  if (right > scrollLeft + viewWidth) return right - viewWidth + p;
   return scrollLeft;
 }

@@ -35,14 +35,20 @@ const okShare = { disabled: false, title: 't' };
 describe('tabMenuModel', () => {
   it('タブ 1 個: 閉じるが無い', () => {
     const rows = tabMenuModel(view(1), okShare);
-    expect(rows.map((r) => r.key)).toEqual(['rename', 'copy', 'share']);
+    expect(rows.map((r) => r.key)).toEqual(['rename', 'copy', 'save', 'share']);
     expect(rows.find((r) => r.key === 'copy')?.disabled).toBeUndefined();
   });
 
   it('タブ 2 個: 閉じるは区切りの後', () => {
     const rows = tabMenuModel(view(2), okShare);
-    expect(rows.map((r) => r.label)).toEqual(['名前を変える…', '複製', 'URL をコピー', '閉じる']);
-    expect(rows[3]?.sep).toBe(true);
+    expect(rows.map((r) => r.label)).toEqual([
+      '名前を変える…',
+      '複製',
+      '保存一覧に保存…',
+      'URL をコピー',
+      '閉じる',
+    ]);
+    expect(rows[4]?.sep).toBe(true);
   });
 
   it(`タブ ${MAX_TABS} 個: 複製を押せない（理由は title）`, () => {
@@ -51,7 +57,7 @@ describe('tabMenuModel', () => {
   });
 
   it('URL をコピーの状態をそのまま映す', () => {
-    const share = tabMenuModel(view(2), { disabled: true, title: '足が無い' })[2];
+    const share = tabMenuModel(view(2), { disabled: true, title: '足が無い' })[3];
     expect(share).toMatchObject({ key: 'share', disabled: true, title: '足が無い' });
   });
 });
@@ -131,6 +137,27 @@ describe('revealScrollLeft', () => {
     expect(revealScrollLeft(50, 200, 120, 300)).toBe(120);
     expect(revealScrollLeft(50, Number.NaN, 120, 30)).toBe(50);
     expect(revealScrollLeft(50, 200, Number.POSITIVE_INFINITY, 30)).toBe(50);
+  });
+
+  it('pad（#87 (C)）: 左は引いて 0 未満にしない・右は足す・収まるなら今のまま・非有限は 0 扱い', () => {
+    expect(revealScrollLeft(100, 200, 40, 60, 3)).toBe(37);
+    expect(revealScrollLeft(100, 200, 2, 60, 3)).toBe(0);
+    expect(revealScrollLeft(0, 200, 180, 60, 3)).toBe(43);
+    expect(revealScrollLeft(50, 200, 100, 60, 3)).toBe(50);
+    expect(revealScrollLeft(50, 200, 120, 300, 3)).toBe(117);
+    expect(revealScrollLeft(100, 200, 40, 60, Number.NaN)).toBe(40);
+    expect(revealScrollLeft(0, 200, 180, 60, Number.NaN)).toBe(40);
+  });
+});
+
+describe('tabMenuModel の 保存一覧に保存…（#87 (C)）', () => {
+  it('複製の直後・上限でも押せる', () => {
+    for (const n of [1, 2, MAX_TABS]) {
+      const rows = tabMenuModel(view(n), okShare);
+      const i = rows.findIndex((r) => r.key === 'save');
+      expect(rows[i - 1]?.key).toBe('copy');
+      expect(rows[i]).toEqual({ key: 'save', label: '保存一覧に保存…' });
+    }
   });
 });
 

@@ -22,6 +22,13 @@
   white-space: normal;
 }
 
+/* メニューは窓の高さまで、中だけスクロール（⋯ の項目が増えた #87 (C)。横向きのスマホでも切れない） */
+.top .menu {
+  max-height: calc(100dvh - var(--top-h) - 16px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
 /* ===== BOX タブ（#87 (B)）: 帯 + ＋ + 作業中のタブのメニュー（帯の外 = この要素に対する絶対配置） ===== */
 .boxtabs-wrap {
   position: relative;
@@ -361,7 +368,9 @@
     padding: 0 6px;
   }
 
-  .top .btn.icon {
+  /* ＋・⋯ だけ（トップバーの中のダイアログの × は .sheet-head の中なので外れる。#87 (C)） */
+  .top > .btn.icon,
+  .top .menu-wrap > .btn.icon {
     width: 28px;
   }
 
