@@ -34,6 +34,8 @@
 //                                          #87 (B): トップバーの検査に BOX タブ（作業中のチップが帯の矩形と窓の中・全チップの本数が
 //                                          切れない・＋ が窓の中・帯にスクロールバーが出ない）、開いた状態にタブのメニュー・
 //                                          名前を変える…・共有の URL（writeText を reject に差し替え）・＋ のメニュー（1 個閉じてから）
+//                                          #87 (C): 開いた状態に設定・保存一覧（名前 3 つ・1 つは 40 字で保存した後）。タブのメニュー・
+//                                          ⋯ メニューは URL をコピーが押せる（URL ができた）のを待ってから撮る
 //                                          空の舞台（#111）: 足 0 本（板あり）× 4 幅 × ダーク / ライトで格子 4 本以上・0 の線・横の目盛り
 //                                          （数字）2 個以上・縦の目盛りと単位 0・注記が前面・ハンドル / マーカー / X₀ 0・tabindex -1
 //   npm run ui:check -- --parts            部品の見本（?ui=next&parts。dev だけ）
@@ -61,7 +63,13 @@
 //                                          Long Animation Frame。390×844 と 1440×900）と URL 共有の手順（AC-13: タブのメニュー・⋯ の
 //                                          URL をコピー → トースト・クリップボード・新しいコンテキストで同じ足・拒否 = 共有の URL の
 //                                          ダイアログ・旧画面の URL に ui なし・上限の確認で前の共有の警告のトーストを消す。1440×900）。
-//                                          全クリアの直後の舞台の格子（#111: 1440 で 4 本以上、390 はシート full のミニで 0）
+//                                          全クリアの直後の舞台の格子（#111: 1440 で 4 本以上、390 はシート full のミニで 0）と
+//                                          設定と保存一覧の手順（#87 (C) AC-14: ATM の基準・単位・手数料・縦軸・basis・テーマが
+//                                          すぐ効いて保存に入る、保存 → [上書き]（確認なし）→ [元に戻す] で保存一覧がバイト単位で同じ・
+//                                          削除の確認・開く / 新しいタブで開く / 重ねる・⋯ > 書き出し / 読み込み…・Esc でフォーカスが戻る。
+//                                          390×844 と 1440×900）とタッチの端末のエミュレーション（AC-19: hasTouch・isMobile の
+//                                          390×844 で帯の横スワイプ（CDP の dispatchTouchEvent）・タップの切替とメニュー・
+//                                          トーストの外とドックが押せる・⋯ からファイルの選択が開く。iPhone の Safari は手動）
 //   --url <base>                           dev サーバーを起こさず、その URL を使う（例 http://127.0.0.1:5173/?ui=next&parts）
 //   --dom <file>                           body の下の要素の tag.class の並びを書き出す（旧画面が変わらないことの比較用）
 //   --shots <dir>                          スクリーンショットを書く（合成の板だけ。リポジトリに入れない）
@@ -1557,6 +1565,9 @@ async function runFlows() {
   // #87 (B) BOX タブの手順（AC-12・AC-15(e)）と URL 共有の手順（AC-13）
   for (const vp of [phone, pc]) await tabFlows(vp);
   await shareFlows(pc);
+  // #87 (C) 設定と保存一覧の手順（AC-14）とタッチの端末のエミュレーション（AC-19。Chromium の根拠）
+  for (const vp of [phone, pc]) await bookSettingsFlows(vp);
+  await touchFlows();
 }
 
 // ---- 舞台の手順（#82）
@@ -3927,7 +3938,16 @@ async function openCheck(page, label, w, h, shotName, sel) {
   }
 }
 
-/** 最も混む作業のトップバーと、開いた状態（知らせのトースト・⋯・ピル・警告のタグ・共有を開く確認） */
+/** ⋯ の URL をコピーが押せる（URL ができた） */
+const MORE_SHARE_READY =
+  'header.top > .menu-wrap [role="menuitem"]:has-text("URL をコピー"):not([aria-disabled])';
+/** 保存一覧の開いた状態の名前（架空。1 つは 40 字 = 名前の上限） */
+const BOOK_NAMES = ['11月 売り 2 本', `${'とても長い保存の名前'.repeat(4)}`, '検査の三'];
+
+/**
+ * 最も混む作業のトップバーと、開いた状態（知らせのトースト・⋯・ピル・警告のタグ・共有を開く確認・BOX タブ・
+ * 設定・保存一覧（#87 (C)））
+ */
 async function topSweep() {
   for (const [w, h] of SIZES) {
     for (const theme of ['dark', 'light']) {
@@ -3949,6 +3969,8 @@ async function topSweep() {
         await closeNotes(page);
         await report(page, tag, w, h, name);
         await page.click('button[aria-label="メニュー"]');
+        // URL ができてから撮る（作っている間の薄い表示で写さない。#87 (B) のレビュー 6）
+        await page.waitForSelector(MORE_SHARE_READY, { timeout: 5000 }).catch(() => {});
         await openCheck(
           page,
           `${tag} ⋯ メニュー`,
@@ -3981,6 +4003,12 @@ async function topSweep() {
         // BOX タブ（#87 (B)）: タブのメニュー・名前を変える…・共有の URL・＋ のメニュー
         const chip = '.boxtabs [aria-selected="true"]';
         await page.click(chip);
+        await page
+          .waitForSelector(
+            '.boxtabs-wrap > [role="menu"] [role="menuitem"]:has-text("URL をコピー"):not([aria-disabled])',
+            { timeout: 5000 },
+          )
+          .catch(() => {});
         await openCheck(
           page,
           `${tag} タブのメニュー`,
@@ -4002,6 +4030,32 @@ async function topSweep() {
         );
         await page.waitForSelector('dialog.sheet[open]', { timeout: 3000 }).catch(() => {});
         await openCheck(page, `${tag} 共有の URL`, w, h, `${name}-shareurl`, 'dialog.sheet[open]');
+        await page.keyboard.press('Escape');
+        await page.waitForSelector('dialog.sheet[open]', { state: 'detached', timeout: 3000 });
+        // 設定・保存一覧（#87 (C)）: 保存一覧は名前 3 つ（1 つは 40 字）で保存した状態
+        await page.click('button[aria-label="メニュー"]');
+        await page.click('header.top > .menu-wrap [role="menuitem"]:has-text("設定…")');
+        await page
+          .waitForSelector('dialog.sheet.settings[open]', { timeout: 3000 })
+          .catch(() => {});
+        await openCheck(page, `${tag} 設定`, w, h, `${name}-settings`, 'dialog.sheet[open]');
+        await page.keyboard.press('Escape');
+        await page.waitForSelector('dialog.sheet[open]', { state: 'detached', timeout: 3000 });
+        await page.click('button[aria-label="メニュー"]');
+        await page.click('header.top > .menu-wrap [role="menuitem"]:has-text("保存一覧")');
+        await page.waitForSelector('dialog.sheet.book[open]', { timeout: 3000 }).catch(() => {});
+        for (const nm of BOOK_NAMES) {
+          await page.fill('dialog.sheet.book[open] .bk-save input', nm);
+          await page.click('dialog.sheet.book[open] .bk-save button:has-text("保存")');
+        }
+        await page
+          .waitForFunction(
+            (n) => document.querySelectorAll('dialog.sheet.book[open] .bk-row').length === n,
+            BOOK_NAMES.length,
+            { timeout: 3000 },
+          )
+          .catch(() => {});
+        await openCheck(page, `${tag} 保存一覧`, w, h, `${name}-book`, 'dialog.sheet[open]');
         await page.keyboard.press('Escape');
         await page.waitForSelector('dialog.sheet[open]', { state: 'detached', timeout: 3000 });
         // 6 個では ＋ を押せないので 1 個閉じてから（閉じたトーストも出る）
@@ -4722,6 +4776,483 @@ async function shareFlows(vp) {
       `#87 ${tag} 上限で共有を開く確認に入ると前の共有の警告のトーストが消える`,
       warned && asking === 1 && left === 0,
       `警告 ${warned}・確認 ${asking}・残り ${left}`,
+    );
+    await ctx.close();
+  }
+}
+
+// ---- #87 (C) の手順（AC-14・AC-19）
+const MORE = 'button[aria-label="メニュー"]';
+const moreItem = (label) => `header.top > .menu-wrap [role^="menuitem"]:has-text("${label}")`;
+const SET = 'dialog.sheet.settings[open]';
+const BOOK = 'dialog.sheet.book[open]';
+const BOOK_KEY_LS = 'option-simulator.book';
+
+async function openFromMore(page, label, dialogSel) {
+  await page.click(MORE);
+  await page.click(moreItem(label));
+  if (dialogSel) await page.waitForSelector(dialogSel, { timeout: 3000 }).catch(() => {});
+}
+async function closeDialog(page) {
+  await page.keyboard.press('Escape');
+  await page
+    .waitForSelector('dialog.sheet[open]', { state: 'detached', timeout: 3000 })
+    .catch(() => {});
+}
+const focusLabel = (page) =>
+  page.evaluate(() => ({
+    label: document.activeElement?.getAttribute('aria-label') ?? null,
+    selected: document.activeElement?.getAttribute('aria-selected') ?? null,
+    cls: document.activeElement?.getAttribute('class') ?? null,
+  }));
+const bookText = (page) => page.evaluate((k) => localStorage.getItem(k), BOOK_KEY_LS);
+
+async function bookSettingsFlows(vp) {
+  const tag = `${vp.width}x${vp.height}`;
+  const phoneSize = vp.width <= PHONE_MAX;
+  const ctx = await newContext(vp, { [WORKSPACE_KEY]: twoLegs });
+  await ctx.addInitScript(LOAF_INIT);
+  const page = await ctx.newPage();
+  await page.goto(pageUrl('next'));
+  await waitReady(page, 'next');
+  const seg = (label, text) =>
+    `${SET} [role="group"][aria-label="${label}"] button:text-is("${text}")`;
+  const atmOf = (t) => /ATM ([0-9,]+)/.exec(t ?? '')?.[1] ?? null;
+  // スマホは板のパネルを開いておく（板の ATM 行を見る。開く描画は Long Animation Frame の数に入れない）
+  if (phoneSize) await setShell(page, 'board', 'peek');
+  const loafOk = await page.evaluate(() => window.__loafOk === true);
+  await page.waitForTimeout(300);
+  const m0 = await page.evaluate(() => window.__loaf.length);
+
+  // (a) ATM の基準を A → ピル・板の ATM 行・板の脚注が A のもの、保存の atm_basis が A
+  const pillBefore = atmOf(await page.getAttribute('.market-pill', 'aria-label'));
+  await openFromMore(page, '設定…', SET);
+  await page.waitForTimeout(200);
+  // 設定を開く（showModal）までは判定に入れる（m0 → m0b）
+  const m0b = await page.evaluate(() => window.__loaf.length);
+  await page.click(seg('ATM の基準', 'ラージ先物（A）'));
+  await page.waitForTimeout(150);
+  const a = await page.evaluate(() => ({
+    pill: document.querySelector('.market-pill')?.getAttribute('aria-label') ?? '',
+    foot: document.querySelector('section.board .board-foot .atm')?.textContent ?? '',
+    row: document.querySelector('section.board tr.atm .kv')?.textContent ?? '',
+  }));
+  const wsA = await savedWorkspace(page);
+  const pillA = atmOf(a.pill);
+  check(
+    `#87 AC-14(a) ${tag} 設定の ATM の基準を A → ピル・板の ATM 行・脚注が A、保存の atm_basis が A`,
+    !!pillA &&
+      pillA !== pillBefore &&
+      a.foot === `ATM ${pillA}（A）` &&
+      a.row === pillA &&
+      wsA?.ui?.atm_basis === 'A',
+    `ピル ${pillBefore} → ${pillA}・脚注 ${a.foot}・行 ${a.row}・保存 ${wsA?.ui?.atm_basis}`,
+  );
+
+  // ATM の基準の切替（m0b → m1）は参考。X₀（横軸の原点）が変わり損益の全体を作り直す（旧画面の Header の切替と同じ計算。
+  // #87 (C) で足したものではない）ので、Long Animation Frame は参考として出し、判定は設定を開く + (b)〜(f) の 5 つで行う
+  await page.waitForTimeout(200);
+  const m1 = await page.evaluate(() => window.__loaf.length);
+  const loafAtm = await page.evaluate(
+    ([a, b]) =>
+      window.__loaf
+        .slice(a, b)
+        .filter((x) => x > 50)
+        .map(Math.round),
+    [m0b, m1],
+  );
+  console.log(
+    `参考  #87 ${tag} 設定の ATM の基準の切替の Long Animation Frame（50ms 超）${loafAtm.length} 件${loafAtm.length ? `（${loafAtm.join('・')}ms）` : ''}`,
+  );
+
+  // (b) 金額の単位を 円 → 指標の見出しの副題が 円（固定）、保存の metrics_unit が yen
+  await page.click(seg('金額の単位', '円'));
+  await page.waitForTimeout(100);
+  const sub = (await page.textContent('section.metrics .panel-head')) ?? '';
+  const wsB = await savedWorkspace(page);
+  check(
+    `#87 AC-14(b) ${tag} 単位を 円 → 指標の副題が 円（固定）・保存の metrics_unit が yen`,
+    sub.includes('円（固定）') && wsB?.ui?.metrics_unit === 'yen',
+    `${sub}・${wsB?.ui?.metrics_unit}`,
+  );
+
+  // (c) 手数料 300 → 保存 300、abc → alert・保存は 300 のまま（内訳の注記は閉じた後に見る）
+  await page.fill(`${SET} input#set-fee`, '300');
+  const wsC1 = await savedWorkspace(page);
+  await page.fill(`${SET} input#set-fee`, 'abc');
+  const alert = (await page.textContent(`${SET} .set-row [role="alert"]`).catch(() => null)) ?? '';
+  const wsC2 = await savedWorkspace(page);
+
+  // (d) 縦軸を ±N 倍 → 舞台の ⋯ の縦軸も ±N 倍・保存の pnl_y.mode
+  await page.click(seg('縦軸', '±N 倍'));
+  await page.waitForTimeout(100);
+  const stageY = await page.evaluate(
+    () =>
+      document.querySelector(
+        'section.stage .stage-pop [aria-label="縦軸"] button[aria-pressed="true"]',
+      )?.textContent ?? null,
+  );
+  const wsD = await savedWorkspace(page);
+  check(
+    `#87 AC-14(d) ${tag} 設定の縦軸を ±N 倍 → 舞台の ⋯ の縦軸も ±N 倍・保存の pnl_y.mode が premium`,
+    stageY === '±N 倍' && wsD?.ui?.pnl_y?.mode === 'premium',
+    `${stageY}・${wsD?.ui?.pnl_y?.mode}`,
+  );
+
+  // (e) 先物の basis を減衰 → 「モデルの前提」の要約も減衰
+  await page.click(seg('先物の basis', '減衰'));
+  await page.waitForTimeout(100);
+  const adv = (await page.textContent('section.scenario details.adv .vals')) ?? '';
+  const wsE = await savedWorkspace(page);
+  check(
+    `#87 AC-14(e) ${tag} 先物の basis を減衰 → モデルの前提の要約が basis 減衰・保存の future_basis が decay`,
+    adv.includes('basis 減衰') && wsE?.ui?.future_basis === 'decay',
+    adv,
+  );
+
+  // (f) テーマをライト → html[data-theme="light"]・prefs
+  await page.click(seg('テーマ', 'ライト'));
+  await page.waitForTimeout(100);
+  const th = await page.evaluate((k) => {
+    let prefs = null;
+    try {
+      prefs = JSON.parse(localStorage.getItem(k) ?? 'null')?.theme ?? null;
+    } catch {}
+    return { attr: document.documentElement.dataset.theme ?? null, prefs };
+  }, PREFS_KEY);
+  check(
+    `#87 AC-14(f) ${tag} テーマをライト → html[data-theme="light"]・prefs の theme が light`,
+    th.attr === 'light' && th.prefs === 'light',
+    JSON.stringify(th),
+  );
+  await closeDialog(page);
+  const fSet = await focusLabel(page);
+  const loafSet = await page.evaluate(
+    ([a, b, c]) =>
+      [...window.__loaf.slice(a, b), ...window.__loaf.slice(c)].filter((x) => x > 50).length,
+    [m0, m0b, m1],
+  );
+
+  // (c) の続き: 内訳の注記に 手数料 300 円 / 枚
+  if (phoneSize) await setShell(page, 'metrics', 'peek');
+  await page.click('section.metrics .mx-toggle');
+  await page.waitForTimeout(100);
+  const note = (await page.textContent('section.metrics .mx-note').catch(() => null)) ?? '';
+  check(
+    `#87 AC-14(c) ${tag} 手数料 300 → 内訳の注記に 手数料 300 円 / 枚・保存 300、abc → alert・保存は 300 のまま`,
+    note.includes('手数料 300 円 / 枚') &&
+      wsC1?.ui?.fee_per_lot === 300 &&
+      alert === '手数料は 0〜100,000 円 / 枚' &&
+      wsC2?.ui?.fee_per_lot === 300,
+    `${note}・${wsC1?.ui?.fee_per_lot}・${alert}・${wsC2?.ui?.fee_per_lot}`,
+  );
+  if (phoneSize) await setShell(page, 'metrics', 'hidden');
+  check(
+    `#87 AC-14 ${tag} 設定を Esc で閉じると ⋯ へフォーカスが戻る`,
+    fSet.label === 'メニュー',
+    JSON.stringify(fSet),
+  );
+  check(
+    `#87 AC-17 ${tag} 設定を開く・5 つの変更（単位・手数料・縦軸・basis・テーマ）の Long Animation Frame 0 件`,
+    loafOk && loafSet === 0,
+    loafOk ? `${loafSet} 件` : 'observer が使えない',
+  );
+
+  // (g) ⋯ > 保存一覧… → [保存] → 行が 1 件増える → [上書き]（確認なし）→ トースト → [元に戻す] → バイト単位で同じ
+  await openFromMore(page, '保存一覧', BOOK);
+  const rows = () => page.locator(`${BOOK} .bk-row`).count();
+  const r0 = await rows();
+  await page.fill(`${BOOK} .bk-save input`, '検査 A');
+  await page.click(`${BOOK} .bk-save button:has-text("保存")`);
+  await page.waitForTimeout(100);
+  const r1 = await rows();
+  const before = await bookText(page);
+  await page.click(`${BOOK} button[aria-label="検査 A を作業中の内容で上書き"]`);
+  await page.waitForTimeout(100);
+  const g = {
+    confirm: await page.locator(`${BOOK} .bk-confirm`).count(),
+    toast: (await page.textContent(`${BOOK} .toast:not(.note) .txt`).catch(() => null)) ?? '',
+    changed: (await bookText(page)) !== before,
+  };
+  // トーストはダイアログの中（押せる）: 中心の点の要素がトーストの中
+  const hit = await page.evaluate((sel) => {
+    const t = document.querySelector(sel);
+    const b = t?.getBoundingClientRect();
+    if (!b) return false;
+    const el = document.elementFromPoint((b.left + b.right) / 2, (b.top + b.bottom) / 2);
+    return !!el && t.contains(el);
+  }, `${BOOK} .toast:not(.note)`);
+  await page.click(`${BOOK} .toast:not(.note) button:has-text("元に戻す")`);
+  await page.waitForTimeout(100);
+  const restored = (await bookText(page)) === before;
+  check(
+    `#87 AC-14(g) ${tag} 保存で行が 1 件増え、[上書き] は確認なしでトースト → [元に戻す] で保存一覧がバイト単位で同じ`,
+    r1 === r0 + 1 &&
+      g.confirm === 0 &&
+      g.toast === '「検査 A」を上書きした' &&
+      g.changed &&
+      hit &&
+      restored,
+    `${r0} → ${r1}・${JSON.stringify(g)}・押せる ${hit}・戻った ${restored}`,
+  );
+
+  // (h) [削除] は行の中の確認を経て消える、[開く]・[新しいタブで開く]・[重ねる] で閉じて反映される
+  await page.click(`${BOOK} button[aria-label="検査 A を削除"]`);
+  const askDel = await page.locator(`${BOOK} .bk-confirm`).count();
+  const rAsk = await rows();
+  await page.click(`${BOOK} .bk-confirm button:has-text("削除")`);
+  await page.waitForTimeout(100);
+  const rDel = await rows();
+  await page.fill(`${BOOK} .bk-save input`, '検査 B');
+  await page.click(`${BOOK} .bk-save button:has-text("保存")`);
+  await page.waitForTimeout(100);
+  await page.click(`${BOOK} button[aria-label="検査 B を開く"]`);
+  await page.waitForTimeout(150);
+  const hOpen = await page.locator('dialog.sheet[open]').count();
+  const tabs0 = (await savedWorkspace(page))?.tabs?.length;
+  await openFromMore(page, '保存一覧', BOOK);
+  await page.click(`${BOOK} button[aria-label="検査 B を新しいタブで開く"]`);
+  await page.waitForTimeout(150);
+  const hNew = await page.locator('dialog.sheet[open]').count();
+  const wsNew = await savedWorkspace(page);
+  await openFromMore(page, '保存一覧', BOOK);
+  await page.click(`${BOOK} button[aria-label="検査 B を損益グラフに重ねる"]`);
+  await page.waitForTimeout(150);
+  const hPin = await page.locator('dialog.sheet[open]').count();
+  const pins = await page.locator('section.stage .pin-chip').count();
+  check(
+    `#87 AC-14(h) ${tag} [削除] は行の中の確認の後に消え、[開く]・[新しいタブで開く]・[重ねる] で閉じて反映`,
+    askDel === 1 &&
+      rAsk === 1 &&
+      rDel === 0 &&
+      hOpen === 0 &&
+      hNew === 0 &&
+      wsNew?.tabs?.length === (tabs0 ?? 0) + 1 &&
+      wsNew?.tabs?.[wsNew.active]?.position?.legs?.length === 2 &&
+      hPin === 0 &&
+      pins === 1,
+    `確認 ${askDel}・${rAsk} → ${rDel}・開く ${hOpen}・新しいタブ ${hNew}（${tabs0} → ${wsNew?.tabs?.length}）・重ねる ${hPin}（ピン ${pins}）`,
+  );
+
+  // Esc で閉じると開く前のボタンへ: ⋯ > 保存一覧… → ⋯、タブのメニューの 保存一覧に保存… → 名前の欄 → チップ
+  await openFromMore(page, '保存一覧', BOOK);
+  await closeDialog(page);
+  const fBook = await focusLabel(page);
+  await page.click(CHIP);
+  await page.click(menuItem('保存一覧に保存…'));
+  await page.waitForSelector(BOOK, { timeout: 3000 }).catch(() => {});
+  await page.waitForTimeout(100);
+  const fName = await focusLabel(page);
+  await closeDialog(page);
+  const fChip = await focusLabel(page);
+  check(
+    `#87 AC-14 ${tag} 保存一覧を Esc で閉じると ⋯ へ、タブのメニューの 保存一覧に保存… は名前の欄 → Esc でチップへ`,
+    fBook.label === 'メニュー' && fName.cls === 'bk-input' && fChip.selected === 'true',
+    `${JSON.stringify(fBook)}・${JSON.stringify(fName)}・${JSON.stringify(fChip)}`,
+  );
+
+  // (i) ⋯ > 書き出し → ダウンロード + トースト、⋯ > 読み込み… でそのファイル → トースト
+  const n = JSON.parse((await bookText(page)) ?? '{"entries":[]}').entries.length;
+  const [download] = await Promise.all([
+    page.waitForEvent('download', { timeout: 5000 }),
+    openFromMore(page, '書き出し', null),
+  ]);
+  const file = await download.path();
+  await page.waitForTimeout(100);
+  const exToast = (await page.textContent('.toast:not(.note) .txt').catch(() => null)) ?? '';
+  const [chooser] = await Promise.all([
+    page.waitForEvent('filechooser', { timeout: 5000 }),
+    openFromMore(page, '読み込み…', null),
+  ]);
+  await chooser.setFiles(file);
+  await page
+    .waitForFunction(
+      () => /件を追加/.test(document.querySelector('.toast:not(.note) .txt')?.textContent ?? ''),
+      undefined,
+      { timeout: 3000 },
+    )
+    .catch(() => {});
+  const imToast = (await page.textContent('.toast:not(.note) .txt').catch(() => null)) ?? '';
+  const n2 = JSON.parse((await bookText(page)) ?? '{"entries":[]}').entries.length;
+  check(
+    `#87 AC-14(i) ${tag} ⋯ > 書き出し でダウンロードとトースト、⋯ > 読み込み… でそのファイルを入れるとトースト`,
+    !!file &&
+      exToast === `${n} 件を書き出した` &&
+      imToast === `${n} 件を追加` &&
+      n2 === n * 2 &&
+      download.suggestedFilename().startsWith('option-simulator-positions-'),
+    `${exToast}・${imToast}・${n} → ${n2}・${download.suggestedFilename()}`,
+  );
+  await ctx.close();
+}
+
+/** タッチの端末のエミュレーション（hasTouch・isMobile。390×844）。AC-19 の Chromium での根拠（iPhone の Safari は手動） */
+async function touchContext(storage) {
+  const localStorage = Object.entries(storage).map(([name, v]) => ({ name, value: v }));
+  return browser.newContext({
+    viewport: { width: 390, height: 844 },
+    hasTouch: true,
+    isMobile: true,
+    deviceScaleFactor: 2,
+    colorScheme: 'dark',
+    storageState: { cookies: [], origins: localStorage.length ? [{ origin, localStorage }] : [] },
+  });
+}
+
+async function touchFlows() {
+  const tag = '390x844 touch';
+  // (a)(b) BOX タブの帯を横にスワイプ（ページは動かない）、作業中でないチップのタップは切替だけ・2 回目でメニュー
+  {
+    const ctx = await touchContext({ [WORKSPACE_KEY]: busyWorkspace });
+    const page = await ctx.newPage();
+    await page.goto(pageUrl('next'));
+    await waitReady(page, 'next');
+    const strip = await page.evaluate(() => {
+      const s = document.querySelector('.boxtabs');
+      const b = s?.getBoundingClientRect();
+      return b
+        ? {
+            x: b.left + b.width / 2,
+            y: b.top + b.height / 2,
+            sl: s.scrollLeft,
+            max: s.scrollWidth - s.clientWidth,
+          }
+        : null;
+    });
+    const cdp = await ctx.newCDPSession(page);
+    // 指のスワイプ（CDP の Input.dispatchTouchEvent。headless の Chromium では synthesizeScrollGesture の touch が
+    // 帯を動かさないため、タッチの点を 10 回動かす = コンポジタのタッチスクロールになる）
+    const sx = Math.round(strip?.x ?? 100);
+    const sy = Math.round(strip?.y ?? 20);
+    await cdp.send('Input.dispatchTouchEvent', {
+      type: 'touchStart',
+      touchPoints: [{ x: sx, y: sy }],
+    });
+    for (let i = 1; i <= 10; i++) {
+      await cdp.send('Input.dispatchTouchEvent', {
+        type: 'touchMove',
+        touchPoints: [{ x: sx - i * 12, y: sy }],
+      });
+    }
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+    await page.waitForTimeout(300);
+    const after = await page.evaluate(() => ({
+      sl: document.querySelector('.boxtabs')?.scrollLeft ?? 0,
+      sx: window.scrollX,
+      sy: window.scrollY,
+      vx: window.visualViewport?.offsetLeft ?? 0,
+      vy: window.visualViewport?.offsetTop ?? 0,
+      root: document.scrollingElement?.scrollTop ?? 0,
+    }));
+    check(
+      `#87 AC-19(a) ${tag} 帯を横にスワイプすると帯だけが動き、ページ・visualViewport は動かない`,
+      !!strip &&
+        strip.max > 0 &&
+        after.sl > strip.sl &&
+        after.sx === 0 &&
+        after.sy === 0 &&
+        after.vx === 0 &&
+        after.vy === 0 &&
+        after.root === 0,
+      `帯 ${strip?.sl} → ${after.sl}（最大 ${strip?.max}）・${JSON.stringify(after)}`,
+    );
+    const chips = page.locator('.boxtabs [role="tab"]');
+    const target = chips.nth(1);
+    await target.scrollIntoViewIfNeeded();
+    await target.tap();
+    await page.waitForTimeout(150);
+    const b1 = {
+      selected: await target.getAttribute('aria-selected'),
+      menu: await page.locator('.boxtabs-wrap > [role="menu"]').count(),
+    };
+    await target.tap();
+    await page.waitForTimeout(150);
+    const b2 = await page.locator('.boxtabs-wrap > [role="menu"]').count();
+    check(
+      `#87 AC-19(b) ${tag} 作業中でないチップのタップは切替だけ（メニューなし）、もう一度のタップでメニュー`,
+      b1.selected === 'true' && b1.menu === 0 && b2 === 1,
+      `${JSON.stringify(b1)} → メニュー ${b2}`,
+    );
+    await ctx.close();
+  }
+  // (c) 警告の知らせのトーストと普通のトーストを出した状態で、トーストの外は押せる（ドックのボタン）
+  {
+    const ctx = await touchContext({ [WORKSPACE_KEY]: twoLegs });
+    await ctx.route('**/fixtures/latest.json', (route) =>
+      route.fulfill({ status: 500, contentType: 'text/plain', body: 'x' }),
+    );
+    const page = await ctx.newPage();
+    await page.goto(pageUrl('next'));
+    await waitReady(page, 'next', { keepNotes: true });
+    await page.tap(MORE);
+    await page.tap(moreItem('全クリア'));
+    await page.waitForSelector('.toast:not(.note)', { timeout: 3000 }).catch(() => {});
+    const c = await page.evaluate(() => {
+      const box = document.querySelector('.toasts')?.getBoundingClientRect();
+      const warn = document.querySelector('.toast.note.warn')?.getBoundingClientRect();
+      const plain = document.querySelector('.toast:not(.note)');
+      const pb = plain?.getBoundingClientRect();
+      const dock = document.querySelector('.dock')?.getBoundingClientRect();
+      if (!box || !warn || !pb || !dock) return { ok: false, why: 'トースト・ドックが無い' };
+      // 箱の中・トーストの外の点（普通のトーストの左の余白）
+      const x = Math.max(box.left + 2, pb.left - 6);
+      const y = (pb.top + pb.bottom) / 2;
+      const outside = x < pb.left;
+      const el = document.elementFromPoint(x, y);
+      const dockHits = [...document.querySelectorAll('.dock button')].every((b) => {
+        const r = b.getBoundingClientRect();
+        const e = document.elementFromPoint((r.left + r.right) / 2, (r.top + r.bottom) / 2);
+        return !!e && b.contains(e);
+      });
+      return {
+        ok: true,
+        outside,
+        inBox: x >= box.left && x <= box.right && y >= box.top && y <= box.bottom,
+        hitToasts: !!el?.closest('.toasts'),
+        aboveDock: box.bottom <= dock.top + 0.5,
+        dockHits,
+      };
+    });
+    await page.tap('.dock button[data-panel="scenario"]');
+    await page.waitForTimeout(200);
+    const opened = await page.evaluate(() => {
+      const l = document.querySelector('.layout');
+      return { panel: l?.getAttribute('data-panel'), sheet: l?.getAttribute('data-sheet') };
+    });
+    check(
+      `#87 AC-19(c) ${tag} トーストは下中央・ドックの上で、箱の中のトーストの外とドックのボタンは押せる`,
+      c.ok &&
+        c.outside &&
+        c.inBox &&
+        !c.hitToasts &&
+        c.aboveDock &&
+        c.dockHits &&
+        opened.panel === 'scenario' &&
+        opened.sheet !== 'hidden',
+      `${JSON.stringify(c)}・${JSON.stringify(opened)}`,
+    );
+    await ctx.close();
+  }
+  // (d) ⋯ > ファイルを開く… / 読み込み… でファイルの選択が開く（タップ）
+  {
+    const ctx = await touchContext({ [WORKSPACE_KEY]: twoLegs });
+    const page = await ctx.newPage();
+    await page.goto(pageUrl('next'));
+    await waitReady(page, 'next');
+    const opens = [];
+    for (const label of ['ファイルを開く…', '読み込み…']) {
+      await page.tap(MORE);
+      const fc = page.waitForEvent('filechooser', { timeout: 3000 }).then(
+        () => true,
+        () => false,
+      );
+      await page.tap(moreItem(label));
+      opens.push(await fc);
+    }
+    check(
+      `#87 AC-19(d) ${tag} ⋯ > ファイルを開く… / 読み込み… のタップでファイルの選択が開く（Chromium。iPhone の Safari は手動）`,
+      opens.every(Boolean),
+      opens.join(' / '),
     );
     await ctx.close();
   }

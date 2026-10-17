@@ -24,9 +24,11 @@ export interface BoxTabsProps {
   subscribeShare: (f: () => void) => () => void;
   shareSupported: boolean;
   onShareResult: (r: ShareResult) => void;
+  /** 保存一覧に保存…（#87 (C)。保存一覧のダイアログを名前の欄にフォーカスして開く） */
+  onSaveToBook: () => void;
 }
 
-const toItems = <K extends string>(rows: MenuRow<K>[], on: (k: K) => void): MenuItem[] =>
+export const toItems = <K extends string>(rows: MenuRow<K>[], on: (k: K) => void): MenuItem[] =>
   rows.map((r) => ({
     key: r.key,
     label: r.label,
@@ -34,6 +36,7 @@ const toItems = <K extends string>(rows: MenuRow<K>[], on: (k: K) => void): Menu
     ...(r.disabled ? { disabled: true } : {}),
     ...(r.title !== undefined ? { title: r.title } : {}),
     ...(r.sep ? { sep: true } : {}),
+    ...(r.checked !== undefined ? { checked: r.checked } : {}),
   }));
 
 /**
@@ -68,7 +71,11 @@ function BoxTabsView(p: BoxTabsProps) {
     label: `タブ ${active.name} のメニュー`,
     items: toItems(tabMenuModel(view, share.item), (k) => {
       if (k === 'rename') setRenaming({ id: active.id, name: active.name });
-      else if (k === 'copy') dispatch({ type: 'addTab', mode: 'copy' });
+      else if (k === 'copy') {
+        // 新しい作業中のチップへフォーカス（閉じると同じ。ロービングのフォーカスを作業中のチップに保つ）
+        focusNext.current = true;
+        dispatch({ type: 'addTab', mode: 'copy' });
+      } else if (k === 'save') p.onSaveToBook();
       else if (k === 'share') share.copy();
       else {
         focusNext.current = true;
@@ -94,11 +101,14 @@ function BoxTabsView(p: BoxTabsProps) {
     const strip = stripRef.current;
     const chip = buttons.current.get(active.id);
     if (strip && chip) {
+      // 帯の padding の分も見せる（左端のチップのフォーカスの輪が帯の端で切れない。#87 (C)）
+      const pad = Number.parseFloat(getComputedStyle(strip).paddingLeft);
       strip.scrollLeft = revealScrollLeft(
         strip.scrollLeft,
         strip.clientWidth,
         chip.offsetLeft,
         chip.offsetWidth,
+        pad,
       );
     }
   }, [active.id, count]);

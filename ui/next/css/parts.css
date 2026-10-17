@@ -461,10 +461,23 @@ dialog.sheet::backdrop {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 6px;
   max-width: calc(100vw - 16px);
   transform: translateX(-50%);
   pointer-events: none;
+}
+
+/* 常設の 2 つの読み上げの領域（#87 (C)。警告 = role="alert"・ほか = role="status"）。警告が上 */
+.toast-alerts,
+.toast-log {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+}
+
+.toast-alerts:not(:empty) + .toast-log:not(:empty) {
+  margin-top: 6px;
 }
 
 .toast {

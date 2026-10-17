@@ -1,0 +1,297 @@
+/*
+ * 設定・保存一覧のダイアログ（docs/ui-redesign.md §3・§5。#87 (C)）。dialog.sheet の中身だけ。
+ * 説明文は <p>（折り返す）、ラベル・値・ボタン・Seg は折り返さない（値ごとの span を flex-wrap で並べ、値の途中で切らない）。
+ * 色は var(--…) だけ。
+ */
+
+/* ===== 設定 ===== */
+.set-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.set-row {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  padding: 10px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.set-row:last-child {
+  border-bottom: 0;
+}
+
+.set-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  white-space: nowrap;
+}
+
+.set-k {
+  color: var(--ink);
+  font-size: var(--fs-sub);
+}
+
+.set-note {
+  color: var(--ink-3);
+  font-size: var(--fs-sm);
+  line-height: 1.45;
+}
+
+.set-note.warn {
+  color: var(--warn);
+}
+
+.set-ro {
+  color: var(--ink-3);
+  font-size: var(--fs-sm);
+}
+
+.set-input {
+  width: 8em;
+  height: 28px;
+  padding: 0 6px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-sm);
+  background: var(--s1);
+  color: var(--ink);
+  font-family: var(--mono);
+}
+
+.set-input[aria-invalid="true"] {
+  border-color: var(--loss);
+}
+
+.set-row > .field-error {
+  color: var(--loss);
+  font-size: var(--fs-sm);
+}
+
+/* 縦軸の欄（舞台の ⋯ と同じ YAxisFields。行の見出しがあるので欄の中の「縦軸」は出さない） */
+.stage-pop.set-y {
+  min-width: 0;
+}
+
+.stage-pop.set-y > .row:first-child > .lbl {
+  display: none;
+}
+
+/* ===== 保存一覧 ===== */
+/* 見出しの ⓘ のポップオーバーをダイアログの外（窓の中）へ出せるように切らない（中身は .sheet-body がスクロール） */
+dialog.sheet.book {
+  overflow: visible;
+}
+
+dialog.sheet.book .sheet-head .popover {
+  max-width: min(320px, calc(100vw - 96px));
+  white-space: normal;
+}
+
+.bk {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.bk-msg,
+.bk-note,
+.bk-state p,
+p.bk-state {
+  font-size: var(--fs-sm);
+  line-height: 1.45;
+}
+
+.bk-msg,
+.bk-note {
+  color: var(--ink-3);
+}
+
+.bk .warn {
+  color: var(--warn);
+}
+
+.bk-state {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--sp-1);
+}
+
+.bk-save {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  white-space: nowrap;
+}
+
+.bk-name-field {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+
+.bk-lbl {
+  color: var(--ink-3);
+  font-size: var(--fs-sm);
+}
+
+.bk-input {
+  flex: 1;
+  width: 100%;
+  min-width: 0;
+  height: 28px;
+  padding: 0 var(--sp-2);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-sm);
+  background: var(--s1);
+  color: var(--ink);
+}
+
+.bk-input:disabled {
+  opacity: 0.5;
+}
+
+.bk-line,
+.bk-io,
+.bk-sum,
+.bk-times {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px var(--sp-3);
+}
+
+.bk-io {
+  gap: var(--sp-2);
+}
+
+.bk-line > span,
+.bk-io > span,
+.bk-sum > span,
+.bk-times > span {
+  white-space: nowrap;
+}
+
+.bk-dim {
+  color: var(--ink-3);
+  font-size: var(--fs-sm);
+}
+
+.bk-file {
+  position: relative;
+  cursor: pointer;
+}
+
+.bk-file:focus-within {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.bk-file.disabled {
+  opacity: 0.4;
+  pointer-events: none;
+}
+
+.bk-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.bk-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: var(--sp-2) 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--s1);
+}
+
+.bk-row.current {
+  border-color: var(--accent);
+}
+
+.bk-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  min-width: 0;
+  white-space: nowrap;
+}
+
+.bk-name {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  font-weight: 600;
+  text-overflow: ellipsis;
+}
+
+.bk-head .tag {
+  flex: 0 0 auto;
+}
+
+.bk-bad {
+  font-size: var(--fs-sub);
+  line-height: 1.45;
+}
+
+.bk-sum {
+  color: var(--ink-2);
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+  font-variant-numeric: tabular-nums;
+}
+
+.bk-times {
+  color: var(--ink-3);
+  font-size: var(--fs-sm);
+}
+
+.bk-ops {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-1);
+}
+
+.bk-rename {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+  min-width: 0;
+}
+
+.bk-confirm {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: var(--sp-2);
+  border: 1px solid var(--warn);
+  border-radius: var(--r-sm);
+  background: var(--warn-fill);
+}
+
+.bk-confirm p {
+  font-size: var(--fs-sub);
+  line-height: 1.45;
+}
+
+.btn.danger {
+  border-color: var(--loss);
+  color: var(--loss);
+}
+
+/* ⓘ の段落の間（詳細度が高いので末尾） */
+dialog.sheet.book .sheet-head .popover p + p {
+  margin-top: var(--sp-2);
+}

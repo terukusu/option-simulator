@@ -1,8 +1,16 @@
 import type { ComponentChildren } from 'preact';
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'preact/hooks';
-import { type Boot, DEV_FIXTURES, useAppController } from '../components/useAppController';
+import { defaultName } from '../book';
+import type { Domain } from '../chart/scale';
+import {
+  type Boot,
+  DEV_FIXTURES,
+  type OverwriteSnap,
+  useAppController,
+} from '../components/useAppController';
 import { useMediaQuery } from '../components/useMediaQuery';
 import { loaderNote } from '../load';
+import { MAX_PINS } from '../pins';
 import type { PrefsRead } from '../prefs';
 import { shareSupported } from '../share';
 import { legAtStrike, MAX_TABS, restoreTabAction } from '../state';
@@ -20,8 +28,11 @@ import {
   warnTagsModel,
 } from '../view/notices';
 import { shareReplaceConfirmText } from '../view/persistNote';
+import { clearUndo } from '../view/positionsRegion';
 import type { DXUnit } from '../view/scenario';
 import { INITIAL_SHELL, layoutTier, shellReduce } from '../view/shell';
+import { bookIoToast, overwrittenText, restoreEntryFailText } from '../view/topMenu';
+import { BookDialog } from './BookDialog';
 import type { MarketAdd } from './market/BoardMonth';
 import { PanelHead } from './PanelHead';
 import { Toasts, useToasts } from './parts/Toast';
@@ -31,6 +42,7 @@ import { Positions } from './regions/Positions';
 import { Scenario } from './regions/Scenario';
 import { Smile } from './regions/Smile';
 import { Stage } from './regions/Stage';
+import { SettingsDialog } from './SettingsDialog';
 import { Shell } from './Shell';
 import { TopBar } from './TopBar';
 import { ShareConfirm } from './top/ShareConfirm';
@@ -53,6 +65,9 @@ import { useTheme } from './useTheme';
  * #87 (B) でトップバーに BOX タブを入れた。タブを閉じるのは即実行 + [元に戻す]（keep 付きのトースト。閉じる前の写しを
  * restoreTabAction で控え、押した時点のタブで restoreTabError を先に判定して restoreTab を 1 回 dispatch）。
  * URL をコピーの結果はトースト、クリップボードに書けなければ「共有の URL」のダイアログ（shareResultView）。
+ * #87 (C) で ⋯ に保存一覧・設定・書き出し / 読み込み…・全クリアを入れた。保存一覧の [上書き] は即実行 + [元に戻す]
+ * （keep 付きのトースト。上書きの直前と書いた項目を控え、restoreEntry で書いたままのときだけ戻す）。保存一覧を
+ * 開いている間はトーストをそのダイアログの中に描く（モーダルの外は押せない）。全クリアはポジションの ⋯ と同じ処理。
  */
 export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
   const c = useAppController(boot);
@@ -64,6 +79,10 @@ export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
   const toasts = useToasts();
   const [picked, setPicked] = useState<number | null>(null);
   const [dXUnit, setDXUnit] = useState<DXUnit>('pct');
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [bookFocusName, setBookFocusName] = useState(false);
+  // 今の縦軸の範囲（舞台が描くたびに入れる。設定の縦軸を手動に切り替えたときの初期値）
+  const yNow = useRef<Domain | null>(null);
   // 足が消えたら選択を外す
   const selectedLeg = picked !== null && c.curLegs.some((l) => l.id === picked) ? picked : null;
   const onPickLeg = useCallback(
@@ -94,6 +113,59 @@ export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
       });
     },
     [dispatch, push],
+  );
+  // 全クリア（トップの ⋯ とポジションの ⋯）: 押した時点の state で写しを作り、[元に戻す] 付きのトースト（#84 と同じ）
+  const onClearLegs = useCallback(() => {
+    const u = clearUndo(stateRef.current);
+    if (!u) return;
+    dispatch({ type: 'clearLegs' });
+    push({
+      kind: u.kind,
+      text: u.text,
+      undo: () => {
+        for (const a of u.undo) dispatch(a);
+      },
+    });
+  }, [dispatch, push]);
+  // 保存一覧・設定（#87 (C)）
+  const { openBook, onBookExport, onBookImport, onBookOverwriteForUndo, onBookRestoreEntry } = c;
+  const onOpenBook = useCallback(() => {
+    setBookFocusName(false);
+    openBook();
+  }, [openBook]);
+  const onSaveToBook = useCallback(() => {
+    setBookFocusName(true);
+    openBook();
+  }, [openBook]);
+  const onOpenSettings = useCallback(() => setSettingsOpen(true), []);
+  const closeSettings = useCallback(() => setSettingsOpen(false), []);
+  const onExport = useCallback(() => {
+    const m = onBookExport();
+    if (m) push(bookIoToast(m));
+  }, [onBookExport, push]);
+  const onImport = useCallback(
+    (file: File) => {
+      void onBookImport(file).then((m) => push(bookIoToast(m)));
+    },
+    [onBookImport, push],
+  );
+  // 保存一覧の [上書き]: 即実行 + [元に戻す]（続けて上書きしたら同じ kind の置き換えで最後の 1 つだけ戻せる）
+  const onBookOverwrite = useCallback(
+    (id: string) => {
+      const snap: OverwriteSnap | null = onBookOverwriteForUndo(id);
+      if (!snap) return;
+      push({
+        kind: 'book-overwrite',
+        text: overwrittenText(snap.name),
+        keep: true,
+        undo: () => {
+          const r = onBookRestoreEntry(snap);
+          if (r !== null)
+            push({ kind: 'book-restore', text: restoreEntryFailText(r), note: 'warn' });
+        },
+      });
+    },
+    [onBookOverwriteForUndo, onBookRestoreEntry, push],
   );
   // URL をコピー（タブのメニュー・⋯）の結果: トースト、書けなければ「共有の URL」のダイアログ
   const [shareOk] = useState(shareSupported);
@@ -209,6 +281,10 @@ export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
     </>
   );
   const mini = tier === 'phone' && shell.sheet === 'full';
+  // 保存一覧を開いている間はそのダイアログの中に描く（1 か所だけ = 読み上げも 1 回）
+  const toastList = (
+    <Toasts toasts={toasts.toasts} onUndo={toasts.undo} onDismiss={toasts.dismiss} />
+  );
   return (
     <div class="screen">
       <TopBar
@@ -231,6 +307,14 @@ export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
         subscribeShare={c.subscribeShare}
         shareSupported={shareOk}
         onShareResult={onShareResult}
+        bookCount={c.bookCount}
+        bookState={c.bookRead.kind}
+        onOpenBook={onOpenBook}
+        onSaveToBook={onSaveToBook}
+        onOpenSettings={onOpenSettings}
+        onExport={onExport}
+        onImport={onImport}
+        onClearLegs={onClearLegs}
       />
       <Shell
         tier={tier}
@@ -244,6 +328,7 @@ export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
             mini={mini}
             onPickLeg={onPickLeg}
             onChangeStrike={onChangeStrike}
+            yNow={yNow}
           />
         }
         scenario={<Scenario c={c} dXUnit={dXUnit} onDXUnit={setDXUnit} />}
@@ -256,6 +341,7 @@ export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
             selectedLeg={selectedLeg}
             onSelectLeg={setPicked}
             push={push}
+            onClear={onClearLegs}
           />
         }
         metrics={<Metrics model={c.metrics} feePerLot={state.feePerLot} />}
@@ -311,7 +397,49 @@ export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
         onCancel={cancelShare}
       />
       <ShareUrlDialog share={shareUrl} onClose={closeShareUrl} />
-      <Toasts toasts={toasts.toasts} onUndo={toasts.undo} onDismiss={toasts.dismiss} />
+      <SettingsDialog
+        open={settingsOpen}
+        onClose={closeSettings}
+        atmBasis={state.atmBasis}
+        metricsUnit={state.metricsUnit}
+        feePerLot={state.feePerLot}
+        pnlY={state.pnlY}
+        futureBasis={state.futureBasis}
+        dXUnit={dXUnit}
+        x0={c.positions?.ctx.x0 ?? Number.NaN}
+        theme={theme.pref}
+        header={c.header}
+        yNow={yNow}
+        dispatch={dispatch}
+        onDXUnit={setDXUnit}
+        onTheme={theme.choose}
+      />
+      <BookDialog
+        open={c.bookOpen}
+        view={c.bookView}
+        legCount={c.curLegs.length}
+        hasBoard={chain !== null}
+        defaultName={defaultName(c.curLegs.map((l) => l.leg))}
+        message={c.bookMsg}
+        onClose={c.closeBook}
+        onSave={c.onBookSave}
+        onOpen={c.onBookOpenEntry}
+        onOpenNewTab={c.onBookOpenNewTab}
+        canAddTab={c.tabsView.canAdd}
+        onOverlay={c.onBookOverlay}
+        canPin={c.pins.length < MAX_PINS}
+        tabName={c.tabsView.active.name}
+        onOverwrite={onBookOverwrite}
+        onDuplicate={c.onBookDuplicate}
+        onRename={c.onBookRename}
+        onRemove={c.onBookRemove}
+        onClear={c.onBookClear}
+        onExport={c.onBookExport}
+        onImport={c.onBookImport}
+        toasts={c.bookOpen ? toastList : null}
+        focusName={bookFocusName}
+      />
+      {!c.bookOpen && toastList}
     </div>
   );
 }

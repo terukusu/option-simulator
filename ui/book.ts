@@ -364,6 +364,24 @@ export function overwriteEntry(book: Book, id: string, saved: SavedWorkspaceV1):
   return finish(book, { entries });
 }
 
+/**
+ * 上書きを戻す（#87 (C)。[元に戻す] 付きのトースト）。`prev` = 上書きの直前の項目、`written` = 上書きで書いた項目。
+ * 今の項目が `written` と同じ（id・名前・作った時刻・中身と保存の時刻）ときだけ、その位置を `prev` に戻す。
+ * 上書きの後に名前の変更・削除・別の上書きがあった（または id が違う）なら `notFound` で断る（別の変更を潰さない）。
+ */
+export function restoreEntry(book: Book, prev: OkEntry, written: OkEntry): BookOp {
+  if (prev.id !== written.id) return { ok: false, reason: 'notFound' };
+  const i = indexOf(book, prev.id);
+  const cur = book.entries[i];
+  if (cur?.status !== 'ok') return { ok: false, reason: 'notFound' };
+  if (JSON.stringify(entryValue(cur)) !== JSON.stringify(entryValue(written))) {
+    return { ok: false, reason: 'notFound' };
+  }
+  const entries = [...book.entries];
+  entries[i] = prev;
+  return finish(book, { entries });
+}
+
 /** 複製（`<名前> (コピー)`、新しい id、元の項目の直後）。 */
 export function duplicateEntry(book: Book, id: string, now: number, newId: string): BookOp {
   const i = indexOf(book, id);

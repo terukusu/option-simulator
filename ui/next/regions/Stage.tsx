@@ -1,4 +1,6 @@
-import { useMemo } from 'preact/hooks';
+import type { MutableRef } from 'preact/hooks';
+import { useLayoutEffect, useMemo } from 'preact/hooks';
+import type { Domain } from '../../chart/scale';
 import type { AppController } from '../../components/useAppController';
 import { usePnlChartModel } from '../../components/usePnlChartModel';
 import { bigReadout, stageFrame } from '../../view/stage';
@@ -21,6 +23,8 @@ export function Stage(p: {
   mini: boolean;
   onPickLeg: (id: number) => void;
   onChangeStrike: (id: number, k: number) => void;
+  /** 今の縦軸の範囲（#87 (C): 設定の縦軸を手動に切り替えたときの初期値。描いた後に入れる = 描き直しは増えない） */
+  yNow?: MutableRef<Domain | null>;
 }) {
   const { c, mini } = p;
   const { state, dispatch, pnlBase: base, metrics } = c;
@@ -39,6 +43,12 @@ export function Stage(p: {
     pinLine: c.pinLine,
     amountUnit: metrics.unit,
   });
+  // 描画の後に入れる（描画中に ref へ書かない）
+  const { yNow } = p;
+  const yDomain = model.yDomain;
+  useLayoutEffect(() => {
+    if (yNow) yNow.current = yDomain;
+  }, [yNow, yDomain]);
   const evalTime = base?.ctx.evalTime ?? null;
   const items = useMemo(
     () => bigReadout(c.readout, metrics.empty ? null : metrics.premium, evalTime, scenario.dSigma),
