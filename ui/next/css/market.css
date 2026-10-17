@@ -1,0 +1,558 @@
+/*
+ * 市場（板・スマイル。docs/ui-redesign.md §2・§4.3・§5・§11 決定 1・12。#85）。部品は ui/next/regions/Board.tsx・Smile.tsx と
+ * ui/next/market/。section.board / section.smile と取り違えないよう、中の要素は .board-* / .smile-* と table.board。
+ * .panel-body.market-body はスクロールしない（スクロールは板の表の枠 .board-wrap だけ。スマイルはスクロールしない）。
+ */
+
+.panel-body.market-body {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* スマイルの見出し行の拡大 [− ＋ ⟲] */
+.seg.zoom > button {
+  padding: 0 8px;
+}
+
+/* ===== 板: 道具の行（2 段） ===== */
+.board-tools {
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  gap: 6px;
+  padding: var(--sp-2) var(--sp-3);
+  border-bottom: 1px solid var(--line);
+}
+
+.board-tools .row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.board-tools .row .chiprow {
+  flex: 1;
+}
+
+/* ===== 板: 限月ごとの表（表示中でない限月・5 列の隠れた種別は描画を止めて保つ） ===== */
+.board-months,
+.board-month {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+
+/* 限月の表の箱は大きさ・割り付け・描画を外に出さない（切替のフレームの描画を ≈ 5 → 1ms。大きさは flex で決まる） */
+.board-month {
+  contain: strict;
+}
+
+.board-wrap {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+
+.board-month.inactive,
+.board-wrap.side-hidden,
+.smile-month.inactive {
+  flex: 0 0 0;
+  height: 0;
+  min-height: 0;
+  overflow: hidden;
+  content-visibility: hidden;
+}
+
+/* 空き時間の割り付け（regions/Board.tsx。同じタスクの中で外す = 描かれない） */
+.board-month.inactive.warm,
+.board-wrap.side-hidden.warm {
+  content-visibility: visible;
+}
+
+table.board {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: var(--mono);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+table.board thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: 6px 3px;
+  border-bottom: 1px solid var(--line);
+  background: var(--s2);
+  color: var(--ink-3);
+  font-family: var(--font);
+  font-size: var(--fs-xs);
+  font-weight: 500;
+  text-align: right;
+  white-space: nowrap;
+}
+
+table.board thead th.k {
+  text-align: center;
+}
+
+table.board td,
+table.board tbody th {
+  height: 30px;
+  padding: 0 3px;
+  border-bottom: 1px solid var(--line);
+  color: var(--ink-2);
+  font-weight: 400;
+  text-align: right;
+  white-space: nowrap;
+}
+
+table.board tbody th.k {
+  position: relative;
+  padding: 0 2px;
+  color: var(--ink);
+  font-weight: 600;
+  line-height: 13px;
+  text-align: center;
+}
+
+table.board tr.atm > * {
+  background: var(--accent-fill);
+}
+
+table.board tr.atm > th.k {
+  color: var(--accent-ink);
+}
+
+/* ジャンプ先の強調（0.9 秒。同じ行を続けて強調するときは .alt で掛け直す） */
+table.board tr.hit > * {
+  animation: board-hit 0.9s ease-out;
+}
+
+table.board tr.hit.alt > * {
+  animation-name: board-hit-alt;
+}
+
+@keyframes board-hit {
+  from {
+    background: var(--handle-fill);
+  }
+}
+
+@keyframes board-hit-alt {
+  from {
+    background: var(--handle-fill);
+  }
+}
+
+table.board td.q {
+  padding: 0;
+}
+
+table.board td.q > button {
+  display: block;
+  width: 100%;
+  height: 30px;
+  padding: 0 4px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  font: inherit;
+  text-align: right;
+  white-space: nowrap;
+}
+
+table.board td.q > button.bid {
+  color: var(--bid);
+}
+
+table.board td.q > button.ask {
+  color: var(--ask);
+}
+
+table.board td.q > button.noquote {
+  color: var(--ink-3);
+}
+
+table.board td.q > button:hover {
+  background: var(--s3);
+}
+
+table.board td.q > button:active {
+  background: var(--handle-fill);
+}
+
+table.board td.iv,
+table.board td.d {
+  position: relative;
+  color: var(--ink-3);
+  font-size: 11px;
+}
+
+table.board .flag {
+  margin-left: 1px;
+  color: var(--warn);
+  font-size: 9px;
+}
+
+/* K の数字（補間 / 外挿は点線の下線） */
+table.board .kv {
+  display: block;
+}
+
+table.board .kv.interp,
+table.board .kv.extrap {
+  text-decoration: underline dotted var(--ink-3);
+  text-underline-offset: 2px;
+}
+
+/*
+ * 足のバッジ（K の数字の下の行。9 / 7 列は call を左・put を右、5 列は対象の種別だけ）。
+ * 位置は絶対配置（K の列の幅・行の高さに効かない = 足を入れても 322 行の表の割り付けをやり直さない）。
+ * バッジのある行は K の数字を上へずらす（相対配置。割り付けに効かない）
+ */
+table.board tbody th.k.b > .kv {
+  position: relative;
+  top: -5px;
+}
+
+table.board .legbadges {
+  position: absolute;
+  right: 2px;
+  bottom: 2px;
+  left: 2px;
+  display: flex;
+  gap: 2px;
+  /* 隣の bid / ask のボタンにかかっても押せる（バッジ 4 つで K の列を超えるとき。D2） */
+  pointer-events: none;
+}
+
+table.board .legbadges.one {
+  justify-content: center;
+}
+
+table.board .legbadges .bg {
+  display: inline-flex;
+  gap: 2px;
+}
+
+table.board .legbadges .bg.p {
+  margin-left: auto;
+}
+
+table.board .legbadges.one .bg.p {
+  margin-left: 0;
+}
+
+table.board .legbadge {
+  padding: 0 2px;
+  border-radius: 3px;
+  color: var(--ink);
+  font-family: var(--font);
+  font-size: 8.5px;
+  font-weight: 600;
+  line-height: 10px;
+}
+
+table.board .legbadge.sell {
+  background: var(--loss-fill);
+}
+
+table.board .legbadge.buy {
+  background: var(--gain-fill);
+}
+
+.board-empty,
+.smile-empty {
+  padding: var(--sp-3);
+  color: var(--ink-3);
+  font-size: 12px;
+}
+
+/* ===== 脚注・凡例（1 行。入らない幅では後ろの案内から隠す） ===== */
+.board-foot,
+.smile-legend {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 10px;
+  min-width: 0;
+  padding: 6px var(--sp-3);
+  overflow: hidden;
+  border-top: 1px solid var(--line);
+  color: var(--ink-3);
+  font-size: var(--fs-sm);
+  white-space: nowrap;
+}
+
+.board-foot > span,
+.smile-legend > span {
+  flex: 0 0 auto;
+}
+
+.board-foot > .f,
+.board-foot > .atm,
+.board-foot > .sq {
+  font-family: var(--mono);
+}
+
+.board-foot > .hint {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+@container (max-width: 479.98px) {
+  .board-foot > .hint {
+    display: none;
+  }
+}
+
+/* ===== スマイル ===== */
+.smile-tools {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: var(--sp-2) var(--sp-3);
+  border-bottom: 1px solid var(--line);
+}
+
+.smile-months {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.smile-month {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+.smile-wrap {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.smile-wrap > svg {
+  position: absolute;
+  inset: 0;
+}
+
+.smile-wrap .grid line {
+  stroke: var(--line);
+}
+
+.smile-wrap .ax text {
+  fill: var(--ink-3);
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+}
+
+.smile-wrap .ax .ty {
+  dominant-baseline: middle;
+  text-anchor: end;
+}
+
+.smile-wrap .ax .tx {
+  text-anchor: middle;
+}
+
+.smile-wrap .curve {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 1.75;
+}
+
+.smile-wrap .curve.ext {
+  opacity: 0.7;
+  stroke-dasharray: 3 3;
+}
+
+.smile-wrap .pt {
+  fill: var(--accent);
+}
+
+.smile-wrap .pt.bid {
+  fill: var(--bid);
+}
+
+.smile-wrap .pt.ask {
+  fill: var(--ask);
+}
+
+.smile-wrap .pt.x {
+  fill: none;
+  stroke: var(--warn);
+  stroke-width: 1.5;
+}
+
+.smile-wrap .atm {
+  stroke: var(--handle);
+  stroke-dasharray: 3 3;
+}
+
+.smile-wrap .atm2 {
+  stroke: var(--pin2);
+  stroke-dasharray: 2 3;
+}
+
+.smile-wrap .sel {
+  stroke: var(--ink);
+  stroke-width: 1;
+}
+
+.smile-wrap .sellbl {
+  fill: var(--ink);
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  paint-order: stroke;
+  stroke: var(--s1);
+  stroke-width: 3px;
+  text-anchor: middle;
+}
+
+/* 凡例の印の色（線・点と同じ） */
+.smile-legend > .mid {
+  color: var(--accent);
+}
+
+.smile-legend > .bid {
+  color: var(--bid);
+}
+
+.smile-legend > .ask {
+  color: var(--ask);
+}
+
+.smile-legend > .x {
+  color: var(--warn);
+}
+
+.smile-legend > .atm {
+  color: var(--handle);
+}
+
+.smile-legend > .atm2 {
+  color: var(--pin2);
+}
+
+/* 操作行（グラフの下。高さ固定 = 選択の有無で描画域の高さを変えない） */
+.smile-act {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: var(--sp-2);
+  height: 48px;
+  min-width: 0;
+  padding: 0 var(--sp-3);
+  border-top: 1px solid var(--line);
+  white-space: nowrap;
+}
+
+.smile-act > .who {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  min-width: 0;
+  line-height: 16px;
+}
+
+.smile-act .k {
+  font-family: var(--mono);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.smile-act .sub {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.smile-act .iv {
+  color: var(--ink-3);
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+}
+
+.smile-act .tag {
+  line-height: 14px;
+}
+
+.smile-act > .hint {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--ink-3);
+  font-size: 12px;
+  text-overflow: ellipsis;
+}
+
+.smile-act > .spacer {
+  flex: 1;
+}
+
+.smile-act .btn {
+  gap: 4px;
+  padding: 0 6px;
+}
+
+.smile-act .btn > b {
+  font-family: var(--mono);
+}
+
+.smile-act .btn > .bid {
+  color: var(--bid);
+}
+
+.smile-act .btn > .ask {
+  color: var(--ask);
+}
+
+/* 凡例の項目は隠さない。入らない幅では短い形（全文は title と ⓘ。§5.1） */
+.smile-legend .short {
+  display: none;
+}
+
+@container (max-width: 419.98px) {
+  .smile-legend {
+    gap: 8px;
+  }
+
+  .smile-legend .full {
+    display: none;
+  }
+
+  .smile-legend .short {
+    display: inline;
+  }
+}
+
+@container (max-width: 559.98px) {
+  .smile-legend:has(> .atm2) {
+    gap: 8px;
+  }
+
+  .smile-legend:has(> .atm2) .full {
+    display: none;
+  }
+
+  .smile-legend:has(> .atm2) .short {
+    display: inline;
+  }
+}

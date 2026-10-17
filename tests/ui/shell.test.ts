@@ -3,6 +3,7 @@ import {
   dockPanels,
   INITIAL_SHELL,
   layoutTier,
+  MARKET_VIEWS,
   SHEET_SNAP_PX,
   SHEET_TAP_PX,
   type ShellState,
@@ -80,6 +81,13 @@ describe('shellReduce', () => {
     expect(shellReduce(at({}), { type: 'market', market: 'smile' })).toEqual(
       at({ market: 'smile' }),
     );
+  });
+
+  it('市場の見え方の一覧は 1 か所（#85。#79 が 1 行足す）', () => {
+    expect(MARKET_VIEWS.map((v) => [v.value, v.text])).toEqual([
+      ['board', '板'],
+      ['smile', 'スマイル'],
+    ]);
   });
 
   it('タブレットで scenario は選べない（positions に読み替える）', () => {
