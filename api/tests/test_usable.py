@@ -65,12 +65,22 @@ def test_session_key_night_spans_midnight():
 
 # ---- 板の判定（1 限月の先物 ±5% の両側気配）----
 
-def test_board_ok_80_percent_exactly():
+def test_board_ok_75_percent_exactly():
     at = jst(2026, 10, 13, 21, 0)
-    assert usable.board_ok(synth_board(at, band_rows=100, quoted=80), 30000.0)
-    assert not usable.board_ok(synth_board(at, band_rows=100, quoted=79), 30000.0)
-    assert usable.board_ok(synth_board(at, band_rows=10, quoted=8), 30000.0)
-    assert not usable.board_ok(synth_board(at, band_rows=10, quoted=7), 30000.0)
+    assert usable.board_ok(synth_board(at, band_rows=100, quoted=75), 30000.0)
+    assert not usable.board_ok(synth_board(at, band_rows=100, quoted=74), 30000.0)
+    assert usable.board_ok(synth_board(at, band_rows=4, quoted=3), 30000.0)
+    assert not usable.board_ok(synth_board(at, band_rows=4, quoted=2), 30000.0)
+    assert usable.board_ok(synth_board(at, band_rows=8, quoted=6), 30000.0)
+    assert not usable.board_ok(synth_board(at, band_rows=8, quoted=5), 30000.0)
+
+
+def test_board_ok_75_percent_real_shape():
+    # #99: 102 行中 81 行（79.4%）は採用。境目は 77 行（77×4=308 ≥ 306）/ 76 行（304 < 306）
+    at = jst(2026, 10, 13, 21, 0)
+    assert usable.board_ok(synth_board(at, band_rows=102, quoted=81), 30000.0)
+    assert usable.board_ok(synth_board(at, band_rows=102, quoted=77), 30000.0)
+    assert not usable.board_ok(synth_board(at, band_rows=102, quoted=76), 30000.0)
 
 
 def test_board_ok_counts_only_first_month_within_band():
