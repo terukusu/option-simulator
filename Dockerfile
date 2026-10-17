@@ -3,7 +3,7 @@
 #   docker build -t simulator:local .
 # context に入るものは .dockerignore（許可リスト方式）で限定する。入力パスを変えたら .github/scripts/image.sh も直す。
 # ベースイメージは digest で固定する（公開から 2 週間以上たった版。uv の exclude-newer と同じ考え方）
-ARG NODE_IMAGE=node:22.23.2-slim@sha256:48e4b67d85f87bd551df43704e24d252f56cc5f8e9718841aace50f19948f0f9
+ARG NODE_IMAGE=node:24.20.0-slim@sha256:ba849c60be29959425b8734d57b8b4b7d56f98edd9504c9af091d5281095a71e
 ARG PYTHON_IMAGE=python:3.13.15-slim@sha256:7c61056e61ac89e852de05f3dc6fa51a6dd2181797bceed46aa725dd7cb2cd3b
 
 # 画面: package-lock.json の integrity で検証して入れ、vite build で dist/ を作る（合成の板・JSON は dist に入らない）

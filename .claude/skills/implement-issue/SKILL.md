@@ -43,7 +43,7 @@ allowed-tools: [Read, Edit, Write, Bash, Glob, Grep, Agent, TaskCreate, TaskUpda
 - **縦切り 2 より前（`api/`・`infra/` が無い間）は本番が無く、デプロイ対象は常に「なし」**。`test -d infra` で判定する
 - データ元は optionchan の BigQuery（データセット `optionchan_tokyo` のテーブル関数 4 本。`docs/design.md` 4.1 の契約）。**読み取りのみ**。生テーブルはアプリから読まない。契約（列・型）は CI で optionchan の固定コミットの `schema/tokyo/*.json` と照合する（AC25）
 - optionchan 側の変更（列の追加、テーブル関数の変更、取り込み範囲の拡張など）が要るときは、**optionchan のリポジトリに Issue で依頼する**（本リポジトリでは実装しない）。依頼先のリポジトリ名は推測せずユーザーに確認して `OPTIONCHAN_REPO=<OWNER>/<REPO>` とし、起票前に本文をユーザーに見せて承認を得る。依頼は `docs/design.md` 13.3 の表にも追記する
-- 検証コマンド（CI と同じ。Node 22 = `.node-version`）: `npm ci && npm run typecheck && npm run lint && npm test && npm run build`、続けて `ci.yml` の「ビルド成果物の検査」と同じ確認。将来 `api/` は pytest、`infra/` は `terraform fmt -check` / `validate` / `plan`。`ci.yml` に検査が増えたら手元でもそれに従う
+- 検証コマンド（CI と同じ。Node 24 = `.node-version`）: `npm ci && npm run typecheck && npm run lint && npm test && npm run build`、続けて `ci.yml` の「ビルド成果物の検査」と同じ確認。将来 `api/` は pytest、`infra/` は `terraform fmt -check` / `validate` / `plan`。`ci.yml` に検査が増えたら手元でもそれに従う
 - **価格モデル（`model/`）の変更は、文献値・性質テスト・合成板での検証を必須とする**（「Phase 3 テスト方針」）
 - GCP プロジェクトは利用者自身のもの（リポジトリに ID を書かない）。GCP を使う Issue（`bigquery` アダプタ・`api/`・`infra/`・デプロイ）では Phase 0 で `P=${GCP_PROJECT_ID:-$(gcloud config get-value project 2>/dev/null)}` として決め、空なら中断してユーザーに確認する。以下のコマンドの `$P` はこれ。gcloud は利用者の active 構成を使う（`gcloud config configurations list` で確認。別の構成を使う場合はユーザーが環境変数 `CLOUDSDK_ACTIVE_CONFIG_NAME` 等で指定する。`gcloud config` のグローバル設定を勝手に書き換えない）。縦切り 1 の範囲（GCP を使わない）なら `P` は不要
 - Cloud Run のリージョン `REGION` は `infra/prod` の変数か `gcloud run services list --project "$P"` の結果から取る（推測で書かない）。Cloud Run の URL・プロジェクト番号は Issue / PR に書かない
