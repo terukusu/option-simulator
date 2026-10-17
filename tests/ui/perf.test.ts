@@ -49,6 +49,13 @@ import {
   pnlViewDomain,
   todayLine,
 } from '../../ui/view/pnlChart';
+import {
+  surfaceDayTicks,
+  surfaceGrid,
+  surfaceImage,
+  surfaceLegend,
+  surfacePoint,
+} from '../../ui/view/pnlSurface';
 import { positionModel } from '../../ui/view/position';
 import {
   hedgeSection,
@@ -1142,5 +1149,139 @@ describe('性能（#87 AC-8: タブを閉じて戻す）', () => {
     expect(state.tabs.map((t) => t.name)).toEqual(begin.tabs.map((t) => t.name));
     expect(state.tabs.findIndex((t) => t.id === state.activeTab)).toBe(1);
     expectWithinBudget('#87 タブを閉じて戻す', once, { warmup: 20, runs: 30 });
+  });
+});
+
+/**
+ * #88 AC-8 (a): 面モードの IV レール（Δσ +0.5）の 1 フレーム。322 行 × 2 限月の板・足 10 本・幅 1,000px・高さ 260px。
+ * 面の値の入力が変わるので粗い格子（48 × 24）を作り直し + 色のバッファ + 指定日の線（線の表示モデルは横軸・ハンドルに
+ * 使う）+ 損益グラフの表示モデル + 交点 + 指標 + ハンドル + 面の点・縦の目盛り・凡例 + 足マーカー + 読み取り。
+ * 記録のみ: 細かい格子（72 × 36）1 回 + 色（足 10 本）、粗い格子 + 色（足 200 本）、足 200 本の線モードの IV レールの 1 フレーム。
+ */
+describe('性能（#88 AC-8: 面モードの 1 フレーム）', () => {
+  const chain = normalizeChain(buildWideChainJson());
+  const [m1, m2] = chain.months;
+  if (!m1 || !m2) throw new Error('限月が足りない');
+  const ids: Record<string, string> = { [M1.id]: m1.id, [M2.id]: m2.id, FUT: chain.future.id };
+  const legs10 = refreshLegMarkets(
+    chain,
+    PERF_LEGS.map((leg, i) => ({
+      id: i + 1,
+      leg:
+        leg.kind === 'option'
+          ? { ...leg, expiry: ids[leg.expiry] ?? leg.expiry }
+          : { ...leg, contract: ids[leg.contract] ?? leg.contract },
+      marks: [],
+    })),
+    CALENDAR.holidays,
+  ).map(({ id: _id, ...rest }) => rest);
+  const stateOf = (legs: typeof legs10) =>
+    [
+      { type: 'loaded', chain, label: 'perf' } as Action,
+      {
+        type: 'openPosition',
+        legs,
+        scenario: { ...ZERO_SCENARIO, days: 5, dX: -500 },
+        feePerLot: 0,
+        futureBasis: 'fixed',
+      } as Action,
+    ].reduce(reduce, initialState);
+  const baseOf = (s: State) => {
+    const pm = positionModel(s.chain ?? chain, s.legs, s.atmBasis, s.calendar);
+    const base = pnlDomains(s.chain ?? chain, pm.prepared, pm.ctx);
+    if (!base) throw new Error('損益グラフの基礎が作れない');
+    return base;
+  };
+  const state10 = stateOf(legs10);
+  const base10 = baseOf(state10);
+  const colors = { gain: [47, 180, 131], loss: [239, 107, 107] } as const;
+  const W = 1000;
+  const H = 260;
+
+  // 今日の線は Δσ で変わらない（usePnlChartModel が memo する。#82 の計測と同じ）
+  const todays = new Map<typeof base10, number[] | null>();
+  function frame(base: typeof base10, uiLegs: readonly UiLeg[], dSigma: number, surface: boolean) {
+    const scenario = { ...state10.scenario, dSigma };
+    if (!todays.has(base)) todays.set(base, todayLine(base, null, W, scenario));
+    const today = todays.get(base) ?? null;
+    let acc = 0;
+    if (surface) {
+      const grid = surfaceGrid(base, scenario, null, 'coarse');
+      if (!grid) throw new Error('格子が無い');
+      acc += surfaceImage(grid, colors).data.length;
+      acc += surfaceLegend(grid.vmax, 'thousand').long.length;
+    }
+    const m = pnlChartModel({
+      base,
+      scenario,
+      viewport: null,
+      pnlY: DEFAULT_PNL_Y,
+      plotWidth: W,
+      plotHeight: H,
+      todayYs: today,
+      dateYs: dateLine(base, null, W, scenario),
+    });
+    const mm = metricsModel({ base, scenario, unit: 'auto' });
+    const marks = scenarioMarks({ base, scenario, chart: m, unit: mm.unit });
+    const h = stageHandle(m, marks);
+    if (surface) {
+      const p = surfacePoint({ base, scenario, chart: m, handle: h, unit: mm.unit });
+      acc += (p?.text.length ?? 0) + surfaceDayTicks(m.plot, base.maxDays).length;
+    } else {
+      const labels = marks ? stageMarkLabels(marks, m) : [];
+      const fill = stageFill(m);
+      acc += labels.length + fill.gain.length;
+    }
+    const ms = legMarkers(uiLegs, base, m, { selected: 1, drag: null });
+    const r = readoutModel({ base, metrics: mm, scenario });
+    const items = bigReadout(r, mm.premium, base.ctx.evalTime, scenario.dSigma);
+    return acc + m.lines.length + (h ? 1 : 0) + ms.length + mm.tail.rows.length + items.length;
+  }
+
+  it(`面モードの IV レール（Δσ +0.5）の 1 フレームが ${BUDGET_MS} ms 以内（30 回の最小値）`, () => {
+    expect(state10.legs).toHaveLength(10);
+    expect(base10.legs).toHaveLength(10);
+    let tick = 0;
+    const ivFrame = () => {
+      tick = (tick + 1) % 40;
+      return frame(base10, state10.legs, tick * 0.5, true);
+    };
+    expect(ivFrame()).toBeGreaterThan(1_000);
+    expectWithinBudget('#88 面モードの IV レールの 1 フレーム（足 10 本）', ivFrame, {
+      warmup: 20,
+      runs: 30,
+    });
+  });
+
+  it('細かい格子 1 回・足 200 本（記録のみ）', () => {
+    const scenario = { ...state10.scenario, dSigma: 2 };
+    record(
+      '#88 細かい格子（72 × 36）1 回 + 色（足 10 本）',
+      () => {
+        const g = surfaceGrid(base10, scenario, null, 'fine');
+        return g ? surfaceImage(g, colors).data.length : 0;
+      },
+      { warmup: 2, runs: RECORD_RUNS },
+    );
+    const state200 = stateOf(Array.from({ length: 20 }, () => legs10).flat());
+    expect(state200.legs).toHaveLength(200);
+    const base200 = baseOf(state200);
+    record(
+      '#88 粗い格子（48 × 24）+ 色（足 200 本）',
+      () => {
+        const g = surfaceGrid(base200, scenario, null, 'coarse');
+        return g ? surfaceImage(g, colors).data.length : 0;
+      },
+      { warmup: 1, runs: RECORD_RUNS },
+    );
+    let tick = 0;
+    record(
+      '#88 参考: 線モードの IV レールの 1 フレーム（足 200 本）',
+      () => {
+        tick = (tick + 1) % 40;
+        return frame(base200, state200.legs, tick * 0.5, false);
+      },
+      { warmup: 1, runs: RECORD_RUNS },
+    );
   });
 });

@@ -30,7 +30,7 @@ import {
 import { shareReplaceConfirmText } from '../view/persistNote';
 import { clearUndo } from '../view/positionsRegion';
 import type { DXUnit } from '../view/scenario';
-import { INITIAL_SHELL, layoutTier, shellReduce } from '../view/shell';
+import { type ChartMode, chartMode, INITIAL_SHELL, layoutTier, shellReduce } from '../view/shell';
 import { bookIoToast, overwrittenText, restoreEntryFailText } from '../view/topMenu';
 import { BookDialog } from './BookDialog';
 import type { MarketAdd } from './market/BoardMonth';
@@ -85,6 +85,7 @@ export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
   const yNow = useRef<Domain | null>(null);
   // 足が消えたら選択を外す
   const selectedLeg = picked !== null && c.curLegs.some((l) => l.id === picked) ? picked : null;
+  const onChart = useCallback((chart: ChartMode) => send({ type: 'chart', chart }), []);
   const onPickLeg = useCallback(
     (id: number) => {
       setPicked(id);
@@ -326,6 +327,9 @@ export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
             c={c}
             selectedLeg={selectedLeg}
             mini={mini}
+            chart={chartMode(shell)}
+            onChart={onChart}
+            theme={theme.resolved}
             onPickLeg={onPickLeg}
             onChangeStrike={onChangeStrike}
             yNow={yNow}

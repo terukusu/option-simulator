@@ -38,6 +38,9 @@
 //                                          ⋯ メニューは URL をコピーが押せる（URL ができた）のを待ってから撮る
 //                                          空の舞台（#111）: 足 0 本（板あり）× 4 幅 × ダーク / ライトで格子 4 本以上・0 の線・横の目盛り
 //                                          （数字）2 個以上・縦の目盛りと単位 0・注記が前面・ハンドル / マーカー / X₀ 0・tabindex -1
+//                                          面モード（#88 段 A）: 360 / 390（シート hidden / peek）・900・1440 × ダーク / ライトで面に
+//                                          切り替えて縦・横・折り返し・読み取り、凡例行の [線 | 面]（ある幅で）・色の見本・±vmax が
+//                                          切れず画面内・canvas がある。1280×800・1800×1000 は記録だけ（--shots の撮影用）
 //   npm run ui:check -- --parts            部品の見本（?ui=next&parts。dev だけ）
 //   npm run ui:check -- --legacy           旧画面（?ui=next なし）
 //   npm run ui:check -- --flows            保存・共有・テーマ・キーボードの手順（#81 AC-11・AC-12）と舞台の手順
@@ -69,7 +72,11 @@
 //                                          削除の確認・開く / 新しいタブで開く / 重ねる・⋯ > 書き出し / 読み込み…・Esc でフォーカスが戻る。
 //                                          390×844 と 1440×900）とタッチの端末のエミュレーション（AC-19: hasTouch・isMobile の
 //                                          390×844 で帯の横スワイプ（CDP の dispatchTouchEvent）・タップの切替とメニュー・
-//                                          トーストの外とドックが押せる・⋯ からファイルの選択が開く。iPhone の Safari は手動）
+//                                          トーストの外とドックが押せる・⋯ からファイルの選択が開く。iPhone の Safari は手動）と
+//                                          面モードの手順（#88 段 A AC-12・AC-14: canvas の矩形・描画域の中 / 外の画素・線が無い・
+//                                          色が --gain / --loss（ダーク / ライト）・キーで点が動きラベルと読み取りが一致・IV レールで
+//                                          色が変わる・線に戻す・ミニは線・再読み込みで線・Long Animation Frame・DPR 2 の backing。
+//                                          390×844 と 1440×900）
 //   --url <base>                           dev サーバーを起こさず、その URL を使う（例 http://127.0.0.1:5173/?ui=next&parts）
 //   --dom <file>                           body の下の要素の tag.class の並びを書き出す（旧画面が変わらないことの比較用）
 //   --shots <dir>                          スクリーンショットを書く（合成の板だけ。リポジトリに入れない）
@@ -776,6 +783,9 @@ async function measureAll() {
     console.log(
       `空の舞台の検査（#111）: ${emptyStageStats.pass} / ${emptyStageStats.total} 状態で pass`,
     );
+    // 面モード（#88 段 A）
+    await surfaceAll();
+    console.log(`面モードの検査（#88）: ${surfaceStats.pass} / ${surfaceStats.total} 状態で pass`);
   }
 }
 
@@ -1298,6 +1308,122 @@ async function emptyStageAll() {
   }
 }
 
+// ---- 面モード（#88 段 A）
+const surfaceStats = { pass: 0, total: 0 };
+const SURFACE_EXTRA_SIZES = [
+  [1280, 800],
+  [1800, 1000],
+];
+
+/** 面モードに切り替える（凡例行の [線 | 面] が見えればそれ、見えなければ ⋯ の中。押した後は Esc で閉じる） */
+async function toSurface(page, chart = '面') {
+  const inRow = page.locator(`.stage-tools .cm button:text-is("${chart}")`);
+  if (await inRow.isVisible()) {
+    await inRow.click();
+  } else {
+    await page.click('.stage-tools button[aria-label="グラフの設定"]');
+    await page.click(`.stage-pop .cm-in button:text-is("${chart}")`);
+    await page.keyboard.press('Escape');
+  }
+  await page.waitForTimeout(150);
+}
+
+/**
+ * 面モードの凡例行・描画域: [線 | 面]（見えていれば。幅 < 480px の舞台は ⋯ の中）・色の見本・±vmax が切れず
+ * （scrollWidth ≤ clientWidth）画面内、canvas.surface が 1 つ、損益の線 0 本、[面] が押されている
+ */
+async function surfaceCheck(page, label) {
+  const r = await page.evaluate(() => {
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    const shown = (el) => !!el && el.getClientRects().length > 0;
+    const inView = (el) => {
+      const b = el.getBoundingClientRect();
+      return (
+        b.width > 0 && b.height > 0 && b.left >= 0 && b.top >= 0 && b.right <= vw && b.bottom <= vh
+      );
+    };
+    const cut = (el) => el.scrollWidth > el.clientWidth;
+    const bad = [];
+    const seg = document.querySelector('.stage-tools .cm .seg');
+    const segShown = shown(seg);
+    if (segShown) {
+      if (!inView(seg)) bad.push('Seg 画面外');
+      for (const b of seg.querySelectorAll('button'))
+        if (cut(b)) bad.push(`Seg「${b.textContent}」切れ`);
+    }
+    const sw = document.querySelector('.legend .surf-sw');
+    if (!shown(sw) || !inView(sw)) bad.push('色の見本');
+    const vmax = document.querySelector('.legend .vmax');
+    if (!shown(vmax) || !inView(vmax) || cut(vmax)) bad.push('±vmax');
+    // 凡例の行の中で ±vmax が見えている（.legend の矩形の中）
+    const lg = document.querySelector('.legend')?.getBoundingClientRect();
+    const vb = vmax?.getBoundingClientRect();
+    if (lg && vb && (vb.right > lg.right + 0.5 || vb.left < lg.left - 0.5))
+      bad.push('±vmax が凡例の外');
+    const pressed = document.querySelector(
+      '.stage-tools .cm .seg button[aria-pressed="true"], .stage-pop .cm-in .seg button[aria-pressed="true"]',
+    )?.textContent;
+    const canvases = document.querySelectorAll('.chart > canvas.surface').length;
+    const lines = document.querySelectorAll('.chart path.ln').length;
+    if (canvases !== 1) bad.push(`canvas ${canvases}`);
+    if (lines !== 0) bad.push(`線 ${lines}`);
+    return { segShown, vmax: vmax?.textContent ?? null, pressed: pressed ?? null, bad };
+  });
+  const ok = r.bad.length === 0;
+  surfaceStats.total++;
+  if (ok) surfaceStats.pass++;
+  else failed = true;
+  console.log(
+    `#88 ${label}: [線 | 面] ${r.segShown ? '凡例行' : '⋯ の中'}・${r.vmax ?? '—'}${ok ? ' pass' : `  ${r.bad.join('・')}  ← NG`}`,
+  );
+  return ok;
+}
+
+/** 面モードの既定の実行: 4 幅 × ダーク / ライト（スマホはシート peek / hidden）。1280 / 1800 は記録だけ */
+async function surfaceAll() {
+  for (const [w, h] of [...SIZES, ...SURFACE_EXTRA_SIZES]) {
+    const judged = SIZES.some(([sw, sh]) => sw === w && sh === h);
+    for (const theme of ['dark', 'light']) {
+      const ctx = await newContext(
+        { width: w, height: h },
+        { [WORKSPACE_KEY]: twoLegs, [PREFS_KEY]: prefsText(theme) },
+      );
+      const page = await ctx.newPage();
+      await page.goto(pageUrl('next'));
+      await waitReady(page, 'next');
+      await toSurface(page);
+      const tag = `next ${theme} 面`;
+      const name = `next-${w}x${h}-${theme}-surface`;
+      const want = w <= PHONE_MAX ? 3 : w >= 1200 ? 6 : 5;
+      if (!judged) {
+        const r = await measure(page);
+        console.log(
+          `${tag} ${w}x${h}: 縦 ${r.v}px 横 ${r.h}px 折り返し ${r.wraps.length} 件（記録のみ）`,
+        );
+        if (shotsDir) await page.screenshot({ path: join(shotsDir, `${name}.png`) });
+        await ctx.close();
+        continue;
+      }
+      if (w <= PHONE_MAX) {
+        await report(page, `${tag} peek`, w, h, `${name}-peek`);
+        await readoutCheck(page, `${tag} peek ${w}x${h}`, want);
+        await surfaceCheck(page, `${theme} peek ${w}x${h}`);
+        await page.click('.dock button[data-panel="positions"]');
+        await page.waitForTimeout(150);
+        await report(page, `${tag} hidden`, w, h, `${name}-hidden`);
+        await readoutCheck(page, `${tag} hidden ${w}x${h}`, want);
+        await surfaceCheck(page, `${theme} hidden ${w}x${h}`);
+      } else {
+        await report(page, tag, w, h, name);
+        await readoutCheck(page, `${tag} ${w}x${h}`, want);
+        await surfaceCheck(page, `${theme} ${w}x${h}`);
+      }
+      await ctx.close();
+    }
+  }
+}
+
 // ---- 手順（AC-11・AC-12）
 const results = [];
 function check(name, ok, detail = '') {
@@ -1568,6 +1694,9 @@ async function runFlows() {
   // #87 (C) 設定と保存一覧の手順（AC-14）とタッチの端末のエミュレーション（AC-19。Chromium の根拠）
   for (const vp of [phone, pc]) await bookSettingsFlows(vp);
   await touchFlows();
+  // #88 段 A 面モードの表示の手順（AC-12・AC-14）
+  for (const vp of [phone, pc]) await surfaceFlows(vp);
+  await surfaceDprFlow();
 }
 
 // ---- 舞台の手順（#82）
@@ -5082,6 +5211,401 @@ async function bookSettingsFlows(vp) {
       n2 === n * 2 &&
       download.suggestedFilename().startsWith('option-simulator-positions-'),
     `${exToast}・${imToast}・${n} → ${n2}・${download.suggestedFilename()}`,
+  );
+  await ctx.close();
+}
+
+// ---- 面モードの表示の手順（#88 段 A AC-12・AC-14）
+
+/**
+ * canvas.surface の画素を読む: 描画域（.chart > svg .grid の横線の x1〜x2・縦線の y1〜y2。CSS px）を device px に
+ * 直し、(a) 中の不透明度 > 0 の画素の数（2 device px おき）と外の画素（描画域を 1 CSS px 広げた外、2 device px おき）の
+ * 不透明度 > 0 の数、(b) 中を 16 CSS px おきに読んだ画素（RGBA と位置）、テーマの --gain / --loss の RGB
+ */
+function surfacePixels(page) {
+  return page.evaluate(() => {
+    const chart = document.querySelector('section.stage .chart');
+    const cv = chart?.querySelector(':scope > canvas.surface');
+    if (!chart || !cv) return null;
+    const cr = chart.getBoundingClientRect();
+    const vr = cv.getBoundingClientRect();
+    const lines = [...chart.querySelectorAll(':scope > svg .grid line')].map((l) => ({
+      x1: Number(l.getAttribute('x1')),
+      x2: Number(l.getAttribute('x2')),
+      y1: Number(l.getAttribute('y1')),
+      y2: Number(l.getAttribute('y2')),
+    }));
+    const hz = lines.filter((l) => l.y1 === l.y2);
+    const vt = lines.filter((l) => l.x1 === l.x2);
+    if (!hz.length || !vt.length) return null;
+    const plot = {
+      left: Math.min(...hz.map((l) => Math.min(l.x1, l.x2))),
+      right: Math.max(...hz.map((l) => Math.max(l.x1, l.x2))),
+      top: Math.min(...vt.map((l) => Math.min(l.y1, l.y2))),
+      bottom: Math.max(...vt.map((l) => Math.max(l.y1, l.y2))),
+    };
+    const sx = cv.width / vr.width;
+    const sy = cv.height / vr.height;
+    const ctx = cv.getContext('2d');
+    const img = ctx.getImageData(0, 0, cv.width, cv.height).data;
+    const at = (x, y) => {
+      const o = (y * cv.width + x) * 4;
+      return [img[o], img[o + 1], img[o + 2], img[o + 3]];
+    };
+    const X0 = Math.round(plot.left * sx);
+    const X1 = Math.round(plot.right * sx);
+    const Y0 = Math.round(plot.top * sy);
+    const Y1 = Math.round(plot.bottom * sy);
+    let inside = 0;
+    for (let y = Y0; y < Y1; y += 2) for (let x = X0; x < X1; x += 2) if (at(x, y)[3] > 0) inside++;
+    const oX0 = Math.floor((plot.left - 1) * sx);
+    const oX1 = Math.ceil((plot.right + 1) * sx);
+    const oY0 = Math.floor((plot.top - 1) * sy);
+    const oY1 = Math.ceil((plot.bottom + 1) * sy);
+    let outside = 0;
+    let outsideN = 0;
+    for (let y = 0; y < cv.height; y += 2) {
+      for (let x = 0; x < cv.width; x += 2) {
+        if (x >= oX0 && x < oX1 && y >= oY0 && y < oY1) continue;
+        outsideN++;
+        if (at(x, y)[3] > 0) outside++;
+      }
+    }
+    const samples = [];
+    for (let y = plot.top + 8; y < plot.bottom; y += 16) {
+      for (let x = plot.left + 8; x < plot.right; x += 16) {
+        const px = Math.round(x * sx);
+        const py = Math.round(y * sy);
+        samples.push({ x: px, y: py, c: at(px, py) });
+      }
+    }
+    const cs = getComputedStyle(document.documentElement);
+    const hex = (v) => {
+      const m = /^#([0-9a-f]{6})$/i.exec(v.trim());
+      return m ? [0, 2, 4].map((i) => Number.parseInt(m[1].slice(i, i + 2), 16)) : null;
+    };
+    return {
+      rect: {
+        canvas: [vr.left, vr.top, vr.width, vr.height],
+        chart: [cr.left, cr.top, cr.width, cr.height],
+      },
+      backing: [cv.width, cv.height],
+      plot,
+      inside,
+      outside,
+      outsideN,
+      samples,
+      gain: hex(cs.getPropertyValue('--gain')),
+      loss: hex(cs.getPropertyValue('--loss')),
+    };
+  });
+}
+
+/** (b) の判定: 不透明度が最大の画素の RGB が gain か loss と各成分 ±8、gain に近い画素と loss に近い画素が両方ある */
+function surfaceColorJudge(px) {
+  if (!px?.gain || !px.loss) return { ok: false, detail: '色のトークンが読めない' };
+  const dist = (c, t) => Math.max(...[0, 1, 2].map((i) => Math.abs(c[i] - t[i])));
+  const lit = px.samples.filter((s) => s.c[3] > 0);
+  let top = null;
+  for (const s of lit) if (!top || s.c[3] > top.c[3]) top = s;
+  const near = (s) => (dist(s.c, px.gain) <= dist(s.c, px.loss) ? 'gain' : 'loss');
+  const kinds = new Set(lit.map(near));
+  const dTop = top
+    ? Math.min(dist(top.c, px.gain), dist(top.c, px.loss))
+    : Number.POSITIVE_INFINITY;
+  const ok = !!top && dTop <= 8 && kinds.has('gain') && kinds.has('loss');
+  return {
+    ok,
+    top,
+    detail: `最大の不透明度 ${top?.c[3] ?? '—'}・RGB ${top ? top.c.slice(0, 3).join(',') : '—'}（${top ? near(top) : '—'} との差 ${dTop}）・gain ${px.gain.join(',')} / loss ${px.loss.join(',')}・近い色 ${[...kinds].join(' / ')}（${lit.length} / ${px.samples.length} 点）`,
+  };
+}
+
+const firstNumber = (t) => {
+  const m = /[+−-]?[0-9][0-9,]*(\.[0-9]+)?/.exec(t ?? '');
+  return m ? Number(m[0].replace('−', '-').replace(/,/g, '')) : Number.NaN;
+};
+
+async function surfaceFlows(vp) {
+  const tag = `${vp.width}x${vp.height}`;
+  const phoneSize = vp.width <= PHONE_MAX;
+  const ctx = await newContext(vp, { [WORKSPACE_KEY]: twoLegs });
+  await ctx.addInitScript(LOAF_INIT);
+  const page = await ctx.newPage();
+  await page.goto(pageUrl('next'));
+  await waitReady(page, 'next');
+  const loafOk = await page.evaluate(() => window.__loafOk === true);
+  const loafMark = () => page.evaluate(() => window.__loaf.length);
+  const loafSince = (i) =>
+    page.evaluate((n) => window.__loaf.slice(n).filter((d) => d > 50).length, i);
+  const box = async (sel) => {
+    const b = await page.locator(sel).first().boundingBox();
+    if (!b) throw new Error(`${sel} が無い`);
+    return { x: b.x + b.width / 2, y: b.y + b.height / 2, b };
+  };
+  const drag = async (from, dx, dy, steps) => {
+    await page.mouse.move(from.x, from.y);
+    await page.mouse.down();
+    await page.mouse.move(from.x + dx, from.y + dy, { steps });
+    await page.mouse.up();
+  };
+  // 始めにシナリオを 0 に
+  await page.focus('.chart');
+  await page.keyboard.press('0');
+  const inRow = await page.locator('.stage-tools .cm .seg').isVisible();
+  check(
+    `#88 AC-12 ${tag} [線 | 面] の置き場所（${phoneSize ? '⋯ の中' : '凡例行'}）`,
+    inRow === !phoneSize,
+  );
+  await toSurface(page);
+  await page.waitForTimeout(150);
+
+  // (a) canvas の矩形・描画域の中 / 外の画素・線 / BEP / 交点のラベルが無い
+  const px0 = await surfacePixels(page);
+  {
+    const els = await page.evaluate(() => {
+      const c = document.querySelector('section.stage .chart');
+      const n = (sel) => c?.querySelectorAll(sel).length ?? -1;
+      return {
+        ln: n('path.ln'),
+        bep: n('.bep'),
+        xpt: n('.xpt'),
+        lbl: n('.xpt-lbl'),
+        pin: n('.ln-pin'),
+        fill: n('.fill-gain, .fill-loss'),
+        zero: n('.zero'),
+      };
+    });
+    const same = !!px0 && px0.rect.canvas.every((v, i) => Math.abs(v - px0.rect.chart[i]) <= 1);
+    check(
+      `#88 AC-12(a) ${tag} canvas.surface の矩形が .chart と ±1px・描画域の中に不透明度 > 0 の画素・外はすべて 0・線 / BEP / 交点が無い`,
+      same && px0.inside > 0 && px0.outside === 0 && Object.values(els).every((v) => v === 0),
+      px0
+        ? `canvas ${px0.rect.canvas.map((v) => v.toFixed(1)).join(',')} / chart ${px0.rect.chart.map((v) => v.toFixed(1)).join(',')}・backing ${px0.backing.join('×')}・中 ${px0.inside}・外 ${px0.outside} / ${px0.outsideN}・${JSON.stringify(els)}`
+        : 'canvas が無い',
+    );
+  }
+  // (b) 色（ダーク）
+  const judgeDark = surfaceColorJudge(px0);
+  check(
+    `#88 AC-12(b) ${tag} ダーク: 色が --gain / --loss（中央が利益・両側が損失）`,
+    judgeDark.ok,
+    judgeDark.detail,
+  );
+
+  // (c) → と ] → ΔX +100・d +1、点が動き、ラベルの金額と読み取りの「損益 · 指定日」が丸め以内で一致
+  {
+    const pos = () =>
+      page.evaluate(() => {
+        const h = document.querySelector('.chart .handle');
+        return h ? [Number(h.getAttribute('cx')), Number(h.getAttribute('cy'))] : null;
+      });
+    const a = await pos();
+    await page.focus('.chart');
+    await page.keyboard.press('ArrowRight');
+    await page.keyboard.press(']');
+    await page.waitForTimeout(150);
+    const b = await pos();
+    const lbl = (await page.textContent('.chart text.surf-lbl').catch(() => null)) ?? '';
+    const ro = (await page.textContent('.ro[data-ro="date"] .v').catch(() => null)) ?? '';
+    const thousand = lbl.includes('千円');
+    const tol = thousand ? 0.1 : 1;
+    const la = firstNumber(lbl);
+    const ra = firstNumber(ro);
+    // 自動保存（500ms の debounce）を待って保存した scenario を読む
+    await page.waitForTimeout(600);
+    const sc = await page.evaluate((k) => {
+      try {
+        const w = JSON.parse(localStorage.getItem(k) ?? 'null');
+        return w?.tabs?.[w.active]?.position?.scenario ?? null;
+      } catch {
+        return null;
+      }
+    }, WORKSPACE_KEY);
+    const moved = !!a && !!b && a[0] !== b[0] && a[1] !== b[1];
+    check(
+      `#88 AC-12(c) ${tag} → と ] で ΔX +100・d +1、点の cx / cy が動き、ラベルの金額が読み取りと丸め（${thousand ? '千円 0.1' : '円 1'}）以内`,
+      moved &&
+        sc?.dX === 100 &&
+        sc?.days === 1 &&
+        Number.isFinite(la) &&
+        Math.abs(la - ra) <= tol + 1e-9 &&
+        lbl.includes('d 1'),
+      `点 ${JSON.stringify(a)} → ${JSON.stringify(b)}・ラベル「${lbl}」・読み取り「${ro}」・保存 ${JSON.stringify({ dX: sc?.dX, days: sc?.days })}`,
+    );
+  }
+
+  // (d) IV レールのつまみを上に 40px → 同じ画素（前に不透明度が最大だった画素）の色が変わる
+  {
+    const before = await surfacePixels(page);
+    const k = await box('.ivrail .knob');
+    await drag(k, 0, -40, 10);
+    await page.waitForTimeout(300);
+    const after = await surfacePixels(page);
+    const jb = surfaceColorJudge(before);
+    const t = jb.top;
+    const sameAt = t ? after?.samples.find((s) => s.x === t.x && s.y === t.y) : null;
+    const changed = !!t && !!sameAt && sameAt.c.some((v, i) => v !== t.c[i]);
+    const nChanged =
+      before && after
+        ? after.samples.filter((s, i) => s.c.some((v, j) => v !== before.samples[i]?.c[j])).length
+        : 0;
+    check(
+      `#88 AC-12(d) ${tag} IV レールを上に 40px → 同じ画素の色が変わる`,
+      changed,
+      `画素 (${t?.x}, ${t?.y}) ${t?.c.join(',')} → ${sameAt?.c.join(',')}・変わった点 ${nChanged} / ${after?.samples.length ?? 0}`,
+    );
+    await page.focus('.chart');
+    await page.keyboard.press('0');
+    await page.waitForTimeout(200);
+  }
+
+  // AC-14 [A]: 面モードで IV レール 30 回・時間レール 30 回・ホイール 20 回・横ホイール 30 回の長いフレーム 0 件
+  {
+    const loafs = [];
+    const run = async (name, fn) => {
+      await page.waitForTimeout(250);
+      const m = await loafMark();
+      await fn();
+      await page.waitForTimeout(200);
+      const n = await loafSince(m);
+      loafs.push(`${name} ${n}`);
+      check(
+        `#88 AC-14 ${tag} 面モードの${name}で長いフレーム 0 件`,
+        loafOk && n === 0,
+        loafOk ? `${n} 件` : '未対応',
+      );
+    };
+    await run('IV レールのドラッグ 30 回', async () => {
+      const k = await box('.ivrail .knob');
+      await drag(k, 0, -30, 30);
+    });
+    await run('時間レールのドラッグ 30 回', async () => {
+      const k = await box('.timerail .knob');
+      await drag(k, 60, 0, 30);
+    });
+    const c = await box('.chart');
+    const at = { x: c.b.x + c.b.width * 0.4, y: c.b.y + c.b.height * 0.4 };
+    await run('ホイールの拡大縮小 20 回', async () => {
+      await page.mouse.move(at.x, at.y);
+      for (let i = 0; i < 20; i++) {
+        await page.mouse.wheel(0, i < 10 ? -60 : 60);
+        await page.waitForTimeout(16);
+      }
+    });
+    await run('横ホイールのパン 30 回', async () => {
+      await page.mouse.move(at.x, at.y);
+      for (let i = 0; i < 30; i++) {
+        await page.mouse.wheel(i < 15 ? 30 : -30, 0);
+        await page.waitForTimeout(16);
+      }
+    });
+    console.log(`      ${tag} 面モードの Long Animation Frame（50ms 超）: ${loafs.join('・')}`);
+    await page.focus('.chart');
+    await page.keyboard.press('0');
+    await page.keyboard.press('r');
+    await page.waitForTimeout(200);
+  }
+
+  // (b) ライト: 設定でテーマをライトにして同じ判定
+  {
+    await openFromMore(page, '設定…', SET);
+    await page.click(`${SET} [role="group"][aria-label="テーマ"] button:text-is("ライト")`);
+    await closeDialog(page);
+    await page.waitForTimeout(300);
+    const px = await surfacePixels(page);
+    const j = surfaceColorJudge(px);
+    const theme = await page.evaluate(() => document.documentElement.dataset.theme);
+    check(
+      `#88 AC-12(b) ${tag} ライト: 色がライトの --gain / --loss`,
+      theme === 'light' && j.ok && !!px && px.gain?.join() !== px0?.gain?.join(),
+      `${theme}・${j.detail}`,
+    );
+  }
+
+  // (f) 390: シート full（ミニ）は面モードでも線・canvas なし、peek に戻すと面
+  if (phoneSize) {
+    await setShell(page, 'positions', 'full');
+    await page.waitForTimeout(150);
+    const mini = await page.evaluate(() => ({
+      ln: document.querySelectorAll('.chart.mini path.ln').length,
+      cv: document.querySelectorAll('.chart > canvas.surface').length,
+    }));
+    await setShell(page, 'positions', 'peek');
+    await page.waitForTimeout(200);
+    const back = await page.evaluate(
+      () => document.querySelectorAll('.chart > canvas.surface').length,
+    );
+    check(
+      `#88 AC-12(f) ${tag} シート full（ミニ）は線（canvas なし）、peek に戻すと面`,
+      mini.ln > 0 && mini.cv === 0 && back === 1,
+      `${JSON.stringify(mini)}・peek の canvas ${back}`,
+    );
+  }
+
+  // (e) 線に戻すと canvas が無く線がある
+  {
+    await toSurface(page, '線');
+    const r = await page.evaluate(() => ({
+      cv: document.querySelectorAll('.chart > canvas.surface').length,
+      ln: document.querySelectorAll('.chart path.ln').length,
+    }));
+    check(
+      `#88 AC-12(e) ${tag} 線に戻すと canvas なし・線あり`,
+      r.cv === 0 && r.ln > 0,
+      JSON.stringify(r),
+    );
+  }
+
+  // (g) 面にしてから再読み込み → 線
+  {
+    await toSurface(page);
+    const on = await page.evaluate(
+      () => document.querySelectorAll('.chart > canvas.surface').length,
+    );
+    await page.reload();
+    await waitReady(page, 'next');
+    const r = await page.evaluate(() => ({
+      cv: document.querySelectorAll('.chart > canvas.surface').length,
+      ln: document.querySelectorAll('.chart path.ln').length,
+    }));
+    check(
+      `#88 AC-12(g) ${tag} 再読み込みで線モード`,
+      on === 1 && r.cv === 0 && r.ln > 0,
+      `再読み込み前の canvas ${on}・${JSON.stringify(r)}`,
+    );
+  }
+  await ctx.close();
+}
+
+/** 参考（判定に入れる）: DPR 2 の 1440×900 で canvas の backing が CSS px × 2 */
+async function surfaceDprFlow() {
+  const localStorage = [{ name: WORKSPACE_KEY, value: twoLegs }];
+  const ctx = await browser.newContext({
+    viewport: { width: 1440, height: 900 },
+    deviceScaleFactor: 2,
+    colorScheme: 'dark',
+    storageState: { cookies: [], origins: [{ origin, localStorage }] },
+  });
+  const page = await ctx.newPage();
+  await page.goto(pageUrl('next'));
+  await waitReady(page, 'next');
+  await toSurface(page);
+  const r = await page.evaluate(() => {
+    const cv = document.querySelector('.chart > canvas.surface');
+    const b = cv?.getBoundingClientRect();
+    return cv && b ? { w: cv.width, h: cv.height, cw: b.width, ch: b.height } : null;
+  });
+  const px = await surfacePixels(page);
+  check(
+    '#88 参考 1440x900 DPR 2: canvas の backing が CSS px × 2・描画域の外は 0',
+    !!r &&
+      r.w === Math.round(r.cw * 2) &&
+      r.h === Math.round(r.ch * 2) &&
+      !!px &&
+      px.inside > 0 &&
+      px.outside === 0,
+    `${JSON.stringify(r)}・中 ${px?.inside}・外 ${px?.outside}`,
   );
   await ctx.close();
 }

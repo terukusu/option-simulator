@@ -1,13 +1,23 @@
 import type { RefObject } from 'preact';
-import { useMemo, useState } from 'preact/hooks';
+import { useEffect, useMemo, useState } from 'preact/hooks';
 import type { Chain } from '../../../data';
 import type { Scenario } from '../../../model';
 import { type Domain, pixelToValue } from '../../chart/scale';
 import { useChartGestures } from '../../components/useChartGestures';
 import type { Action, UiLeg } from '../../state';
 import { fmtNum } from '../../view/format';
+import type { AmountUnit } from '../../view/metrics';
 import type { PinLabel } from '../../view/pins';
 import { type PnlBase, type PnlChartModel, Y_UNIT_LABEL } from '../../view/pnlChart';
+import {
+  parseCssColor,
+  SURFACE_Y_UNIT,
+  type SurfaceColors,
+  type SurfaceGrid,
+  surfaceDayTicks,
+  surfaceImage,
+  surfacePoint,
+} from '../../view/pnlSurface';
 import { dXFromAxis } from '../../view/scenario';
 import type { ScenarioMarks } from '../../view/scenarioMarks';
 import {
@@ -22,11 +32,25 @@ import {
   stageMarkLabels,
   strikeAtPx,
 } from '../../view/stage';
+import { SurfaceCanvas } from './SurfaceCanvas';
 
 /** ハンドルをつかむ幅（左右 px。§4.1。旧画面は 12 のまま） */
 const STAGE_GRAB_PX = 14;
 
 const KIND_CLASS = { expiry: 'expiry', date: 'date', today: 'today' } as const;
+
+const LINE_LABEL =
+  '損益グラフ（ドラッグでパン、ホイール・ピンチで拡大、ダブルクリックでリセット、ハンドルをつかむか長押しして左右にドラッグでシナリオ点 ΔX、足のマーカーで足を選ぶ・長押しして横にドラッグで行使価格。キー: ← / → ΔX ∓100 円（Shift で 1,000 円）、↑ / ↓ Δσ ±0.5pt、[ / ] 経過日数 ∓1 日、0 シナリオを 0 に、+ / − 拡大縮小、R リセット）';
+const SURFACE_LABEL =
+  '損益の面（横 原資産・縦 経過日数・色 損益。ドラッグでパン、ホイール・ピンチで拡大、ダブルクリックでリセット、ハンドルをつかむか長押しして左右にドラッグでシナリオ点 ΔX、足のマーカーで足を選ぶ。キー: ← / → ΔX ∓100 円（Shift で 1,000 円）、↑ / ↓ Δσ ±0.5pt、[ / ] 経過日数 ∓1 日、0 シナリオを 0 に、+ / − 拡大縮小、R リセット）';
+
+/** 面の両極の色（テーマの --gain / --loss を読む。読めなければ null = 面を描かない） */
+function readSurfaceColors(): SurfaceColors | null {
+  const cs = getComputedStyle(document.documentElement);
+  const gain = parseCssColor(cs.getPropertyValue('--gain'));
+  const loss = parseCssColor(cs.getPropertyValue('--loss'));
+  return gain && loss ? { gain, loss } : null;
+}
 
 /**
  * 舞台の描画域（docs/ui-redesign.md §4.1・§8。#82）。線・目盛り・BEP・X₀・シナリオ ATM・ピンは pnlChartModel の
@@ -50,14 +74,27 @@ export function PnlPlot(p: {
   legCount: number;
   selectedLeg: number | null;
   mini: boolean;
+  /** 面モード（ミニでは false。#88） */
+  surfaceOn: boolean;
+  /** 面の格子（面モードで作れたとき。maxDays ≤ 0 などは null = canvas に描かない） */
+  surface: SurfaceGrid | null;
+  /** 指標の金額の単位（面の点のラベル） */
+  unit: AmountUnit;
+  /** テーマの解決値（変わったら面の色を読み直す） */
+  theme: 'dark' | 'light';
   dispatch: (a: Action) => void;
   onPickLeg: (id: number) => void;
   onChangeStrike: (id: number, k: number) => void;
 }) {
   const { model, marks, base, scenario, frame, mini, dispatch } = p;
+  const surfaceOn = p.surfaceOn && !mini && !model.empty;
   const [dragK, setDragK] = useState<{ id: number; k: number } | null>(null);
   const handle = useMemo(() => stageHandle(model, marks), [model, marks]);
-  const fill = useMemo(() => stageFill(model), [model]);
+  // 面モードでは塗り・交点のラベルを作らない（描かない）
+  const fill = useMemo(
+    () => (surfaceOn ? { gain: '', loss: '' } : stageFill(model)),
+    [model, surfaceOn],
+  );
   const markers = useMemo(
     () => legMarkers(p.legs, base, model, { selected: p.selectedLeg, drag: dragK }),
     [p.legs, base, model, p.selectedLeg, dragK],
@@ -65,10 +102,58 @@ export function PnlPlot(p: {
   // 交点のラベルは IV レールの吹き出し（描画域の右に重ねて描く。レールは同じ高さで右隣）も避ける
   const dSigma = scenario.dSigma;
   const labels = useMemo(() => {
-    if (!marks) return [];
+    if (!marks || surfaceOn) return [];
     const obstacles = mini ? [] : [ivRailObstacle(dSigma, p.height, p.width + frame.offsetX)];
     return stageMarkLabels(marks, model, obstacles);
-  }, [marks, model, mini, dSigma, p.height, p.width, frame.offsetX]);
+  }, [marks, model, mini, surfaceOn, dSigma, p.height, p.width, frame.offsetX]);
+  // 面: 色（テーマが変わったら読み直す。テーマの属性は親のレイアウトの effect が入れるので passive で読む）
+  const [colors, setColors] = useState<SurfaceColors | null>(null);
+  const { theme } = p;
+  useEffect(() => {
+    if (!surfaceOn) return;
+    const next = readSurfaceColors();
+    setColors((c) =>
+      c && next && c.gain.join() === next.gain.join() && c.loss.join() === next.loss.join()
+        ? c
+        : next,
+    );
+  }, [theme, surfaceOn]);
+  const surface = surfaceOn ? p.surface : null;
+  const image = useMemo(
+    () => (surface && colors ? surfaceImage(surface, colors) : null),
+    [surface, colors],
+  );
+  const surfMaxDays = base?.maxDays ?? 0;
+  const dayTicks = useMemo(
+    () => (surfaceOn ? surfaceDayTicks(model.plot, surfMaxDays) : []),
+    [surfaceOn, model.plot, surfMaxDays],
+  );
+  const { unit: amountUnit } = p;
+  const point = useMemo(
+    () =>
+      surfaceOn
+        ? surfacePoint({
+            base,
+            scenario,
+            chart: model,
+            handle,
+            unit: amountUnit,
+            obstacles: [ivRailObstacle(dSigma, p.height, p.width + frame.offsetX)],
+          })
+        : null,
+    [
+      surfaceOn,
+      base,
+      scenario,
+      model,
+      handle,
+      amountUnit,
+      dSigma,
+      p.height,
+      p.width,
+      frame.offsetX,
+    ],
+  );
   // 足が無い（評価できる足が無い）ときの格子（#111。ミニは今のまま描かない）
   const emptyGrid = useMemo(
     () =>
@@ -142,16 +227,32 @@ export function PnlPlot(p: {
   });
 
   const dragMarker = dragK ? markers.find((m) => m.id === dragK.id) : undefined;
-  const unit = Y_UNIT_LABEL[model.yUnit];
+  const unit = surfaceOn ? SURFACE_Y_UNIT : Y_UNIT_LABEL[model.yUnit];
+  // 描画域の矩形（.chart の CSS px。モデルの画素 − offset）
+  const surfaceRect = {
+    left: plot.left - ox,
+    top: plot.top - frame.offsetY,
+    width: plot.width,
+    height: plot.height,
+  };
+  /** 縦の目盛り: 面モードは経過日数、線モードは損益 */
+  const yTicks: ReadonlyArray<{ v: number; px: number; label: string }> = surfaceOn
+    ? dayTicks.map((t) => ({ v: t.v, px: t.py, label: t.label }))
+    : model.yTicks;
+  /** ● の縦の画素（面モードは d の画素） */
+  const dotPy = surfaceOn ? (point?.py ?? null) : (handle?.dotPy ?? null);
 
   return (
     <div
-      class={mini ? 'chart mini' : 'chart'}
+      class={mini ? 'chart mini' : surfaceOn ? 'chart surf' : 'chart'}
       ref={p.chartRef}
       tabIndex={model.empty || mini ? -1 : 0}
       role="application"
-      aria-label="損益グラフ（ドラッグでパン、ホイール・ピンチで拡大、ダブルクリックでリセット、ハンドルをつかむか長押しして左右にドラッグでシナリオ点 ΔX、足のマーカーで足を選ぶ・長押しして横にドラッグで行使価格。キー: ← / → ΔX ∓100 円（Shift で 1,000 円）、↑ / ↓ Δσ ±0.5pt、[ / ] 経過日数 ∓1 日、0 シナリオを 0 に、+ / − 拡大縮小、R リセット）"
+      aria-label={surfaceOn ? SURFACE_LABEL : LINE_LABEL}
     >
+      {surfaceOn && (
+        <SurfaceCanvas width={p.width} height={p.height} image={image} rect={surfaceRect} />
+      )}
       {model.empty && emptyGrid && (
         <svg width={p.width} height={p.height} viewBox={frame.viewBox} aria-hidden="true">
           <g class="grid">
@@ -205,7 +306,7 @@ export function PnlPlot(p: {
         <svg width={p.width} height={p.height} viewBox={frame.viewBox} aria-hidden="true">
           {!mini && (
             <g class="grid">
-              {model.yTicks.map((t) => (
+              {yTicks.map((t) => (
                 <line key={`y${t.v}`} x1={plot.left} x2={right} y1={t.px} y2={t.px} />
               ))}
               {model.xTicks.map((t) => (
@@ -215,7 +316,7 @@ export function PnlPlot(p: {
           )}
           {!mini && (
             <g class="ax">
-              {model.yTicks.map((t) => (
+              {yTicks.map((t) => (
                 <text key={`y${t.v}`} class="tick-y" x={plot.left - 6} y={t.px}>
                   {t.label}
                 </text>
@@ -242,7 +343,7 @@ export function PnlPlot(p: {
           >
             {fill.gain && <path class="fill-gain" d={fill.gain} />}
             {fill.loss && <path class="fill-loss" d={fill.loss} />}
-            {model.zeroPy !== null && (
+            {!surfaceOn && model.zeroPy !== null && (
               <line class="zero" x1={plot.left} x2={right} y1={model.zeroPy} y2={model.zeroPy} />
             )}
             {!mini && model.x0Px !== null && (
@@ -257,13 +358,16 @@ export function PnlPlot(p: {
                 y2={bottom}
               />
             )}
-            {model.pins.map((pin) => (
-              <path key={`pin${pin.no}`} class={`ln-pin p${pin.no}`} d={pin.d} />
-            ))}
-            {model.lines.map((l) => (
-              <path key={l.kind} class={`ln ${KIND_CLASS[l.kind]}`} d={l.d} />
-            ))}
+            {!surfaceOn &&
+              model.pins.map((pin) => (
+                <path key={`pin${pin.no}`} class={`ln-pin p${pin.no}`} d={pin.d} />
+              ))}
+            {!surfaceOn &&
+              model.lines.map((l) => (
+                <path key={l.kind} class={`ln ${KIND_CLASS[l.kind]}`} d={l.d} />
+              ))}
             {!mini &&
+              !surfaceOn &&
               model.breakevens.map((b) => (
                 <path
                   key={`b${b.x}`}
@@ -280,6 +384,7 @@ export function PnlPlot(p: {
                 y2={handle.bottom}
               />
             )}
+            {point && <line class="hline" x1={plot.left} x2={right} y1={point.py} y2={point.py} />}
           </svg>
           {!mini && model.x0Px !== null && (
             <text class="legtxt x0-lbl" x={model.x0Px - 3} y={plot.top + 10}>
@@ -287,6 +392,7 @@ export function PnlPlot(p: {
             </text>
           )}
           {!mini &&
+            !surfaceOn &&
             marks?.marks.map((m) =>
               m.py === null ? null : (
                 <circle
@@ -310,6 +416,7 @@ export function PnlPlot(p: {
               </text>
             ))}
           {!mini &&
+            !surfaceOn &&
             p.pinMarks.map((l) => (
               <text key={`pl${l.no}`} class={`pinlbl p${l.no}`} x={l.x} y={l.y}>
                 {l.text}
@@ -317,10 +424,10 @@ export function PnlPlot(p: {
             ))}
           {!mini && handle && (
             <g class="handle-g">
-              {handle.dotPy !== null && (
+              {dotPy !== null && (
                 <>
-                  <circle class="handle-ring" cx={handle.px} cy={handle.dotPy} r={11} />
-                  <circle class="handle" cx={handle.px} cy={handle.dotPy} r={6} />
+                  <circle class="handle-ring" cx={handle.px} cy={dotPy} r={11} />
+                  <circle class="handle" cx={handle.px} cy={dotPy} r={6} />
                 </>
               )}
               <path
@@ -336,6 +443,11 @@ export function PnlPlot(p: {
                 y2={bottom - MARKER_BAND_PX}
               />
             </g>
+          )}
+          {point && (
+            <text class={`surf-lbl ${point.anchor}`} x={point.labelX} y={point.labelY}>
+              {point.text}
+            </text>
           )}
           {!mini &&
             markers.map((m) => (

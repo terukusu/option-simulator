@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
+  CHART_MODES,
+  chartMode,
   dockPanels,
   INITIAL_SHELL,
   layoutTier,
@@ -152,5 +154,46 @@ describe('shellReduce の open（#82 AC-7: 舞台の足マーカーのタップ�
     ).toEqual(at({ panel: 'positions' }));
     const pc = at({ panel: 'positions' });
     expect(shellReduce(pc, { type: 'open', panel: 'positions', tier: 'pc' })).toBe(pc);
+  });
+});
+
+describe('グラフの表示（#88 AC-5）', () => {
+  it('既定は line（INITIAL_SHELL は変えない）、選べるのは 線 / 面', () => {
+    expect(chartMode(INITIAL_SHELL)).toBe('line');
+    expect(CHART_MODES.map((m) => m.value)).toEqual(['line', 'surface']);
+    expect(CHART_MODES.map((m) => m.text)).toEqual(['線', '面']);
+  });
+
+  it('chart の action で surface ⇄ line、同じ値なら同じ参照', () => {
+    const s0 = at({});
+    const s1 = shellReduce(s0, { type: 'chart', chart: 'surface' });
+    expect(chartMode(s1)).toBe('surface');
+    expect(s1).toEqual({ ...s0, chart: 'surface' });
+    expect(shellReduce(s1, { type: 'chart', chart: 'surface' })).toBe(s1);
+    const s2 = shellReduce(s1, { type: 'chart', chart: 'line' });
+    expect(chartMode(s2)).toBe('line');
+    expect(shellReduce(s2, { type: 'chart', chart: 'line' })).toBe(s2);
+    // 既定（chart 無し）に line を入れても同じ参照
+    expect(shellReduce(s0, { type: 'chart', chart: 'line' })).toBe(s0);
+  });
+
+  it('他の action（dock・open・grab・market）で chart が変わらない', () => {
+    const s = at({ chart: 'surface' });
+    const after = [
+      shellReduce(s, { type: 'dock', panel: 'board', tier: 'phone' }),
+      shellReduce(s, { type: 'dock', panel: 'positions', tier: 'phone' }),
+      shellReduce(at({ chart: 'surface', sheet: 'hidden' }), {
+        type: 'open',
+        panel: 'metrics',
+        tier: 'phone',
+      }),
+      shellReduce(s, { type: 'grab', dy: -60 }),
+      shellReduce(s, { type: 'grab', dy: 2 }),
+      shellReduce(s, { type: 'market', market: 'smile' }),
+    ];
+    for (const a of after) expect(chartMode(a)).toBe('surface');
+    // 変わった action は他の欄だけが変わる
+    expect(after[0]).toEqual({ ...s, panel: 'board' });
+    expect(after[5]).toEqual({ ...s, market: 'smile' });
   });
 });
