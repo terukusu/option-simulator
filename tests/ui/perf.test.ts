@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { normalizeChain } from '../../data';
+import { boardOptionLeg, normalizeChain } from '../../data';
 import { DEFAULT_SETTINGS } from '../../model';
 import { preparePosition } from '../../model/position';
 import { ZERO_SCENARIO } from '../../model/scenario';
@@ -18,6 +18,7 @@ import {
 import type { PinNo } from '../../ui/pins';
 import { type Action, initialState, reduce, type State, type UiLeg } from '../../ui/state';
 import { atmStrike, boardRows } from '../../ui/view/board';
+import { boardBadges, boardRowTexts } from '../../ui/view/boardPanel';
 import { bookListModel } from '../../ui/view/bookList';
 import { headerModel } from '../../ui/view/header';
 import { hedgeModel } from '../../ui/view/hedge';
@@ -991,5 +992,60 @@ describe('性能（#86 AC-5: 指標パネル）', () => {
     expect(once()).toBeGreaterThan(20);
     expect(s.scenario.dSigma).toBe(2.5);
     expectWithinBudget('#86 ステッパー 1 段で指標パネルまで', once, { warmup: 20, runs: 30 });
+  });
+});
+
+/**
+ * #85 AC-5: 新しい画面の板の表示モデル（322 行 × 2 限月・足 10 本）。限月の切替・足の追加で作り直すもの。
+ * 行の文字列と印（boardRowTexts）は板が変わったときだけ、バッジ（boardBadges）は足が変わったときだけ作る。
+ */
+describe('性能（#85 AC-5: 板の表示）', () => {
+  const chain = normalizeChain(buildWideChainJson());
+  const legs: UiLeg[] = [];
+  chain.months.forEach((m, mi) => {
+    const atm = m.atm.B.pick?.k ?? m.strikes[Math.floor(m.strikes.length / 2)]?.k ?? 0;
+    for (let i = 0; i < 5; i++) {
+      const k = atm + (i - 2) * 500;
+      const built = boardOptionLeg(chain, {
+        expiry: m.id,
+        k,
+        type: i % 2 ? 'call' : 'put',
+        side: i < 3 ? 'sell' : 'buy',
+      });
+      legs.push({ id: mi * 10 + i + 1, leg: built.leg, marks: built.marks });
+    }
+  });
+
+  it(`板の表示（322 行 × 2 限月・足 10 本: boardRows + 行の文字列と印 + バッジ）が ${BUDGET_MS} ms 以内（30 回の最小値）`, () => {
+    expect(chain.months.every((m) => m.strikes.length >= 322)).toBe(true);
+    expect(legs.length).toBe(10);
+    const once = () => {
+      let n = 0;
+      for (const m of chain.months) {
+        const rows = boardRows(chain, m);
+        n += boardRowTexts(chain, m, rows).size + boardBadges(legs, m.id).size;
+      }
+      return n;
+    };
+    expect(once()).toBeGreaterThan(644);
+    expectWithinBudget('#85 板の表示（322 行 × 2 限月・足 10 本）', once, { warmup: 10, runs: 30 });
+  });
+
+  it(`足 1 本の追加でのバッジの作り直し（322 行・足 10 本）が ${BUDGET_MS} ms 以内（30 回の最小値）`, () => {
+    let s: State = reduce(
+      { ...initialState, legs: [...legs], nextId: 100 },
+      { type: 'loaded', chain, label: 'wide' },
+    );
+    const m = chain.months[0];
+    if (!m) throw new Error('限月が無い');
+    const atm = m.atm.B.pick?.k ?? 0;
+    const start = s;
+    const once = () => {
+      if (s.legs.length > 40) s = start;
+      s = reduce(s, { type: 'addBoardLeg', expiry: m.id, k: atm, optionType: 'put', side: 'sell' });
+      return boardBadges(s.legs, m.id).size + boardBadges(s.legs, chain.months[1]?.id ?? '').size;
+    };
+    expect(once()).toBeGreaterThan(0);
+    expectWithinBudget('#85 足 1 本の追加でのバッジ', once, { warmup: 10, runs: 30 });
   });
 });

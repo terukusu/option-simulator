@@ -1,19 +1,25 @@
+import type { ComponentChildren } from 'preact';
 import { useCallback, useEffect, useReducer, useRef, useState } from 'preact/hooks';
 import { type Boot, useAppController } from '../components/useAppController';
 import { useMediaQuery } from '../components/useMediaQuery';
 import type { PrefsRead } from '../prefs';
 import { legAtStrike, MAX_TABS } from '../state';
+import { marketAddPlan, marketAddToast } from '../view/boardPanel';
 import { fmtNum } from '../view/format';
 import { keptBoardNote } from '../view/header';
 import { PC_QUERY, PHONE_QUERY } from '../view/layout';
 import { shareReplaceConfirmText } from '../view/persistNote';
 import type { DXUnit } from '../view/scenario';
 import { INITIAL_SHELL, layoutTier, shellReduce } from '../view/shell';
+import type { MarketAdd } from './market/BoardMonth';
 import { Notices } from './Notices';
+import { PanelHead } from './PanelHead';
 import { Toasts, useToasts } from './parts/Toast';
+import { Board } from './regions/Board';
 import { Metrics } from './regions/Metrics';
 import { Positions } from './regions/Positions';
 import { Scenario } from './regions/Scenario';
+import { Smile } from './regions/Smile';
 import { Stage } from './regions/Stage';
 import { Shell } from './Shell';
 import { TopBar } from './TopBar';
@@ -44,6 +50,8 @@ function boardNotice(
  * #83 でシナリオ（regions/Scenario.tsx）を入れた。ΔX の単位はここのローカル（保存しない。#87 の設定も同じ値を触る）。
  * #84 でポジション（regions/Positions.tsx。key = 作業中のタブ）を入れた。タブが変わったら [元に戻す] 付きのトーストを閉じる。
  * #86 で指標 · テール（regions/Metrics.tsx。c.metrics と state.feePerLot だけを渡す = pure が効く）を入れた。
+ * #85 で板・スマイル（regions/Board.tsx・Smile.tsx。state の値を個別に渡す = pure が効く）を入れた。板・スマイルから
+ * 足を入れたら [元に戻す]（removeLeg）付きのトーストを出し、入れた足を選ぶ（市場のパネルは開いたまま）。
  */
 export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
   const c = useAppController(boot);
@@ -88,6 +96,36 @@ export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
       });
     },
     [state.legs, state.chain, state.activeTab, dispatch, push],
+  );
+  // 板・スマイルから足を入れる: 入る足を先に求め（reducer と同じ boardOptionLeg）、addBoardLeg は必ず送る
+  // （作れなければ reducer が legError を入れる = 今と同じ「足を追加できない: …」）
+  // 板の 322 行が持つ関数なので参照を変えない（板・次の id は ref で読む = 足を入れても行を描き直さない）
+  const { chain } = state;
+  const latest = useRef({ chain, nextId: state.nextId });
+  latest.current = { chain, nextId: state.nextId };
+  const onMarketAdd = useCallback<MarketAdd>(
+    (expiry, k, type, side) => {
+      const leg = marketAddPlan(latest.current.chain, { expiry, k, type, side });
+      const id = latest.current.nextId;
+      dispatch({ type: 'addBoardLeg', expiry, k, optionType: type, side });
+      if (!leg) return;
+      // 再描画の前にもう一度押されても次の id を指す（reducer は足を入れたら nextId を 1 進める）
+      latest.current = { ...latest.current, nextId: id + 1 };
+      setPicked(id);
+      push({
+        kind: 'market-add',
+        text: marketAddToast(leg),
+        undo: () => dispatch({ type: 'removeLeg', id }),
+      });
+    },
+    [dispatch, push],
+  );
+  const monthId = c.month?.id ?? chain?.months[0]?.id ?? '';
+  const emptyMarket = (title: string, seg: ComponentChildren) => (
+    <>
+      <PanelHead title={title}>{seg}</PanelHead>
+      <div class="panel-body" />
+    </>
   );
   const mini = tier === 'phone' && shell.sheet === 'full';
   return (
@@ -149,6 +187,42 @@ export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
           />
         }
         metrics={<Metrics model={c.metrics} feePerLot={state.feePerLot} />}
+        board={(seg) =>
+          chain && c.header ? (
+            <Board
+              chain={chain}
+              months={c.header.months}
+              monthId={monthId}
+              basis={c.atmBasis}
+              target={state.target}
+              filterAsk={state.filterAsk}
+              legs={c.curLegs}
+              dispatch={dispatch}
+              onAdd={onMarketAdd}
+              marketSeg={seg}
+            />
+          ) : (
+            emptyMarket('板', seg)
+          )
+        }
+        smile={(seg) =>
+          chain ? (
+            <Smile
+              chain={chain}
+              monthId={monthId}
+              basis={c.atmBasis}
+              axis={state.smileAxis}
+              viewport={state.smileViewport}
+              pick={state.smilePick}
+              scenarioAtm={c.scenarioAtmView}
+              dispatch={dispatch}
+              onAdd={onMarketAdd}
+              marketSeg={seg}
+            />
+          ) : (
+            emptyMarket('スマイル', seg)
+          )
+        }
       />
       <Toasts toasts={toasts.toasts} onUndo={toasts.undo} />
     </div>

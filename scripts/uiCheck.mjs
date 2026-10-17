@@ -19,6 +19,12 @@
 //                                          副題（#107）: タイルの .s・読み取りの .s の切れがすべて全文のボタン（aria-expanded）の中
 //                                          で、ボタンの数がタイル 6・読み取りの全文のある項目（ミニは 0）。既定の足と掛け金の足
 //                                          （買い 2 本）は千円（自動）で切れ 0、円固定の足（売り 5 枚）は件数だけ
+//                                          市場（#85）: 板の列の数（360・390・900・1200×800・1280×800 で 5、1440 で 7、1800×1000 で 9）・
+//                                          見えている行のセル・道具の行・脚注の F / ATM / SQ・スマイルの道具の行・操作行（選択なし / あり）・
+//                                          凡例が切れていない・.board-wrap が横にはみ出さない・スマイルの描画域（360 peek で 140px 以上）。
+//                                          1200 / 1280 / 1800 は市場の列の中の折り返しを判定（ページ全体は記録）。322 行の板
+//                                          （buildWideChainJson を /fixtures/latest.json に差し替え）× 既定の字幅 / 実機相当の字幅
+//                                          （--mono を DejaVu Sans Mono = Menlo と同じ 0.6em に。無ければ skip）でも測る
 //   npm run ui:check -- --parts            部品の見本（?ui=next&parts。dev だけ）
 //   npm run ui:check -- --legacy           旧画面（?ui=next なし）
 //   npm run ui:check -- --flows            保存・共有・テーマ・キーボードの手順（#81 AC-11・AC-12）と舞台の手順
@@ -31,7 +37,10 @@
 //                                          （390 は IV レールの ↑ / ↓）・Long Animation Frame。390×844 と 1440×900）と副題の全文の手順
 //                                          （#107: タイル 6 枚のタップで全文・内訳との一致・Esc でボタンへ戻る・外側で閉じる・
 //                                          同時に 1 つ・Tab → Enter / Space・窓と .panel-body の中・読み取りの損益の全文（上に開く）と
-//                                          ハンドルで閉じる・Long Animation Frame。390×844 と 1440×900）
+//                                          ハンドルで閉じる・Long Animation Frame。390×844 と 1440×900）と市場の手順
+//                                          （#85: bid / ask で足が入る・追従・[元に戻す]・ジャンプと強調・ask ≤ 50 円・put / call・限月・
+//                                          スマイルの操作。390×844・1440×900・1800×1000。322 行の板の Long Animation Frame・限月の切替の
+//                                          時間。新しい画面の限月・種別・絞り込み・横軸が再読み込みと旧画面に残る）
 //   --url <base>                           dev サーバーを起こさず、その URL を使う（例 http://127.0.0.1:5173/?ui=next&parts）
 //   --dom <file>                           body の下の要素の tag.class の並びを書き出す（旧画面が変わらないことの比較用）
 //   --shots <dir>                          スクリーンショットを書く（合成の板だけ。リポジトリに入れない）
@@ -184,6 +193,9 @@ async function waitReady(page, m) {
 /** ページのスクロールと折り返し（EPIC の as-is と同じ規則） */
 function measure(page) {
   return page.evaluate(() => {
+    // 検査自身の時間（板の 322 行・2 千要素の getComputedStyle で 50ms を超えうる）を Long Animation Frame の件数から
+    // 除けるように記録する（loafSinceExcludingChecks）
+    const t0 = performance.now();
     const wraps = [];
     for (const el of document.querySelectorAll('body *')) {
       const cs = getComputedStyle(el);
@@ -209,6 +221,7 @@ function measure(page) {
     // （ページは動かないが、はみ出しを見逃さない。旧画面の body は切らないので値は変わらない）
     const d = document.documentElement;
     const b = document.body;
+    if (Array.isArray(window.__checkRanges)) window.__checkRanges.push([t0, performance.now()]);
     return {
       v: Math.max(d.scrollHeight - window.innerHeight, b.scrollHeight - b.clientHeight),
       h: Math.max(d.scrollWidth - window.innerWidth, b.scrollWidth - b.clientWidth),
@@ -591,12 +604,24 @@ async function measureAll() {
             await page.waitForTimeout(100);
             const scn = panel === 'scenario' && sheet !== 'hidden';
             const mx = panel === 'metrics' && sheet !== 'hidden';
-            await report(page, lbl, w, h, `${name}-${panel}-${sheet}`, scn || mx);
+            const mk = (panel === 'board' || panel === 'smile') && sheet !== 'hidden';
+            await report(page, lbl, w, h, `${name}-${panel}-${sheet}`, scn || mx || mk);
             await readoutCheck(page, `${lbl} ${w}x${h}`, 3);
             await positionsCheck(page, `${lbl} ${w}x${h}`);
             if (scn) {
               await scenarioCheck(page, `${lbl} ${w}x${h}`);
               await advOpenCheck(page, lbl, w, h, `${name}-${panel}-${sheet}-adv`, 3);
+            }
+            if (mk) {
+              // 市場（#85）: 板 5 列・切れ・スマイルの描画域（360 peek で 140px 以上）。スマイルは選択あり / なし
+              const smileMin = w === 360 && sheet === 'peek' ? 140 : null;
+              await marketCheck(page, `${lbl} ${w}x${h}`, { cols: 5, smileMin });
+              if (panel === 'smile') {
+                await smilePick(page, true);
+                await report(page, `${lbl} 選択あり`, w, h, `${name}-${panel}-${sheet}-pick`);
+                await marketCheck(page, `${lbl} 選択あり ${w}x${h}`, { smileMin });
+                await smilePick(page, false);
+              }
             }
             if (mx) {
               await metricsCheck(page, `${lbl} ${w}x${h}`);
@@ -620,6 +645,21 @@ async function measureAll() {
             // PC は指標が常に見えている
             await metricsCheck(page, `${tag} ${w}x${h}`);
             await breakdownOpenCheck(page, tag, w, h, `${name}-kv`, want);
+            // 市場（#85）: 板（既定）→ 市場の Seg でスマイル（選択なし / あり）→ 板へ戻す
+            await marketCheck(page, `${tag} board ${w}x${h}`, { cols: marketCols(w) });
+            await page.click('section.board .panel-head .seg button:has-text("スマイル")');
+            await page.waitForTimeout(150);
+            await report(page, `${tag} smile`, w, h, `${name}-smile`);
+            await readoutCheck(page, `${tag} smile ${w}x${h}`, want);
+            await marketCheck(page, `${tag} smile ${w}x${h}`, {});
+            // 市場の列がスマイルのときも指標のタイルの副題の検査（#107）が通る
+            await metricsCheck(page, `${tag} smile ${w}x${h}`);
+            await smilePick(page, true);
+            await report(page, `${tag} smile 選択あり`, w, h, `${name}-smile-pick`);
+            await marketCheck(page, `${tag} smile 選択あり ${w}x${h}`, {});
+            await smilePick(page, false);
+            await page.click('section.smile .panel-head .seg button:has-text("板")');
+            await page.waitForTimeout(150);
           } else {
             // タブレットはドックで「指標」を開いて測り、「ポジ」で戻す
             await page.click('.dock button[data-panel="metrics"]');
@@ -628,6 +668,20 @@ async function measureAll() {
             await readoutCheck(page, `${tag} metrics ${w}x${h}`, want);
             await metricsCheck(page, `${tag} metrics ${w}x${h}`);
             await breakdownOpenCheck(page, `${tag} metrics`, w, h, `${name}-metrics-kv`, want);
+            // 市場（#85）: ドックで「板」「スマイル」（選択なし / あり）
+            for (const view of ['board', 'smile']) {
+              await page.click(`.dock button[data-panel="${view}"]`);
+              await page.waitForTimeout(150);
+              await report(page, `${tag} ${view}`, w, h, `${name}-${view}`);
+              await readoutCheck(page, `${tag} ${view} ${w}x${h}`, want);
+              await marketCheck(page, `${tag} ${view} ${w}x${h}`, { cols: marketCols(w) });
+              if (view === 'smile') {
+                await smilePick(page, true);
+                await report(page, `${tag} smile 選択あり`, w, h, `${name}-smile-pick`);
+                await marketCheck(page, `${tag} smile 選択あり ${w}x${h}`, {});
+                await smilePick(page, false);
+              }
+            }
             await page.click('.dock button[data-panel="positions"]');
             await page.waitForTimeout(150);
           }
@@ -660,6 +714,296 @@ async function measureAll() {
     console.log(
       `副題の検査: ${subStats.pass} / ${subStats.total} 状態で pass、切れ ${subStats.cut} 件（うち円固定 ${subStats.cutYen} 件。すべて全文のボタンの中）`,
     );
+    // 市場の追加の状態（1200 / 1280 / 1800・322 行の板・字幅 2 通り。#85）
+    await marketSweep();
+    console.log(
+      `市場の検査: ${marketStats.pass} / ${marketStats.total} 状態で pass${marketStats.skip ? `（実機相当の字幅は ${marketStats.skip} 幅で skip）` : ''}`,
+    );
+  }
+}
+
+// ---- 市場（#85）: 板の列の数・切れ・スマイルの描画域の高さ
+/** 板の列の数の期待（section.board の幅で 9 / 7 / 5。docs/ui-redesign.md §2.4） */
+const marketCols = (w) => (w >= 1800 ? 9 : w >= 1440 ? 7 : 5);
+/** 市場の検査だけを判定する追加の幅（ページ全体の縦・横・折り返しは記録だけ） */
+const MARKET_SIZES = [
+  [1200, 800],
+  [1280, 800],
+  [1800, 1000],
+];
+const marketStats = { pass: 0, total: 0, skip: 0 };
+
+/**
+ * 見えている板・スマイルの (a) 板の列の数（表示中の表の thead th）、(b) 見出し行・道具の行・見えている行のセル /
+ * ボタン・脚注（F / ATM / SQ）・スマイルの道具の行・操作行・凡例が切れていない（scrollWidth ≤ clientWidth）、
+ * 表の枠 .board-wrap が横にはみ出していない、(c) スマイルの描画域の高さ（want.smileMin 以上）
+ */
+async function marketCheck(page, label, want) {
+  const r = await page.evaluate(() => {
+    const vis = (el) => !!el && el.getClientRects().length > 0;
+    const name = (el) =>
+      `${el.tagName.toLowerCase()}.${(el.getAttribute('class') ?? '').trim().replace(/\s+/g, '.')}「${(el.textContent ?? '').trim().slice(0, 16)}」${el.scrollWidth}/${el.clientWidth}`;
+    const bad = [];
+    let n = 0;
+    const test = (els) => {
+      for (const el of els) {
+        if (!vis(el)) continue;
+        n++;
+        if (el.scrollWidth > el.clientWidth) bad.push(name(el));
+      }
+    };
+    const out = { board: null, smile: null };
+    const board = document.querySelector('section.board');
+    if (vis(board)) {
+      const wrap = board.querySelector('.board-month:not(.inactive) .board-wrap:not(.side-hidden)');
+      test(
+        board.querySelectorAll(
+          '.panel-head > h2, .panel-head .seg > button, .board-tools .row, .board-tools .seg > button, .board-tools .chip, .board-tools .btn, .board-foot, .board-foot > .f, .board-foot > .atm, .board-foot > .sq',
+        ),
+      );
+      let rows = 0;
+      if (wrap) {
+        test([wrap]);
+        const wr = wrap.getBoundingClientRect();
+        for (const tr of wrap.querySelectorAll('tbody tr')) {
+          rows++;
+          const rr = tr.getBoundingClientRect();
+          if (rr.bottom < wr.top || rr.top > wr.bottom) continue;
+          test(tr.querySelectorAll('td, th, button, .legbadge'));
+        }
+      }
+      out.board = { cols: wrap ? wrap.querySelectorAll('thead th').length : 0, rows };
+    }
+    const smile = document.querySelector('section.smile');
+    if (vis(smile)) {
+      test(
+        smile.querySelectorAll(
+          '.panel-head > h2, .panel-head .seg > button, .smile-tools, .smile-tools .seg > button, .smile-act, .smile-act > *, .smile-legend, .smile-legend > span',
+        ),
+      );
+      const plot = smile.querySelector('.smile-month:not(.inactive) .smile-wrap');
+      // 凡例の項目（レビュー S2）: 隠さない = 見えている項目が 7（シナリオ ATM があれば 8）で、どれも凡例の箱の中
+      const lg = smile.querySelector('.smile-legend');
+      const lb = lg?.getBoundingClientRect();
+      const items = [...(lg?.children ?? [])];
+      const shown = items.filter((el) => {
+        const b = el.getBoundingClientRect();
+        return !!lb && b.width > 0 && b.left >= lb.left - 0.5 && b.right <= lb.right + 0.5;
+      });
+      out.smile = {
+        height: plot ? Math.round(plot.getBoundingClientRect().height) : 0,
+        picked: !!smile.querySelector('.smile-act .k'),
+        legend: shown.length,
+        legendWant: lg?.querySelector(':scope > .atm2') ? 8 : 7,
+      };
+    }
+    return { ...out, n, bad };
+  });
+  if (!r.board && !r.smile) return true;
+  const bad = [...r.bad];
+  if (r.board && want.cols !== undefined && r.board.cols !== want.cols) {
+    bad.push(`列 ${r.board.cols}（${want.cols} のはず）`);
+  }
+  if (r.board && r.board.rows === 0) bad.push('行が無い');
+  if (r.smile && r.smile.legend !== r.smile.legendWant) {
+    bad.push(`凡例の項目 ${r.smile.legend}（${r.smile.legendWant} のはず）`);
+  }
+  if (r.smile && want.smileMin && r.smile.height < want.smileMin) {
+    bad.push(`描画域の高さ ${r.smile.height}px（${want.smileMin}px 以上のはず）`);
+  }
+  const ok = r.n > 0 && bad.length === 0;
+  marketStats.total++;
+  if (ok) marketStats.pass++;
+  else failed = true;
+  const what = r.board
+    ? `板 ${r.board.cols} 列・${r.board.rows} 行`
+    : `スマイル 高さ ${r.smile.height}px・凡例 ${r.smile.legend} 項目${r.smile.picked ? '・選択あり' : ''}`;
+  console.log(`${label}: 市場 ${what}・${r.n} 個 ${ok ? 'pass' : `${bad.join('・')}  ← NG`}`);
+  return ok;
+}
+
+/** スマイルで選択を作る（描画域にフォーカスして . = 市場 ATM から）/ 消す（×） */
+async function smilePick(page, on) {
+  if (on) {
+    const plot = page.locator('section.smile .smile-month:not(.inactive) .smile-wrap');
+    await plot.focus();
+    await page.keyboard.press('.');
+  } else {
+    const x = page.locator('section.smile .smile-act button[aria-label="選択を消す"]');
+    if ((await x.count()) > 0) await x.click();
+  }
+  await page.waitForTimeout(120);
+}
+
+/** 市場の列（section.board / .smile）の中の折り返し（measure と同じ規則） */
+function marketWraps(page) {
+  return page.evaluate(() => {
+    const wraps = [];
+    for (const el of document.querySelectorAll('section.board *, section.smile *')) {
+      const cs = getComputedStyle(el);
+      if (cs.display === 'none' || cs.visibility === 'hidden' || el.getClientRects().length === 0)
+        continue;
+      const txt = [...el.childNodes]
+        .filter((c) => c.nodeType === 3)
+        .map((c) => c.textContent)
+        .join('')
+        .trim();
+      if (!txt || txt.length > 40) continue;
+      if (['P', 'LI', 'DD', 'TEXTAREA', 'OPTION'].includes(el.tagName)) continue;
+      if (el.closest('.help-popover,[role="tooltip"],details:not([open])')) continue;
+      const range = document.createRange();
+      range.selectNodeContents(el);
+      const lines = new Set(
+        [...range.getClientRects()].filter((r) => r.width > 0).map((r) => Math.round(r.top)),
+      );
+      if (lines.size > 1) wraps.push(`${el.tagName}.${el.getAttribute('class') ?? ''}「${txt}」`);
+    }
+    return wraps;
+  });
+}
+
+/** 合成の 322 行 × 2 限月の板（scripts/synthBoard.ts の buildWideChainJson。ファイルを書かない） */
+let wideBoardText = null;
+async function wideBoard() {
+  if (wideBoardText) return wideBoardText;
+  const { runnerImport } = await import('vite');
+  const { module } = await runnerImport(join(root, 'scripts', 'synthBoard.ts'), {
+    configFile: false,
+    root,
+    logLevel: 'error',
+  });
+  wideBoardText = module.serializeChainJson(module.buildWideChainJson());
+  return wideBoardText;
+}
+/** dev の板の応答（/fixtures/latest.json）を 322 行の板に差し替える */
+async function routeWide(target) {
+  const body = await wideBoard();
+  await target.route('**/fixtures/latest.json', (route) =>
+    route.fulfill({ status: 200, contentType: 'application/json; charset=utf-8', body }),
+  );
+}
+
+/** 実機相当の等幅（Menlo / SF Mono と同じ 0.6em の DejaVu Sans Mono）が使えるか */
+async function realMonoAvailable(page) {
+  return page.evaluate(() => {
+    const c = document.createElement('canvas').getContext('2d');
+    if (!c) return false;
+    c.font = '20px "DejaVu Sans Mono", serif';
+    const a = c.measureText('0000000000').width;
+    const b = c.measureText('iiiiiiiiii').width;
+    return Math.abs(a - b) < 0.5 && Math.abs(a / 200 - 0.602) < 0.02;
+  });
+}
+/** --mono を実機相当の字幅に（CSSOM。検査だけ。製品のコードには入らない） */
+async function useRealMono(page) {
+  await page.evaluate(() =>
+    document.documentElement.style.setProperty('--mono', '"DejaVu Sans Mono", monospace'),
+  );
+  await page.waitForTimeout(300);
+}
+
+/**
+ * 市場の検査の追加の状態（既定の 4 幅のほか）: (1) 1200×800・1280×800・1800×1000 の板 / スマイル（市場の検査と市場の列の中の
+ * 折り返しを判定、ページ全体の縦・横・折り返しは記録）、(2) 322 行の板 × 既定の字幅 / 実機相当の字幅 × 全 7 幅の板 / スマイル
+ * （選択なし / あり）。スクリーンショットは 1800 と 322 行の 390 / 1800
+ */
+async function marketSweep() {
+  const sizes = [...SIZES, ...MARKET_SIZES].sort((a, b) => a[0] - b[0]);
+  for (const [w, h] of MARKET_SIZES) {
+    for (const theme of ['dark', 'light']) {
+      const ctx = await newContext(
+        { width: w, height: h },
+        { [WORKSPACE_KEY]: twoLegs, [PREFS_KEY]: prefsText(theme) },
+      );
+      const page = await ctx.newPage();
+      await page.goto(pageUrl('next'));
+      await waitReady(page, 'next');
+      const tag = `next ${theme} 市場`;
+      for (const view of ['board', 'smile']) {
+        if (view === 'smile') {
+          await page.click('section.board .panel-head .seg button:has-text("スマイル")');
+          await page.waitForTimeout(200);
+        }
+        const m = await measure(page);
+        const mw = await marketWraps(page);
+        const lbl = `${tag} ${view} ${w}x${h}`;
+        console.log(
+          `${lbl}: （記録）ページ 縦 ${m.v}px 横 ${m.h}px 折り返し ${m.wraps.length} 件・市場の列の中の折り返し ${mw.length} 件${mw.length ? '  ← NG' : ''}`,
+        );
+        for (const s of mw.slice(0, 10)) console.log(`    ${s}`);
+        if (mw.length) failed = true;
+        await marketCheck(page, lbl, { cols: marketCols(w) });
+        if (view === 'smile') {
+          await smilePick(page, true);
+          await marketCheck(page, `${lbl} 選択あり`, {});
+          if (shotsDir)
+            await page.screenshot({
+              path: join(shotsDir, `next-${w}x${h}-${theme}-smile-pick.png`),
+            });
+          await smilePick(page, false);
+        } else if (shotsDir) {
+          await page.screenshot({ path: join(shotsDir, `next-${w}x${h}-${theme}-board.png`) });
+        }
+      }
+      await ctx.close();
+    }
+  }
+  // 322 行の板 × 字幅 2 通り
+  for (const mono of ['既定の字幅', '実機相当の字幅']) {
+    for (const [w, h] of sizes) {
+      const ctx = await newContext(
+        { width: w, height: h },
+        { [WORKSPACE_KEY]: twoLegs, [PREFS_KEY]: prefsText('dark') },
+      );
+      await routeWide(ctx);
+      const page = await ctx.newPage();
+      await page.goto(pageUrl('next'));
+      await waitReady(page, 'next');
+      if (mono !== '既定の字幅') {
+        if (!(await realMonoAvailable(page))) {
+          marketStats.skip++;
+          console.log(`322 行 ${mono} ${w}x${h}: DejaVu Sans Mono が無いので skip`);
+          await ctx.close();
+          continue;
+        }
+        await useRealMono(page);
+      }
+      const tag = `next dark 322 行 ${mono}`;
+      const phone = w <= PHONE_MAX;
+      const tablet = !phone && w < 1200;
+      for (const view of ['board', 'smile']) {
+        const sheets = phone ? ['peek', 'full'] : [null];
+        for (const sheet of sheets) {
+          if (phone) await setShell(page, view, sheet);
+          else if (tablet) {
+            await page.click(`.dock button[data-panel="${view}"]`);
+            await page.waitForTimeout(150);
+          } else if (view === 'smile') {
+            // PC: 市場の Seg で板 → スマイル
+            await page.click('section.board .panel-head .seg button:has-text("スマイル")');
+            await page.waitForTimeout(150);
+          }
+          await page.waitForTimeout(250);
+          const lbl = `${tag} ${view}${sheet ? `/${sheet}` : ''} ${w}x${h}`;
+          await marketCheck(page, lbl, {
+            cols: marketCols(w),
+            smileMin: w === 360 && sheet === 'peek' ? 140 : null,
+          });
+          const shotName = `next-${w}x${h}-dark-wide-${mono === '既定の字幅' ? 'default' : 'real'}-${view}${sheet ? `-${sheet}` : ''}`;
+          if (view === 'smile') {
+            await smilePick(page, true);
+            await marketCheck(page, `${lbl} 選択あり`, {
+              smileMin: w === 360 && sheet === 'peek' ? 140 : null,
+            });
+            if (shotsDir) await page.screenshot({ path: join(shotsDir, `${shotName}-pick.png`) });
+            await smilePick(page, false);
+          } else if (shotsDir && (w === 390 || w === 1800 || w === 1440)) {
+            await page.screenshot({ path: join(shotsDir, `${shotName}.png`) });
+          }
+        }
+      }
+      await ctx.close();
+    }
   }
 }
 
@@ -1083,6 +1427,11 @@ async function runFlows() {
   for (const vp of [phone, pc]) await metricsFlows(vp);
   // #107 副題の全文のポップオーバーの手順（AC-4）
   for (const vp of [phone, pc]) await subtitleFlows(vp);
+  // #85 市場の手順（AC-9・AC-10・AC-12）: 5 列（390）・7 列（1440）・9 列（1800）
+  const wide = { width: 1800, height: 1000 };
+  for (const vp of [phone, pc, wide]) await marketFlows(vp);
+  for (const vp of [phone, pc, wide]) await marketWideFlows(vp);
+  await marketPersistFlow();
 }
 
 // ---- 舞台の手順（#82）
@@ -1100,9 +1449,14 @@ const signedText = (v) => {
 /** Long Animation Frame（50ms 超）の数を数える observer（ページより先に入れる） */
 const LOAF_INIT = `
   window.__loaf = [];
+  window.__loafAt = [];
+  window.__checkRanges = [];
   try {
     new PerformanceObserver((list) => {
-      for (const e of list.getEntries()) window.__loaf.push(e.duration);
+      for (const e of list.getEntries()) {
+        window.__loaf.push(e.duration);
+        window.__loafAt.push([e.startTime, e.startTime + e.duration]);
+      }
     }).observe({ type: 'long-animation-frame', buffered: true });
     window.__loafOk = true;
   } catch {
@@ -2532,16 +2886,683 @@ async function subtitleFlows(vp) {
   }
   // (h) 開閉の間の Long Animation Frame（50ms 超）
   {
-    const n = await page.evaluate(
-      (i) => window.__loaf.slice(i).filter((d) => d > 50).length,
-      loafMark,
-    );
+    // 検査の measure（ページ全体の要素を走査する。#85 で板の 322 行が入ると 50ms を超えうる）のフレームは除く
+    const n = await page.evaluate((i) => {
+      const self = window.__checkRanges ?? [];
+      return window.__loaf
+        .map((d, j) => [d, window.__loafAt[j]])
+        .slice(i)
+        .filter(([d, at]) => d > 50 && !self.some(([a, b]) => at[0] < b && a < at[1])).length;
+    }, loafMark);
     check(
       `#107 AC-4(h) ${tag} 全文の開閉の間の長いフレーム 0 件`,
       loafOk && n === 0,
       loafOk ? `${n} 件` : '未対応',
     );
   }
+  await ctx.close();
+}
+
+// ---- 市場の手順（#85 AC-9・AC-10・AC-12）
+/** ui/view/board.ts のジャンプの規則と data/ の正規化（Vite のモジュールランナーで読む。期待値を画面と別に求める） */
+let boardRules = null;
+async function rules() {
+  if (boardRules) return boardRules;
+  const { runnerImport } = await import('vite');
+  const load = async (p) =>
+    (await runnerImport(join(root, p), { configFile: false, root, logLevel: 'error' })).module;
+  const data = await load('data/index.ts');
+  const view = await load('ui/view/board.ts');
+  boardRules = { normalizeChain: data.normalizeChain, ...view };
+  return boardRules;
+}
+const fmtK = (k) => new Intl.NumberFormat('en-US').format(k);
+const twoFrames = (page) =>
+  page.evaluate(
+    () => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(() => r(true)))),
+  );
+const ACTIVE_WRAP = 'section.board .board-month:not(.inactive) .board-wrap:not(.side-hidden)';
+
+async function marketFlows(vp) {
+  const tag = `${vp.width}x${vp.height}`;
+  const phoneSize = vp.width <= PHONE_MAX;
+  const ctx = await newContext(vp, { [WORKSPACE_KEY]: twoLegs, [PREFS_KEY]: prefsText('dark') });
+  await ctx.addInitScript(LOAF_INIT);
+  const page = await ctx.newPage();
+  await page.goto(pageUrl('next'));
+  await waitReady(page, 'next');
+  const R = await rules();
+  const chain = R.normalizeChain(board);
+  if (phoneSize)
+    check(`#85 ${tag} ドックで「板」を開く（peek）`, await setShell(page, 'board', 'peek'));
+  const cols = await page.locator(`${ACTIVE_WRAP} thead th`).count();
+  check(
+    `#85 ${tag} 板の列の数 ${cols}`,
+    cols === marketCols(vp.width),
+    `${marketCols(vp.width)} のはず`,
+  );
+
+  const counts = () =>
+    page.evaluate(() => ({
+      rows: document.querySelectorAll('section.positions li.leg').length,
+      marks: document.querySelectorAll('.chart .legmark').length,
+      sel: document.querySelector('.chart .legmark.sel')?.getAttribute('data-leg-id') ?? null,
+      dock:
+        document.querySelector('.dock button[data-panel="positions"] .cnt')?.textContent ?? null,
+      toast: [...document.querySelectorAll('.toast .txt')].map((t) => t.textContent),
+      panel: document.querySelector('.layout')?.getAttribute('data-panel'),
+      market: document.querySelector('.layout')?.getAttribute('data-market'),
+      boardShown: (document.querySelector('section.board')?.getClientRects().length ?? 0) > 0,
+    }));
+  const pageScroll = () =>
+    page.evaluate(() => ({
+      doc: document.scrollingElement?.scrollTop ?? 0,
+      body: document.body.scrollTop,
+      sec: Math.round(document.querySelector('section.board')?.getBoundingClientRect().top ?? -1),
+    }));
+  const info = () =>
+    page.evaluate((sel) => {
+      const wrap = document.querySelector(sel);
+      const atm = wrap?.querySelector('tr.atm')?.getAttribute('data-k');
+      const foot = document.querySelector('section.board .board-foot > .atm')?.textContent ?? '';
+      const month = document
+        .querySelector('section.board .board-month:not(.inactive)')
+        ?.getAttribute('data-month');
+      const target = document.querySelector(
+        'section.board [aria-label="対象の種別"] button[aria-pressed="true"]',
+      )?.textContent;
+      return {
+        atm: atm ? Number(atm) : null,
+        basis: /（([AB])）/.exec(foot)?.[1] ?? 'B',
+        month,
+        target,
+      };
+    }, ACTIVE_WRAP);
+  /** その K の行を枠の中央に置いた（スクロールした）うえで、ボタンを押す */
+  const centerRow = (k) =>
+    page.evaluate(
+      ({ sel, k }) => {
+        const wrap = document.querySelector(sel);
+        const tr = wrap?.querySelector(`tr[data-k="${k}"]`);
+        if (!wrap || !tr) return false;
+        const r = tr.getBoundingClientRect();
+        const b = wrap.getBoundingClientRect();
+        wrap.scrollTop += r.top - b.top - wrap.clientHeight / 2;
+        return true;
+      },
+      { sel: ACTIVE_WRAP, k },
+    );
+  /** 行が枠の中央 ±1 行（端で中央に来られない行は枠の中に見えている） */
+  const centered = (k) =>
+    page.evaluate(
+      ({ sel, k }) => {
+        const wrap = document.querySelector(sel);
+        const tr = wrap?.querySelector(`tr[data-k="${k}"]`);
+        if (!wrap || !tr) return { ok: false, why: '行が無い' };
+        const head = wrap.querySelector('thead')?.getBoundingClientRect().height ?? 0;
+        const b = wrap.getBoundingClientRect();
+        const r = tr.getBoundingClientRect();
+        const mid = b.top + head + (wrap.clientHeight - head) / 2;
+        const off = r.top + r.height / 2 - mid;
+        const atEdge =
+          wrap.scrollTop <= 0 || wrap.scrollTop >= wrap.scrollHeight - wrap.clientHeight - 1;
+        const inside = r.top >= b.top + head - 1 && r.bottom <= b.top + wrap.clientHeight + 1;
+        return {
+          ok: Math.abs(off) <= r.height + 1 || (atEdge && inside),
+          why: `中央からの差 ${Math.round(off)}px`,
+          hit: tr.classList.contains('hit'),
+        };
+      },
+      { sel: ACTIVE_WRAP, k },
+    );
+
+  const start = await counts();
+  const i0 = await info();
+  const month = chain.months.find((m) => m.id === i0.month);
+  const atm = i0.atm;
+  // (a) ATM − 2,000 の put の bid
+  const k = (atm ?? 0) - 2000;
+  if (phoneSize && i0.target !== 'put')
+    await page.click('section.board [aria-label="対象の種別"] button:has-text("put")');
+  await centerRow(k);
+  const bidBtn = page.locator(`${ACTIVE_WRAP} button[aria-label^="${fmtK(k)} put bid "]`);
+  const bidText = (await bidBtn.textContent())?.trim() ?? '';
+  await bidBtn.click();
+  await twoFrames(page);
+  const a = await counts();
+  const badgeA = await page
+    .locator(`${ACTIVE_WRAP} tr[data-k="${k}"] .legbadge.sell`)
+    .allTextContents();
+  check(
+    `#85 AC-9(a) ${tag} ATM−2,000（${fmtK(k)}）の put の bid: 次の描画で 行 +1・マーカー +1（その足が .sel）・バッジ 売1・トースト`,
+    a.rows === start.rows + 1 &&
+      a.marks === start.marks + 1 &&
+      a.sel !== null &&
+      a.sel !== start.sel &&
+      badgeA.includes('売1') &&
+      a.toast.includes(`売 P ${fmtK(k)} @${bidText} を追加`) &&
+      (!phoneSize || Number(a.dock) === start.rows + 1),
+    `行 ${start.rows}→${a.rows}・マーカー ${start.marks}→${a.marks}・選択 ${a.sel}・バッジ ${badgeA.join(' ')}・ドック ${a.dock}・${a.toast.join(' / ')}`,
+  );
+  check(
+    `#85 AC-9(a) ${tag} 市場のパネルは開いたまま`,
+    a.boardShown && (phoneSize ? a.panel === 'board' : a.market === 'board'),
+    `${a.panel} / ${a.market}`,
+  );
+  // (b) 同じ K の call の ask（5 列は call に替えて）
+  if (cols === 5) {
+    await page.click('section.board [aria-label="対象の種別"] button:has-text("call")');
+    await twoFrames(page);
+  }
+  await centerRow(k);
+  const askBtn = page.locator(`${ACTIVE_WRAP} button[aria-label^="${fmtK(k)} call ask "]`);
+  const askText = (await askBtn.textContent())?.trim() ?? '';
+  await askBtn.click();
+  await twoFrames(page);
+  const b = await counts();
+  check(
+    `#85 AC-9(b) ${tag} 同じ K の call の ask で 買 C`,
+    b.rows === a.rows + 1 &&
+      b.marks === a.marks + 1 &&
+      b.toast.includes(`買 C ${fmtK(k)} @${askText} を追加`),
+    `行 ${b.rows}・${b.toast.join(' / ')}`,
+  );
+  // (c) [元に戻す]
+  await page
+    .locator('.toast', { hasText: `買 C ${fmtK(k)}` })
+    .locator('button', { hasText: '元に戻す' })
+    .click();
+  await twoFrames(page);
+  const c = await counts();
+  const badgeC = await page.locator(`${ACTIVE_WRAP} tr[data-k="${k}"] .legbadge.buy`).count();
+  check(
+    `#85 AC-9(c) ${tag} トーストの [元に戻す] で足が消える（行・マーカー・バッジが元の数）`,
+    c.rows === a.rows && c.marks === a.marks && badgeC === 0 && (!phoneSize || c.dock === a.dock),
+    `行 ${c.rows}・マーカー ${c.marks}・買のバッジ ${badgeC}`,
+  );
+  if (cols === 5) {
+    await page.click('section.board [aria-label="対象の種別"] button:has-text("put")');
+    await twoFrames(page);
+  }
+  // レビュー S3: 同じ K に両側の売り・買い（バッジ 4 つ）でも P bid のボタンが押せる（バッジに当たらない）
+  if (cols !== 5 && atm !== null) {
+    await centerRow(atm);
+    for (const lbl of ['call bid', 'call ask', 'put bid', 'put ask']) {
+      await page.locator(`${ACTIVE_WRAP} button[aria-label^="${fmtK(atm)} ${lbl} "]`).click();
+      await twoFrames(page);
+    }
+    const before = await counts();
+    const geo = await page.evaluate(
+      ({ sel, k }) => {
+        const tr = document.querySelector(sel)?.querySelector(`tr[data-k="${k}"]`);
+        const btn = [...(tr?.querySelectorAll('button') ?? [])].find((b) =>
+          b.getAttribute('aria-label')?.includes(' put bid '),
+        );
+        const badges = [...(tr?.querySelectorAll('.legbadge') ?? [])].map((e) =>
+          e.getBoundingClientRect(),
+        );
+        const b = btn?.getBoundingClientRect();
+        if (!b) return null;
+        // バッジと重なる所（無ければボタンの左下）を押す
+        const over = badges.find((r) => r.right > b.left && r.left < b.right);
+        const x = over
+          ? (Math.max(over.left, b.left) + Math.min(over.right, b.right)) / 2
+          : b.left + 3;
+        const y = over ? (over.top + over.bottom) / 2 : b.bottom - 3;
+        return { x, y, overlap: !!over, n: badges.length };
+      },
+      { sel: ACTIVE_WRAP, k: atm },
+    );
+    if (geo) await page.mouse.click(geo.x, geo.y);
+    await twoFrames(page);
+    const after = await counts();
+    check(
+      `#85 レビュー S3 ${tag} バッジ ${geo?.n ?? 0} つの行の P bid を${geo?.overlap ? 'バッジと重なる所で' : ''}押すと足が入る`,
+      !!geo &&
+        geo.n >= 4 &&
+        after.rows === before.rows + 1 &&
+        after.toast.some((t) => t?.startsWith(`売 P ${fmtK(atm)} `)),
+      `${before.rows} → ${after.rows}`,
+    );
+  }
+
+  // (d) [ATM]・OTM 20%・|Δ| .10: その K が枠の中央 ±1 行、強調 0.9 秒（±0.3）、ページ・シートは動かない
+  if (month) {
+    const rows = R.boardRows(chain, month);
+    const x0 = R.referencePrice(month, i0.basis);
+    const jumps = [
+      ['ATM', 'button[aria-label="ATM へ"]', R.atmStrike(month, i0.basis)],
+      ['OTM 20%', 'button[aria-label="OTM 20% へ"]', R.jumpToOtm(rows, 'put', x0, 0.2)],
+      ['|Δ| .10', 'button[aria-label="|Δ| 0.10 へ"]', R.jumpToDelta(rows, 'put', 0.1)],
+    ];
+    for (const [name, sel, want] of jumps) {
+      // いったん表の先頭へ（ジャンプで動くことを確かめる）
+      await page.evaluate((s) => {
+        const w = document.querySelector(s);
+        if (w) w.scrollTop = 0;
+      }, ACTIVE_WRAP);
+      const before = await pageScroll();
+      await page.click(`section.board .board-tools ${sel}`);
+      const t0 = Date.now();
+      await twoFrames(page);
+      const at = await centered(want);
+      let off = null;
+      while (Date.now() - t0 < 2000) {
+        const st = await centered(want);
+        if (!st.hit) {
+          off = Date.now() - t0;
+          break;
+        }
+        await page.waitForTimeout(25);
+      }
+      const after = await pageScroll();
+      check(
+        `#85 AC-9(d) ${tag} ${name} → ${fmtK(want)}: 枠の中央 ±1 行・強調が付いて ${off ?? '—'}ms で外れる・ページ / シートは動かない`,
+        at.ok &&
+          at.hit &&
+          off !== null &&
+          off >= 600 &&
+          off <= 1200 &&
+          JSON.stringify(before) === JSON.stringify(after),
+        `${at.why}・${JSON.stringify(before)} → ${JSON.stringify(after)}`,
+      );
+    }
+  }
+
+  // (e) ask ≤ 50 円: 見えている行の ask がすべて 50 以下、絞り込み中に [ATM] で外れて ATM へ
+  {
+    const chip = page.locator('section.board .board-tools .chip:has-text("ask ≤ 50 円")');
+    await chip.click();
+    await twoFrames(page);
+    const asks = await page.evaluate((s) => {
+      const wrap = document.querySelector(s);
+      return [...(wrap?.querySelectorAll('button[aria-label*=" put ask "]') ?? [])].map(
+        (b) => b.textContent,
+      );
+    }, ACTIVE_WRAP);
+    const nums = asks.map((t) => Number((t ?? '').replace(/,/g, '')));
+    check(
+      `#85 AC-9(e) ${tag} ask ≤ 50 円: 行の put の ask がすべて 50 以下（${nums.length} 行）`,
+      (await chip.getAttribute('aria-pressed')) === 'true' &&
+        nums.length > 0 &&
+        nums.every((v) => Number.isFinite(v) && v <= 50),
+      nums.slice(0, 8).join(' '),
+    );
+    await page.click('section.board .board-tools button[aria-label="ATM へ"]');
+    await twoFrames(page);
+    await twoFrames(page);
+    const st = await centered(atm);
+    check(
+      `#85 AC-9(e) ${tag} 絞り込み中に [ATM] で絞り込みが外れて ATM へ`,
+      (await chip.getAttribute('aria-pressed')) === 'false' && st.ok,
+      st.why,
+    );
+  }
+
+  // (f) 5 列で put → call を替えても枠の中央の K が ±1 行
+  if (cols === 5) {
+    const mid = () =>
+      page.evaluate((s) => {
+        const wrap = document.querySelector(s);
+        if (!wrap) return null;
+        const head = wrap.querySelector('thead')?.getBoundingClientRect().height ?? 0;
+        const b = wrap.getBoundingClientRect();
+        const y = b.top + head + (wrap.clientHeight - head) / 2;
+        const trs = [...wrap.querySelectorAll('tbody tr')];
+        const i = trs.findIndex((tr) => tr.getBoundingClientRect().bottom >= y);
+        return { i, k: Number(trs[i]?.getAttribute('data-k')) };
+      }, ACTIVE_WRAP);
+    await page.evaluate((s) => {
+      const w = document.querySelector(s);
+      if (w) w.scrollTop += 700;
+    }, ACTIVE_WRAP);
+    const m0 = await mid();
+    await page.click('section.board [aria-label="対象の種別"] button:has-text("call")');
+    await twoFrames(page);
+    await twoFrames(page);
+    const m1 = await mid();
+    check(
+      `#85 AC-9(f) ${tag} 5 列で put → call: 枠の中央の K が ±1 行`,
+      !!m0 && !!m1 && Math.abs(m0.i - m1.i) <= 1,
+      `${fmtK(m0?.k)} → ${fmtK(m1?.k)}`,
+    );
+    await page.click('section.board [aria-label="対象の種別"] button:has-text("put")');
+    await twoFrames(page);
+  }
+
+  // (h) スマイル: タップ・もう一度タップ・長押し + 横ドラッグ・. ・[×]・[売り]・ホイール / ⟲・横軸
+  if (phoneSize) await setShell(page, 'smile', 'peek');
+  else await page.click('section.board .panel-head .seg button:has-text("スマイル")');
+  await page.waitForTimeout(250);
+  const S = 'section.smile .smile-month:not(.inactive) .smile-wrap';
+  const actK = () =>
+    page
+      .locator('section.smile .smile-act .k')
+      .textContent({ timeout: 300 })
+      .catch(() => null);
+  /** mid の点の中心（画面の座標。ATM の縦線に近いものから） */
+  const points = await page.evaluate((s) => {
+    const wrap = document.querySelector(s);
+    const svg = wrap?.querySelector('svg');
+    const d = svg?.querySelector('.pt.mid')?.getAttribute('d') ?? '';
+    const atm = Number(svg?.querySelector('line.atm')?.getAttribute('x1') ?? Number.NaN);
+    const b = svg?.getBoundingClientRect();
+    const pts = [...d.matchAll(/M([\d.]+) ([\d.]+)a2\.5/g)].map((m) => ({
+      x: Number(m[1]) + 2.5,
+      y: Number(m[2]),
+    }));
+    if (!b) return [];
+    return pts
+      .map((p) => ({ x: b.left + p.x, y: b.top + p.y, d: Math.abs(p.x - atm) }))
+      .sort((a, c) => a.d - c.d);
+  }, S);
+  const p0 = points[0];
+  if (!p0) check(`#85 AC-9(h) ${tag} スマイルの点`, false, '点が無い');
+  else {
+    await page.mouse.click(p0.x, p0.y);
+    await twoFrames(page);
+    const k1 = await actK();
+    // 続けて押すとダブルクリック（リセット）になるので間を空ける
+    await page.waitForTimeout(600);
+    await page.mouse.click(p0.x, p0.y);
+    await twoFrames(page);
+    const k2 = await actK();
+    check(
+      `#85 AC-9(h) ${tag} 点のタップで操作行に K、同じ点のタップで解除`,
+      !!k1 && k2 === null,
+      `${k1} → ${k2}`,
+    );
+    // 長押し（0.5 秒）して横に 60px ドラッグ
+    await page.mouse.move(p0.x, p0.y);
+    await page.mouse.down();
+    await page.waitForTimeout(550);
+    const k3 = await actK();
+    await page.mouse.move(p0.x + 60, p0.y, { steps: 12 });
+    await page.mouse.up();
+    await twoFrames(page);
+    const k4 = await actK();
+    check(
+      `#85 AC-9(h) ${tag} 長押し + 横に 60px で選択の K が変わる`,
+      !!k3 && !!k4 && k3 !== k4,
+      `${k3} → ${k4}`,
+    );
+    await page.locator(S).focus();
+    await page.keyboard.press('.');
+    await twoFrames(page);
+    const k5 = await actK();
+    check(`#85 AC-9(h) ${tag} . で次の K`, !!k5 && k5 !== k4, `${k4} → ${k5}`);
+    const before = await counts();
+    await page.click('section.smile .smile-act button[aria-label*="を売り"]');
+    await twoFrames(page);
+    const after = await counts();
+    check(
+      `#85 AC-9(h) ${tag} [売り] で足 +1 とトースト`,
+      after.rows === before.rows + 1 &&
+        after.toast.some((t) => /^売 [PC] .* を追加$/.test(t ?? '')),
+      `${before.rows} → ${after.rows}・${after.toast.join(' / ')}`,
+    );
+    await page.click('section.smile .smile-act button[aria-label="選択を消す"]');
+    await twoFrames(page);
+    check(`#85 AC-9(h) ${tag} [×] で選択が消える`, (await actK()) === null);
+    const ticks = () => page.locator(`${S} .ax .tx`).allTextContents();
+    const t0 = await ticks();
+    const box = await page.locator(S).boundingBox();
+    if (box) {
+      await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+      for (let i = 0; i < 3; i++) {
+        await page.mouse.wheel(0, -200);
+        await page.waitForTimeout(50);
+      }
+    }
+    await twoFrames(page);
+    const t1 = await ticks();
+    await page.click('section.smile .panel-head button[aria-label="リセット"]');
+    await twoFrames(page);
+    const t2 = await ticks();
+    check(
+      `#85 AC-9(h) ${tag} ホイールで横軸の範囲が狭まり ⟲ で戻る`,
+      JSON.stringify(t0) !== JSON.stringify(t1) && JSON.stringify(t0) === JSON.stringify(t2),
+      `${t0.at(0)}〜${t0.at(-1)} → ${t1.at(0)}〜${t1.at(-1)} → ${t2.at(0)}〜${t2.at(-1)}`,
+    );
+    await page.click('section.smile [aria-label="横軸"] button:has-text("moneyness")');
+    await twoFrames(page);
+    const tm = await ticks();
+    await page.click('section.smile [aria-label="横軸"] button[aria-label="デルタ"]');
+    await twoFrames(page);
+    const td = await ticks();
+    await page.click('section.smile [aria-label="横軸"] button:has-text("行使価格")');
+    await twoFrames(page);
+    check(
+      `#85 AC-9(h) ${tag} 横軸の Seg で目盛りの文言が変わる`,
+      tm.some((t) => t.includes('%')) && td.some((t) => /^[PC] /.test(t) || t === '0.50'),
+      `${tm.slice(0, 3).join(' ')} / ${td.slice(0, 3).join(' ')}`,
+    );
+  }
+  // (g) 限月を替えると板の行とスマイルが別の限月になり、スマイルの選択が消える
+  {
+    await page.locator(S).focus();
+    await page.keyboard.press('.');
+    await twoFrames(page);
+    const picked = await actK();
+    const other = chain.months.find((m) => m.id !== i0.month)?.id;
+    await page.click(`section.smile [aria-label="限月"] button[aria-label="${other} 限"]`);
+    await twoFrames(page);
+    const sm = await page
+      .locator('section.smile .smile-month:not(.inactive)')
+      .getAttribute('data-month');
+    const k6 = await actK();
+    if (phoneSize) await setShell(page, 'board', 'peek');
+    else await page.click('section.smile .panel-head .seg button:has-text("板")');
+    await twoFrames(page);
+    const bm = (await info()).month;
+    check(
+      `#85 AC-9(g) ${tag} 限月の切替: 板とスマイルが ${other}・スマイルの選択が消える`,
+      !!picked && sm === other && bm === other && k6 === null,
+      `選択 ${picked} → ${k6}・板 ${bm}・スマイル ${sm}`,
+    );
+    await page.click(`section.board [aria-label="限月"] button[aria-label="${i0.month} 限"]`);
+    await twoFrames(page);
+  }
+  const lf = await page.evaluate(() =>
+    window.__loafOk ? window.__loaf.filter((d) => d > 50).length : -1,
+  );
+  console.log(`      ${tag} 市場の手順の Long Animation Frame（50ms 超・記録）: ${lf} 件`);
+  await ctx.close();
+}
+
+/** AC-10: 322 行の板（合成）で、行数・各操作の Long Animation Frame 0 件・限月の切替の時間（記録） */
+async function marketWideFlows(vp) {
+  const tag = `${vp.width}x${vp.height} 322 行`;
+  const phoneSize = vp.width <= PHONE_MAX;
+  const ctx = await newContext(vp, { [WORKSPACE_KEY]: twoLegs, [PREFS_KEY]: prefsText('dark') });
+  await ctx.addInitScript(LOAF_INIT);
+  await routeWide(ctx);
+  const page = await ctx.newPage();
+  await page.goto(pageUrl('next'));
+  await waitReady(page, 'next');
+  if (phoneSize) await setShell(page, 'board', 'peek');
+  await page.waitForTimeout(500);
+  const loafOk = await page.evaluate(() => window.__loafOk === true);
+  const mark = () => page.evaluate(() => window.__loaf.length);
+  const since = (i) => page.evaluate((n) => window.__loaf.slice(n).filter((d) => d > 50), i);
+  const rows = await page.locator(`${ACTIVE_WRAP} tbody tr`).count();
+  check(`#85 AC-10(a) ${tag} 表の行が 322`, rows === 322, `${rows} 行`);
+  const results = [];
+  // 隠れた表の空き時間の割り付け（regions/Board.tsx）が済むのを待ってから測る
+  const settle = () =>
+    page
+      .waitForSelector('section.board .board-months[data-warm="done"]', { timeout: 5000 })
+      .catch(() => null);
+  const run = async (name, fn) => {
+    await settle();
+    await page.waitForTimeout(300);
+    const m = await mark();
+    await fn();
+    await page.waitForTimeout(300);
+    const l = await since(m);
+    results.push([name, l]);
+  };
+  const box = await page.locator(ACTIVE_WRAP).boundingBox();
+  await run('板の枠のホイール 20 回', async () => {
+    if (!box) return;
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    for (let i = 0; i < 20; i++) {
+      await page.mouse.wheel(0, i < 10 ? 240 : -240);
+      await page.waitForTimeout(30);
+    }
+  });
+  await run('put / call の切替 10 回', async () => {
+    for (let i = 0; i < 10; i++) {
+      await page.click(
+        `section.board [aria-label="対象の種別"] button:has-text("${i % 2 ? 'put' : 'call'}")`,
+      );
+      await twoFrames(page);
+    }
+  });
+  const months = await page.locator('section.board [aria-label="限月"] button').count();
+  const times = [];
+  await run('限月の切替 10 回', async () => {
+    for (let i = 0; i < 10; i++) {
+      const t = await page.evaluate(
+        (n) =>
+          new Promise((r) => {
+            const b = document.querySelectorAll('section.board [aria-label="限月"] button')[n];
+            const t0 = performance.now();
+            b?.click();
+            requestAnimationFrame(() => requestAnimationFrame(() => r(performance.now() - t0)));
+          }),
+        (i + 1) % months,
+      );
+      times.push(t);
+      await page.waitForTimeout(50);
+    }
+  });
+  const chips = [
+    'ATM へ',
+    'OTM 10% へ',
+    'OTM 20% へ',
+    'OTM 30% へ',
+    '|Δ| 0.05 へ',
+    '|Δ| 0.10 へ',
+    '|Δ| 0.20 へ',
+    '|Δ| 0.30 へ',
+  ];
+  await run('ジャンプ 8 回', async () => {
+    for (const c of chips) {
+      await page.click(`section.board .board-tools button[aria-label="${c}"]`);
+      await twoFrames(page);
+    }
+  });
+  await run('bid / ask での追加 5 回', async () => {
+    await page.click('section.board .board-tools button[aria-label="ATM へ"]');
+    await twoFrames(page);
+    const btns = page.locator(`${ACTIVE_WRAP} tr.atm button`);
+    const n = await btns.count();
+    for (let i = 0; i < 5; i++) {
+      await btns.nth(i % n).click();
+      await twoFrames(page);
+    }
+  });
+  if (phoneSize) await setShell(page, 'smile', 'peek');
+  else await page.click('section.board .panel-head .seg button:has-text("スマイル")');
+  await page.waitForTimeout(300);
+  const sb = await page
+    .locator('section.smile .smile-month:not(.inactive) .smile-wrap')
+    .boundingBox();
+  await run('スマイルのドラッグ（パン）と拡大縮小', async () => {
+    if (!sb) return;
+    const x = sb.x + sb.width / 2;
+    const y = sb.y + sb.height / 2;
+    await page.mouse.move(x, y);
+    for (let i = 0; i < 4; i++) {
+      await page.mouse.wheel(0, -150);
+      await page.waitForTimeout(40);
+    }
+    await page.mouse.down();
+    await page.mouse.move(x + 80, y, { steps: 20 });
+    await page.mouse.up();
+    for (let i = 0; i < 4; i++) {
+      await page.mouse.wheel(0, 150);
+      await page.waitForTimeout(40);
+    }
+  });
+  for (const [name, l] of results) {
+    check(
+      `#85 AC-10(b) ${tag} ${name}の Long Animation Frame（50ms 超）0 件`,
+      loafOk && l.length === 0,
+      loafOk
+        ? `${l.length} 件${l.length ? `（${l.map((d) => Math.round(d)).join('・')}ms）` : ''}`
+        : '未対応',
+    );
+  }
+  const sorted = [...times].sort((a, b) => a - b);
+  const med = sorted[Math.floor(sorted.length / 2)] ?? Number.NaN;
+  console.log(
+    `      ${tag} AC-10(c) 限月の切替のクリックから次の描画まで（記録）: 中央値 ${med.toFixed(1)}ms（${sorted.map((t) => t.toFixed(0)).join('・')}）`,
+  );
+  await ctx.close();
+}
+
+/** AC-12: 新しい画面で限月・種別・ask ≤ 50 円・横軸を替え → 再読み込み → 旧画面で同じ */
+async function marketPersistFlow() {
+  const vp = { width: 1440, height: 900 };
+  const ctx = await newContext(vp, { [WORKSPACE_KEY]: twoLegs, [PREFS_KEY]: prefsText('dark') });
+  const page = await ctx.newPage();
+  await page.goto(pageUrl('next'));
+  await waitReady(page, 'next');
+  const monthBtn = page.locator('section.board [aria-label="限月"] button').nth(1);
+  const monthText = (await monthBtn.textContent())?.trim();
+  const monthLabel = await monthBtn.getAttribute('aria-label');
+  await monthBtn.click();
+  await page.click('section.board [aria-label="対象の種別"] button:has-text("call")');
+  await page.click('section.board .board-tools .chip:has-text("ask ≤ 50 円")');
+  await page.click('section.board .panel-head .seg button:has-text("スマイル")');
+  await page.click('section.smile [aria-label="横軸"] button:has-text("moneyness")');
+  await page.waitForTimeout(800);
+  await page.reload();
+  await waitReady(page, 'next');
+  const pressed = (sel) =>
+    page.evaluate((s) => document.querySelector(s)?.textContent?.trim() ?? null, sel);
+  const nextMonth = await pressed('section.board [aria-label="限月"] button[aria-pressed="true"]');
+  const nextTarget = await pressed(
+    'section.board [aria-label="対象の種別"] button[aria-pressed="true"]',
+  );
+  const nextFilter = await page
+    .locator('section.board .board-tools .chip:has-text("ask ≤ 50 円")')
+    .getAttribute('aria-pressed');
+  check(
+    '#85 AC-12 新しい画面の再読み込みで限月・種別・ask ≤ 50 円が残る',
+    nextMonth === monthText && nextTarget === 'call' && nextFilter === 'true',
+    `${nextMonth}・${nextTarget}・${nextFilter}`,
+  );
+  await page.goto(pageUrl('legacy'));
+  // 表示中の限月が 2 つ目なので、先頭の .board-table（隠れた限月）ではなく表示中の板を待つ
+  await page.waitForSelector('.board:not(.inactive) .board-table', { timeout: 20000 });
+  await page.waitForTimeout(400);
+  const old = await page.evaluate(() => ({
+    month: document.querySelector('nav.tabs button[aria-pressed="true"]')?.textContent?.trim(),
+    target: document
+      .querySelector(
+        '.board:not(.inactive) fieldset[aria-label="対象の種別"] button[aria-pressed="true"]',
+      )
+      ?.textContent?.trim(),
+    filter: [...document.querySelectorAll('.board:not(.inactive) .board-tools > button')]
+      .find((b) => b.textContent?.includes('ask'))
+      ?.getAttribute('aria-pressed'),
+    axis: document
+      .querySelector(
+        '.smile:not(.inactive) fieldset[aria-label="横軸"] button[aria-pressed="true"]',
+      )
+      ?.textContent?.trim(),
+  }));
+  check(
+    '#85 AC-12 旧画面（?ui=next なし）で同じ限月・種別・絞り込み・横軸',
+    old.month === monthLabel &&
+      old.target === 'call' &&
+      old.filter === 'true' &&
+      old.axis === 'moneyness',
+    JSON.stringify(old),
+  );
   await ctx.close();
 }
 

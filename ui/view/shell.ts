@@ -9,7 +9,14 @@ export type Tier = 'phone' | 'tablet' | 'pc';
 export type PanelId = 'positions' | 'board' | 'scenario' | 'metrics' | 'smile';
 /** スマホのシート。hidden = 隠す（舞台が最大）/ peek = 覗く（42dvh）/ full = 全開（舞台はミニ 92px） */
 export type SheetStage = 'hidden' | 'peek' | 'full';
-export type MarketView = 'board' | 'smile';
+/**
+ * 市場の見え方の一覧（PC の見出しの Seg。#85。#79 の IV 推移はここに 1 行足す）。
+ */
+export const MARKET_VIEWS = [
+  { value: 'board', text: '板' },
+  { value: 'smile', text: 'スマイル' },
+] as const;
+export type MarketView = (typeof MARKET_VIEWS)[number]['value'];
 
 export interface ShellState {
   panel: PanelId;

@@ -1,14 +1,14 @@
 import type { ComponentChildren } from 'preact';
-import { useRef } from 'preact/hooks';
+import { useMemo, useRef } from 'preact/hooks';
 import {
   dockPanels,
+  MARKET_VIEWS,
   type PanelId,
   type ShellAction,
   type ShellState,
   type Tier,
   visiblePanel,
 } from '../view/shell';
-import { PanelHead } from './PanelHead';
 import { Seg } from './parts/Seg';
 
 /** ドックのボタン（ラベルは短く。アイコンはスマホだけ） */
@@ -20,17 +20,13 @@ const DOCK: Record<PanelId, { text: string; name: string; ic: string }> = {
   smile: { text: 'スマイル', name: 'スマイル', ic: '◡' },
 };
 
-const MARKET_OPTIONS = [
-  { value: 'board', text: '板' },
-  { value: 'smile', text: 'スマイル' },
-] as const;
-
 /**
  * 本体の骨組み（docs/ui-redesign.md §2。状態は ui/view/shell.ts）。3 段階のグリッド・ドック・スマホのシート。
  * 舞台（凡例行 + .panel-body）は #82 の regions/Stage.tsx を stage で、シナリオ（見出し行 + .panel-body）は #83 の
  * regions/Scenario.tsx を scenario で、ポジション（見出し行 + .panel-body）は #84 の regions/Positions.tsx を positions で、
  * 指標 · テール（見出し行 + .panel-body）は #86 の regions/Metrics.tsx を metrics で受ける。
- * 他の領域は見出し行だけ（#85 が入れる）。
+ * 板・スマイル（見出し行 + .panel-body）は #85 の regions/Board.tsx・Smile.tsx を board / smile で受ける。
+ * PC の見出しの市場の Seg（MARKET_VIEWS）はここで作って渡す（板・スマイルの見出し行の子。他の段階は null）。
  * 出し分けは .layout の data-panel・data-sheet・data-market と CSS（style 属性を使わない）。
  */
 export function Shell(p: {
@@ -46,6 +42,9 @@ export function Shell(p: {
   positions: ComponentChildren;
   /** 指標 · テールの中身（見出し行 + .panel-body。#86） */
   metrics: ComponentChildren;
+  /** 板・スマイルの中身（見出し行 + .panel-body。#85）。引数は見出しに置く市場の Seg（PC 以外は null） */
+  board: (marketSeg: ComponentChildren) => ComponentChildren;
+  smile: (marketSeg: ComponentChildren) => ComponentChildren;
 }) {
   const { tier, state, send } = p;
   const panel = visiblePanel(state, tier);
@@ -54,15 +53,20 @@ export function Shell(p: {
     tier === 'phone' && panel === id && state.sheet !== 'hidden' ? (
       <Grabber onGrab={(dy) => send({ type: 'grab', dy })} />
     ) : null;
-  const marketSeg =
-    tier === 'pc' ? (
-      <Seg
-        label="市場"
-        value={state.market}
-        options={MARKET_OPTIONS}
-        onChange={(market) => send({ type: 'market', market })}
-      />
-    ) : null;
+  // 市場の Seg は同じ要素を使い回す（板・スマイルの領域の pure を効かせる）
+  const { market } = state;
+  const marketSeg = useMemo(
+    () =>
+      tier === 'pc' ? (
+        <Seg
+          label="市場"
+          value={market}
+          options={MARKET_VIEWS}
+          onChange={(m) => send({ type: 'market', market: m })}
+        />
+      ) : null,
+    [tier, market, send],
+  );
   const dock = dockPanels(tier);
   return (
     <main class="layout" data-panel={panel} data-sheet={state.sheet} data-market={state.market}>
@@ -83,13 +87,11 @@ export function Shell(p: {
       </section>
       <section class="market panel side board" aria-label="板">
         {grabber('board')}
-        <PanelHead title="板">{marketSeg}</PanelHead>
-        <div class="panel-body" />
+        {p.board(marketSeg)}
       </section>
       <section class="market panel side smile" aria-label="スマイル">
         {grabber('smile')}
-        <PanelHead title="スマイル">{marketSeg}</PanelHead>
-        <div class="panel-body" />
+        {p.smile(marketSeg)}
       </section>
       {dock.length > 0 && (
         <nav class="dock" aria-label="パネル">

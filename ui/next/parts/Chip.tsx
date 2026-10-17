@@ -11,12 +11,15 @@ export function Chip(p: {
   disabled?: boolean;
   title?: string;
   warn?: boolean;
+  /** aria-label（文字を短くしたときの全文。省略時は属性を出さない。#85） */
+  label?: string;
 }) {
   return (
     <button
       type="button"
       class={p.warn ? 'chip warn' : 'chip'}
       aria-pressed={p.pressed}
+      aria-label={p.label}
       disabled={p.disabled}
       title={p.title}
       onClick={p.onClick}
