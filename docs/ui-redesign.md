@@ -258,6 +258,26 @@ option-simulator の画面を「書類」から「計器」に作り直すため
 | Esc | メニュー・ポップオーバー・パレット・シートを閉じる |
 | , . < > | スマイル: 選択の移動（今と同じ） |
 
+**段 6 のキー (A)（#89）の規則**（1〜5・G・T。判定は純関数 `ui/view/keys.ts` の `globalKey`、DOM は `ui/next/useGlobalKeys.ts`）:
+
+- **発火しない**（この順で見る。どれかに当たれば何もしない）: (1) IME の変換中（`isComposing`・`key === 'Process'`・`keyCode === 229`）(2) 既に `defaultPrevented`（舞台の描画域・ステッパー・BOX タブ・スマイルなど部品が処理したキー。`document` のバブルで受けるので部品が先に走る）(3) 押しっぱなしの自動繰り返し（`repeat`。T がちらつかない。1〜5・G は 1 回で足りる）(4) 対象が入力欄（`input`（type を問わない。checkbox などもフォーカス中は止める = 安全側）・`textarea`・`select`・`contenteditable`）(5) ふさがっている（`dialog[open]` がある・`ui/next/parts/overlay.ts` で開いているメニュー / ポップオーバー（段 B のパレットも overlay として数える））
+- **修飾**: 1〜5・G・T は Ctrl / ⌘ / Alt のどれかが押されていれば発火しない（ブラウザの Ctrl + 1・⌘ + T などを奪わない）。Shift は G・T の大小を問わない（数字は Shift で `key` が記号になるので自然に外れる）。Ctrl / ⌘ + K（Alt・Shift なし、`key` の小文字が `k`）はパレット。**段 B まで奪わない**（フックの `onPalette` が渡されたときだけ `preventDefault` して呼ぶ。段 A の画面は渡さない = Ctrl / ⌘ + K を食べて何もしない期間を作らない）
+- **1〜5**（`panelKeyActions(panel, tier)` が `ShellAction[]` を返す。`open` は今の規則のまま = 閉じない・hidden なら peek）:
+
+  | キー | スマホ | タブレット | PC |
+  |---|---|---|---|
+  | 1 ポジ | `open positions` | `open positions` | なし（常設） |
+  | 2 板 | `open board` | `open board` | `market board` |
+  | 3 シナリオ | `open scenario` | なし（常設） | なし（常設） |
+  | 4 指標 | `open metrics` | `open metrics` | なし（常設） |
+  | 5 スマイル | `open smile` | `open smile` | `market smile` |
+
+  どの幅でも（「なし」でも）そのあと次のフレーム（`requestAnimationFrame`。PC で市場を切り替えた直後は描き直しの前で `display: none` のため。板は初めて見せたとき幅を測ってから表を作るので、行き先が無ければ 10 フレームまで待つ。その間に利用者がフォーカスを他の要素へ動かしたらやめる）でそのパネルの **スクロールする枠**（`tabindex="-1"`。ポジション・シナリオ・指標・スマイルは `.panel-body`、板は表示中の表の枠 `.board-wrap`（板の `.panel-body` はスクロールしない））へ `focus({ preventScroll: true })`。そのまま ↓・PageDown でパネルが動き、次の Tab でパネルの中の操作に入る。輪はその枠の `:focus-visible` を内側（`outline-offset: -2px`。overflow で切れない・スクロールを出さない）に出す（マウスのクリックで枠にフォーカスが移っても輪は出ない）。**`section` には tabindex を付けない**: フォーカスできる祖先があるとクリックでそこへフォーカスが移り、Chromium のキーボードスクロール（↓・PageDown・Space）はフォーカスのある要素から祖先へ探すので、子孫の枠が動かなくなる（#89 のレビュー R1。枠そのものにフォーカスがあれば動く）
+- **G**: 舞台の描画域 `.chart` が `tabindex="0"`（足 0 本・スマホのミニでは `-1`。`PnlPlot` の条件が正）のときだけ `focus({ preventScroll: true })`。以後は今の描画域のキー（← → ↑ ↓ [ ] + − R 0）
+- **T**: 今の **解決済み** のテーマの反対を明示の設定にする（dark → ライト、light → ダーク。「端末に合わせる」からは抜ける）。書くのは ⋯ / 設定のテーマと同じ `useTheme().choose`（端末のキー `option-simulator.prefs`）
+- `preventDefault` は動作したときだけ（1〜5・T は常に、G は描画域へ移したときだけ。Firefox の「入力で検索」などを出さない）
+- 描画域にフォーカスがあるときの `0`・`R` は描画域のキー（リセット）が勝つ。1〜5・G・T は描画域が処理しないので全体のキーとして効く
+
 ---
 
 ## 5. 部品の一覧
@@ -432,7 +452,7 @@ option-simulator の画面を「書類」から「計器」に作り直すため
 | **3 作業台** | (i) ポジションの行の見た目（枚数ステッパー・⇄・×・トースト [元に戻す]）と詳細 (j) ヘッジ 1 行 (k) 指標のタイルとテール表のバー (l) 足の追加ダイアログ | 0 | i / j / k / l は並列可 |
 | **4 市場** | (m) 板（枠幅で列数・チップ行・バッジ・脚注）(n) スマイル（選択行・ATM の色） | 0 | 並列可 |
 | **5 トップ** | (o) 市場ピル + ポップオーバー（`headerModel` を要約と全文に分ける）(p) BOX タブのチップとメニュー (q) ⋯ メニュー・設定ダイアログ・保存一覧の見た目 (r) トースト化（`persistNote` をトーストへ） | 0 | 並列可 |
-| **6 PC の操作** | (s) コマンドパレット（既存の action を並べる）(t) キー割り当て（1〜5 / G / T） | 0〜5 | 最後 |
+| **6 PC の操作** | (s) コマンドパレット（既存の action を並べる）(t) キー割り当て（1〜5 / G / T）。#89 段 A で (t) を入れた: 判定の純関数 `ui/view/keys.ts`（`globalKey`・`editableTarget`・`panelKeyActions`・`toggledTheme`）+ document の keydown のフック `ui/next/useGlobalKeys.ts`（`NextApp` で 1 回） | 0〜5 | 最後 |
 | **7 仕上げ** | (u) 動き（線の補間・シート・マーカー）(v) PWA（manifest・アイコン・オフラインは板の最後の 1 枚） (w) 旧 CSS の削除、`docs/user-guide.md` の改訂 | すべて | |
 
 - 各段は「スマホ 390 / タブレット 900 / PC 1280・1440・1800 のスクリーンショット」と「幅 360 で横スクロールなし」を AC にする
@@ -453,6 +473,7 @@ option-simulator の画面を「書類」から「計器」に作り直すため
 - **メニュー・ポップオーバー**: `overflow` を切らない親（トップバー・`.panel-head`）に置く。ボタンの親に対する絶対配置 + `.end`（ボタンが画面の右半分なら右端に揃える）。開くのは同時に 1 つ（`ui/next/parts/overlay.ts`）。メニューのキーは `ui/view/menu.ts`、ポップオーバーの開閉は `ui/view/hint.ts` の `hintNext`。**設計からの逸脱（#107）**: 指標のタイル・舞台の読み取りの全文のポップオーバーは「`overflow` を切らない親に置く」の例外として `.panel-body` の中に置き、`within=".panel-body"` で左右の揃えをその `.panel-body` の左右で判定する（画面の幅ではない。1440 の指標パネルの左の列が左へ切れない）。読み取りは舞台の下端にあり `.stage-main` が `overflow: hidden` なので上に開く（`.popover.up`）。スクロールする `.panel-body`（指標）は、開いたときにポップオーバーの下端が見えるまでその中だけを動かす（`revealDelta`。`scrollIntoView` はページ・`overflow: hidden` の祖先まで動かすので使わない）
 - **部品の API**: `Seg`・`Chip` / `ChipRow`・`Stepper`（規則は `ui/view/stepper.ts`。#83 で省略可能な props を足した: `name`（`data-name`）・`disabled`（`aria-disabled`、どの操作でも onChange を呼ばない）・`gestures`（Shift + クリック 10 段・± の長押しの連続・スクラブ・ホイール・全キー。省略時は ↑↓ だけ）・`keepFraction`（d 用。格子に寄せない）・`edit { parse, text, onError }`（数値入力）。省略時の DOM・動きは #81 のまま）・`Menu`・`Popover`・`Dialog`・`useToasts` / `Toasts`（規則は `ui/view/toast.ts`。2.2 秒・[元に戻す] 付き 5 秒・同じ種類は置き換え・最大 3 件。#84 で `useToasts().dropUndo()` を足した = [元に戻す] 付きのトーストだけを閉じる。タブの切り替えで呼ぶ）。#84 で `Seg` の選択肢に省略可能な `label`（そのボタンの `aria-label`。文字を短くしたときの全文。省略時は属性を出さず #81 の DOM のまま）を足した。#107 で `Popover` に省略可能な props を足した: `label` の省略（`aria-label` を出さない = 名前はボタンの中身）・`up`（上に開く `.popover.up`）・`within`（左右の揃えとスクロールの基準の祖先のセレクタ）。省略時の DOM・動きは #81 のまま。全文の中身は `FullText`（`ui/next/parts/FullText.tsx`。表示モデルの `FullRow[]` を 2 列の格子で描くだけ。クラスに `.k`・`.v`・`.s` を使わない）。#85 で `Chip` に省略可能な `label`（`aria-label`。省略時は #81 の DOM のまま）を足した。#87 で省略可能なものを足した（省略時の DOM・動きは #81 のまま）: トーストの `note`（`'info'` 6 秒 / `'warn'` [閉じる] まで。`.toast.note` で説明文として折り返し、`Toasts` の `onDismiss` で [閉じる]）・`keep`（`dropUndo` の対象外）・`useToasts().drop(kind)`（その種類を閉じる）、`Menu` の項目の `sep`（前に `hr.menu-sep`）、`Popover` の `popClass`（`.popover` に足すクラス。市場ピル・警告のタグの `.wide`）。部品の見本は dev だけの `?ui=next&parts`（`ui/next/dev/PartsGallery.tsx`。本番のビルドに入らない）
 - **検査**: `npm run ui:check`（`scripts/uiCheck.mjs`。Playwright の Chromium。CI に入れない。入れるかは #91 で決める）が 360×780・390×844・900×1100・1440×900 × ダーク / ライト（スマホはシート 3 段階）のページの縦・横スクロール（body が `overflow: hidden` で切っているはみ出しも数える）と折り返しの件数を出す。新しい画面で縦か横が 0 より大きければ失敗。#82 からスマホは 5 つのパネル × シート 3 段階のすべてを測り、各状態で舞台の読み取り（`.readout .ro`）が画面内に見えているか（スマホ 3・900 で 5・1440 で 6、値が切れていない）も確かめる（外れたら失敗）。`--flows` には舞台の手順（ハンドル・IV / 時間レール・キー・足マーカー・Long Animation Frame の件数）も入る。#83 から既定の実行でシナリオの `.stepper .val b`・チップが切れていない（`scrollWidth ≤ clientWidth`）ことを「モデルの前提」の閉 / 開の両方で測り、`--flows` にシナリオの手順（ステッパーの各操作・数値入力・プリセット・評価時刻・前提・#82 のレールとの一致・LoAF）が入る。#84 から既定の実行でポジションの `.leg-title` の名前・`@建値`・枚数の `.stepper .val b`・⇄・× が切れていないことを測り、**詳細を 1 本開いた状態**（360×780 peek・390×844 full・900×1100・1440×900）も縦・横・折り返しを測る。`--flows` に作業台の手順（枚数・⇄・× と [元に戻す]・全クリアと [元に戻す]・詳細の入力・足の追加ダイアログ・ヘッジ・舞台の足マーカー → 行の強調・LoAF）が入る。#86 から既定の実行で指標のタイルの `.k`・`.v`・テール表の全セル・（開いていれば）内訳の各行が切れていないこと（と `.panel-body` の中で横にはみ出していないこと）を、スマホの「指標」peek / full・900×1100（ドックで指標を開く）・1440×900 で測り、**内訳を開いた状態**（360×780 peek・390×844 full・900×1100・1440×900）も縦・横・折り返し・読み取りを測る。`--flows` に指標の手順（旧画面の内訳・テール表との値の一致・タイル 5 と読み取りの一致・Δσ ±0.5 の追従（390 は IV レールの ↑ / ↓）・LoAF）が入る。#107 から既定の実行で副題（タイルの `.s`・読み取りの `.s`）の切れがすべて全文のボタン（`aria-expanded`）の中にあり、ボタンの数がタイル 6・読み取りの全文のある項目（ミニは 0）であることを確かめ（外れたら失敗）、既定の足と掛け金の足（買い 2 本）の千円（自動）では切れ 0、円固定の足（売り 5 枚）は件数を出す。`--flows` に全文の手順（タイル 6 枚のタップで全文・内訳との一致・Esc でボタンへ戻る・外側で閉じる・同時に 1 つ・Tab → Enter / Space・窓と `.panel-body` の中・読み取りの損益の全文（上に開く・ハンドルで閉じる）・LoAF）が入る。#85 から既定の実行で市場の検査（板の列の数 = 360・390・900・1200×800・1280×800 で 5、1440 で 7、1800×1000 で 9、見えている行のセル・道具の行・脚注の F / ATM / SQ、スマイルの道具の行・操作行（選択なし / あり）・凡例が切れていない、`.board-wrap` が横にはみ出さない、スマイルの描画域の高さ（360×780 peek で 140px 以上））を、headless の既定の等幅（半角 0.5em）と実機相当の字幅（`--mono` を DejaVu Sans Mono = Menlo と同じ 0.6em にした状態。無い環境では skip）の 2 通りで測る。1200×800・1280×800・1800×1000 は市場の検査だけを判定し、ページ全体の縦・横・折り返しは記録する。`--flows` に市場の手順（bid / ask で足が入る・追従・[元に戻す]・ジャンプと強調・絞り込み・put / call・限月・スマイルの操作・322 行の板（`scripts/synthBoard.ts` の `buildWideChainJson` を dev の板の応答に差し替える。ファイルを書かない）・LoAF・保存の往復）が入る。`--parts`（部品の見本）・`--legacy`（旧画面）・`--flows`（保存・共有・テーマ・キーボードの手順）・`--dom`・`--shots`・`--max-wraps`・`--url`。各子の PR に `npm run ui:check` と `npm run ui:check -- --parts --max-wraps 0` の出力を貼り、縦・横 0px を保ち、折り返しの件数を増やさない
+- **全体のキー**（#89 段 A）: キーの判定は `ui/view/keys.ts` の純関数だけ（`globalKey` など）。`document` の keydown を受けるのは `ui/next/useGlobalKeys.ts` だけ（`NextApp` で 1 回。旧画面・部品の見本には入れない）。開いているメニュー / ポップオーバーは `ui/next/parts/overlay.ts` の `openOverlayId()` で読む（Menu・Popover の動きは変えない）。1〜5 の行き先はパネルのスクロールする枠（`.panel-body`・板の `.board-wrap`。`tabindex="-1"`。セレクタは `useGlobalKeys.ts` の `PANEL_FOCUS`）で、`section` には付けない（4.6）。`--flows` にキーの手順（#89 AC-A4）
 - **知らせ**（#87 (A)）: 知らせの行をやめ、`ui/view/notices.ts` の `noticeRoute` で振り分ける（文はすべて今のまま）。復元・共有を開いた = 情報のトースト、保存した作業を読めない・一部を読めない・共有の URL を読めない = 警告のトースト、保存できない・別のタブ・新しい版 = トップバーの警告のタグ（重い順 新しい版 > 保存できない > 別のタブ）、読み込み中・失敗 = 市場ピル（失敗した瞬間に警告のトーストも。次の成功で消す）、足を追加できない = 警告のトースト（出したら `clearLegError`）、タブが上限のときの共有を開く確認 = ダイアログ（§4.5）。`NextApp` はトーストへ振り分けた知らせを出してから `c.closeNote` で消す（新しい画面の `c.notes` に残るのは警告のタグのものだけ。旧画面は別の `useAppController` なので変わらない）
 - **共有 URL の `?ui=next`**（#87）: `makeShareUrl` は `origin + pathname + search` に `#p=` を付けるので、新しい画面で作った URL には `?ui=next` が残り、受け手も新しい画面で開く（#91 で既定を切り替えた後も開ける）。#91 で既定を切り替えたら外す（外すなら `search` から `ui` を落とすだけ）
 - **検査（#87 (A)）**: `waitReady` は市場ピルの `.pill[data-state]` が `ready` か `failed` になるのを待ち、新しい画面では起動時の知らせのトースト（復元 6 秒など）を [閉じる] で閉じてから測る（下の行・読み取りに重なるため。知らせの手順だけ残す）。既存の手順のトーストの選び方は `.toast:not(.note)`。既定の実行に **トップバーの検査**（4 幅 × ダーク / ライト + 最も混む作業 = タブ 6 個・12 字の名前・保存した板 + 合成の板の読み込みの失敗・別のタブ: 高さが `--top-h`、ピルの時刻・F・ATM・[最新]・⋯ が切れず画面内、トップバーの中の折り返し 0）と **開いた状態の検査**（⋯ メニュー・ピルのポップオーバー・警告のタグのポップオーバー・共有を開く確認・知らせのトースト: 縦・横 0px・折り返し 0・画面内）、`--flows` に #87 (A) の手順（[最新] の読み込み中 / 失敗・ファイルを開く…・限月の切替と旧画面の F / ATM の一致・全文の数値の列が旧画面の `header.header` を含む・知らせのトースト / 警告のタグ / 共有の確認・タブの切り替えで消えるトースト）
@@ -596,3 +617,9 @@ option-simulator の画面を「書類」から「計器」に作り直すため
 - 6: 面の上の点のドラッグは格子を作り直さない・`.live`
 - 8: ±vmax は描いている格子の最大（粗い / 細かいで少し違う）、足 0 本の面モードの凡例は線モードの空の表示
 - 10 段 1 (g): `gesture.ts` の `GestureCtx.surface`、`pnlSurface.ts` の `surfaceDragPatch`・`surfaceActive`
+
+### 2026-10-18 段 6 のキー (A)（#89）
+
+- 4.6: 1〜5・G・T の規則（発火しない条件と順・`repeat`・修飾・1〜5 の幅ごとの表とフォーカスの行き先（スクロールする枠）と輪・G の条件・T の意味・`preventDefault` は動作したときだけ・Ctrl / ⌘ + K は段 B まで奪わない）
+- 10 段 6 (t): `ui/view/keys.ts`・`ui/next/useGlobalKeys.ts`
+- 10.1: 全体のキーの置き場所・`openOverlayId`・1〜5 の行き先はスクロールする枠（`tabindex="-1"`。section には付けない = クリックの後の ↓・PageDown を壊さない）

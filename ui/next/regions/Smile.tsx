@@ -89,7 +89,7 @@ function SmileView(p: SmileRegionProps) {
           <p>{SMILE_LEGEND_HINT}</p>
         </Popover>
       </PanelHead>
-      <div class="panel-body market-body">
+      <div class="panel-body market-body" tabIndex={-1}>
         <div class="smile-tools">
           <MonthSeg
             months={chain.months}
