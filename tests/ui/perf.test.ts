@@ -40,6 +40,15 @@ import {
 import { positionModel } from '../../ui/view/position';
 import { readoutModel } from '../../ui/view/readout';
 import { scenarioMarks } from '../../ui/view/scenarioMarks';
+import {
+  advSummary,
+  betaStepper,
+  evalChips,
+  presetChips,
+  type ScenarioRegionInput,
+  scenarioSteppers,
+  stepperAction,
+} from '../../ui/view/scenarioRegion';
 import { smileModel } from '../../ui/view/smile';
 import {
   bigReadout,
@@ -48,6 +57,7 @@ import {
   stageHandle,
   stageMarkLabels,
 } from '../../ui/view/stage';
+import { stepBy } from '../../ui/view/stepper';
 import { tabsModel } from '../../ui/view/tabs';
 import { M1, M2, makeMarket } from '../support/market';
 import { BUDGET_MS, expectWithinBudget, RECORD_RUNS, record } from '../support/perf';
@@ -690,5 +700,126 @@ describe('性能（#82 AC-8: 舞台の 1 フレーム）', () => {
     };
     expect(railFrame()).toBeGreaterThan(20);
     expectWithinBudget('#82 舞台のレールの 1 フレーム', railFrame, { warmup: 20, runs: 30 });
+  });
+});
+
+/**
+ * #83 AC-6: 新しい画面のシナリオの 1 回（足 10 本・幅 1,000px・高さ 260px）。ステッパー 1 段（Δσ +0.5 → 指定日の線を
+ * 作り直す）とプリセット 1 回（ΔX・Δσ・Δs が変わる）。どちらも reducer + シナリオの表示モデル（ステッパー 4 つ + β・
+ * チップ・要約）+ 損益グラフの表示モデル + 舞台の付属 + 交点 + 指標 + 読み取り。
+ */
+describe('性能（#83 AC-6: シナリオの 1 回）', () => {
+  const { ctx, rows } = makeMarket();
+  const legs = preparePosition(PERF_LEGS, ctx);
+  const uiLegs: UiLeg[] = PERF_LEGS.map((leg, i) => ({ id: i + 1, leg, marks: [] }));
+  const board = {
+    months: [
+      { F: M1.F, rows: rows[M1.id] ?? [] },
+      { F: M2.F, rows: rows[M2.id] ?? [] },
+    ],
+  };
+  const base = pnlDomains(board, legs, ctx);
+  if (!base) throw new Error('損益グラフの基礎が作れない');
+  const DAY = 86_400_000;
+  const targets = [M1, M2].map((m) => ({
+    id: m.id,
+    label: m.id,
+    sqTime: ctx.evalTime + m.days * DAY,
+    lastTradeClose: ctx.evalTime + (m.days - 1) * DAY,
+  }));
+  const state0: State = {
+    ...initialState,
+    scenario: { ...ZERO_SCENARIO, days: 5, dX: -400, dSigma: 2 },
+  };
+  const today = todayLine(base, null, 1000, state0.scenario);
+  let tick = 0;
+
+  function frame(s: State): number {
+    const input: ScenarioRegionInput = {
+      scenario: s.scenario,
+      futureBasis: s.futureBasis,
+      x0: ctx.x0,
+      maxDays: base?.maxDays ?? 0,
+      evalTime: base?.ctx.evalTime ?? null,
+      targets,
+      dXUnit: 'pct',
+    };
+    const views = scenarioSteppers(input);
+    const beta = betaStepper(input);
+    const chips = presetChips(input).length + evalChips(input).length;
+    const summary = advSummary(input);
+    const scenario = s.scenario;
+    const m = pnlChartModel({
+      base,
+      scenario,
+      viewport: null,
+      pnlY: DEFAULT_PNL_Y,
+      plotWidth: 1000,
+      plotHeight: 260,
+      todayYs: today,
+      dateYs: dateLine(base, null, 1000, scenario),
+    });
+    const mm = metricsModel({ base, scenario, unit: 'auto' });
+    const marks = scenarioMarks({ base, scenario, chart: m, unit: mm.unit });
+    const labels = marks ? stageMarkLabels(marks, m) : [];
+    const h = stageHandle(m, marks);
+    const fill = stageFill(m);
+    const ms = legMarkers(uiLegs, base, m, { selected: 1, drag: null });
+    const r = readoutModel({ base, metrics: mm, scenario });
+    const items = bigReadout(r, mm.premium, base?.ctx.evalTime ?? null, scenario.dSigma);
+    return (
+      views.length +
+      (beta.hot ? 1 : 0) +
+      chips +
+      summary.length +
+      m.lines.length +
+      labels.length +
+      (h ? 1 : 0) +
+      fill.gain.length +
+      fill.loss.length +
+      ms.length +
+      mm.tail.rows.length +
+      items.length
+    );
+  }
+
+  it(`ステッパー 1 段（Δσ +0.5）の 1 回が ${BUDGET_MS} ms 以内（30 回の最小値）`, () => {
+    let s = state0;
+    const once = () => {
+      tick = (tick + 1) % 40;
+      const input: ScenarioRegionInput = {
+        scenario: s.scenario,
+        futureBasis: s.futureBasis,
+        x0: ctx.x0,
+        maxDays: base.maxDays,
+        evalTime: base.ctx.evalTime,
+        targets,
+        dXUnit: 'pct',
+      };
+      const view = scenarioSteppers(input)[2];
+      if (!view) throw new Error('Δσ が無い');
+      // 上限に着いたら −10 から（毎回 Δσ が変わる = 指定日の線を作り直す）
+      const next = view.value >= view.spec.max ? view.spec.min : stepBy(view.spec, view.value, 1);
+      const a = stepperAction('dSigma', next, input);
+      if (a) s = reduce(s, a);
+      return frame(s);
+    };
+    expect(once()).toBeGreaterThan(20);
+    expect(s.scenario.dSigma).toBe(2.5);
+    expectWithinBudget('#83 シナリオのステッパー 1 段', once, { warmup: 20, runs: 30 });
+  });
+
+  it(`プリセット 1 回（ΔX・Δσ・Δs）が ${BUDGET_MS} ms 以内（30 回の最小値）`, () => {
+    let s = state0;
+    let k = 0;
+    const once = () => {
+      k = (k + 1) % 3;
+      const a: Action = { type: 'applyPreset', index: k, x0: ctx.x0 };
+      s = reduce(s, a);
+      return frame(s);
+    };
+    expect(once()).toBeGreaterThan(20);
+    expect(s.scenario.dSigma).toBe(8);
+    expectWithinBudget('#83 シナリオのプリセット 1 回', once, { warmup: 20, runs: 30 });
   });
 });

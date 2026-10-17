@@ -1,0 +1,142 @@
+/*
+ * シナリオ（docs/ui-redesign.md §2・§3・§4.2・§5。#83。部品は ui/next/regions/Scenario.tsx）。
+ * ステッパー 4 つ → プリセット → 評価時刻 → 「モデルの前提」。クラス名は試作品に合わせる。色は var(--…) だけ。
+ * ステッパーの列数はシナリオの .panel-body（container-type: inline-size）のコンテナクエリ（≥ 600px で 4 列。値の欄 ≥ 72px = 最長の「−27,100 円」が入る幅）。
+ */
+
+.scn-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--sp-2);
+  padding: 10px var(--sp-3);
+}
+
+.scn-grid > .stepper {
+  width: 100%;
+}
+
+/*
+ * 4 列: ± を 24px・間を 6px に詰めて値の欄を広げる（1440 = シナリオ 605px で値の欄 ≈ 83px。最長の「−27,100 円」≈ 71px
+ * に約 12px の余裕。フォントの違い（Mac / iOS）で切れないように。レビュー S-2）
+ */
+@container (min-width: 600px) {
+  .scn-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 6px;
+  }
+
+  .scn-grid > .stepper {
+    grid-template-columns: 24px minmax(0, 1fr) 24px;
+  }
+}
+
+.scn-err {
+  padding: 0 var(--sp-3) var(--sp-2);
+  color: var(--loss);
+  font-size: var(--fs-sm);
+}
+
+.scn-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 0 var(--sp-3) 10px;
+}
+
+.scn-row .chiprow {
+  flex: 1;
+  min-width: 0;
+}
+
+.scn-row .lab,
+.adv-body .lab {
+  flex: 0 0 auto;
+  color: var(--ink-3);
+  font-size: var(--fs-sm);
+  white-space: nowrap;
+}
+
+.scn-row .note {
+  min-width: 0;
+  color: var(--ink-3);
+  font-size: var(--fs-sm);
+}
+
+details.adv {
+  border-top: 1px solid var(--line);
+}
+
+details.adv summary {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  min-width: 0;
+  padding: var(--sp-2) var(--sp-3);
+  color: var(--ink-2);
+  font-size: var(--fs-sub);
+  list-style: none;
+  cursor: pointer;
+}
+
+details.adv summary::-webkit-details-marker {
+  display: none;
+}
+
+details.adv summary::before {
+  content: "▸";
+  color: var(--ink-3);
+}
+
+details.adv[open] summary::before {
+  content: "▾";
+}
+
+details.adv summary .ttl {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+details.adv summary .vals {
+  min-width: 0;
+  margin-left: auto;
+  overflow: hidden;
+  color: var(--ink-3);
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.adv-body {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 18px;
+  padding: 0 var(--sp-3) var(--sp-3);
+}
+
+.adv-body .item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.adv-body .item.beta > .stepper {
+  width: 132px;
+}
+
+section.scenario .popover p + p {
+  margin-top: var(--sp-1);
+}
+
+/*
+ * PC・タブレット: 舞台の下に常設（グリッドの行は auto）。画面の高さの 40% を超えれば中だけスクロール（舞台の読み取りを
+ * 縮めすぎない）。行が auto なので % ではなく dvh で決める
+ */
+@media (min-width: 720px) {
+  section.scenario {
+    max-height: 40dvh;
+  }
+}

@@ -1,7 +1,9 @@
 /**
  * ステッパー（#81。docs/ui-redesign.md §5・§4.2）の規則。部品は ui/next/parts/Stepper.tsx。
- * スクラブ・ホイール・数値入力・Shift の大きな段は #83。
+ * #83: スクラブ・ホイール・全キー・Shift の大きな段・端数を保つ段（d）・± の長押しの連続・数値入力の長押し。
  */
+
+import { LONG_PRESS_MS, TAP_MOVE_PX } from '../chart/gesture';
 
 export interface StepSpec {
   min: number;
@@ -44,4 +46,139 @@ export function stepKey(key: string): -1 | 0 | 1 {
   if (key === 'ArrowUp') return 1;
   if (key === 'ArrowDown') return -1;
   return 0;
+}
+
+// ---------------------------------------------------------------- #83 の操作
+
+/** スクラブ: この px で 1 段 */
+export const SCRUB_PX = 8;
+/** Shift + クリック・Shift + 矢印・PageUp / PageDown の段の数 */
+export const BIG_STEPS = 10;
+/** ± の長押し: 連続が始まるまでの待ち（ms） */
+export const REPEAT_DELAY_MS = 400;
+/** ± の長押し: 連続の間隔（ms） */
+export const REPEAT_INTERVAL_MS = 80;
+/** 数値入力を開くタッチの長押し（ms。舞台の長押しと同じ） */
+export const EDIT_HOLD_MS = LONG_PRESS_MS;
+/** 長押しを取り消す移動量（px。舞台のタップと同じ） */
+export const EDIT_MOVE_PX = TAP_MOVE_PX;
+
+/** 押した位置からの横の移動量（px）→ 累計の段（0 に向けて切り捨て）。DOM は「今の累計 − 反映済み」だけ動かす */
+export function scrubSteps(dx: number): number {
+  return Number.isFinite(dx) ? Math.trunc(dx / SCRUB_PX) || 0 : 0;
+}
+
+/** ホイール 1 イベント → 段（上 = +1、下 = −1） */
+export function wheelStep(deltaY: number): -1 | 0 | 1 {
+  if (!Number.isFinite(deltaY) || deltaY === 0) return 0;
+  return deltaY < 0 ? 1 : -1;
+}
+
+export type StepperKeyResult = { n: number } | { to: 'min' | 'max' | 'def' } | null;
+
+/**
+ * 値にフォーカスしたキー（§4.2）: ↑ / → +1、↓ / ← −1、Shift + 矢印・PageUp / PageDown ±10、Home / End 端、
+ * R 既定値。+ / − / = などは扱わない（null。拡大縮小は舞台のキー）。
+ */
+export function stepperKey(key: string, shift: boolean): StepperKeyResult {
+  const big = shift ? BIG_STEPS : 1;
+  switch (key) {
+    case 'ArrowUp':
+    case 'ArrowRight':
+      return { n: big };
+    case 'ArrowDown':
+    case 'ArrowLeft':
+      return { n: -big };
+    case 'PageUp':
+      return { n: BIG_STEPS };
+    case 'PageDown':
+      return { n: -BIG_STEPS };
+    case 'Home':
+      return { to: 'min' };
+    case 'End':
+      return { to: 'max' };
+    case 'r':
+    case 'R':
+      return { to: 'def' };
+    default:
+      return null;
+  }
+}
+
+/** ± のクリック 1 回の段（Shift で 10） */
+export function clickSteps(shift: boolean): number {
+  return shift ? BIG_STEPS : 1;
+}
+
+const clampTo = (v: number, lo: number, hi: number) => Math.min(Math.max(v, lo), hi);
+
+/**
+ * 格子に寄せない段（d。§4.2）: 範囲に収めた今の値に n·step を足し、範囲で止める（#82 の stageKey の [ ] と同じ演算順）。
+ * 非有限の値は既定値から。
+ */
+export function stepFree(spec: StepSpec, value: number, n: number): number {
+  const { min, max, step } = spec;
+  const cur = clampTo(Number.isFinite(value) ? value : spec.def, min, max);
+  return clampTo(cur + n * step, min, max);
+}
+
+/** n 段動かす（keepFraction なら stepFree、なければ stepBy の格子） */
+export function stepperMove(
+  spec: StepSpec,
+  value: number,
+  n: number,
+  keepFraction: boolean,
+): number {
+  return keepFraction ? stepFree(spec, value, n) : stepBy(spec, value, n);
+}
+
+/** Home / End / R の行き先 */
+export function stepperJump(spec: StepSpec, to: 'min' | 'max' | 'def'): number {
+  return to === 'min' ? spec.min : to === 'max' ? spec.max : spec.def;
+}
+
+/**
+ * ± の長押し: 押してからの経過（ms）→ それまでに動かした段の累計。押した瞬間に 1、REPEAT_DELAY_MS で 2、
+ * 以後 REPEAT_INTERVAL_MS ごとに +1（単調非減少、1 以上）。
+ */
+export function repeatSteps(elapsedMs: number): number {
+  if (!(elapsedMs >= REPEAT_DELAY_MS)) return 1;
+  return 2 + Math.floor((elapsedMs - REPEAT_DELAY_MS) / REPEAT_INTERVAL_MS);
+}
+
+export type EditOutcome =
+  | { type: 'keep' }
+  | { type: 'set'; value: number }
+  | { type: 'invalid'; message: string };
+
+/**
+ * 数値入力の確定（Enter / フォーカスが外れたとき）: 開いたときの文字列から変わっていなければ keep（何もしない。
+ * 欄の文字列は丸めた値なので、確定すると端数の d・β などが変わる・上限の d が範囲外で拒否されるため）。
+ * 変わっていれば parse の結果（正しければ set、正しくなければ invalid）。前後の空白は比べない。
+ */
+export function editOutcome(
+  opened: string,
+  text: string,
+  parse: (text: string) => { ok: true; value: number } | { ok: false; message: string },
+): EditOutcome {
+  if (text.trim() === opened.trim()) return { type: 'keep' };
+  const r = parse(text);
+  return r.ok ? { type: 'set', value: r.value } : { type: 'invalid', message: r.message };
+}
+
+/**
+ * 段の起点（B-2）。sent = 最後に送ってまだ props に届いていない値（無ければ null）。
+ * 描画で props の値が変わったら（送った値が届いた・ほかの操作で変わった・送る前の値に戻った のどれでも）sent を捨てる
+ * （`sentAfterProps`）。起点は「まだ反映していないフレームの値（pending）→ sent → props」の順。
+ */
+export function sentAfterProps(
+  sent: number | null,
+  prevValue: number,
+  value: number,
+): number | null {
+  return Object.is(prevValue, value) ? sent : null;
+}
+
+export function stepOrigin(pending: number | null, sent: number | null, value: number): number {
+  return pending ?? sent ?? value;
 }
