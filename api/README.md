@@ -8,6 +8,7 @@ optionchan の BigQuery（データセット `optionchan_tokyo` のテーブル�
 | `GET /api/calendar` | 取引カレンダーの最新版 `{schema_version, source, version_at, covered_until, listed_until, days: [{date, is_trading_day, status, name}]}`（日付の昇順）。画面は本番で開いたときと [最新] で読む（取れなければ同梱の版。#39） |
 | `GET /healthz` | 設定の読み込みだけ（BigQuery に触れない） |
 | `/`・`/assets/<path>` | `STATIC_DIR` があるときだけ、Vite のビルド成果物（`dist/`）を配る |
+| `/manifest.webmanifest`・`/favicon.svg`・`/apple-touch-icon.png`・`/icon-192.png`・`/icon-512.png` | `STATIC_DIR` があるときだけ、`dist/` 直下のこの 5 つの名前だけを配る（`no-cache`。名前の集合は `app.py` の `ROOT_FILES`。他の名前は 404。#90） |
 
 作り（`src/simulator_api/`）: `usable.py`（使える板の判定。純関数。定数は `settings.py` の上部）、`chain.py`（板の JSON の組み立て）、`calendar.py`（SQ 日の規則と `/api/calendar` の JSON）、`cache.py`（TTL・LRU と single-flight）、`service.py`（BigQuery の読み方とキャッシュ）、`bq.py`（SQL の読み込みと実行）、`contract.py`（optionchan との契約 = 使う列と型）、`sql/*.sql`、`app.py`（Flask・セキュリティヘッダ）、`log.py`（JSON の構造化ログ）。
 
@@ -21,7 +22,7 @@ optionchan の BigQuery（データセット `optionchan_tokyo` のテーブル�
 | `BQ_LOCATION` | `asia-northeast1` | ロケーション |
 | `MAX_BYTES_BILLED` | `536870912` | 1 ジョブのクエリ量の上限（バイト。1〜512 MiB。超える値は起動時にエラー） |
 | `CHAIN_FILE` | なし | `DATA_SOURCE=file` の板の JSON |
-| `STATIC_DIR` | なし | 静的ファイルのディレクトリ（`index.html` と `assets/`） |
+| `STATIC_DIR` | なし | 静的ファイルのディレクトリ（`index.html`・`assets/`・直下の manifest とアイコン） |
 
 実値（プロジェクト ID など）はリポジトリに書かない。
 

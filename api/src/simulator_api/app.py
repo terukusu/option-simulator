@@ -3,7 +3,8 @@
 - GET /api/chain: 使える最新の板（7.2）を JSON 版 1 で（data/chainTypes.ts）。?at= は後段（#33 では 400）
 - GET /api/calendar: 取引カレンダーの最新版（trading_calendar_latest）
 - GET /healthz: 設定の読み込みだけ（BigQuery に触れない）
-- 静的ファイル: 環境変数 STATIC_DIR があるときだけ / と /assets/<path>（Vite のビルド成果物 = dist/）
+- 静的ファイル: 環境変数 STATIC_DIR があるときだけ / と /assets/<path>（Vite のビルド成果物 = dist/）と、
+  dist/ 直下の決まった名前（ROOT_FILES。manifest とアイコン。#90）
 - 認証はアプリでは行わない（Cloud Run の IAP）。IAP のヘッダは読まない・ログに出さない
 """
 
@@ -18,16 +19,26 @@ from .log import log
 from .service import ChainService, FileChainService, Unavailable
 
 JSON_TYPE = "application/json; charset=utf-8"
-# すべての応答に付けるセキュリティヘッダ（optionchan のビューアーと同じ）。スクリプト・スタイル・画像・XHR は
-# 同じオリジンの同梱ファイルだけ。他のサイトの frame に入れない
+# すべての応答に付けるセキュリティヘッダ（optionchan のビューアー + manifest-src 'self'。#90）。スクリプト・スタイル・
+# 画像・manifest・XHR は同じオリジンの同梱ファイルだけ。他のサイトの frame に入れない
 SECURITY_HEADERS = {
     "Content-Security-Policy": (
-        "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'; "
-        "base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+        "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; manifest-src 'self'; "
+        "connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
     ),
     "X-Content-Type-Options": "nosniff",
     "Referrer-Policy": "no-referrer",
     "X-Frame-Options": "DENY",
+}
+# STATIC_DIR の直下から配る決まった名前 → Content-Type（ホーム画面に追加の manifest とアイコン。元は
+# ui/public/、docs/ui-redesign.md §10.1「PWA」）。名前ごとに固定の経路にする
+# （変数を含む経路を作らない = URL がファイル名に流れない）
+ROOT_FILES: dict[str, str] = {
+    "manifest.webmanifest": "application/manifest+json",
+    "favicon.svg": "image/svg+xml",
+    "apple-touch-icon.png": "image/png",
+    "icon-192.png": "image/png",
+    "icon-512.png": "image/png",
 }
 # 未対応のクエリパラメータ（指定されたら 400。値は応答・ログに出さない）
 REJECTED_PARAMS = ("at",)
@@ -124,6 +135,18 @@ def create_app(runner=None, clock=None, monotonic=None, cfg: st.Settings | None 
             res = send_from_directory(static_dir / "assets", name)
             res.headers["Cache-Control"] = "private, max-age=31536000, immutable"
             return res
+
+        def root_file(name: str, mimetype: str):
+            def view():
+                # ファイルが無ければ send_from_directory が 404。名前はハッシュを持たないので no-cache（ETag で 304）
+                res = send_from_directory(static_dir, name, mimetype=mimetype, max_age=0)
+                res.headers["Cache-Control"] = "no-cache"
+                return res
+
+            return view
+
+        for name, mimetype in ROOT_FILES.items():
+            app.add_url_rule(f"/{name}", endpoint=f"root_file:{name}", view_func=root_file(name, mimetype))
 
     return app
 

@@ -16,7 +16,9 @@
     "perf": "node scripts/perf.mjs",
     "fixtures": "node scripts/fixtures.mjs",
     "fixtures:check": "node scripts/fixtures.mjs --check",
-    "ui:check": "node scripts/uiCheck.mjs"
+    "ui:check": "node scripts/uiCheck.mjs",
+    "icons": "node scripts/icons.mjs",
+    "pwa:check": "node scripts/pwaCheck.mjs"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.14",

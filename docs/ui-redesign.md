@@ -479,14 +479,14 @@ option-simulator の画面を「書類」から「計器」に作り直すため
 | **4 市場** | (m) 板（枠幅で列数・チップ行・バッジ・脚注）(n) スマイル（選択行・ATM の色） | 0 | 並列可 |
 | **5 トップ** | (o) 市場ピル + ポップオーバー（`headerModel` を要約と全文に分ける）(p) BOX タブのチップとメニュー (q) ⋯ メニュー・設定ダイアログ・保存一覧の見た目 (r) トースト化（`persistNote` をトーストへ） | 0 | 並列可 |
 | **6 PC の操作** | (s) コマンドパレット（既存の action を並べる）(t) キー割り当て（1〜5 / G / T）。#89 段 A で (t) を入れた: 判定の純関数 `ui/view/keys.ts`（`globalKey`・`editableTarget`・`panelKeyActions`・`toggledTheme`）+ document の keydown のフック `ui/next/useGlobalKeys.ts`（`NextApp` で 1 回）。#89 段 B で (s) を入れた: 行・検索・キーの純関数 `ui/view/palette.ts`（`paletteItems`・`paletteFilter`・`paletteView`・`paletteKey`）+ 部品 `ui/next/parts/Palette.tsx`（`NextApp` が開閉と実行の振り分け） | 0〜5 | 最後 |
-| **7 仕上げ** | (u) 動き（線の補間・シート・マーカー）(v) PWA（manifest・アイコン・オフラインは板の最後の 1 枚） (w) 旧 CSS の削除、`docs/user-guide.md` の改訂 | すべて | |
+| **7 仕上げ** | (u) 動き（線の補間・シート・マーカー）(v) PWA（manifest・アイコン。#90。オフラインの板は後回し = §11 決定 10） (w) 旧 CSS の削除、`docs/user-guide.md` の改訂 | すべて | |
 
 - 各段は「スマホ 390 / タブレット 900 / PC 1280・1440・1800 のスクリーンショット」と「幅 360 で横スクロールなし」を AC にする
 - 既存の `tests/ui/` は表示モデルのテストなので、そのまま通るはず。追加するのは `pnlSurface`（格子の値）と、折り返しの規則（主要な行の `scrollWidth`）の Playwright の確認
 
 ### 10.1 段 0 で決めた実装の規約（#81。後続の #82〜#91 が従う）
 
-- **入口**: 新しい画面は `?ui=next` だけ（`ui/entry.ts` の `uiVariant`。`ui` がちょうど `next`）。`ui/main.tsx` は保存した作業を 1 回読んでから、旧画面なら今までどおり `App` を描き、新しい画面なら (1) 起動時にある `link[rel="stylesheet"]`（旧 CSS）を集め、(2) テーマを `html[data-theme]` に入れ、(3) `import('./next/main')` が解決した（= 新しい CSS を読み終えた）後に旧 CSS を `disabled` にして描く（読めなければ旧画面を描く）。`ui/index.html` は変えない。旧 CSS の無効化は #91 で消す暫定
+- **入口**: 新しい画面は `?ui=next` だけ（`ui/entry.ts` の `uiVariant`。`ui` がちょうど `next`）。`ui/main.tsx` は保存した作業を 1 回読んでから、旧画面なら今までどおり `App` を描き、新しい画面なら (1) 起動時にある `link[rel="stylesheet"]`（旧 CSS）を集め、(2) テーマを `html[data-theme]` に入れ、(3) `import('./next/main')` が解決した（= 新しい CSS を読み終えた）後に旧 CSS を `disabled` にして描く（読めなければ旧画面を描く）。`ui/index.html` は変えない（入口の仕組みのための script・link を足さないという意味。#90 の PWA の link・meta を head に足すのはこれに当たらない）。旧 CSS の無効化は #91 で消す暫定
 - **置き場所**: 新しい画面は `ui/next/` だけ。領域の部品は `ui/next/regions/<Region>.tsx`（`Stage`・`Scenario`・`Positions`・`Metrics`・`Board`・`Smile`。#82 以降が作る）、共通部品は `ui/next/parts/`、表示のロジックは `ui/view/` の純関数（Preact に依存しない、`tests/ui/` で固める）。旧の部品（`ui/components/*`）を新しい画面に置かない（旧 CSS が効かない）。逆に新しい部品を旧画面に置かない。DOM・CSS を持たないフック（`useAppController`・`useMediaQuery`）は共有してよい
 - **状態**: 作業の状態・保存・共有は `ui/components/useAppController.ts`（旧 `App.tsx` から切り出した。旧画面と同じ `ui/state.ts` の reducer・自動保存・別のタブ・URL 共有・保存一覧の操作・表示モデルの useMemo）。新しい画面だけの見た目の状態は `NextApp` のローカル（`ui/view/shell.ts` 型の純関数 reducer。保存しない）。保存の形式（作業の版 2・保存一覧・URL）を変えるときは設計書を先に直す。#82 で `ui/state.ts` に action を 2 つ足した（保存の形式は変えない）: `changeLegStrike { id, k }`（板の OP の足を同じ id・枚数・売買・限月・種別のまま新しい K の足に置き換える。建値・印・mid は `boardOptionLeg` の新しい K のもの、手入力の IV は外れる）と `restoreLeg { leg, index, expect, tab }`（作業中のタブが `tab` で、その id の今の足が `expect` と構造的に等しい（`expect = null` なら id が無い）ときだけ、置き換えか `index` への挿入で戻す。それ以外は何もしない。#84 の × / 全クリアの [元に戻す] にも使う）
 - **CSS**: `ui/next/next.css` が `css/tokens.css` → `base.css` → `parts.css` → `shell.css` → 領域ごとの `css/<region>.css`（後続が末尾に足す）を `@import`。クラス名は試作品に合わせる（`.layout`・`.panel`・`.panel-head`・`.panel-body`・`.dock`・`.seg`・`.chip`・`.chiprow`・`.stepper`・`.menu`・`.toasts` / `.toast`・`dialog.sheet`・`.tag`・`.ro`・`.tile`・`.leg-row`・`table.board`）。状態は ARIA 属性（`aria-pressed`・`aria-expanded`・`aria-checked`・`aria-disabled`）→ `data-*` 属性 → 短い修飾クラス（`.hot`・`.warn`・`.end`）の順で表す。BEM・CSS Modules は使わない
@@ -509,6 +509,7 @@ option-simulator の画面を「書類」から「計器」に作り直すため
 - **上書きを戻す**（#87 (C)）: `ui/book.ts` に `restoreEntry(book, prev, written)` を足した（保存の形式は変えない）。`useAppController` は追加だけ: 内部の `commit` を `commitWith`（`CommitResult` を返す）の上の薄い包みにし、`onBookOverwriteForUndo(id)`（書き込みは `onBookOverwrite` と同じ。`{ name, prev, written }` を返す）・`onBookRestoreEntry(snap)`（null = 戻した）を足し、`onBookExport` / `onBookImport` は今の副作用のまま知らせ（`BookMessage`）を返す（旧 `Book` は戻り値を捨てるので動きは変わらない）
 - **部品の API（#87 (C)）**: `Dialog` に省略可能な `head`（見出しと × の間）・`after`（`.sheet-body` の後。保存一覧のトースト）・`class` と、中のポップオーバーが開いていれば Esc はそれだけを閉じる規則。`Toasts` は常設の 2 つの読み上げの領域（§5）。縦軸の欄は `ui/next/parts/YAxisFields.tsx`（舞台の ⋯ と設定で共有。もう一方の場所で値が変わったら、欄の文字が今の値を表していなければ値に戻して検証の文を消す）。設定の縦軸を手動に切り替えたときの「いま見ている範囲」は `NextApp` の `yNow`（ref。舞台が描いた後に `useLayoutEffect` で入れる）。`tabMenuModel` に `save`（保存一覧に保存…）、`revealScrollLeft` に省略可能な `pad`（帯の padding。フォーカスの輪が帯の端で切れない）
 - **検査（#87 (C)）**: 開いた状態に設定・保存一覧（名前 3 つ・1 つは 40 字で保存した後）。タブのメニュー・⋯ メニューは URL ができてから撮る。`--flows` に設定と保存一覧の手順（AC-14。390・1440）とタッチの端末のエミュレーション（AC-19。`hasTouch`・`isMobile` の 390×844、帯のスワイプは CDP の `Input.dispatchTouchEvent`（headless の Chromium では `synthesizeScrollGesture` の touch が帯を動かさない）。iPhone の Safari は手動）。設定の手順の Long Animation Frame は、設定を開くと 5 つの変更（単位・手数料・縦軸・basis・テーマ）で 0 件を判定し、ATM の基準の切替だけは参考の行（X₀ が変わり損益の全体を作り直す = 旧画面の `Header` の切替と同じ計算）
+- **PWA**（#90。§11 決定 10）: 置き場所は `ui/public/`（Vite が書き換えずに `dist/` 直下へ写す。ハッシュを付けない）。名前は 5 つだけ: `manifest.webmanifest`（`.json` にしない = イメージの検査が `/app/static` の `*.json` を拒む）・`favicon.svg`（手書きの原本。色は tokens.css のダークの `--bg`・`--accent`、`<script>`・`<style>`・外部参照なし）・`apple-touch-icon.png`（180）・`icon-192.png`・`icon-512.png`。PNG は `npm run icons`（`scripts/icons.mjs`。Playwright の Chromium で SVG を描く。不透明）で作ってコミットし、手で直さない・CI では生成しない（CI は大きさ・形式だけ）。manifest は `display: "browser"`（standalone・fullscreen・minimal-ui にしない。`apple-mobile-web-app-capable` も置かない）・`id` / `start_url` / `scope` は `"./"`（`?ui=next` を含めない。#91 で既定が切り替わればそのまま新しい画面）・`theme_color` / `background_color` はダークの `--bg`。head は `link rel="manifest"`（`crossorigin="use-credentials"` = IAP の cookie を付けさせる）・`rel="icon"` 2 つ（SVG・PNG 192）・`rel="apple-touch-icon"`・`theme-color` 2 つ（`prefers-color-scheme` のダーク / ライトの `--bg`。アプリ内のテーマ選択には追従しない）・`apple-mobile-web-app-title`（`OP Sim`）。参照は `/` 始まり。Flask は 5 つの名前だけを固定の経路で配り（`ROOT_FILES`）、CSP に `manifest-src 'self'`。検査は `tests/ui/pwa.test.ts`・`api/tests/test_app.py`・`image-check.sh`、手元のブラウザでは `npm run pwa:check`（`scripts/pwaCheck.mjs`。ビルドした `dist/` を `STATIC_DIR` にした手元の Flask に対して manifest のエラー・cookie・CSP 違反を見る。ループバック以外は拒む。CI に入れない）
 
 ---
 
@@ -656,3 +657,8 @@ option-simulator の画面を「書類」から「計器」に作り直すため
 - 5: コマンドパレットの行（`ui/next/parts/Palette.tsx`・`<dialog>` を `show()` + 窓いっぱいの下敷き（`showModal()` の inert の作り直しを避ける）・combobox / listbox）
 - 10 段 6 (s): `ui/view/palette.ts`・`ui/next/parts/Palette.tsx`
 - 10.1: パレットの行・検索の置き場所、実行の記述はデータ、`pinMenuRows`・`atmJump`・`marketAddLabel`、`blocked` / `overlay`
+
+### 2026-10-18 段 7 の PWA（#90）
+
+- 10 段 7 (v): manifest・アイコンまで（オフラインの板は後回し = 決定 10）
+- 10.1: 「PWA」の規約（置き場所 `ui/public/`・5 つの名前・`display: browser`・`crossorigin="use-credentials"`・`npm run icons`・`npm run pwa:check`）。入口の「`ui/index.html` は変えない」は head の PWA の link・meta には当たらないことを明記
