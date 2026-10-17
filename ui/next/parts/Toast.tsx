@@ -14,7 +14,7 @@ import {
  * トースト（docs/ui-redesign.md §5・§11-8。規則は ui/view/toast.ts）。下中央（ドックの上）・role="status"・折り返さない。
  * タイマーは次に消える時刻まで 1 本だけ。
  * #87: 知らせのトースト（note 付き）は文を説明文（<p>）として折り返し、[閉じる]（onDismiss）を出す。
- * note の無いトーストの DOM は #81 のまま。
+ * note の無いトーストの DOM は #81 のまま。警告の知らせのトーストは role="alert"（#87 (B)）。
  */
 export function useToasts(): {
   toasts: readonly Toast[];
@@ -80,6 +80,7 @@ export function Toasts(p: {
             class={t.note === 'warn' ? 'toast note warn' : 'toast note'}
             key={t.id}
             data-kind={t.kind}
+            role={t.note === 'warn' ? 'alert' : undefined}
           >
             <p class="txt">{t.text}</p>
             {onDismiss && (

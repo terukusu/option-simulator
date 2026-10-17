@@ -298,6 +298,11 @@ export type Action =
   /** タブの名前を変える（正規化して空・他のタブと同じ名前なら何もしない） */
   | { type: 'renameTab'; id: number; name: string }
   /**
+   * 閉じたタブを戻す（#87 (B) のトーストの [元に戻す]。docs/ui-redesign.md §4.5・§10.1）。restoreTabAction が閉じる前の
+   * state から作る。上限・名前が空・同じ名前のタブがあれば何もしない。active なら作業中にして横軸の表示範囲を viewport に戻す
+   */
+  | RestoreTabAction
+  /**
    * ピンを足す（#22。source は App が作る: ゴーストは今の基礎・シナリオの参照、重ねはタブの id か保存の足の写し）。
    * 上限・同じタブの重ね・無いタブ・作業中のタブの重ねは何もしない
    */
@@ -487,6 +492,65 @@ function renameTab(state: State, id: number, raw: string): State {
 }
 
 const renameActive = (state: State, raw: string): State => renameTab(state, state.activeTab, raw);
+
+/** 閉じたタブを戻す action（#87 (B)）。index は閉じる前の並びの位置、viewport は閉じる前の横軸の表示範囲 */
+export interface RestoreTabAction {
+  type: 'restoreTab';
+  name: string;
+  position: TabPosition;
+  index: number;
+  active: boolean;
+  viewport: Domain | null;
+}
+
+/**
+ * タブ id を閉じる前の写し（closeTab の前に呼ぶ。#87 (B)）。無い id・最後の 1 個（closeTab が何もしない）は null。
+ * 作業中のタブは stashActive、他は退避した saved（同じ参照）
+ */
+export function restoreTabAction(state: State, id: number): RestoreTabAction | null {
+  const index = state.tabs.findIndex((t) => t.id === id);
+  const slot = state.tabs[index];
+  if (!slot || state.tabs.length <= 1) return null;
+  const active = id === state.activeTab;
+  const position = active ? stashActive(state) : slot.saved;
+  if (!position) return null;
+  return {
+    type: 'restoreTab',
+    name: slot.name,
+    position,
+    index,
+    active,
+    viewport: state.pnlViewport,
+  };
+}
+
+/** restoreTab の本体（戻せなければ state のまま。規則は ui/view/boxTabs.ts の restoreTabError と同じ） */
+function restoreTab(state: State, a: RestoreTabAction): State {
+  const name = sanitizeTabName(a.name);
+  if (state.tabs.length >= MAX_TABS || name === '') return state;
+  if (state.tabs.some((t) => t.name === name)) return state;
+  const at = Math.min(Math.max(Math.trunc(a.index) || 0, 0), state.tabs.length);
+  const id = state.nextTabId;
+  if (!a.active) {
+    const tabs = state.tabs.slice();
+    tabs.splice(at, 0, { id, name, saved: a.position });
+    return { ...state, tabs, nextTabId: id + 1 };
+  }
+  const stash = stashActive(state);
+  const tabs: TabSlot[] = state.tabs.map((t) =>
+    t.id === state.activeTab ? { ...t, saved: stash } : t,
+  );
+  tabs.splice(at, 0, { id, name, saved: null });
+  const loaded = loadLegs(state, a.position.legs, SCENARIO_PER_TAB ? a.position.scenario : null);
+  return {
+    ...loaded,
+    tabs,
+    activeTab: id,
+    nextTabId: id + 1,
+    // switchTo と同じ規則（足 0 本なら初期範囲）。違いは表示範囲を閉じる前の値に戻すこと
+    pnlViewport: loaded.legs.length === 0 ? null : a.viewport,
+  };
+}
 
 export function reduce(state: State, action: Action): State {
   switch (action.type) {
@@ -729,6 +793,8 @@ export function reduce(state: State, action: Action): State {
     }
     case 'renameTab':
       return renameTab(state, action.id, action.name);
+    case 'restoreTab':
+      return restoreTab(state, action);
     case 'addPin': {
       const pins = addPin(
         state.pins,

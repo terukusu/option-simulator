@@ -16,7 +16,14 @@ import {
   toSaved,
 } from '../../ui/persist';
 import type { PinNo } from '../../ui/pins';
-import { type Action, initialState, reduce, type State, type UiLeg } from '../../ui/state';
+import {
+  type Action,
+  initialState,
+  reduce,
+  restoreTabAction,
+  type State,
+  type UiLeg,
+} from '../../ui/state';
 import { atmStrike, boardRows } from '../../ui/view/board';
 import { boardBadges, boardRowTexts } from '../../ui/view/boardPanel';
 import { bookListModel } from '../../ui/view/bookList';
@@ -1076,5 +1083,64 @@ describe('性能（#87 AC-8: 市場ピル）', () => {
     };
     expect(once()).toBeGreaterThan(0);
     expectWithinBudget('#87 市場ピルの要約 + 全文', once, { warmup: 20, runs: 30 });
+  });
+});
+
+/**
+ * #87 AC-8: タブを閉じて戻す 1 回（足 10 本のタブ 3 個・322 行 × 2 限月の板。作業中の 2 番目を closeTab → restoreTab）。
+ * 足の市場の作り直し（switchTab と同じ loadLegs）が 2 回分入る
+ */
+describe('性能（#87 AC-8: タブを閉じて戻す）', () => {
+  const chain = normalizeChain(buildWideChainJson());
+  const [m1, m2] = chain.months;
+  if (!m1 || !m2) throw new Error('限月が足りない');
+  const ids: Record<string, string> = { [M1.id]: m1.id, [M2.id]: m2.id, FUT: chain.future.id };
+  const legs10 = refreshLegMarkets(
+    chain,
+    PERF_LEGS.map((leg, i) => ({
+      id: i + 1,
+      leg:
+        leg.kind === 'option'
+          ? { ...leg, expiry: ids[leg.expiry] ?? leg.expiry }
+          : { ...leg, contract: ids[leg.contract] ?? leg.contract },
+      marks: [],
+    })),
+    CALENDAR.holidays,
+  ).map(({ id: _id, ...rest }) => rest);
+  const open = (type: 'openPosition' | 'openPositionInNewTab'): Action => ({
+    type,
+    legs: legs10,
+    scenario: null,
+    feePerLot: null,
+    futureBasis: null,
+  });
+  // タブ A・B・C（どれも足 10 本）、作業中は B
+  const start = [
+    { type: 'loaded', chain, label: 'perf' } as Action,
+    open('openPosition'),
+    open('openPositionInNewTab'),
+    open('openPositionInNewTab'),
+  ].reduce(reduce, initialState);
+  const second = start.tabs[1];
+  if (!second) throw new Error('タブが足りない');
+  const begin = reduce(start, { type: 'switchTab', id: second.id });
+
+  let state = begin;
+  function once(): number {
+    const action = restoreTabAction(state, state.activeTab);
+    if (!action) throw new Error('閉じられない');
+    const closed = reduce(state, { type: 'closeTab', id: state.activeTab });
+    state = reduce(closed, action);
+    return state.tabs.length + state.legs.length;
+  }
+
+  it(`タブを閉じて戻す 1 回（足 10 本 × 3 個・322 行 × 2 限月）が ${BUDGET_MS} ms 以内（30 回の最小値）`, () => {
+    expect(chain.months.every((m) => m.strikes.length >= 322)).toBe(true);
+    expect(begin.tabs).toHaveLength(3);
+    expect(begin.tabs.every((t) => (t.saved?.legs.length ?? begin.legs.length) === 10)).toBe(true);
+    expect(once()).toBe(13);
+    expect(state.tabs.map((t) => t.name)).toEqual(begin.tabs.map((t) => t.name));
+    expect(state.tabs.findIndex((t) => t.id === state.activeTab)).toBe(1);
+    expectWithinBudget('#87 タブを閉じて戻す', once, { warmup: 20, runs: 30 });
   });
 });
