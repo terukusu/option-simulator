@@ -11,7 +11,11 @@
 //                                          シナリオ（#83）の .stepper .val b・チップが切れていないか（scrollWidth ≤ clientWidth）を
 //                                          「モデルの前提」の閉 / 開の両方で（開いた状態は縦・横・折り返し・読み取りも測る）。
 //                                          ポジション（#84）の .leg-title（名前・@建値）・枚数の .stepper .val b・⇄・× が切れて
-//                                          いないか、詳細を 1 本開いた状態の縦・横・折り返し・読み取り
+//                                          いないか、詳細を 1 本開いた状態の縦・横・折り返し・読み取り。
+//                                          指標（#86）のタイルの .k・.v・テール表の全セル・（開いていれば）内訳の各行が切れて
+//                                          いないか（と .panel-body の中で横にはみ出していないか）を、スマホの「指標」peek / full・
+//                                          900（ドックで指標を開く）・1440 で。内訳を開いた状態（360 peek・390 full・900・1440）の
+//                                          縦・横・折り返し・読み取り
 //   npm run ui:check -- --parts            部品の見本（?ui=next&parts。dev だけ）
 //   npm run ui:check -- --legacy           旧画面（?ui=next なし）
 //   npm run ui:check -- --flows            保存・共有・テーマ・キーボードの手順（#81 AC-11・AC-12）と舞台の手順
@@ -19,7 +23,9 @@
 //                                          （#83: ステッパーの ± / Shift / スクラブ / ホイール / キー / 数値入力・プリセット・評価時刻・
 //                                          前提・#82 のレールとの一致・Long Animation Frame。390×844 と 1440×900）と作業台の手順
 //                                          （#84: 枚数・⇄・× と [元に戻す]・全クリアと [元に戻す]・詳細の入力・足の追加ダイアログ・
-//                                          ヘッジ・舞台の足マーカー → 行の強調・Long Animation Frame。390×844 と 1440×900）
+//                                          ヘッジ・舞台の足マーカー → 行の強調・Long Animation Frame。390×844 と 1440×900）と指標の手順
+//                                          （#86: 旧画面の内訳・テール表との値の一致・タイル 5 と読み取りの一致・Δσ ±0.5 の追従
+//                                          （390 は IV レールの ↑ / ↓）・Long Animation Frame。390×844 と 1440×900）
 //   --url <base>                           dev サーバーを起こさず、その URL を使う（例 http://127.0.0.1:5173/?ui=next&parts）
 //   --dom <file>                           body の下の要素の tag.class の並びを書き出す（旧画面が変わらないことの比較用）
 //   --shots <dir>                          スクリーンショットを書く（合成の板だけ。リポジトリに入れない）
@@ -374,6 +380,66 @@ async function detailOpenCheck(page, label, w, h, shotName, readouts) {
 }
 const detailStats = { pass: 0, total: 0 };
 
+/**
+ * 指標（#86 AC-8）: 見えている section.metrics の (a) タイルの .k・.v、テール表の th・td .txt、（開いていれば）内訳の
+ * .kv-grid > .k・.v が切れていない（scrollWidth ≤ clientWidth）、(b) .panel-body が横にはみ出していない
+ * （overflow: auto なのでページの横スクロールに出ない。別に測る）。見えていなければ数えない
+ */
+async function metricsCheck(page, label) {
+  const r = await page.evaluate(() => {
+    const sec = document.querySelector('section.metrics');
+    if (!sec || sec.getClientRects().length === 0) return null;
+    const els = [
+      ...sec.querySelectorAll(
+        '.tile .k, .tile .v, table.tail th, table.tail td .txt, .kv-grid > .k, .kv-grid > .v',
+      ),
+    ].filter((el) => el.getClientRects().length > 0);
+    const bad = els
+      .filter((el) => el.scrollWidth > el.clientWidth)
+      .map((el) => `「${el.textContent}」${el.scrollWidth}/${el.clientWidth}`);
+    const body = sec.querySelector('.panel-body');
+    if (body && body.scrollWidth > body.clientWidth) {
+      bad.push(`.panel-body ${body.scrollWidth}/${body.clientWidth}`);
+    }
+    return { n: els.length, bad };
+  });
+  if (r === null) return true;
+  const ok = r.n > 0 && r.bad.length === 0;
+  metricsStats.total++;
+  if (ok) metricsStats.pass++;
+  else failed = true;
+  if (!ok) console.log(`${label}: 指標の値 ${r.n} 個 ${r.bad.join('・')}  ← NG`);
+  return ok;
+}
+const metricsStats = { pass: 0, total: 0 };
+
+/** 指標の「内訳」を開いて測り（縦・横・折り返し・読み取り・指標の切れ）、閉じて戻す（#86 AC-8） */
+async function breakdownOpenCheck(page, label, w, h, shotName, readouts) {
+  const btn = page.locator('section.metrics .mx-toggle');
+  if ((await btn.count()) === 0 || !(await btn.isVisible())) {
+    failed = true;
+    console.log(`${label} 内訳を開く ${w}x${h}: ボタンが見えない  ← NG`);
+    return;
+  }
+  await btn.click();
+  await page.waitForTimeout(150);
+  const opened =
+    (await btn.getAttribute('aria-expanded')) === 'true' &&
+    (await page.locator('section.metrics .kv-grid > .v').count()) > 0;
+  if (!opened) {
+    failed = true;
+    console.log(`${label} 内訳を開く ${w}x${h}: 開かない  ← NG`);
+  }
+  breakdownStats.total++;
+  if (opened) breakdownStats.pass++;
+  await report(page, `${label} 内訳を開く`, w, h, shotName);
+  await readoutCheck(page, `${label} 内訳を開く ${w}x${h}`, readouts);
+  await metricsCheck(page, `${label} 内訳を開く ${w}x${h}`);
+  await btn.click();
+  await page.waitForTimeout(100);
+}
+const breakdownStats = { pass: 0, total: 0 };
+
 const PANELS = ['positions', 'board', 'scenario', 'metrics', 'smile'];
 
 /** スマホの画面の状態（パネル・シート）をドックとつまみで作る（.layout の data-panel / data-sheet を読んで確かめる） */
@@ -452,12 +518,20 @@ async function measureAll() {
             }
             await page.waitForTimeout(100);
             const scn = panel === 'scenario' && sheet !== 'hidden';
-            await report(page, lbl, w, h, `${name}-${panel}-${sheet}`, scn);
+            const mx = panel === 'metrics' && sheet !== 'hidden';
+            await report(page, lbl, w, h, `${name}-${panel}-${sheet}`, scn || mx);
             await readoutCheck(page, `${lbl} ${w}x${h}`, 3);
             await positionsCheck(page, `${lbl} ${w}x${h}`);
             if (scn) {
               await scenarioCheck(page, `${lbl} ${w}x${h}`);
               await advOpenCheck(page, lbl, w, h, `${name}-${panel}-${sheet}-adv`, 3);
+            }
+            if (mx) {
+              await metricsCheck(page, `${lbl} ${w}x${h}`);
+              // 内訳を開いた状態: 360 は peek、390 は full（#86 AC-8）
+              if ((w === 360 && sheet === 'peek') || (w === 390 && sheet === 'full')) {
+                await breakdownOpenCheck(page, lbl, w, h, `${name}-${panel}-${sheet}-kv`, 3);
+              }
             }
           }
         }
@@ -470,6 +544,21 @@ async function measureAll() {
           await positionsCheck(page, `${tag} ${w}x${h}`);
           await advOpenCheck(page, tag, w, h, `${name}-adv`, want);
           await detailOpenCheck(page, tag, w, h, `${name}-detail`, want);
+          if (w >= 1200) {
+            // PC は指標が常に見えている
+            await metricsCheck(page, `${tag} ${w}x${h}`);
+            await breakdownOpenCheck(page, tag, w, h, `${name}-kv`, want);
+          } else {
+            // タブレットはドックで「指標」を開いて測り、「ポジ」で戻す
+            await page.click('.dock button[data-panel="metrics"]');
+            await page.waitForTimeout(150);
+            await report(page, `${tag} metrics`, w, h, `${name}-metrics`);
+            await readoutCheck(page, `${tag} metrics ${w}x${h}`, want);
+            await metricsCheck(page, `${tag} metrics ${w}x${h}`);
+            await breakdownOpenCheck(page, `${tag} metrics`, w, h, `${name}-metrics-kv`, want);
+            await page.click('.dock button[data-panel="positions"]');
+            await page.waitForTimeout(150);
+          }
         }
       }
       if (domFile) domOut.push(`## ${w}x${h}${theme ? ` ${theme}` : ''}`, await domList(page));
@@ -490,6 +579,9 @@ async function measureAll() {
     );
     console.log(
       `ポジションの行の検査: ${positionsStats.pass} / ${positionsStats.total} 状態で pass、詳細を開いた状態 ${detailStats.pass} / ${detailStats.total}`,
+    );
+    console.log(
+      `指標の検査: ${metricsStats.pass} / ${metricsStats.total} 状態で pass、内訳を開いた状態 ${breakdownStats.pass} / ${breakdownStats.total}`,
     );
   }
 }
@@ -843,6 +935,8 @@ async function runFlows() {
   for (const vp of [phone, pc]) await scenarioFlows(vp);
   // #84 作業台の手順（AC-11・AC-12）
   for (const vp of [phone, pc]) await benchFlows(vp);
+  // #86 指標の手順（AC-10・AC-11）
+  for (const vp of [phone, pc]) await metricsFlows(vp);
 }
 
 // ---- 舞台の手順（#82）
@@ -1856,6 +1950,208 @@ async function benchFlows(vp) {
   }
   // 最初の保存と比べて足が増えている（手順の後始末は不要。コンテキストごと捨てる）
   if (start.legs.length !== 2) check(`#84 ${tag} 始めの足は 2 本`, false, `${start.legs.length}`);
+  await ctx.close();
+}
+
+// ---- 指標の手順（#86 AC-10・AC-11）
+/** 数値のトークン（要素ごとに取り出して連ねる。見出しの末尾と値の先頭の数字をつなげない） */
+const METRIC_TOKEN = '[+−]?[0-9][0-9,.]*|[+−]∞|なし|—';
+
+/** 旧画面の指標（dl.metrics-list の dt / dd のトークン列とテール表の 30 個） */
+async function legacyMetrics(vp) {
+  const ctx = await newContext(vp, { [WORKSPACE_KEY]: twoLegs });
+  const page = await ctx.newPage();
+  await page.goto(pageUrl('legacy'));
+  await waitReady(page, 'legacy');
+  const r = await page.evaluate((re) => {
+    const tokens = [
+      ...document.querySelectorAll('dl.metrics-list > dt, dl.metrics-list > dd'),
+    ].flatMap((el) => el.textContent.match(new RegExp(re, 'g')) ?? []);
+    // 主の文字列（.note を除く）と .note
+    const split = (el) => {
+      const c = el.cloneNode(true);
+      for (const n of c.querySelectorAll('.note')) n.remove();
+      return [c.textContent.trim(), el.querySelector('.note')?.textContent.trim() ?? ''];
+    };
+    const tail = [...document.querySelectorAll('table.tail-table tbody tr')].flatMap((tr) =>
+      [...tr.querySelectorAll('th, td')].flatMap(split),
+    );
+    return { tokens, tail };
+  }, METRIC_TOKEN);
+  await ctx.close();
+  return r;
+}
+
+async function metricsFlows(vp) {
+  const tag = `${vp.width}x${vp.height}`;
+  const phoneSize = vp.width <= PHONE_MAX;
+  const old = phoneSize ? null : await legacyMetrics(vp);
+  const ctx = await newContext(vp, { [WORKSPACE_KEY]: twoLegs });
+  await ctx.addInitScript(LOAF_INIT);
+  const page = await ctx.newPage();
+  await page.goto(pageUrl('next'));
+  await waitReady(page, 'next');
+  if (phoneSize) {
+    const ok = await setShell(page, 'metrics', 'peek');
+    check(`#86 ${tag} ドックで「指標」を開く（peek）`, ok);
+  }
+  const M = 'section.metrics';
+  const loafOk = await page.evaluate(() => window.__loafOk === true);
+  const loafMark = () => page.evaluate(() => window.__loaf.length);
+  const loafSince = (i) =>
+    page.evaluate((n) => window.__loaf.slice(n).filter((d) => d > 50).length, i);
+  /** タイル 5 の値（主の文字列）・テールの SQ の列・指定日の列（5 個ずつ） */
+  const snap = () =>
+    page.evaluate((m) => {
+      const main = (el) => el?.querySelector(':scope > span')?.textContent ?? null;
+      const col = (i) =>
+        [...document.querySelectorAll(`${m} table.tail tbody tr`)].map((tr) => {
+          const td = tr.querySelectorAll('td')[i];
+          return td
+            ? `${main(td.querySelector('.txt'))} ${td.querySelector('.txt small')?.textContent}`
+            : null;
+        });
+      return {
+        t5: main(document.querySelector(`${m} .tile[data-tile="scenario"] .v`)),
+        sq: col(0),
+        sc: col(1),
+      };
+    }, M);
+  const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+
+  // AC-10: 旧画面と同じ値（1440×900）
+  if (old) {
+    const toggle = page.locator(`${M} .mx-toggle`);
+    await toggle.click();
+    await page.waitForTimeout(150);
+    const now = await page.evaluate(
+      ({ m, re }) => {
+        const tokens = [
+          ...document.querySelectorAll(`${m} .kv-grid > .k, ${m} .kv-grid > .v`),
+        ].flatMap((el) => el.textContent.match(new RegExp(re, 'g')) ?? []);
+        const pair = (el) => [
+          el?.querySelector(':scope > span')?.textContent.trim() ?? '',
+          el?.querySelector('small')?.textContent.trim() ?? '',
+        ];
+        const tail = [...document.querySelectorAll(`${m} table.tail tbody tr`)].flatMap((tr) => [
+          ...pair(tr.querySelector('th')),
+          ...[...tr.querySelectorAll('td')].flatMap((td) => pair(td.querySelector('.txt'))),
+        ]);
+        const t5 = document.querySelector(
+          `${m} .tile[data-tile="scenario"] .v > span`,
+        )?.textContent;
+        const ro = document.querySelector('.ro[data-ro="date"] .v > span')?.textContent;
+        return { tokens, tail, t5, ro };
+      },
+      { m: M, re: METRIC_TOKEN },
+    );
+    check(
+      `#86 AC-10(a) ${tag} 内訳のトークン列が旧画面の dl.metrics-list と一致（${now.tokens.length} 個）`,
+      now.tokens.length > 20 && same(now.tokens, old.tokens),
+      same(now.tokens, old.tokens) ? '' : `新 ${now.tokens.join(' ')} / 旧 ${old.tokens.join(' ')}`,
+    );
+    check(
+      `#86 AC-10(b) ${tag} テール表の 30 個が旧画面と一致`,
+      now.tail.length === 30 && same(now.tail, old.tail),
+      same(now.tail, old.tail)
+        ? now.tail.slice(0, 6).join(' ')
+        : `新 ${now.tail.join(' ')} / 旧 ${old.tail.join(' ')}`,
+    );
+    check(
+      `#86 AC-10(c) ${tag} タイル 5 の値 = 読み取りの指定日の損益`,
+      !!now.t5 && now.t5 === now.ro,
+      `${now.t5} / ${now.ro}`,
+    );
+    await toggle.click();
+    await page.waitForTimeout(100);
+    check(
+      `#86 ${tag} 内訳を閉じる（1 回で aria-expanded = false・行が消える）`,
+      (await toggle.getAttribute('aria-expanded')) === 'false' &&
+        (await page.locator(`${M} .kv-grid`).count()) === 0,
+    );
+  } else {
+    // スマホ: 内訳の開閉が 1 タップで効く
+    const toggle = page.locator(`${M} .mx-toggle`);
+    await toggle.click();
+    await page.waitForTimeout(150);
+    const opened =
+      (await toggle.getAttribute('aria-expanded')) === 'true' &&
+      (await page.locator(`${M} .kv-grid > .v`).count()) > 0;
+    await toggle.click();
+    await page.waitForTimeout(100);
+    const closed = (await toggle.getAttribute('aria-expanded')) === 'false';
+    check(`#86 ${tag} 内訳の開閉（開く → 閉じる）`, opened && closed);
+  }
+
+  // AC-11 (a)(b): Δσ ＋ 1 回でタイル 5 と指定日の列が変わり SQ の列は同じ、− 1 回で元に戻る
+  // PC はシナリオのステッパー、スマホは指標のシートとシナリオが同時に見えないので舞台の IV レールの ↑ / ↓（同じ ±0.5）
+  const dsPlus = 'section.scenario .stepper[data-name="dSigma"] > button:last-child';
+  const dsMinus = 'section.scenario .stepper[data-name="dSigma"] > button:first-child';
+  const up = async () => {
+    if (phoneSize) {
+      await page.focus('.ivrail');
+      await page.keyboard.press('ArrowUp');
+    } else await page.click(dsPlus);
+  };
+  const down = async () => {
+    if (phoneSize) {
+      await page.focus('.ivrail');
+      await page.keyboard.press('ArrowDown');
+    } else await page.click(dsMinus);
+  };
+  const how = phoneSize ? 'IV レールの ↑ / ↓' : 'Δσ の ＋ / −';
+  {
+    const a = await snap();
+    await up();
+    await page.waitForTimeout(150);
+    const b = await snap();
+    check(
+      `#86 AC-11(a) ${tag} ${how}: ＋ 1 回でタイル 5 と指定日の列が変わり SQ の列は同じ`,
+      !!a.t5 && a.t5 !== b.t5 && !same(a.sc, b.sc) && same(a.sq, b.sq) && a.sq.length === 5,
+      `タイル 5 ${a.t5} → ${b.t5}・指定日 ${a.sc[0]} → ${b.sc[0]}`,
+    );
+    await down();
+    await page.waitForTimeout(150);
+    const c = await snap();
+    check(`#86 AC-11(b) ${tag} ${how}: − 1 回で元の値に戻る`, same(a, c), `タイル 5 ${c.t5}`);
+  }
+
+  // AC-11 (c): ＋ の 20 回の連打・舞台のハンドルのドラッグの間の Long Animation Frame（50ms 超）
+  {
+    const mark = await loafMark();
+    if (phoneSize) await page.focus('.ivrail');
+    for (let i = 0; i < 20; i++) {
+      if (phoneSize) await page.keyboard.press('ArrowUp');
+      else await page.click(dsPlus);
+      await page.waitForTimeout(16);
+    }
+    const lfPlus = await loafSince(mark);
+    const hb = await page.locator('.chart .handle-hit').first().boundingBox();
+    let lfDrag = -1;
+    if (hb) {
+      const x = hb.x + hb.width / 2;
+      const y = hb.y + hb.height / 2;
+      const mark2 = await loafMark();
+      await page.mouse.move(x, y);
+      await page.mouse.down();
+      await page.mouse.move(x + 60, y, { steps: 30 });
+      await page.mouse.up();
+      lfDrag = await loafSince(mark2);
+    }
+    for (const [name, n] of [
+      [`${phoneSize ? 'IV レールの ↑' : 'Δσ の ＋'} 20 回の連打`, lfPlus],
+      ['ハンドルのドラッグ（30 回の move）', lfDrag],
+    ]) {
+      check(
+        `#86 AC-11(c) ${tag} 指標が見えている状態で${name}の長いフレーム 0 件`,
+        loafOk && n === 0,
+        loafOk ? `${n} 件` : '未対応',
+      );
+    }
+    console.log(
+      `      ${tag} 指標の Long Animation Frame（50ms 超）: 連打 ${lfPlus}・ハンドル ${lfDrag}`,
+    );
+  }
   await ctx.close();
 }
 

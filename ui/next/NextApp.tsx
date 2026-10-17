@@ -11,6 +11,7 @@ import type { DXUnit } from '../view/scenario';
 import { INITIAL_SHELL, layoutTier, shellReduce } from '../view/shell';
 import { Notices } from './Notices';
 import { Toasts, useToasts } from './parts/Toast';
+import { Metrics } from './regions/Metrics';
 import { Positions } from './regions/Positions';
 import { Scenario } from './regions/Scenario';
 import { Stage } from './regions/Stage';
@@ -42,6 +43,7 @@ function boardNotice(
  * 舞台で選んだ足（selectedLeg）はここのローカル（保存しない）。行使価格の変更はトーストの [元に戻す] で戻せる。
  * #83 でシナリオ（regions/Scenario.tsx）を入れた。ΔX の単位はここのローカル（保存しない。#87 の設定も同じ値を触る）。
  * #84 でポジション（regions/Positions.tsx。key = 作業中のタブ）を入れた。タブが変わったら [元に戻す] 付きのトーストを閉じる。
+ * #86 で指標 · テール（regions/Metrics.tsx。c.metrics と state.feePerLot だけを渡す = pure が効く）を入れた。
  */
 export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
   const c = useAppController(boot);
@@ -146,6 +148,7 @@ export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
             push={push}
           />
         }
+        metrics={<Metrics model={c.metrics} feePerLot={state.feePerLot} />}
       />
       <Toasts toasts={toasts.toasts} onUndo={toasts.undo} />
     </div>

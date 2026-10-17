@@ -22,6 +22,7 @@ import { bookListModel } from '../../ui/view/bookList';
 import { headerModel } from '../../ui/view/header';
 import { hedgeModel } from '../../ui/view/hedge';
 import { metricsModel } from '../../ui/view/metrics';
+import { metricsPanel } from '../../ui/view/metricsPanel';
 import {
   cachedPinLines,
   type PinLineCacheEntry,
@@ -927,5 +928,68 @@ describe('性能（#84 AC-7: 作業台の 1 回）', () => {
     expect(once()).toBeGreaterThan(30);
     expect(s.legs[0]?.leg.qty).toBe(q0 + 1);
     expectWithinBudget('#84 枚数 ±1 の 1 回（足 10 本）', once, { warmup: 20, runs: 30 });
+  });
+});
+
+/**
+ * #86 AC-5: 新しい画面の指標パネル（足 10 本）。(1) 指標パネルの表示モデルの 1 回（タイル + 内訳 + テール表のバー。
+ * metricsModel は useAppController の useMemo の出力を受けるので含めない）。(2) ステッパー 1 段（Δσ +0.5）の 1 回で
+ * 指標パネルまで（reduce + 損益グラフの表示モデル（指定日の線を作り直す）+ 指標 + 読み取り + 指標パネル）。
+ */
+describe('性能（#86 AC-5: 指標パネル）', () => {
+  const { ctx, rows } = makeMarket();
+  const legs = preparePosition(PERF_LEGS, ctx);
+  const board = {
+    months: [
+      { F: M1.F, rows: rows[M1.id] ?? [] },
+      { F: M2.F, rows: rows[M2.id] ?? [] },
+    ],
+  };
+  const base = pnlDomains(board, legs, ctx);
+  if (!base) throw new Error('損益グラフの基礎が作れない');
+  const state0: State = {
+    ...initialState,
+    feePerLot: 300,
+    scenario: { ...ZERO_SCENARIO, days: 5, dX: -400, dSigma: 2 },
+  };
+  const today = todayLine(base, null, 1000, state0.scenario);
+  const panelSize = (v: ReturnType<typeof metricsPanel>) =>
+    v.tiles.length +
+    v.breakdown.length +
+    v.tail.reduce((n, r) => n + (r.sq.bar ? 1 : 0) + (r.scenario.bar ? 1 : 0), 0);
+
+  it(`指標パネルの 1 回（足 10 本: タイル + 内訳 + テール表のバー）が ${BUDGET_MS} ms 以内（30 回の最小値）`, () => {
+    const mm = metricsModel({ base, scenario: state0.scenario, unit: 'auto' });
+    expect(mm.empty).toBe(false);
+    const once = () => panelSize(metricsPanel(mm, state0.feePerLot));
+    expect(once()).toBeGreaterThan(20);
+    expectWithinBudget('#86 指標パネルの表示モデル（足 10 本）', once, { warmup: 20, runs: 30 });
+  });
+
+  it(`ステッパー 1 段（Δσ +0.5）の 1 回で指標パネルまでが ${BUDGET_MS} ms 以内（30 回の最小値）`, () => {
+    let s = state0;
+    const once = () => {
+      // 上限に着いたら 0 から（毎回 Δσ が変わる = 指定日の線と指標を作り直す）
+      const next = s.scenario.dSigma >= 20 ? 0 : s.scenario.dSigma + 0.5;
+      s = reduce(s, { type: 'setScenario', patch: { dSigma: next } });
+      const scenario = s.scenario;
+      const m = pnlChartModel({
+        base,
+        scenario,
+        viewport: null,
+        pnlY: DEFAULT_PNL_Y,
+        plotWidth: 1000,
+        plotHeight: 260,
+        todayYs: today,
+        dateYs: dateLine(base, null, 1000, scenario),
+      });
+      const mm = metricsModel({ base, scenario, unit: s.metricsUnit });
+      const r = readoutModel({ base, metrics: mm, scenario });
+      const items = bigReadout(r, mm.premium, base.ctx.evalTime, scenario.dSigma);
+      return m.lines.length + items.length + panelSize(metricsPanel(mm, s.feePerLot));
+    };
+    expect(once()).toBeGreaterThan(20);
+    expect(s.scenario.dSigma).toBe(2.5);
+    expectWithinBudget('#86 ステッパー 1 段で指標パネルまで', once, { warmup: 20, runs: 30 });
   });
 });
