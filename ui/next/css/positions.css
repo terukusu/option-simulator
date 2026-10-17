@@ -1,0 +1,387 @@
+/*
+ * ポジション（docs/ui-redesign.md §2・§3・§4.4・§5・§5.1。#84。部品は ui/next/regions/Positions.tsx・LegDialog.tsx・
+ * HedgeDialog.tsx）。クラス名は試作品に合わせる。色は var(--…) だけ。
+ * 行は 3 列（本文 minmax(0, 1fr) / 枚数 / ⇄ ×）。本文は折り返さず、入らなければ 2 段目から省略記号（1 段目の名前と
+ * @建値は縮めない）。詳細の格子の列数は .panel-body（container-type: inline-size）のコンテナクエリ。
+ */
+
+.legs {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.leg {
+  border-bottom: 1px solid var(--line);
+}
+
+.leg-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: var(--sp-2);
+  min-height: 48px;
+  padding: 6px var(--sp-2) 6px var(--sp-3);
+}
+
+.leg[data-selected] > .leg-row {
+  background: var(--handle-fill);
+}
+
+.leg-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  touch-action: manipulation;
+}
+
+.leg-title {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+  white-space: nowrap;
+}
+
+.leg-title > * {
+  flex: none;
+}
+
+.leg-title .side {
+  padding: 0 5px;
+  border-radius: 4px;
+  font-size: var(--fs-xs);
+  font-weight: 700;
+  line-height: 16px;
+}
+
+.leg-title .side[data-side="sell"] {
+  background: var(--loss-fill);
+  color: var(--loss);
+}
+
+.leg-title .side[data-side="buy"] {
+  background: var(--gain-fill);
+  color: var(--gain);
+}
+
+.leg-title .name {
+  font-family: var(--mono);
+  font-size: var(--fs-body);
+  font-weight: 600;
+}
+
+.leg-title .px {
+  color: var(--ink-2);
+  font-family: var(--mono);
+  font-size: var(--fs-sub);
+}
+
+.leg-sub {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--ink-3);
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.leg-sub > * + * {
+  margin-left: 6px;
+}
+
+.leg-sub .tag {
+  font-family: var(--font);
+}
+
+.leg.warn .leg-sub .tag.warn {
+  font-weight: 600;
+}
+
+/* 枚数のステッパー（値の幅は中身。最長の 100,000 でも切れない） */
+.leg .stepper {
+  grid-template-columns: 26px minmax(30px, auto) 26px;
+  height: 30px;
+}
+
+.leg .stepper > .val b {
+  font-size: 13px;
+}
+
+.leg .ops {
+  display: flex;
+  gap: 2px;
+}
+
+/* ===== 詳細 ===== */
+.leg-detail {
+  padding: var(--sp-1) var(--sp-3) var(--sp-3);
+  background: var(--s2);
+  font-size: var(--fs-sm);
+}
+
+.kvs {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--sp-2) 10px;
+}
+
+@container (min-width: 440px) {
+  .kvs {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@container (min-width: 580px) {
+  .kvs {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+.kv {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.kv.wide {
+  grid-column: 1 / -1;
+}
+
+.kv .k {
+  overflow: hidden;
+  color: var(--ink-3);
+  font-size: var(--fs-xs);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.kv .v {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-1);
+  min-width: 0;
+  font-family: var(--mono);
+  white-space: nowrap;
+}
+
+.kv .v .tag {
+  font-family: var(--font);
+}
+
+.kv .note,
+.flags p,
+.leg-detail .field-err {
+  color: var(--ink-2);
+  font-size: var(--fs-sm);
+}
+
+.leg-detail .field-err {
+  color: var(--loss);
+  font-family: var(--font);
+  white-space: normal;
+}
+
+.fld-in {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  min-width: 0;
+}
+
+.kv-head {
+  margin: 10px 0 6px;
+  color: var(--ink-2);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.flags {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: var(--sp-2);
+}
+
+.flags p.warn {
+  color: var(--warn);
+}
+
+/* 入力欄（詳細・ダイアログ） */
+.pos-body .input,
+.pos-form .input,
+.pos-form select {
+  width: 100%;
+  min-width: 0;
+  height: 28px;
+  padding: 0 6px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-sm);
+  background: var(--s1);
+  font-family: var(--mono);
+  font-size: var(--fs-sub);
+}
+
+.pos-form select {
+  font-family: var(--font);
+}
+
+.pos-body .input[aria-invalid="true"],
+.pos-form .input[aria-invalid="true"] {
+  border-color: var(--loss);
+  color: var(--loss);
+}
+
+/* ===== 空の状態 ===== */
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 22px var(--sp-4);
+  color: var(--ink-3);
+  font-size: var(--fs-sub);
+  text-align: center;
+}
+
+.empty-state .acts {
+  display: flex;
+  gap: var(--sp-2);
+}
+
+/* ===== デルタヘッジの節 ===== */
+.sec-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  min-width: 0;
+  height: 38px;
+  padding: 0 var(--sp-3);
+  border-bottom: 1px solid var(--line);
+  background: var(--s1);
+}
+
+.sec-head h3 {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  font-size: var(--fs-sub);
+  font-weight: 600;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.sec-head .spacer {
+  flex: 1;
+}
+
+.hedge {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: var(--sp-2) var(--sp-3) var(--sp-3);
+  font-size: var(--fs-sub);
+}
+
+.hedge .hl {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  min-width: 0;
+  white-space: nowrap;
+}
+
+.hedge .hl.head {
+  display: block;
+  overflow: hidden;
+  font-family: var(--mono);
+  font-weight: 600;
+  text-overflow: ellipsis;
+}
+
+.hedge .hl .txt {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  font-family: var(--mono);
+  text-overflow: ellipsis;
+}
+
+.hedge .hl .txt b {
+  font-weight: 600;
+}
+
+.hedge .hl .why {
+  margin-left: 6px;
+  color: var(--warn);
+  font-family: var(--font);
+}
+
+.hedge p.note {
+  color: var(--ink-3);
+  font-size: var(--fs-sm);
+}
+
+.hedge p.warn {
+  color: var(--warn);
+}
+
+/* ===== ダイアログのフォーム ===== */
+.pos-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+}
+
+.pos-form .fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px var(--sp-3);
+}
+
+.pos-form .fld {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  min-width: 0;
+}
+
+.pos-form .fld .lab {
+  overflow: hidden;
+  color: var(--ink-3);
+  font-size: var(--fs-sm);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.pos-form .input,
+.pos-form select {
+  height: 32px;
+}
+
+.pos-form .note {
+  color: var(--ink-3);
+  font-size: var(--fs-sm);
+}
+
+.pos-form .form-err {
+  color: var(--loss);
+  font-size: var(--fs-sub);
+}
+
+.pos-form .form-acts {
+  display: flex;
+  justify-content: flex-end;
+}

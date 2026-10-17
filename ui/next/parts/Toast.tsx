@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'preact/hooks';
+import { dropUndoToasts } from '../../view/positionsRegion';
 import {
   expireToasts,
   nextDeadline,
@@ -17,6 +18,8 @@ export function useToasts(): {
   push: (t: ToastInput) => void;
   undo: (id: number) => void;
   dismiss: (id: number) => void;
+  /** [元に戻す] 付きのトーストを閉じる（タブの切り替え。#84） */
+  dropUndo: () => void;
 } {
   const [toasts, setToasts] = useState<readonly Toast[]>([]);
   const listRef = useRef<readonly Toast[]>(toasts);
@@ -52,7 +55,8 @@ export function useToasts(): {
     (id: number) => set(listRef.current.filter((t) => t.id !== id)),
     [set],
   );
-  return { toasts, push, undo, dismiss };
+  const dropUndo = useCallback(() => set(dropUndoToasts(listRef.current)), [set]);
+  return { toasts, push, undo, dismiss, dropUndo };
 }
 
 export function Toasts(p: { toasts: readonly Toast[]; onUndo: (id: number) => void }) {

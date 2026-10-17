@@ -9,13 +9,17 @@
 //                                          スマホはシート hidden / peek / full × パネル 5 つ。各状態で舞台の読み取り
 //                                          （.readout .ro）が画面内に見えているか（スマホ 3・900 で 5・1440 で 6。#82）。
 //                                          シナリオ（#83）の .stepper .val b・チップが切れていないか（scrollWidth ≤ clientWidth）を
-//                                          「モデルの前提」の閉 / 開の両方で（開いた状態は縦・横・折り返し・読み取りも測る）
+//                                          「モデルの前提」の閉 / 開の両方で（開いた状態は縦・横・折り返し・読み取りも測る）。
+//                                          ポジション（#84）の .leg-title（名前・@建値）・枚数の .stepper .val b・⇄・× が切れて
+//                                          いないか、詳細を 1 本開いた状態の縦・横・折り返し・読み取り
 //   npm run ui:check -- --parts            部品の見本（?ui=next&parts。dev だけ）
 //   npm run ui:check -- --legacy           旧画面（?ui=next なし）
 //   npm run ui:check -- --flows            保存・共有・テーマ・キーボードの手順（#81 AC-11・AC-12）と舞台の手順
 //                                          （#82: ハンドル・IV / 時間レール・キー・足マーカー・Long Animation Frame）とシナリオの手順
 //                                          （#83: ステッパーの ± / Shift / スクラブ / ホイール / キー / 数値入力・プリセット・評価時刻・
-//                                          前提・#82 のレールとの一致・Long Animation Frame。390×844 と 1440×900）
+//                                          前提・#82 のレールとの一致・Long Animation Frame。390×844 と 1440×900）と作業台の手順
+//                                          （#84: 枚数・⇄・× と [元に戻す]・全クリアと [元に戻す]・詳細の入力・足の追加ダイアログ・
+//                                          ヘッジ・舞台の足マーカー → 行の強調・Long Animation Frame。390×844 と 1440×900）
 //   --url <base>                           dev サーバーを起こさず、その URL を使う（例 http://127.0.0.1:5173/?ui=next&parts）
 //   --dom <file>                           body の下の要素の tag.class の並びを書き出す（旧画面が変わらないことの比較用）
 //   --shots <dir>                          スクリーンショットを書く（合成の板だけ。リポジトリに入れない）
@@ -303,6 +307,73 @@ async function advOpenCheck(page, label, w, h, shotName, readouts) {
   await page.waitForTimeout(80);
 }
 
+/**
+ * ポジション（#84 AC-10）: 見えている section.positions の .leg-title（名前・@建値）・枚数の .stepper .val b・⇄・× が
+ * 切れていない（scrollWidth ≤ clientWidth。.leg-title は本文のボタンの幅にも収まる）。2 段目（.leg-sub）は省略記号で可。
+ * 見えていなければ数えない
+ */
+async function positionsCheck(page, label) {
+  const r = await page.evaluate(() => {
+    const sec = document.querySelector('section.positions');
+    if (!sec || sec.getClientRects().length === 0) return null;
+    const rows = [...sec.querySelectorAll('li.leg')].filter((el) => el.getClientRects().length > 0);
+    const bad = [];
+    let n = 0;
+    for (const li of rows) {
+      const main = li.querySelector('.leg-main');
+      const title = li.querySelector('.leg-title');
+      const els = [
+        title,
+        ...li.querySelectorAll('.leg-title .name, .leg-title .px, .stepper .val b, .ops button'),
+      ];
+      for (const el of els) {
+        if (!el) continue;
+        n++;
+        if (el.scrollWidth > el.clientWidth) {
+          bad.push(`「${el.textContent}」${el.scrollWidth}/${el.clientWidth}`);
+        }
+      }
+      if (main && title && title.scrollWidth > main.clientWidth) {
+        bad.push(`本文「${title.textContent}」${title.scrollWidth}/${main.clientWidth}`);
+      }
+    }
+    return { rows: rows.length, n, bad };
+  });
+  if (r === null) return true;
+  const ok = r.bad.length === 0;
+  positionsStats.total++;
+  if (ok) positionsStats.pass++;
+  else failed = true;
+  if (!ok) console.log(`${label}: ポジションの行 ${r.rows} 本 ${r.bad.join('・')}  ← NG`);
+  return ok;
+}
+const positionsStats = { pass: 0, total: 0 };
+
+/** ポジションの詳細を 1 本開いて測り（縦・横・折り返し・読み取り・行の切れ）、閉じて戻す（#84 AC-10） */
+async function detailOpenCheck(page, label, w, h, shotName, readouts) {
+  const main = page.locator('section.positions li.leg .leg-main').first();
+  if ((await main.count()) === 0 || !(await main.isVisible())) {
+    failed = true;
+    console.log(`${label} 詳細を開く ${w}x${h}: 行が見えない  ← NG`);
+    return;
+  }
+  await main.click();
+  await page.waitForTimeout(150);
+  const opened = (await main.getAttribute('aria-expanded')) === 'true';
+  if (!opened) {
+    failed = true;
+    console.log(`${label} 詳細を開く ${w}x${h}: aria-expanded が true にならない  ← NG`);
+  }
+  detailStats.total++;
+  if (opened) detailStats.pass++;
+  await report(page, `${label} 詳細を開く`, w, h, shotName);
+  await readoutCheck(page, `${label} 詳細を開く ${w}x${h}`, readouts);
+  await positionsCheck(page, `${label} 詳細を開く ${w}x${h}`);
+  await main.click();
+  await page.waitForTimeout(100);
+}
+const detailStats = { pass: 0, total: 0 };
+
 const PANELS = ['positions', 'board', 'scenario', 'metrics', 'smile'];
 
 /** スマホの画面の状態（パネル・シート）をドックとつまみで作る（.layout の data-panel / data-sheet を読んで確かめる） */
@@ -347,6 +418,8 @@ async function measureAll() {
         // シート 3 段階: peek（既定）→ hidden（開いているドックのボタン）→ full（もう一度で peek、つまみのタップ）
         await report(page, `${tag} peek`, w, h, `${name}-peek`);
         await readoutCheck(page, `${tag} positions/peek ${w}x${h}`, 3);
+        await positionsCheck(page, `${tag} positions/peek ${w}x${h}`);
+        await detailOpenCheck(page, `${tag} positions/peek`, w, h, `${name}-peek-detail`, 3);
         await page.click('.dock button[data-panel="positions"]');
         await page.waitForTimeout(150);
         await report(page, `${tag} hidden`, w, h, `${name}-hidden`);
@@ -356,6 +429,8 @@ async function measureAll() {
         await page.waitForTimeout(150);
         await report(page, `${tag} full`, w, h, `${name}-full`);
         await readoutCheck(page, `${tag} positions/full ${w}x${h}`, 3);
+        await positionsCheck(page, `${tag} positions/full ${w}x${h}`);
+        await detailOpenCheck(page, `${tag} positions/full`, w, h, `${name}-full-detail`, 3);
         const stageH = await page.evaluate(
           () => document.querySelector('section.stage')?.getBoundingClientRect().height ?? null,
         );
@@ -379,6 +454,7 @@ async function measureAll() {
             const scn = panel === 'scenario' && sheet !== 'hidden';
             await report(page, lbl, w, h, `${name}-${panel}-${sheet}`, scn);
             await readoutCheck(page, `${lbl} ${w}x${h}`, 3);
+            await positionsCheck(page, `${lbl} ${w}x${h}`);
             if (scn) {
               await scenarioCheck(page, `${lbl} ${w}x${h}`);
               await advOpenCheck(page, lbl, w, h, `${name}-${panel}-${sheet}-adv`, 3);
@@ -391,7 +467,9 @@ async function measureAll() {
           const want = w >= 1200 ? 6 : 5;
           await readoutCheck(page, `${tag} ${w}x${h}`, want);
           await scenarioCheck(page, `${tag} ${w}x${h}`);
+          await positionsCheck(page, `${tag} ${w}x${h}`);
           await advOpenCheck(page, tag, w, h, `${name}-adv`, want);
+          await detailOpenCheck(page, tag, w, h, `${name}-detail`, want);
         }
       }
       if (domFile) domOut.push(`## ${w}x${h}${theme ? ` ${theme}` : ''}`, await domList(page));
@@ -409,6 +487,9 @@ async function measureAll() {
     console.log(`読み取りの検査: ${readoutStats.pass} / ${readoutStats.total} 状態で pass`);
     console.log(
       `シナリオの値・チップの検査: ${scenarioStats.pass} / ${scenarioStats.total} 状態で pass`,
+    );
+    console.log(
+      `ポジションの行の検査: ${positionsStats.pass} / ${positionsStats.total} 状態で pass、詳細を開いた状態 ${detailStats.pass} / ${detailStats.total}`,
     );
   }
 }
@@ -760,6 +841,8 @@ async function runFlows() {
   for (const vp of [phone, pc]) await stageFlows(vp);
   // #83 シナリオの手順（AC-10・AC-11）
   for (const vp of [phone, pc]) await scenarioFlows(vp);
+  // #84 作業台の手順（AC-11・AC-12）
+  for (const vp of [phone, pc]) await benchFlows(vp);
 }
 
 // ---- 舞台の手順（#82）
@@ -1427,6 +1510,352 @@ async function scenarioFlows(vp) {
     }
     console.log(`      ${tag} シナリオの Long Animation Frame（50ms 超）: ${loafs.join('・')}`);
   }
+  await ctx.close();
+}
+
+// ---- 作業台の手順（#84 AC-11・AC-12）
+async function benchFlows(vp) {
+  const tag = `${vp.width}x${vp.height}`;
+  const phoneSize = vp.width <= PHONE_MAX;
+  const ctx = await newContext(vp, { [WORKSPACE_KEY]: twoLegs });
+  await ctx.addInitScript(LOAF_INIT);
+  const page = await ctx.newPage();
+  await page.goto(pageUrl('next'));
+  await waitReady(page, 'next');
+  if (phoneSize) {
+    const ok = await setShell(page, 'positions', 'full');
+    check(`#84 ${tag} ドックで「ポジ」を開く（full）`, ok);
+  }
+  const P = 'section.positions';
+  const leg = (i) => `${P} li.leg:nth-child(${i})`;
+  const saved = async () => {
+    await page.waitForTimeout(700); // 自動保存（500ms の debounce）
+    return page.evaluate((k) => {
+      try {
+        const ws = JSON.parse(localStorage.getItem(k) ?? 'null');
+        return {
+          legs: ws?.tabs?.[ws.active]?.position?.legs ?? [],
+          hedge: ws?.ui?.hedge ?? null,
+        };
+      } catch {
+        return { legs: [], hedge: null };
+      }
+    }, WORKSPACE_KEY);
+  };
+  const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+  const rowCount = () => page.locator(`${P} li.leg`).count();
+  const toastText = () =>
+    page.evaluate(() => [...document.querySelectorAll('.toast .txt')].map((t) => t.textContent));
+  /** トーストが消えるまで待つ（スマホでは下の行に重なるので、押す前に） */
+  const noToasts = () =>
+    page
+      .waitForFunction(() => document.querySelectorAll('.toast').length === 0, undefined, {
+        timeout: 8000,
+      })
+      .catch(() => {});
+  const undoToast = (text) =>
+    page.locator('.toast', { hasText: text }).locator('button', { hasText: '元に戻す' });
+  const menu = async (item) => {
+    await page.click(`${P} button[aria-label="ポジションの操作"]`);
+    await page.click(`[role="menuitem"]:has-text("${item}")`);
+    await page.waitForTimeout(120);
+  };
+  const loafOk = await page.evaluate(() => window.__loafOk === true);
+  const loafMark = () => page.evaluate(() => window.__loaf.length);
+  const loafSince = (i) =>
+    page.evaluate((n) => window.__loaf.slice(n).filter((d) => d > 50).length, i);
+  const loafs = [];
+  const start = await saved();
+
+  // (a) 1 本目の枚数の ＋ → 2、− → 1、qty 1 で − が disabled
+  {
+    const st = `${leg(1)} .stepper`;
+    await page.click(`${st} > button:last-child`);
+    const a = (await saved()).legs[0]?.leg.qty;
+    const shown = await page.textContent(`${st} .val b`);
+    await page.click(`${st} > button:first-child`);
+    const b = (await saved()).legs[0]?.leg.qty;
+    const dis = await page.isDisabled(`${st} > button:first-child`);
+    check(
+      `#84 AC-11(a) ${tag} 枚数 ＋ → ${a}（表示 ${shown}）、− → ${b}、1 で − が disabled`,
+      a === 2 && shown === '2' && b === 1 && dis,
+    );
+  }
+
+  // (b) ⇄ → side が反対・entry は同じ・トーストの文（もう一度押して戻す）
+  {
+    const before = (await saved()).legs[0]?.leg;
+    await page.click(`${leg(1)} button[data-op="flip"]`);
+    const after = (await saved()).legs[0]?.leg;
+    const texts = await toastText();
+    const want = '買 P 63,500 に切替（建値は保持）';
+    const btn = await page.locator('.toast', { hasText: want }).locator('button').count();
+    check(
+      `#84 AC-11(b) ${tag} ⇄ → ${before?.side} → ${after?.side}・建値 ${after?.entry} のまま・トースト（[元に戻す] なし）`,
+      before?.side === 'sell' &&
+        after?.side === 'buy' &&
+        after?.entry === before?.entry &&
+        texts.includes(want) &&
+        btn === 0,
+      texts.join(' / '),
+    );
+    await page.click(`${leg(1)} button[data-op="flip"]`);
+    const back = (await saved()).legs[0]?.leg;
+    check(`#84 AC-11(b) ${tag} もう一度 ⇄ で売りに戻る`, back?.side === 'sell');
+  }
+
+  // (c) × → 足 1 本・[元に戻す]・確認ダイアログなし → [元に戻す] で保存の legs が消す前と同じ
+  {
+    await noToasts();
+    const before = (await saved()).legs;
+    await page.click(`${leg(1)} button[data-op="remove"]`);
+    const dlg = await page.locator('dialog[open]').count();
+    const mid = (await saved()).legs;
+    const rows = await rowCount();
+    const u = undoToast('を消した');
+    const hasUndo = (await u.count()) === 1;
+    if (hasUndo) await u.click();
+    const back = (await saved()).legs;
+    check(
+      `#84 AC-11(c) ${tag} × → 足 ${mid.length} 本（行 ${rows}）・確認ダイアログ ${dlg} 個・[元に戻す] → 足 ${back.length} 本で消す前と同じ`,
+      mid.length === 1 && rows === 1 && dlg === 0 && hasUndo && same(back, before),
+    );
+  }
+
+  // (d) ⋯ > 全クリア → 足 0 本・空の状態 → [元に戻す] → 2 本が元の順
+  {
+    await noToasts();
+    const before = (await saved()).legs;
+    await menu('全クリア');
+    const mid = (await saved()).legs;
+    const empty = await page.isVisible(`${P} .empty-state`);
+    const u = undoToast('足 2 本を消した');
+    const hasUndo = (await u.count()) === 1;
+    if (hasUndo) await u.click();
+    const back = (await saved()).legs;
+    check(
+      `#84 AC-11(d) ${tag} 全クリア → 足 ${mid.length} 本・空の状態 ${empty} → [元に戻す] → ${back.length} 本が元の順`,
+      mid.length === 0 && empty && hasUndo && same(back, before),
+    );
+  }
+
+  // (e) 詳細: 建値 700 → entry 700、枚数 0 → aria-invalid で保存が変わらない、IV 25 → iv 0.25・印「IV 編集」
+  {
+    await noToasts();
+    const main = page.locator(`${leg(1)} .leg-main`);
+    await main.click();
+    const expanded = await main.getAttribute('aria-expanded');
+    const detail = await page.isVisible(`${leg(1)} .leg-detail`);
+    check(
+      `#84 AC-11(e) ${tag} 行を押す → aria-expanded=${expanded}・詳細`,
+      expanded === 'true' && detail,
+    );
+    const entry = page.locator(`${leg(1)} input[aria-label$=" の建値"]`);
+    await entry.fill('700');
+    await entry.press('Enter');
+    const e1 = (await saved()).legs[0]?.leg;
+    check(`#84 AC-11(e) ${tag} 建値 700 Enter → 保存の entry ${e1?.entry}`, e1?.entry === 700);
+    const qty = page.locator(`${leg(1)} input[aria-label$=" の枚数を入力"]`);
+    await qty.fill('0');
+    await qty.press('Enter');
+    const inv = await qty.getAttribute('aria-invalid');
+    const alert = await page.locator(`${leg(1)} .leg-detail [role="alert"]`).count();
+    const q1 = (await saved()).legs[0]?.leg.qty;
+    check(
+      `#84 AC-11(e) ${tag} 枚数 0 → aria-invalid=${inv}・文言 ${alert} 件・保存の qty ${q1} のまま`,
+      inv === 'true' && alert === 1 && q1 === 1,
+    );
+    const iv = page.locator(`${leg(1)} input[aria-label$=" の IV（%）"]`);
+    await iv.fill('25');
+    await iv.press('Enter');
+    const i1 = (await saved()).legs[0]?.leg;
+    const badge = await page.locator(`${leg(1)} .leg-sub .tag`, { hasText: 'IV 編集' }).count();
+    check(
+      `#84 AC-11(e) ${tag} IV 25 → 保存の iv ${i1?.iv}・印「IV 編集」`,
+      i1?.iv === 0.25 && badge === 1,
+    );
+    await main.click();
+  }
+
+  // (f) 足の追加ダイアログ: 先物（既定のまま）→ 足 3 本・閉じる・トースト。枚数 0 → 開いたまま alert。Esc → ⋯ にフォーカス。
+  // 手入力 OP（板に無い限月）→ 足が増えて印「手入力」
+  {
+    await noToasts();
+    await menu('足を追加…');
+    const open1 = await page.locator('dialog[open]').count();
+    await page.click('dialog[open] button[type="submit"]');
+    await page.waitForTimeout(150);
+    const s1 = (await saved()).legs;
+    const closed = (await page.locator('dialog[open]').count()) === 0;
+    const texts = await toastText();
+    const last = s1[s1.length - 1]?.leg;
+    check(
+      `#84 AC-11(f) ${tag} 足を追加…（先物の既定）→ 足 ${s1.length} 本（${last?.product}）・閉じる・トースト`,
+      open1 === 1 &&
+        s1.length === 3 &&
+        last?.product === 'fut_mini' &&
+        closed &&
+        texts.some((t) => /^ミニ先物 \d{4}-\d{2} 買 ×1 を追加$/.test(t ?? '')),
+      texts.join(' / '),
+    );
+    await menu('足を追加…');
+    await page.fill('dialog[open] input[name="qty"]', '0');
+    await page.click('dialog[open] button[type="submit"]');
+    await page.waitForTimeout(120);
+    const stillOpen = await page.locator('dialog[open]').count();
+    const alert = (await page.textContent('dialog[open] [role="alert"]').catch(() => null)) ?? '';
+    const s2 = (await saved()).legs;
+    check(
+      `#84 AC-11(f) ${tag} 枚数 0 で [追加] → 開いたまま「${alert}」・足 ${s2.length} 本のまま`,
+      stillOpen === 1 && alert === '枚数は 1 以上の整数' && s2.length === 3,
+    );
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(150);
+    const focus = await page.evaluate(() => document.activeElement?.getAttribute('aria-label'));
+    check(
+      `#84 AC-11(f) ${tag} Esc → 閉じて ⋯ にフォーカス（${focus}）`,
+      (await page.locator('dialog[open]').count()) === 0 && focus === 'ポジションの操作',
+    );
+    await menu('足を追加…');
+    await page.click('dialog[open] .seg button:has-text("OP（手入力）")');
+    await page.fill('dialog[open] input[name="expiry"]', '2027-06');
+    await page.fill('dialog[open] input[name="k"]', '66000');
+    await page.fill('dialog[open] input[name="entry"]', '300');
+    await page.fill('dialog[open] input[name="iv"]', '30');
+    await page.press('dialog[open] input[name="iv"]', 'Enter');
+    await page.waitForTimeout(150);
+    const s3 = (await saved()).legs;
+    const m = s3[s3.length - 1];
+    const badge = await page
+      .locator(`${P} li.leg:last-child .leg-sub .tag`, { hasText: '手入力' })
+      .count();
+    check(
+      `#84 AC-11(f) ${tag} 手入力 OP（2027-06 P 66,000）を Enter → 足 ${s3.length} 本・印「手入力」`,
+      s3.length === 4 &&
+        m?.leg.expiry === '2027-06' &&
+        (m?.marks ?? []).includes('no_board') &&
+        badge === 1 &&
+        (await page.locator('dialog[open]').count()) === 0,
+    );
+  }
+
+  // (g) ヘッジ: ⋯ > ヘッジの設定… で目標 Δ 1 → 保存の target 1・1 段目が変わる。押せる段の [追加] → 先物の足（枚数 = 段の枚数）。
+  // 評価点「シナリオ時点」→ 保存の at
+  {
+    await noToasts();
+    const head0 = await page.textContent(`${P} .hedge .hl.head`);
+    await menu('ヘッジの設定…');
+    await page.fill('dialog[open] input[name="target"]', '1');
+    const h1 = (await saved()).hedge;
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(120);
+    const head1 = await page.textContent(`${P} .hedge .hl.head`);
+    check(
+      `#84 AC-11(g) ${tag} 目標 Δ 1 → 保存の target ${h1?.target}・1 段目「${head1}」`,
+      h1?.target === 1 && head1 !== head0 && (head1 ?? '').endsWith('→ 目標 1'),
+    );
+    const line = page.locator(`${P} .hedge .hl.line`, {
+      has: page.locator('button:not([disabled])'),
+    });
+    const n = await line.count();
+    const lotsText = n > 0 ? ((await line.first().locator('.txt b').textContent()) ?? '') : '';
+    const lots = Math.abs(Number(lotsText.replace(/[^\d−-]/g, '').replace('−', '-')));
+    const before = (await saved()).legs;
+    if (n > 0) await line.first().locator('button').click();
+    const after = (await saved()).legs;
+    const added = after[after.length - 1];
+    check(
+      `#84 AC-11(g) ${tag} ヘッジの [追加]（${lotsText}）→ 足 ${before.length} → ${after.length} 本・枚数 ${added?.leg.qty}`,
+      n > 0 &&
+        after.length === before.length + 1 &&
+        added?.leg.kind === 'future' &&
+        added.leg.qty === lots,
+    );
+    await page.click(`${P} .sec-head .seg button[aria-label="シナリオ時点"]`);
+    const h2 = (await saved()).hedge;
+    check(`#84 AC-11(g) ${tag} 評価点「シナリオ時点」→ 保存の at ${h2?.at}`, h2?.at === 'scenario');
+  }
+
+  // AC-12: 枚数の ＋ 20 回・⇄ 10 回・× と [元に戻す] 5 回の間の Long Animation Frame
+  {
+    await noToasts();
+    const st = `${leg(1)} .stepper > button:last-child`;
+    const q0 = (await saved()).legs[0]?.leg.qty ?? 0;
+    const m1 = await loafMark();
+    for (let i = 0; i < 20; i++) await page.click(st, { delay: 0 });
+    const lfQty = await loafSince(m1);
+    const q1 = (await saved()).legs[0]?.leg.qty ?? 0;
+    check(`#84 AC-12 ${tag} 枚数の ＋ 20 回 → qty ${q0} → ${q1}`, q1 === q0 + 20);
+    const m2 = await loafMark();
+    for (let i = 0; i < 10; i++) await page.click(`${leg(1)} button[data-op="flip"]`);
+    const lfFlip = await loafSince(m2);
+    await noToasts();
+    const before = (await saved()).legs;
+    const m3 = await loafMark();
+    for (let i = 0; i < 5; i++) {
+      await page.click(`${leg(1)} button[data-op="remove"]`);
+      await undoToast('を消した').first().click();
+    }
+    const lfDel = await loafSince(m3);
+    const after = (await saved()).legs;
+    check(`#84 AC-12 ${tag} × と [元に戻す] 5 回の後も足は同じ`, same(after, before));
+    loafs.push(`枚数 ${lfQty}`, `⇄ ${lfFlip}`, `×・戻す ${lfDel}`);
+    for (const [name, v] of [
+      ['枚数の ＋ 20 回', lfQty],
+      ['⇄ 10 回', lfFlip],
+      ['× と [元に戻す] 5 回', lfDel],
+    ]) {
+      check(
+        `#84 AC-12 ${tag} ${name}で長いフレーム 0 件`,
+        loafOk && v === 0,
+        loafOk ? `${v} 件` : '未対応',
+      );
+    }
+    console.log(`      ${tag} 作業台の Long Animation Frame（50ms 超）: ${loafs.join('・')}`);
+  }
+
+  // (h) 舞台の足マーカーのタップ → ポジションのパネルが開き、その足の行が data-selected で .panel-body の見える範囲にある
+  {
+    await noToasts();
+    if (phoneSize) await setShell(page, 'board', 'hidden');
+    await page.waitForTimeout(150);
+    const pick = await page.evaluate(() => {
+      const ms = [...document.querySelectorAll('.legmark[data-leg-id]')].reverse();
+      for (const m of ms) {
+        const b = m.getBoundingClientRect();
+        const x = b.left + b.width / 2;
+        const y = b.top + b.height / 2;
+        const hit = document.elementFromPoint(x, y);
+        if (b.width > 0 && hit && (hit === m || m.contains(hit)))
+          return { id: m.getAttribute('data-leg-id'), x, y };
+      }
+      return null;
+    });
+    if (pick) {
+      await page.mouse.click(pick.x, pick.y);
+      await page.waitForTimeout(200);
+    }
+    const st = await page.evaluate((id) => {
+      const l = document.querySelector('.layout');
+      const body = document.querySelector('section.positions .panel-body');
+      const li = document.querySelector(`section.positions li.leg[data-leg-id="${id}"]`);
+      const vb = body?.getBoundingClientRect();
+      const rb = li?.getBoundingClientRect();
+      return {
+        panel: l?.getAttribute('data-panel'),
+        selected: li?.hasAttribute('data-selected') ?? false,
+        inView:
+          !!vb && !!rb && rb.height > 0 && rb.top >= vb.top - 0.5 && rb.bottom <= vb.bottom + 0.5,
+      };
+    }, pick?.id ?? '');
+    check(
+      `#84 AC-11(h) ${tag} 足マーカー（id ${pick?.id}）のタップ → ポジションのパネル・行が data-selected で見える範囲`,
+      pick !== null && st.panel === 'positions' && st.selected && st.inView,
+      JSON.stringify(st),
+    );
+  }
+  // 最初の保存と比べて足が増えている（手順の後始末は不要。コンテキストごと捨てる）
+  if (start.legs.length !== 2) check(`#84 ${tag} 始めの足は 2 本`, false, `${start.legs.length}`);
   await ctx.close();
 }
 

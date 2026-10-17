@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { normalizeChain } from '../../data';
+import { DEFAULT_SETTINGS } from '../../model';
 import { preparePosition } from '../../model/position';
 import { ZERO_SCENARIO } from '../../model/scenario';
 import { buildWideChainJson } from '../../scripts/synthBoard';
@@ -19,6 +20,7 @@ import { type Action, initialState, reduce, type State, type UiLeg } from '../..
 import { atmStrike, boardRows } from '../../ui/view/board';
 import { bookListModel } from '../../ui/view/bookList';
 import { headerModel } from '../../ui/view/header';
+import { hedgeModel } from '../../ui/view/hedge';
 import { metricsModel } from '../../ui/view/metrics';
 import {
   cachedPinLines,
@@ -38,6 +40,13 @@ import {
   todayLine,
 } from '../../ui/view/pnlChart';
 import { positionModel } from '../../ui/view/position';
+import {
+  hedgeSection,
+  legDetail,
+  legSpreadCosts,
+  positionRows,
+  scenarioLegsByRow,
+} from '../../ui/view/positionsRegion';
 import { readoutModel } from '../../ui/view/readout';
 import { scenarioMarks } from '../../ui/view/scenarioMarks';
 import {
@@ -821,5 +830,102 @@ describe('性能（#83 AC-6: シナリオの 1 回）', () => {
     expect(once()).toBeGreaterThan(20);
     expect(s.scenario.dSigma).toBe(8);
     expectWithinBudget('#83 シナリオのプリセット 1 回', once, { warmup: 20, runs: 30 });
+  });
+});
+
+/**
+ * #84 AC-7: 新しい画面の作業台の 1 回（322 行 × 2 限月の板・足 10 本）。
+ * (1) ポジションの行の表示モデル + 足別のシナリオ点の対応 + スプレッドコスト + 詳細 1 本 + ヘッジの節
+ * （positionModel・hedgeModel から作る。画面では memo の出力を並べ直すだけ）
+ * (2) 枚数 ±1 の 1 回（editLeg の reduce + ポジションの表示モデル + 損益グラフの表示モデル + 指標 + 読み取り + (1)）。
+ */
+describe('性能（#84 AC-7: 作業台の 1 回）', () => {
+  const chain = normalizeChain(buildWideChainJson());
+  const [m1, m2] = chain.months;
+  if (!m1 || !m2) throw new Error('限月が足りない');
+  const ids: Record<string, string> = { [M1.id]: m1.id, [M2.id]: m2.id, FUT: chain.future.id };
+  const legs10 = refreshLegMarkets(
+    chain,
+    PERF_LEGS.map((leg, i) => ({
+      id: i + 1,
+      leg:
+        leg.kind === 'option'
+          ? { ...leg, expiry: ids[leg.expiry] ?? leg.expiry }
+          : { ...leg, contract: ids[leg.contract] ?? leg.contract },
+      marks: [],
+    })),
+    CALENDAR.holidays,
+  ).map(({ id: _id, ...rest }) => rest);
+  const state0 = [
+    { type: 'loaded', chain, label: 'perf' } as Action,
+    {
+      type: 'openPosition',
+      legs: legs10,
+      scenario: { ...ZERO_SCENARIO, days: 5, dX: -500 },
+      feePerLot: 0,
+      futureBasis: 'fixed',
+    } as Action,
+  ].reduce(reduce, initialState);
+
+  function bench(s: State) {
+    const c = s.chain ?? chain;
+    const pm = positionModel(c, s.legs, s.atmBasis, s.calendar);
+    const base = pnlDomains(c, pm.prepared, pm.ctx);
+    const mm = metricsModel({ base, scenario: s.scenario, unit: 'auto' });
+    const hm = hedgeModel({
+      chain: c,
+      ctx: pm.ctx,
+      base,
+      settings: base?.settings ?? DEFAULT_SETTINGS,
+      scenario: s.scenario,
+      hedge: s.hedge,
+      holidays: s.calendar.holidays,
+    });
+    return { pm, base, mm, hm };
+  }
+  function region(v: ReturnType<typeof bench>): number {
+    const rows = positionRows(v.pm);
+    const scen = scenarioLegsByRow(v.pm, v.base, v.mm);
+    const spread = legSpreadCosts(v.pm, DEFAULT_SETTINGS);
+    const row = v.pm.rows[0];
+    const d = row ? legDetail(row, scen[0] ?? null, spread[0] ?? null, v.mm.unit) : null;
+    const h = hedgeSection(v.hm);
+    return rows.length + scen.length + spread.length + (d?.items.length ?? 0) + h.lines.length;
+  }
+
+  it(`ポジションの行 + 足別の対応 + ヘッジの節（足 10 本）が ${BUDGET_MS} ms 以内（30 回の最小値）`, () => {
+    expect(state0.legs).toHaveLength(10);
+    const v = bench(state0);
+    expect(v.pm.rows.every((r) => r.error === null)).toBe(true);
+    const once = () => region(v);
+    expect(once()).toBeGreaterThan(30);
+    expectWithinBudget('#84 作業台の表示モデル（足 10 本）', once, { warmup: 20, runs: 30 });
+  });
+
+  it(`枚数 ±1 の 1 回（reduce + 表示モデル一式）が ${BUDGET_MS} ms 以内（30 回の最小値）`, () => {
+    let s = state0;
+    let k = 0;
+    const id = s.legs[0]?.id ?? 1;
+    const once = () => {
+      k++;
+      const qty = (s.legs[0]?.leg.qty ?? 1) + (k % 2 === 1 ? 1 : -1);
+      s = reduce(s, { type: 'editLeg', id, patch: { qty } });
+      const v = bench(s);
+      if (!v.base) return 0;
+      const m = pnlChartModel({
+        base: v.base,
+        scenario: s.scenario,
+        viewport: s.pnlViewport,
+        pnlY: s.pnlY,
+        plotWidth: 1000,
+        plotHeight: 260,
+      });
+      const r = readoutModel({ base: v.base, metrics: v.mm, scenario: s.scenario });
+      return region(v) + m.lines.length + v.mm.tail.rows.length + r.text.x.length;
+    };
+    const q0 = s.legs[0]?.leg.qty ?? 0;
+    expect(once()).toBeGreaterThan(30);
+    expect(s.legs[0]?.leg.qty).toBe(q0 + 1);
+    expectWithinBudget('#84 枚数 ±1 の 1 回（足 10 本）', once, { warmup: 20, runs: 30 });
   });
 });

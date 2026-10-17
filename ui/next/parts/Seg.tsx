@@ -8,6 +8,8 @@ export interface SegOption<T extends string> {
   text: string;
   title?: string;
   disabled?: boolean;
+  /** ボタンの aria-label（文字を短くしたときの全文。#84） */
+  label?: string;
 }
 
 export function Seg<T extends string>(p: {
@@ -25,6 +27,7 @@ export function Seg<T extends string>(p: {
           key={o.value}
           aria-pressed={o.value === p.value}
           title={o.title}
+          aria-label={o.label}
           disabled={o.disabled}
           onClick={() => {
             if (o.value !== p.value) p.onChange(o.value);
