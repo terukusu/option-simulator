@@ -128,7 +128,7 @@ function concat(chunks: readonly Uint8Array[], total: number): Uint8Array {
   return out;
 }
 
-/** ブラウザ（と Node 22）の CompressionStream / DecompressionStream を使う圧縮。 */
+/** ブラウザ（と Node）の CompressionStream / DecompressionStream を使う圧縮。 */
 export const streamCodec: ShareCodec = {
   async gzip(bytes) {
     const reader = streamOf(bytes)

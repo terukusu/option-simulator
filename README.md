@@ -10,7 +10,7 @@
 
 ## 開発
 
-Node 22 を使う（`.node-version`）。
+Node 24 を使う（`.node-version`）。
 
 ```sh
 npm ci
