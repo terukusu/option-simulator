@@ -30,7 +30,7 @@ PRE_OPEN_WINDOWS = ((time(8, 39), time(8, 46)), (time(16, 45), time(17, 0)))  # 
 AFTER_CLOSE_WINDOWS = ((time(15, 41), time(16, 44)), (time(5, 56), time(8, 38)))  # 引け後（両端含む）
 CLOSED_AFTER_MINUTES = 45  # 最新の snapshot_at がこれより古ければ closed（土日・休業日・取り込みの停止）
 MIN_ROWS = 300  # rows_option の下限（夜間序盤の 522 行を捨てない）
-FILL_RATIO = (4, 5)  # 1 限月の先物 ±5% の行のうち両側気配のある割合の下限（分数 = 80%。浮動小数の境界を避ける）
+FILL_RATIO = (3, 4)  # 1 限月の先物 ±5% の行のうち両側気配のある割合の下限（分数 = 75%。浮動小数の境界を避ける）
 BAND = 0.05  # 先物 ±5%
 MAX_BOARD_READS = 3  # 1 リクエストで板（option_price_latest）を読む上限
 MAX_FUTURE_READS = 10  # 1 リクエストで候補の先物を読む上限（先物 NULL が続くときの安全弁）
