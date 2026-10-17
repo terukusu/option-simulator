@@ -486,3 +486,32 @@ dialog.sheet::backdrop {
     transform: translateY(6px);
   }
 }
+
+/* ===== 全文のポップオーバー（#107: 指標のタイル・舞台の読み取り） ===== */
+.popover.up {
+  top: auto;
+  bottom: calc(100% + var(--sp-1));
+}
+
+.full {
+  display: grid;
+  grid-template-columns: auto auto;
+  gap: 2px var(--sp-3);
+  white-space: nowrap;
+}
+
+.full .fk {
+  color: var(--ink-3);
+}
+
+.full .fv {
+  color: var(--ink);
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.full .lead {
+  color: var(--ink);
+  font-weight: 600;
+}

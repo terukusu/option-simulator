@@ -15,7 +15,10 @@
 //                                          指標（#86）のタイルの .k・.v・テール表の全セル・（開いていれば）内訳の各行が切れて
 //                                          いないか（と .panel-body の中で横にはみ出していないか）を、スマホの「指標」peek / full・
 //                                          900（ドックで指標を開く）・1440 で。内訳を開いた状態（360 peek・390 full・900・1440）の
-//                                          縦・横・折り返し・読み取り
+//                                          縦・横・折り返し・読み取り。
+//                                          副題（#107）: タイルの .s・読み取りの .s の切れがすべて全文のボタン（aria-expanded）の中
+//                                          で、ボタンの数がタイル 6・読み取りの全文のある項目（ミニは 0）。既定の足と掛け金の足
+//                                          （買い 2 本）は千円（自動）で切れ 0、円固定の足（売り 5 枚）は件数だけ
 //   npm run ui:check -- --parts            部品の見本（?ui=next&parts。dev だけ）
 //   npm run ui:check -- --legacy           旧画面（?ui=next なし）
 //   npm run ui:check -- --flows            保存・共有・テーマ・キーボードの手順（#81 AC-11・AC-12）と舞台の手順
@@ -25,7 +28,10 @@
 //                                          （#84: 枚数・⇄・× と [元に戻す]・全クリアと [元に戻す]・詳細の入力・足の追加ダイアログ・
 //                                          ヘッジ・舞台の足マーカー → 行の強調・Long Animation Frame。390×844 と 1440×900）と指標の手順
 //                                          （#86: 旧画面の内訳・テール表との値の一致・タイル 5 と読み取りの一致・Δσ ±0.5 の追従
-//                                          （390 は IV レールの ↑ / ↓）・Long Animation Frame。390×844 と 1440×900）
+//                                          （390 は IV レールの ↑ / ↓）・Long Animation Frame。390×844 と 1440×900）と副題の全文の手順
+//                                          （#107: タイル 6 枚のタップで全文・内訳との一致・Esc でボタンへ戻る・外側で閉じる・
+//                                          同時に 1 つ・Tab → Enter / Space・窓と .panel-body の中・読み取りの損益の全文（上に開く）と
+//                                          ハンドルで閉じる・Long Animation Frame。390×844 と 1440×900）
 //   --url <base>                           dev サーバーを起こさず、その URL を使う（例 http://127.0.0.1:5173/?ui=next&parts）
 //   --dom <file>                           body の下の要素の tag.class の並びを書き出す（旧画面が変わらないことの比較用）
 //   --shots <dir>                          スクリーンショットを書く（合成の板だけ。リポジトリに入れない）
@@ -270,9 +276,74 @@ async function readoutCheck(page, label, want) {
   if (ok) readoutStats.pass++;
   else failed = true;
   if (!ok) console.log(`${label}: 読み取り ${r.n} / ${want} つ ${r.bad.join('・')}  ← NG`);
+  await subCheck(page, label, 'readout', true);
   return ok;
 }
 const readoutStats = { pass: 0, total: 0 };
+
+/**
+ * 副題の全文（#107 AC-3）: 見えている副題（指標のタイルの .tile .s・読み取りの .readout .ro .s）のうち切れている
+ * （scrollWidth > clientWidth）ものがすべて全文のポップオーバーのボタン（button[aria-expanded]）の中にある。
+ * ボタンの数: タイルは見えているタイルの数（6）、読み取りは見えている項目のうち全文のある項目
+ * （date・expiry・delta・premium。ui/view/stage.ts の bigReadout の full）の数、スマホでシート全開のミニは 0。
+ * strict（千円（自動）の足）なら切れの件数 0 も条件。件数は統計に出す（円固定は yen = true で別に数える）
+ */
+async function subCheck(page, label, scope, strict, yen = false) {
+  const r = await page.evaluate(
+    ({ scope, phoneMax }) => {
+      const vis = (el) => el.getClientRects().length > 0;
+      const BTN = 'button[aria-expanded]';
+      let items;
+      let want;
+      if (scope === 'tiles') {
+        const sec = document.querySelector('section.metrics');
+        if (!sec || !vis(sec)) return null;
+        items = [...sec.querySelectorAll('.tile')].filter(vis);
+        want = items.length;
+      } else {
+        items = [...document.querySelectorAll('.readout .ro[data-ro]')].filter(
+          (el) => getComputedStyle(el).display !== 'none',
+        );
+        const mini =
+          window.innerWidth <= phoneMax &&
+          document.querySelector('.layout')?.getAttribute('data-sheet') === 'full';
+        const FULL = ['date', 'expiry', 'delta', 'premium'];
+        want = mini ? 0 : items.filter((el) => FULL.includes(el.getAttribute('data-ro'))).length;
+      }
+      const btns = items.filter((el) => el.querySelector(`:scope ${BTN}`)).length;
+      const subs = items.flatMap((el) => [...el.querySelectorAll('.s')]).filter(vis);
+      const cut = subs.filter((el) => el.scrollWidth > el.clientWidth);
+      const bare = cut
+        .filter((el) => !el.closest(BTN))
+        .map((el) => `「${el.textContent}」${el.scrollWidth}/${el.clientWidth}`);
+      return {
+        n: subs.length,
+        btns,
+        want,
+        cut: cut.map((el) => `「${el.textContent}」${el.scrollWidth}/${el.clientWidth}`),
+        bare,
+      };
+    },
+    { scope, phoneMax: PHONE_MAX },
+  );
+  if (r === null) return true;
+  const ok = r.bare.length === 0 && r.btns === r.want && (!strict || r.cut.length === 0);
+  subStats.total++;
+  if (ok) subStats.pass++;
+  else failed = true;
+  subStats.cut += r.cut.length;
+  if (yen) subStats.cutYen += r.cut.length;
+  const what = scope === 'tiles' ? 'タイル' : '読み取り';
+  if (!ok) {
+    console.log(
+      `${label}: ${what}の副題 ${r.n} 個・ボタン ${r.btns} / ${r.want}・切れ ${r.cut.join('・') || 0}・ボタン外の切れ ${r.bare.join('・') || 0}  ← NG`,
+    );
+  } else if (r.cut.length > 0) {
+    console.log(`${label}: ${what}の副題の切れ（全文あり）${r.cut.join('・')}`);
+  }
+  return ok;
+}
+const subStats = { pass: 0, total: 0, cut: 0, cutYen: 0 };
 
 /**
  * シナリオ（#83 AC-9）: 見えている section.scenario の .stepper .val b・.chip が切れていない（scrollWidth ≤ clientWidth）。
@@ -409,6 +480,7 @@ async function metricsCheck(page, label) {
   if (ok) metricsStats.pass++;
   else failed = true;
   if (!ok) console.log(`${label}: 指標の値 ${r.n} 個 ${r.bad.join('・')}  ← NG`);
+  await subCheck(page, label, 'tiles', true);
   return ok;
 }
 const metricsStats = { pass: 0, total: 0 };
@@ -583,6 +655,78 @@ async function measureAll() {
     console.log(
       `指標の検査: ${metricsStats.pass} / ${metricsStats.total} 状態で pass、内訳を開いた状態 ${breakdownStats.pass} / ${breakdownStats.total}`,
     );
+    // 掛け金の足・円固定の足（#107 AC-3）
+    await subtitleAll();
+    console.log(
+      `副題の検査: ${subStats.pass} / ${subStats.total} 状態で pass、切れ ${subStats.cut} 件（うち円固定 ${subStats.cutYen} 件。すべて全文のボタンの中）`,
+    );
+  }
+}
+
+// ---- 副題の全文（#107）: 掛け金の足（買い 2 本）と円固定の足（売り 5 枚）。タブ A の足から作る（架空の建値）
+const tabA = fixture.tabs[0];
+const legsOf = (side, qty) =>
+  tabA.position.legs.map((l) => ({ ...l, leg: { ...l.leg, side, qty } }));
+const withLegs = (legs, ui = fixture.ui) =>
+  JSON.stringify({
+    ...fixture,
+    ui,
+    active: 0,
+    tabs: [{ ...tabA, position: { ...tabA.position, legs } }],
+  });
+/** 買い 2 本（put 63,500 / call 71,000 を 1 枚ずつ。建値 640 / 520）= 掛け金のタイル */
+const buyTwo = withLegs(legsOf('buy', 1));
+/** 売り 5 枚ずつ・金額の単位を円に固定（桁が増える） */
+const sellFiveYen = withLegs(legsOf('sell', 5), { ...fixture.ui, metrics_unit: 'yen' });
+
+/**
+ * 副題の検査の追加の状態（#107 AC-3）: 掛け金の足 × 4 幅 × 2 テーマ（千円・自動。切れ 0 が条件）と
+ * 円固定の足 × 4 幅 × ダーク（件数だけ）。スマホは「指標」peek と full、900 はドックで指標、1440 はそのまま
+ */
+async function subtitleAll() {
+  const runs = [
+    ['掛け金', buyTwo, ['dark', 'light'], true],
+    ['円固定', sellFiveYen, ['dark'], false],
+  ];
+  for (const [name, ws, themes, strict] of runs) {
+    for (const [w, h] of SIZES) {
+      for (const theme of themes) {
+        const ctx = await newContext(
+          { width: w, height: h },
+          { [WORKSPACE_KEY]: ws, [PREFS_KEY]: prefsText(theme) },
+        );
+        const page = await ctx.newPage();
+        await page.goto(pageUrl('next'));
+        await waitReady(page, 'next');
+        const tag = `next ${theme} ${name}`;
+        const shot = `next-${w}x${h}-${theme}-sub-${strict ? 'stake' : 'yen'}`;
+        const states = w <= PHONE_MAX ? ['peek', 'full'] : w >= 1200 ? ['pc'] : ['dock'];
+        for (const st of states) {
+          if (st === 'peek' || st === 'full') {
+            if (!(await setShell(page, 'metrics', st))) {
+              failed = true;
+              console.log(`${tag} metrics/${st} ${w}x${h}: 画面の状態を作れない  ← NG`);
+              continue;
+            }
+          } else if (st === 'dock') {
+            await page.click('.dock button[data-panel="metrics"]');
+          }
+          await page.waitForTimeout(150);
+          const lbl = `${tag} ${st}`;
+          const want = w <= PHONE_MAX ? 3 : w >= 1200 ? 6 : 5;
+          if (strict) {
+            await report(page, lbl, w, h, `${shot}-${st}`);
+            await readoutCheck(page, `${lbl} ${w}x${h}`, want);
+            await metricsCheck(page, `${lbl} ${w}x${h}`);
+          } else {
+            if (shotsDir) await page.screenshot({ path: join(shotsDir, `${shot}-${st}.png`) });
+            await subCheck(page, `${lbl} ${w}x${h}`, 'tiles', false, true);
+            await subCheck(page, `${lbl} ${w}x${h}`, 'readout', false, true);
+          }
+        }
+        await ctx.close();
+      }
+    }
   }
 }
 
@@ -937,6 +1081,8 @@ async function runFlows() {
   for (const vp of [phone, pc]) await benchFlows(vp);
   // #86 指標の手順（AC-10・AC-11）
   for (const vp of [phone, pc]) await metricsFlows(vp);
+  // #107 副題の全文のポップオーバーの手順（AC-4）
+  for (const vp of [phone, pc]) await subtitleFlows(vp);
 }
 
 // ---- 舞台の手順（#82）
@@ -2150,6 +2296,250 @@ async function metricsFlows(vp) {
     }
     console.log(
       `      ${tag} 指標の Long Animation Frame（50ms 超）: 連打 ${lfPlus}・ハンドル ${lfDrag}`,
+    );
+  }
+  await ctx.close();
+}
+
+// ---- 副題の全文のポップオーバーの手順（#107 AC-4）
+/** 開いているポップオーバーのボタン（タイル・読み取り）の数 */
+const openPops = (page) =>
+  page.evaluate(
+    () =>
+      document.querySelectorAll('.tile-btn[aria-expanded="true"], .ro-btn[aria-expanded="true"]')
+        .length,
+  );
+
+async function subtitleFlows(vp) {
+  const tag = `${vp.width}x${vp.height}`;
+  const phoneSize = vp.width <= PHONE_MAX;
+  const ctx = await newContext(vp, { [WORKSPACE_KEY]: buyTwo });
+  await ctx.addInitScript(LOAF_INIT);
+  const page = await ctx.newPage();
+  await page.goto(pageUrl('next'));
+  await waitReady(page, 'next');
+  if (phoneSize) {
+    const ok = await setShell(page, 'metrics', 'peek');
+    check(`#107 ${tag} ドックで「指標」を開く（peek）`, ok);
+  }
+  const M = 'section.metrics';
+  const loafOk = await page.evaluate(() => window.__loafOk === true);
+  const loafMark = await page.evaluate(() => window.__loaf.length);
+
+  // 比較の正: 内訳を開いた行（見出し → 値）
+  const toggle = page.locator(`${M} .mx-toggle`);
+  await toggle.click();
+  await page.waitForTimeout(150);
+  const kv = await page.evaluate(
+    (m) =>
+      [...document.querySelectorAll(`${m} .kv-grid > .k`)].map((k) => [
+        k.textContent,
+        k.nextElementSibling?.textContent ?? '',
+      ]),
+    M,
+  );
+  await toggle.click();
+  await page.waitForTimeout(100);
+
+  /** そのボタンの全文の行・見た目の値・矩形・ページのスクロール */
+  const popInfo = (btnSel, hostSel) =>
+    page.evaluate(
+      ({ btnSel, hostSel }) => {
+        const btn = document.querySelector(btnSel);
+        const wrap = btn?.closest('.pop-wrap');
+        const pop = wrap?.querySelector('.popover');
+        if (!btn || !pop) return null;
+        const rows = [];
+        const cells = [...pop.querySelectorAll('.full > span')];
+        for (let i = 0; i + 1 < cells.length; i += 2) {
+          rows.push([cells[i].textContent, cells[i + 1].textContent]);
+        }
+        const v = btn.querySelector('.v');
+        const vText = [
+          v?.querySelector(':scope > span')?.textContent ?? '',
+          v?.querySelector('small')?.textContent ?? '',
+        ]
+          .filter(Boolean)
+          .join(' ');
+        const r = pop.getBoundingClientRect();
+        const h = btn.closest(hostSel)?.getBoundingClientRect();
+        const inWin =
+          r.left >= 0 &&
+          r.top >= 0 &&
+          r.right <= window.innerWidth &&
+          r.bottom <= window.innerHeight;
+        const inHost =
+          !!h &&
+          r.left >= h.left - 0.5 &&
+          r.top >= h.top - 0.5 &&
+          r.right <= h.right + 0.5 &&
+          r.bottom <= h.bottom + 0.5;
+        return {
+          expanded: btn.getAttribute('aria-expanded'),
+          hidden: pop.hidden,
+          up: pop.classList.contains('up'),
+          rows,
+          k: btn.querySelector('.k')?.textContent ?? '',
+          vText,
+          inWin,
+          inHost,
+          rect: `${Math.round(r.left)},${Math.round(r.top)}–${Math.round(r.right)},${Math.round(r.bottom)}`,
+        };
+      },
+      { btnSel, hostSel },
+    );
+
+  // (a)(f) 各タイルをタップ → 開く・中身が全文（内訳・見た目の値と一致）・窓と .panel-body の中・縦・横 0px
+  const keys = ['maxProfit', 'maxLoss', 'bep', 'premium', 'scenario', 'greeks'];
+  const tileBtn = (k) => `${M} .tile[data-tile="${k}"] .tile-btn`;
+  const kvHas = (v) => kv.some(([, bv]) => bv.includes(v));
+  for (const k of keys) {
+    await page.click(tileBtn(k));
+    await page.waitForTimeout(120);
+    const i = await popInfo(tileBtn(k), '.panel-body');
+    const m = await measure(page);
+    if (!i) {
+      check(`#107 AC-4(a) ${tag} タイル ${k} のポップオーバー`, false, '無い');
+      continue;
+    }
+    const first = i.rows[0] ?? ['', ''];
+    let content =
+      i.rows.length > 0 &&
+      i.rows.every(([rk, rv]) => rv !== '' && (rk === 'X' || rk === 'd' || kvHas(rv)));
+    if (k === 'greeks') {
+      const want = kv.filter(([bk]) => ['Δ', 'Γ', 'Θ', 'V'].includes(bk));
+      content = JSON.stringify(i.rows) === JSON.stringify(want);
+    } else {
+      content = content && first[0].startsWith(i.k) && first[1] === i.vText;
+    }
+    if (k === 'premium') {
+      const fee = kv.find(([bk]) => bk === '手数料の合計');
+      content =
+        content && !!fee && i.rows.some(([rk, rv]) => rk === '手数料の合計' && rv === fee[1]);
+    }
+    check(
+      `#107 AC-4(a) ${tag} タイル ${k} をタップ → 全文（${i.rows.length} 行）が表示モデルの全文と一致`,
+      i.expanded === 'true' && !i.hidden && content,
+      i.rows.map((r) => r.join(' ')).join(' / '),
+    );
+    check(
+      `#107 AC-4(f) ${tag} タイル ${k} の全文が窓と .panel-body の中・ページの縦・横 0px`,
+      i.inWin && i.inHost && m.v === 0 && m.h === 0,
+      `${i.rect} 縦 ${m.v} 横 ${m.h}`,
+    );
+    // 開いた全文は下のタイルに重なる（押しても閉じない）ので Esc で閉じて次へ
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(80);
+  }
+  // (b) Esc で閉じてそのタイルのボタンへフォーカス
+  {
+    const k = 'premium';
+    await page.click(tileBtn(k));
+    await page.waitForTimeout(100);
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(100);
+    const r = await page.evaluate(
+      (sel) => ({
+        expanded: document.querySelector(sel)?.getAttribute('aria-expanded'),
+        focus: document.activeElement === document.querySelector(sel),
+      }),
+      tileBtn(k),
+    );
+    check(
+      `#107 AC-4(b) ${tag} Esc で閉じてタイルのボタンへフォーカス`,
+      r.expanded === 'false' && r.focus,
+    );
+  }
+  // (c) 外側（パネルの見出し）のタップで閉じる
+  {
+    await page.click(tileBtn('maxLoss'));
+    await page.waitForTimeout(100);
+    const before = await openPops(page);
+    await page.click(`${M} .panel-head h2`);
+    await page.waitForTimeout(100);
+    check(`#107 AC-4(c) ${tag} 外側のタップで閉じる`, before === 1 && (await openPops(page)) === 0);
+  }
+  // (d) 別のタイルのタップで前のものが閉じる（同時に 1 つ）
+  {
+    await page.click(tileBtn('maxProfit'));
+    await page.waitForTimeout(100);
+    await page.click(tileBtn('greeks'));
+    await page.waitForTimeout(100);
+    const r = await page.evaluate(
+      ({ a, b }) => [
+        document.querySelector(a)?.getAttribute('aria-expanded'),
+        document.querySelector(b)?.getAttribute('aria-expanded'),
+      ],
+      { a: tileBtn('maxProfit'), b: tileBtn('greeks') },
+    );
+    check(
+      `#107 AC-4(d) ${tag} 別のタイルのタップで前のものが閉じる（開いているのは 1 つ）`,
+      r[0] === 'false' && r[1] === 'true' && (await openPops(page)) === 1,
+    );
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(80);
+  }
+  // (e) キーボード: パネルの ⓘ から Tab → 最初のタイル、Enter で開く、Space で閉じる
+  {
+    await page.focus(`${M} .panel-head .hintbtn`);
+    await page.keyboard.press('Tab');
+    const onTile = await page.evaluate(
+      (sel) => document.activeElement === document.querySelector(sel),
+      tileBtn('maxProfit'),
+    );
+    await page.keyboard.press('Enter');
+    await page.waitForTimeout(100);
+    const opened = (await page.getAttribute(tileBtn('maxProfit'), 'aria-expanded')) === 'true';
+    await page.keyboard.press('Space');
+    await page.waitForTimeout(100);
+    const closed = (await page.getAttribute(tileBtn('maxProfit'), 'aria-expanded')) === 'false';
+    check(
+      `#107 AC-4(e) ${tag} Tab → タイル、Enter で開く、Space で閉じる`,
+      onTile && opened && closed,
+    );
+  }
+  // (g) 読み取りの date: 全文に Δσ、上に開いて .stage-main の中、ハンドルのドラッグ（pointerdown）で閉じる
+  {
+    const ro = '.readout .ro[data-ro="date"] .ro-btn';
+    await page.click(ro);
+    await page.waitForTimeout(120);
+    const i = await popInfo(ro, '.stage-main');
+    const m = await measure(page);
+    check(
+      `#107 AC-4(g) ${tag} 読み取りの損益をタップ → 全文に Δσ +2.0 pt・上に開いて舞台の中・縦・横 0px`,
+      !!i &&
+        i.expanded === 'true' &&
+        i.up &&
+        i.inWin &&
+        i.inHost &&
+        m.v === 0 &&
+        m.h === 0 &&
+        i.rows.some(([k, v]) => k === 'Δσ' && v === '+2.0 pt') &&
+        i.rows[0]?.[1] === i.vText,
+      i ? `${i.rows.map((r) => r.join(' ')).join(' / ')}・${i.rect}` : '無い',
+    );
+    const hb = await page.locator('.chart .handle-hit').first().boundingBox();
+    if (hb) {
+      await page.mouse.move(hb.x + hb.width / 2, hb.y + hb.height / 2);
+      await page.mouse.down();
+      await page.mouse.up();
+      await page.waitForTimeout(100);
+    }
+    check(
+      `#107 AC-4(g) ${tag} 舞台のハンドルの pointerdown で閉じる`,
+      !!hb && (await openPops(page)) === 0,
+    );
+  }
+  // (h) 開閉の間の Long Animation Frame（50ms 超）
+  {
+    const n = await page.evaluate(
+      (i) => window.__loaf.slice(i).filter((d) => d > 50).length,
+      loafMark,
+    );
+    check(
+      `#107 AC-4(h) ${tag} 全文の開閉の間の長いフレーム 0 件`,
+      loafOk && n === 0,
+      loafOk ? `${n} 件` : '未対応',
     );
   }
   await ctx.close();

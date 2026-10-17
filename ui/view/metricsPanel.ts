@@ -24,6 +24,12 @@ import {
 export type Tone = 'gain' | 'loss' | null;
 export type TileKey = 'maxProfit' | 'maxLoss' | 'bep' | 'premium' | 'scenario' | 'greeks';
 
+/** 全文（タイル・読み取りのポップオーバー）の 1 行。見出しと値（値は内訳と同じ関数・同じ桁の文字列） */
+export interface FullRow {
+  k: string;
+  v: string;
+}
+
 export interface MetricTile {
   key: TileKey;
   /** 見出し */
@@ -35,6 +41,8 @@ export interface MetricTile {
   /** 副題（1 行、入らなければ省略記号） */
   s: string;
   tone: Tone;
+  /** 全文（タップ / Enter / Space のポップオーバーの中身。1 行目は見出し + 値。必ず 1 行以上。#107） */
+  full: FullRow[];
 }
 
 export interface BreakdownRow {
@@ -102,7 +110,7 @@ const unitFor = (value: string, unit: string) =>
   value === DASH || value.endsWith('∞') ? '' : unit;
 
 /** 金額 + 単位の文字列（内訳の値。— と ∞ には単位を付けない） */
-function amountText(v: number | null, u: AmountUnit, signed = false): string {
+export function amountText(v: number | null, u: AmountUnit, signed = false): string {
   const s = fmtAmount(v, u, signed);
   const unit = unitFor(s, AMOUNT_UNIT_LABEL[u]);
   return unit ? `${s} ${unit}` : s;
@@ -116,6 +124,87 @@ function xsChunks(xs: readonly number[]): string[] {
   return out;
 }
 
+/** 点の並びの行（2 点ずつ。続きの行の見出しは空。内訳と全文で共用） */
+function xsFullRows(k: string, xs: readonly number[]): FullRow[] {
+  return xsChunks(xs).map((v, i) => ({ k: i === 0 ? k : '', v }));
+}
+
+/** 満期 最大利益の行（内訳と全文で共用。全文は有限の X も出す） */
+function maxProfitRows(m: MetricsModel, withX: boolean): FullRow[] {
+  const { expiry } = m;
+  const rows: FullRow[] = [
+    { k: '満期 最大利益', v: amountText(expiry.maxProfit.value, m.unit, true) },
+  ];
+  if (expiry.profitFinite) {
+    rows.push({ k: 'call 側 ∞ / put 側', v: amountText(expiry.profitFinite.value, m.unit, true) });
+  } else if (withX && expiry.maxProfit.x !== null) {
+    rows.push({ k: 'X', v: fmtNum(expiry.maxProfit.x) });
+  }
+  return rows;
+}
+
+/** 満期 最大損失の行（−∞ なら put 側と SQ = 下端 / X。内訳と全文で共用。全文は有限の X も出す） */
+function maxLossRows(m: MetricsModel, withX: boolean): FullRow[] {
+  const { expiry } = m;
+  const lf = expiry.lossFinite;
+  if (lf) {
+    const atLo = lf.x === expiry.xLo;
+    const rows: FullRow[] = [
+      { k: '満期 最大損失', v: 'call 側 −∞' },
+      { k: atLo ? 'put 側（SQ = 下端）' : 'put 側', v: amountText(lf.value, m.unit, true) },
+    ];
+    if (!atLo) rows.push({ k: 'put 側の X', v: fmtNum(lf.x) });
+    return rows;
+  }
+  const rows: FullRow[] = [
+    { k: '満期 最大損失', v: amountText(expiry.maxLoss.value, m.unit, true) },
+  ];
+  if (withX && expiry.maxLoss.x !== null) rows.push({ k: 'X', v: fmtNum(expiry.maxLoss.x) });
+  return rows;
+}
+
+/** 指定日 + シナリオの d と X の行（内訳と全文で共用） */
+function scenarioRows(m: MetricsModel): FullRow[] {
+  const sp = m.scenarioPoint;
+  return [
+    { k: 'd', v: `${fmtNum(m.days, 2)} 日` },
+    { k: 'X', v: `${fmtNum(sp.x)}（ΔX ${fmtSigned(sp.dXPct, 1)}%）` },
+  ];
+}
+
+/** 合計グリーク（シナリオ点）の 4 行（内訳と全文で共用） */
+function greekRows(m: MetricsModel): FullRow[] {
+  const g = m.scenarioPoint.total;
+  const A = (v: number) => amountText(v, m.unit, true);
+  return [
+    { k: 'Δ', v: `${fmtSigned(g.deltaLarge, 3)} 枚（ミニ ${fmtSigned(g.deltaMini, 2)}）` },
+    { k: 'Γ', v: `${fmtSigned(g.gammaPer100, 4)} / 100 円` },
+    { k: 'Θ', v: `${A(g.thetaPerDay)} / 日` },
+    { k: 'V', v: `${A(g.vegaPerPt)} / pt` },
+  ];
+}
+
+/**
+ * 掛け金 / 受取 − 支払の全文（タイルと舞台の読み取りの premium で共用。値は内訳と同じ桁）。
+ * 支払超は掛け金（支払 − 受取 + 手数料）・支払・受取・手数料の合計、受取超は受取 − 支払・受取・支払・手数料の合計
+ */
+export function premiumFullRows(p: MetricsModel['premium'], u: AmountUnit): FullRow[] {
+  const A = (v: number | null, signed = false) => amountText(v, u, signed);
+  return p.stake !== null
+    ? [
+        { k: '掛け金（支払 − 受取 + 手数料）', v: A(p.stake) },
+        { k: '支払', v: A(p.paid) },
+        { k: '受取', v: A(p.received) },
+        { k: '手数料の合計', v: A(p.fees) },
+      ]
+    : [
+        { k: '受取 − 支払', v: A(p.net, true) },
+        { k: '受取', v: A(p.received) },
+        { k: '支払', v: A(p.paid) },
+        { k: '手数料の合計', v: A(p.fees) },
+      ];
+}
+
 function unitSubOf(m: MetricsModel): string {
   return `${AMOUNT_UNIT_LABEL[m.unit]}${m.unitAuto ? '（自動）' : '（固定）'}`;
 }
@@ -127,13 +216,21 @@ export function metricTiles(m: MetricsModel): MetricTile[] {
   const ul = AMOUNT_UNIT_LABEL[u];
   const { expiry, scenarioPoint: sp, premium } = m;
   const g = sp.total;
-  const amountTile = (key: TileKey, k: string, v: string, s: string, toned = true): MetricTile => ({
+  const amountTile = (
+    key: TileKey,
+    k: string,
+    v: string,
+    s: string,
+    full: FullRow[],
+    toned = true,
+  ): MetricTile => ({
     key,
     k,
     v,
     unit: unitFor(v, ul),
     s,
     tone: toned ? toneOf(v) : null,
+    full,
   });
 
   const maxProfitV = fmtAmount(expiry.maxProfit.value, u, true);
@@ -146,7 +243,7 @@ export function metricTiles(m: MetricsModel): MetricTile[] {
   const maxLossV = fmtAmount(expiry.maxLoss.value, u, true);
   const lf = expiry.lossFinite;
   const maxLossS = lf
-    ? `put 側 ${fmtAmount(lf.value, u, true)} · ${lf.x === expiry.xLo ? 'SQ = 下端' : `X ${fmtNum(lf.x)}`}`
+    ? `put 側 ${fmtAmount(lf.value, u, true)} · ${lf.x === expiry.xLo ? '下端' : `X ${fmtNum(lf.x)}`}`
     : expiry.maxLoss.x !== null
       ? `X ${fmtNum(expiry.maxLoss.x)}`
       : '';
@@ -157,19 +254,21 @@ export function metricTiles(m: MetricsModel): MetricTile[] {
           'premium',
           '掛け金',
           fmtAmount(premium.stake, u),
-          `支払 ${fmtAmount(premium.paid, u)} / 受取 ${fmtAmount(premium.received, u)} / 手数料 ${fmtAmount(premium.fees, u)}`,
+          `支払 ${fmtAmount(premium.paid, u)} · 受取 ${fmtAmount(premium.received, u)}`,
+          premiumFullRows(premium, u),
           false,
         )
       : amountTile(
           'premium',
           '受取 − 支払',
           fmtAmount(premium.net, u, true),
-          `受取 ${fmtAmount(premium.received, u)} / 支払 ${fmtAmount(premium.paid, u)}`,
+          `受取 ${fmtAmount(premium.received, u)} · 支払 ${fmtAmount(premium.paid, u)}`,
+          premiumFullRows(premium, u),
         );
 
   return [
-    amountTile('maxProfit', '満期 最大利益', maxProfitV, maxProfitS),
-    amountTile('maxLoss', '満期 最大損失', maxLossV, maxLossS),
+    amountTile('maxProfit', '満期 最大利益', maxProfitV, maxProfitS, maxProfitRows(m, true)),
+    amountTile('maxLoss', '満期 最大損失', maxLossV, maxLossS, maxLossRows(m, true)),
     {
       key: 'bep',
       k: '満期 BEP',
@@ -177,6 +276,10 @@ export function metricTiles(m: MetricsModel): MetricTile[] {
       unit: '',
       s: `指定日 ${fmtXs(m.dateBreakevens)}`,
       tone: null,
+      full: [
+        ...xsFullRows('満期 BEP', expiry.breakevens),
+        ...xsFullRows('指定日 BEP', m.dateBreakevens),
+      ],
     },
     prem,
     amountTile(
@@ -184,14 +287,16 @@ export function metricTiles(m: MetricsModel): MetricTile[] {
       '指定日 + シナリオ',
       fmtAmount(sp.pnl, u, true),
       `d ${fmtNum(m.days, 2)} · X ${fmtNum(sp.x)} (${fmtSigned(sp.dXPct, 1)}%)`,
+      [{ k: '指定日 + シナリオ', v: amountText(sp.pnl, u, true) }, ...scenarioRows(m)],
     ),
     {
       key: 'greeks',
       k: '合計グリーク',
       v: `Δ ${fmtSigned(g.deltaLarge, 2)} (${fmtSigned(g.deltaMini, 1)})`,
       unit: '',
-      s: `Γ ${fmtSigned(g.gammaPer100, 3)} · Θ ${fmtAmount(g.thetaPerDay, u, true)} · V ${fmtAmount(g.vegaPerPt, u, true)}`,
+      s: `Θ ${fmtAmount(g.thetaPerDay, u, true)} · V ${fmtAmount(g.vegaPerPt, u, true)}`,
       tone: null,
+      full: greekRows(m),
     },
   ];
 }
@@ -205,42 +310,29 @@ export function metricsBreakdown(m: MetricsModel): BreakdownRow[] {
   const u = m.unit;
   const A = (v: number | null, signed = false) => amountText(v, u, signed);
   const { expiry, scenarioPoint: sp, premium } = m;
-  const g = sp.total;
   const rows: BreakdownRow[] = [];
   const row = (k: string, v: string) => rows.push({ k, v, group: false });
   const group = (k: string) => rows.push({ k, v: '', group: true });
-  const xsRows = (k: string, xs: readonly number[]) => {
-    xsChunks(xs).forEach((v, i) => {
-      row(i === 0 ? k : '', v);
-    });
+  const add = (rs: readonly FullRow[]) => {
+    for (const r of rs) row(r.k, r.v);
   };
+  const xsRows = (k: string, xs: readonly number[]) => add(xsFullRows(k, xs));
 
   // 1 満期 最大利益（+∞ なら反対側を併記）
-  row('満期 最大利益', A(expiry.maxProfit.value, true));
-  if (expiry.profitFinite) row('call 側 ∞ / put 側', A(expiry.profitFinite.value, true));
+  add(maxProfitRows(m, false));
   // 2 満期 最大損失（−∞ なら put 側と SQ = 下端 / X）
-  const lf = expiry.lossFinite;
-  if (lf) {
-    row('満期 最大損失', 'call 側 −∞');
-    const atLo = lf.x === expiry.xLo;
-    row(atLo ? 'put 側（SQ = 下端）' : 'put 側', A(lf.value, true));
-    if (!atLo) row('put 側の X', fmtNum(lf.x));
-  } else {
-    row('満期 最大損失', A(expiry.maxLoss.value, true));
-  }
+  add(maxLossRows(m, false));
   // 3 満期 BEP
   xsRows('満期 BEP', expiry.breakevens);
-  // 4 指定日 + シナリオ
+  // 4 指定日 + シナリオ（全文の d の行は「N 日」、内訳は旧と同じ「d = N 日」）
+  const [, xRow] = scenarioRows(m);
   row('指定日 + シナリオ', `d = ${fmtNum(m.days, 2)} 日`);
-  row('X', `${fmtNum(sp.x)}（ΔX ${fmtSigned(sp.dXPct, 1)}%）`);
+  if (xRow) row(xRow.k, xRow.v);
   row('損益', A(sp.pnl, true));
   xsRows('BEP', m.dateBreakevens);
   // 5 合計グリーク（シナリオ点）
   group('合計グリーク（シナリオ点）');
-  row('Δ', `${fmtSigned(g.deltaLarge, 3)} 枚（ミニ ${fmtSigned(g.deltaMini, 2)}）`);
-  row('Γ', `${fmtSigned(g.gammaPer100, 4)} / 100 円`);
-  row('Θ', `${A(g.thetaPerDay, true)} / 日`);
-  row('V', `${A(g.vegaPerPt, true)} / pt`);
+  add(greekRows(m));
   // 6 受取 / 支払
   row('受取 / 支払', `${A(premium.received)} / ${A(premium.paid)}`);
   row('差引', A(premium.net, true));

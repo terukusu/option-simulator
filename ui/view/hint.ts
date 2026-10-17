@@ -22,3 +22,19 @@ export function hintAlign(
   if (!(hostRight > hostLeft)) return 'start';
   return btnCenterX > (hostLeft + hostRight) / 2 ? 'end' : 'start';
 }
+
+/**
+ * 開いたポップオーバーをスクロールする祖先（host）の中で見せるための scrollTop の増分（px。正 = 下へ。#107）。
+ * 下端がはみ出す量だけ動かすが、上端（popTop − hostTop）を越えて動かさない（上を隠さない）。負にならない。
+ */
+export function revealDelta(
+  popTop: number,
+  popBottom: number,
+  hostTop: number,
+  hostBottom: number,
+): number {
+  const over = popBottom - hostBottom;
+  const room = popTop - hostTop;
+  if (!(over > 0) || !Number.isFinite(over) || !Number.isFinite(room)) return 0;
+  return Math.max(0, Math.min(over, room));
+}

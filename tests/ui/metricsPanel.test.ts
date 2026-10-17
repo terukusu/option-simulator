@@ -27,6 +27,7 @@ import {
 import { pnlDomains } from '../../ui/view/pnlChart';
 import { positionModel } from '../../ui/view/position';
 import { fixture } from '../support/fixtures';
+import { SUB_MAX_UNITS, widthUnits } from '../support/widthUnits';
 
 /** #86 AC-2〜AC-4: 新しい画面の指標パネルの表示モデル。合成の板・架空の値。 */
 
@@ -179,8 +180,9 @@ describe('タイル 6 枚（#86 AC-2）', () => {
     expect(t2.unit).toBe('');
     expect(t2.s).toContain('put 側');
     expect(t2.s).toContain(fmtAmount(lf.value, u, true));
-    expect(t2.s).toContain('SQ = 下端');
-    expect(t2.s).toBe(`put 側 ${fmtAmount(lf.value, u, true)} · SQ = 下端`);
+    // #107: 副題は「SQ = 」を省く（全文と内訳は「put 側（SQ = 下端）」）
+    expect(t2.s).toContain('下端');
+    expect(t2.s).toBe(`put 側 ${fmtAmount(lf.value, u, true)} · 下端`);
     const t3 = tile(tiles, 'bep');
     expect(m.expiry.breakevens.length).toBe(2);
     expect(t3.v).toBe(m.expiry.breakevens.map((x) => fmtNum(x)).join(' / '));
@@ -190,8 +192,9 @@ describe('タイル 6 枚（#86 AC-2）', () => {
     expect(m.premium.stake).toBeNull();
     expect(t4.k).toBe('受取 − 支払');
     expect(t4.v).toBe(fmtAmount(m.premium.net, u, true));
+    // #107: 区切りは ` · `
     expect(t4.s).toBe(
-      `受取 ${fmtAmount(m.premium.received, u)} / 支払 ${fmtAmount(m.premium.paid, u)}`,
+      `受取 ${fmtAmount(m.premium.received, u)} · 支払 ${fmtAmount(m.premium.paid, u)}`,
     );
     const t5 = tile(tiles, 'scenario');
     expect(t5.v).toBe(fmtAmount(m.scenarioPoint.pnl, u, true));
@@ -204,8 +207,9 @@ describe('タイル 6 枚（#86 AC-2）', () => {
     const g = m.scenarioPoint.total;
     const t6 = tile(tiles, 'greeks');
     expect(t6.v).toBe(`Δ ${fmtSigned(g.deltaLarge, 2)} (${fmtSigned(g.deltaMini, 1)})`);
+    // #107: Γ は全文（と舞台の Δ の副題）で読む
     expect(t6.s).toBe(
-      `Γ ${fmtSigned(g.gammaPer100, 3)} · Θ ${fmtAmount(g.thetaPerDay, u, true)} · V ${fmtAmount(g.vegaPerPt, u, true)}`,
+      `Θ ${fmtAmount(g.thetaPerDay, u, true)} · V ${fmtAmount(g.vegaPerPt, u, true)}`,
     );
     expect(t6.unit).toBe('');
   });
@@ -248,8 +252,9 @@ describe('タイル 6 枚（#86 AC-2）', () => {
     expect(m.premium.stake).not.toBeNull();
     expect(t4.k).toBe('掛け金');
     expect(t4.v).toBe(fmtAmount(m.premium.stake, u));
+    // #107: 手数料は全文と内訳で読む
     expect(t4.s).toBe(
-      `支払 ${fmtAmount(m.premium.paid, u)} / 受取 ${fmtAmount(m.premium.received, u)} / 手数料 ${fmtAmount(m.premium.fees, u)}`,
+      `支払 ${fmtAmount(m.premium.paid, u)} · 受取 ${fmtAmount(m.premium.received, u)}`,
     );
   });
 
@@ -543,5 +548,216 @@ describe('テール表とバー（#86 AC-4）', () => {
     const snap = JSON.stringify(m);
     expect(metricsPanel(m, 300)).toEqual(metricsPanel(m, 300));
     expect(JSON.stringify(m)).toBe(snap);
+  });
+});
+
+// ------------------------------------------------ #107 全文（ポップオーバー）と副題の短縮
+
+/** 買い 2 本（掛け金のタイル。架空の値） */
+const buy2 = run(loaded(chain), add(63_500, 'put', 'buy'), add(71_000, 'call', 'buy'), scen);
+/** 売り 5 枚のストラングル・単位を円に固定（桁が増える。架空の値） */
+const strangleYen = run(
+  loaded(chain),
+  add(64_000, 'put', 'sell'),
+  add(71_000, 'call', 'sell'),
+  { type: 'editLeg', id: 1, patch: { qty: 5 } },
+  { type: 'editLeg', id: 2, patch: { qty: 5 } },
+  { type: 'setMetricsUnit', unit: 'yen' },
+  scen,
+);
+
+const fr = (k: string, v: string) => ({ k, v });
+
+describe('全文（#107 AC-1）', () => {
+  const cases: [string, State][] = [
+    ['ストラングル売り', strangle],
+    ['put のクレジットスプレッド', creditPut],
+    ['支払超（手数料 300 円 / 枚）', debitPut],
+    ['call 買い（+∞）', callBuy],
+    ['売りの −∞ で put 側が下端でない', callSellPutBuy],
+    ['買い 2 本', buy2],
+    ['売り 5 枚・円固定', strangleYen],
+  ];
+
+  for (const [name, s] of cases) {
+    it(`${name}: 6 枚とも全文があり、値は内訳の値の文字列の中にある（finite の X・d の行を除く）`, () => {
+      const m = metricsOf(s);
+      const tiles = metricTiles(m);
+      const bd = metricsBreakdown(m);
+      expect(tiles).toHaveLength(6);
+      for (const t of tiles) {
+        expect(t.full.length).toBeGreaterThanOrEqual(1);
+        for (const r of t.full) {
+          expect(r.v).not.toBe('');
+          expect(r.v.includes('\n') || r.k.includes('\n')).toBe(false);
+          if (r.k === 'X' || r.k === 'd') continue;
+          expect(bd.some((b) => b.v.includes(r.v))).toBe(true);
+        }
+      }
+      // 1 行目は見出し + 値（合計グリークは Δ の行）
+      for (const t of tiles.filter((x) => x.key !== 'greeks' && x.key !== 'premium')) {
+        expect(t.full[0]?.k).toBe(t.k);
+      }
+    });
+  }
+
+  it('ストラングル売り: 6 枚の全文の行（内訳と同じ式・同じ桁）', () => {
+    const m = metricsOf(strangle);
+    const u = m.unit;
+    const A = (v: number | null, signed = false) => amt(v, u, signed);
+    const lf = m.expiry.lossFinite;
+    if (!lf) throw new Error('lossFinite が無い');
+    const g = m.scenarioPoint.total;
+    const p = m.premium;
+    const sp = m.scenarioPoint;
+    const tiles = metricTiles(m);
+    expect(tile(tiles, 'maxProfit').full).toEqual([
+      fr('満期 最大利益', A(m.expiry.maxProfit.value, true)),
+      ...(m.expiry.maxProfit.x === null ? [] : [fr('X', fmtNum(m.expiry.maxProfit.x))]),
+    ]);
+    expect(tile(tiles, 'maxLoss').full).toEqual([
+      fr('満期 最大損失', 'call 側 −∞'),
+      fr('put 側（SQ = 下端）', A(lf.value, true)),
+    ]);
+    expect(tile(tiles, 'bep').full).toEqual([
+      fr('満期 BEP', fmtXs(m.expiry.breakevens)),
+      fr('指定日 BEP', fmtXs(m.dateBreakevens)),
+    ]);
+    expect(tile(tiles, 'premium').full).toEqual([
+      fr('受取 − 支払', A(p.net, true)),
+      fr('受取', A(p.received)),
+      fr('支払', A(p.paid)),
+      fr('手数料の合計', A(p.fees)),
+    ]);
+    expect(tile(tiles, 'scenario').full).toEqual([
+      fr('指定日 + シナリオ', A(sp.pnl, true)),
+      fr('d', `${fmtNum(m.days, 2)} 日`),
+      fr('X', `${fmtNum(sp.x)}（ΔX ${fmtSigned(sp.dXPct, 1)}%）`),
+    ]);
+    expect(tile(tiles, 'greeks').full).toEqual([
+      fr('Δ', `${fmtSigned(g.deltaLarge, 3)} 枚（ミニ ${fmtSigned(g.deltaMini, 2)}）`),
+      fr('Γ', `${fmtSigned(g.gammaPer100, 4)} / 100 円`),
+      fr('Θ', `${A(g.thetaPerDay, true)} / 日`),
+      fr('V', `${A(g.vegaPerPt, true)} / pt`),
+    ]);
+    // 合計グリークの 4 行は内訳の行と同じ（見出しも値も）
+    const bd = metricsBreakdown(m);
+    for (const r of tile(tiles, 'greeks').full) {
+      expect(bd).toContainEqual({ ...r, group: false });
+    }
+  });
+
+  it('支払超: 掛け金の全文に副題で省いた手数料（内訳の「手数料の合計」と同じ文字列）', () => {
+    for (const s of [buy2, debitPut, callBuy]) {
+      const m = metricsOf(s);
+      const u = m.unit;
+      const p = m.premium;
+      expect(p.stake).not.toBeNull();
+      const t = tile(metricTiles(m), 'premium');
+      expect(t.s).not.toContain('手数料');
+      expect(t.full).toEqual([
+        fr('掛け金（支払 − 受取 + 手数料）', amt(p.stake, u)),
+        fr('支払', amt(p.paid, u)),
+        fr('受取', amt(p.received, u)),
+        fr('手数料の合計', amt(p.fees, u)),
+      ]);
+      const bd = metricsBreakdown(m);
+      expect(bd.find((r) => r.k === '手数料の合計')?.v).toBe(t.full[3]?.v);
+      expect(bd.find((r) => r.k === '掛け金（支払 − 受取 + 手数料）')?.v).toBe(t.full[0]?.v);
+    }
+  });
+
+  it('円固定 5 枚: 合計グリークの全文に Γ と Θ / V の全桁（円）、最大損失の全文に put 側の全桁', () => {
+    const m = metricsOf(strangleYen);
+    expect(m.unit).toBe('yen');
+    const g = m.scenarioPoint.total;
+    const t = tile(metricTiles(m), 'greeks');
+    expect(t.s).not.toContain('Γ');
+    expect(t.full).toContainEqual(fr('Γ', `${fmtSigned(g.gammaPer100, 4)} / 100 円`));
+    expect(t.full).toContainEqual(fr('Θ', `${fmtAmount(g.thetaPerDay, 'yen', true)} 円 / 日`));
+    expect(t.full).toContainEqual(fr('V', `${fmtAmount(g.vegaPerPt, 'yen', true)} 円 / pt`));
+    // 円の全桁（千円に丸めない）
+    expect(fmtAmount(g.thetaPerDay, 'yen', true).replace(/[^0-9]/g, '').length).toBeGreaterThan(3);
+    const lf = m.expiry.lossFinite;
+    if (!lf) throw new Error('lossFinite が無い');
+    expect(tile(metricTiles(m), 'maxLoss').full).toContainEqual(
+      fr('put 側（SQ = 下端）', `${fmtAmount(lf.value, 'yen', true)} 円`),
+    );
+  });
+
+  it('BEP 3 点以上: 全文は 2 点ずつの行（内訳と同じ）で全点を読める', () => {
+    const m = metricsOf(strangle);
+    const more: MetricsModel = {
+      ...m,
+      expiry: { ...m.expiry, breakevens: [61_000, 62_500, 66_000, 70_500, 72_000] },
+      dateBreakevens: [],
+    };
+    expect(tile(metricTiles(more), 'bep').full).toEqual([
+      fr('満期 BEP', '61,000 / 62,500'),
+      fr('', '66,000 / 70,500'),
+      fr('', '72,000'),
+      fr('指定日 BEP', 'なし'),
+    ]);
+  });
+
+  it('有限の最大利益 / 損失は X の行（x が null なら出さない）', () => {
+    const m = metricsOf(creditPut);
+    const u = m.unit;
+    const tiles = metricTiles(m);
+    const t2 = tile(tiles, 'maxLoss');
+    expect(t2.full[0]).toEqual(fr('満期 最大損失', amt(m.expiry.maxLoss.value, u, true)));
+    expect(t2.full.slice(1)).toEqual(
+      m.expiry.maxLoss.x === null ? [] : [fr('X', fmtNum(m.expiry.maxLoss.x))],
+    );
+    const noX: MetricsModel = {
+      ...m,
+      expiry: {
+        ...m.expiry,
+        maxProfit: { ...m.expiry.maxProfit, x: null },
+        maxLoss: { ...m.expiry.maxLoss, x: null },
+      },
+    };
+    const nt = metricTiles(noX);
+    expect(tile(nt, 'maxProfit').full).toHaveLength(1);
+    expect(tile(nt, 'maxLoss').full).toHaveLength(1);
+    // −∞ で put 側が下端でない: put 側の X の行
+    const c = metricsOf(callSellPutBuy);
+    const lf = c.expiry.lossFinite;
+    if (!lf) throw new Error('lossFinite が無い');
+    expect(tile(metricTiles(c), 'maxLoss').full).toEqual([
+      fr('満期 最大損失', 'call 側 −∞'),
+      fr('put 側', amt(lf.value, c.unit, true)),
+      fr('put 側の X', fmtNum(lf.x)),
+    ]);
+  });
+});
+
+describe('副題の短縮（#107 AC-2）', () => {
+  it('掛け金の副題は `支払 … · 受取 …` で、今までの `支払 … / 受取 … / 手数料 …` より短い', () => {
+    for (const s of [buy2, debitPut, callBuy]) {
+      const m = metricsOf(s);
+      const u = m.unit;
+      const p = m.premium;
+      const t = tile(metricTiles(m), 'premium');
+      expect(t.s).toBe(`支払 ${fmtAmount(p.paid, u)} · 受取 ${fmtAmount(p.received, u)}`);
+      const before = `支払 ${fmtAmount(p.paid, u)} / 受取 ${fmtAmount(p.received, u)} / 手数料 ${fmtAmount(p.fees, u)}`;
+      expect(widthUnits(t.s)).toBeLessThan(widthUnits(before));
+    }
+  });
+
+  it(`売り 2 本・買い 2 本（千円・自動）: 6 枚の副題が幅の単位 ${SUB_MAX_UNITS} 以下`, () => {
+    for (const s of [strangle, buy2]) {
+      const m = metricsOf(s);
+      expect(m.unitAuto).toBe(true);
+      for (const t of metricTiles(m)) {
+        expect(widthUnits(t.s), `${t.key}: ${t.s}`).toBeLessThanOrEqual(SUB_MAX_UNITS);
+      }
+    }
+  });
+
+  it('幅の単位の数え方（ASCII 1・全角 2）', () => {
+    expect(widthUnits('支払 1,160 · 受取 0.0')).toBe(2 * 4 + 13);
+    expect(widthUnits('ＡＢ')).toBe(4);
+    expect(widthUnits('Θ −1')).toBe(4);
   });
 });
