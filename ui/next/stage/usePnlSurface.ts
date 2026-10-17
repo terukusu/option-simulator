@@ -31,12 +31,8 @@ export function usePnlSurface(p: {
   const hi = viewport?.[1] ?? null;
   // ΔX・d は面の値に効かないので依存に入れない（scenario の欄を個別に見る）
   const grid = useMemo(() => {
-    if (!on) {
-      planRef.current = null;
-      gridRef.current = null;
-      return null;
-    }
-    const deps = surfaceDeps(base, scenario, viewport);
+    // on = false（線モード・ミニ・空）は deps = null → 計画も格子も null（planSurface の規則）
+    const deps = on ? surfaceDeps(base, scenario, viewport) : null;
     const plan = planSurface(planRef.current, deps, settle);
     if (plan === null) {
       planRef.current = null;

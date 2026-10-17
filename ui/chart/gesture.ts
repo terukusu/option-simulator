@@ -15,6 +15,12 @@
  *   （ダブルタップの 1 回目に数えない）、6px 動けばパン（今のまま）、drag: true のマーカーを LONG_PRESS_MS 押すと
  *   'markerDrag'（move で markerDrag、離して markerDrop。表示範囲は変えない）。markerDrag 中に 2 本目の指が来るか
  *   cancel なら markerCancel（drop は出さない）。マーカーはハンドルより優先（band の外ならハンドル）
+ * - 面の上の点（ctx.surface を渡したときだけ。新しい画面の舞台の面モード。#88 段 B）: 1 本目をマーカーの外で押すと
+ *   すぐ 'surface'（パン・長押しを待たない）。点（pointPx）から grabPx 以内（距離）なら点の位置を返して点と指の
+ *   ずれを保ち、それ以外は押した位置を返す（surfaceStart）。move で surface（viewport は返さない = パンしない）。
+ *   離して idle + surfaceEnd、6px 未満・500ms 未満の押下はタップとしてダブルタップ（reset）に数える（tap は出さない）。
+ *   2 本目の指でピンチに移り surfaceCancel（押す前に戻す）、cancel も surfaceCancel。長押しは何もしない。
+ *   マーカーの上で押して 6px 動かすとパンではなく 'surface'（その位置から）。ctx.surface があると ctx.scrub は使わない
  *
  * 拡大・パンの規則そのものは ui/chart/scale.ts（panBy・pinchViewport）。DOM のイベントの受け口は
  * ui/components/useChartGestures.ts。
@@ -61,6 +67,11 @@ export interface GestureCtx {
     band: readonly [number, number];
     items: ReadonlyArray<{ id: number; px: number; drag: boolean }>;
   };
+  /**
+   * 面の上の点（#88 段 B。無ければ従来どおり）。pointPx = 今の点の画素（要素の座標。無ければ null）、grabPx = 点を
+   * つかむ距離（px）。渡すと scrub は使わない
+   */
+  surface?: { pointPx: { x: number; y: number } | null; grabPx: number };
 }
 
 interface TrackedPointer {
@@ -73,7 +84,15 @@ interface TrackedPointer {
   t0: number;
 }
 
-export type GestureMode = 'idle' | 'pending' | 'drag' | 'pinch' | 'scrub' | 'marker' | 'markerDrag';
+export type GestureMode =
+  | 'idle'
+  | 'pending'
+  | 'drag'
+  | 'pinch'
+  | 'scrub'
+  | 'marker'
+  | 'markerDrag'
+  | 'surface';
 
 export interface GestureState {
   mode: GestureMode;
@@ -88,6 +107,8 @@ export interface GestureState {
   scrubOffset: number;
   /** 押したマーカー（'marker'・'markerDrag' の間だけ。それ以外は null） */
   marker: { id: number; drag: boolean } | null;
+  /** 面の点をつかんでいる間の、指の位置から点までのずれ（画素。'surface' の間だけ。それ以外は null） */
+  surfaceOffset: { x: number; y: number } | null;
 }
 
 export interface GestureResult {
@@ -105,6 +126,14 @@ export interface GestureResult {
   markerDrop?: { id: number; x: number };
   /** マーカーのドラッグの取り消し（2 本目の指・cancel） */
   markerCancel?: { id: number };
+  /** 面の点の位置（要素の座標の画素。#88 段 B） */
+  surface?: { x: number; y: number };
+  /** 面の点をつかみ始めた（最初の surface より前に押す前の値を覚える） */
+  surfaceStart?: true;
+  /** 面の点を離した */
+  surfaceEnd?: true;
+  /** 面の点の取り消し（2 本目の指・cancel。押す前の値に戻す） */
+  surfaceCancel?: true;
 }
 
 export function initialGesture(): GestureState {
@@ -116,6 +145,7 @@ export function initialGesture(): GestureState {
     lastTap: null,
     scrubOffset: 0,
     marker: null,
+    surfaceOffset: null,
   };
 }
 
@@ -150,6 +180,20 @@ export function gestureDown(s: GestureState, p: PointerSample, ctx: GestureCtx):
   }
   const tracked: TrackedPointer = { id: p.id, x: p.x, y: p.y, x0: p.x, y0: p.y, t0: p.t };
   const pointers = [...s.pointers, tracked];
+  if (s.mode === 'surface') {
+    // 面の点をつかんでいる間の 2 本目の指: 押す前の値に戻してピンチへ
+    return {
+      state: {
+        ...s,
+        mode: 'pinch',
+        pointers,
+        start: ctx.viewport,
+        anchorPx: pinchPx(pointers),
+        surfaceOffset: null,
+      },
+      surfaceCancel: true,
+    };
+  }
   if (s.mode === 'markerDrag' && s.marker) {
     // マーカーのドラッグ中の 2 本目の指: 取り消してピンチへ（確定しない）
     return {
@@ -177,6 +221,24 @@ export function gestureDown(s: GestureState, p: PointerSample, ctx: GestureCtx):
           anchorPx: [p.x, p.x],
           marker: hit,
         },
+      };
+    }
+    if (ctx.surface) {
+      // 面の上: すぐ点をつかむ（点の近くはずれを保つ = 飛ばない、それ以外は押した位置へ）
+      const pt = ctx.surface.pointPx;
+      const near = pt !== null && Math.hypot(p.x - pt.x, p.y - pt.y) <= ctx.surface.grabPx;
+      const offset = near && pt ? { x: pt.x - p.x, y: pt.y - p.y } : { x: 0, y: 0 };
+      return {
+        state: {
+          ...s,
+          mode: 'surface',
+          pointers,
+          start: null,
+          anchorPx: null,
+          surfaceOffset: offset,
+        },
+        surface: { x: p.x + offset.x, y: p.y + offset.y },
+        surfaceStart: true,
       };
     }
     const line = ctx.scrub?.linePx;
@@ -249,13 +311,35 @@ export function gestureMove(s: GestureState, p: PointerSample, ctx: GestureCtx):
   if (s.mode === 'markerDrag' && s.marker) {
     return { state: { ...s, pointers }, markerDrag: { id: s.marker.id, x: p.x } };
   }
+  const cur = pointers[i] as TrackedPointer;
+  const far = Math.hypot(cur.x - cur.x0, cur.y - cur.y0) >= TAP_MOVE_PX;
+  if (s.mode === 'surface' && s.surfaceOffset) {
+    const o = s.surfaceOffset;
+    // 一度 6px 動いた押下は戻ってきてもタップに数えない（pending が drag になるのと同じ。押した時刻を捨てる）
+    const kept = far
+      ? pointers.map((q, j) => (j === i ? { ...q, t0: Number.NEGATIVE_INFINITY } : q))
+      : pointers;
+    return { state: { ...s, pointers: kept }, surface: { x: p.x + o.x, y: p.y + o.y } };
+  }
+  if (ctx.surface && s.mode === 'marker' && far) {
+    // 面モードのマーカーの上で動かした: パンではなく点をつかむ（その位置から）。6px 動いたのでタップに数えない
+    return {
+      state: {
+        ...s,
+        mode: 'surface',
+        pointers: pointers.map((q, j) => (j === i ? { ...q, t0: Number.NEGATIVE_INFINITY } : q)),
+        start: null,
+        anchorPx: null,
+        marker: null,
+        surfaceOffset: { x: 0, y: 0 },
+      },
+      surface: { x: p.x, y: p.y },
+      surfaceStart: true,
+    };
+  }
   let mode = s.mode;
   let marker = s.marker;
-  const cur = pointers[i] as TrackedPointer;
-  if (
-    (mode === 'pending' || mode === 'marker') &&
-    Math.hypot(cur.x - cur.x0, cur.y - cur.y0) >= TAP_MOVE_PX
-  ) {
+  if ((mode === 'pending' || mode === 'marker') && far) {
     mode = 'drag';
     marker = null;
   }
@@ -290,6 +374,23 @@ export function gestureUp(s: GestureState, p: PointerSample, ctx: GestureCtx): G
   const pointers = s.pointers.filter((_, j) => j !== i);
   // つかむ操作の後はタップ・ダブルタップの判定を続けない
   if (s.mode === 'scrub') return { state: initialGesture() };
+  if (s.mode === 'surface') {
+    // 面の点を離す。動かさない短い押下はダブルタップ（リセット）の判定に数える（tap は出さない）
+    const idle: GestureState = { ...initialGesture(), lastTap: s.lastTap };
+    const moved = Math.hypot(p.x - released.x0, p.y - released.y0);
+    if (moved >= TAP_MOVE_PX || p.t - released.t0 >= TAP_MAX_MS) {
+      return { state: idle, surfaceEnd: true };
+    }
+    const last = s.lastTap;
+    if (
+      last &&
+      p.t - last.t <= DOUBLE_TAP_MS &&
+      Math.hypot(p.x - last.x, p.y - last.y) <= DOUBLE_TAP_PX
+    ) {
+      return { state: { ...idle, lastTap: null }, surfaceEnd: true, reset: true };
+    }
+    return { state: { ...idle, lastTap: { x: p.x, y: p.y, t: p.t } }, surfaceEnd: true };
+  }
   if (s.mode === 'markerDrag' && s.marker) {
     return { state: initialGesture(), markerDrop: { id: s.marker.id, x: p.x } };
   }
@@ -330,6 +431,7 @@ export function gestureUp(s: GestureState, p: PointerSample, ctx: GestureCtx): G
 }
 
 export function gestureCancel(s: GestureState, _p: PointerSample, _ctx: GestureCtx): GestureResult {
+  if (s.mode === 'surface') return { state: initialGesture(), surfaceCancel: true };
   if (s.mode === 'markerDrag' && s.marker) {
     return { state: initialGesture(), markerCancel: { id: s.marker.id } };
   }

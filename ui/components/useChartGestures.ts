@@ -12,6 +12,9 @@
  *   ← / → をパンに使わず onScrubKey(key, shiftKey) へ、markers で足マーカーのタップ・長押しドラッグ
  *   （onMarkerTap / onMarkerDrag（1 フレーム 1 回）/ onMarkerDrop / onMarkerCancel）。マーカーの上の dblclick は
  *   リセットしない。長押しでつかんだ（ハンドル・マーカー）ときは onLongPress
+ * - 面モード（#88 段 B）: surface を渡すと 1 本目の押下ですぐ面の点をつかむ。onSurfaceStart（同期。最初の onSurface
+ *   より前）→ onSurface(x, y)（1 フレーム 1 回）→ onSurfaceEnd（同期。最後の位置は次のフレームで流す）。2 本目の指・
+ *   cancel は未反映の位置を捨てて onSurfaceCancel。リセット（ダブルタップ・dblclick・R）の前に未反映の位置を流す
  *
  * 規則はすべて純関数（ui/chart/scale.ts・ui/chart/gesture.ts）。ここはイベントを受けて渡すだけ。
  * move・wheel の反映は requestAnimationFrame で 1 フレーム 1 回にまとめる。最新の props は ref で持ち、
@@ -72,6 +75,13 @@ export interface ChartGestureOptions {
   onMarkerCancel?: (id: number) => void;
   /** 長押しでつかんだ（ハンドル・マーカーのドラッグの開始。端末の軽い振動などに使う） */
   onLongPress?: () => void;
+  /** 面の上の点（#88 段 B。gesture.ts の GestureCtx.surface。渡すと scrub は使わない） */
+  surface?: GestureCtx['surface'];
+  onSurfaceStart?: () => void;
+  /** 面の点の位置（要素の座標の画素。1 フレーム 1 回） */
+  onSurface?: (x: number, y: number) => void;
+  onSurfaceEnd?: () => void;
+  onSurfaceCancel?: () => void;
 }
 
 export function useChartGestures(ref: RefObject<HTMLElement>, opts: ChartGestureOptions): void {
@@ -88,6 +98,8 @@ export function useChartGestures(ref: RefObject<HTMLElement>, opts: ChartGesture
     let pendingScrub: number | null = null;
     /** まだ反映していない、マーカーのドラッグの位置 */
     let pendingMarker: { id: number; x: number } | null = null;
+    /** まだ反映していない、面の点の位置 */
+    let pendingSurface: { x: number; y: number } | null = null;
     let frame = 0;
     /** 長押しのタイマー */
     let longTimer = 0;
@@ -102,6 +114,7 @@ export function useChartGestures(ref: RefObject<HTMLElement>, opts: ChartGesture
         minWidth: o.minWidth,
         ...(o.scrub ? { scrub: o.scrub } : {}),
         ...(o.markers ? { markers: o.markers } : {}),
+        ...(o.surface ? { surface: o.surface } : {}),
       };
     };
     const flush = () => {
@@ -109,12 +122,15 @@ export function useChartGestures(ref: RefObject<HTMLElement>, opts: ChartGesture
       const v = pending;
       const sx = pendingScrub;
       const mk = pendingMarker;
+      const sf = pendingSurface;
       pending = null;
       pendingScrub = null;
       pendingMarker = null;
+      pendingSurface = null;
       if (v) optsRef.current.onViewport(v);
       if (sx !== null) optsRef.current.onScrub?.(sx);
       if (mk) optsRef.current.onMarkerDrag?.(mk.id, mk.x);
+      if (sf) optsRef.current.onSurface?.(sf.x, sf.y);
     };
     const schedule = (v: Domain) => {
       pending = v;
@@ -128,6 +144,10 @@ export function useChartGestures(ref: RefObject<HTMLElement>, opts: ChartGesture
       pendingMarker = m;
       if (!frame) frame = requestAnimationFrame(flush);
     };
+    const scheduleSurface = (pt: { x: number; y: number }) => {
+      pendingSurface = pt;
+      if (!frame) frame = requestAnimationFrame(flush);
+    };
     const clearLong = () => {
       if (longTimer) clearTimeout(longTimer);
       longTimer = 0;
@@ -137,6 +157,10 @@ export function useChartGestures(ref: RefObject<HTMLElement>, opts: ChartGesture
       frame = 0;
       pending = null;
       pendingScrub = null;
+      // 面の点はリセットの前に流す（位置は今の表示範囲で読む）
+      const sf = pendingSurface;
+      pendingSurface = null;
+      if (sf) optsRef.current.onSurface?.(sf.x, sf.y);
       optsRef.current.onViewport(null);
     };
     const sample = (e: PointerEvent): PointerSample => {
@@ -145,6 +169,14 @@ export function useChartGestures(ref: RefObject<HTMLElement>, opts: ChartGesture
     };
     const apply = (res: GestureResult) => {
       state = res.state;
+      if (res.surfaceCancel) {
+        // 未反映の位置を捨ててから押す前に戻す
+        pendingSurface = null;
+        optsRef.current.onSurfaceCancel?.();
+      }
+      if (res.surfaceStart) optsRef.current.onSurfaceStart?.();
+      if (res.surface) scheduleSurface(res.surface);
+      if (res.surfaceEnd) optsRef.current.onSurfaceEnd?.();
       if (res.reset) reset();
       else if (res.viewport) schedule(res.viewport);
       if (res.scrub) scheduleScrub(res.scrub.x);
@@ -193,7 +225,8 @@ export function useChartGestures(ref: RefObject<HTMLElement>, opts: ChartGesture
         state.mode === 'drag' ||
         state.mode === 'pinch' ||
         state.mode === 'scrub' ||
-        state.mode === 'markerDrag'
+        state.mode === 'markerDrag' ||
+        state.mode === 'surface'
       ) {
         e.preventDefault();
       }
@@ -271,7 +304,7 @@ export function useChartGestures(ref: RefObject<HTMLElement>, opts: ChartGesture
     // 長押しで OS のメニュー（Android Chrome の長押しメニュー・右クリック）を出さない（損益グラフだけ）
     const onContextMenu = (e: Event) => {
       const o = optsRef.current;
-      if ((o.scrub || o.markers) && !o.disabled) e.preventDefault();
+      if ((o.scrub || o.markers || o.surface) && !o.disabled) e.preventDefault();
     };
 
     el.addEventListener('pointerdown', onDown);

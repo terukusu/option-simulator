@@ -21,11 +21,13 @@ import {
   SURFACE_Y_UNIT,
   type SurfaceGrid,
   sameSurfaceDeps,
+  surfaceActive,
   surfaceAlpha,
   surfaceDayAt,
   surfaceDayPy,
   surfaceDayTicks,
   surfaceDeps,
+  surfaceDragPatch,
   surfaceGrid,
   surfaceImage,
   surfaceLegend,
@@ -33,6 +35,7 @@ import {
   surfaceValueAt,
 } from '../../ui/view/pnlSurface';
 import { readoutModel } from '../../ui/view/readout';
+import { dXRange } from '../../ui/view/scenario';
 import { scenarioMarks } from '../../ui/view/scenarioMarks';
 import { ivRailObstacle, type MarkObstacle, stageHandle } from '../../ui/view/stage';
 import { M1, M2, makeMarket, quoteOf } from '../support/market';
@@ -503,5 +506,175 @@ describe('粗い / 細かい（AC-6）', () => {
     const p = planSurface(null, surfaceDeps(perf, SC, null), 0);
     if (!p) throw new Error('計画が無い');
     expect(surfaceGrid(p.deps.base, SC, [p.deps.lo, p.deps.hi], p.res)?.nx).toBe(SURFACE_FINE.nx);
+  });
+});
+
+describe('面モードの判定（AC-6: 線モードでは作らない）', () => {
+  it('surfaceActive: 面 かつ ミニでない かつ 空でない ときだけ true', () => {
+    expect(surfaceActive('surface', false, false)).toBe(true);
+    expect(surfaceActive('line', false, false)).toBe(false);
+    expect(surfaceActive('surface', true, false)).toBe(false);
+    expect(surfaceActive('surface', false, true)).toBe(false);
+    expect(surfaceActive('line', true, true)).toBe(false);
+  });
+
+  it('面でない（deps = null）なら前の計画があっても null = 格子を作らない', () => {
+    const p0 = planSurface(null, surfaceDeps(perf, SC, null), 0);
+    if (!p0) throw new Error('計画が無い');
+    const coarse = planSurface(p0, surfaceDeps(perf, { ...SC, dSigma: 9 }, null), 0);
+    for (const prev of [null, p0, coarse]) {
+      for (const settle of [0, 1, 5]) expect(planSurface(prev, null, settle)).toBeNull();
+    }
+  });
+});
+
+describe('surfaceDragPatch（AC-7・AC-13 の根拠。段 B）', () => {
+  /** 要素の座標と SVG の座標のずれ（舞台の frame.offsetX / offsetY の代わりの架空の値） */
+  const OX = 56;
+  const OY = 8;
+
+  function pointOf(base: PnlBase, sc: Scenario) {
+    const chart = chartOf(base, sc);
+    const mm = metricsModel({ base, scenario: sc, unit: 'auto' });
+    const marks = scenarioMarks({ base, scenario: sc, chart, unit: mm.unit });
+    const handle = stageHandle(chart, marks);
+    const p = surfacePoint({ base, scenario: sc, chart, handle, unit: mm.unit });
+    if (!p) throw new Error('点が無い');
+    return { chart, px: { x: p.px - OX, y: p.py - OY } };
+  }
+
+  const patchAt = (
+    base: PnlBase,
+    sc: Scenario,
+    x: number,
+    y: number,
+    pointPx: { x: number; y: number } | null,
+  ) =>
+    surfaceDragPatch({
+      x,
+      y,
+      chart: chartOf(base, sc),
+      offsetX: OX,
+      offsetY: OY,
+      x0: base.ctx.x0,
+      maxDays: base.maxDays,
+      scenario: sc,
+      pointPx,
+    });
+
+  const GRID_SCENARIOS = (base: PnlBase): Scenario[] => [
+    { ...ZERO_SCENARIO },
+    { ...ZERO_SCENARIO, dX: -400, days: 3 },
+    { ...ZERO_SCENARIO, dX: 1_250, days: Math.floor(base.maxDays) - 1, dSigma: 2 },
+  ];
+
+  it('(1) 往復: 整数の d・10 円の格子の ΔX の点の画素 → null（pointPx あり / なし）', () => {
+    for (const base of [strangle, perf]) {
+      for (const sc of GRID_SCENARIOS(base)) {
+        const { px } = pointOf(base, sc);
+        expect(patchAt(base, sc, px.x, px.y, px)).toBeNull();
+        expect(patchAt(base, sc, px.x, px.y, null)).toBeNull();
+      }
+    }
+  });
+
+  it('(2) 別の (ΔX′, d′) の点の画素 → { dX: ΔX′, days: d′ }', () => {
+    for (const base of [strangle, perf]) {
+      const scs = GRID_SCENARIOS(base);
+      for (const a of scs) {
+        const from = pointOf(base, a).px;
+        for (const b of scs) {
+          if (a === b) continue;
+          const to = pointOf(base, { ...a, dX: b.dX, days: b.days }).px;
+          const want: { dX?: number; days?: number } = {};
+          if (b.dX !== a.dX) want.dX = b.dX;
+          if (b.days !== a.days) want.days = b.days;
+          expect(patchAt(base, a, to.x, to.y, from)).toEqual(want);
+        }
+      }
+    }
+  });
+
+  it('(3) dX は 10 の倍数・dXRange の中、days は [0, maxDays] の整数か maxDays', () => {
+    for (const base of [strangle, perf]) {
+      const chart = chartOf(base, ZERO_SCENARIO);
+      const { plot } = chart;
+      const [lo, hi] = dXRange(base.ctx.x0);
+      for (let k = 0; k <= 40; k++) {
+        const x = plot.left - OX - 30 + ((plot.width + 60) * k) / 40;
+        const y = plot.top - OY - 30 + ((plot.height + 60) * ((k * 7) % 41)) / 40;
+        const r = patchAt(base, { ...ZERO_SCENARIO, dX: 7, days: 0.3 }, x, y, null);
+        if (!r) throw new Error('patch が無い');
+        expect(r.dX !== undefined && r.dX % 10 === 0).toBe(true);
+        expect(r.dX).toBeGreaterThanOrEqual(lo);
+        expect(r.dX).toBeLessThanOrEqual(hi);
+        const d = r.days as number;
+        expect(d >= 0 && d <= base.maxDays).toBe(true);
+        expect(Number.isInteger(d) || d === base.maxDays).toBe(true);
+      }
+    }
+  });
+
+  it('(4) 描画域の外: 上 → maxDays、下 → 0、左右 → 表示範囲の端の値（の格子）', () => {
+    expect(Number.isInteger(strangle.maxDays)).toBe(false);
+    for (const base of [strangle, perf]) {
+      const sc = { ...ZERO_SCENARIO, dX: 10, days: 1 };
+      const { plot, domain } = chartOf(base, sc);
+      const midX = plot.left + plot.width / 2 - OX;
+      const midY = plot.top + plot.height / 2 - OY;
+      expect(patchAt(base, sc, midX, plot.top - OY - 40, null)?.days).toBe(base.maxDays);
+      expect(patchAt(base, sc, midX, plot.top - OY, null)?.days).toBe(base.maxDays);
+      expect(patchAt(base, sc, midX, plot.top + plot.height - OY + 40, null)?.days).toBe(0);
+      const left = patchAt(base, sc, plot.left - OX - 100, midY, null)?.dX;
+      const right = patchAt(base, sc, plot.left + plot.width - OX + 100, midY, null)?.dX;
+      const [lo, hi] = dXRange(base.ctx.x0);
+      const snap = (v: number) => Math.min(Math.max(Math.round(v / 10) * 10, lo), hi);
+      expect(left).toBe(snap(domain[0] - base.ctx.x0));
+      expect(right).toBe(snap(domain[1] - base.ctx.x0));
+    }
+  });
+
+  it('(5) 横だけ動かすと端数の d を保ち、縦だけ動かすと格子の外の ΔX を保つ', () => {
+    for (const base of [strangle, perf]) {
+      const sc = { ...ZERO_SCENARIO, dX: 0, days: 2.5 };
+      const { px } = pointOf(base, sc);
+      expect(patchAt(base, sc, px.x + 60, px.y, px)).toEqual({
+        dX: expect.any(Number) as number,
+      });
+      expect(patchAt(base, sc, px.x + 60, px.y + 0.4, px)?.days).toBeUndefined();
+      const odd = { ...ZERO_SCENARIO, dX: 125, days: 2 };
+      const q = pointOf(base, odd).px;
+      const r = patchAt(base, odd, q.x, q.y - 40, q);
+      expect(r?.dX).toBeUndefined();
+      expect(r?.days).toBeGreaterThan(2);
+      // maxDays（端数）の点を横に動かしても maxDays のまま
+      const top = { ...ZERO_SCENARIO, days: base.maxDays };
+      const t = pointOf(base, top).px;
+      expect(patchAt(base, top, t.x - 50, t.y, t)?.days).toBeUndefined();
+    }
+  });
+
+  it('極限: x0 が無効 → dX なし、非有限の x / y → その軸なし、maxDays ≤ 0 → days なし', () => {
+    const sc = { ...ZERO_SCENARIO, dX: 0, days: 0 };
+    const chart = chartOf(perf, sc);
+    const mid = { x: chart.plot.left + 100 - OX, y: chart.plot.top + 20 - OY };
+    const base = { chart, offsetX: OX, offsetY: OY, scenario: sc, pointPx: null };
+    expect(
+      surfaceDragPatch({ ...base, ...mid, x0: Number.NaN, maxDays: perf.maxDays })?.dX,
+    ).toBeUndefined();
+    expect(
+      surfaceDragPatch({ ...base, x: Number.NaN, y: mid.y, x0: perf.ctx.x0, maxDays: perf.maxDays })
+        ?.dX,
+    ).toBeUndefined();
+    expect(
+      surfaceDragPatch({ ...base, x: mid.x, y: Number.NaN, x0: perf.ctx.x0, maxDays: perf.maxDays })
+        ?.days,
+    ).toBeUndefined();
+    expect(
+      surfaceDragPatch({ ...base, ...mid, x0: perf.ctx.x0, maxDays: 0 })?.days,
+    ).toBeUndefined();
+    expect(
+      surfaceDragPatch({ ...base, x: Number.NaN, y: Number.NaN, x0: perf.ctx.x0, maxDays: 0 }),
+    ).toBeNull();
   });
 });
