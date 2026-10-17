@@ -1,4 +1,5 @@
-"""Flask のアプリ（AC-5 の応答・ログ、AC-6 の /api/calendar、AC-7 のヘッダ・入力、AC-10 の静的ファイル）。"""
+"""Flask のアプリ（AC-5 の応答・ログ、AC-6 の /api/calendar、AC-7 のヘッダ・入力、AC-10 の静的ファイル、
+#90 の manifest・アイコン）。"""
 
 import gzip
 import json
@@ -11,10 +12,13 @@ from support import Clock, FakeRunner, World, jst, load_fixture, synth_board
 
 from simulator_api import bq
 from simulator_api import settings as st
-from simulator_api.app import SECURITY_HEADERS, create_app
+from simulator_api.app import ROOT_FILES, SECURITY_HEADERS, create_app
 
-CSP = ("default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'; "
-       "base-uri 'none'; form-action 'none'; frame-ancestors 'none'")
+# optionchan のビューアーと同じ CSP（#90 の前の値）。#90 で manifest-src 'self' を 1 つ足した
+VIEWER_CSP = ("default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'; "
+              "base-uri 'none'; form-action 'none'; frame-ancestors 'none'")
+CSP = ("default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; manifest-src 'self'; "
+       "connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'")
 CFG = st.Settings(project="example-project")
 
 
@@ -36,8 +40,14 @@ def assert_security_headers(res):
     assert res.headers["X-Frame-Options"] == "DENY"
 
 
-def test_csp_same_as_viewer():
+def directives(csp):
+    return {d.strip() for d in csp.split(";") if d.strip()}
+
+
+def test_csp():
+    # #90 AC-4(c): ビューアーの CSP に manifest-src 'self' を足しただけ（他のディレクティブは同じ）
     assert SECURITY_HEADERS["Content-Security-Policy"] == CSP
+    assert directives(CSP) == directives(VIEWER_CSP) | {"manifest-src 'self'"}
 
 
 def test_chain_ok_headers():
@@ -182,6 +192,11 @@ def static_dir(tmp_path):
     (d / "index.html").write_text("<!doctype html><title>t</title>", encoding="utf-8")
     (d / "assets" / "index-abc.js").write_text("console.log(1)", encoding="utf-8")
     (tmp_path / "secret.txt").write_text("secret", encoding="utf-8")
+    # #90: manifest とアイコン（中身はダミー）と、決まった名前以外の直下のファイル（配らないこと）
+    for name in ROOT_FILES:
+        (d / name).write_text(f"root:{name}", encoding="utf-8")
+    (d / "secret.txt").write_text("secret", encoding="utf-8")
+    (d / "index-abc.js").write_text("secret()", encoding="utf-8")
     return d
 
 
@@ -202,10 +217,69 @@ def test_static_files(static_dir):
         assert b"secret" not in r.data
 
 
+ROOT_FILE_TYPES = {
+    "/manifest.webmanifest": "application/manifest+json",
+    "/favicon.svg": "image/svg+xml",
+    "/apple-touch-icon.png": "image/png",
+    "/icon-192.png": "image/png",
+    "/icon-512.png": "image/png",
+}
+
+
+def test_root_files_names():
+    assert {f"/{n}": t for n, t in ROOT_FILES.items()} == ROOT_FILE_TYPES
+
+
+def test_root_files(static_dir):
+    # #90 AC-4(a): 5 つの名前は 200・Content-Type・no-cache・ETag で 304・CSP
+    client, _, _ = make(cfg=st.Settings(project="example-project", static_dir=static_dir))
+    for path, mimetype in ROOT_FILE_TYPES.items():
+        res = client.get(path)
+        assert res.status_code == 200, path
+        assert res.data == f"root:{path[1:]}".encode(), path
+        assert res.mimetype == mimetype, path  # SVG は Werkzeug が "; charset=utf-8" を付ける
+        assert res.headers["Cache-Control"] == "no-cache", path
+        assert "manifest-src 'self'" in res.headers["Content-Security-Policy"]
+        assert_security_headers(res)
+        etag = res.headers["ETag"]
+        r = client.get(path, headers={"If-None-Match": etag})
+        assert r.status_code == 304, path
+        assert r.headers["Cache-Control"] == "no-cache", path
+        assert_security_headers(r)
+    # クエリ文字列は無視
+    assert client.get("/manifest.webmanifest?x=1").status_code == 200
+
+
+def test_root_files_allowlist(static_dir):
+    # #90 AC-4(b): 静的ディレクトリに同名のファイルがあっても 5 つ以外は配らない。ディレクトリの外にも出ない
+    client, _, _ = make(cfg=st.Settings(project="example-project", static_dir=static_dir))
+    for path in ("/secret.txt", "/index-abc.js", "/manifest.webmanifest/../secret.txt", "/%2e%2e/secret.txt",
+                 "/favicon.svg/", "/Favicon.svg", "/manifest.json", "/favicon.ico",
+                 "/apple-touch-icon-precomposed.png", "/icon-192.png/../../secret.txt"):
+        r = client.get(path)
+        assert r.status_code == 404, path
+        assert b"secret" not in r.data, path
+        assert_security_headers(r)
+
+
+def test_root_files_missing_is_404(tmp_path):
+    # ビルド物に無い名前は 404（500 にしない）
+    d = tmp_path / "dist"
+    d.mkdir()
+    (d / "index.html").write_text("<!doctype html>", encoding="utf-8")
+    client, _, _ = make(cfg=st.Settings(project="example-project", static_dir=d))
+    for path in ROOT_FILE_TYPES:
+        assert client.get(path).status_code == 404, path
+
+
 def test_static_disabled_without_dir():
     client, _, _ = make()
     assert client.get("/").status_code == 404
     assert client.get("/assets/index-abc.js").status_code == 404
+    for path in ROOT_FILE_TYPES:
+        r = client.get(path)
+        assert r.status_code == 404, path
+        assert_security_headers(r)
 
 
 # ---- DATA_SOURCE=file ----

@@ -645,7 +645,7 @@ F の推定・補間・ATM の判定はブラウザ（`model/`）。`sq_date`・
 | 観点 | **A. 単独の Cloud Run + IAP** | B. optionchan のビューアーに同居 | C. ローカルのみ | D. 静的ホスティング + 板の書き出し |
 |---|---|---|---|---|
 | 構成 | このリポジトリに UI（静的）+ 小さな API。optionchan と同じ GCP プロジェクトに Cloud Run `simulator` を IAP 付きで。同一オリジン | `optionchan-gcp/apps/viewer` にページと API を足す | `vite dev` + API を手元で。ADC | UI を GitHub Pages 等、板を optionchan が JSON に書き出す |
-| セキュリティ | IAP（Cloud Run 直接設定）。`run.invoker` は IAP の SA だけ。専用 SA はデータセットの `dataViewer` + `bigquery.jobUser`。CSP はビューアーと同じ（`default-src 'none'; script-src 'self'; ...`）。IAP のユーザーメールのヘッダはログに出さない | 同じ（既存のまま） | 公開なし | **JPX 由来のデータを公開の場所に置く** |
+| セキュリティ | IAP（Cloud Run 直接設定）。`run.invoker` は IAP の SA だけ。専用 SA はデータセットの `dataViewer` + `bigquery.jobUser`。CSP はビューアーと同じ（`default-src 'none'; script-src 'self'; ...`）に `manifest-src 'self'` を 1 つ足したもの（#90。ホーム画面に追加の manifest を同じオリジンからだけ読む。他のディレクティブ・`img-src 'self'` は同じ）。IAP のユーザーメールのヘッダはログに出さない | 同じ（既存のまま） | 公開なし | **JPX 由来のデータを公開の場所に置く** |
 | 費用 | Cloud Run の無料枠は請求先アカウント単位で ingest がほぼ使い切る → **ほぼ 0 円（超過分は月数円）**。BigQuery は 7.3。IAP 0 円 | 追加 0 円 | 0 円 | 書き出しを BigQuery で行うと 100〜150 MB × 約 1,000 スナップショット / 日 ≒ **100〜150 GB / 日で不成立**。ingest 側で書き出す案だけ成立（R4） |
 | 運用 | Terraform + CI をもう 1 組（付録 B の一覧）。OAuth クライアントは流用できる見込み（要確認） | 追加なし。ただし **リリースが optionchan と一体**になり、ビューアーの UI 機能が増える | なし | optionchan に書き出しを足す |
 | ローカル開発 | `file` / ADC で A のコードがそのまま C | optionchan の開発環境で | — | 静的 |
@@ -666,7 +666,7 @@ F の推定・補間・ATM の判定はブラウザ（`model/`）。`sq_date`・
 | GCP プロジェクト | optionchan と同じ | データセットの読み取りが同じプロジェクト内。OAuth クライアントを流用できる |
 | IaC の置き場所 | このリポジトリ（`infra/bootstrap` を所有者が apply、`infra/prod` を CI が apply）。必要なものの一覧・名前は付録 B、手順は `infra/README.md` | optionchan-gcp 側の変更を不要にする |
 | API の言語 | Python（Flask / gunicorn）。ビューアーの `bq.py` / `settings.py` / テスト / Dockerfile を写す | BigQuery の読み方・セキュリティヘッダ・テストの流儀が揃う。API は薄い |
-| 静的ファイル | Vite のビルド成果物を Flask から配る（環境変数 `STATIC_DIR` のディレクトリの `/`（`index.html`、`no-cache`）と `/assets/<path>`（`immutable`）。未設定なら 404）。イメージへの同梱はリポジトリ直下の `Dockerfile` の Node ステージ（`npm ci --ignore-scripts` → `npm run build` の `dist/` を `/app/static` に置き、`STATIC_DIR` はイメージの環境変数。#36）。CDN なし。ローカルは Vite の `server.proxy` で `/api` → `127.0.0.1:8080` の Flask（同一オリジン維持） | CSP `script-src 'self'` |
+| 静的ファイル | Vite のビルド成果物を Flask から配る（環境変数 `STATIC_DIR` のディレクトリの `/`（`index.html`、`no-cache`）と `/assets/<path>`（`immutable`）と、`/` 直下の決まった 5 つの名前（`/manifest.webmanifest`・`/favicon.svg`・`/apple-touch-icon.png`・`/icon-192.png`・`/icon-512.png`。`no-cache`、Content-Type は名前ごとに固定、名前の集合は `app.py` の定数 1 か所で変数を含む経路を作らない。#90）。未設定なら 404）。イメージへの同梱はリポジトリ直下の `Dockerfile` の Node ステージ（`npm ci --ignore-scripts` → `npm run build` の `dist/` を `/app/static` に置き、`STATIC_DIR` はイメージの環境変数。#36）。CDN なし。ローカルは Vite の `server.proxy` で `/api` → `127.0.0.1:8080` の Flask（同一オリジン維持） | CSP `script-src 'self'` |
 | 設定 | `GCP_PROJECT`（`bigquery` のとき必須）、`BQ_DATASET`（既定 `optionchan_tokyo`）、`BQ_LOCATION`（既定 `asia-northeast1`）、`MAX_BYTES_BILLED`（既定かつ上限 512 MiB）、`DATA_SOURCE`（`bigquery` / `file`。`file` は `CHAIN_FILE` の JSON をそのまま `/api/chain` で返し、`/api/calendar` は 503。GCP なしの起動確認・clone した人向け）、`CHAIN_FILE`、`STATIC_DIR`。詳細は `api/README.md` | ビューアーと同じ名前 |
 | Cloud Run | ビューアーと同じ（第 1 世代、CPU 1・512Mi・リクエスト中だけ CPU、0〜2 インスタンス、60 秒、digest 指定、同時実行 8、起動プローブ `/healthz`）。gunicorn は 1 ワーカー・8 スレッド（API のキャッシュと single-flight をインスタンス内で共有する。13.4）。`infra/prod/simulator.tf`。検証は apply 後に本番の URL で行い（`infra/README.md`「prod（Cloud Run simulator）」の確認）、戻すときは revert の PR → deploy、急ぐときは `gcloud run services update-traffic` で旧リビジョンへ（#36。リビジョンタグでの事前検証はしない） | 実績のある値。リビジョンタグはビューアーも使っておらず、初回は戻す先の旧リビジョンも利用者もいない。タグを入れると Terraform の `traffic` と deploy の 2 段階化が要る |
 | IAP の権限 | `httpsResourceAccessor`（閲覧者）は **bootstrap（所有者 apply、`local.auto.tfvars`）** に置く。付与には `roles/iap.admin` が要り、apply SA には渡さない | optionchan と同じ |
@@ -684,7 +684,7 @@ F の推定・補間・ATM の判定はブラウザ（`model/`）。`sq_date`・
 | 可用性 | optionchan が止まっていても最後の板（localStorage）で動く。開いたとき API が 503・通信エラーで板が無ければ、最後に取れた板を「古い板」の印（ヘッダのタグ・日付つきの取得時刻・Loader の注記）つきで使う（#23）。開いたままの画面ではメモリ内の前の板を保ち、種別ごとのエラーを出す（#34） |
 | セキュリティ | 8.1。入力値は応答・ログに反射しない。BigQuery の例外本文は応答に出さない |
 | ログ | JSON の構造化ログ（ビューアーの `log.py` と同じ形）。個人情報・資格情報・IAP のメールを出さない |
-| テスト戦略 | (1) `model/`: vitest。文献値、性質テスト（PCP 恒等式、K 単調性・凸性、価格 ↔ IV のラウンドトリップ、極限）、合成板からの F の回復、満期損益の解析解。(2) 補間・テンプレート・判定: 合成の固定 JSON でスナップショットテスト（17 時台の少ない行数の板も）。(3) API: pytest、偽 runner。SQL は `OPTIONCHAN_BQ_TEST=1` のときだけ dry run。スキーマ照合は CI（AC25）。(4) インフラ: Terraform の静的テスト（IAP 有効、`allUsers` 不在、digest 指定。`infra/*/tests/`）と、イメージの検査（`.github/scripts/image-check.sh`。import・非 root・`.git` / テスト / fixture / `infra` を含まない・`/healthz`・`/`・`/assets/*` が 200 で CSP ヘッダ付き）。(5) ビルド成果物の CSP 検査（`.github/scripts/csp-check.sh`。`dist/index.html` とイメージに同梱した `index.html` の両方。AC11）。(6) E2E は後段（Playwright で U1）。(7) 性能: 計算部分のベンチ（`tests/model/perf.test.ts`・`tests/ui/perf.test.ts`。AC8 の補助。計測の手順は `tests/support/perf.ts` の 1 か所で、判定は最小値）。16 ms の判定は `npm run perf`（2 ファイルだけを並列なしで。手元・負荷の低いときに。始めに load average と CPU の数を出す）、`npm test` と CI は 200 ms（桁違いの悪化だけを落とす） |
+| テスト戦略 | (1) `model/`: vitest。文献値、性質テスト（PCP 恒等式、K 単調性・凸性、価格 ↔ IV のラウンドトリップ、極限）、合成板からの F の回復、満期損益の解析解。(2) 補間・テンプレート・判定: 合成の固定 JSON でスナップショットテスト（17 時台の少ない行数の板も）。(3) API: pytest、偽 runner。SQL は `OPTIONCHAN_BQ_TEST=1` のときだけ dry run。スキーマ照合は CI（AC25）。(4) インフラ: Terraform の静的テスト（IAP 有効、`allUsers` 不在、digest 指定。`infra/*/tests/`）と、イメージの検査（`.github/scripts/image-check.sh`。import・非 root・`.git` / テスト / fixture / `infra` を含まない・`/healthz`・`/`・`/assets/*`・`/manifest.webmanifest`（`application/manifest+json`・CSP に `manifest-src 'self'`）・アイコン 4 つ（SVG・PNG 3 つの Content-Type）が 200 で CSP ヘッダ付き。#90）。(5) ビルド成果物の CSP 検査（`.github/scripts/csp-check.sh`。`dist/index.html` とイメージに同梱した `index.html` の両方。AC11）。(6) E2E は後段（Playwright で U1）。(7) 性能: 計算部分のベンチ（`tests/model/perf.test.ts`・`tests/ui/perf.test.ts`。AC8 の補助。計測の手順は `tests/support/perf.ts` の 1 か所で、判定は最小値）。16 ms の判定は `npm run perf`（2 ファイルだけを並列なしで。手元・負荷の低いときに。始めに load average と CPU の数を出す）、`npm test` と CI は 200 ms（桁違いの悪化だけを落とす） |
 
 ## 10. 技術の候補
 
@@ -1015,6 +1015,11 @@ optionchan-gcp の bootstrap / prod を写すだけでは足りないもの。
 | テスト | `terraform test`（`infra/bootstrap/tests/`・`infra/prod/tests/`、モックのプロバイダ。資格情報なしで CI の `check` job で回る）: bootstrap は公開の拒否、WIF の条件、apply SA の subject、データセットの付与の型と role。prod は IAP 有効・`ingress`・IAM の検査が有効、`run.invoker` が IAP のサービスエージェント 1 件だけ、イメージが digest か `src-<20hex>` のタグ参照だけ、8.3 の値（AC11） |
 
 ## 変更履歴
+
+### 2026-10-18 PWA（ホーム画面に追加とアイコン。#90）
+
+- 8.1・8.3: CSP に `manifest-src 'self'` を足す（「ビューアーと同じ」→「ビューアー + `manifest-src 'self'`」。他のディレクティブは同じ）。静的ファイルに `/` 直下の決まった 5 つの名前（manifest・favicon・アイコン 3 つ、`no-cache`）を足す。規約は docs/ui-redesign.md 10.1「PWA」
+- 9 章 テスト戦略 (4): イメージの検査に manifest（Content-Type・CSP）とアイコン 4 つを足す
 
 ### 2026-10-17 使える板の気配の割合を 75% に（#99）
 

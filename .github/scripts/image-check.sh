@@ -45,7 +45,8 @@ echo "ok: 除外物 0 件"
 docker run --rm --entrypoint cat "$img" /app/static/index.html > "$work/index.html"
 "$here/csp-check.sh" "$work/index.html"
 
-# 5. 起動して /healthz・/・/assets/* が 200、CSP ヘッダ（script-src 'self'）が付くこと
+# 5. 起動して /healthz・/・/assets/* が 200、CSP ヘッダ（script-src 'self'）が付くこと。
+#    manifest とアイコン（#90）は Content-Type も見て、manifest は CSP に manifest-src 'self' があること
 cid=$(docker run -d -p 127.0.0.1::8080 -e GCP_PROJECT=example-project "$img")
 port=$(docker port "$cid" 8080/tcp | head -n 1 | sed 's/.*://')
 base="http://127.0.0.1:${port}"
@@ -54,12 +55,19 @@ for _ in $(seq 1 30); do
   sleep 1
 done
 
-check() {  # パス 名前（ヘッダは $work/<名前>.h）
-  local code
+check() {  # パス 名前 [Content-Type の前方一致]（ヘッダは $work/<名前>.h）
+  local code type
   code=$(curl -sS -o "$work/$2.body" -D "$work/$2.h" -w '%{http_code}' "$base$1") || fail "$1 に接続できない"
   [ "$code" = 200 ] || { docker logs "$cid" 2>&1 | tail -n 20 >&2; fail "$1 が ${code}"; }
   grep -i '^content-security-policy:' "$work/$2.h" | grep -q "script-src 'self'" \
     || fail "$1 に Content-Security-Policy（script-src 'self'）が無い"
+  if [ -n "${3:-}" ]; then
+    type=$(grep -i '^content-type:' "$work/$2.h" | head -n 1 | sed 's/^[^:]*:[[:space:]]*//' | tr -d '\r')
+    case "$type" in
+      "$3"*) ;;
+      *) fail "$1 の Content-Type が ${3} でない: ${type}" ;;
+    esac
+  fi
   echo "ok: $1 200（CSP あり）"
 }
 check /healthz healthz
@@ -68,4 +76,12 @@ cmp -s "$work/index.body" "$work/index.html" || fail "/ が同梱の index.html 
 asset=$(grep -oE '/assets/[A-Za-z0-9._-]+\.js' "$work/index.html" | head -n 1)
 [ -n "$asset" ] || fail "index.html に /assets/*.js が無い"
 check "$asset" asset
+check /manifest.webmanifest manifest application/manifest+json
+grep -i '^content-security-policy:' "$work/manifest.h" | grep -q "manifest-src 'self'" \
+  || fail "/manifest.webmanifest の CSP に manifest-src 'self' が無い"
+echo "ok: manifest-src 'self'"
+check /favicon.svg favicon image/svg+xml
+check /apple-touch-icon.png apple-touch-icon image/png
+check /icon-192.png icon-192 image/png
+check /icon-512.png icon-512 image/png
 echo "simulator のイメージの検査: OK"
