@@ -171,6 +171,12 @@ option-simulator の画面を「書類」から「計器」に作り直すため
 - 時間レールの現在値の吹き出しはつまみの下の文字の行に置き（描画域の目盛りの文字を隠さない）、重なる目盛りの文字は出さない
 - 凡例行のピン（①②③ + 名前 + ×）は線の凡例より先に場所を取り、縮むのは名前だけ（名前は省略記号。× は 24px の当たりで常に押せ、右の道具（ピン・拡大縮小・⋯・ⓘ）は縮まない。ピンのメニューにも「① 名前 を外す」）。交点のラベルは線（満期・指定日・今日）・他のラベル・IV レールの吹き出しに重ならない位置へ上下にずらす（元の位置から ±45px に無ければ縦線の反対側、それでも無ければ描画域の高さまで広げる。`stageMarkLabels`）
 
+**面モード（#88 段 A）の決め**（新しい画面だけ）:
+
+- 切替 `[線 | 面]`（`Seg`、グループの名前「グラフの表示」）は舞台の幅 ≥ 480px で凡例行の道具の [ピン N/3] の前、< 480px は ⋯ の中（[−][＋][⟲] と同じコンテナクエリ）。状態は `ui/view/shell.ts` の `chart`（保存しない = 再読み込みで線）。シートを全開にした舞台（ミニ）は面モードでも線で描く（モードは保つ）。足が無い（評価できる足が無い）ときは今の空の表示
+- 面モードでもキー・IV レール・時間レール・ホイール・ピンチ・[−][＋][⟲]・足マーカーは線モードと同じに効き、シナリオ点（縦線 + d の横線 + ●）が付いて動く
+- 段 A の間、描画域の 1 本のドラッグ・長押しは線モードと同じ（パン / 横の ΔX）。段 B で「面モードの点」（押してそのまま ΔX と d）に替える
+
 ### 4.2 ステッパー（シナリオ）
 
 - [−][＋]: 1 刻み（d 1 日 / ΔX 0.5% または 100 円 / Δσ 0.5pt / Δs 0.5 / β 0.1）。長押しで連続
@@ -304,7 +310,7 @@ option-simulator の画面を「書類」から「計器」に作り直すため
 | 足の追加 | 横軸のマーカーが下から現れる（120ms）、トースト |
 | ジャンプ（板） | 行を中央へスクロール + 0.9 秒ハイライト |
 | シートの開閉 | 高さを 180ms で補間。`prefers-reduced-motion` では即時 |
-| 面モード | 72 × 36 の格子をキャンバスに描き、ドラッグ中は 48 × 24 に落として止まったら描き直す |
+| 面モード | 72 × 36 の格子をキャンバスに描き、ドラッグ中は 48 × 24 に落として止まったら描き直す。#88: 面の値の入力（基礎・表示範囲・Δσ・Δs・β・動き方・ivShift。ΔX・d は値に効かないので入れない）が変わったフレームは 48 × 24、120ms 変化が無ければ 72 × 36 で 1 回（ピンの線の `PIN_SETTLE_MS` と同じ値）。ΔX・d だけの変化では作り直さない（点だけ動く）。最初の 1 枚（線 → 面の切替など）は 72 × 36。規則は `ui/view/pnlSurface.ts` の `planSurface` |
 
 ---
 
@@ -374,6 +380,15 @@ option-simulator の画面を「書類」から「計器」に作り直すため
 | 足のマーカーのドラッグ（#82） | マーカーを長押しして横に滑らせて行使価格を変える（板の OP の足だけ。新しい K の bid / ask で建て直す。確定は `changeLegStrike`、トーストの [元に戻す] は `restoreLeg`） | なし（§12） |
 | スマイル | 点のタップ → 選択行に「売り bid / 買い ask」。長押しで連続選択。ATM 線は `--handle`、シナリオ ATM は紫 | あり（拡大・パンは省略） |
 
+**面モード（#88 段 A）の決め**（表示モデルは `ui/view/pnlSurface.ts`、描画は `ui/next/stage/SurfaceCanvas.tsx`）:
+
+- 格子: 横 = 線と同じ表示範囲（`pnlViewDomain`）、縦 = d の 0（下 = 今日）〜 最遠の SQ（上 = `maxDays`）。値はセルの中心で `theoreticalPnl`（指定日の線と同じ式。新しい計算は無い）
+- 色: 符号で `--gain` / `--loss`、不透明度 `210 × (|v| / vmax)^0.6`（vmax = 格子の有限の |v| の最大。0 で透明 = 決定 2。試作品の下限 20/255 は採らない）。vmax < 1 円・非有限のセルは透明
+- 描くもの: 格子線・目盛り（縦は整数の日、左上に「日」。「日」と重ならないよう、0 以外で上端から 12px 未満の目盛りは出さない）・X₀・シナリオ ATM・足マーカー・シナリオ点（縦線 + d の横線 + ● + 輪 + ラベル「{金額}{単位} · d {d}」）・▼ のつまみ。描かないもの: 線・塗り・0 の線・BEP・ピンの線とラベル・交点
+- 点のラベルは点の右上、描画域・IV レールの吹き出しにかかるなら 左上 → 右下 → 左下 の順に替える
+- 凡例行: 線の凡例の代わりに色の見本（`--loss` → `--s1` → `--gain`）+「損益の面（横 原資産 · 縦 経過日数）±{vmax}」（舞台の幅 < 480px は「損益の面 ±{vmax}」、vmax は指標の単位）。「指定日 d を最遠の SQ に収めた」のタグは出す。ピンのチップ・「プレミアム 0 のため自動」のタグは出さず、⋯ の縦軸の欄は「縦軸は経過日数（面モード）」の注記に替える（ピンの状態・[ピン N/3] は保つ）
+- canvas: `.chart` 全体に重ね（`aria-hidden`）、backing は CSS px × `min(max(devicePixelRatio, 1), 2)`（`width` / `height` 属性）、見た目の大きさはクラスの CSS。格子の RGBA を nx × ny のオフスクリーン canvas に `putImageData` → 描画域の矩形（device px の整数）へ平滑化して `drawImage`。CSP（`img-src 'self'`）のため `toDataURL`・`<img>`・`createObjectURL` は使わない。色はテーマの解決値が変わるたびに `getComputedStyle` で読み直す（JS に色を直書きしない）
+
 ---
 
 ## 9. 今の画面からの対応表
@@ -406,7 +421,7 @@ option-simulator の画面を「書類」から「計器」に作り直すため
 | 段 | Issue の単位 | 依存 | 並列 |
 |---|---|---|---|
 | **0 土台** | (a) デザイントークン（`ui/next/css/tokens.css` の `:root` と `[data-theme]`。旧 `style.css` とは排他）とテーマの切替・保存（端末の設定 `option-simulator.prefs`。7.4）(b) 共通部品（seg / chip / stepper / menu / toast / dialog / popover）と折り返しの規則 (c) 3 段階のグリッド（`body` 固定、舞台 / シナリオ / 作業台 / 市場 / ドック / シート。画面の状態 panel / sheet / market は新しい画面のローカル `ui/view/shell.ts`。保存しない）。**#81 で a / b / c を 1 本で入れた**（10.1） | なし | a / b / c は並列可（c は a の変数名に合わせる） |
-| **1 舞台** | (d) 描画域の改修: ハンドル・足マーカー・塗り・ラベルの位置・X₀（#82 で、`pnlChart.ts` の出力は変えずに付属の表示モデル `ui/view/stage.ts` に置いた。`axisX` を export するだけ。DOM を持たない memo の連鎖は `ui/components/usePnlChartModel.ts` で旧画面と共有）(e) IV レール・時間レール（`ui/view/scenario.ts` の `sliderSpec` を使う。目盛りは `evalTimeTargets`）(f) 読み取り（`readoutModel` をそのまま大きな数字に）(g) 面モード（新規 `ui/view/pnlSurface.ts`: 格子の評価 + canvas。ドラッグ時の粗い格子） | 0 | d / e / f は並列可。g は d の後 |
+| **1 舞台** | (d) 描画域の改修: ハンドル・足マーカー・塗り・ラベルの位置・X₀（#82 で、`pnlChart.ts` の出力は変えずに付属の表示モデル `ui/view/stage.ts` に置いた。`axisX` を export するだけ。DOM を持たない memo の連鎖は `ui/components/usePnlChartModel.ts` で旧画面と共有）(e) IV レール・時間レール（`ui/view/scenario.ts` の `sliderSpec` を使う。目盛りは `evalTimeTargets`）(f) 読み取り（`readoutModel` をそのまま大きな数字に）(g) 面モード（新規 `ui/view/pnlSurface.ts`: 格子の評価 + canvas。ドラッグ時の粗い格子）。#88 段 A で `ui/view/pnlSurface.ts`（格子・色・縦軸・点・凡例・粗い / 細かいの規則。純関数）+ `ui/next/stage/usePnlSurface.ts`（粗い / 細かいの時計を持つ DOM の無いフック）+ `ui/next/stage/SurfaceCanvas.tsx`（canvas）を入れた | 0 | d / e / f は並列可。g は d の後 |
 | **2 シナリオ** | (h) ステッパー（スクラブ・ホイール・数値入力）とプリセット・評価時刻のチップ、「モデルの前提」折りたたみ | 0 | 1 と並列可 |
 | **3 作業台** | (i) ポジションの行の見た目（枚数ステッパー・⇄・×・トースト [元に戻す]）と詳細 (j) ヘッジ 1 行 (k) 指標のタイルとテール表のバー (l) 足の追加ダイアログ | 0 | i / j / k / l は並列可 |
 | **4 市場** | (m) 板（枠幅で列数・チップ行・バッジ・脚注）(n) スマイル（選択行・ATM の色） | 0 | 並列可 |
@@ -425,8 +440,8 @@ option-simulator の画面を「書類」から「計器」に作り直すため
 - **CSS**: `ui/next/next.css` が `css/tokens.css` → `base.css` → `parts.css` → `shell.css` → 領域ごとの `css/<region>.css`（後続が末尾に足す）を `@import`。クラス名は試作品に合わせる（`.layout`・`.panel`・`.panel-head`・`.panel-body`・`.dock`・`.seg`・`.chip`・`.chiprow`・`.stepper`・`.menu`・`.toasts` / `.toast`・`dialog.sheet`・`.tag`・`.ro`・`.tile`・`.leg-row`・`table.board`）。状態は ARIA 属性（`aria-pressed`・`aria-expanded`・`aria-checked`・`aria-disabled`）→ `data-*` 属性 → 短い修飾クラス（`.hot`・`.warn`・`.end`）の順で表す。BEM・CSS Modules は使わない
 - **色**: `ui/next/**/*.css` で色の値（hex・`rgb()`・`hsl()`・色の名前）を書けるのは `tokens.css` のテーマの定義（`:root, :root[data-theme="dark"]` と `:root[data-theme="light"]`）の中だけ。`color-mix()` もトークン同士。足りない色は役割の名前で `tokens.css` に足す（7.4）。`tests/ui/cssTokens.test.ts`（CI に入る）が (a) 色の置き場所 (b) 7.1・7.2 の表の値（テストの中に写した定数。表を直したらテストも直す）(c) `var(--x)` の名前がすべて定義済み、を確かめる
 - **幅の段階**: CSS は `@media (max-width: 719.98px)` / `(min-width: 720px) and (max-width: 1199.98px)` / `(min-width: 1200px)`。JS は `PHONE_QUERY`・`PC_QUERY`（`ui/view/layout.ts`）と `layoutTier`（`ui/view/shell.ts`）。パネルの中の詰め方はコンテナクエリ（`.panel-body` が `container-type: inline-size`）
-- **画面の状態の規則**（`ui/view/shell.ts`）: 既定 positions / peek / board。ドックの別のボタン → そのパネル（hidden なら peek）、開いている同じボタン → hidden。`open`（#82。舞台の足マーカーのタップなど）はそのパネルを開くだけで閉じない（hidden なら peek）。つまみ（スマホ、見えているシートの先頭に 1 つ）は離したときの縦の移動量で決め、6px 未満はタップ（peek ⇄ full）、40px 以上で 1 段（下: full → peek → hidden、上: peek → full）、その間は何もしない。hidden ではつまみが無い。タブレットで scenario は選べない（positions に読み替える）。出し分けは `.layout[data-panel][data-sheet][data-market]` と CSS
-- **CSP**: `style` 属性・JSX の `style` prop・HTML 文字列を DOM に入れる API を使わない。位置・大きさが動くもの（シート・ハンドル・レールのつまみ・メニューの左右）は `data-*` / クラスの付け替えか SVG の属性。シートは指に追従させない
+- **画面の状態の規則**（`ui/view/shell.ts`）: 既定 positions / peek / board。ドックの別のボタン → そのパネル（hidden なら peek）、開いている同じボタン → hidden。`open`（#82。舞台の足マーカーのタップなど）はそのパネルを開くだけで閉じない（hidden なら peek）。つまみ（スマホ、見えているシートの先頭に 1 つ）は離したときの縦の移動量で決め、6px 未満はタップ（peek ⇄ full）、40px 以上で 1 段（下: full → peek → hidden、上: peek → full）、その間は何もしない。hidden ではつまみが無い。タブレットで scenario は選べない（positions に読み替える）。出し分けは `.layout[data-panel][data-sheet][data-market]` と CSS。#88 段 A で `chart`（`line` / `surface`。省略可能で無い = `line`、読むのは `chartMode`。保存しない。他の action で変わらない）を足した
+- **CSP**: `style` 属性・JSX の `style` prop・HTML 文字列を DOM に入れる API を使わない。位置・大きさが動くもの（シート・ハンドル・レールのつまみ・メニューの左右）は `data-*` / クラスの付け替えか SVG の属性。シートは指に追従させない。canvas（#88 の面モード）は大きさを `width` / `height` 属性とクラスの CSS で決め、描くのは 2D API（`putImageData`・`drawImage`）だけ（`toDataURL` などで画像の URL にしない）
 - **折り返し**: 5.1。値・ラベル・ボタン・セグメント・チップは `white-space: nowrap`。ボタンの中でアイコンと文字を縦に積むときは文字を `span` に入れる（直下のテキストにしない）
 - **ページはスクロールしない**: `html, body { height: 100%; overflow: hidden }`、画面は `100dvh` のグリッド（トップバー → 本体。#87 で知らせの行をやめた）。スクロールは `.panel-body`（`overflow: auto; overscroll-behavior: contain`）だけ
 - **メニュー・ポップオーバー**: `overflow` を切らない親（トップバー・`.panel-head`）に置く。ボタンの親に対する絶対配置 + `.end`（ボタンが画面の右半分なら右端に揃える）。開くのは同時に 1 つ（`ui/next/parts/overlay.ts`）。メニューのキーは `ui/view/menu.ts`、ポップオーバーの開閉は `ui/view/hint.ts` の `hintNext`。**設計からの逸脱（#107）**: 指標のタイル・舞台の読み取りの全文のポップオーバーは「`overflow` を切らない親に置く」の例外として `.panel-body` の中に置き、`within=".panel-body"` で左右の揃えをその `.panel-body` の左右で判定する（画面の幅ではない。1440 の指標パネルの左の列が左へ切れない）。読み取りは舞台の下端にあり `.stage-main` が `overflow: hidden` なので上に開く（`.popover.up`）。スクロールする `.panel-body`（指標）は、開いたときにポップオーバーの下端が見えるまでその中だけを動かす（`revealDelta`。`scrollIntoView` はページ・`overflow: hidden` の祖先まで動かすので使わない）
@@ -560,3 +575,11 @@ option-simulator の画面を「書類」から「計器」に作り直すため
 - 5: `dialog.sheet` の `head`・Esc でポップオーバーだけ閉じる・設定の行、`.toast` の読み上げの 2 つの領域、トップバーの `.menu` の `max-height`
 - 9: `Header` の ATM の基準・`Metrics` の単位・手数料 = `ui/next/SettingsDialog.tsx`、`Book` = `ui/next/BookDialog.tsx`
 - 10.1: `restoreEntry` と `useAppController` の口、`Dialog` / `Toasts` / `YAxisFields` / `tabMenuModel` / `revealScrollLeft` の追加、ui:check の追加
+
+### 2026-10-18 段 1 の面モード (A)（#88）
+
+- 4.1: 面モードの決め（切替の置き場所・保存しない・ミニは線・キーとレールなどは線モードと同じに効く・段 A の間の 1 本のドラッグは線モードと同じ）
+- 6: 面モードの格子の作り直しの規則（入力が変わったフレームは 48 × 24、120ms 止まったら 72 × 36、ΔX・d では作り直さない、最初の 1 枚は 72 × 36。`pnlSurface` の `planSurface`）
+- 8: 面モードの決め（格子・不透明度 `210 × (|v| / vmax)^0.6`・描くもの / 描かないもの・点のラベル・凡例行と ±vmax・canvas の描き方と CSP）
+- 10 段 1 (g): `ui/view/pnlSurface.ts`・`ui/next/stage/usePnlSurface.ts`・`ui/next/stage/SurfaceCanvas.tsx`
+- 10.1: 画面の状態に `chart`、CSP に canvas の規則

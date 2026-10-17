@@ -4,8 +4,11 @@ import type { Action } from '../../state';
 import { fmtNum } from '../../view/format';
 import { PIN_MARK, type PinTarget } from '../../view/pins';
 import type { PnlChartModel, PnlYSettings } from '../../view/pnlChart';
+import type { SurfaceLegend } from '../../view/pnlSurface';
+import { CHART_MODES, type ChartMode } from '../../view/shell';
 import { Menu, type MenuItem } from '../parts/Menu';
 import { Popover } from '../parts/Popover';
+import { Seg } from '../parts/Seg';
 import { YAxisFields } from '../parts/YAxisFields';
 
 const fmtDays = (v: number) => String(Math.round(v * 100) / 100);
@@ -15,6 +18,8 @@ const DYNAMICS_LABEL = { sticky_strike: 'sticky strike', sticky_moneyness: 'stic
  * 舞台の凡例行（docs/ui-redesign.md §3・§9。#82）: 線の凡例・ピン ①②③（スマホは番号だけ）と ×、[ピン N/3] のメニュー、
  * [−][＋][⟲]（舞台の幅 < 480px は ⋯ の中）、⋯（縦軸の自動 / ±N 倍 / 手動）、警告のタグ、ⓘ（前提）。
  * 操作は既存の action だけ。メニュー・ポップオーバーは overflow を切らないこの行に置く。
+ * 面モード（#88 段 A）: [線 | 面]（幅 < 480px は ⋯ の中）、線の凡例の代わりに色の見本 + 文言 + ±vmax、ピンのチップと
+ * 「プレミアム 0」のタグは出さない、⋯ の縦軸の欄は注記に、ⓘ は面の説明。
  */
 export function StageHead(p: {
   model: PnlChartModel;
@@ -26,9 +31,18 @@ export function StageHead(p: {
   pinTabs: ReadonlyArray<{ id: number; name: string; legCount: number; pinned: boolean }>;
   onPinCurrent: () => void;
   onZoom: (factor: number) => void;
+  chart: ChartMode;
+  onChart: (chart: ChartMode) => void;
+  /** 面モードの凡例（線モードは null） */
+  surfaceLegend: SurfaceLegend | null;
   dispatch: (a: Action) => void;
 }) {
   const { model, pnlY, pins, dispatch, scenario } = p;
+  const legend = p.surfaceLegend;
+  const surf = p.chart === 'surface';
+  const chartSeg = (
+    <Seg label="グラフの表示" value={p.chart} options={CHART_MODES} onChange={p.onChart} />
+  );
   const pinFull = pinAddError(pins);
   const pinItems: MenuItem[] = [
     {
@@ -106,11 +120,21 @@ export function StageHead(p: {
   return (
     <div class="stage-head">
       <div class="legend">
-        <span>
-          <i class="exp" />
-          <span>満期</span>
-        </span>
-        {hasDate && (
+        {legend && (
+          <span class="surf" title={`${legend.long}${legend.vmax ? ` ${legend.vmax}` : ''}`}>
+            <i class="surf-sw" />
+            <span class="surf-long">{legend.long}</span>
+            <span class="surf-short">{legend.short}</span>
+            {legend.vmax && <b class="vmax">{legend.vmax}</b>}
+          </span>
+        )}
+        {!legend && (
+          <span>
+            <i class="exp" />
+            <span>満期</span>
+          </span>
+        )}
+        {!legend && hasDate && (
           <span>
             <i class="sc" />
             <span>
@@ -118,14 +142,16 @@ export function StageHead(p: {
             </span>
           </span>
         )}
-        <span>
-          <i class="td" />
-          <span>今日</span>
-        </span>
-        {model.premiumFallback && <span class="tag warn">プレミアム 0 のため自動</span>}
+        {!legend && (
+          <span>
+            <i class="td" />
+            <span>今日</span>
+          </span>
+        )}
+        {!legend && model.premiumFallback && <span class="tag warn">プレミアム 0 のため自動</span>}
         {model.daysClamped && <span class="tag warn">指定日 d を最遠の SQ に収めた</span>}
       </div>
-      {pins.length > 0 && (
+      {!legend && pins.length > 0 && (
         // ピンの凡例（①②③ + 名前 + ×）は線の凡例より先に場所を取る（縮むのは名前だけ。スマホ・狭い舞台は番号だけ）
         <div class="pins" data-n={pins.length}>
           {pins.map((t) => (
@@ -147,6 +173,7 @@ export function StageHead(p: {
         </div>
       )}
       <div class="stage-tools">
+        <span class="cm">{chartSeg}</span>
         <Menu
           label="ピン"
           button={`ピン ${pins.length}/${MAX_PINS}`}
@@ -156,7 +183,15 @@ export function StageHead(p: {
         <span class="zb">{zoomButtons}</span>
         <Popover label="グラフの設定" button="⋯" buttonClass="btn ghost icon sm">
           <div class="stage-pop">
-            <YAxisFields pnlY={pnlY} current={() => model.yDomain} dispatch={dispatch} />
+            <div class="row cm-in">
+              <span class="lbl">グラフ</span>
+              {chartSeg}
+            </div>
+            {surf ? (
+              <p class="surf-note">縦軸は経過日数（面モード）。縦軸の設定は線モードで</p>
+            ) : (
+              <YAxisFields pnlY={pnlY} current={() => model.yDomain} dispatch={dispatch} />
+            )}
             <div class="row zb-in">
               <span class="lbl">表示</span>
               {zoomButtons}
@@ -164,16 +199,34 @@ export function StageHead(p: {
           </div>
         </Popover>
         <Popover label="損益グラフの前提" button="ⓘ">
-          <p>
-            満期 = SQ の損益。指定日の線 = シナリオ（Δσ {fmtNum(scenario.dSigma, 1)}pt、Δs{' '}
-            {fmtNum(scenario.skew, 1)}）、今日の線 = シナリオ IV なし。どちらも β{' '}
-            {fmtNum(scenario.beta, 1)}pt/1%（横軸の各点）、{DYNAMICS_LABEL[scenario.ivDynamics]}。
-          </p>
-          <p>
-            縦線上の 満 / 指 / 今 = シナリオ点の満期・指定日・今日の損益。塗り =
-            指定日の線（無ければ今日の線）と 0 の間。横軸の ▲ call / ▼ put = 足（塗り = 買い・白抜き
-            = 売り）。◇ = 満期の BEP。
-          </p>
+          {surf ? (
+            <>
+              <p>
+                色 = 指定日の損益（横 = 原資産、縦 = 経過日数 0（下）〜 最遠の SQ（上））。緑 =
+                利益・赤 = 損失、濃さ = |損益| ÷ 格子の最大（±vmax）の 0.6 乗、0 付近は透明。
+              </p>
+              <p>
+                Δσ {fmtNum(scenario.dSigma, 1)}pt・Δs {fmtNum(scenario.skew, 1)}・β{' '}
+                {fmtNum(scenario.beta, 1)}pt/1%・{DYNAMICS_LABEL[scenario.ivDynamics]}{' '}
+                は面の全体に効く。点 = シナリオ点（ΔX・d）。ΔX はハンドル・← →、d は時間レール・[
+                ]。
+              </p>
+            </>
+          ) : (
+            <>
+              <p>
+                満期 = SQ の損益。指定日の線 = シナリオ（Δσ {fmtNum(scenario.dSigma, 1)}pt、Δs{' '}
+                {fmtNum(scenario.skew, 1)}）、今日の線 = シナリオ IV なし。どちらも β{' '}
+                {fmtNum(scenario.beta, 1)}pt/1%（横軸の各点）、{DYNAMICS_LABEL[scenario.ivDynamics]}
+                。
+              </p>
+              <p>
+                縦線上の 満 / 指 / 今 = シナリオ点の満期・指定日・今日の損益。塗り =
+                指定日の線（無ければ今日の線）と 0 の間。横軸の ▲ call / ▼ put = 足（塗り =
+                買い・白抜き = 売り）。◇ = 満期の BEP。
+              </p>
+            </>
+          )}
         </Popover>
       </div>
     </div>

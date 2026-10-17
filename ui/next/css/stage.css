@@ -72,6 +72,27 @@ section.stage {
   border-top-style: dashed;
 }
 
+/* 面モードの凡例（#88）: 色の見本（損失 → 舞台の面 → 利益）+ 文言 + ±vmax（vmax は縮まない） */
+.legend i.surf-sw {
+  width: 28px;
+  height: 8px;
+  border-top: 0;
+  border-radius: 2px;
+  background: linear-gradient(90deg, var(--loss), var(--s1), var(--gain));
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+
+.legend > span.surf > .surf-short {
+  display: none;
+}
+
+.legend > span.surf > .vmax {
+  flex: 0 0 auto;
+  color: var(--ink);
+  font-family: var(--mono);
+  font-weight: 600;
+}
+
 /*
  * ピンの凡例: 線の凡例より先に場所を取り、縮むのは名前だけ（§4.1。× は 24px の当たりで常に押せる）。
  * 1 本の下限 = 余白 4 + 線種 14 + 番号 + × 24 と間隔（名前 0）。右の道具（.stage-tools）は縮まない
@@ -233,9 +254,27 @@ section.stage {
   font-size: var(--fs-sm);
 }
 
-/* 舞台が広いときは拡大ボタンを行に出し、⋯ の中の分を隠す */
-.stage-pop .zb-in {
+/* 舞台が広いときは拡大ボタン・[線 | 面] を行に出し、⋯ の中の分を隠す */
+.stage-pop .zb-in,
+.stage-pop .cm-in {
   display: none;
+}
+
+/* 凡例行の [線 | 面]: 舞台 518px（900 幅）でピン 3 本と右の道具が入るように左右の余白を詰める */
+.stage-tools .cm {
+  display: inline-flex;
+}
+
+.stage-tools .cm .seg > button {
+  padding: 0 8px;
+}
+
+.stage-pop .surf-note {
+  max-width: 260px;
+  margin: 0;
+  color: var(--ink-3);
+  font-size: var(--fs-sm);
+  white-space: normal;
 }
 
 /* ===== 本体（描画域 + IV レール → 時間レール → 読み取り） ===== */
@@ -272,6 +311,38 @@ section.stage > .panel-body.stage-main {
   position: absolute;
   inset: 0;
   display: block;
+}
+
+/* 面モードの canvas（#88）: .chart 全体に重ね、SVG の下。大きさはクラス（backing は width / height 属性） */
+.chart > canvas.surface {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.chart .hline {
+  stroke: var(--handle);
+  stroke-width: 1.25;
+  stroke-dasharray: 3 3;
+}
+
+.chart .surf-lbl {
+  fill: var(--ink);
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 600;
+  dominant-baseline: central;
+  paint-order: stroke;
+  stroke: var(--s1);
+  stroke-width: 3px;
+  stroke-linejoin: round;
+}
+
+.chart .surf-lbl.end {
+  text-anchor: end;
 }
 
 .chart > .note {
@@ -770,6 +841,22 @@ section.stage > .panel-body.stage-main {
 
   .stage-pop .zb-in {
     display: flex;
+  }
+
+  .stage-tools .cm {
+    display: none;
+  }
+
+  .stage-pop .cm-in {
+    display: flex;
+  }
+
+  .legend > span.surf > .surf-long {
+    display: none;
+  }
+
+  .legend > span.surf > .surf-short {
+    display: inline;
   }
 
   .pin-chip .pin-name,

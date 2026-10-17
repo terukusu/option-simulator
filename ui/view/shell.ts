@@ -17,11 +17,19 @@ export const MARKET_VIEWS = [
   { value: 'smile', text: 'スマイル' },
 ] as const;
 export type MarketView = (typeof MARKET_VIEWS)[number]['value'];
+/** 舞台のグラフの表示（凡例行の [線 | 面]。#88） */
+export const CHART_MODES = [
+  { value: 'line', text: '線' },
+  { value: 'surface', text: '面' },
+] as const;
+export type ChartMode = (typeof CHART_MODES)[number]['value'];
 
 export interface ShellState {
   panel: PanelId;
   sheet: SheetStage;
   market: MarketView;
+  /** 舞台のグラフの表示（#88。無い = line。読むのは chartMode） */
+  chart?: ChartMode;
 }
 
 export const INITIAL_SHELL: ShellState = { panel: 'positions', sheet: 'peek', market: 'board' };
@@ -37,10 +45,16 @@ export type ShellAction =
   | { type: 'open'; panel: PanelId; tier: Tier }
   /** つまみの縦の移動量（下向き正。離したときの値） */
   | { type: 'grab'; dy: number }
-  | { type: 'market'; market: MarketView };
+  | { type: 'market'; market: MarketView }
+  | { type: 'chart'; chart: ChartMode };
 
 const PHONE_DOCK: readonly PanelId[] = ['positions', 'board', 'scenario', 'metrics', 'smile'];
 const TABLET_DOCK: readonly PanelId[] = ['positions', 'board', 'metrics', 'smile'];
+
+/** 舞台のグラフの表示（既定 line） */
+export function chartMode(s: ShellState): ChartMode {
+  return s.chart ?? 'line';
+}
 
 /** 幅の段階（スマホとPCのメディアクエリの結果から） */
 export function layoutTier(isPhone: boolean, isPc: boolean): Tier {
@@ -93,5 +107,7 @@ export function shellReduce(s: ShellState, a: ShellAction): ShellState {
     }
     case 'market':
       return a.market === s.market ? s : { ...s, market: a.market };
+    case 'chart':
+      return a.chart === chartMode(s) ? s : { ...s, chart: a.chart };
   }
 }
