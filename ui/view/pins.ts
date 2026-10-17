@@ -30,8 +30,9 @@ import {
   type PinLineMode,
   type PinNo,
   type PinPeriodKind,
+  pinAddError,
 } from '../pins';
-import type { TabSlot, UiLeg } from '../state';
+import type { Action, TabSlot, UiLeg } from '../state';
 import { DASH, fmtNum, fmtSigned, fmtTime } from './format';
 import { type AmountUnit, fmtAmount } from './metrics';
 import {
@@ -504,4 +505,78 @@ export function pinListModel(input: PinListInput): PinRowView[] {
       drawn: fn !== null,
     };
   });
+}
+
+// ---------------------------------------------------------------- ピンのメニューの行（#89 段 B）
+
+export interface PinMenuInput {
+  /** 評価できる足が無い（舞台の noLegs = 基礎が無い） */
+  noLegs: boolean;
+  pins: readonly PinTarget[];
+  pinLine: PinLineMode;
+  /** 重ねられるタブ（作業中以外） */
+  pinTabs: ReadonlyArray<{ id: number; name: string; legCount: number; pinned: boolean }>;
+}
+
+/** 行の実行の記述（データ。今の線を残すは基礎の参照を持つので画面の pinCurrent に任せる） */
+export type PinMenuRun = { kind: 'pinCurrent' } | { kind: 'action'; action: Action };
+
+export interface PinMenuRow {
+  key: string;
+  label: string;
+  /** undefined = 押せる（舞台の ⋯ の DOM を変えない） */
+  disabled?: boolean;
+  /** ピンの線の radio */
+  checked?: boolean;
+  run: PinMenuRun;
+}
+
+/**
+ * 舞台の [ピン N/3] のメニューとコマンドパレットのピンの行（同じ規則）: 今の線を残す → `<タブ> を重ねる` →
+ * ピンの線: 期中 / 満期 → `<①…> <名前> を外す` → 全部外す。
+ * 押せない: 今の線を残す = 足が無い・上限、重ねる = 上限・重ね済み・足 0 本のタブ、全部外す = ピン 0 本。
+ */
+export function pinMenuRows(i: PinMenuInput): PinMenuRow[] {
+  const full = pinAddError(i.pins) !== null;
+  return [
+    {
+      key: 'current',
+      label: '今の線を残す',
+      disabled: i.noLegs || full,
+      run: { kind: 'pinCurrent' },
+    },
+    ...i.pinTabs.map(
+      (t): PinMenuRow => ({
+        key: `tab${t.id}`,
+        label: `${t.name} を重ねる`,
+        disabled: full || t.pinned || t.legCount === 0,
+        run: { kind: 'action', action: { type: 'addPin', source: { kind: 'tab', tabId: t.id } } },
+      }),
+    ),
+    {
+      key: 'period',
+      label: 'ピンの線: 期中',
+      checked: i.pinLine === 'period',
+      run: { kind: 'action', action: { type: 'setPinLine', line: 'period' } },
+    },
+    {
+      key: 'expiry',
+      label: 'ピンの線: 満期',
+      checked: i.pinLine === 'expiry',
+      run: { kind: 'action', action: { type: 'setPinLine', line: 'expiry' } },
+    },
+    ...i.pins.map(
+      (t): PinMenuRow => ({
+        key: `remove${t.no}`,
+        label: `${PIN_MARK[t.no]} ${t.name} を外す`,
+        run: { kind: 'action', action: { type: 'removePin', no: t.no } },
+      }),
+    ),
+    {
+      key: 'clear',
+      label: '全部外す',
+      disabled: i.pins.length === 0,
+      run: { kind: 'action', action: { type: 'clearPins' } },
+    },
+  ];
 }

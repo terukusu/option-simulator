@@ -40,22 +40,29 @@ const BASIS = [
  * 表示モデルと操作 → action は ui/view/scenarioRegion.ts。状態は既存の action だけ（#82 の舞台と同じ state.scenario）。
  * ΔX の単位は NextApp のローカル（保存しない）、前提の開閉・数値入力のエラーはここのローカル（保存しない）。
  */
+/** シナリオの表示モデルの入力（コマンドパレットのシナリオ・評価時刻の行も同じ組み立て。#89 段 B） */
+export function scenarioInputOf(c: AppController, dXUnit: DXUnit): ScenarioRegionInput {
+  const base = c.pnlBase;
+  return {
+    scenario: c.state.scenario,
+    futureBasis: c.state.futureBasis,
+    x0: c.positions?.ctx.x0 ?? Number.NaN,
+    maxDays: base?.maxDays ?? 0,
+    evalTime: base?.ctx.evalTime ?? null,
+    targets: c.targets,
+    dXUnit,
+  };
+}
+
 export function Scenario(p: { c: AppController; dXUnit: DXUnit; onDXUnit: (u: DXUnit) => void }) {
   const { c, dXUnit } = p;
   const { state, dispatch, pnlBase: base } = c;
   const x0 = c.positions?.ctx.x0 ?? Number.NaN;
   const maxDays = base?.maxDays ?? 0;
   const evalTime = base?.ctx.evalTime ?? null;
+  // 依存は組み立てに使う値だけ（c は毎回新しいオブジェクト）
   const input = useMemo<ScenarioRegionInput>(
-    () => ({
-      scenario: state.scenario,
-      futureBasis: state.futureBasis,
-      x0,
-      maxDays,
-      evalTime,
-      targets: c.targets,
-      dXUnit,
-    }),
+    () => scenarioInputOf(c, dXUnit),
     [state.scenario, state.futureBasis, x0, maxDays, evalTime, c.targets, dXUnit],
   );
   const view = useMemo(

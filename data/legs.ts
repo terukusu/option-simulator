@@ -80,17 +80,21 @@ function requireMonth(chain: Chain, id: string): ChainMonth {
   return m;
 }
 
-/** 板の行から足を作る。 */
-export function boardOptionLeg(chain: Chain, input: BoardOptionLegInput): BuiltLeg<OptionLeg> {
+function boardRowOf(chain: Chain, input: BoardOptionLegInput) {
   const month = requireMonth(chain, input.expiry);
   const idx = month.rows.findIndex((r) => r.k === input.k);
   const row = month.rows[idx];
   const info = month.strikes[idx];
   if (!row || !info) throw new Error(`板に無い行使価格: ${input.expiry} ${input.k}`);
-  const q = row[input.type];
-  const sideInfo = info[input.type];
-  const marks: LegMark[] = [];
+  return { month, q: row[input.type], info, sideInfo: info[input.type] };
+}
 
+/**
+ * 板の行から足だけを作る（印は作らない = IV の逆算をしない。boardOptionLeg の leg と同じ）。
+ * 多数の行の建値だけが要るとき（コマンドパレットの足の行。#89）に使う。
+ */
+export function boardOptionLegOnly(chain: Chain, input: BoardOptionLegInput): OptionLeg {
+  const { month, q, sideInfo } = boardRowOf(chain, input);
   let entry: number;
   if (input.entry !== undefined) entry = input.entry;
   else {
@@ -98,6 +102,24 @@ export function boardOptionLeg(chain: Chain, input: BoardOptionLegInput): BuiltL
     if (sideInfo.quote === 'two_sided' && quoted !== null) entry = quoted;
     else entry = manualEntryDefault(month, input.k, input.type, q.ask, chain.r);
   }
+  return {
+    kind: 'option',
+    product: 'op_large',
+    type: input.type,
+    expiry: month.id,
+    strike: input.k,
+    side: input.side,
+    qty: input.qty ?? 1,
+    entry,
+    mid: sideInfo.mid,
+  };
+}
+
+/** 板の行から足を作る。 */
+export function boardOptionLeg(chain: Chain, input: BoardOptionLegInput): BuiltLeg<OptionLeg> {
+  const leg = boardOptionLegOnly(chain, input);
+  const { month, q, info, sideInfo } = boardRowOf(chain, input);
+  const marks: LegMark[] = [];
   if (sideInfo.quote !== 'two_sided') marks.push('no_quote');
 
   if (Number.isFinite(month.F) && month.T > 0) {
@@ -110,20 +132,7 @@ export function boardOptionLeg(chain: Chain, input: BoardOptionLegInput): BuiltL
   else if (info.mark === 'interpolated') marks.push('interpolated');
   if (!month.syntheticOk) marks.push('forward_from_future');
 
-  return {
-    leg: {
-      kind: 'option',
-      product: 'op_large',
-      type: input.type,
-      expiry: month.id,
-      strike: input.k,
-      side: input.side,
-      qty: input.qty ?? 1,
-      entry,
-      mid: sideInfo.mid,
-    },
-    marks,
-  };
+  return { leg, marks };
 }
 
 /**

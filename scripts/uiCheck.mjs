@@ -83,7 +83,10 @@
 //                                          全体のキーの手順（#89 段 A AC-A4: body から 1〜5 でパネルとスクロールする枠のフォーカス・G で描画域と
 //                                          → の ΔX +100・描画域の 0 はリセット・T で反転と prefs・設定 / ⋯ / 数値入力では効かない・
 //                                          板の行 / 指標のテール表のクリックと 2 / 4 の後の PageDown で枠が動く。
-//                                          390×844 と 1440×900、900×1100 は参考）
+//                                          390×844 と 1440×900、900×1100 は参考）とコマンドパレットの手順（#89 段 B AC-B5:
+//                                          Ctrl + K で開く・↑↓ と押せない行・急落・足の追加と [元に戻す]・ATM へ・テーマ / 設定・
+//                                          Esc / 背景で閉じてフォーカスが戻る・開いている間の 1 / G / T と 2 つ目・メニュー / 設定の上・
+//                                          322 行の板で開く / 打つの Long Animation Frame。390×844 と 1440×900）
 //   --url <base>                           dev サーバーを起こさず、その URL を使う（例 http://127.0.0.1:5173/?ui=next&parts）
 //   --dom <file>                           body の下の要素の tag.class の並びを書き出す（旧画面が変わらないことの比較用）
 //   --shots <dir>                          スクリーンショットを書く（合成の板だけ。リポジトリに入れない）
@@ -793,6 +796,11 @@ async function measureAll() {
     // 面モード（#88 段 A）
     await surfaceAll();
     console.log(`面モードの検査（#88）: ${surfaceStats.pass} / ${surfaceStats.total} 状態で pass`);
+    // コマンドパレット（#89 段 B AC-B6）
+    await paletteSweep();
+    console.log(
+      `コマンドパレットの検査（#89）: ${paletteStats.pass} / ${paletteStats.total} 状態で pass`,
+    );
   }
 }
 
@@ -1388,6 +1396,68 @@ async function surfaceCheck(page, label) {
 }
 
 /** 面モードの既定の実行: 4 幅 × ダーク / ライト（スマホはシート peek / hidden）。1280 / 1800 は記録だけ */
+// ---- コマンドパレット（#89 段 B AC-B6）: 開いた状態の縦・横・折り返し・箱と入力欄が窓の中・行のラベルが 1 行
+const PALETTE = 'dialog.palette[open]';
+const paletteStats = { total: 0, pass: 0 };
+
+/** Ctrl + K で開いて待つ（開けば true） */
+async function openPalette(page) {
+  await page.keyboard.press('Control+K');
+  return page
+    .waitForSelector(`${PALETTE} input`, { timeout: 2000 })
+    .then(() => true)
+    .catch(() => false);
+}
+
+async function paletteSweep() {
+  for (const [w, h] of SIZES) {
+    for (const theme of ['dark', 'light']) {
+      const ctx = await newContext(
+        { width: w, height: h },
+        { [WORKSPACE_KEY]: twoLegs, [PREFS_KEY]: prefsText(theme) },
+      );
+      const page = await ctx.newPage();
+      await page.goto(pageUrl('next'));
+      await waitReady(page, 'next');
+      const opened = await openPalette(page);
+      await page.waitForTimeout(150);
+      const label = `next ${theme} パレット`;
+      const name = `next-${w}x${h}-${theme}-palette`;
+      const ok = await report(page, label, w, h, name);
+      const box = opened ? await inWindow(page, `${PALETTE} .pal-box`) : 'パレットが開かない';
+      const input = opened ? await inWindow(page, `${PALETTE} input`) : '';
+      // 表示中の行のラベルが 1 行（長いラベルは省略記号）
+      const lines = await page.evaluate((sel) => {
+        const bad = [];
+        const list = document.querySelector(`${sel} .pal-list`);
+        const lb = list?.getBoundingClientRect();
+        for (const el of document.querySelectorAll(`${sel} .pal-lbl`)) {
+          const r = el.getBoundingClientRect();
+          // 一覧の枠の中に見えている行だけ
+          if (!lb || r.bottom < lb.top || r.top > lb.bottom) continue;
+          const range = document.createRange();
+          range.selectNodeContents(el);
+          const tops = new Set(
+            [...range.getClientRects()].filter((x) => x.width > 0).map((x) => Math.round(x.top)),
+          );
+          if (tops.size > 1) bad.push(el.textContent);
+        }
+        return bad;
+      }, PALETTE);
+      const out = [box, input, lines.length ? `ラベルの折り返し ${lines.join('・')}` : '']
+        .filter(Boolean)
+        .join(' / ');
+      paletteStats.total++;
+      if (ok && out === '') paletteStats.pass++;
+      else {
+        failed = true;
+        if (out) console.log(`${label} ${w}x${h}: ${out}  ← NG`);
+      }
+      await ctx.close();
+    }
+  }
+}
+
 async function surfaceAll() {
   for (const [w, h] of [...SIZES, ...SURFACE_EXTRA_SIZES]) {
     const judged = SIZES.some(([sw, sh]) => sw === w && sh === h);
@@ -1709,6 +1779,9 @@ async function runFlows() {
   await surfaceTouchFlow();
   // #89 段 A 全体のキー 1〜5・G・T の手順（AC-A4）。900 は参考（AC に数えない。vitest の 15 マスが正）
   for (const vp of [phone, pc, { width: 900, height: 1100 }]) await keyFlows(vp);
+  // #89 段 B コマンドパレットの手順（AC-B5）
+  for (const vp of [phone, pc]) await paletteFlows(vp);
+  for (const vp of [phone, pc]) await paletteWideFlow(vp);
 }
 
 // ---- 舞台の手順（#82）
@@ -6311,6 +6384,410 @@ async function keyFlows(vp) {
       `余白 ${room}px・クリックでフォーカス ${clickFocus}・scrollTop ${byClick} / ${byKey}`,
     );
   }
+  await ctx.close();
+}
+
+// ---- #89 段 B コマンドパレットの手順（AC-B5。docs/ui-redesign.md §4.6）
+const PAL_INPUT = `${PALETTE} input`;
+const PAL_OPT = `${PALETTE} [role="listbox"] [role="option"]`;
+
+async function paletteFlows(vp) {
+  const tag = `${vp.width}x${vp.height}`;
+  const phone = vp.width <= PHONE_MAX;
+  const ctx = await newContext(vp, { [WORKSPACE_KEY]: twoLegs, [PREFS_KEY]: prefsText('light') });
+  const page = await ctx.newPage();
+  await page.goto(pageUrl('next'));
+  await waitReady(page, 'next');
+  const act = () => page.getAttribute(PAL_INPUT, 'aria-activedescendant');
+  const optIds = (q) => page.evaluate((s) => [...document.querySelectorAll(s)].map((e) => e.id), q);
+  const isOpen = async () => (await page.$(PALETTE)) !== null;
+  const shellNow = () =>
+    page.evaluate(() => {
+      const l = document.querySelector('.layout');
+      return {
+        panel: l?.getAttribute('data-panel') ?? null,
+        sheet: l?.getAttribute('data-sheet') ?? null,
+        market: l?.getAttribute('data-market') ?? null,
+        theme: document.documentElement.dataset.theme ?? null,
+      };
+    });
+  const saved = async () => {
+    await page.waitForTimeout(700);
+    return page.evaluate((k) => {
+      try {
+        const w = JSON.parse(localStorage.getItem(k) ?? 'null');
+        const pos = w?.tabs?.[w.active]?.position;
+        return { scenario: pos?.scenario ?? null, legs: pos?.legs?.length ?? -1 };
+      } catch {
+        return { scenario: null, legs: -1 };
+      }
+    }, WORKSPACE_KEY);
+  };
+  const type = async (text) => {
+    await page.keyboard.type(text);
+    await page.waitForTimeout(120);
+  };
+  const press = async (key) => {
+    await page.keyboard.press(key);
+    await page.waitForTimeout(120);
+  };
+  const closeIt = async () => {
+    if (await isOpen()) await press('Escape');
+  };
+  const blur = () =>
+    page.evaluate(() => {
+      if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+    });
+  const steppers = () =>
+    page.evaluate(
+      (names) =>
+        names.map(
+          (n) =>
+            document.querySelector(`section.scenario .stepper[data-name="${n}"] .val b`)
+              ?.textContent ?? null,
+        ),
+      ['dX', 'dSigma', 'skew'],
+    );
+
+  // (a) 開く: 入力欄にフォーカス・先頭の押せる行・option が 1 件以上
+  {
+    await blur();
+    const opened = await openPalette(page);
+    const focusIn = await page.evaluate(
+      (s) => document.activeElement?.matches(s) === true,
+      PAL_INPUT,
+    );
+    const enabled = await optIds(`${PAL_OPT}:not([aria-disabled="true"])`);
+    const all = await optIds(PAL_OPT);
+    const a = await act();
+    check(
+      `#89 AC-B5(a) ${tag} Ctrl + K で開き、入力欄にフォーカス・aria-activedescendant が先頭の押せる行・option が 1 件以上`,
+      opened && focusIn && a !== null && a === enabled[0] && all.length > 0,
+      `開いた ${opened}・フォーカス ${focusIn}・${a} / ${enabled[0]}・${all.length} 件`,
+    );
+    // (b) ↓ ↓ ↑ で 2 行目
+    await press('ArrowDown');
+    await press('ArrowDown');
+    await press('ArrowUp');
+    const b = await act();
+    check(
+      `#89 AC-B5(b) ${tag} ↓ ↓ ↑ で aria-activedescendant が 2 行目`,
+      b === enabled[1],
+      `${b} / ${enabled[1]}`,
+    );
+    await closeIt();
+  }
+
+  // (c) 急落 → Enter: 閉じて、ステッパーの表示がチップの [急落] と同じ
+  {
+    if (phone) await setShell(page, 'scenario', 'peek');
+    await page.click('section.scenario .chip:has-text("急落")');
+    await page.waitForTimeout(200);
+    const byChip = await steppers();
+    await page.click('section.scenario .chip:has-text("リセット")');
+    await page.waitForTimeout(200);
+    const reset = await steppers();
+    await blur();
+    await openPalette(page);
+    await type('急落');
+    const n = (await optIds(PAL_OPT)).length;
+    await press('Enter');
+    await page.waitForTimeout(150);
+    const closed = !(await isOpen());
+    const byPal = await steppers();
+    check(
+      `#89 AC-B5(c) ${tag} 急落 → Enter でパレットが閉じ、ΔX・Δσ・Δs がチップの [急落] と同じ`,
+      n === 1 &&
+        closed &&
+        JSON.stringify(byPal) === JSON.stringify(byChip) &&
+        JSON.stringify(byPal) !== JSON.stringify(reset),
+      `${n} 件・閉じた ${closed}・${byPal.join(' / ')}（チップ ${byChip.join(' / ')}・リセット ${reset.join(' / ')}）`,
+    );
+    await page.click('section.scenario .chip:has-text("リセット")').catch(() => {});
+    await page.waitForTimeout(150);
+  }
+
+  // (d) 売 P → 先頭の足の行を Enter: 足が 1 本増え、トーストの文が <ラベル> を追加、[元に戻す] で戻る
+  {
+    const before = (await saved()).legs;
+    const dock = () =>
+      page.evaluate(
+        () =>
+          document.querySelector('.dock button[data-panel="positions"] .cnt')?.textContent ?? null,
+      );
+    const dock0 = await dock();
+    await blur();
+    await openPalette(page);
+    await type('売 P');
+    const first = await page.evaluate((s) => {
+      const id = document.querySelector(s)?.getAttribute('aria-activedescendant');
+      return id
+        ? (document.getElementById(id)?.querySelector('.pal-lbl')?.textContent ?? null)
+        : null;
+    }, PAL_INPUT);
+    const head = first?.split('（')[0] ?? '';
+    await press('Enter');
+    await page.waitForTimeout(200);
+    const toast = await page.evaluate(() =>
+      [...document.querySelectorAll('.toast:not(.note) .txt')].map((t) => t.textContent),
+    );
+    const after = (await saved()).legs;
+    const dock1 = await dock();
+    await page.click('.toast:not(.note) button:has-text("元に戻す")').catch(() => {});
+    const undone = (await saved()).legs;
+    const dockOk = phone ? Number(dock1) === Number(dock0) + 1 : true;
+    check(
+      `#89 AC-B5(d) ${tag} 売 P の先頭の足の行を Enter → 足 +1${phone ? '・ドックのバッジ +1' : ''}・トーストが「${head} を追加」・[元に戻す] で戻る`,
+      head.startsWith('売 P ') &&
+        after === before + 1 &&
+        dockOk &&
+        toast.includes(`${head} を追加`) &&
+        undone === before,
+      `${first}・足 ${before} → ${after} → ${undone}・ドック ${dock0} → ${dock1}・トースト ${JSON.stringify(toast)}`,
+    );
+  }
+
+  // (e) ATM へ: 板が見え、ATM の行が表の枠の中（強調も出る）
+  {
+    if (!phone) {
+      await page.evaluate((s) => {
+        const w = document.querySelector(s);
+        if (w) w.scrollTop = 0;
+      }, ACTIVE_WRAP);
+    } else await setShell(page, 'positions', 'peek');
+    await blur();
+    await openPalette(page);
+    await type('ATM');
+    await press('Enter');
+    const seen = await page
+      .waitForFunction(
+        (s) => {
+          const w = document.querySelector(s);
+          const tr = w?.querySelector('tr.atm');
+          if (!w || !tr) return false;
+          const a = w.getBoundingClientRect();
+          const b = tr.getBoundingClientRect();
+          return (
+            a.height > 0 &&
+            b.top >= a.top - 0.5 &&
+            b.bottom <= a.bottom + 0.5 &&
+            tr.classList.contains('hit')
+          );
+        },
+        ACTIVE_WRAP,
+        { timeout: 1500 },
+      )
+      .then(() => true)
+      .catch(() => false);
+    const sh = await shellNow();
+    check(
+      `#89 AC-B5(e) ${tag} ATM へ → ${phone ? 'data-panel が board' : 'data-market が board'}・ATM の行が板の枠の中（強調あり）`,
+      seen && (phone ? sh.panel === 'board' && sh.sheet !== 'hidden' : sh.market === 'board'),
+      `${JSON.stringify(sh)}・枠の中 ${seen}`,
+    );
+  }
+
+  // (f) テーマ: ダーク・設定…
+  {
+    const t0 = (await shellNow()).theme;
+    await blur();
+    await openPalette(page);
+    await type('テーマ ダーク');
+    await press('Enter');
+    const t1 = (await shellNow()).theme;
+    await openPalette(page);
+    await type('設定');
+    await press('Enter');
+    const set = await page
+      .waitForSelector(SET, { timeout: 2000 })
+      .then(() => true)
+      .catch(() => false);
+    await closeDialog(page);
+    check(
+      `#89 AC-B5(f) ${tag} 「テーマ: ダーク」で data-theme ${t0} → ${t1}・「設定…」で設定ダイアログ`,
+      t0 === 'light' && t1 === 'dark' && set,
+    );
+  }
+
+  // (g) Esc / 背景で閉じる: フォーカスが開く前の要素（ステッパー）に戻り、シナリオ・足・パネルが変わらない
+  {
+    if (phone) await setShell(page, 'scenario', 'peek');
+    const val = 'section.scenario .stepper[data-name="dX"] > .val';
+    await page.focus(val);
+    const sh0 = await shellNow();
+    const s0 = await saved();
+    await openPalette(page);
+    await type('急落');
+    await press('Escape');
+    const closed = !(await isOpen());
+    const back = await page.evaluate((s) => document.activeElement?.matches(s) === true, val);
+    const sh1 = await shellNow();
+    const s1 = await saved();
+    check(
+      `#89 AC-B5(g) ${tag} Esc で閉じ、フォーカスがステッパーに戻る・シナリオ・足・パネルが同じ`,
+      closed &&
+        back &&
+        JSON.stringify(sh0) === JSON.stringify(sh1) &&
+        JSON.stringify(s0) === JSON.stringify(s1),
+      `閉じた ${closed}・戻った ${back}・${JSON.stringify(sh1)}`,
+    );
+    await openPalette(page);
+    await page.mouse.click(10, vp.height - 10);
+    await page.waitForTimeout(150);
+    const closed2 = !(await isOpen());
+    const back2 = await page.evaluate((s) => document.activeElement?.matches(s) === true, val);
+    const sh2 = await shellNow();
+    check(
+      `#89 AC-B5(g) ${tag} 背景のクリックで閉じる（下の要素は押されない・フォーカスが戻る）`,
+      closed2 && back2 && JSON.stringify(sh2) === JSON.stringify(sh1),
+      `閉じた ${closed2}・戻った ${back2}・${JSON.stringify(sh2)}`,
+    );
+  }
+
+  // (h) 開いている間の 1・G・T は入力欄の文字、Ctrl + K で 2 つ目が開かない
+  {
+    await blur();
+    const sh0 = await shellNow();
+    await openPalette(page);
+    for (const k of ['1', 'g', 't']) await press(k);
+    const v = await page.inputValue(PAL_INPUT);
+    const sh1 = await shellNow();
+    // Tab / Shift + Tab は入力欄に留まる（背景へ出ない）
+    await press('Tab');
+    await press('Shift+Tab');
+    const tabStay = await page.evaluate(
+      (s) => document.activeElement?.matches(s) === true,
+      PAL_INPUT,
+    );
+    // 背景の要素へフォーカスが移っても入力欄へ戻る（非モーダルのガード。#89 段 B のレビュー 1）
+    await page.evaluate(() => {
+      document.querySelector('button[aria-label="メニュー"]')?.focus();
+    });
+    await page.waitForTimeout(120);
+    const guard = await page.evaluate(
+      (s) => document.activeElement?.matches(s) === true,
+      PAL_INPUT,
+    );
+    const menuNone = (await page.$('[role="menu"]')) === null;
+    // 入力欄の Ctrl + K はパレットを閉じる（2 つ目は開かない・ブラウザの既定を止める。レビュー 2）
+    const prevented = await page.evaluate((s) => {
+      const el = document.querySelector(s);
+      const ev = new KeyboardEvent('keydown', {
+        key: 'k',
+        ctrlKey: true,
+        bubbles: true,
+        cancelable: true,
+      });
+      el?.dispatchEvent(ev);
+      return ev.defaultPrevented;
+    }, PAL_INPUT);
+    await page.waitForTimeout(150);
+    const n = await page.evaluate((s) => document.querySelectorAll(s).length, PALETTE);
+    await closeIt();
+    check(
+      `#89 AC-B5(h) ${tag} 開いている間の 1・G・T は入力欄の文字（${v}）・パネル / テーマが同じ・Tab で外へ出ない・背景へ移ったフォーカスは入力欄へ戻る・入力欄の Ctrl + K は既定を止めて閉じる（2 つ目は開かない）`,
+      v === '1gt' &&
+        JSON.stringify(sh0) === JSON.stringify(sh1) &&
+        tabStay &&
+        guard &&
+        menuNone &&
+        prevented &&
+        n === 0,
+      `${JSON.stringify(sh0)} → ${JSON.stringify(sh1)}・Tab ${tabStay}・戻す ${guard}・既定を止めた ${prevented}・dialog ${n}`,
+    );
+  }
+
+  // (i) ⋯ メニューの上の Ctrl + K はメニューを閉じてパレット、設定ダイアログの上は何もしない
+  {
+    await page.click(MORE);
+    await page.waitForTimeout(120);
+    const menu0 = (await page.$('header.top [role="menu"]')) !== null;
+    const opened = await openPalette(page);
+    const menu1 = (await page.$('[role="menu"]')) !== null;
+    await closeIt();
+    check(
+      `#89 AC-B5(i) ${tag} ⋯ メニューを開いた状態で Ctrl + K → メニューが閉じてパレットが開く`,
+      menu0 && opened && !menu1,
+      `メニュー ${menu0} → ${menu1}・パレット ${opened}`,
+    );
+    await openFromMore(page, '設定…', SET);
+    const set = (await page.$(SET)) !== null;
+    await page.keyboard.press('Control+K');
+    await page.waitForTimeout(200);
+    const pal = await isOpen();
+    const setStill = (await page.$(SET)) !== null;
+    await closeDialog(page);
+    check(
+      `#89 AC-B5(i) ${tag} 設定ダイアログを開いた状態の Ctrl + K は何もしない`,
+      set && !pal && setStill,
+      `設定 ${set}・パレット ${pal}`,
+    );
+  }
+  await ctx.close();
+
+  // (b) 足 0 本の作業で クリア: 押せない行だけ = aria-activedescendant なし、Enter で何も起きない
+  {
+    const c2 = await newContext(vp, {});
+    const p2 = await c2.newPage();
+    await p2.goto(pageUrl('next'));
+    await waitReady(p2, 'next');
+    await p2.keyboard.press('Control+K');
+    const opened = await p2
+      .waitForSelector(PAL_INPUT, { timeout: 2000 })
+      .then(() => true)
+      .catch(() => false);
+    await p2.keyboard.type('クリア');
+    await p2.waitForTimeout(120);
+    const a = await p2.getAttribute(PAL_INPUT, 'aria-activedescendant');
+    const opts = await p2.evaluate(
+      (s) => [...document.querySelectorAll(s)].map((e) => e.getAttribute('aria-disabled')),
+      PAL_OPT,
+    );
+    await p2.keyboard.press('Enter');
+    await p2.waitForTimeout(200);
+    const still = (await p2.$(PALETTE)) !== null;
+    const toasts = await p2.evaluate(() => document.querySelectorAll('.toast:not(.note)').length);
+    check(
+      `#89 AC-B5(b) ${tag} 足 0 本で クリア → 全クリアが押せず aria-activedescendant なし・Enter で何も起きない（開いたまま）`,
+      opened && a === null && opts.length === 1 && opts[0] === 'true' && still && toasts === 0,
+      `${a}・${JSON.stringify(opts)}・開いたまま ${still}・トースト ${toasts}`,
+    );
+    await c2.close();
+  }
+}
+
+/** (j) 322 行の板でパレットを開く・64 と打つの Long Animation Frame（50ms 超）が 0 件 */
+async function paletteWideFlow(vp) {
+  const tag = `${vp.width}x${vp.height} 322 行`;
+  const ctx = await newContext(vp, { [WORKSPACE_KEY]: twoLegs, [PREFS_KEY]: prefsText('dark') });
+  await ctx.addInitScript(LOAF_INIT);
+  await routeWide(ctx);
+  const page = await ctx.newPage();
+  await page.goto(pageUrl('next'));
+  await waitReady(page, 'next');
+  await page
+    .waitForSelector('section.board .board-months[data-warm="done"]', { timeout: 8000 })
+    .catch(() => null);
+  await page.waitForTimeout(500);
+  const loafOk = await page.evaluate(() => window.__loafOk === true);
+  const mark = () => page.evaluate(() => window.__loaf.length);
+  const since = (i) => page.evaluate((n) => window.__loaf.slice(n).filter((d) => d > 50), i);
+  const m1 = await mark();
+  const opened = await openPalette(page);
+  await page.waitForTimeout(400);
+  const l1 = await since(m1);
+  const rows = await page.evaluate(
+    () => document.querySelector('dialog.palette .pal-foot')?.textContent ?? '',
+  );
+  const m2 = await mark();
+  await page.keyboard.type('64');
+  await page.waitForTimeout(400);
+  const l2 = await since(m2);
+  check(
+    `#89 AC-B5(j) ${tag} パレットを開く・64 と打つの Long Animation Frame（50ms 超）が 0 件`,
+    loafOk && opened && l1.length === 0 && l2.length === 0,
+    `${loafOk ? '' : 'LoAF を測れない・'}開く ${l1.map((d) => Math.round(d)).join(',') || 0} 件 / 打つ ${l2.map((d) => Math.round(d)).join(',') || 0} 件・${rows}`,
+  );
   await ctx.close();
 }
 

@@ -1,0 +1,125 @@
+/*
+ * コマンドパレット（docs/ui-redesign.md §4.6・§5。#89 段 B）。<dialog class="palette"> を show() で開き、dialog 自身を
+ * 窓いっぱいの下敷き（固定位置・最前面・--scrim）にする（showModal の inert の作り直しを避ける。Palette.tsx）。
+ * 箱は中の .pal-box（背景のクリックの判定は箱の矩形でする）。幅 min(560px, 100vw − 32px)、上から 12vh、一覧は 50vh
+ * まで中だけスクロール。行は 1 行（ラベルは省略記号）。色は var(--…) だけ。
+ */
+dialog.palette {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  box-sizing: border-box;
+  width: 100%;
+  height: 100%;
+  max-width: none;
+  max-height: none;
+  margin: 0;
+  padding: 12vh 0 0;
+  border: 0;
+  background: var(--scrim);
+  color: var(--ink);
+  overflow: hidden;
+}
+
+dialog.palette[open] {
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+}
+
+.pal-box {
+  display: flex;
+  flex-direction: column;
+  width: min(560px, calc(100vw - 32px));
+  border: 1px solid var(--line-2);
+  border-radius: var(--r);
+  background: var(--s2);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+
+.pal-box input {
+  box-sizing: border-box;
+  width: 100%;
+  height: 46px;
+  padding: 0 var(--sp-4);
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  background: transparent;
+  /* 16px 以上 = iOS の自動拡大を出さない */
+  font-size: 16px;
+  outline: none;
+}
+
+.pal-box input::placeholder {
+  color: var(--ink-3);
+}
+
+.pal-list {
+  max-height: 50vh;
+  margin: 0;
+  padding: 6px;
+  overflow: auto;
+  overscroll-behavior: contain;
+  list-style: none;
+}
+
+.pal-list:empty {
+  display: none;
+}
+
+.pal-opt {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding: 8px 10px;
+  border-radius: var(--r-sm);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.pal-opt[aria-selected="true"] {
+  background: var(--s3);
+}
+
+.pal-opt[aria-disabled="true"] {
+  color: var(--ink-3);
+  cursor: default;
+}
+
+.pal-grp {
+  flex: none;
+  /* グループ名の幅をそろえる（最長の「評価時刻」4 字） */
+  min-width: 4.5em;
+  color: var(--ink-3);
+  font-size: var(--fs-xs);
+}
+
+.pal-lbl {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pal-check {
+  flex: none;
+  margin-left: auto;
+  color: var(--accent-ink);
+}
+
+.pal-opt .kbd {
+  flex: none;
+  margin-left: auto;
+}
+
+.pal-foot {
+  padding: 6px var(--sp-4);
+  border-top: 1px solid var(--line);
+  color: var(--ink-3);
+  font-size: var(--fs-xs);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}

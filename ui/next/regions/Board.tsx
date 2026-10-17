@@ -62,7 +62,15 @@ export interface BoardRegionProps {
   onAdd: MarketAdd;
   /** PC の見出しの市場の Seg（Shell が作る。他の段階は null） */
   marketSeg: ComponentChildren;
+  /**
+   * 外からの「ATM へ」の要求（連番。0 / 省略 = 要求なし。#89 段 B のコマンドパレット）。値が変わったら [ATM] と同じ
+   * jump(atmK)。表がまだ無い（板を開いた直後・幅 0）あいだは ATM_JUMP_FRAMES まで次のフレームで試し直す
+   */
+  atmJump?: number;
 }
+
+/** 外からの ATM へで表ができるのを待つフレームの上限 */
+const ATM_JUMP_FRAMES = 30;
 
 /**
  * 板（docs/ui-redesign.md §2・§4.3・§11 決定 1・12。#85）: 見出し行（市場の Seg・ⓘ）→ 道具の行 2 段（限月・put / call、
@@ -169,6 +177,31 @@ function BoardView(p: BoardRegionProps) {
     }
     scrollTo(k, true);
   };
+
+  // 外からの ATM へ（#89 段 B）: 最新の jump を ref で読み、表ができるまで次のフレームで試し直す
+  const jumpRef = useRef<() => boolean>(() => false);
+  jumpRef.current = () => {
+    if (atmK === null) return true;
+    if (!shownRows.some((r) => r.k === atmK)) {
+      jump(atmK);
+      return true;
+    }
+    return scrollTo(atmK, true);
+  };
+  const { atmJump = 0 } = p;
+  useEffect(() => {
+    if (atmJump <= 0) return;
+    let n = 0;
+    let frame = 0;
+    const tick = () => {
+      frame = 0;
+      if (!jumpRef.current() && ++n < ATM_JUMP_FRAMES) frame = requestAnimationFrame(tick);
+    };
+    tick();
+    return () => {
+      if (frame) cancelAnimationFrame(frame);
+    };
+  }, [atmJump]);
 
   /** 5 列で種別を替えるとき、いま枠の中央にある行使価格を新しい表でも中央に置く */
   const switchTarget = (t: OptionType) => {

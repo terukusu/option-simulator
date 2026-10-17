@@ -27,6 +27,7 @@ import {
   noticeRoute,
   warnTagsModel,
 } from '../view/notices';
+import { type PaletteRun, paletteAtmK, paletteItems } from '../view/palette';
 import { shareReplaceConfirmText } from '../view/persistNote';
 import { clearUndo } from '../view/positionsRegion';
 import type { DXUnit } from '../view/scenario';
@@ -35,11 +36,12 @@ import { bookIoToast, overwrittenText, restoreEntryFailText } from '../view/topM
 import { BookDialog } from './BookDialog';
 import type { MarketAdd } from './market/BoardMonth';
 import { PanelHead } from './PanelHead';
+import { Palette } from './parts/Palette';
 import { Toasts, useToasts } from './parts/Toast';
 import { Board } from './regions/Board';
 import { Metrics } from './regions/Metrics';
 import { Positions } from './regions/Positions';
-import { Scenario } from './regions/Scenario';
+import { Scenario, scenarioInputOf } from './regions/Scenario';
 import { Smile } from './regions/Smile';
 import { Stage } from './regions/Stage';
 import { SettingsDialog } from './SettingsDialog';
@@ -47,7 +49,7 @@ import { Shell } from './Shell';
 import { TopBar } from './TopBar';
 import { ShareConfirm } from './top/ShareConfirm';
 import { ShareUrlDialog } from './top/ShareUrlDialog';
-import { useGlobalKeys } from './useGlobalKeys';
+import { type GlobalKeysCtx, runGlobalKey, useGlobalKeys } from './useGlobalKeys';
 import { useTheme } from './useTheme';
 
 /**
@@ -70,6 +72,8 @@ import { useTheme } from './useTheme';
  * （keep 付きのトースト。上書きの直前と書いた項目を控え、restoreEntry で書いたままのときだけ戻す）。保存一覧を
  * 開いている間はトーストをそのダイアログの中に描く（モーダルの外は押せない）。全クリアはポジションの ⋯ と同じ処理。
  * #89 段 A で全体のキー（1〜5・G・T。useGlobalKeys）を入れた。
+ * #89 段 B でコマンドパレット（Ctrl / ⌘ + K。parts/Palette.tsx）を入れた。行（ui/view/palette.ts）は開いている間だけ
+ * 作り、実行の記述を runPalette が dispatch / send / 既存のコールバックへ振り分ける（新しい state の action は無い）。
  */
 export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
   const c = useAppController(boot);
@@ -77,8 +81,18 @@ export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
   const theme = useTheme(prefs, boot.storage);
   const tier = layoutTier(useMediaQuery(PHONE_QUERY), useMediaQuery(PC_QUERY));
   const [shell, send] = useReducer(shellReduce, INITIAL_SHELL);
-  // 全体のキー 1〜5・G・T（#89 段 A。Ctrl / ⌘ + K は段 B で onPalette を渡すまで奪わない）
-  useGlobalKeys({ tier, send, resolvedTheme: theme.resolved, chooseTheme: theme.choose });
+  // 全体のキー 1〜5・G・T・Ctrl / ⌘ + K（#89。パレットの行の実行も同じ ctx）
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  const onPalette = useCallback(() => setPaletteOpen(true), []);
+  const closePalette = useCallback(() => setPaletteOpen(false), []);
+  const keyCtx: GlobalKeysCtx = {
+    tier,
+    send,
+    resolvedTheme: theme.resolved,
+    chooseTheme: theme.choose,
+    onPalette,
+  };
+  useGlobalKeys(keyCtx);
   const { pendingShare } = c;
   const toasts = useToasts();
   const [picked, setPicked] = useState<number | null>(null);
@@ -286,6 +300,90 @@ export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
     </>
   );
   const mini = tier === 'phone' && shell.sheet === 'full';
+  // コマンドパレット（#89 段 B）: 行は開いている間だけ作る（閉じている間は舞台・シナリオの操作に何も足さない）。
+  // 依存は行に使う値だけ（c は毎回新しいオブジェクト）
+  const [atmJump, setAtmJump] = useState(0);
+  const atmK = paletteOpen ? paletteAtmK(chain, monthId, c.atmBasis) : null;
+  const items = useMemo(
+    () =>
+      paletteOpen
+        ? paletteItems({
+            chartFocusable: c.pnlBase !== null && !mini,
+            chartEmpty: c.pnlBase === null,
+            scenario: scenarioInputOf(c, dXUnit),
+            pins: {
+              noLegs: c.pnlBase === null,
+              pins: c.pinTargets,
+              pinLine: c.pinLine,
+              pinTabs: c.pinTabs,
+            },
+            chain,
+            monthId,
+            atmK,
+            tabs: c.tabsView,
+            legCount: c.curLegs.length,
+            bookCount: c.bookCount,
+          })
+        : [],
+    [
+      paletteOpen,
+      c.pnlBase,
+      mini,
+      state.scenario,
+      state.futureBasis,
+      c.positions,
+      c.targets,
+      dXUnit,
+      c.pinTargets,
+      c.pinLine,
+      c.pinTabs,
+      chain,
+      monthId,
+      atmK,
+      c.tabsView,
+      c.curLegs.length,
+      c.bookCount,
+    ],
+  );
+  const runPalette = (run: PaletteRun) => {
+    switch (run.kind) {
+      case 'key':
+        runGlobalKey(run.key, keyCtx);
+        return;
+      case 'action':
+        dispatch(run.action);
+        return;
+      case 'shell':
+        send(run.action);
+        return;
+      case 'pinCurrent':
+        c.pinCurrent();
+        return;
+      case 'atm':
+        // 板を見せて（2 と同じ）、板の [ATM] と同じジャンプ
+        runGlobalKey({ kind: 'panel', panel: 'board' }, keyCtx);
+        setAtmJump((n) => n + 1);
+        return;
+      case 'add':
+        onMarketAdd(run.add.expiry, run.add.k, run.add.type, run.add.side);
+        return;
+      case 'book':
+        onOpenBook();
+        return;
+      case 'saveToBook':
+        onSaveToBook();
+        return;
+      case 'clear':
+        onClearLegs();
+        return;
+      case 'settings':
+        onOpenSettings();
+        return;
+      case 'theme':
+        theme.choose(run.theme);
+        return;
+    }
+  };
   // 保存一覧を開いている間はそのダイアログの中に描く（1 か所だけ = 読み上げも 1 回）
   const toastList = (
     <Toasts toasts={toasts.toasts} onUndo={toasts.undo} onDismiss={toasts.dismiss} />
@@ -366,6 +464,7 @@ export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
               dispatch={dispatch}
               onAdd={onMarketAdd}
               marketSeg={seg}
+              atmJump={atmJump}
             />
           ) : (
             emptyMarket('板', seg)
@@ -448,6 +547,7 @@ export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
         focusName={bookFocusName}
       />
       {!c.bookOpen && toastList}
+      <Palette open={paletteOpen} items={items} onClose={closePalette} onRun={runPalette} />
     </div>
   );
 }

@@ -7,7 +7,7 @@
  * - バッジ（`boardBadges`）は作業中のタブの OP の足を売り / 買いで別々に合計する
  */
 
-import { boardOptionLeg, type Chain, type ChainMonth } from '../../data';
+import { boardOptionLegOnly, type Chain, type ChainMonth } from '../../data';
 import type { AtmBasis, OptionLeg, OptionType, Side } from '../../model';
 import type { UiLeg } from '../state';
 import {
@@ -349,20 +349,28 @@ export interface MarketAddInput {
   side: Side;
 }
 
-/** 板・スマイルから入る足（reducer の addBoardLeg と同じ boardOptionLeg。作れなければ null） */
+/**
+ * 板・スマイルから入る足（reducer の addBoardLeg と同じ boardOptionLeg の leg。作れなければ null）。印は作らない
+ * （boardOptionLegOnly = IV の逆算をしない。コマンドパレットは 322 行の板で ≈ 1,300 回呼ぶ。#89）
+ */
 export function marketAddPlan(chain: Chain | null, input: MarketAddInput): OptionLeg | null {
   if (!chain) return null;
   try {
-    return boardOptionLeg(chain, input).leg;
+    return boardOptionLegOnly(chain, input);
   } catch {
     return null;
   }
 }
 
-/** 足を入れたトーストの文（`売 P 64,000 @740 を追加`。建値は整数なら 0 桁、そうでなければ 1 桁 = #82 と同じ） */
-export function marketAddToast(leg: OptionLeg): string {
+/** 入る足の短い名前（`売 P 64,000 @740`。建値は整数なら 0 桁、そうでなければ 1 桁 = #82 と同じ）。パレットの足の行も同じ */
+export function marketAddLabel(leg: OptionLeg): string {
   const price = fmtNum(leg.entry, Number.isInteger(leg.entry) ? 0 : 1);
-  return `${leg.side === 'sell' ? '売' : '買'} ${leg.type === 'put' ? 'P' : 'C'} ${fmtNum(leg.strike, 0)} @${price} を追加`;
+  return `${leg.side === 'sell' ? '売' : '買'} ${leg.type === 'put' ? 'P' : 'C'} ${fmtNum(leg.strike, 0)} @${price}`;
+}
+
+/** 足を入れたトーストの文（`売 P 64,000 @740 を追加`） */
+export function marketAddToast(leg: OptionLeg): string {
+  return `${marketAddLabel(leg)} を追加`;
 }
 
 /** 見出しの ⓘ（今の「板の使い方」の文 + 印の意味） */

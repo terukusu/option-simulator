@@ -22,11 +22,13 @@ import {
   ghostSource,
   overlayBase,
   overlayBases,
+  type PinMenuInput,
   type PinTarget,
   pinLabels,
   pinLineData,
   pinLineFn,
   pinListModel,
+  pinMenuRows,
   pinSampleCap,
   pinSampleXs,
   resolvePins,
@@ -608,5 +610,108 @@ describe('ピンは保存しない（#22 AC9）', () => {
     expect(JSON.stringify(toSaved(s, 0))).toBe(JSON.stringify(toSaved(a, 0)));
     expect(persistKey(s)).toBe(persistKey(a));
     expect(serializeWorkspace(s, 0)).not.toContain('pin');
+  });
+});
+
+describe('pinMenuRows（#89 段 B AC-B4。舞台の [ピン N/3] とコマンドパレットの行）', () => {
+  const target = (no: 1 | 2 | 3, name: string): PinTarget => ({
+    no,
+    kind: 'ghost',
+    name,
+    base: null,
+    scenario: ZERO_SCENARIO,
+    period: 'today',
+    active: false,
+    legCount: 1,
+    excluded: 0,
+    boardSnapshotAt: null,
+  });
+  const tabs = [
+    { id: 2, name: 'B', legCount: 2, pinned: false },
+    { id: 3, name: 'C', legCount: 0, pinned: false },
+    { id: 4, name: 'D', legCount: 1, pinned: true },
+  ];
+  const base: PinMenuInput = { noLegs: false, pins: [], pinLine: 'period', pinTabs: tabs };
+  const byKey = (i: PinMenuInput) => new Map(pinMenuRows(i).map((r) => [r.key, r]));
+
+  it('行の並び・ラベル・checked は舞台の ⋯ の今の項目と同じ', () => {
+    const rows = pinMenuRows({ ...base, pins: [target(1, '甲'), target(3, '乙')] });
+    expect(rows.map((r) => [r.key, r.label])).toEqual([
+      ['current', '今の線を残す'],
+      ['tab2', 'B を重ねる'],
+      ['tab3', 'C を重ねる'],
+      ['tab4', 'D を重ねる'],
+      ['period', 'ピンの線: 期中'],
+      ['expiry', 'ピンの線: 満期'],
+      ['remove1', '① 甲 を外す'],
+      ['remove3', '③ 乙 を外す'],
+      ['clear', '全部外す'],
+    ]);
+    expect(rows.map((r) => r.checked)).toEqual([
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      true,
+      false,
+      undefined,
+      undefined,
+      undefined,
+    ]);
+    // 外す・ピンの線は disabled を持たない（舞台の ⋯ の DOM を変えない）
+    expect(rows.filter((r) => !('disabled' in r)).map((r) => r.key)).toEqual([
+      'period',
+      'expiry',
+      'remove1',
+      'remove3',
+    ]);
+    const exp = pinMenuRows({ ...base, pinLine: 'expiry' });
+    expect(exp.find((r) => r.key === 'expiry')?.checked).toBe(true);
+  });
+
+  it('実行の記述は今と同じ action（今の線を残すは pinCurrent）', () => {
+    const m = byKey({ ...base, pins: [target(2, '甲')] });
+    expect(m.get('current')?.run).toEqual({ kind: 'pinCurrent' });
+    expect(m.get('tab2')?.run).toEqual({
+      kind: 'action',
+      action: { type: 'addPin', source: { kind: 'tab', tabId: 2 } },
+    });
+    expect(m.get('period')?.run).toEqual({
+      kind: 'action',
+      action: { type: 'setPinLine', line: 'period' },
+    });
+    expect(m.get('remove2')?.run).toEqual({ kind: 'action', action: { type: 'removePin', no: 2 } });
+    expect(m.get('clear')?.run).toEqual({ kind: 'action', action: { type: 'clearPins' } });
+  });
+
+  it('足 0 本: 今の線を残すが押せない（重ねるは押せる）', () => {
+    const m = byKey({ ...base, noLegs: true });
+    expect(m.get('current')?.disabled).toBe(true);
+    expect(m.get('tab2')?.disabled).toBe(false);
+  });
+
+  it('上限 3 本: 今の線を残す・重ねるが押せない', () => {
+    const pins = [target(1, 'a'), target(2, 'b'), target(3, 'c')];
+    expect(pins.length).toBe(MAX_PINS);
+    const m = byKey({ ...base, pins });
+    expect(m.get('current')?.disabled).toBe(true);
+    expect(m.get('tab2')?.disabled).toBe(true);
+    expect(m.get('clear')?.disabled).toBe(false);
+    // 2 本なら押せる
+    const two = byKey({ ...base, pins: pins.slice(0, 2) });
+    expect(two.get('current')?.disabled).toBe(false);
+    expect(two.get('tab2')?.disabled).toBe(false);
+  });
+
+  it('重ねたタブ・足 0 本のタブは押せない', () => {
+    const m = byKey(base);
+    expect(m.get('tab4')?.disabled).toBe(true);
+    expect(m.get('tab3')?.disabled).toBe(true);
+    expect(m.get('tab2')?.disabled).toBe(false);
+  });
+
+  it('ピン 0 本で全部外すが押せない', () => {
+    expect(byKey(base).get('clear')?.disabled).toBe(true);
+    expect(byKey({ ...base, pins: [target(1, 'a')] }).get('clear')?.disabled).toBe(false);
   });
 });
