@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { boardOptionLeg, normalizeChain } from '../../data';
+import { boardOptionLeg, boardOptionLegOnly, normalizeChain } from '../../data';
 import type { Leg, OptionLeg } from '../../model';
 import { CALENDAR } from '../../ui/calendar';
 import type { UiLeg } from '../../ui/state';
@@ -23,6 +23,7 @@ import {
   boardPanelColumns,
   boardRowTexts,
   fmtNumFast,
+  marketAddLabel,
   marketAddPlan,
   marketAddToast,
   monthSegOptions,
@@ -353,6 +354,13 @@ describe('AC-3(e) 足を入れる・トーストの文', () => {
     expect(marketAddToast(sell(64000, 740))).toBe('売 P 64,000 @740 を追加');
   });
 
+  it('marketAddLabel はトーストの文から「を追加」を除いたもの（#89 段 B のパレットの足の行と同じ）', () => {
+    expect(marketAddLabel(sell(64000, 740))).toBe('売 P 64,000 @740');
+    const leg: OptionLeg = { ...sell(71000, 12.5), type: 'call', side: 'buy' };
+    expect(marketAddLabel(leg)).toBe('買 C 71,000 @12.5');
+    expect(marketAddToast(leg)).toBe(`${marketAddLabel(leg)} を追加`);
+  });
+
   it('買い call・建値 12.5 → 買 C … @12.5 を追加', () => {
     const leg: OptionLeg = { ...sell(71000, 12.5), type: 'call', side: 'buy' };
     expect(marketAddToast(leg)).toBe('買 C 71,000 @12.5 を追加');
@@ -369,6 +377,32 @@ describe('AC-3(e) 足を入れる・トーストの文', () => {
     expect(marketAddPlan(chain, { expiry: m1.id, k: 1, type: 'put', side: 'sell' })).toBeNull();
     expect(marketAddPlan(chain, { expiry: '1999-01', k, type: 'put', side: 'sell' })).toBeNull();
     expect(marketAddPlan(null, { expiry: m1.id, k, type: 'put', side: 'sell' })).toBeNull();
+  });
+
+  it('marketAddPlan は全行（片側気配・気配なし = manualEntryDefault の経路を含む）で boardOptionLeg と同じ足。entry / qty の指定も同じ（#89 段 B）', () => {
+    let manual = 0;
+    let total = 0;
+    for (const name of ['latest', 'night_early', 'pre_open'] as const) {
+      const c = normalizeChain(fixture(name));
+      for (const m of c.months) {
+        for (const info of m.strikes) {
+          for (const type of ['put', 'call'] as const) {
+            for (const side of ['sell', 'buy'] as const) {
+              const input = { expiry: m.id, k: info.k, type, side };
+              const full = boardOptionLeg(c, input).leg;
+              expect(marketAddPlan(c, input)).toEqual(full);
+              total++;
+              if (info[type].quote !== 'two_sided') manual++;
+              const given = { ...input, entry: 123.5, qty: 3 };
+              expect(boardOptionLegOnly(c, given)).toEqual(boardOptionLeg(c, given).leg);
+            }
+          }
+        }
+      }
+    }
+    // 片側気配・気配なしの行（建値は manualEntryDefault）も比べている
+    expect(manual).toBeGreaterThan(0);
+    expect(total).toBeGreaterThan(manual);
   });
 
   it('強調は 0.9 秒', () => {

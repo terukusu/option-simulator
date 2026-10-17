@@ -33,6 +33,7 @@ const ev = (key: string, o: Partial<KeySummary> = {}): KeySummary => ({
   defaultPrevented: false,
   editable: false,
   blocked: false,
+  overlay: false,
   ...o,
 });
 
@@ -84,10 +85,23 @@ describe('globalKey', () => {
     expect(globalKey(ev('k', { meta: true, editable: true }))).toBeNull();
   });
 
-  it('(f) ふさがっている（ダイアログ / overlay / パレット）なら 1・g・t・Ctrl + K が null', () => {
+  it('(f) ダイアログ（パレットを含む）なら 1・g・t・Ctrl + K が null', () => {
     for (const key of ALL_KEYS) expect(globalKey(ev(key, { blocked: true }))).toBeNull();
     expect(globalKey(ev('k', { ctrl: true, blocked: true }))).toBeNull();
     expect(globalKey(ev('k', { meta: true, blocked: true }))).toBeNull();
+    // ダイアログの上にメニュー / ポップオーバーが重なっていても同じ
+    expect(globalKey(ev('k', { ctrl: true, blocked: true, overlay: true }))).toBeNull();
+  });
+
+  it('(f) メニュー / ポップオーバーなら 1・g・t は null、Ctrl / ⌘ + K は palette（#89 段 B・AC-B5(i)）', () => {
+    for (const key of ALL_KEYS) expect(globalKey(ev(key, { overlay: true }))).toBeNull();
+    expect(globalKey(ev('k', { ctrl: true, overlay: true }))).toEqual({ kind: 'palette' });
+    expect(globalKey(ev('k', { meta: true, overlay: true }))).toEqual({ kind: 'palette' });
+    // 修飾の規則は同じ（Shift・Alt 付きは null）
+    expect(globalKey(ev('k', { ctrl: true, shift: true, overlay: true }))).toBeNull();
+    expect(globalKey(ev('k', { ctrl: true, alt: true, overlay: true }))).toBeNull();
+    // 入力欄は overlay より先に止める
+    expect(globalKey(ev('k', { ctrl: true, editable: true, overlay: true }))).toBeNull();
   });
 
   it('(g) Ctrl + K・⌘ + K は palette、Ctrl + Shift + K・Ctrl + Alt + K は null', () => {

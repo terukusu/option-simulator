@@ -1,8 +1,8 @@
 import type { Scenario } from '../../../model';
-import { MAX_PINS, type PinLineMode, pinAddError } from '../../pins';
+import { MAX_PINS, type PinLineMode } from '../../pins';
 import type { Action } from '../../state';
 import { fmtNum } from '../../view/format';
-import { PIN_MARK, type PinTarget } from '../../view/pins';
+import { PIN_MARK, type PinTarget, pinMenuRows } from '../../view/pins';
 import type { PnlChartModel, PnlYSettings } from '../../view/pnlChart';
 import type { SurfaceLegend } from '../../view/pnlSurface';
 import { CHART_MODES, type ChartMode } from '../../view/shell';
@@ -44,44 +44,16 @@ export function StageHead(p: {
   const chartSeg = (
     <Seg label="グラフの表示" value={p.chart} options={CHART_MODES} onChange={p.onChart} />
   );
-  const pinFull = pinAddError(pins);
-  const pinItems: MenuItem[] = [
-    {
-      key: 'current',
-      label: '今の線を残す',
-      onSelect: p.onPinCurrent,
-      disabled: p.noLegs || pinFull !== null,
-    },
-    ...p.pinTabs.map((t) => ({
-      key: `tab${t.id}`,
-      label: `${t.name} を重ねる`,
-      onSelect: () => dispatch({ type: 'addPin', source: { kind: 'tab', tabId: t.id } }),
-      disabled: pinFull !== null || t.pinned || t.legCount === 0,
-    })),
-    {
-      key: 'period',
-      label: 'ピンの線: 期中',
-      checked: p.pinLine === 'period',
-      onSelect: () => dispatch({ type: 'setPinLine', line: 'period' }),
-    },
-    {
-      key: 'expiry',
-      label: 'ピンの線: 満期',
-      checked: p.pinLine === 'expiry',
-      onSelect: () => dispatch({ type: 'setPinLine', line: 'expiry' }),
-    },
-    ...pins.map((t) => ({
-      key: `remove${t.no}`,
-      label: `${PIN_MARK[t.no]} ${t.name} を外す`,
-      onSelect: () => dispatch({ type: 'removePin', no: t.no }),
-    })),
-    {
-      key: 'clear',
-      label: '全部外す',
-      onSelect: () => dispatch({ type: 'clearPins' }),
-      disabled: pins.length === 0,
-    },
-  ];
+  // 行は ui/view/pins.ts の pinMenuRows（コマンドパレットと同じ規則。#89 段 B）
+  const pinItems: MenuItem[] = pinMenuRows({
+    noLegs: p.noLegs,
+    pins,
+    pinLine: p.pinLine,
+    pinTabs: p.pinTabs,
+  }).map(({ run, ...row }) => ({
+    ...row,
+    onSelect: () => (run.kind === 'pinCurrent' ? p.onPinCurrent() : dispatch(run.action)),
+  }));
 
   const hasDate = model.lines.some((l) => l.kind === 'date');
   const zoomButtons = (

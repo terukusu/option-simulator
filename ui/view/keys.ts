@@ -22,8 +22,10 @@ export interface KeySummary {
   defaultPrevented: boolean;
   /** 対象が入力欄（editableTarget） */
   editable: boolean;
-  /** ふさがっている（dialog[open]・開いているメニュー / ポップオーバー / パレット） */
+  /** モーダルのダイアログが開いている（dialog[open]。コマンドパレットも <dialog>）。すべて止める */
   blocked: boolean;
+  /** メニュー / ポップオーバーが開いている（overlay）。1〜5・G・T だけ止める（Ctrl / ⌘ + K はそれを閉じてパレット） */
+  overlay: boolean;
 }
 
 export type GlobalKey =
@@ -71,13 +73,15 @@ export function editableTarget(
 
 /**
  * keydown の要約から全体のキーの動作を決める（無ければ null）。見る順は §4.6:
- * IME の変換中 → defaultPrevented → repeat → 入力欄 → ふさがっている → Ctrl / ⌘ + K → 修飾 → 1〜5・G・T。
+ * IME の変換中 → defaultPrevented → repeat → 入力欄 → ダイアログ → Ctrl / ⌘ + K → メニュー / ポップオーバー →
+ * 修飾 → 1〜5・G・T。
  */
 export function globalKey(s: KeySummary): GlobalKey | null {
   if (s.isComposing || s.key === 'Process' || s.keyCode === 229) return null;
   if (s.defaultPrevented || s.repeat || s.editable || s.blocked) return null;
   const lower = s.key.toLowerCase();
   if ((s.ctrl || s.meta) && !s.alt && !s.shift && lower === 'k') return { kind: 'palette' };
+  if (s.overlay) return null;
   if (s.ctrl || s.meta || s.alt) return null;
   const panel = Object.hasOwn(PANEL_KEYS, s.key) ? PANEL_KEYS[s.key] : undefined;
   if (panel !== undefined) return { kind: 'panel', panel };

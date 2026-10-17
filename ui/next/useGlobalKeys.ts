@@ -20,7 +20,8 @@ export interface GlobalKeysCtx {
 }
 
 /**
- * 1〜5 のフォーカスの行き先 = そのパネルのスクロールする枠（tabindex=-1）。section にしないのは、フォーカスできる
+ * 1〜5 のフォーカスの行き先 = そのパネルのスクロールする枠（tabindex=-1。スマイルの .panel-body はスクロールしないが
+ * 行き先として同じ枠）。section にしないのは、フォーカスできる
  * 祖先があるとクリックでそこへフォーカスが移り、↓・PageDown が子孫の枠を動かさなくなるため（#89 のレビュー R1）。
  * 板は表示中の限月・種別の表の枠 .board-wrap（.panel-body はスクロールしない）。
  */
@@ -54,9 +55,9 @@ function focusLater(sel: string): void {
   requestAnimationFrame(tick);
 }
 
-/** ふさがっている = モーダルのダイアログ・開いているメニュー / ポップオーバー（段 B のパレットも overlay） */
-function blockedNow(): boolean {
-  return document.querySelector('dialog[open]') !== null || openOverlayId() !== null;
+/** モーダルのダイアログ（コマンドパレットも <dialog>）が開いている = すべて止める */
+function dialogNow(): boolean {
+  return document.querySelector('dialog[open]') !== null;
 }
 
 /**
@@ -116,7 +117,8 @@ export function useGlobalKeys(ctx: GlobalKeysCtx): void {
                 isContentEditable: t instanceof HTMLElement && t.isContentEditable,
               },
         ),
-        blocked: blockedNow(),
+        blocked: dialogNow(),
+        overlay: openOverlayId() !== null,
       });
       if (action !== null && runGlobalKey(action, ref.current)) e.preventDefault();
     };

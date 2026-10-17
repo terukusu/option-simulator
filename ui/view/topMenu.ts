@@ -35,7 +35,8 @@ export interface TopMenuInput {
   theme: ThemePref;
 }
 
-const THEMES: readonly { theme: ThemePref; label: string }[] = [
+/** テーマの選択肢（⋯ とコマンドパレットのテーマの行） */
+export const THEMES: readonly { theme: ThemePref; label: string }[] = [
   { theme: 'auto', label: '端末に合わせる' },
   { theme: 'dark', label: 'ダーク' },
   { theme: 'light', label: 'ライト' },
