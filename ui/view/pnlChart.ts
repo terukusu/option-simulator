@@ -53,9 +53,9 @@ export const THOUSAND_YEN_FROM = 100_000;
 export const DEFAULT_PREMIUM_N = 5;
 
 /** 横軸の目盛りのラベル（円、整数） */
-const xTickLabel = (v: number) => fmtNum(v, 0);
+export const xTickLabel = (v: number) => fmtNum(v, 0);
 /** 横軸の刻みの候補: 1・2・2.5・5 × 10^n（1 円以上、2.5 は 10 円以上だけ。#55） */
-const X_TICK_OPTIONS: FitTicksOptions = {
+export const X_TICK_OPTIONS: FitTicksOptions = {
   mantissas: [1, 2, 2.5, 5],
   minStepFor: (m) => (m === 2.5 ? 10 : 1),
 };

@@ -280,6 +280,20 @@ section.stage > .panel-body.stage-main {
   font-size: var(--fs-sub);
 }
 
+/*
+ * 足が無いときの格子（#111）の上に注記を重ねる（svg は absolute なので、後ろの positioned 要素が前面）。
+ * 文字の幅だけ舞台と同じ背景（--s1）で格子線を隠す。文字の位置は格子なしのときと同じ（余白 = 元の padding − 内側の padding）
+ */
+.chart > svg + .note {
+  position: relative;
+  width: fit-content;
+  max-width: calc(100% - 2 * var(--sp-3));
+  margin: calc(var(--sp-4) - 2px) calc(var(--sp-3) - 4px);
+  padding: 2px 4px;
+  border-radius: var(--r-sm);
+  background: var(--s1);
+}
+
 .chart .grid line {
   stroke: var(--line);
   stroke-width: 1;

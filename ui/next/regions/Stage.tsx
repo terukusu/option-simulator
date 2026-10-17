@@ -71,6 +71,7 @@ export function Stage(p: {
             marks={marks}
             pinMarks={pinMarks}
             base={base}
+            boardX0={c.positions?.ctx.x0 ?? Number.NaN}
             chain={c.chain}
             scenario={scenario}
             legs={c.curLegs}

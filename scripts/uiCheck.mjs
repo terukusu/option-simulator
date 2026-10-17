@@ -31,6 +31,8 @@
 //                                          中の折り返し 0。開いた状態（知らせのトースト・⋯ メニュー・ピルのポップオーバー・警告のタグ・
 //                                          共有を開く確認。360 / 390 / 1440）の縦・横・折り返しと窓の中。waitReady は市場ピルの
 //                                          data-state を待ち、起動時の知らせのトーストを閉じてから測る
+//                                          空の舞台（#111）: 足 0 本（板あり）× 4 幅 × ダーク / ライトで格子 4 本以上・0 の線・横の目盛り
+//                                          （数字）2 個以上・縦の目盛りと単位 0・注記が前面・ハンドル / マーカー / X₀ 0・tabindex -1
 //   npm run ui:check -- --parts            部品の見本（?ui=next&parts。dev だけ）
 //   npm run ui:check -- --legacy           旧画面（?ui=next なし）
 //   npm run ui:check -- --flows            保存・共有・テーマ・キーボードの手順（#81 AC-11・AC-12）と舞台の手順
@@ -50,7 +52,8 @@
 //                                          （#87 (A): [最新] の読み込み中 / 失敗（/api/chain を差し替え）・失敗のトーストが成功で消える・
 //                                          ⋯ > ファイルを開く…・限月の切替と旧画面の F / ATM の一致・全文の数値の列が旧画面の header.header
 //                                          を含む・復元のトースト 6 秒・壊れた保存の警告のトースト・別のタブの警告のタグ・タブが 6 個の
-//                                          共有を開く確認・タブの切り替えで [元に戻す] だけ消える。390×844 と 1440×900）
+//                                          共有を開く確認・タブの切り替えで [元に戻す] だけ消える。390×844 と 1440×900）。
+//                                          全クリアの直後の舞台の格子（#111: 1440 で 4 本以上、390 はシート full のミニで 0）
 //   --url <base>                           dev サーバーを起こさず、その URL を使う（例 http://127.0.0.1:5173/?ui=next&parts）
 //   --dom <file>                           body の下の要素の tag.class の並びを書き出す（旧画面が変わらないことの比較用）
 //   --shots <dir>                          スクリーンショットを書く（合成の板だけ。リポジトリに入れない）
@@ -752,6 +755,11 @@ async function measureAll() {
     await topSweep();
     console.log(`トップバーの検査: ${topStats.pass} / ${topStats.total} 状態で pass`);
     console.log(`開いた状態の検査: ${openStats.pass} / ${openStats.total} で pass`);
+    // 空の舞台（#111）: 足 0 本でも格子・横軸の目盛り・0 の線と注記
+    await emptyStageAll();
+    console.log(
+      `空の舞台の検査（#111）: ${emptyStageStats.pass} / ${emptyStageStats.total} 状態で pass`,
+    );
   }
 }
 
@@ -1201,6 +1209,77 @@ async function pinCheck(w, h, long) {
     `${tag} ${w}x${h}: 凡例のピン ${r.n} 本・× と道具 ${r.tools} 個が見えて押せる ${ok ? 'pass' : `NG ${r.bad.join('・')}`}`,
   );
   await ctx.close();
+}
+
+// ---- 空の舞台（#111）: 足 0 本（板あり）でも格子・横軸の目盛り・0 の線と注記
+const noLegs = withLegs([]);
+const emptyStageStats = { pass: 0, total: 0 };
+
+/**
+ * 足 0 本（板あり）の舞台 × 4 幅 × ダーク / ライト（スマホは既定のシート peek = ミニでない）: 縦・横・折り返しと、
+ * .chart > svg .grid line が 4 本以上・.zero 1 本・.ax .tick-x 2 個以上で数字・.tick-y / .unit 0 個・注記が見えて
+ * 中心の elementFromPoint が注記（前面）・.handle-hit / .legmark / .x0 0 個・.chart の tabindex が -1
+ */
+async function emptyStageAll() {
+  for (const [w, h] of SIZES) {
+    for (const theme of ['dark', 'light']) {
+      const ctx = await newContext(
+        { width: w, height: h },
+        { [WORKSPACE_KEY]: noLegs, [PREFS_KEY]: prefsText(theme) },
+      );
+      const page = await ctx.newPage();
+      await page.goto(pageUrl('next'));
+      await waitReady(page, 'next');
+      await page.waitForTimeout(150);
+      const tag = `next ${theme} 空の舞台`;
+      await report(page, tag, w, h, `next-${w}x${h}-${theme}-empty-stage`);
+      const r = await page.evaluate(() => {
+        const c = document.querySelector('section.stage .chart');
+        if (!c) return null;
+        const n = (sel) => c.querySelectorAll(sel).length;
+        const ticks = [...c.querySelectorAll('.ax .tick-x')].map((t) => t.textContent ?? '');
+        const note = c.querySelector(':scope > .note');
+        const nr = note?.getBoundingClientRect();
+        const visible = !!nr && nr.width > 0 && nr.height > 0;
+        const hit = visible
+          ? document.elementFromPoint(nr.left + nr.width / 2, nr.top + nr.height / 2)
+          : null;
+        return {
+          grid: c.querySelectorAll(':scope > svg .grid line').length,
+          zero: n('.zero'),
+          ticks,
+          tickY: n('.ax .tick-y'),
+          unit: n('.ax .unit'),
+          noteFront: visible && !!hit && note.contains(hit),
+          extra: n('.handle-hit') + n('.legmark') + n('.x0'),
+          tabindex: c.getAttribute('tabindex'),
+          mini: c.classList.contains('mini'),
+        };
+      });
+      const num = /^\d{1,3}(,\d{3})*$/;
+      const ok =
+        !!r &&
+        !r.mini &&
+        r.grid >= 4 &&
+        r.zero === 1 &&
+        r.ticks.length >= 2 &&
+        r.ticks.every((t) => num.test(t)) &&
+        r.tickY === 0 &&
+        r.unit === 0 &&
+        r.noteFront &&
+        r.extra === 0 &&
+        r.tabindex === '-1';
+      emptyStageStats.total++;
+      if (ok) emptyStageStats.pass++;
+      else failed = true;
+      console.log(
+        r
+          ? `#111 ${theme} ${w}x${h}: 格子 ${r.grid} 本・0 の線 ${r.zero}・横の目盛り ${r.ticks.length}（${r.ticks.join(' ')}）・縦の目盛り ${r.tickY}・単位 ${r.unit}・注記が前面 ${r.noteFront}・ハンドル / マーカー / X₀ ${r.extra}・tabindex ${r.tabindex} ${ok ? 'pass' : '← NG'}`
+          : `#111 ${theme} ${w}x${h}: section.stage .chart が無い  ← NG`,
+      );
+      await ctx.close();
+    }
+  }
 }
 
 // ---- 手順（AC-11・AC-12）
@@ -2267,6 +2346,17 @@ async function benchFlows(vp) {
     await menu('全クリア');
     const mid = (await saved()).legs;
     const empty = await page.isVisible(`${P} .empty-state`);
+    // #111 AC-6: 全クリアの直後の舞台の格子（スマホはシート full = 舞台がミニなので格子なしのまま）
+    const grid = await page.evaluate(() => ({
+      lines: document.querySelectorAll('section.stage .chart > svg .grid line').length,
+      mini: !!document.querySelector('section.stage .chart.mini'),
+    }));
+    check(
+      phoneSize
+        ? `#111 AC-6 ${tag} 全クリア直後の舞台はミニ（格子 ${grid.lines} 本）`
+        : `#111 AC-6 ${tag} 全クリア直後の格子 ${grid.lines} 本`,
+      phoneSize ? grid.mini && grid.lines === 0 : !grid.mini && grid.lines >= 4,
+    );
     const u = undoToast('足 2 本を消した');
     const hasUndo = (await u.count()) === 1;
     if (hasUndo) await u.click();
