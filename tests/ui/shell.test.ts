@@ -112,3 +112,37 @@ describe('layoutTier / visiblePanel / dockPanels', () => {
     expect(dockPanels('pc')).toEqual([]);
   });
 });
+
+describe('shellReduce の open（#82 AC-7: 舞台の足マーカーのタップ）', () => {
+  it('開いている同じパネルでも閉じない（同じ参照）、hidden なら peek、full は full のまま', () => {
+    const s = at({});
+    expect(shellReduce(s, { type: 'open', panel: 'positions', tier: 'phone' })).toBe(s);
+    const full = at({ sheet: 'full' });
+    expect(shellReduce(full, { type: 'open', panel: 'positions', tier: 'phone' })).toBe(full);
+    expect(
+      shellReduce(at({ sheet: 'hidden' }), { type: 'open', panel: 'positions', tier: 'phone' }),
+    ).toEqual(at({ sheet: 'peek' }));
+    expect(
+      shellReduce(at({ panel: 'board', sheet: 'hidden' }), {
+        type: 'open',
+        panel: 'positions',
+        tier: 'phone',
+      }),
+    ).toEqual(at({ panel: 'positions', sheet: 'peek' }));
+    expect(
+      shellReduce(at({ panel: 'metrics', sheet: 'full' }), {
+        type: 'open',
+        panel: 'positions',
+        tier: 'phone',
+      }),
+    ).toEqual(at({ panel: 'positions', sheet: 'full' }));
+  });
+
+  it('タブレットで scenario は positions、PC でも状態は変わる（見た目はパネルが常設）', () => {
+    expect(
+      shellReduce(at({ panel: 'board' }), { type: 'open', panel: 'scenario', tier: 'tablet' }),
+    ).toEqual(at({ panel: 'positions' }));
+    const pc = at({ panel: 'positions' });
+    expect(shellReduce(pc, { type: 'open', panel: 'positions', tier: 'pc' })).toBe(pc);
+  });
+});

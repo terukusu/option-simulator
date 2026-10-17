@@ -1,12 +1,20 @@
 import { describe, expect, it } from 'vitest';
-import { buildCalendar, type Chain, manualEntryDefault, normalizeChain } from '../../data';
+import {
+  boardOptionLeg,
+  buildCalendar,
+  type Chain,
+  manualEntryDefault,
+  normalizeChain,
+} from '../../data';
 import bundledJson from '../../data/calendar/calendar.json';
 import { monthlyExpiry, type OptionLeg, type OptionType } from '../../model';
 import { BUNDLED_CALENDAR } from '../../ui/calendar';
+import { serializeWorkspace } from '../../ui/persist';
 import {
   type Action,
   initialState,
   type LegPatch,
+  legAtStrike,
   MAX_TABS,
   nextTabName,
   parseContract,
@@ -21,6 +29,7 @@ import {
   reduce,
   SCENARIO_PER_TAB,
   type State,
+  sameUiLeg,
   sanitizeTabName,
   TAB_NAME_MAX,
   type UiLeg,
@@ -1182,5 +1191,217 @@ describe('作業中のポジションのタブ（#71）', () => {
     expect(all.some((v) => v.forward !== null)).toBe(true);
     expect(all.some((v) => v.futureContract !== null)).toBe(true);
     expect(all.some((v) => v.leg.kind === 'option' && v.leg.iv !== undefined)).toBe(true);
+  });
+});
+
+describe('行使価格の変更と足の復元（#82 AC-6: changeLegStrike・restoreLeg）', () => {
+  const chain = normalizeChain(fixture('latest'));
+  const month = chain.months[0];
+  if (!month) throw new Error('限月が無い');
+  const m1 = month.id;
+  /** 売り put 63,500（枚数 2・IV 手入力）+ 買い call 71,000 */
+  const base = () =>
+    run(
+      loaded(chain),
+      { type: 'addBoardLeg', expiry: m1, k: 63500, optionType: 'put', side: 'sell' },
+      { type: 'addBoardLeg', expiry: m1, k: 71000, optionType: 'call', side: 'buy' },
+      { type: 'editLeg', id: 1, patch: { qty: 2, iv: 0.31 } },
+    );
+  const rowOf = (k: number) => {
+    const i = month.rows.findIndex((r) => r.k === k);
+    return { row: month.rows[i], info: month.strikes[i] };
+  };
+
+  it('売り put: 同じ id・枚数・売買・限月、K が新しい値、建値 = 新しい K の bid、IV なし、印は新しい K のもの', () => {
+    const s0 = base();
+    const s1 = reduce(s0, { type: 'changeLegStrike', id: 1, k: 63625 });
+    const leg = s1.legs[0]?.leg as OptionLeg;
+    const want = boardOptionLeg(chain, { expiry: m1, k: 63625, type: 'put', side: 'sell', qty: 2 });
+    expect(s1.legs[0]?.id).toBe(1);
+    expect(leg).toMatchObject({
+      kind: 'option',
+      type: 'put',
+      side: 'sell',
+      qty: 2,
+      expiry: m1,
+      strike: 63625,
+    });
+    expect(leg.entry).toBe(rowOf(63625).row?.put.bid);
+    expect('iv' in leg).toBe(false);
+    expect(s1.legs[0]?.marks).toEqual(want.marks);
+    expect(s1.legs[0]?.leg).toEqual(want.leg);
+    // 他の足・位置・nextId は同じ
+    expect(s1.legs[1]).toBe(s0.legs[1]);
+    expect(s1.nextId).toBe(s0.nextId);
+    // 画面と共有する純関数と同じ結果
+    expect(
+      sameUiLeg(s1.legs[0] as UiLeg, legAtStrike(chain, s0.legs[0] as UiLeg, 63625) as UiLeg),
+    ).toBe(true);
+  });
+
+  it('買いは ask、気配の無い K は boardOptionLeg と同じ既定の建値と no_quote', () => {
+    const s1 = reduce(base(), { type: 'changeLegStrike', id: 2, k: 70875 });
+    expect(s1.legs[1]?.leg.entry).toBe(rowOf(70875).row?.call.ask);
+    const none = month.strikes.find((x) => x.put.quote === 'none');
+    if (!none) throw new Error('気配の無い行が無い');
+    const s2 = reduce(base(), { type: 'changeLegStrike', id: 1, k: none.k });
+    const want = boardOptionLeg(chain, {
+      expiry: m1,
+      k: none.k,
+      type: 'put',
+      side: 'sell',
+      qty: 2,
+    });
+    expect(s2.legs[0]?.leg.entry).toBe(want.leg.entry);
+    expect(s2.legs[0]?.marks).toContain('no_quote');
+  });
+
+  it('板に無い K・手入力の限月の足・先物の足・無い id・同じ K は同じ参照', () => {
+    const s0 = base();
+    expect(reduce(s0, { type: 'changeLegStrike', id: 1, k: 63501 })).toBe(s0);
+    expect(reduce(s0, { type: 'changeLegStrike', id: 1, k: 63500 })).toBe(s0);
+    expect(reduce(s0, { type: 'changeLegStrike', id: 99, k: 63625 })).toBe(s0);
+    expect(reduce(s0, { type: 'changeLegStrike', id: 1, k: Number.NaN })).toBe(s0);
+    const withOthers = run(
+      s0,
+      {
+        type: 'addManualLeg',
+        input: {
+          product: 'op_large',
+          expiry: '2027-03',
+          type: 'put',
+          k: 60000,
+          side: 'sell',
+          entry: 300,
+          iv: 0.3,
+        },
+      },
+      { type: 'addFutureLeg', input: { side: 'buy', qty: 1 } },
+    );
+    expect(withOthers.legs).toHaveLength(4);
+    expect(withOthers.legs[2]?.optionMarket).toBeDefined();
+    expect(reduce(withOthers, { type: 'changeLegStrike', id: 3, k: 60500 })).toBe(withOthers);
+    expect(reduce(withOthers, { type: 'changeLegStrike', id: 4, k: 63625 })).toBe(withOthers);
+    expect(legAtStrike(null, s0.legs[0] as UiLeg, 63625)).toBeNull();
+  });
+
+  it('restoreLeg: 置き換える前と深く等しい足に戻る、往復した作業の JSON のキーの集合は同じ', () => {
+    const s0 = base();
+    const before = s0.legs[0] as UiLeg;
+    const s1 = reduce(s0, { type: 'changeLegStrike', id: 1, k: 63625 });
+    const after = s1.legs[0] as UiLeg;
+    const s2 = reduce(s1, {
+      type: 'restoreLeg',
+      leg: before,
+      index: 0,
+      expect: after,
+      tab: s1.activeTab,
+    });
+    expect(s2.legs[0]).toEqual(before);
+    expect(s2.legs).toEqual(s0.legs);
+    const keys = (st: State) => {
+      const out = new Set<string>();
+      const walk = (v: unknown, path: string) => {
+        if (v && typeof v === 'object') {
+          for (const [k, x] of Object.entries(v)) {
+            const p = `${path}.${Array.isArray(v) ? '[]' : k}`;
+            out.add(p);
+            walk(x, p);
+          }
+        }
+      };
+      walk(JSON.parse(serializeWorkspace(st, 0)), '');
+      return [...out].sort();
+    };
+    expect(keys(s2)).toEqual(keys(s0));
+    // 置き換えた作業は手入力の IV のキーだけが無い（形式は同じ）
+    const k1 = keys(s1);
+    expect(
+      keys(s0)
+        .filter((k) => !k1.includes(k))
+        .every((k) => k.endsWith('.iv')),
+    ).toBe(true);
+    expect(k1.every((k) => keys(s0).includes(k))).toBe(true);
+  });
+
+  it('restoreLeg: タブ違い・expect と違う・id が無い（expect が足）は同じ参照', () => {
+    const s0 = base();
+    const before = s0.legs[0] as UiLeg;
+    const s1 = reduce(s0, { type: 'changeLegStrike', id: 1, k: 63625 });
+    const after = s1.legs[0] as UiLeg;
+    expect(reduce(s1, { type: 'restoreLeg', leg: before, index: 0, expect: after, tab: 99 })).toBe(
+      s1,
+    );
+    // その後に別の操作で足が変わっていれば戻さない
+    const s3 = reduce(s1, { type: 'editLeg', id: 1, patch: { qty: 5 } });
+    expect(
+      reduce(s3, { type: 'restoreLeg', leg: before, index: 0, expect: after, tab: s3.activeTab }),
+    ).toBe(s3);
+    const gone = reduce(s1, { type: 'removeLeg', id: 1 });
+    expect(
+      reduce(gone, {
+        type: 'restoreLeg',
+        leg: before,
+        index: 0,
+        expect: after,
+        tab: gone.activeTab,
+      }),
+    ).toBe(gone);
+    // expect = null で、その id が既にあれば何もしない
+    expect(
+      reduce(s1, { type: 'restoreLeg', leg: before, index: 0, expect: null, tab: s1.activeTab }),
+    ).toBe(s1);
+  });
+
+  it('restoreLeg（expect = null）: 消した足を元の位置に戻し、nextId は id より大きく', () => {
+    const s0 = run(base(), {
+      type: 'addBoardLeg',
+      expiry: m1,
+      k: 64000,
+      optionType: 'put',
+      side: 'buy',
+    });
+    const removed = s0.legs[1] as UiLeg;
+    const s1 = reduce(s0, { type: 'removeLeg', id: removed.id });
+    const s2 = reduce(s1, {
+      type: 'restoreLeg',
+      leg: removed,
+      index: 1,
+      expect: null,
+      tab: s1.activeTab,
+    });
+    expect(s2.legs).toEqual(s0.legs);
+    expect(s2.nextId).toBe(s0.nextId);
+    // 全クリアからの復元（index の昇順）
+    const cleared = reduce(s0, { type: 'clearLegs' });
+    const back = s0.legs.reduce(
+      (st, leg, i) =>
+        reduce(st, { type: 'restoreLeg', leg, index: i, expect: null, tab: st.activeTab }),
+      cleared,
+    );
+    expect(back.legs).toEqual(s0.legs);
+    // index は 0〜本数に収める
+    const s3 = reduce(s1, {
+      type: 'restoreLeg',
+      leg: removed,
+      index: 99,
+      expect: null,
+      tab: s1.activeTab,
+    });
+    expect(s3.legs.at(-1)).toEqual(removed);
+    const s4 = { ...s1, nextId: 1 };
+    expect(
+      reduce(s4, { type: 'restoreLeg', leg: removed, index: -3, expect: null, tab: s4.activeTab })
+        .nextId,
+    ).toBe(removed.id + 1);
+  });
+
+  it('sameUiLeg: 構造の比較（印の並び・手入力の市場の有無）', () => {
+    const s0 = base();
+    const a = s0.legs[0] as UiLeg;
+    expect(sameUiLeg(a, structuredClone(a))).toBe(true);
+    expect(sameUiLeg(a, { ...a, marks: [...a.marks, 'no_quote'] })).toBe(false);
+    expect(sameUiLeg(a, { ...a, id: 9 })).toBe(false);
+    expect(sameUiLeg(a, { ...a, leg: { ...a.leg, qty: 3 } })).toBe(false);
   });
 });

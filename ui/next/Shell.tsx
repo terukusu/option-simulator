@@ -1,3 +1,4 @@
+import type { ComponentChildren } from 'preact';
 import { useRef } from 'preact/hooks';
 import {
   dockPanels,
@@ -26,7 +27,7 @@ const MARKET_OPTIONS = [
 
 /**
  * 本体の骨組み（docs/ui-redesign.md §2。状態は ui/view/shell.ts）。3 段階のグリッド・ドック・スマホのシート。
- * #81 の時点は領域ごとの見出し行だけ（中身は #82〜#86 が .panel-body に入れる）。
+ * 舞台（凡例行 + .panel-body）は #82 の regions/Stage.tsx を stage で受ける。他の領域は見出し行だけ（#83〜#86 が入れる）。
  * 出し分けは .layout の data-panel・data-sheet・data-market と CSS（style 属性を使わない）。
  */
 export function Shell(p: {
@@ -34,6 +35,8 @@ export function Shell(p: {
   state: ShellState;
   send: (a: ShellAction) => void;
   legCount: number;
+  /** 舞台の中身（凡例行 + .panel-body。#82） */
+  stage: ComponentChildren;
 }) {
   const { tier, state, send } = p;
   const panel = visiblePanel(state, tier);
@@ -55,8 +58,7 @@ export function Shell(p: {
   return (
     <main class="layout" data-panel={panel} data-sheet={state.sheet} data-market={state.market}>
       <section class="stage panel" aria-label="損益グラフ">
-        <PanelHead title="損益グラフ" />
-        <div class="panel-body" />
+        {p.stage}
       </section>
       <section class="scenario panel" aria-label="シナリオ">
         {grabber('scenario')}
