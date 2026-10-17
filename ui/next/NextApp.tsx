@@ -4,8 +4,10 @@ import { type Boot, DEV_FIXTURES, useAppController } from '../components/useAppC
 import { useMediaQuery } from '../components/useMediaQuery';
 import { loaderNote } from '../load';
 import type { PrefsRead } from '../prefs';
-import { legAtStrike, MAX_TABS } from '../state';
+import { shareSupported } from '../share';
+import { legAtStrike, MAX_TABS, restoreTabAction } from '../state';
 import { marketAddPlan, marketAddToast } from '../view/boardPanel';
+import { closedTabText, restoreTabError, type ShareResult, shareResultView } from '../view/boxTabs';
 import { fmtNum } from '../view/format';
 import { keptBoardNote } from '../view/header';
 import { PC_QUERY, PHONE_QUERY } from '../view/layout';
@@ -32,6 +34,7 @@ import { Stage } from './regions/Stage';
 import { Shell } from './Shell';
 import { TopBar } from './TopBar';
 import { ShareConfirm } from './top/ShareConfirm';
+import { ShareUrlDialog } from './top/ShareUrlDialog';
 import { useTheme } from './useTheme';
 
 /**
@@ -47,6 +50,9 @@ import { useTheme } from './useTheme';
  * #87 (A) で知らせの行をやめ、知らせをトースト / トップバーの警告のタグ / 共有を開く確認のダイアログ / 市場ピルへ
  * 振り分けた（ui/view/notices.ts）。トーストへ振り分けた知らせは push してから c.closeNote で消す（新しい画面の
  * c.notes に残るのは警告のタグのものだけ。旧画面は別の useAppController なので変わらない）。
+ * #87 (B) でトップバーに BOX タブを入れた。タブを閉じるのは即実行 + [元に戻す]（keep 付きのトースト。閉じる前の写しを
+ * restoreTabAction で控え、押した時点のタブで restoreTabError を先に判定して restoreTab を 1 回 dispatch）。
+ * URL をコピーの結果はトースト、クリップボードに書けなければ「共有の URL」のダイアログ（shareResultView）。
  */
 export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
   const c = useAppController(boot);
@@ -68,6 +74,39 @@ export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
     [tier],
   );
   const { push, dropUndo, drop } = toasts;
+  // 閉じたタブの [元に戻す] は押した時点の state で判定する（トーストの undo は push した時点のクロージャ）
+  const stateRef = useRef(state);
+  stateRef.current = state;
+  const onCloseTab = useCallback(
+    (id: number) => {
+      const action = restoreTabAction(stateRef.current, id);
+      if (!action) return;
+      dispatch({ type: 'closeTab', id });
+      push({
+        kind: 'tab-closed',
+        text: closedTabText(action.name, action.position.legs.length),
+        keep: true,
+        undo: () => {
+          const err = restoreTabError(stateRef.current.tabs, action.name);
+          if (err !== null) push({ kind: 'tab-restore', text: err });
+          else dispatch(action);
+        },
+      });
+    },
+    [dispatch, push],
+  );
+  // URL をコピー（タブのメニュー・⋯）の結果: トースト、書けなければ「共有の URL」のダイアログ
+  const [shareOk] = useState(shareSupported);
+  const [shareUrl, setShareUrl] = useState<{ url: string; text: string } | null>(null);
+  const onShareResult = useCallback(
+    (r: ShareResult) => {
+      const v = shareResultView(r);
+      if ('toast' in v) push(v.toast);
+      else setShareUrl(v.dialog);
+    },
+    [push],
+  );
+  const closeShareUrl = useCallback(() => setShareUrl(null), []);
   // 知らせ（#87）: トーストに振り分けるものは出してから消す。警告のタグのものは c.notes に残す
   const { notes, closeNote } = c;
   useEffect(() => {
@@ -158,6 +197,11 @@ export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
   );
   const warn = useMemo(() => warnTagsModel(notes), [notes]);
   const cancelShare = useCallback(() => c.setPendingShare(null), [c.setPendingShare]);
+  // タブが上限で共有を開く確認に入ったら、前の URL の「読めない」警告のトーストを残さない（#87 (A) のレビュー）
+  const asking = pendingShare !== null;
+  useEffect(() => {
+    if (asking) drop('note-shared');
+  }, [asking, drop]);
   const emptyMarket = (title: string, seg: ComponentChildren) => (
     <>
       <PanelHead title={title}>{seg}</PanelHead>
@@ -180,6 +224,13 @@ export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
         onFile={c.onFile}
         onFixture={c.onFixture}
         onCloseNote={closeNote}
+        tabs={c.tabsView}
+        dispatch={dispatch}
+        onCloseTab={onCloseTab}
+        makeShareUrl={c.makeShareUrl}
+        subscribeShare={c.subscribeShare}
+        shareSupported={shareOk}
+        onShareResult={onShareResult}
       />
       <Shell
         tier={tier}
@@ -259,6 +310,7 @@ export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
         onReplace={c.confirmShare}
         onCancel={cancelShare}
       />
+      <ShareUrlDialog share={shareUrl} onClose={closeShareUrl} />
       <Toasts toasts={toasts.toasts} onUndo={toasts.undo} onDismiss={toasts.dismiss} />
     </div>
   );

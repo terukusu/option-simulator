@@ -30,7 +30,10 @@
 //                                          警告のタグ）で、高さが --top-h・ピルの時刻・F・ATM（スマホは時刻）・[最新]・⋯ が切れず画面内・
 //                                          中の折り返し 0。開いた状態（知らせのトースト・⋯ メニュー・ピルのポップオーバー・警告のタグ・
 //                                          共有を開く確認。360 / 390 / 1440）の縦・横・折り返しと窓の中。waitReady は市場ピルの
-//                                          data-state を待ち、起動時の知らせのトーストを閉じてから測る
+//                                          data-state を待ち、起動時の知らせのトーストを閉じてから測る。
+//                                          #87 (B): トップバーの検査に BOX タブ（作業中のチップが帯の矩形と窓の中・全チップの本数が
+//                                          切れない・＋ が窓の中・帯にスクロールバーが出ない）、開いた状態にタブのメニュー・
+//                                          名前を変える…・共有の URL（writeText を reject に差し替え）・＋ のメニュー（1 個閉じてから）
 //                                          空の舞台（#111）: 足 0 本（板あり）× 4 幅 × ダーク / ライトで格子 4 本以上・0 の線・横の目盛り
 //                                          （数字）2 個以上・縦の目盛りと単位 0・注記が前面・ハンドル / マーカー / X₀ 0・tabindex -1
 //   npm run ui:check -- --parts            部品の見本（?ui=next&parts。dev だけ）
@@ -52,7 +55,12 @@
 //                                          （#87 (A): [最新] の読み込み中 / 失敗（/api/chain を差し替え）・失敗のトーストが成功で消える・
 //                                          ⋯ > ファイルを開く…・限月の切替と旧画面の F / ATM の一致・全文の数値の列が旧画面の header.header
 //                                          を含む・復元のトースト 6 秒・壊れた保存の警告のトースト・別のタブの警告のタグ・タブが 6 個の
-//                                          共有を開く確認・タブの切り替えで [元に戻す] だけ消える。390×844 と 1440×900）。
+//                                          共有を開く確認・タブの切り替えで [元に戻す] だけ消える。390×844 と 1440×900）と BOX タブの手順
+//                                          （#87 (B) AC-12: ＋ の空 / 複製・クリックと ← → Home End・名前を変える…（B2 / 空 / 重複）・
+//                                          閉じる → [元に戻す]（切り替えても残る = AC-15(e)）・6 個で ＋ が disabled・切り替え 10 回の
+//                                          Long Animation Frame。390×844 と 1440×900）と URL 共有の手順（AC-13: タブのメニュー・⋯ の
+//                                          URL をコピー → トースト・クリップボード・新しいコンテキストで同じ足・拒否 = 共有の URL の
+//                                          ダイアログ・旧画面の URL に ui なし・上限の確認で前の共有の警告のトーストを消す。1440×900）。
 //                                          全クリアの直後の舞台の格子（#111: 1440 で 4 本以上、390 はシート full のミニで 0）
 //   --url <base>                           dev サーバーを起こさず、その URL を使う（例 http://127.0.0.1:5173/?ui=next&parts）
 //   --dom <file>                           body の下の要素の tag.class の並びを書き出す（旧画面が変わらないことの比較用）
@@ -1546,6 +1554,9 @@ async function runFlows() {
   await marketPersistFlow();
   // #87 (A) トップバーの手順（AC-11・AC-15）
   for (const vp of [phone, pc]) await topFlows(vp);
+  // #87 (B) BOX タブの手順（AC-12・AC-15(e)）と URL 共有の手順（AC-13）
+  for (const vp of [phone, pc]) await tabFlows(vp);
+  await shareFlows(pc);
 }
 
 // ---- 舞台の手順（#82）
@@ -3730,6 +3741,19 @@ async function savedBoard() {
   return savedBoardText;
 }
 
+/**
+ * クリップボードへの書き込みを断る（#87 (B)。Chromium は操作の中なら権限なしでも書けることがあるので差し替えで作る）。
+ * 書こうとした文字列を window.__clipTried に残す
+ */
+const CLIP_REJECT_INIT = `
+  if (navigator.clipboard) {
+    navigator.clipboard.writeText = (t) => {
+      window.__clipTried = t;
+      return Promise.reject(new DOMException('', 'NotAllowedError'));
+    };
+  }
+`;
+
 /** 同じコンテキストの別のページで作業の保存を書く（storage イベント → 警告のタグ「別のタブ」） */
 async function writeFromOtherPage(ctx, value) {
   const other = await ctx.newPage();
@@ -3751,6 +3775,8 @@ async function busyPage(vp, theme) {
   await ctx.route('**/fixtures/latest.json', (route) =>
     route.fulfill({ status: 500, contentType: 'text/plain', body: 'x' }),
   );
+  // 共有の URL のダイアログ（#87 (B)）を開くため、クリップボードへの書き込みを断る
+  await ctx.addInitScript(CLIP_REJECT_INIT);
   const page = await ctx.newPage();
   await page.goto(pageUrl('next'));
   await waitReady(page, 'next', { keepNotes: true });
@@ -3779,6 +3805,35 @@ async function topBarCheck(page, label) {
     ];
     if (!phone) sels.push('.market-pill .vals', 'button[aria-label="テーマ"]');
     if (top.querySelector('.warn-btn')) sels.push('.warn-btn');
+    // BOX タブ（#87 (B)）: ＋ が窓の中・切れない、作業中のチップが帯の矩形と窓の中、本数が切れない、スクロールバーなし
+    sels.push('.boxtabs-add');
+    const strip = top.querySelector('.boxtabs');
+    const chip = top.querySelector('.boxtabs [aria-selected="true"]');
+    if (!strip || !chip) bad.push('BOX タブが無い');
+    else {
+      const sb = strip.getBoundingClientRect();
+      const cb = chip.getBoundingClientRect();
+      if (
+        cb.left < sb.left - 0.5 ||
+        cb.right > sb.right + 0.5 ||
+        cb.left < -0.5 ||
+        cb.right > window.innerWidth + 0.5
+      ) {
+        bad.push(
+          `作業中のチップが帯の外（${Math.round(cb.left)}–${Math.round(cb.right)} / 帯 ${Math.round(sb.left)}–${Math.round(sb.right)}）`,
+        );
+      }
+      if (strip.offsetHeight !== strip.clientHeight) {
+        bad.push(`帯にスクロールバー（${strip.offsetHeight} ≠ ${strip.clientHeight}）`);
+      }
+      for (const n of strip.querySelectorAll('.boxtab .n')) {
+        if (n.scrollWidth > n.clientWidth + 0.5)
+          bad.push(`チップの本数が切れている「${n.textContent}」`);
+      }
+      if (chip.scrollWidth > chip.clientWidth + 0.5) {
+        bad.push(`作業中のチップの中が切れている（${chip.scrollWidth} > ${chip.clientWidth}）`);
+      }
+    }
     for (const sel of sels) {
       const el = top.querySelector(sel);
       if (!el) {
@@ -3922,6 +3977,46 @@ async function topSweep() {
         await page.waitForSelector('dialog.sheet[open]', { timeout: 5000 }).catch(() => {});
         await openCheck(page, `${tag} 共有を開く確認`, w, h, `${name}-share`, 'dialog.sheet[open]');
         await page.click('dialog.sheet button:has-text("やめる")').catch(() => {});
+        await page.waitForSelector('dialog.sheet[open]', { state: 'detached', timeout: 3000 });
+        // BOX タブ（#87 (B)）: タブのメニュー・名前を変える…・共有の URL・＋ のメニュー
+        const chip = '.boxtabs [aria-selected="true"]';
+        await page.click(chip);
+        await openCheck(
+          page,
+          `${tag} タブのメニュー`,
+          w,
+          h,
+          `${name}-tabmenu`,
+          '.boxtabs-wrap > [role="menu"]',
+        );
+        await page.click(
+          '.boxtabs-wrap > [role="menu"] [role="menuitem"]:has-text("名前を変える…")',
+        );
+        await page.waitForSelector('dialog.sheet[open]', { timeout: 3000 }).catch(() => {});
+        await openCheck(page, `${tag} 名前を変える…`, w, h, `${name}-rename`, 'dialog.sheet[open]');
+        await page.keyboard.press('Escape');
+        await page.waitForSelector('dialog.sheet[open]', { state: 'detached', timeout: 3000 });
+        await page.click(chip);
+        await page.click(
+          '.boxtabs-wrap > [role="menu"] [role="menuitem"]:has-text("URL をコピー"):not([aria-disabled])',
+        );
+        await page.waitForSelector('dialog.sheet[open]', { timeout: 3000 }).catch(() => {});
+        await openCheck(page, `${tag} 共有の URL`, w, h, `${name}-shareurl`, 'dialog.sheet[open]');
+        await page.keyboard.press('Escape');
+        await page.waitForSelector('dialog.sheet[open]', { state: 'detached', timeout: 3000 });
+        // 6 個では ＋ を押せないので 1 個閉じてから（閉じたトーストも出る）
+        await page.click(chip);
+        await page.click('.boxtabs-wrap > [role="menu"] [role="menuitem"]:has-text("閉じる")');
+        await page.click('.boxtabs-add');
+        await openCheck(
+          page,
+          `${tag} ＋ のメニュー`,
+          w,
+          h,
+          `${name}-addmenu`,
+          '.boxtabs-wrap .menu-wrap > [role="menu"]',
+        );
+        await page.keyboard.press('Escape');
       }
       await ctx.close();
     }
@@ -4284,6 +4379,349 @@ async function topFlows(vp) {
         kept === before &&
         dialogs === 0,
       `足 ${replaced?.length}`,
+    );
+    await ctx.close();
+  }
+}
+
+// ---- #87 (B) の手順（AC-12・AC-13・AC-15(e)）
+const CHIP = '.boxtabs [aria-selected="true"]';
+const ADD = '.boxtabs-add';
+const menuItem = (label) => `[role="menu"] [role="menuitem"]:has-text("${label}")`;
+/** 作業の保存（自動保存の debounce 500ms を待ってから読む） */
+async function savedWorkspace(page) {
+  await page.waitForTimeout(700);
+  return page.evaluate((k) => {
+    try {
+      return JSON.parse(localStorage.getItem(k) ?? 'null');
+    } catch {
+      return null;
+    }
+  }, WORKSPACE_KEY);
+}
+/** タブの並び（名前・足・作業中。比べる形） */
+const tabsShape = (ws) =>
+  JSON.stringify({
+    names: ws?.tabs?.map((t) => t.name),
+    legs: ws?.tabs?.map((t) => t.position.legs),
+    active: ws?.active,
+  });
+
+async function tabFlows(vp) {
+  const tag = `${vp.width}x${vp.height}`;
+  const ctx = await newContext(vp, { [WORKSPACE_KEY]: twoLegs });
+  await ctx.addInitScript(LOAF_INIT);
+  const page = await ctx.newPage();
+  await page.goto(pageUrl('next'));
+  await waitReady(page, 'next');
+  const chipAt = (i) => `.boxtabs [role="tab"]:nth-child(${i + 1})`;
+
+  // (a) ＋ > 空のタブ → 2 個・作業中は新しいタブ・足 0 本。A に戻って ＋ > このタブを複製 → 足が A と同じ
+  await page.click(ADD);
+  await page.click(menuItem('空のタブ'));
+  const a1 = await savedWorkspace(page);
+  await page.click(chipAt(0));
+  await page.click(ADD);
+  await page.click(menuItem('このタブを複製'));
+  const a2 = await savedWorkspace(page);
+  check(
+    `#87 AC-12(a) ${tag} ＋ > 空のタブで 2 個・足 0 本、＋ > このタブを複製で足が同じ`,
+    a1?.tabs?.length === 2 &&
+      a1.active === 1 &&
+      a1.tabs[1].position.legs.length === 0 &&
+      a2?.tabs?.length === 3 &&
+      a2.active === 1 &&
+      a2.tabs[0].position.legs.length === 2 &&
+      JSON.stringify(a2.tabs[1].position.legs) === JSON.stringify(a2.tabs[0].position.legs),
+    `${a1?.tabs?.length}・${a2?.tabs?.map((t) => `${t.name}:${t.position.legs.length}`).join(' ')}`,
+  );
+
+  // (b) クリックと ← → Home End で切り替わる（保存の active）。End の後、作業中のチップが帯の中
+  const actives = [];
+  await page.click(chipAt(0));
+  actives.push((await savedWorkspace(page))?.active);
+  for (const key of ['ArrowRight', 'End', 'Home', 'ArrowLeft']) {
+    await page.keyboard.press(key);
+    actives.push((await savedWorkspace(page))?.active);
+    if (key === 'End') {
+      const inStrip = await page.evaluate((sel) => {
+        const c = document.querySelector(sel)?.getBoundingClientRect();
+        const st = document.querySelector('.boxtabs')?.getBoundingClientRect();
+        return !!c && !!st && c.left >= st.left - 0.5 && c.right <= st.right + 0.5;
+      }, CHIP);
+      actives.push(inStrip ? 'in' : 'out');
+    }
+  }
+  const focusTab = await page.evaluate(
+    () => document.activeElement?.getAttribute('aria-selected') === 'true',
+  );
+  check(
+    `#87 AC-12(b) ${tag} クリックと ← → Home End で作業中のタブが変わり、End の後のチップは帯の中`,
+    JSON.stringify(actives) === JSON.stringify([0, 1, 2, 'in', 0, 2]) && focusTab,
+    `${actives.join(' ')}・フォーカス ${focusTab}`,
+  );
+
+  // (c) 作業中のチップをもう一度押す → メニュー、名前を変える… → B2、空 / 他のタブと同じ名前は開いたまま alert
+  await page.click(CHIP);
+  const menuOpen = await page.locator('.boxtabs-wrap > [role="menu"]').count();
+  await page.click(menuItem('名前を変える…'));
+  const input = 'dialog.sheet[open] input[aria-label="タブの名前"]';
+  await page.waitForSelector(input, { timeout: 3000 });
+  const focused = await page.evaluate(
+    () => document.activeElement?.getAttribute('aria-label') === 'タブの名前',
+  );
+  await page.fill(input, 'B2');
+  await page.keyboard.press('Enter');
+  const c1 = await savedWorkspace(page);
+  const closed1 = await page.locator('dialog.sheet[open]').count();
+  const back = await page.evaluate(
+    () => document.activeElement?.getAttribute('aria-selected') === 'true',
+  );
+  const tries = [];
+  for (const v of ['', c1?.tabs?.[0]?.name ?? 'A']) {
+    await page.click(CHIP);
+    await page.click(menuItem('名前を変える…'));
+    await page.waitForSelector(input, { timeout: 3000 });
+    await page.fill(input, v);
+    await page.keyboard.press('Enter');
+    await page.waitForTimeout(100);
+    tries.push({
+      open: await page.locator('dialog.sheet[open]').count(),
+      alert: (await page.textContent('dialog.sheet[open] [role="alert"]').catch(() => null)) ?? '',
+    });
+    await page.keyboard.press('Escape');
+    await page.waitForSelector('dialog.sheet[open]', { state: 'detached', timeout: 3000 });
+  }
+  const c2 = await savedWorkspace(page);
+  check(
+    `#87 AC-12(c) ${tag} チップをもう一度押すとメニュー、名前を変える… で B2、空 / 同じ名前は開いたまま alert`,
+    menuOpen === 1 &&
+      focused &&
+      c1?.tabs?.[c1.active]?.name === 'B2' &&
+      closed1 === 0 &&
+      back &&
+      tries[0]?.open === 1 &&
+      tries[0].alert === '名前を入れる' &&
+      tries[1]?.open === 1 &&
+      tries[1].alert === '同じ名前のタブがある' &&
+      c2?.tabs?.[c2.active]?.name === 'B2',
+    `メニュー ${menuOpen}・欄 ${focused}・${c1?.tabs?.map((t) => t.name).join(' ')}・戻り ${back}・${JSON.stringify(tries)}`,
+  );
+
+  // (d) 足 2 本のタブ A を閉じる → 確認なし・タブが減る・トースト → 別のチップへ切り替えても残る（AC-15(e)）→
+  //     [元に戻す] で並び・名前・足・作業中が閉じる前と同じ
+  await page.click(chipAt(0));
+  const before = await savedWorkspace(page);
+  await page.click(CHIP);
+  await page.click(menuItem('閉じる'));
+  await page.waitForTimeout(100);
+  const d = {
+    dialogs: await page.locator('dialog[open]').count(),
+    chips: await page.locator('.boxtabs [role="tab"]').count(),
+    toast: (await page.textContent('.toast:not(.note) .txt').catch(() => null)) ?? '',
+  };
+  await page.click(chipAt(1));
+  await page.waitForTimeout(100);
+  const kept = (await page.textContent('.toast:not(.note) .txt').catch(() => null)) ?? '';
+  await page.click('.toast:not(.note) button:has-text("元に戻す")');
+  const after = await savedWorkspace(page);
+  check(
+    `#87 AC-12(d) ${tag} 閉じる（確認なし）→ トースト → [元に戻す] で閉じる前と同じ`,
+    d.dialogs === 0 &&
+      d.chips === 2 &&
+      d.toast === 'タブ A（足 2 本）を閉じた' &&
+      tabsShape(after) === tabsShape(before),
+    `${JSON.stringify(d)}・${tabsShape(after) === tabsShape(before) ? '同じ' : `違う ${tabsShape(after)} / ${tabsShape(before)}`}`,
+  );
+  check(
+    `#87 AC-15(e) ${tag} 「タブを閉じた」のトーストはタブを切り替えても消えず [元に戻す] が効く`,
+    kept === d.toast && tabsShape(after) === tabsShape(before),
+    kept,
+  );
+
+  // (f) タブの切り替え 10 回（クリック）の Long Animation Frame 0 件
+  const loafOk = await page.evaluate(() => window.__loafOk === true);
+  await page.waitForTimeout(300);
+  const m0 = await page.evaluate(() => window.__loaf.length);
+  for (let i = 0; i < 10; i++) {
+    await page.click(chipAt(i % 3));
+    await page.waitForTimeout(60);
+  }
+  await page.waitForTimeout(200);
+  const loaf = await page.evaluate((n) => window.__loaf.slice(n).filter((x) => x > 50).length, m0);
+  check(
+    `#87 AC-12(f) ${tag} タブの切り替え 10 回の Long Animation Frame 0 件`,
+    loafOk && loaf === 0,
+    loafOk ? `${loaf} 件` : 'observer が使えない',
+  );
+  await ctx.close();
+
+  // (e) 6 個で ＋ が disabled（title は上限の文）
+  {
+    const ctx6 = await newContext(vp, { [WORKSPACE_KEY]: busyWorkspace });
+    const p6 = await ctx6.newPage();
+    await p6.goto(pageUrl('next'));
+    await waitReady(p6, 'next');
+    const dis = await p6.isDisabled(ADD);
+    const title = await p6.getAttribute(ADD, 'title');
+    check(
+      `#87 AC-12(e) ${tag} 6 個で ＋ が disabled`,
+      dis && title === 'タブは 6 個まで',
+      `${dis}・${title}`,
+    );
+    await ctx6.close();
+  }
+}
+
+async function shareFlows(vp) {
+  const tag = `${vp.width}x${vp.height}`;
+  const copied = /^コピーした（[0-9,]+ 字）$/;
+  const legsOf = (ws) =>
+    JSON.stringify(
+      (ws?.tabs?.[ws.active]?.position?.legs ?? []).map((l) => [l.side, l.strike, l.qty, l.entry]),
+    );
+  // タブのメニューと ⋯ の URL をコピー → トースト・クリップボード（#p=・?ui=next）→ 新しいコンテキストで同じ足
+  {
+    const ctx = await newContext(vp, { [WORKSPACE_KEY]: twoLegs });
+    await ctx.grantPermissions(['clipboard-read', 'clipboard-write'], { origin });
+    const page = await ctx.newPage();
+    await page.goto(pageUrl('next'));
+    await waitReady(page, 'next');
+    const orig = legsOf(await savedWorkspace(page));
+    const copy = async (open) => {
+      // 前のコピーの結果（トースト・クリップボード）を読まないように空にする
+      await page.evaluate(() => navigator.clipboard.writeText(''));
+      await page
+        .waitForSelector('.toast:not(.note)', { state: 'detached', timeout: 6000 })
+        .catch(() => {});
+      await open();
+      const sel = `${menuItem('URL をコピー')}:not([aria-disabled])`;
+      await page.waitForSelector(sel, { timeout: 5000 });
+      await page.click(sel);
+      await page
+        .waitForFunction(
+          () =>
+            [...document.querySelectorAll('.toast:not(.note) .txt')].some((t) =>
+              t.textContent?.startsWith('コピーした'),
+            ),
+          undefined,
+          { timeout: 5000 },
+        )
+        .catch(() => {});
+      const toast = (await page.textContent('.toast:not(.note) .txt').catch(() => null)) ?? '';
+      const url = await page.evaluate(() => navigator.clipboard.readText()).catch(() => '');
+      return { toast, url };
+    };
+    const viaTab = await copy(() => page.click(CHIP));
+    const viaMore = await copy(() => page.click('button[aria-label="メニュー"]'));
+    for (const [name, r] of [
+      ['タブのメニュー', viaTab],
+      ['⋯', viaMore],
+    ]) {
+      let opened = '';
+      let ui = null;
+      try {
+        ui = new URL(r.url).searchParams.get('ui');
+        const c2 = await newContext(vp, {});
+        const p2 = await c2.newPage();
+        await p2.goto(r.url);
+        await waitReady(p2, 'next');
+        await p2.waitForTimeout(1500);
+        opened = legsOf(await savedWorkspace(p2));
+        await c2.close();
+      } catch (e) {
+        opened = `開けない ${e.message}`;
+      }
+      check(
+        `#87 AC-13 ${tag} ${name}の URL をコピー → トースト・#p= と ?ui=next・開くと同じ足`,
+        copied.test(r.toast) && r.url.includes('#p=') && ui === 'next' && opened === orig,
+        `${r.toast}・ui=${ui}・足 ${opened === orig ? '同じ' : `${opened} / ${orig}`}`,
+      );
+    }
+    await ctx.close();
+  }
+
+  // クリップボードを拒否 → 「共有の URL」のダイアログに同じ URL が全文選択で出る
+  {
+    const ctx = await newContext(vp, { [WORKSPACE_KEY]: twoLegs });
+    await ctx.addInitScript(CLIP_REJECT_INIT);
+    const page = await ctx.newPage();
+    await page.goto(pageUrl('next'));
+    await waitReady(page, 'next');
+    await page.click(CHIP);
+    const sel = `${menuItem('URL をコピー')}:not([aria-disabled])`;
+    await page.waitForSelector(sel, { timeout: 5000 });
+    await page.click(sel);
+    const field = 'dialog.sheet[open] input[aria-label="共有の URL"]';
+    await page.waitForSelector(field, { timeout: 5000 }).catch(() => {});
+    const r = await page.evaluate((f) => {
+      const el = document.querySelector(f);
+      const title = document.querySelector('dialog.sheet[open] h2')?.textContent ?? '';
+      return el instanceof HTMLInputElement
+        ? {
+            title,
+            same: el.value === window.__clipTried && el.value.includes('#p='),
+            all: el.selectionStart === 0 && el.selectionEnd === el.value.length,
+            focus: document.activeElement === el,
+          }
+        : { title, same: false, all: false, focus: false };
+    }, field);
+    check(
+      `#87 AC-13 ${tag} クリップボードを拒否 → 共有の URL のダイアログに同じ URL が全文選択`,
+      r.title === '共有の URL' && r.same && r.all && r.focus,
+      JSON.stringify(r),
+    );
+    await ctx.close();
+  }
+
+  // 旧画面の URL をコピー → クリップボードの URL に ui が無い
+  {
+    const ctx = await newContext(vp, { [WORKSPACE_KEY]: twoLegs });
+    await ctx.grantPermissions(['clipboard-read', 'clipboard-write'], { origin });
+    const page = await ctx.newPage();
+    await page.goto(pageUrl('legacy'));
+    await waitReady(page, 'legacy');
+    await page.click('.work-tab-more');
+    const btn = 'button:has-text("URL をコピー"):not([disabled]):not([aria-disabled="true"])';
+    await page.waitForSelector(btn, { timeout: 5000 }).catch(() => {});
+    await page.click(btn).catch(() => {});
+    await page.waitForTimeout(300);
+    const url = await page.evaluate(() => navigator.clipboard.readText()).catch(() => '');
+    let hasUi = true;
+    try {
+      hasUi = new URL(url).searchParams.has('ui');
+    } catch {}
+    check(
+      `#87 AC-13 ${tag} 旧画面の URL をコピーの URL に ui が無い`,
+      url.includes('#p=') && !hasUi,
+      url ? `${new URL(url).search || '(search なし)'}` : 'コピーされない',
+    );
+    await ctx.close();
+  }
+
+  // #87 (A) のレビュー: 壊れた共有 URL の警告のトースト → タブ 6 個で正しい共有 URL → 確認が出て前の警告は消える
+  {
+    const ctx = await newContext(vp, { [WORKSPACE_KEY]: busyWorkspace });
+    const page = await ctx.newPage();
+    await page.goto(pageUrl('next'));
+    await waitReady(page, 'next');
+    await page.evaluate(() => {
+      location.hash = '#p=x';
+    });
+    const warned = await page
+      .waitForSelector('.toast.note[data-kind="note-shared"]', { timeout: 3000 })
+      .then(() => true)
+      .catch(() => false);
+    await page.evaluate((hash) => {
+      location.hash = hash;
+    }, share.hash);
+    await page.waitForSelector('dialog.sheet[open]', { timeout: 5000 }).catch(() => {});
+    const asking = await page.locator('dialog.sheet[open]').count();
+    const left = await page.locator('.toast.note[data-kind="note-shared"]').count();
+    check(
+      `#87 ${tag} 上限で共有を開く確認に入ると前の共有の警告のトーストが消える`,
+      warned && asking === 1 && left === 0,
+      `警告 ${warned}・確認 ${asking}・残り ${left}`,
     );
     await ctx.close();
   }

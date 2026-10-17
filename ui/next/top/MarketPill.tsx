@@ -3,8 +3,11 @@ import { visibleTags } from '../../view/marketPill';
 import type { Tier } from '../../view/shell';
 import { Popover } from '../parts/Popover';
 
-/** ピルに見せるタグの数（幅の段階で固定。残りは +N。docs/ui-redesign.md §2.1） */
-const TAG_MAX: Record<Exclude<Tier, 'phone'>, number> = { pc: 3, tablet: 2 };
+/**
+ * ピルに見せるタグの数（幅の段階で固定。残りは +N。docs/ui-redesign.md §2.1）。タブレットは BOX タブの帯を入れるため 1
+ * （#87 (B)。最も混む作業で作業中のチップが帯に入る幅）
+ */
+const TAG_MAX: Record<Exclude<Tier, 'phone'>, number> = { pc: 3, tablet: 1 };
 
 const Tag = ({ t }: { t: { label: string; warn: boolean } }) => (
   <span class={t.warn ? 'tag warn' : 'tag'}>{t.label}</span>
@@ -22,14 +25,14 @@ function Val({ s }: { s: string }) {
   );
 }
 
-function Summary({ m, tier }: { m: MarketPillModel; tier: Tier }) {
+function Summary({ m, tier, noTag }: { m: MarketPillModel; tier: Tier; noTag: boolean }) {
   const dot = <span class={m.warn ? 'dot warn' : 'dot'} aria-hidden="true" />;
   if (tier === 'phone') {
     return (
       <>
         {dot}
         <span class="when">{m.clock}</span>
-        {m.shortTag && <span class="tag warn">{m.shortTag.short}</span>}
+        {m.shortTag && !noTag && <span class="tag warn">{m.shortTag.short}</span>}
       </>
     );
   }
@@ -144,15 +147,25 @@ function Full({ f }: { f: PillFull }) {
 /**
  * 市場ピル（#87。docs/ui-redesign.md §2.1・§3）。要約をボタンに、全文をポップオーバーに。
  * 表示モデルは ui/view/marketPill.ts（NextApp の useMemo）。data-state は読み込みの状態（ui:check が待つ）。
+ * noTag（#87 (B)）: スマホで警告のタグがあるときは短縮形のタグを出さない（`● HH:mm` だけ。BOX タブの帯を 360px に
+ * 入れるため。● の色・aria-label・ポップオーバーの全文は変えない）。
  */
-export function MarketPill({ m, tier }: { m: MarketPillModel; tier: Tier }) {
+export function MarketPill({
+  m,
+  tier,
+  noTag = false,
+}: {
+  m: MarketPillModel;
+  tier: Tier;
+  noTag?: boolean;
+}) {
   return (
     <div class="pill" data-state={m.state}>
       <Popover
         label={m.summary}
         buttonClass={tier === 'phone' ? 'market-pill mini' : 'market-pill'}
         popClass="wide"
-        button={<Summary m={m} tier={tier} />}
+        button={<Summary m={m} tier={tier} noTag={noTag} />}
       >
         <Full f={m.full} />
       </Popover>
