@@ -81,7 +81,7 @@ option-simulator の画面を「書類」から「計器」に作り直すため
 ```
 
 - 2 列。左 = 舞台 + シナリオ（常設なのでドックに「シナリオ」は無い）、右 = ドックで切り替える 1 枚（ポジション / 板 / 指標 / スマイル）
-- 読み取りは 5 つ（指定日・満期・Δ・Θ・V）
+- 読み取りは 5 つ（指定日・満期・Δ・Θ・V）。個数は舞台の幅のコンテナクエリで決める（< 480px で 3、480〜599px で 5、≥ 600px で 6。#82）
 
 ### 2.4 PC（≥ 1200px、例 1440×900）
 
@@ -101,7 +101,7 @@ option-simulator の画面を「書類」から「計器」に作り直すため
 
 - 列の比: 市場 `minmax(340px, 30%)` / 舞台 `1fr` / 作業台 `minmax(360px, min(28%, 420px))`。1280 で舞台 ≈ 540px、1440 で ≈ 600px、1800 で ≈ 760px
 - 板の列数は **板の枠の幅** で決める（≥ 540px で 9 列、≥ 410px で 7 列 = Δ 無し、未満は 5 列 + put/call セグメント）。1800px 以上で 9 列になる
-- 舞台・シナリオはコンテナクエリで自分の幅に合わせる（読み取りの個数・ステッパーの列数・拡大ボタンの表示）
+- 舞台・シナリオはコンテナクエリで自分の幅に合わせる（読み取りの個数・ステッパーの列数・拡大ボタンの表示）。読み取りは舞台の幅 ≥ 600px で 6 つ（480〜599px は 5 つ、< 480px は 3 つ）
 - ドックは無い。板 / スマイルは市場列のセグメントで切替。各列は独立にスクロール
 
 ---
@@ -159,6 +159,16 @@ option-simulator の画面を「書類」から「計器」に作り直すため
 - 長押し中は文字選択・コンテキストメニューを出さない（今と同じ）
 - ドラッグ中は線の補間（§7）を切り、離したら戻す
 - ΔX の範囲・刻み（10 円格子、−40%〜+20%）・d の範囲（0〜最遠の SQ）・Δσ（−10〜+40pt、0.5）は今のまま
+
+**新しい画面（#82）の決め**（旧画面は今のまま）:
+
+- ハンドルは ΔX = 0 でも X₀ の上にある。つかむ幅は ±14px（旧画面は ±12px のまま。`gesture.ts` の `GestureCtx.scrub.grabPx`、省略時は今の `GRAB_PX`）
+- キー: ← → は ΔX（旧画面の `, .` `< >` と同じ刻み・範囲。← → でパンはしない）、↑ ↓ は Δσ ±0.5pt（`sliderSpec('dSigma')` の格子）、`[` `]` は d ±1 日（格子に乗せない。目盛りのタップで入った端数を保つ）、0 はシナリオを 0 に、+ − R は今のまま。解釈は `ui/view/stage.ts` の `stageKey`
+- 操作の優先: (1) 足マーカーの当たり判定（横 ±8px・横軸の上 14px の帯）→ タップで足を選ぶ、長押し 450ms → 横に滑らせて行使価格を変える（板の OP の足だけ）、長押し前に 6px 動けばパン (2) ハンドル ±14px → ΔX を即つかむ (3) それ以外 → パン / 長押しで ΔX。マーカーのタップはダブルタップ（リセット）の 1 回目に数えない（マウスの dblclick もマーカーの上では無視）。マーカーのドラッグ中に 2 本目の指が来たら取り消す（確定しない）
+- シートを全開にした舞台（92px）の描画域はミニ（線・塗り・0 の線・ハンドルの縦線だけ）で、操作を受けない
+- IV レールの感度は 0.25pt / px まで。レールが短い（トラック < 200px）ときは押した位置に飛ばさず、縦の移動量で動かす（相対）
+- 時間レールの現在値の吹き出しはつまみの下の文字の行に置き（描画域の目盛りの文字を隠さない）、重なる目盛りの文字は出さない
+- 凡例行のピン（①②③ + 名前 + ×）は線の凡例より先に場所を取り、縮むのは名前だけ（名前は省略記号。× は 24px の当たりで常に押せ、右の道具（ピン・拡大縮小・⋯・ⓘ）は縮まない。ピンのメニューにも「① 名前 を外す」）。交点のラベルは線（満期・指定日・今日）・他のラベル・IV レールの吹き出しに重ならない位置へ上下にずらす（元の位置から ±45px に無ければ縦線の反対側、それでも無ければ描画域の高さまで広げる。`stageMarkLabels`）
 
 ### 4.2 ステッパー（シナリオ）
 
@@ -320,7 +330,7 @@ option-simulator の画面を「書類」から「計器」に作り直すため
 | X₀ の縦線 | 細い点線 + 左肩に小さく X₀。ΔX = 0 のときはハンドルと重なる | あり |
 | シナリオ ATM | 紫の点線（今と同じ） | あり |
 | 縦軸の単位 | 左上に「千円 / 円」を常に | あり |
-| 足のマーカーのドラッグ（将来） | マーカーを横に滑らせて行使価格を変える（新しい K の bid / ask で建て直す。確認トースト付き） | なし（§12） |
+| 足のマーカーのドラッグ（#82） | マーカーを長押しして横に滑らせて行使価格を変える（板の OP の足だけ。新しい K の bid / ask で建て直す。確定は `changeLegStrike`、トーストの [元に戻す] は `restoreLeg`） | なし（§12） |
 | スマイル | 点のタップ → 選択行に「売り bid / 買い ask」。長押しで連続選択。ATM 線は `--handle`、シナリオ ATM は紫 | あり（拡大・パンは省略） |
 
 ---
@@ -355,7 +365,7 @@ option-simulator の画面を「書類」から「計器」に作り直すため
 | 段 | Issue の単位 | 依存 | 並列 |
 |---|---|---|---|
 | **0 土台** | (a) デザイントークン（`ui/next/css/tokens.css` の `:root` と `[data-theme]`。旧 `style.css` とは排他）とテーマの切替・保存（端末の設定 `option-simulator.prefs`。7.4）(b) 共通部品（seg / chip / stepper / menu / toast / dialog / popover）と折り返しの規則 (c) 3 段階のグリッド（`body` 固定、舞台 / シナリオ / 作業台 / 市場 / ドック / シート。画面の状態 panel / sheet / market は新しい画面のローカル `ui/view/shell.ts`。保存しない）。**#81 で a / b / c を 1 本で入れた**（10.1） | なし | a / b / c は並列可（c は a の変数名に合わせる） |
-| **1 舞台** | (d) 描画域の改修: ハンドル・足マーカー・塗り・ラベルの位置・X₀（`ui/view/pnlChart.ts` の出力に足マーカーと塗りのパスを足す）(e) IV レール・時間レール（`ui/view/scenario.ts` の `sliderSpec` を使う。目盛りは `evalTimeTargets`）(f) 読み取り（`readoutModel` をそのまま大きな数字に）(g) 面モード（新規 `ui/view/pnlSurface.ts`: 格子の評価 + canvas。ドラッグ時の粗い格子） | 0 | d / e / f は並列可。g は d の後 |
+| **1 舞台** | (d) 描画域の改修: ハンドル・足マーカー・塗り・ラベルの位置・X₀（#82 で、`pnlChart.ts` の出力は変えずに付属の表示モデル `ui/view/stage.ts` に置いた。`axisX` を export するだけ。DOM を持たない memo の連鎖は `ui/components/usePnlChartModel.ts` で旧画面と共有）(e) IV レール・時間レール（`ui/view/scenario.ts` の `sliderSpec` を使う。目盛りは `evalTimeTargets`）(f) 読み取り（`readoutModel` をそのまま大きな数字に）(g) 面モード（新規 `ui/view/pnlSurface.ts`: 格子の評価 + canvas。ドラッグ時の粗い格子） | 0 | d / e / f は並列可。g は d の後 |
 | **2 シナリオ** | (h) ステッパー（スクラブ・ホイール・数値入力）とプリセット・評価時刻のチップ、「モデルの前提」折りたたみ | 0 | 1 と並列可 |
 | **3 作業台** | (i) ポジションの行の見た目（枚数ステッパー・⇄・×・トースト [元に戻す]）と詳細 (j) ヘッジ 1 行 (k) 指標のタイルとテール表のバー (l) 足の追加ダイアログ | 0 | i / j / k / l は並列可 |
 | **4 市場** | (m) 板（枠幅で列数・チップ行・バッジ・脚注）(n) スマイル（選択行・ATM の色） | 0 | 並列可 |
@@ -370,17 +380,17 @@ option-simulator の画面を「書類」から「計器」に作り直すため
 
 - **入口**: 新しい画面は `?ui=next` だけ（`ui/entry.ts` の `uiVariant`。`ui` がちょうど `next`）。`ui/main.tsx` は保存した作業を 1 回読んでから、旧画面なら今までどおり `App` を描き、新しい画面なら (1) 起動時にある `link[rel="stylesheet"]`（旧 CSS）を集め、(2) テーマを `html[data-theme]` に入れ、(3) `import('./next/main')` が解決した（= 新しい CSS を読み終えた）後に旧 CSS を `disabled` にして描く（読めなければ旧画面を描く）。`ui/index.html` は変えない。旧 CSS の無効化は #91 で消す暫定
 - **置き場所**: 新しい画面は `ui/next/` だけ。領域の部品は `ui/next/regions/<Region>.tsx`（`Stage`・`Scenario`・`Positions`・`Metrics`・`Board`・`Smile`。#82 以降が作る）、共通部品は `ui/next/parts/`、表示のロジックは `ui/view/` の純関数（Preact に依存しない、`tests/ui/` で固める）。旧の部品（`ui/components/*`）を新しい画面に置かない（旧 CSS が効かない）。逆に新しい部品を旧画面に置かない。DOM・CSS を持たないフック（`useAppController`・`useMediaQuery`）は共有してよい
-- **状態**: 作業の状態・保存・共有は `ui/components/useAppController.ts`（旧 `App.tsx` から切り出した。旧画面と同じ `ui/state.ts` の reducer・自動保存・別のタブ・URL 共有・保存一覧の操作・表示モデルの useMemo）。新しい画面だけの見た目の状態は `NextApp` のローカル（`ui/view/shell.ts` 型の純関数 reducer。保存しない）。保存の形式（作業の版 2・保存一覧・URL）を変えるときは設計書を先に直す
+- **状態**: 作業の状態・保存・共有は `ui/components/useAppController.ts`（旧 `App.tsx` から切り出した。旧画面と同じ `ui/state.ts` の reducer・自動保存・別のタブ・URL 共有・保存一覧の操作・表示モデルの useMemo）。新しい画面だけの見た目の状態は `NextApp` のローカル（`ui/view/shell.ts` 型の純関数 reducer。保存しない）。保存の形式（作業の版 2・保存一覧・URL）を変えるときは設計書を先に直す。#82 で `ui/state.ts` に action を 2 つ足した（保存の形式は変えない）: `changeLegStrike { id, k }`（板の OP の足を同じ id・枚数・売買・限月・種別のまま新しい K の足に置き換える。建値・印・mid は `boardOptionLeg` の新しい K のもの、手入力の IV は外れる）と `restoreLeg { leg, index, expect, tab }`（作業中のタブが `tab` で、その id の今の足が `expect` と構造的に等しい（`expect = null` なら id が無い）ときだけ、置き換えか `index` への挿入で戻す。それ以外は何もしない。#84 の × / 全クリアの [元に戻す] にも使う）
 - **CSS**: `ui/next/next.css` が `css/tokens.css` → `base.css` → `parts.css` → `shell.css` → 領域ごとの `css/<region>.css`（後続が末尾に足す）を `@import`。クラス名は試作品に合わせる（`.layout`・`.panel`・`.panel-head`・`.panel-body`・`.dock`・`.seg`・`.chip`・`.chiprow`・`.stepper`・`.menu`・`.toasts` / `.toast`・`dialog.sheet`・`.tag`・`.ro`・`.tile`・`.leg-row`・`table.board`）。状態は ARIA 属性（`aria-pressed`・`aria-expanded`・`aria-checked`・`aria-disabled`）→ `data-*` 属性 → 短い修飾クラス（`.hot`・`.warn`・`.end`）の順で表す。BEM・CSS Modules は使わない
 - **色**: `ui/next/**/*.css` で色の値（hex・`rgb()`・`hsl()`・色の名前）を書けるのは `tokens.css` のテーマの定義（`:root, :root[data-theme="dark"]` と `:root[data-theme="light"]`）の中だけ。`color-mix()` もトークン同士。足りない色は役割の名前で `tokens.css` に足す（7.4）。`tests/ui/cssTokens.test.ts`（CI に入る）が (a) 色の置き場所 (b) 7.1・7.2 の表の値（テストの中に写した定数。表を直したらテストも直す）(c) `var(--x)` の名前がすべて定義済み、を確かめる
 - **幅の段階**: CSS は `@media (max-width: 719.98px)` / `(min-width: 720px) and (max-width: 1199.98px)` / `(min-width: 1200px)`。JS は `PHONE_QUERY`・`PC_QUERY`（`ui/view/layout.ts`）と `layoutTier`（`ui/view/shell.ts`）。パネルの中の詰め方はコンテナクエリ（`.panel-body` が `container-type: inline-size`）
-- **画面の状態の規則**（`ui/view/shell.ts`）: 既定 positions / peek / board。ドックの別のボタン → そのパネル（hidden なら peek）、開いている同じボタン → hidden。つまみ（スマホ、見えているシートの先頭に 1 つ）は離したときの縦の移動量で決め、6px 未満はタップ（peek ⇄ full）、40px 以上で 1 段（下: full → peek → hidden、上: peek → full）、その間は何もしない。hidden ではつまみが無い。タブレットで scenario は選べない（positions に読み替える）。出し分けは `.layout[data-panel][data-sheet][data-market]` と CSS
+- **画面の状態の規則**（`ui/view/shell.ts`）: 既定 positions / peek / board。ドックの別のボタン → そのパネル（hidden なら peek）、開いている同じボタン → hidden。`open`（#82。舞台の足マーカーのタップなど）はそのパネルを開くだけで閉じない（hidden なら peek）。つまみ（スマホ、見えているシートの先頭に 1 つ）は離したときの縦の移動量で決め、6px 未満はタップ（peek ⇄ full）、40px 以上で 1 段（下: full → peek → hidden、上: peek → full）、その間は何もしない。hidden ではつまみが無い。タブレットで scenario は選べない（positions に読み替える）。出し分けは `.layout[data-panel][data-sheet][data-market]` と CSS
 - **CSP**: `style` 属性・JSX の `style` prop・HTML 文字列を DOM に入れる API を使わない。位置・大きさが動くもの（シート・ハンドル・レールのつまみ・メニューの左右）は `data-*` / クラスの付け替えか SVG の属性。シートは指に追従させない
 - **折り返し**: 5.1。値・ラベル・ボタン・セグメント・チップは `white-space: nowrap`。ボタンの中でアイコンと文字を縦に積むときは文字を `span` に入れる（直下のテキストにしない）
 - **ページはスクロールしない**: `html, body { height: 100%; overflow: hidden }`、画面は `100dvh` のグリッド（トップバー → 知らせの行 → 本体）。スクロールは `.panel-body`（`overflow: auto; overscroll-behavior: contain`）だけ
 - **メニュー・ポップオーバー**: `overflow` を切らない親（トップバー・`.panel-head`）に置く。ボタンの親に対する絶対配置 + `.end`（ボタンが画面の右半分なら右端に揃える）。開くのは同時に 1 つ（`ui/next/parts/overlay.ts`）。メニューのキーは `ui/view/menu.ts`、ポップオーバーの開閉は `ui/view/hint.ts` の `hintNext`
 - **部品の API**: `Seg`・`Chip` / `ChipRow`・`Stepper`（規則は `ui/view/stepper.ts`。スクラブ・ホイール・数値入力は #83）・`Menu`・`Popover`・`Dialog`・`useToasts` / `Toasts`（規則は `ui/view/toast.ts`。2.2 秒・[元に戻す] 付き 5 秒・同じ種類は置き換え・最大 3 件）。部品の見本は dev だけの `?ui=next&parts`（`ui/next/dev/PartsGallery.tsx`。本番のビルドに入らない）
-- **検査**: `npm run ui:check`（`scripts/uiCheck.mjs`。Playwright の Chromium。CI に入れない。入れるかは #91 で決める）が 360×780・390×844・900×1100・1440×900 × ダーク / ライト（スマホはシート 3 段階）のページの縦・横スクロール（body が `overflow: hidden` で切っているはみ出しも数える）と折り返しの件数を出す。新しい画面で縦か横が 0 より大きければ失敗。`--parts`（部品の見本）・`--legacy`（旧画面）・`--flows`（保存・共有・テーマ・キーボードの手順）・`--dom`・`--shots`・`--max-wraps`・`--url`。各子の PR に `npm run ui:check` と `npm run ui:check -- --parts --max-wraps 0` の出力を貼り、縦・横 0px を保ち、折り返しの件数を増やさない
+- **検査**: `npm run ui:check`（`scripts/uiCheck.mjs`。Playwright の Chromium。CI に入れない。入れるかは #91 で決める）が 360×780・390×844・900×1100・1440×900 × ダーク / ライト（スマホはシート 3 段階）のページの縦・横スクロール（body が `overflow: hidden` で切っているはみ出しも数える）と折り返しの件数を出す。新しい画面で縦か横が 0 より大きければ失敗。#82 からスマホは 5 つのパネル × シート 3 段階のすべてを測り、各状態で舞台の読み取り（`.readout .ro`）が画面内に見えているか（スマホ 3・900 で 5・1440 で 6、値が切れていない）も確かめる（外れたら失敗）。`--flows` には舞台の手順（ハンドル・IV / 時間レール・キー・足マーカー・Long Animation Frame の件数）も入る。`--parts`（部品の見本）・`--legacy`（旧画面）・`--flows`（保存・共有・テーマ・キーボードの手順）・`--dom`・`--shots`・`--max-wraps`・`--url`。各子の PR に `npm run ui:check` と `npm run ui:check -- --parts --max-wraps 0` の出力を貼り、縦・横 0px を保ち、折り返しの件数を増やさない
 - **知らせ**: #81 の時点の知らせ（保存・共有を開く確認・読み込み中 / 失敗・足を追加できない）はトップバーの下の行に旧画面と同じ文で出す暫定。#87 でトーストとトップバーのタグへ移す
 
 ---
@@ -427,3 +437,11 @@ option-simulator の画面を「書類」から「計器」に作り直すため
 
 - 7: `html[data-theme]` は解決した値。7.4 を新設（テーマの保存は端末のキー `option-simulator.prefs` の版 1、作業の保存には入れない。表に無い役割の色・色でないトークンの名前と値）
 - 10: 段 0 の行を実装に合わせて直した（トークンは `ui/next/css/tokens.css`、テーマは作業の状態でなく端末の設定、panel / sheet / market は新しい画面のローカルで保存しない）。10.1 を新設（入口・置き場所・状態・CSS・色・幅・画面の状態の規則・CSP・折り返し・メニュー・部品・検査の規約）
+
+### 2026-10-17 段 1 の舞台（#82）
+
+- 4.1: 新しい画面の決め（ハンドルは ΔX = 0 でも X₀ 上・つかむ幅 ±14px、キー ← → = ΔX・↑ ↓ = Δσ・`[` `]` = d ±1 日（格子に乗せない）・0 = シナリオを 0 に、足マーカーの操作の優先、シート全開のミニは操作を受けない）。レビューで足したもの: IV レールの感度の上限（0.25pt / px。短いレールは相対）、時間レールの吹き出しはつまみの下の文字の行、凡例行のピン（縮むのは名前だけ・× は 24px・右の道具は縮まない）、交点のラベルは線・他のラベル・IV レールの吹き出しを避ける
+- 2.3・2.4: 読み取りの個数は舞台の幅のコンテナクエリ（< 480px で 3、480〜599px で 5、≥ 600px で 6）。試作品の閾値（560 / 680）だと実測の舞台の幅（900 = 518px、1440 = 605px）で 2.3・2.4 の個数にならないため、設計の個数を優先して下げた
+- 8: 足マーカーのドラッグを実装（確定は `changeLegStrike`、[元に戻す] は `restoreLeg`）
+- 10 段 1 (d): 付属の表示モデル（ハンドル・塗り・足マーカー・位置 → K・読み取りの文字列・レール・キー・ミニの枠・ラベルの退避）は `pnlChart.ts` の出力に足さず、新規 `ui/view/stage.ts` に置いた（旧画面の表示モデルの出力と既存のテストを変えないため）。旧 `PnlChart.tsx` の DOM を持たない memo の連鎖は `ui/components/usePnlChartModel.ts` に移して共有
+- 10.1 状態: `ui/state.ts` に action `changeLegStrike`・`restoreLeg`（保存の形式は変えない）。画面の状態の規則に `open`（閉じない）。検査: `npm run ui:check` に読み取りの検査（スマホ 5 パネル × 3 段階）、`--flows` に舞台の手順

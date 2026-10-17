@@ -8,6 +8,10 @@
  * - scrub を渡したとき（損益グラフ。#52）: 長押し（6px 未満のまま 450ms）・縦線の ±12px の押下でつかみ、
  *   指の位置を onScrub に要素の座標で渡す。キー , . < > は onScrubKey に渡す。長押しの OS のメニュー
  *   （contextmenu）を止める
+ * - 新しい画面の舞台（#82。旧画面・スマイルは渡さない = 今のまま）: scrub.grabPx でつかむ幅、arrowPan: false で
+ *   ← / → をパンに使わず onScrubKey(key, shiftKey) へ、markers で足マーカーのタップ・長押しドラッグ
+ *   （onMarkerTap / onMarkerDrag（1 フレーム 1 回）/ onMarkerDrop / onMarkerCancel）。マーカーの上の dblclick は
+ *   リセットしない。長押しでつかんだ（ハンドル・マーカー）ときは onLongPress
  *
  * 規則はすべて純関数（ui/chart/scale.ts・ui/chart/gesture.ts）。ここはイベントを受けて渡すだけ。
  * move・wheel の反映は requestAnimationFrame で 1 フレーム 1 回にまとめる。最新の props は ref で持ち、
@@ -26,6 +30,7 @@ import {
   gestureUp,
   initialGesture,
   LONG_PRESS_MS,
+  markerAt,
   type PointerSample,
 } from '../chart/gesture';
 import { type Domain, panBy, pixelToValue, wheelFactor, zoom, zoomAt } from '../chart/scale';
@@ -47,12 +52,26 @@ export interface ChartGestureOptions {
   /** 表示範囲の変更（null = リセット） */
   onViewport: (viewport: Domain | null) => void;
   onTap?: (x: number, y: number) => void;
-  /** 長押し・縦線をつかむ操作を有効にする（linePx = つかめる縦線の画素。無ければ null。#52） */
-  scrub?: { linePx: number | null };
+  /**
+   * 長押し・縦線をつかむ操作を有効にする（linePx = つかめる縦線の画素。無ければ null。#52）。
+   * grabPx = つかむ幅（省略時は GRAB_PX。#82）
+   */
+  scrub?: { linePx: number | null; grabPx?: number };
   /** つかんでいる位置（要素の座標の画素。1 フレーム 1 回） */
   onScrub?: (x: number) => void;
-  /** グラフのキー（, . < >）。扱ったら true（既定の動作を止める） */
-  onScrubKey?: (key: string) => boolean;
+  /** グラフのキー（, . < >。arrowPan: false なら ← / → も）。扱ったら true（既定の動作を止める） */
+  onScrubKey?: (key: string, shiftKey: boolean) => boolean;
+  /** ← / → をパンに使う（省略時 true = 今のまま。false なら onScrubKey に渡す。#82） */
+  arrowPan?: boolean;
+  /** 足マーカーの当たり判定（#82。gesture.ts の GestureCtx.markers） */
+  markers?: GestureCtx['markers'];
+  onMarkerTap?: (id: number) => void;
+  /** マーカーのドラッグ中の指の位置（要素の座標の画素。1 フレーム 1 回） */
+  onMarkerDrag?: (id: number, x: number) => void;
+  onMarkerDrop?: (id: number, x: number) => void;
+  onMarkerCancel?: (id: number) => void;
+  /** 長押しでつかんだ（ハンドル・マーカーのドラッグの開始。端末の軽い振動などに使う） */
+  onLongPress?: () => void;
 }
 
 export function useChartGestures(ref: RefObject<HTMLElement>, opts: ChartGestureOptions): void {
@@ -67,6 +86,8 @@ export function useChartGestures(ref: RefObject<HTMLElement>, opts: ChartGesture
     let pending: Domain | null = null;
     /** まだ反映していない、つかんでいる位置 */
     let pendingScrub: number | null = null;
+    /** まだ反映していない、マーカーのドラッグの位置 */
+    let pendingMarker: { id: number; x: number } | null = null;
     let frame = 0;
     /** 長押しのタイマー */
     let longTimer = 0;
@@ -80,16 +101,20 @@ export function useChartGestures(ref: RefObject<HTMLElement>, opts: ChartGesture
         full: o.full,
         minWidth: o.minWidth,
         ...(o.scrub ? { scrub: o.scrub } : {}),
+        ...(o.markers ? { markers: o.markers } : {}),
       };
     };
     const flush = () => {
       frame = 0;
       const v = pending;
       const sx = pendingScrub;
+      const mk = pendingMarker;
       pending = null;
       pendingScrub = null;
+      pendingMarker = null;
       if (v) optsRef.current.onViewport(v);
       if (sx !== null) optsRef.current.onScrub?.(sx);
+      if (mk) optsRef.current.onMarkerDrag?.(mk.id, mk.x);
     };
     const schedule = (v: Domain) => {
       pending = v;
@@ -97,6 +122,10 @@ export function useChartGestures(ref: RefObject<HTMLElement>, opts: ChartGesture
     };
     const scheduleScrub = (x: number) => {
       pendingScrub = x;
+      if (!frame) frame = requestAnimationFrame(flush);
+    };
+    const scheduleMarker = (m: { id: number; x: number }) => {
+      pendingMarker = m;
       if (!frame) frame = requestAnimationFrame(flush);
     };
     const clearLong = () => {
@@ -120,8 +149,16 @@ export function useChartGestures(ref: RefObject<HTMLElement>, opts: ChartGesture
       else if (res.viewport) schedule(res.viewport);
       if (res.scrub) scheduleScrub(res.scrub.x);
       if (res.tap) optsRef.current.onTap?.(res.tap.x, res.tap.y);
-      // 長押しを待つのは 1 本の押下（pending）の間だけ
-      if (state.mode !== 'pending' || state.pointers.length !== 1) clearLong();
+      if (res.markerDrag) scheduleMarker(res.markerDrag);
+      // 離す・取り消しの後に前のフレームの位置を流さない
+      if (res.markerDrop || res.markerCancel) pendingMarker = null;
+      if (res.markerTap) optsRef.current.onMarkerTap?.(res.markerTap.id);
+      if (res.markerDrop) optsRef.current.onMarkerDrop?.(res.markerDrop.id, res.markerDrop.x);
+      if (res.markerCancel) optsRef.current.onMarkerCancel?.(res.markerCancel.id);
+      // 長押しを待つのは 1 本の押下（pending・マーカーの上）の間だけ
+      if ((state.mode !== 'pending' && state.mode !== 'marker') || state.pointers.length !== 1) {
+        clearLong();
+      }
     };
 
     const onDown = (e: PointerEvent) => {
@@ -135,19 +172,29 @@ export function useChartGestures(ref: RefObject<HTMLElement>, opts: ChartGesture
         // capture できない環境でも操作は続ける
       }
       apply(gestureDown(state, sample(e), ctx()));
-      if (optsRef.current.scrub && state.mode === 'pending' && state.pointers.length === 1) {
+      const waits =
+        (optsRef.current.scrub && state.mode === 'pending') ||
+        (state.mode === 'marker' && state.marker?.drag === true);
+      if (waits && state.pointers.length === 1) {
         clearLong();
         // PointerEvent.timeStamp と同じ時計（performance.now）で発火時刻を渡す
         longTimer = window.setTimeout(() => {
           longTimer = 0;
+          const before = state.mode;
           apply(gestureLongPress(state, performance.now(), ctx()));
+          if (before !== state.mode) optsRef.current.onLongPress?.();
         }, LONG_PRESS_MS);
       }
     };
     const onMove = (e: PointerEvent) => {
       if (state.pointers.length === 0) return;
       apply(gestureMove(state, sample(e), ctx()));
-      if (state.mode === 'drag' || state.mode === 'pinch' || state.mode === 'scrub') {
+      if (
+        state.mode === 'drag' ||
+        state.mode === 'pinch' ||
+        state.mode === 'scrub' ||
+        state.mode === 'markerDrag'
+      ) {
         e.preventDefault();
       }
     };
@@ -190,10 +237,12 @@ export function useChartGestures(ref: RefObject<HTMLElement>, opts: ChartGesture
           next = zoom(v, KEY_ZOOM_OUT, o.full, o.minWidth);
           break;
         case 'ArrowLeft':
-          next = panBy(v, -(v[1] - v[0]) * KEY_PAN_RATIO, o.full);
-          break;
         case 'ArrowRight':
-          next = panBy(v, (v[1] - v[0]) * KEY_PAN_RATIO, o.full);
+          if (o.arrowPan === false) {
+            if (o.onScrubKey?.(e.key, e.shiftKey)) e.preventDefault();
+            return;
+          }
+          next = panBy(v, (e.key === 'ArrowLeft' ? -1 : 1) * (v[1] - v[0]) * KEY_PAN_RATIO, o.full);
           break;
         case 'r':
         case 'R':
@@ -201,7 +250,7 @@ export function useChartGestures(ref: RefObject<HTMLElement>, opts: ChartGesture
           reset();
           return;
         default:
-          if (o.onScrubKey?.(e.key)) e.preventDefault();
+          if (o.onScrubKey?.(e.key, e.shiftKey)) e.preventDefault();
           return;
       }
       e.preventDefault();
@@ -210,13 +259,19 @@ export function useChartGestures(ref: RefObject<HTMLElement>, opts: ChartGesture
     const onDbl = (e: MouseEvent) => {
       if (optsRef.current.disabled) return;
       if ((e.target as Element | null)?.closest('button, input, select, label')) return;
+      // 足マーカーの上のダブルクリックはリセットしない（#82）
+      if (optsRef.current.markers) {
+        const r = el.getBoundingClientRect();
+        if (markerAt(ctx(), e.clientX - r.left, e.clientY - r.top)) return;
+      }
       e.preventDefault();
       reset();
     };
 
     // 長押しで OS のメニュー（Android Chrome の長押しメニュー・右クリック）を出さない（損益グラフだけ）
     const onContextMenu = (e: Event) => {
-      if (optsRef.current.scrub && !optsRef.current.disabled) e.preventDefault();
+      const o = optsRef.current;
+      if ((o.scrub || o.markers) && !o.disabled) e.preventDefault();
     };
 
     el.addEventListener('pointerdown', onDown);

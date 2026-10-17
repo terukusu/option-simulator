@@ -6,10 +6,12 @@
 // 作業の保存（版 2）として localStorage に入れて開く（UI の操作に依存しない。旧画面にも同じ足）。
 //
 //   npm run ui:check                       新しい画面（?ui=next）: 360 / 390 / 900 / 1440 × ダーク / ライト、
-//                                          スマホはシート hidden / peek / full
+//                                          スマホはシート hidden / peek / full × パネル 5 つ。各状態で舞台の読み取り
+//                                          （.readout .ro）が画面内に見えているか（スマホ 3・900 で 5・1440 で 6。#82）
 //   npm run ui:check -- --parts            部品の見本（?ui=next&parts。dev だけ）
 //   npm run ui:check -- --legacy           旧画面（?ui=next なし）
-//   npm run ui:check -- --flows            保存・共有・テーマ・キーボードの手順（AC-11・AC-12）を pass / fail で出す
+//   npm run ui:check -- --flows            保存・共有・テーマ・キーボードの手順（#81 AC-11・AC-12）と舞台の手順
+//                                          （#82: ハンドル・IV / 時間レール・キー・足マーカー・Long Animation Frame）
 //   --url <base>                           dev サーバーを起こさず、その URL を使う（例 http://127.0.0.1:5173/?ui=next&parts）
 //   --dom <file>                           body の下の要素の tag.class の並びを書き出す（旧画面が変わらないことの比較用）
 //   --shots <dir>                          スクリーンショットを書く（合成の板だけ。リポジトリに入れない）
@@ -17,7 +19,8 @@
 //
 // 縦・横 = ページのスクロール量（scrollHeight − innerHeight・scrollWidth − innerWidth）。body が切っている（overflow: hidden）
 // はみ出しも数える（body の scrollHeight − clientHeight との大きい方）。
-// 終了コード: 新しい画面（部品の見本を含む）で縦か横が 0 より大きい、--max-wraps の超過、--flows の fail で 1。
+// 終了コード: 新しい画面（部品の見本を含む）で縦か横が 0 より大きい、読み取りの検査の失敗、--max-wraps の超過、
+// --flows の fail で 1。
 // 折り返しの規則は EPIC #92 の as-is と同じ: 直下のテキストが 40 字以下の要素で、その中身の行（getClientRects の上端）が
 // 2 つ以上。P・LI・DD・TEXTAREA・OPTION と .help-popover・[role="tooltip"]・閉じた details の中は除く。
 
@@ -209,7 +212,7 @@ function domList(page) {
 let failed = false;
 const domOut = [];
 
-async function report(page, label, w, h, shotName) {
+async function report(page, label, w, h, shotName, shot = true) {
   const r = await measure(page);
   const bad = mode !== 'legacy' && (r.v > 0 || r.h > 0);
   const over = maxWraps !== null && r.wraps.length > maxWraps;
@@ -217,7 +220,71 @@ async function report(page, label, w, h, shotName) {
   const mark = bad || over ? '  ← NG' : '';
   console.log(`${label} ${w}x${h}: 縦 ${r.v}px 横 ${r.h}px 折り返し ${r.wraps.length} 件${mark}`);
   for (const s of r.wraps.slice(0, 30)) console.log(`    ${s}`);
-  if (shotsDir) await page.screenshot({ path: join(shotsDir, `${shotName}.png`) });
+  if (shotsDir && shot) await page.screenshot({ path: join(shotsDir, `${shotName}.png`) });
+}
+
+/**
+ * 読み取り（大きな数字。#82 AC-12）: 表示している .readout .ro[data-ro] の個数が want、各要素が画面内（幅と高さ > 0）・
+ * 中心の elementFromPoint がその要素の中（他の面に隠れていない）・値（.v）が切れていない（scrollWidth ≤ clientWidth）
+ */
+async function readoutCheck(page, label, want) {
+  const r = await page.evaluate(() => {
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    const items = [...document.querySelectorAll('.readout .ro[data-ro]')].filter(
+      (el) => getComputedStyle(el).display !== 'none',
+    );
+    const bad = [];
+    for (const el of items) {
+      const b = el.getBoundingClientRect();
+      const inView =
+        b.width > 0 && b.height > 0 && b.left >= 0 && b.top >= 0 && b.right <= vw && b.bottom <= vh;
+      const hit = document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2);
+      const onTop = hit !== null && el.contains(hit);
+      const v = el.querySelector('.v');
+      const cut = !v || v.scrollWidth > v.clientWidth;
+      if (!inView || !onTop || cut) {
+        bad.push(
+          `${el.getAttribute('data-ro')}${inView ? '' : ' 画面外'}${onTop ? '' : ' 隠れ'}${cut ? ' 切れ' : ''}`,
+        );
+      }
+    }
+    return { n: items.length, bad };
+  });
+  const ok = r.n === want && r.bad.length === 0;
+  readoutStats.total++;
+  if (ok) readoutStats.pass++;
+  else failed = true;
+  if (!ok) console.log(`${label}: 読み取り ${r.n} / ${want} つ ${r.bad.join('・')}  ← NG`);
+  return ok;
+}
+const readoutStats = { pass: 0, total: 0 };
+
+const PANELS = ['positions', 'board', 'scenario', 'metrics', 'smile'];
+
+/** スマホの画面の状態（パネル・シート）をドックとつまみで作る（.layout の data-panel / data-sheet を読んで確かめる） */
+async function setShell(page, panel, sheet) {
+  const st = () =>
+    page.evaluate(() => {
+      const l = document.querySelector('.layout');
+      return { panel: l?.getAttribute('data-panel'), sheet: l?.getAttribute('data-sheet') };
+    });
+  for (let i = 0; i < 8; i++) {
+    const cur = await st();
+    if (cur.panel === panel && cur.sheet === sheet) return true;
+    if (cur.panel !== panel || cur.sheet === 'hidden') {
+      // 別のパネル → そのパネル（hidden なら peek）。同じパネルで hidden → peek
+      await page.click(`.dock button[data-panel="${panel}"]`);
+    } else if (sheet === 'hidden') {
+      await page.click(`.dock button[data-panel="${panel}"]`);
+    } else {
+      // peek ⇄ full はつまみのタップ
+      await page.click('.grabber');
+    }
+    await page.waitForTimeout(120);
+  }
+  const cur = await st();
+  return cur.panel === panel && cur.sheet === sheet;
 }
 
 async function measureAll() {
@@ -236,21 +303,154 @@ async function measureAll() {
       if (mode === 'next' && w <= PHONE_MAX) {
         // シート 3 段階: peek（既定）→ hidden（開いているドックのボタン）→ full（もう一度で peek、つまみのタップ）
         await report(page, `${tag} peek`, w, h, `${name}-peek`);
+        await readoutCheck(page, `${tag} positions/peek ${w}x${h}`, 3);
         await page.click('.dock button[data-panel="positions"]');
         await page.waitForTimeout(150);
         await report(page, `${tag} hidden`, w, h, `${name}-hidden`);
+        await readoutCheck(page, `${tag} positions/hidden ${w}x${h}`, 3);
         await page.click('.dock button[data-panel="positions"]');
         await page.click('.grabber');
         await page.waitForTimeout(150);
         await report(page, `${tag} full`, w, h, `${name}-full`);
+        await readoutCheck(page, `${tag} positions/full ${w}x${h}`, 3);
+        const stageH = await page.evaluate(
+          () => document.querySelector('section.stage')?.getBoundingClientRect().height ?? null,
+        );
+        if (stageH !== 92) {
+          failed = true;
+          console.log(
+            `${tag} full ${w}x${h}: section.stage の高さ ${stageH}px（92px のはず）  ← NG`,
+          );
+        }
+        // 残りのパネル × シート 3 段階（読み取りと、縦・横・折り返し）
+        for (const panel of PANELS.slice(1)) {
+          for (const sheet of ['peek', 'hidden', 'full']) {
+            const ok = await setShell(page, panel, sheet);
+            const lbl = `${tag} ${panel}/${sheet}`;
+            if (!ok) {
+              failed = true;
+              console.log(`${lbl} ${w}x${h}: 画面の状態を作れない  ← NG`);
+              continue;
+            }
+            await page.waitForTimeout(100);
+            await report(page, lbl, w, h, `${name}-${panel}-${sheet}`, false);
+            await readoutCheck(page, `${lbl} ${w}x${h}`, 3);
+          }
+        }
       } else {
         await report(page, tag, w, h, name);
+        if (mode === 'next') await readoutCheck(page, `${tag} ${w}x${h}`, w >= 1200 ? 6 : 5);
       }
       if (domFile) domOut.push(`## ${w}x${h}${theme ? ` ${theme}` : ''}`, await domList(page));
       await ctx.close();
     }
   }
   if (domFile) writeFileSync(domFile, `${domOut.join('\n')}\n`);
+  if (mode === 'next') {
+    // ピン 3 本の凡例（#82 のレビュー B1）: 各サイズのダークで
+    for (const [w, h] of SIZES) {
+      await pinCheck(w, h, false);
+      // タブの名前が上限（12 文字）の長さ（レビュー block-1 の回帰の検査）
+      await pinCheck(w, h, true);
+    }
+    console.log(`読み取りの検査: ${readoutStats.pass} / ${readoutStats.total} 状態で pass`);
+  }
+}
+
+/** 足 2 本のタブ A + タブ「ヘッジ案」（重ねる相手）の作業 */
+const twoTabs = JSON.stringify({ ...fixture, active: 0, tabs: [fixture.tabs[0], fixture.tabs[1]] });
+/** 同じ作業で、タブの名前を上限（TAB_NAME_MAX = 12 文字）の長さにしたもの */
+const LONG_NAMES = ['長い名前のタブ一二三四五', '別の長いヘッジ案ですよね'];
+const twoTabsLong = JSON.stringify({
+  ...fixture,
+  active: 0,
+  tabs: [
+    { ...fixture.tabs[0], name: LONG_NAMES[0] },
+    { ...fixture.tabs[1], name: LONG_NAMES[1] },
+  ],
+});
+
+/**
+ * ピン 3 本（今の線を残す × 2 + ヘッジ案を重ねる）の凡例: 各ピンの番号と × が凡例行の中に見え（幅 > 0）、× の当たりが
+ * 24px 以上・中心の elementFromPoint が × 自身、× を押すとそのピンが外れる。この状態の縦・横・折り返し・読み取りも測る
+ */
+async function pinCheck(w, h, long) {
+  const ctx = await newContext(
+    { width: w, height: h },
+    {
+      [WORKSPACE_KEY]: long ? twoTabsLong : twoTabs,
+      [PREFS_KEY]: prefsText('dark'),
+    },
+  );
+  const page = await ctx.newPage();
+  await page.goto(pageUrl('next'));
+  await waitReady(page, 'next');
+  const add = async (text) => {
+    await page.click('button[aria-label="ピン"]');
+    await page.click(`[role="menuitem"]:has-text("${text}")`);
+    await page.waitForTimeout(150);
+  };
+  await add('今の線を残す');
+  await add(`${long ? LONG_NAMES[1] : 'ヘッジ案'} を重ねる`);
+  await add('今の線を残す');
+  const tag = `next dark ピン 3 本${long ? '（12 文字の名前）' : ''}`;
+  const name = `next-${w}x${h}-dark-pins3${long ? '-long' : ''}`;
+  await report(page, tag, w, h, name);
+  await readoutCheck(page, `${tag} ${w}x${h}`, w <= PHONE_MAX ? 3 : w >= 1200 ? 6 : 5);
+  const r = await page.evaluate(() => {
+    const head = document.querySelector('.stage-head')?.getBoundingClientRect();
+    const stage = document.querySelector('section.stage')?.getBoundingClientRect();
+    const chips = [...document.querySelectorAll('.pins .pin-chip')];
+    const bad = [];
+    for (const c of chips) {
+      const no = c.querySelector('.pin-no');
+      const x = c.querySelector('.pin-x');
+      const nb = no?.getBoundingClientRect();
+      const xb = x?.getBoundingClientRect();
+      const inside = (b) =>
+        !!b && !!head && b.width > 0 && b.left >= head.left && b.right <= head.right + 0.5;
+      const label = no?.textContent ?? '?';
+      if (!inside(nb)) bad.push(`${label} 番号が見えない`);
+      if (!inside(xb)) bad.push(`${label} × が見えない`);
+      else {
+        if (xb.width < 24 || xb.height < 24)
+          bad.push(`${label} × の当たり ${xb.width}x${xb.height}`);
+        const hit = document.elementFromPoint(xb.left + xb.width / 2, xb.top + xb.height / 2);
+        if (hit !== x) bad.push(`${label} × が隠れている`);
+      }
+    }
+    // 凡例行の右の道具（ピン・拡大縮小・⋯・ⓘ。出しているものすべて）が舞台の中にあって押せる
+    const tools = [...document.querySelectorAll('.stage-tools button')].filter(
+      (b) => b.getClientRects().length > 0,
+    );
+    for (const b of tools) {
+      const bb = b.getBoundingClientRect();
+      const label = b.getAttribute('aria-label') ?? b.textContent ?? '?';
+      const inStage =
+        !!stage && !!head && bb.width > 0 && bb.left >= stage.left && bb.right <= stage.right + 0.5;
+      if (!inStage) {
+        bad.push(`道具「${label}」が舞台の外`);
+        continue;
+      }
+      const hit = document.elementFromPoint(bb.left + bb.width / 2, bb.top + bb.height / 2);
+      if (!hit || !b.contains(hit)) bad.push(`道具「${label}」が押せない`);
+    }
+    return { n: chips.length, tools: tools.length, bad };
+  });
+  let ok = r.n === 3 && r.tools >= 3 && r.bad.length === 0;
+  if (ok) {
+    await page.click('.pins .pin-chip:nth-child(2) .pin-x');
+    await page.waitForTimeout(150);
+    const n = await page.locator('.pins .pin-chip').count();
+    const btn = await page.textContent('button[aria-label="ピン"]');
+    ok = n === 2 && (btn ?? '').includes('2/3');
+    if (!ok) r.bad.push(`× の後 ${n} 本（${btn}）`);
+  }
+  if (!ok) failed = true;
+  console.log(
+    `${tag} ${w}x${h}: 凡例のピン ${r.n} 本・× と道具 ${r.tools} 個が見えて押せる ${ok ? 'pass' : `NG ${r.bad.join('・')}`}`,
+  );
+  await ctx.close();
 }
 
 // ---- 手順（AC-11・AC-12）
@@ -499,6 +699,287 @@ async function runFlows() {
     );
     await ctx.close();
   }
+
+  // #82 舞台の手順（AC-13・AC-14・AC-15）
+  for (const vp of [phone, pc]) await stageFlows(vp);
+}
+
+// ---- 舞台の手順（#82）
+const board = JSON.parse(readFileSync(join(root, 'fixtures/synthetic/latest.json'), 'utf8'));
+/** 合成の板のその限月・K の put の bid */
+const putBid = (month, k) =>
+  board.months.find((m) => m.contract_month === month)?.rows.find((r) => r.k === k)?.put.bid ??
+  null;
+/** 画面の符号付きの整数（fmtSigned(v, 0) と同じ: +1,234 / −1,234 / 0） */
+const signedText = (v) => {
+  const s = new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 }).format(Math.abs(v));
+  return v > 0 ? `+${s}` : v < 0 ? `−${s}` : '0';
+};
+
+/** Long Animation Frame（50ms 超）の数を数える observer（ページより先に入れる） */
+const LOAF_INIT = `
+  window.__loaf = [];
+  try {
+    new PerformanceObserver((list) => {
+      for (const e of list.getEntries()) window.__loaf.push(e.duration);
+    }).observe({ type: 'long-animation-frame', buffered: true });
+    window.__loafOk = true;
+  } catch {
+    window.__loafOk = false;
+  }
+`;
+
+async function stageFlows(vp) {
+  const tag = `${vp.width}x${vp.height}`;
+  const ctx = await newContext(vp, { [WORKSPACE_KEY]: twoLegs });
+  await ctx.addInitScript(LOAF_INIT);
+  const page = await ctx.newPage();
+  await page.goto(pageUrl('next'));
+  await waitReady(page, 'next');
+  const saved = async () => {
+    await page.waitForTimeout(700); // 自動保存（500ms の debounce）
+    return page.evaluate((k) => {
+      try {
+        const ws = JSON.parse(localStorage.getItem(k) ?? 'null');
+        const pos = ws?.tabs?.[ws.active]?.position;
+        return { scenario: pos?.scenario ?? null, legs: pos?.legs ?? [] };
+      } catch {
+        return { scenario: null, legs: [] };
+      }
+    }, WORKSPACE_KEY);
+  };
+  const box = async (sel) => {
+    const b = await page.locator(sel).first().boundingBox();
+    if (!b) throw new Error(`${sel} が無い`);
+    return { x: b.x + b.width / 2, y: b.y + b.height / 2, b };
+  };
+  const aria = (sel) =>
+    page.evaluate((s) => Number(document.querySelector(s)?.getAttribute('aria-valuenow')), sel);
+  const loafOk = await page.evaluate(() => window.__loafOk === true);
+  const loafMark = () => page.evaluate(() => window.__loaf.length);
+  const loafSince = (i) =>
+    page.evaluate((n) => window.__loaf.slice(n).filter((d) => d > 50).length, i);
+  const drag = async (from, dx, dy, steps) => {
+    await page.mouse.move(from.x, from.y);
+    await page.mouse.down();
+    await page.mouse.move(from.x + dx, from.y + dy, { steps });
+    await page.mouse.up();
+  };
+  const axes = new Set();
+  const loafs = [];
+
+  // 始めにシナリオを 0 に（描画域にフォーカスして 0）
+  await page.focus('.chart');
+  await page.keyboard.press('0');
+  const s0 = (await saved()).scenario;
+  check(
+    `#82 ${tag} 描画域の 0 でシナリオが 0 に`,
+    s0?.dX === 0 && s0?.days === 0 && s0?.dSigma === 0,
+    JSON.stringify(s0),
+  );
+
+  // (a) ハンドルを横に 60px → ΔX（10 円の倍数）。保存と読み取りの副題が同じ値
+  {
+    const h = await box('.chart .handle-hit');
+    const mark = await loafMark();
+    await drag(h, 60, 0, 30);
+    const lf = await loafSince(mark);
+    loafs.push(`ハンドル ${lf}`);
+    const sc = (await saved()).scenario;
+    const sub = await page.textContent('.ro[data-ro="date"] .s');
+    const dX = sc?.dX ?? 0;
+    const ok = dX !== 0 && dX % 10 === 0 && (sub ?? '').includes(`(${signedText(dX)}/`);
+    if (ok) axes.add('ΔX');
+    check(`#82 AC-13(a) ${tag} ハンドルを 60px → ΔX ${dX}・副題と同じ`, ok, sub ?? '');
+    check(
+      `#82 AC-15 ${tag} ハンドルのドラッグ 30 回の move で長いフレーム 0 件`,
+      loafOk && lf === 0,
+      loafOk ? `${lf} 件` : '未対応',
+    );
+  }
+
+  // (b) IV レールのつまみを上に 40px → Δσ > 0、ダブルクリックで 0
+  {
+    const k = await box('.ivrail .knob');
+    const mark = await loafMark();
+    await drag(k, 0, -40, 30);
+    const lf = await loafSince(mark);
+    loafs.push(`IV レール ${lf}`);
+    const now = await aria('.ivrail');
+    const sc = (await saved()).scenario;
+    const ok = now > 0 && sc?.dSigma === now;
+    if (ok) axes.add('Δσ');
+    check(`#82 AC-13(b) ${tag} IV レールを上に 40px → Δσ ${now}（保存 ${sc?.dSigma}）`, ok);
+    check(
+      `#82 AC-15 ${tag} IV レールのドラッグ 30 回で長いフレーム 0 件`,
+      loafOk && lf === 0,
+      loafOk ? `${lf} 件` : '未対応',
+    );
+    const k2 = await box('.ivrail .knob');
+    await page.mouse.dblclick(k2.x, k2.y);
+    await page.waitForTimeout(100);
+    const z = await aria('.ivrail');
+    const sc2 = (await saved()).scenario;
+    check(
+      `#82 AC-13(b) ${tag} IV レールのダブルクリックで 0`,
+      z === 0 && sc2?.dSigma === 0,
+      `${z} / ${sc2?.dSigma}`,
+    );
+  }
+
+  // (c) 時間レールのつまみを右に 60px → d が 1 以上の整数、SQ の目盛りのタップ → daysToTarget の値
+  {
+    const k = await box('.timerail .knob');
+    const mark = await loafMark();
+    await drag(k, 60, 0, 30);
+    const lf = await loafSince(mark);
+    loafs.push(`時間レール ${lf}`);
+    const now = await aria('.timerail');
+    const sc = (await saved()).scenario;
+    const ok = Number.isInteger(now) && now >= 1 && sc?.days === now;
+    if (ok) axes.add('d');
+    check(`#82 AC-13(c) ${tag} 時間レールを右に 60px → d ${now}（保存 ${sc?.days}）`, ok);
+    check(
+      `#82 AC-15 ${tag} 時間レールのドラッグ 30 回で長いフレーム 0 件`,
+      loafOk && lf === 0,
+      loafOk ? `${lf} 件` : '未対応',
+    );
+    const t = await box('.timerail .mark.sq');
+    const want = Number(await page.getAttribute('.timerail .mark.sq', 'data-days'));
+    await page.mouse.click(t.x, t.y);
+    await page.waitForTimeout(100);
+    const got = await aria('.timerail');
+    const sc2 = (await saved()).scenario;
+    check(
+      `#82 AC-13(c) ${tag} SQ の目盛りのタップ → d = daysToTarget`,
+      got === want && sc2?.days === want && !Number.isInteger(want),
+      `${got} / 期待 ${want}`,
+    );
+  }
+
+  // (d) キー: 描画域で → ↑ ] → ΔX +100・Δσ +0.5・d +1、IV レールで ↑、時間レールで →
+  {
+    await page.focus('.chart');
+    await page.keyboard.press('0');
+    const a = (await saved()).scenario;
+    await page.keyboard.press('ArrowRight');
+    await page.keyboard.press('ArrowUp');
+    await page.keyboard.press(']');
+    const b = (await saved()).scenario;
+    check(
+      `#82 AC-13(d) ${tag} 描画域の → ↑ ] で ΔX +100・Δσ +0.5・d +1`,
+      b?.dX === a.dX + 100 && b?.dSigma === a.dSigma + 0.5 && b?.days === a.days + 1,
+      `${JSON.stringify({ dX: b?.dX, dSigma: b?.dSigma, days: b?.days })}`,
+    );
+    await page.focus('.ivrail');
+    await page.keyboard.press('ArrowUp');
+    await page.focus('.timerail');
+    await page.keyboard.press('ArrowRight');
+    const c = (await saved()).scenario;
+    check(
+      `#82 AC-13(d) ${tag} IV レールの ↑ で Δσ +0.5、時間レールの → で d +1`,
+      c?.dSigma === b.dSigma + 0.5 && c?.days === b.days + 1,
+      `${c?.dSigma} / ${c?.days}`,
+    );
+  }
+  check(
+    `#82 AC-13 ${tag} グラフの上で動かせる軸 ${axes.size} / 3`,
+    axes.size === 3,
+    [...axes].join('・'),
+  );
+
+  // AC-15 ホイール 20 回・パン 30 回
+  {
+    const c = await box('.chart');
+    const mark = await loafMark();
+    await page.mouse.move(c.b.x + c.b.width * 0.3, c.b.y + c.b.height * 0.35);
+    for (let i = 0; i < 20; i++) {
+      await page.mouse.wheel(0, i < 10 ? -60 : 60);
+      await page.waitForTimeout(16);
+    }
+    const lfWheel = await loafSince(mark);
+    const mark2 = await loafMark();
+    await drag({ x: c.b.x + c.b.width * 0.3, y: c.b.y + c.b.height * 0.35 }, -90, 0, 30);
+    const lfPan = await loafSince(mark2);
+    loafs.push(`ホイール ${lfWheel}`, `パン ${lfPan}`);
+    check(
+      `#82 AC-15 ${tag} ホイール 20 回で長いフレーム 0 件`,
+      loafOk && lfWheel === 0,
+      loafOk ? `${lfWheel} 件` : '未対応',
+    );
+    check(
+      `#82 AC-15 ${tag} パン 30 回で長いフレーム 0 件`,
+      loafOk && lfPan === 0,
+      loafOk ? `${lfPan} 件` : '未対応',
+    );
+    console.log(`      ${tag} Long Animation Frame（50ms 超）: ${loafs.join('・')}`);
+    await page.focus('.chart');
+    await page.keyboard.press('r');
+  }
+
+  // AC-14 (a) マーカーのタップ → ポジションのパネルが開き（スマホは peek）、マーカーが強調
+  const phoneSize = vp.width <= PHONE_MAX;
+  if (phoneSize) {
+    await setShell(page, 'board', 'hidden');
+    await page.waitForTimeout(150);
+  }
+  {
+    const m = await box('.legmark[data-leg-id="1"]');
+    await page.mouse.click(m.x, m.y);
+    await page.waitForTimeout(150);
+    const st = await page.evaluate(() => {
+      const l = document.querySelector('.layout');
+      return {
+        panel: l?.getAttribute('data-panel'),
+        sheet: l?.getAttribute('data-sheet'),
+        sel: document.querySelector('.legmark.sel')?.getAttribute('data-leg-id') ?? null,
+      };
+    });
+    check(
+      `#82 AC-14(a) ${tag} マーカーのタップ → ポジションのパネル${phoneSize ? '（peek）' : ''}・強調`,
+      st.panel === 'positions' && (!phoneSize || st.sheet === 'peek') && st.sel === '1',
+      JSON.stringify(st),
+    );
+  }
+
+  // AC-14 (b) 売りの put のマーカーを長押し 500ms → 1 つ上の行使価格までドラッグ → 離す → [元に戻す]
+  {
+    const before = (await saved()).legs[0]?.leg;
+    const m = await box('.legmark[data-leg-id="1"]');
+    await page.mouse.move(m.x, m.y);
+    await page.mouse.down();
+    await page.waitForTimeout(500);
+    const next = 63625;
+    let reached = false;
+    let label = '';
+    for (let i = 1; i <= 80 && !reached; i++) {
+      await page.mouse.move(m.x + i, m.y);
+      await page.waitForTimeout(20);
+      label = (await page.textContent('.chart .legdrag').catch(() => null)) ?? '';
+      reached = label === `K ${next.toLocaleString('en-US')}`;
+    }
+    await page.mouse.up();
+    const after = (await saved()).legs[0]?.leg;
+    const bid = putBid('2026-11', next);
+    const toast = (await page.textContent('.toast .txt').catch(() => null)) ?? '';
+    check(
+      `#82 AC-14(b) ${tag} マーカーの長押しドラッグで K ${before?.strike} → ${after?.strike}・建値 ${after?.entry}（bid ${bid}）`,
+      reached &&
+        before?.strike === 63500 &&
+        after?.strike === next &&
+        after?.entry === bid &&
+        toast.includes('63,625'),
+      `トースト「${toast}」`,
+    );
+    await page.click('.toast button');
+    const back = (await saved()).legs[0]?.leg;
+    check(
+      `#82 AC-14(b) ${tag} [元に戻す] で元の strike・entry`,
+      back?.strike === before?.strike && back?.entry === before?.entry,
+      `${back?.strike} @${back?.entry}`,
+    );
+  }
+  await ctx.close();
 }
 
 try {

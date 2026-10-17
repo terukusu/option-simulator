@@ -1,0 +1,803 @@
+/*
+ * 舞台（docs/ui-redesign.md §2・§5・§8。#82。部品は ui/next/regions/Stage.tsx・ui/next/stage/）。
+ * 凡例行 → 描画域 + IV レール → 時間レール → 読み取り。クラス名は試作品に合わせる。色は var(--…) だけ。
+ * 位置が動くもの（ハンドル・マーカー・レールのつまみ・吹き出し）は SVG の属性で描く（style 属性を使わない）。
+ * 読み取りの個数・拡大ボタンの表示は舞台の幅のコンテナクエリ（container: stage）。
+ */
+
+section.stage {
+  container: stage / inline-size;
+}
+
+/* ===== 凡例行 ===== */
+.stage-head {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: var(--sp-2);
+  height: 40px;
+  min-width: 0;
+  padding: 0 var(--sp-3);
+}
+
+.legend {
+  display: flex;
+  flex: 1 1 0;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--ink-2);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.legend > span {
+  display: inline-flex;
+  flex: 0 1 auto;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+}
+
+/* 入らない線の凡例の文字は省略記号（§5.1） */
+.legend > span > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.legend > .tag {
+  flex: 0 0 auto;
+}
+
+.legend i {
+  display: inline-block;
+  flex: 0 0 auto;
+  width: 16px;
+  height: 0;
+  border-top: 2px solid;
+}
+
+.legend i.exp {
+  border-color: var(--expiry);
+}
+
+.legend i.sc {
+  border-color: var(--accent);
+}
+
+.legend i.td {
+  border-color: var(--today);
+  border-top-style: dashed;
+}
+
+/*
+ * ピンの凡例: 線の凡例より先に場所を取り、縮むのは名前だけ（§4.1。× は 24px の当たりで常に押せる）。
+ * 1 本の下限 = 余白 4 + 線種 14 + 番号 + × 24 と間隔（名前 0）。右の道具（.stage-tools）は縮まない
+ */
+.pins {
+  display: flex;
+  flex: 0 1 auto;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.pins[data-n="1"] {
+  min-width: 68px;
+}
+
+.pins[data-n="2"] {
+  min-width: 138px;
+}
+
+.pins[data-n="3"] {
+  min-width: 208px;
+}
+
+.pin-chip {
+  display: inline-flex;
+  flex: 0 1 auto;
+  align-items: center;
+  gap: 3px;
+  min-width: 68px;
+  padding-left: var(--sp-1);
+  color: var(--ink-2);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.pin-chip i {
+  display: inline-block;
+  flex: 0 0 auto;
+  width: 14px;
+  height: 0;
+  border-top: 2px solid;
+}
+
+.pin-chip i.p1 {
+  border-color: var(--pin1);
+  border-top-style: dashed;
+}
+
+.pin-chip i.p2 {
+  border-color: var(--pin2);
+  border-top-style: dotted;
+}
+
+.pin-chip i.p3 {
+  border-color: var(--pin3);
+  border-top-style: dashed;
+}
+
+.pin-chip .pin-no {
+  flex: 0 0 auto;
+  font-weight: 600;
+}
+
+.pin-chip .pin-no.p1 {
+  color: var(--pin1);
+}
+
+.pin-chip .pin-no.p2 {
+  color: var(--pin2);
+}
+
+.pin-chip .pin-no.p3 {
+  color: var(--pin3);
+}
+
+.pin-chip .pin-name {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 8em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pin-chip .pin-x {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--ink-3);
+  line-height: 1;
+}
+
+.pin-chip .pin-x:hover {
+  background: var(--s3);
+  color: var(--ink);
+}
+
+.stage-tools {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: var(--sp-1);
+  margin-left: auto;
+}
+
+.stage-tools .zb {
+  display: inline-flex;
+  gap: 2px;
+}
+
+.stage-pop {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  min-width: 220px;
+}
+
+.stage-pop .row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  white-space: nowrap;
+}
+
+.stage-pop .row label {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+}
+
+.stage-pop .lbl {
+  color: var(--ink-3);
+  font-size: var(--fs-sm);
+}
+
+.stage-pop input {
+  height: 26px;
+  padding: 0 6px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-sm);
+  background: var(--s1);
+  font-family: var(--mono);
+}
+
+.stage-pop input[aria-invalid="true"] {
+  border-color: var(--loss);
+}
+
+.stage-pop .field-error {
+  color: var(--loss);
+  font-size: var(--fs-sm);
+}
+
+/* 舞台が広いときは拡大ボタンを行に出し、⋯ の中の分を隠す */
+.stage-pop .zb-in {
+  display: none;
+}
+
+/* ===== 本体（描画域 + IV レール → 時間レール → 読み取り） ===== */
+section.stage > .panel-body.stage-main {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.stage-body {
+  display: grid;
+  flex: 1 1 auto;
+  grid-template-columns: minmax(0, 1fr) 34px;
+  min-height: 0;
+}
+
+.chart {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  outline: none;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+
+.chart:focus-visible {
+  border-radius: var(--r-sm);
+  box-shadow: inset 0 0 0 2px var(--accent);
+}
+
+.chart > svg {
+  position: absolute;
+  inset: 0;
+  display: block;
+}
+
+.chart > .note {
+  padding: var(--sp-4) var(--sp-3);
+  color: var(--ink-3);
+  font-size: var(--fs-sub);
+}
+
+.chart .grid line {
+  stroke: var(--line);
+  stroke-width: 1;
+}
+
+.chart .ax text {
+  fill: var(--ink-3);
+  font-family: var(--mono);
+  font-size: 10.5px;
+}
+
+.chart .ax .tick-y,
+.chart .ax .unit {
+  text-anchor: end;
+  dominant-baseline: central;
+}
+
+.chart .ax .unit {
+  font-size: 9.5px;
+}
+
+.chart .ax .tick-x {
+  text-anchor: middle;
+}
+
+.chart .zero {
+  stroke: var(--line-2);
+  stroke-width: 1;
+}
+
+.chart .ln {
+  fill: none;
+  stroke-linejoin: round;
+}
+
+.chart .ln.expiry {
+  stroke: var(--expiry);
+  stroke-width: 2;
+}
+
+.chart .ln.date {
+  stroke: var(--accent);
+  stroke-width: 2.25;
+}
+
+.chart .ln.today {
+  stroke: var(--today);
+  stroke-width: 1.5;
+  stroke-dasharray: 5 4;
+}
+
+.chart .ln-pin {
+  fill: none;
+  stroke-width: 1.75;
+}
+
+.chart .ln-pin.p1 {
+  stroke: var(--pin1);
+  stroke-dasharray: 6 3;
+}
+
+.chart .ln-pin.p2 {
+  stroke: var(--pin2);
+  stroke-dasharray: 2 2;
+}
+
+.chart .ln-pin.p3 {
+  stroke: var(--pin3);
+  stroke-dasharray: 8 3 2 3;
+}
+
+.chart .fill-gain {
+  fill: var(--gain-fill);
+}
+
+.chart .fill-loss {
+  fill: var(--loss-fill);
+}
+
+.chart .vline {
+  stroke: var(--handle);
+  stroke-width: 1.25;
+  stroke-dasharray: 3 3;
+}
+
+.chart .x0 {
+  stroke: var(--ink-3);
+  stroke-width: 1;
+  stroke-dasharray: 2 3;
+}
+
+.chart .atm2 {
+  stroke: var(--pin2);
+  stroke-width: 1;
+  stroke-dasharray: 2 3;
+}
+
+.chart .bep {
+  fill: var(--s1);
+  stroke: var(--expiry);
+  stroke-width: 1.5;
+}
+
+.chart .handle {
+  fill: var(--handle);
+  stroke: var(--s1);
+  stroke-width: 2;
+}
+
+.chart .handle-ring {
+  fill: none;
+  stroke: var(--handle);
+  stroke-width: 1.25;
+  opacity: 0.55;
+}
+
+.chart .grip {
+  fill: var(--handle);
+}
+
+.chart .handle-hit {
+  stroke: transparent;
+  stroke-width: 28;
+  cursor: ew-resize;
+  pointer-events: stroke;
+}
+
+.chart .xpt {
+  stroke: var(--s1);
+  stroke-width: 1.5;
+}
+
+.chart .xpt.expiry {
+  fill: var(--expiry);
+}
+
+.chart .xpt.date {
+  fill: var(--accent);
+}
+
+.chart .xpt.today {
+  fill: var(--today);
+}
+
+.chart .xpt-lbl {
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 600;
+  dominant-baseline: central;
+  paint-order: stroke;
+  stroke: var(--s1);
+  stroke-width: 3px;
+  stroke-linejoin: round;
+}
+
+.chart .xpt-lbl.end {
+  text-anchor: end;
+}
+
+.chart .xpt-lbl.expiry {
+  fill: var(--expiry);
+}
+
+.chart .xpt-lbl.date {
+  fill: var(--accent);
+}
+
+.chart .xpt-lbl.today {
+  fill: var(--today);
+}
+
+.chart .pinlbl {
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 600;
+  text-anchor: end;
+  dominant-baseline: central;
+  paint-order: stroke;
+  stroke: var(--s1);
+  stroke-width: 3px;
+}
+
+.chart .pinlbl.p1 {
+  fill: var(--pin1);
+}
+
+.chart .pinlbl.p2 {
+  fill: var(--pin2);
+}
+
+.chart .pinlbl.p3 {
+  fill: var(--pin3);
+}
+
+.chart .legmark {
+  fill: var(--ink-2);
+  cursor: pointer;
+}
+
+.chart .legmark.sell {
+  fill: var(--s1);
+  stroke: var(--ink-2);
+  stroke-width: 1.5;
+}
+
+.chart .legmark.sel,
+.chart .legmark.drag {
+  fill: var(--handle);
+  stroke: var(--handle);
+}
+
+.chart .legtxt {
+  fill: var(--ink-3);
+  font-family: var(--mono);
+  font-size: 10px;
+}
+
+.chart .x0-lbl {
+  text-anchor: end;
+}
+
+.chart .legdrag {
+  fill: var(--handle);
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 600;
+  text-anchor: middle;
+  paint-order: stroke;
+  stroke: var(--s1);
+  stroke-width: 3px;
+}
+
+/* ===== IV レール（右） ===== */
+.ivrail {
+  position: relative;
+  min-height: 0;
+  border-left: 1px solid var(--line);
+  outline: none;
+  touch-action: none;
+  user-select: none;
+  cursor: ns-resize;
+}
+
+.ivrail > svg,
+.timerail > svg {
+  position: absolute;
+  inset: 0;
+  display: block;
+  overflow: visible;
+}
+
+.ivrail:focus-visible,
+.timerail:focus-visible {
+  border-radius: var(--r-sm);
+  box-shadow: inset 0 0 0 2px var(--accent);
+}
+
+.ivrail .track {
+  stroke: var(--line-2);
+  stroke-width: 2;
+  stroke-linecap: round;
+}
+
+.ivrail .zero {
+  stroke: var(--ink-3);
+  stroke-width: 1;
+}
+
+.ivrail .lbl {
+  fill: var(--ink-3);
+  font-family: var(--mono);
+  font-size: 10px;
+  text-anchor: middle;
+}
+
+.ivrail .knob,
+.timerail .knob {
+  fill: var(--s1);
+  stroke: var(--accent);
+  stroke-width: 2;
+}
+
+.ivrail.hot .knob,
+.timerail.hot .knob {
+  fill: var(--accent);
+}
+
+.ivrail .cur,
+.timerail .cur {
+  pointer-events: none;
+}
+
+.ivrail .cur rect,
+.timerail .cur rect {
+  fill: var(--s3);
+}
+
+.ivrail .cur text,
+.timerail .cur text {
+  fill: var(--accent-ink);
+  font-family: var(--mono);
+  font-size: 11px;
+  dominant-baseline: central;
+}
+
+.ivrail .cur text {
+  text-anchor: end;
+}
+
+.timerail .cur text {
+  text-anchor: middle;
+}
+
+/* ===== 時間レール（下） ===== */
+.timerail {
+  position: relative;
+  flex: 0 0 auto;
+  height: 44px;
+  margin: 0 var(--sp-1);
+  outline: none;
+  touch-action: none;
+  user-select: none;
+  cursor: ew-resize;
+}
+
+.timerail[aria-disabled="true"] {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.timerail .track {
+  fill: var(--s3);
+}
+
+.timerail .fillbar {
+  fill: var(--accent);
+  opacity: 0.7;
+}
+
+.timerail .mark {
+  stroke: var(--ink-3);
+  stroke-width: 2;
+}
+
+.timerail .mark.sq {
+  stroke: var(--ink-2);
+}
+
+.timerail .mtxt {
+  fill: var(--ink-3);
+  font-family: var(--mono);
+  font-size: 10px;
+  text-anchor: middle;
+}
+
+.timerail .mtxt.start {
+  text-anchor: start;
+}
+
+.timerail .mtxt.end {
+  text-anchor: end;
+}
+
+/* ===== 読み取り（大きな数字） ===== */
+.readout {
+  display: grid;
+  flex: 0 0 auto;
+  grid-auto-flow: column;
+  grid-template-columns: minmax(max-content, 1.6fr);
+  grid-auto-columns: minmax(max-content, 1fr);
+  gap: var(--sp-2);
+  min-width: 0;
+  padding: var(--sp-2) var(--sp-3) 10px;
+  border-top: 1px solid var(--line);
+}
+
+.ro {
+  min-width: 0;
+}
+
+/* 見出し・副題は列の幅を決めない（値だけで決める）。入らなければ省略記号 */
+.ro .k,
+.ro .s {
+  overflow: hidden;
+  contain: inline-size;
+  color: var(--ink-3);
+  font-size: var(--fs-xs);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.ro .s {
+  font-family: var(--mono);
+}
+
+.ro.hero .k {
+  color: var(--accent-ink);
+}
+
+.ro .v {
+  font-family: var(--mono);
+  font-size: var(--fs-ro);
+  font-weight: 600;
+  line-height: 1.15;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.ro.hero .v {
+  font-size: var(--fs-hero);
+}
+
+.ro .v small {
+  margin-left: 2px;
+  color: var(--ink-3);
+  font-size: var(--fs-sm);
+  font-weight: 500;
+}
+
+.ro .v.gain {
+  color: var(--gain);
+}
+
+.ro .v.loss {
+  color: var(--loss);
+}
+
+/* 個数: 舞台の幅 < 480px は 3 つ、480〜599px は 5 つ、≥ 600px は 6 つ（§2.3・§2.4） */
+.readout .ro.x1,
+.readout .ro.x2 {
+  display: none;
+}
+
+@container stage (min-width: 480px) {
+  .readout .ro.x1 {
+    display: block;
+  }
+}
+
+@container stage (min-width: 600px) {
+  .readout .ro.x2 {
+    display: block;
+  }
+}
+
+/* 拡大ボタン: 舞台の幅 < 480px は ⋯ の中 */
+@container stage (max-width: 479.98px) {
+  .stage-tools .zb {
+    display: none;
+  }
+
+  .stage-pop .zb-in {
+    display: flex;
+  }
+
+  .pin-chip .pin-name,
+  .pin-chip i {
+    display: none;
+  }
+
+  /* 番号と × だけ（余白 4 + 番号 + × 24 と間隔） */
+  .pin-chip {
+    min-width: 48px;
+  }
+
+  .pins[data-n="1"] {
+    min-width: 48px;
+  }
+
+  .pins[data-n="2"] {
+    min-width: 98px;
+  }
+
+  .pins[data-n="3"] {
+    min-width: 148px;
+  }
+}
+
+/* ===== スマホ ===== */
+@media (max-width: 719.98px) {
+  .stage-head {
+    height: 36px;
+    padding: 0 10px;
+  }
+
+  .legend {
+    gap: var(--sp-2);
+    font-size: var(--fs-sm);
+  }
+
+  .stage-body {
+    grid-template-columns: minmax(0, 1fr) 30px;
+  }
+
+  .readout {
+    gap: 6px;
+    padding: 6px var(--sp-3) var(--sp-2);
+  }
+
+  /* 全開（舞台 92px）: 線と読み取りだけ（ミニ。凡例行・レールは JS が出さない） */
+  .layout[data-sheet="full"] .stage-body {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .layout[data-sheet="full"] .readout {
+    padding: 2px var(--sp-3) 4px;
+    border-top: 0;
+  }
+
+  .layout[data-sheet="full"] .ro .s {
+    display: none;
+  }
+
+  .layout[data-sheet="full"] .ro .v {
+    font-size: 15px;
+  }
+
+  .layout[data-sheet="full"] .ro.hero .v {
+    font-size: 20px;
+  }
+}

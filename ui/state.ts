@@ -253,6 +253,16 @@ export type Action =
   | { type: 'addFutureLeg'; input: FutureLegInput }
   | { type: 'addManualLeg'; input: ManualOptionLegInput }
   | { type: 'editLeg'; id: number; patch: LegPatch }
+  /**
+   * 板の OP の足の行使価格を変える（#82。舞台の足マーカーのドラッグ）: 同じ id・枚数・売買・限月・種別のまま、
+   * 新しい K の足（legAtStrike = boardOptionLeg）に置き換える。作れなければ何もしない
+   */
+  | { type: 'changeLegStrike'; id: number; k: number }
+  /**
+   * 足を戻す（#82 の [元に戻す]。#84 の × / 全クリアにも使う）。作業中のタブが tab で、その id の今の足が expect と
+   * 構造的に等しい（expect = null なら id が無い）ときだけ、置き換えるか index に挿入する。それ以外は何もしない
+   */
+  | { type: 'restoreLeg'; leg: UiLeg; index: number; expect: UiLeg | null; tab: number }
   | { type: 'removeLeg'; id: number }
   | { type: 'clearLegs' }
   | { type: 'clearLegError' }
@@ -295,6 +305,50 @@ export type Action =
   | { type: 'removePin'; no: number }
   | { type: 'clearPins' }
   | { type: 'setPinLine'; line: PinLineMode };
+
+/**
+ * 板の OP の足 ui を行使価格 k に建て直した足（#82。reducer の changeLegStrike と画面のトーストが共有）。
+ * 限月・種別・売買・枚数・id は同じ、建値・印・mid は新しい K の boardOptionLeg（売り = bid / 買い = ask、
+ * 気配が無ければ既定）、手入力の IV は外れる。OP でない・手入力の限月（optionMarket）・同じ K・板に無い K は null。
+ */
+export function legAtStrike(chain: Chain | null, ui: UiLeg, k: number): UiLeg | null {
+  const leg = ui.leg;
+  if (!chain || leg.kind !== 'option' || ui.optionMarket || ui.futureMarket) return null;
+  if (!Number.isFinite(k) || k === leg.strike) return null;
+  try {
+    const built = boardOptionLeg(chain, {
+      expiry: leg.expiry,
+      k,
+      type: leg.type,
+      side: leg.side,
+      qty: leg.qty,
+    });
+    return { id: ui.id, leg: built.leg, marks: built.marks };
+  } catch {
+    return null;
+  }
+}
+
+const sameRecord = (a: object, b: object): boolean => {
+  const ka = Object.keys(a);
+  const kb = Object.keys(b);
+  if (ka.length !== kb.length) return false;
+  const rb = b as Record<string, unknown>;
+  return ka.every((k) => {
+    const va = (a as Record<string, unknown>)[k];
+    const vb = rb[k];
+    if (va === vb) return true;
+    if (va && vb && typeof va === 'object' && typeof vb === 'object') {
+      return Array.isArray(va) === Array.isArray(vb) && sameRecord(va, vb);
+    }
+    return Number.isNaN(va) && Number.isNaN(vb);
+  });
+};
+
+/** 足の構造の比較（id・足の全キーと値・印の並び・手入力の市場の有無と中身）。 */
+export function sameUiLeg(a: UiLeg, b: UiLeg): boolean {
+  return a === b || sameRecord(a, b);
+}
 
 function errorText(e: unknown): string {
   return e instanceof Error ? e.message : '足を追加できない';
@@ -595,6 +649,32 @@ export function reduce(state: State, action: Action): State {
           l.id === action.id ? { ...l, leg: applyPatch(l.leg, action.patch) } : l,
         ),
       };
+    case 'changeLegStrike': {
+      const i = state.legs.findIndex((l) => l.id === action.id);
+      const cur = state.legs[i];
+      const next = cur ? legAtStrike(state.chain, cur, action.k) : null;
+      if (!next) return state;
+      const legs = state.legs.slice();
+      legs[i] = next;
+      return { ...state, legs };
+    }
+    case 'restoreLeg': {
+      if (state.activeTab !== action.tab) return state;
+      const { leg, expect } = action;
+      const i = state.legs.findIndex((l) => l.id === leg.id);
+      if (expect === null) {
+        if (i >= 0) return state;
+        const at = Math.min(Math.max(Math.trunc(action.index) || 0, 0), state.legs.length);
+        const legs = state.legs.slice();
+        legs.splice(at, 0, leg);
+        return { ...state, legs, nextId: Math.max(state.nextId, leg.id + 1) };
+      }
+      const cur = state.legs[i];
+      if (!cur || !sameUiLeg(cur, expect)) return state;
+      const legs = state.legs.slice();
+      legs[i] = leg;
+      return { ...state, legs };
+    }
     case 'removeLeg': {
       const legs = state.legs.filter((l) => l.id !== action.id);
       // 足が 0 本になったら全クリアと同じく初期範囲に戻す

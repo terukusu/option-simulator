@@ -41,6 +41,13 @@ import { positionModel } from '../../ui/view/position';
 import { readoutModel } from '../../ui/view/readout';
 import { scenarioMarks } from '../../ui/view/scenarioMarks';
 import { smileModel } from '../../ui/view/smile';
+import {
+  bigReadout,
+  legMarkers,
+  stageFill,
+  stageHandle,
+  stageMarkLabels,
+} from '../../ui/view/stage';
 import { tabsModel } from '../../ui/view/tabs';
 import { M1, M2, makeMarket } from '../support/market';
 import { BUDGET_MS, expectWithinBudget, RECORD_RUNS, record } from '../support/perf';
@@ -609,5 +616,79 @@ describe('性能（#22 AC8: ピン 3 本）', () => {
       warmup: 20,
       runs: 30,
     });
+  });
+});
+
+/**
+ * #82 AC-8: 新しい画面の舞台の 1 フレーム（足 10 本・幅 1,000px・高さ 260px）。ハンドルのドラッグは ΔX だけ変わる
+ * （今日・指定日の線は memo 済みを渡す）、レールのドラッグは Δσ・d が変わる（指定日の線を作り直す）。どちらも
+ * 表示モデル + 舞台の付属（ハンドル・塗り・足マーカー・ラベルの退避）+ 交点 + 指標 + 読み取り。
+ */
+describe('性能（#82 AC-8: 舞台の 1 フレーム）', () => {
+  const { ctx, rows } = makeMarket();
+  const legs = preparePosition(PERF_LEGS, ctx);
+  const uiLegs: UiLeg[] = PERF_LEGS.map((leg, i) => ({ id: i + 1, leg, marks: [] }));
+  const board = {
+    months: [
+      { F: M1.F, rows: rows[M1.id] ?? [] },
+      { F: M2.F, rows: rows[M2.id] ?? [] },
+    ],
+  };
+  const base = pnlDomains(board, legs, ctx);
+  if (!base) throw new Error('損益グラフの基礎が作れない');
+  const scenario0 = { ...ZERO_SCENARIO, days: 5, dSigma: 2 };
+  const today = todayLine(base, null, 1000, scenario0);
+  const date0 = dateLine(base, null, 1000, scenario0);
+  let tick = 0;
+
+  function stageFrame(scenario: typeof scenario0, dateYs: number[] | null): number {
+    const m = pnlChartModel({
+      base,
+      scenario,
+      viewport: null,
+      pnlY: DEFAULT_PNL_Y,
+      plotWidth: 1000,
+      plotHeight: 260,
+      todayYs: today,
+      dateYs,
+    });
+    const mm = metricsModel({ base, scenario, unit: 'auto' });
+    const marks = scenarioMarks({ base, scenario, chart: m, unit: mm.unit });
+    const labels = marks ? stageMarkLabels(marks, m) : [];
+    const h = stageHandle(m, marks);
+    const fill = stageFill(m);
+    const ms = legMarkers(uiLegs, base, m, { selected: 1, drag: null });
+    const r = readoutModel({ base, metrics: mm, scenario });
+    const items = bigReadout(r, mm.premium, base?.ctx.evalTime ?? null, scenario.dSigma);
+    return (
+      m.lines.length +
+      labels.length +
+      (h ? 1 : 0) +
+      fill.gain.length +
+      fill.loss.length +
+      ms.length +
+      mm.tail.rows.length +
+      items.length
+    );
+  }
+
+  it(`ハンドルのドラッグ（ΔX）の 1 フレームが ${BUDGET_MS} ms 以内（30 回の最小値）`, () => {
+    const handleFrame = () => {
+      tick = (tick + 1) % 40;
+      return stageFrame({ ...scenario0, dX: -2_000 + tick * 100 }, date0);
+    };
+    expect(date0).not.toBeNull();
+    expect(handleFrame()).toBeGreaterThan(20);
+    expectWithinBudget('#82 舞台のハンドルの 1 フレーム', handleFrame, { warmup: 20, runs: 30 });
+  });
+
+  it(`レールのドラッグ（Δσ・d）の 1 フレームが ${BUDGET_MS} ms 以内（30 回の最小値）`, () => {
+    const railFrame = () => {
+      tick = (tick + 1) % 40;
+      const scenario = { ...scenario0, dX: -400, dSigma: tick * 0.5, days: tick % 2 === 0 ? 5 : 6 };
+      return stageFrame(scenario, dateLine(base, null, 1000, scenario));
+    };
+    expect(railFrame()).toBeGreaterThan(20);
+    expectWithinBudget('#82 舞台のレールの 1 フレーム', railFrame, { warmup: 20, runs: 30 });
   });
 });

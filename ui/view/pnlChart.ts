@@ -133,7 +133,8 @@ export function maxScenarioDays(prepared: readonly PreparedLeg[]): number {
   return max > 0 ? daysToExpire(max) : 0;
 }
 
-function axisX(k: number, F: number, x0: number, settings: ModelSettings): number {
+/** 行使価格 K（限月の F）の横軸上の位置（円: K − (F − X₀)、比率: K · X₀ / F。満期の折れ点・足マーカーと同じ写像）。 */
+export function axisX(k: number, F: number, x0: number, settings: ModelSettings): number {
   return settings.basisMode === 'yen' ? k - (F - x0) : (k * x0) / F;
 }
 

@@ -26,6 +26,8 @@ export const SHEET_TAP_PX = 6;
 
 export type ShellAction =
   | { type: 'dock'; panel: PanelId; tier: Tier }
+  /** そのパネルを開く（閉じない。hidden なら peek。舞台の足マーカーのタップなど。#82） */
+  | { type: 'open'; panel: PanelId; tier: Tier }
   /** つまみの縦の移動量（下向き正。離したときの値） */
   | { type: 'grab'; dy: number }
   | { type: 'market'; market: MarketView };
@@ -72,6 +74,11 @@ export function shellReduce(s: ShellState, a: ShellAction): ShellState {
       const current = visiblePanel(s, a.tier);
       if (panel === current && s.sheet !== 'hidden') return { ...s, panel, sheet: 'hidden' };
       return { ...s, panel, sheet: s.sheet === 'hidden' ? 'peek' : s.sheet };
+    }
+    case 'open': {
+      const panel = forTier(a.panel, a.tier);
+      const sheet = s.sheet === 'hidden' ? 'peek' : s.sheet;
+      return panel === s.panel && sheet === s.sheet ? s : { ...s, panel, sheet };
     }
     case 'grab': {
       const sheet = grab(s.sheet, a.dy);
