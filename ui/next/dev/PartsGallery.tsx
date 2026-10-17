@@ -40,6 +40,8 @@ export function PartsGallery() {
     { key: 'rename', label: '名前を変える', onSelect: () => setPicked('名前を変える') },
     { key: 'off', label: '閉じる（最後のタブ）', disabled: true, onSelect: () => {} },
     { key: 'share', label: 'URL をコピー', kbd: '⌘L', onSelect: () => setPicked('URL をコピー') },
+    // 区切り（#87）
+    { key: 'theme', label: 'テーマ', sep: true, onSelect: () => setPicked('テーマ') },
   ];
   return (
     <main class="parts-gallery">
@@ -151,7 +153,8 @@ export function PartsGallery() {
         </div>
         <p class="gal-note">選んだ項目: {picked}</p>
         <div class="menu gal-static" role="presentation">
-          {items.map((it) => (
+          {items.map((it) => [
+            it.sep ? <hr class="menu-sep" key={`${it.key}-sep`} /> : null,
             <button
               type="button"
               key={it.key}
@@ -160,8 +163,8 @@ export function PartsGallery() {
             >
               <span>{it.label}</span>
               {it.kbd && <span class="kbd">{it.kbd}</span>}
-            </button>
-          ))}
+            </button>,
+          ])}
         </div>
       </section>
 
@@ -191,6 +194,32 @@ export function PartsGallery() {
           >
             元に戻す付き
           </button>
+          <button
+            type="button"
+            class="btn"
+            onClick={() =>
+              toasts.push({
+                kind: 'note-restored',
+                text: '前回の作業を復元した（足 2 本。保存 2026-11-02 21:47、そのときの板 2026-11-02 21:31）。建値は保存時のまま',
+                note: 'info',
+              })
+            }
+          >
+            知らせ（情報）
+          </button>
+          <button
+            type="button"
+            class="btn"
+            onClick={() =>
+              toasts.push({
+                kind: 'note-invalid',
+                text: '保存した作業を読めなかった（形式が壊れている）。既定の状態で開いた',
+                note: 'warn',
+              })
+            }
+          >
+            知らせ（警告）
+          </button>
           <span class="tag">手入力</span>
           <span class="tag warn">古い板</span>
           <span class="tag ok">ok</span>
@@ -202,6 +231,23 @@ export function PartsGallery() {
             元に戻す
           </button>
         </div>
+        {/* 知らせのトースト（#87。説明文として折り返す・[閉じる]） */}
+        <div class="toast note gal-static">
+          <p class="txt">
+            URL のポジションを新しいタブで開いた（足 3 本。共有 2026-11-02 21:47、そのときの板
+            2026-11-02 21:31）。建値は共有時のまま。シナリオ・手数料・先物の basis は今のまま（URL
+            の値は使わない）
+          </p>
+          <button type="button" tabIndex={-1}>
+            閉じる
+          </button>
+        </div>
+        <div class="toast note warn gal-static">
+          <p class="txt">URL が長すぎて読まない。作業は変えていない</p>
+          <button type="button" tabIndex={-1}>
+            閉じる
+          </button>
+        </div>
       </section>
 
       <Dialog open={dialog} title="ダイアログの見本" onClose={() => setDialog(false)}>
@@ -209,7 +255,7 @@ export function PartsGallery() {
           Esc か [×] で閉じ、開く前のボタンへフォーカスが戻る。中身だけスクロールする。
         </p>
       </Dialog>
-      <Toasts toasts={toasts.toasts} onUndo={toasts.undo} />
+      <Toasts toasts={toasts.toasts} onUndo={toasts.undo} onDismiss={toasts.dismiss} />
     </main>
   );
 }

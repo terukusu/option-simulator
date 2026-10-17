@@ -1,4 +1,4 @@
-import type { ComponentChildren } from 'preact';
+import { type ComponentChildren, Fragment } from 'preact';
 import { useId, useLayoutEffect, useRef, useState } from 'preact/hooks';
 import { hintAlign } from '../../view/hint';
 import { isMenuKey, menuMove } from '../../view/menu';
@@ -24,6 +24,8 @@ export interface MenuItem {
   disabled?: boolean;
   /** 渡すと role="menuitemradio" + aria-checked */
   checked?: boolean;
+  /** 項目の前に区切り（<hr> = role="separator"。#87。省略時の DOM は #81 のまま） */
+  sep?: boolean;
 }
 
 export function Menu(p: {
@@ -125,29 +127,39 @@ export function Menu(p: {
           aria-label={p.label}
           onKeyDown={onKeyDown}
         >
-          {p.items.map((it, i) => (
-            <button
-              type="button"
-              key={it.key}
-              ref={(el) => {
-                itemRefs.current[i] = el;
-              }}
-              {...(it.checked === undefined
-                ? { role: 'menuitem' }
-                : { role: 'menuitemradio', 'aria-checked': it.checked })}
-              aria-disabled={it.disabled ? true : undefined}
-              tabIndex={-1}
-              onClick={() => select(it)}
-            >
-              {it.checked !== undefined && (
-                <span class="mark" aria-hidden="true">
-                  {it.checked ? '✓' : ''}
-                </span>
-              )}
-              <span>{it.label}</span>
-              {it.kbd && <span class="kbd">{it.kbd}</span>}
-            </button>
-          ))}
+          {p.items.map((it, i) => {
+            const item = (
+              <button
+                type="button"
+                key={it.key}
+                ref={(el) => {
+                  itemRefs.current[i] = el;
+                }}
+                {...(it.checked === undefined
+                  ? { role: 'menuitem' }
+                  : { role: 'menuitemradio', 'aria-checked': it.checked })}
+                aria-disabled={it.disabled ? true : undefined}
+                tabIndex={-1}
+                onClick={() => select(it)}
+              >
+                {it.checked !== undefined && (
+                  <span class="mark" aria-hidden="true">
+                    {it.checked ? '✓' : ''}
+                  </span>
+                )}
+                <span>{it.label}</span>
+                {it.kbd && <span class="kbd">{it.kbd}</span>}
+              </button>
+            );
+            return it.sep ? (
+              <Fragment key={it.key}>
+                <hr class="menu-sep" />
+                {item}
+              </Fragment>
+            ) : (
+              item
+            );
+          })}
         </div>
       )}
     </span>

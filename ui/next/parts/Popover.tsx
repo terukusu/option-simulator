@@ -13,6 +13,7 @@ import { useOverlay } from './overlay';
  * - up: ボタンの上に開く（.popover.up。舞台の下端の読み取り）
  * - within: 祖先のセレクタ。左右の揃えをその祖先の左右で判定し、祖先が縦にスクロールする要素なら
  *   開いたときにポップオーバーの下端が見えるまでその祖先の scrollTop だけを動かす（revealDelta）
+ * - popClass（#87）: .popover に足すクラス（市場ピル・警告のタグの .wide）。省略時の DOM は #81 のまま
  */
 export function Popover(p: {
   label?: string;
@@ -21,6 +22,7 @@ export function Popover(p: {
   buttonClass?: string;
   up?: boolean;
   within?: string;
+  popClass?: string;
 }) {
   const id = useId();
   const { open, setOpen } = useOverlay(id);
@@ -89,7 +91,7 @@ export function Popover(p: {
         {p.button}
       </button>
       <div
-        class={`popover${p.up ? ' up' : ''}${align === 'end' ? ' end' : ''}`}
+        class={`popover${p.popClass ? ` ${p.popClass}` : ''}${p.up ? ' up' : ''}${align === 'end' ? ' end' : ''}`}
         id={`${id}-pop`}
         hidden={!open}
       >
