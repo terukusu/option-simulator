@@ -353,6 +353,14 @@
   margin-left: auto;
 }
 
+/* 区切り（#87。Menu の項目の sep） */
+.menu > .menu-sep {
+  height: 1px;
+  margin: 4px 6px;
+  border: 0;
+  background: var(--line);
+}
+
 .popover {
   position: absolute;
   top: calc(100% + var(--sp-1));
@@ -367,6 +375,17 @@
   color: var(--ink-2);
   font-size: var(--fs-sub);
   box-shadow: var(--shadow);
+}
+
+/* 幅の広いポップオーバー（#87: 市場ピル・警告のタグ）。高さは画面まで、中だけスクロール */
+.popover.wide {
+  width: min(420px, calc(100vw - 16px));
+  max-width: none;
+  max-height: calc(100dvh - var(--top-h) - 16px);
+  overflow: auto;
+  /* トップバーの nowrap を継がない（中は説明文。値・タグは各部品が nowrap） */
+  white-space: normal;
+  overscroll-behavior: contain;
 }
 
 .hintbtn {
@@ -478,6 +497,32 @@ dialog.sheet::backdrop {
   color: var(--accent-ink);
   font-weight: 600;
   white-space: nowrap;
+}
+
+/* 知らせのトースト（#87。§5 の例外: 説明文として折り返す・[閉じる]。情報 6 秒・警告は閉じるまで） */
+.toast.note {
+  align-items: flex-start;
+  width: min(520px, calc(100vw - 16px));
+  border-radius: var(--r);
+  white-space: normal;
+}
+
+.toast.note > .txt {
+  flex: 1;
+  overflow: visible;
+  line-height: 1.45;
+}
+
+.toast.note > button {
+  padding: 1px 0;
+}
+
+.toast.note.warn {
+  border: 1px solid var(--warn);
+}
+
+.toast.note.warn > .txt {
+  color: var(--warn);
 }
 
 @keyframes toast-in {

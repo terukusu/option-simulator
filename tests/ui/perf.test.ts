@@ -20,8 +20,9 @@ import { type Action, initialState, reduce, type State, type UiLeg } from '../..
 import { atmStrike, boardRows } from '../../ui/view/board';
 import { boardBadges, boardRowTexts } from '../../ui/view/boardPanel';
 import { bookListModel } from '../../ui/view/bookList';
-import { headerModel } from '../../ui/view/header';
+import { headerModel, keptBoardNote } from '../../ui/view/header';
 import { hedgeModel } from '../../ui/view/hedge';
+import { marketPill } from '../../ui/view/marketPill';
 import { metricsModel } from '../../ui/view/metrics';
 import { metricsPanel } from '../../ui/view/metricsPanel';
 import {
@@ -1047,5 +1048,33 @@ describe('性能（#85 AC-5: 板の表示）', () => {
     };
     expect(once()).toBeGreaterThan(0);
     expectWithinBudget('#85 足 1 本の追加でのバッジ', once, { warmup: 10, runs: 30 });
+  });
+});
+
+/**
+ * #87 AC-8: 市場ピルの要約 + 全文の 1 回（322 行 × 2 限月の板）。headerModel は前で 1 回作って含めない
+ * （ピルは headerModel の文字列を選ぶだけ。限月の数に比例し、行の数に依らない）。
+ */
+describe('性能（#87 AC-8: 市場ピル）', () => {
+  const chain = normalizeChain(buildWideChainJson());
+  const fetchedAt = chain.snapshotAt + 60_000;
+  const header = headerModel(chain, 'B', CALENDAR, { fetchedAt, label: 'API', stale: true });
+  const load = {
+    loading: false,
+    error: { message: '板を読めない（HTTP 500）', errors: ['months[0]: 形が違う'] },
+    kept: keptBoardNote(fetchedAt, true),
+    loaderNote: '表示中: 保存した板（API）',
+  };
+
+  it(`市場ピルの要約 + 全文の 1 回（322 行 × 2 限月）が ${BUDGET_MS} ms 以内（30 回の最小値）`, () => {
+    expect(chain.months.every((m) => m.strikes.length >= 322)).toBe(true);
+    const ids = chain.months.map((m) => m.id);
+    let i = 0;
+    const once = () => {
+      const p = marketPill(header, ids[i++ % ids.length] ?? null, load);
+      return p.summary.length + p.full.months.length + p.tags.length;
+    };
+    expect(once()).toBeGreaterThan(0);
+    expectWithinBudget('#87 市場ピルの要約 + 全文', once, { warmup: 20, runs: 30 });
   });
 });

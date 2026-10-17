@@ -25,6 +25,12 @@
 //                                          1200 / 1280 / 1800 は市場の列の中の折り返しを判定（ページ全体は記録）。322 行の板
 //                                          （buildWideChainJson を /fixtures/latest.json に差し替え）× 既定の字幅 / 実機相当の字幅
 //                                          （--mono を DejaVu Sans Mono = Menlo と同じ 0.6em に。無ければ skip）でも測る
+//                                          トップバー（#87 (A)）: 4 幅 × ダーク / ライトの既定の作業と最も混む作業（タブ 6 個・12 字の
+//                                          名前 + 保存した最後の板 + 合成の板の読み込みの失敗 = ピルに 読めない・古い板 + 別のタブの
+//                                          警告のタグ）で、高さが --top-h・ピルの時刻・F・ATM（スマホは時刻）・[最新]・⋯ が切れず画面内・
+//                                          中の折り返し 0。開いた状態（知らせのトースト・⋯ メニュー・ピルのポップオーバー・警告のタグ・
+//                                          共有を開く確認。360 / 390 / 1440）の縦・横・折り返しと窓の中。waitReady は市場ピルの
+//                                          data-state を待ち、起動時の知らせのトーストを閉じてから測る
 //   npm run ui:check -- --parts            部品の見本（?ui=next&parts。dev だけ）
 //   npm run ui:check -- --legacy           旧画面（?ui=next なし）
 //   npm run ui:check -- --flows            保存・共有・テーマ・キーボードの手順（#81 AC-11・AC-12）と舞台の手順
@@ -40,7 +46,11 @@
 //                                          ハンドルで閉じる・Long Animation Frame。390×844 と 1440×900）と市場の手順
 //                                          （#85: bid / ask で足が入る・追従・[元に戻す]・ジャンプと強調・ask ≤ 50 円・put / call・限月・
 //                                          スマイルの操作。390×844・1440×900・1800×1000。322 行の板の Long Animation Frame・限月の切替の
-//                                          時間。新しい画面の限月・種別・絞り込み・横軸が再読み込みと旧画面に残る）
+//                                          時間。新しい画面の限月・種別・絞り込み・横軸が再読み込みと旧画面に残る）とトップバーの手順
+//                                          （#87 (A): [最新] の読み込み中 / 失敗（/api/chain を差し替え）・失敗のトーストが成功で消える・
+//                                          ⋯ > ファイルを開く…・限月の切替と旧画面の F / ATM の一致・全文の数値の列が旧画面の header.header
+//                                          を含む・復元のトースト 6 秒・壊れた保存の警告のトースト・別のタブの警告のタグ・タブが 6 個の
+//                                          共有を開く確認・タブの切り替えで [元に戻す] だけ消える。390×844 と 1440×900）
 //   --url <base>                           dev サーバーを起こさず、その URL を使う（例 http://127.0.0.1:5173/?ui=next&parts）
 //   --dom <file>                           body の下の要素の tag.class の並びを書き出す（旧画面が変わらないことの比較用）
 //   --shots <dir>                          スクリーンショットを書く（合成の板だけ。リポジトリに入れない）
@@ -173,21 +183,37 @@ async function newContext(viewport, storage, colorScheme = 'dark') {
   });
 }
 
-/** 板の読み込みが終わるまで待つ */
-async function waitReady(page, m) {
+/**
+ * 板の読み込みが終わるまで待つ。新しい画面は市場ピルの data-state が ready か failed になるまで（#87）。
+ * 新しい画面では起動時の知らせのトースト（復元 6 秒・読み込みの失敗など）を [閉じる] で閉じてから返す
+ * （スマホの下の行・読み取りに重なるため。#84 の noToasts と同じ理由）。知らせの手順だけ keepNotes で残す。
+ * 閉じるのは要素の click()（フォーカスを動かさない = Tab の順の検査に影響しない）
+ */
+async function waitReady(page, m, opts = {}) {
   if (m === 'legacy') {
     await page.waitForSelector('.board-table, p.empty', { timeout: 20000 });
   } else if (m === 'parts') {
     await page.waitForSelector('.parts-gallery', { timeout: 20000 });
   } else {
     await page.waitForSelector('.layout', { timeout: 20000 });
-    await page.waitForFunction(
-      () => ![...document.querySelectorAll('.notice')].some((n) => n.textContent === '読み込み中…'),
-      undefined,
-      { timeout: 20000 },
-    );
+    await page.waitForSelector('.pill[data-state="ready"], .pill[data-state="failed"]', {
+      timeout: 20000,
+    });
   }
   await page.waitForTimeout(400);
+  if (m === 'next' && !opts.keepNotes) await closeNotes(page);
+}
+
+/** 知らせのトーストを全部閉じる（#87） */
+async function closeNotes(page) {
+  await page.evaluate(() => {
+    for (const b of document.querySelectorAll('.toast.note > button')) b.click();
+  });
+  await page
+    .waitForFunction(() => document.querySelectorAll('.toast.note').length === 0, undefined, {
+      timeout: 3000,
+    })
+    .catch(() => {});
 }
 
 /** ページのスクロールと折り返し（EPIC の as-is と同じ規則） */
@@ -254,6 +280,7 @@ async function report(page, label, w, h, shotName, shot = true) {
   console.log(`${label} ${w}x${h}: 縦 ${r.v}px 横 ${r.h}px 折り返し ${r.wraps.length} 件${mark}`);
   for (const s of r.wraps.slice(0, 30)) console.log(`    ${s}`);
   if (shotsDir && shot) await page.screenshot({ path: join(shotsDir, `${shotName}.png`) });
+  return !(bad || over);
 }
 
 /**
@@ -565,6 +592,8 @@ async function measureAll() {
       await waitReady(page, mode);
       const tag = theme ? `${mode} ${theme}` : mode;
       const name = `${mode}-${w}x${h}${theme ? `-${theme}` : ''}`;
+      // トップバー（#87）: 既定の作業
+      if (mode === 'next') await topBarCheck(page, `${tag} ${w}x${h}`);
       if (mode === 'next' && w <= PHONE_MAX) {
         // シート 3 段階: peek（既定）→ hidden（開いているドックのボタン）→ full（もう一度で peek、つまみのタップ）
         await report(page, `${tag} peek`, w, h, `${name}-peek`);
@@ -719,6 +748,10 @@ async function measureAll() {
     console.log(
       `市場の検査: ${marketStats.pass} / ${marketStats.total} 状態で pass${marketStats.skip ? `（実機相当の字幅は ${marketStats.skip} 幅で skip）` : ''}`,
     );
+    // トップバー（#87 (A)）: 最も混む作業（タブ 6 個・保存した板 + 読み込みの失敗・別のタブ）と開いた状態
+    await topSweep();
+    console.log(`トップバーの検査: ${topStats.pass} / ${topStats.total} 状態で pass`);
+    console.log(`開いた状態の検査: ${openStats.pass} / ${openStats.total} で pass`);
   }
 }
 
@@ -1432,6 +1465,8 @@ async function runFlows() {
   for (const vp of [phone, pc, wide]) await marketFlows(vp);
   for (const vp of [phone, pc, wide]) await marketWideFlows(vp);
   await marketPersistFlow();
+  // #87 (A) トップバーの手順（AC-11・AC-15）
+  for (const vp of [phone, pc]) await topFlows(vp);
 }
 
 // ---- 舞台の手順（#82）
@@ -1696,7 +1731,7 @@ async function stageFlows(vp) {
     await page.mouse.up();
     const after = (await saved()).legs[0]?.leg;
     const bid = putBid('2026-11', next);
-    const toast = (await page.textContent('.toast .txt').catch(() => null)) ?? '';
+    const toast = (await page.textContent('.toast:not(.note) .txt').catch(() => null)) ?? '';
     check(
       `#82 AC-14(b) ${tag} マーカーの長押しドラッグで K ${before?.strike} → ${after?.strike}・建値 ${after?.entry}（bid ${bid}）`,
       reached &&
@@ -1706,7 +1741,7 @@ async function stageFlows(vp) {
         toast.includes('63,625'),
       `トースト「${toast}」`,
     );
-    await page.click('.toast button');
+    await page.click('.toast:not(.note) button');
     const back = (await saved()).legs[0]?.leg;
     check(
       `#82 AC-14(b) ${tag} [元に戻す] で元の strike・entry`,
@@ -2139,16 +2174,22 @@ async function benchFlows(vp) {
   const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
   const rowCount = () => page.locator(`${P} li.leg`).count();
   const toastText = () =>
-    page.evaluate(() => [...document.querySelectorAll('.toast .txt')].map((t) => t.textContent));
+    page.evaluate(() =>
+      [...document.querySelectorAll('.toast:not(.note) .txt')].map((t) => t.textContent),
+    );
   /** トーストが消えるまで待つ（スマホでは下の行に重なるので、押す前に） */
   const noToasts = () =>
     page
-      .waitForFunction(() => document.querySelectorAll('.toast').length === 0, undefined, {
-        timeout: 8000,
-      })
+      .waitForFunction(
+        () => document.querySelectorAll('.toast:not(.note)').length === 0,
+        undefined,
+        {
+          timeout: 8000,
+        },
+      )
       .catch(() => {});
   const undoToast = (text) =>
-    page.locator('.toast', { hasText: text }).locator('button', { hasText: '元に戻す' });
+    page.locator('.toast:not(.note)', { hasText: text }).locator('button', { hasText: '元に戻す' });
   const menu = async (item) => {
     await page.click(`${P} button[aria-label="ポジションの操作"]`);
     await page.click(`[role="menuitem"]:has-text("${item}")`);
@@ -2183,7 +2224,10 @@ async function benchFlows(vp) {
     const after = (await saved()).legs[0]?.leg;
     const texts = await toastText();
     const want = '買 P 63,500 に切替（建値は保持）';
-    const btn = await page.locator('.toast', { hasText: want }).locator('button').count();
+    const btn = await page
+      .locator('.toast:not(.note)', { hasText: want })
+      .locator('button')
+      .count();
     check(
       `#84 AC-11(b) ${tag} ⇄ → ${before?.side} → ${after?.side}・建値 ${after?.entry} のまま・トースト（[元に戻す] なし）`,
       before?.side === 'sell' &&
@@ -2949,7 +2993,7 @@ async function marketFlows(vp) {
       sel: document.querySelector('.chart .legmark.sel')?.getAttribute('data-leg-id') ?? null,
       dock:
         document.querySelector('.dock button[data-panel="positions"] .cnt')?.textContent ?? null,
-      toast: [...document.querySelectorAll('.toast .txt')].map((t) => t.textContent),
+      toast: [...document.querySelectorAll('.toast:not(.note) .txt')].map((t) => t.textContent),
       panel: document.querySelector('.layout')?.getAttribute('data-panel'),
       market: document.querySelector('.layout')?.getAttribute('data-market'),
       boardShown: (document.querySelector('section.board')?.getClientRects().length ?? 0) > 0,
@@ -3069,7 +3113,7 @@ async function marketFlows(vp) {
   );
   // (c) [元に戻す]
   await page
-    .locator('.toast', { hasText: `買 C ${fmtK(k)}` })
+    .locator('.toast:not(.note)', { hasText: `買 C ${fmtK(k)}` })
     .locator('button', { hasText: '元に戻す' })
     .click();
   await twoFrames(page);
@@ -3564,6 +3608,595 @@ async function marketPersistFlow() {
     JSON.stringify(old),
   );
   await ctx.close();
+}
+
+// ---- トップバー（#87 (A)）: トップバーの検査・開いた状態の検査・手順
+const BOARD_KEY = 'option-simulator.lastBoard';
+const topStats = { pass: 0, total: 0 };
+const openStats = { pass: 0, total: 0 };
+/** 最も混む作業: タブ 6 個（12 字の名前。先頭は足 2 本）。名前は架空 */
+const BUSY_NAMES = [...'一二三四五六'].map((c) => `長いタブの名前ですね${c}号`);
+const busyWorkspace = JSON.stringify({
+  ...fixture,
+  active: 0,
+  tabs: BUSY_NAMES.map((name, i) => ({
+    ...fixture.tabs[0],
+    name,
+    position: i === 0 ? fixture.tabs[0].position : { ...fixture.tabs[0].position, legs: [] },
+  })),
+});
+/** 保存した最後の板（合成の latest。取得時刻は架空） */
+const BUSY_FETCHED = Date.parse('2026-10-13T21:40:00+09:00');
+let savedBoardText = null;
+async function savedBoard() {
+  if (savedBoardText) return savedBoardText;
+  const { runnerImport } = await import('vite');
+  const { module } = await runnerImport(join(root, 'ui', 'persist.ts'), {
+    configFile: false,
+    root,
+    logLevel: 'error',
+  });
+  savedBoardText = module.serializeBoard(board, BUSY_FETCHED, 'latest');
+  return savedBoardText;
+}
+
+/** 同じコンテキストの別のページで作業の保存を書く（storage イベント → 警告のタグ「別のタブ」） */
+async function writeFromOtherPage(ctx, value) {
+  const other = await ctx.newPage();
+  await other.goto(`${origin}/fixtures/pre_open.json`);
+  await other.evaluate(([k, v]) => localStorage.setItem(k, v), [WORKSPACE_KEY, value]);
+  await other.close();
+}
+
+/**
+ * 最も混む作業のページ: タブ 6 個・12 字の名前 + 保存した最後の板 + 合成の板の読み込みの失敗（ピルに 読めない・古い板）
+ * + 別のタブ（警告のタグ）。知らせのトースト（復元・読み込みの失敗）は残す
+ */
+async function busyPage(vp, theme) {
+  const ctx = await newContext(vp, {
+    [WORKSPACE_KEY]: busyWorkspace,
+    [BOARD_KEY]: await savedBoard(),
+    [PREFS_KEY]: prefsText(theme),
+  });
+  await ctx.route('**/fixtures/latest.json', (route) =>
+    route.fulfill({ status: 500, contentType: 'text/plain', body: 'x' }),
+  );
+  const page = await ctx.newPage();
+  await page.goto(pageUrl('next'));
+  await waitReady(page, 'next', { keepNotes: true });
+  await writeFromOtherPage(ctx, `${busyWorkspace} `);
+  await page.waitForSelector('.warn-btn', { timeout: 5000 }).catch(() => {});
+  return { ctx, page };
+}
+
+/** トップバーの検査: 高さ = --top-h、ピルの時刻・F・ATM（スマホは時刻）・[最新]・⋯ が切れず画面内、中の折り返し 0 */
+async function topBarCheck(page, label) {
+  const r = await page.evaluate(() => {
+    const top = document.querySelector('header.top');
+    if (!top) return { bad: ['header.top が無い'], pill: '' };
+    const want = Number.parseFloat(
+      getComputedStyle(document.documentElement).getPropertyValue('--top-h'),
+    );
+    const tb = top.getBoundingClientRect();
+    const bad = [];
+    if (Math.abs(tb.height - want) > 0.5) bad.push(`高さ ${tb.height}px（--top-h ${want}px）`);
+    const phone = window.innerWidth < 720;
+    const sels = [
+      '.market-pill',
+      '.market-pill .when',
+      'header.top > button.btn',
+      'button[aria-label="メニュー"]',
+    ];
+    if (!phone) sels.push('.market-pill .vals', 'button[aria-label="テーマ"]');
+    if (top.querySelector('.warn-btn')) sels.push('.warn-btn');
+    for (const sel of sels) {
+      const el = top.querySelector(sel);
+      if (!el) {
+        bad.push(`${sel} が無い`);
+        continue;
+      }
+      const b = el.getBoundingClientRect();
+      if (
+        b.width <= 0 ||
+        b.left < -0.5 ||
+        b.right > window.innerWidth + 0.5 ||
+        b.top < tb.top - 0.5 ||
+        b.bottom > tb.bottom + 0.5
+      ) {
+        bad.push(`${sel} が画面外（${Math.round(b.left)}–${Math.round(b.right)}）`);
+      }
+      if (el.scrollWidth > el.clientWidth + 0.5) {
+        bad.push(`${sel} が切れている（${el.scrollWidth} > ${el.clientWidth}）`);
+      }
+    }
+    if (phone) {
+      for (const sel of ['.brand', '.top-theme']) {
+        const el = top.querySelector(sel);
+        if (el && getComputedStyle(el).display !== 'none') bad.push(`スマホで ${sel} が見えている`);
+      }
+    }
+    for (const el of top.querySelectorAll('*')) {
+      if (el.closest('.popover, .menu')) continue;
+      const cs = getComputedStyle(el);
+      if (cs.display === 'none' || cs.visibility === 'hidden') continue;
+      const txt = [...el.childNodes]
+        .filter((c) => c.nodeType === 3)
+        .map((c) => c.textContent)
+        .join('')
+        .trim();
+      if (!txt) continue;
+      const range = document.createRange();
+      range.selectNodeContents(el);
+      const lines = new Set(
+        [...range.getClientRects()].filter((x) => x.width > 0).map((x) => Math.round(x.top)),
+      );
+      if (lines.size > 1)
+        bad.push(`折り返し ${el.tagName}.${el.getAttribute('class') ?? ''}「${txt}」`);
+    }
+    const pill = top.querySelector('.market-pill')?.textContent ?? '';
+    return { bad, pill };
+  });
+  topStats.total++;
+  if (r.bad.length === 0) topStats.pass++;
+  else {
+    failed = true;
+    console.log(`${label}: トップバー ${r.bad.join('、')}  ← NG`);
+  }
+}
+
+/** 開いたもの（sel）が窓の中に収まり、中で横にはみ出さない */
+function inWindow(page, sel) {
+  return page.evaluate((s) => {
+    const els = [...document.querySelectorAll(s)].filter((e) => {
+      const b = e.getBoundingClientRect();
+      return b.width > 0 && b.height > 0;
+    });
+    if (els.length === 0) return `${s} が無い`;
+    for (const e of els) {
+      const b = e.getBoundingClientRect();
+      if (
+        b.left < -0.5 ||
+        b.top < -0.5 ||
+        b.right > innerWidth + 0.5 ||
+        b.bottom > innerHeight + 0.5
+      ) {
+        return `${s} が窓の外（${Math.round(b.left)},${Math.round(b.top)}–${Math.round(b.right)},${Math.round(b.bottom)}）`;
+      }
+      // 中で横にはみ出していない（説明文が折り返さずに切れる・隠れるのを見逃さない）
+      if (e.scrollWidth > e.clientWidth + 0.5) {
+        return `${s} の中が横にはみ出す（${e.scrollWidth} > ${e.clientWidth}）`;
+      }
+    }
+    return '';
+  }, sel);
+}
+
+async function openCheck(page, label, w, h, shotName, sel) {
+  const ok = await report(page, label, w, h, shotName);
+  const out = await inWindow(page, sel);
+  openStats.total++;
+  if (ok && out === '') openStats.pass++;
+  else {
+    failed = true;
+    if (out) console.log(`${label} ${w}x${h}: ${out}  ← NG`);
+  }
+}
+
+/** 最も混む作業のトップバーと、開いた状態（知らせのトースト・⋯・ピル・警告のタグ・共有を開く確認） */
+async function topSweep() {
+  for (const [w, h] of SIZES) {
+    for (const theme of ['dark', 'light']) {
+      const { ctx, page } = await busyPage({ width: w, height: h }, theme);
+      const tag = `next ${theme} 最も混む作業`;
+      const name = `next-busy-${w}x${h}-${theme}`;
+      await topBarCheck(page, `${tag} ${w}x${h}`);
+      const pill = await page.getAttribute('.market-pill', 'aria-label');
+      const warn = await page.getAttribute('.warn-btn', 'aria-label').catch(() => null);
+      if (!(pill?.includes('読めない') && pill.includes('古い板') && warn?.includes('別のタブ'))) {
+        failed = true;
+        console.log(`${tag} ${w}x${h}: 最も混む作業を作れない（ピル ${pill}・警告 ${warn}）  ← NG`);
+      }
+      if (w === 900) {
+        await report(page, tag, w, h, name);
+      } else {
+        // 開いた状態（360・390・1440。#87 AC-10）
+        await openCheck(page, `${tag} 知らせのトースト`, w, h, `${name}-toasts`, '.toast.note');
+        await closeNotes(page);
+        await report(page, tag, w, h, name);
+        await page.click('button[aria-label="メニュー"]');
+        await openCheck(
+          page,
+          `${tag} ⋯ メニュー`,
+          w,
+          h,
+          `${name}-menu`,
+          'header.top [role="menu"]',
+        );
+        await page.keyboard.press('Escape');
+        await page.click('.market-pill');
+        await openCheck(
+          page,
+          `${tag} ピルのポップオーバー`,
+          w,
+          h,
+          `${name}-pill`,
+          '.pill .popover',
+        );
+        await page.keyboard.press('Escape');
+        await page.click('.warn-btn');
+        await openCheck(page, `${tag} 警告のタグ`, w, h, `${name}-warn`, '.warn-tags .popover');
+        await page.keyboard.press('Escape');
+        await page.evaluate((hash) => {
+          location.hash = hash;
+        }, share.hash);
+        await page.waitForSelector('dialog.sheet[open]', { timeout: 5000 }).catch(() => {});
+        await openCheck(page, `${tag} 共有を開く確認`, w, h, `${name}-share`, 'dialog.sheet[open]');
+        await page.click('dialog.sheet button:has-text("やめる")').catch(() => {});
+      }
+      await ctx.close();
+    }
+  }
+}
+
+// ---- #87 (A) の手順（AC-11・AC-15）
+/** tests/ui/saved/share-v1.json の足の本数（#81 AC-11(b) と同じ） */
+const SHARE_LEGS = 3;
+const nightEarlyText = readFileSync(join(root, 'fixtures/synthetic/night_early.json'), 'utf8');
+/** 板の時刻（JST）→ `MM/DD HH:mm` */
+const jstPill = (iso) => {
+  const p = Object.fromEntries(
+    new Intl.DateTimeFormat('en-US', {
+      timeZone: 'Asia/Tokyo',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      hourCycle: 'h23',
+    })
+      .formatToParts(new Date(iso))
+      .map((x) => [x.type, x.value]),
+  );
+  return `${p.month}/${p.day} ${p.hour}:${p.minute}`;
+};
+/** 数値のトークン（#87 AC-11(e)） */
+const PILL_TOKEN = /[+−]?[0-9][0-9,.:/-]*/g;
+const tokens = (text) => text.match(PILL_TOKEN) ?? [];
+/** a のトークンが b にすべて含まれる（回数も。足りないものを返す） */
+function missingTokens(a, b) {
+  const count = new Map();
+  for (const t of b) count.set(t, (count.get(t) ?? 0) + 1);
+  const miss = [];
+  for (const t of a) {
+    const n = count.get(t) ?? 0;
+    if (n === 0) miss.push(t);
+    else count.set(t, n - 1);
+  }
+  return miss;
+}
+
+async function topFlows(vp) {
+  const tag = `${vp.width}x${vp.height}`;
+  const phoneSize = vp.width <= PHONE_MAX;
+  const pillLabel = (page) => page.getAttribute('.market-pill', 'aria-label');
+  const pillState = (page) => page.getAttribute('.pill', 'data-state');
+  const popText = async (page) => {
+    await page.click('.market-pill');
+    const t = (await page.textContent('.pill .popover')) ?? '';
+    await page.keyboard.press('Escape');
+    return t;
+  };
+  const savedLegs = (page) =>
+    page.evaluate((k) => {
+      try {
+        const ws = JSON.parse(localStorage.getItem(k) ?? 'null');
+        return JSON.stringify(ws?.tabs?.[ws.active]?.position?.legs ?? null);
+      } catch {
+        return null;
+      }
+    }, WORKSPACE_KEY);
+
+  // AC-11 (a)(b) [最新] の読み込み中・失敗、(c) ファイルを開く…
+  {
+    const ctx = await newContext(vp, { [WORKSPACE_KEY]: twoLegs });
+    await ctx.addInitScript(LOAF_INIT);
+    let chain = 'ok';
+    await ctx.route('**/api/calendar**', (route) =>
+      route.fulfill({ status: 500, contentType: 'text/plain', body: 'x' }),
+    );
+    await ctx.route('**/api/chain**', async (route) => {
+      if (chain === 'fail') {
+        await route.fulfill({ status: 500, contentType: 'text/plain', body: 'x' });
+        return;
+      }
+      await new Promise((r) => setTimeout(r, 1000));
+      await route.fulfill({ status: 200, contentType: 'application/json', body: nightEarlyText });
+    });
+    const page = await ctx.newPage();
+    await page.goto(pageUrl('next'));
+    await waitReady(page, 'next');
+    const legs0 = await savedLegs(page);
+    const latest = 'header.top > button.btn';
+    await page.click(latest);
+    await page.waitForTimeout(150);
+    const during = {
+      state: await pillState(page),
+      label: await pillLabel(page),
+      disabled: await page.isDisabled(latest),
+    };
+    await page.waitForSelector('.pill[data-state="ready"]', { timeout: 10000 });
+    const after = await pillLabel(page);
+    const want = `板 ${jstPill(JSON.parse(nightEarlyText).snapshot_at)}`;
+    check(
+      `#87 AC-11(a) ${tag} [最新] の間はピルが読み込み中…・[最新] が disabled、終わると差し替えた板の時刻`,
+      during.state === 'loading' &&
+        (during.label ?? '').includes('読み込み中…') &&
+        during.disabled &&
+        (after ?? '').startsWith(want),
+      `${JSON.stringify(during)} → ${after}`,
+    );
+
+    chain = 'fail';
+    await page.click(latest);
+    await page.waitForSelector('.pill[data-state="failed"]', { timeout: 10000 });
+    const failLabel = await pillLabel(page);
+    const failPop = await popText(page);
+    const toast = await page
+      .textContent('.toast.note.warn[data-kind="load-failed"] .txt')
+      .catch(() => null);
+    const legs1 = await savedLegs(page);
+    check(
+      `#87 AC-11(b) ${tag} 500 → ピルに読めない・ポップオーバーに失敗の文と前の板のまま・警告のトースト・足は同じ`,
+      (failLabel ?? '').includes('読めない') &&
+        /前の板のまま（取得 \d\d:\d\d）/.test(failPop) &&
+        failPop.includes('板を読めない') &&
+        (toast ?? '').includes('前の板のまま') &&
+        legs1 === legs0,
+      `ピル ${failLabel}・トースト ${toast}`,
+    );
+    // 次に成功したら失敗のトーストを消す（#87 の追加の振る舞い）
+    chain = 'ok';
+    await page.click(latest);
+    await page.waitForSelector('.pill[data-state="ready"]', { timeout: 10000 });
+    const gone = await page.locator('.toast.note[data-kind="load-failed"]').count();
+    check(
+      `#87 ${tag} 読み込みが成功したら失敗の警告のトーストが消える`,
+      gone === 0,
+      `残り ${gone}`,
+    );
+
+    // (c) ⋯ > ファイルを開く…
+    const file = join(root, 'fixtures/synthetic/pre_open.json');
+    await page.click('button[aria-label="メニュー"]');
+    const [chooser] = await Promise.all([
+      page.waitForEvent('filechooser', { timeout: 5000 }),
+      page.click('[role="menuitem"]:has-text("ファイルを開く…")'),
+    ]);
+    await chooser.setFiles(file);
+    await page
+      .waitForFunction(
+        () =>
+          document
+            .querySelector('.market-pill')
+            ?.getAttribute('aria-label')
+            ?.startsWith('板 10/13 15:40'),
+        undefined,
+        { timeout: 10000 },
+      )
+      .catch(() => {});
+    const fileLabel = await pillLabel(page);
+    const filePop = await popText(page);
+    const inputVal = await page.evaluate(
+      () => document.querySelector('header.top input[type="file"]')?.value ?? null,
+    );
+    check(
+      `#87 AC-11(c) ${tag} ⋯ > ファイルを開く… でピルの時刻がその板・表示中: pre_open.json・欄は空`,
+      (fileLabel ?? '').startsWith('板 10/13 15:40') &&
+        filePop.includes('表示中: pre_open.json') &&
+        inputVal === '',
+      `${fileLabel}`,
+    );
+    // 板の読み込み（正規化と全体の描画）は含めず、トップバーの操作（ピルのポップオーバー・⋯ メニューの開閉）だけを数える
+    const m0 = await page.evaluate(() => (window.__loaf ?? []).length);
+    for (let i = 0; i < 3; i++) {
+      await page.click('.market-pill');
+      await page.waitForTimeout(60);
+      await page.keyboard.press('Escape');
+      await page.click('button[aria-label="メニュー"]');
+      await page.waitForTimeout(60);
+      await page.keyboard.press('Escape');
+    }
+    await page.waitForTimeout(200);
+    const loaf = await page.evaluate(
+      (n) => (window.__loaf ?? []).slice(n).filter((d) => d > 50).length,
+      m0,
+    );
+    check(
+      `#87 AC-17 ${tag} ピルのポップオーバー・⋯ メニューの開閉 3 回の Long Animation Frame 0 件`,
+      loaf === 0,
+      `${loaf} 件`,
+    );
+    await ctx.close();
+  }
+
+  // AC-11 (d) 限月の切替でピルの F・ATM がその限月（旧画面の Header と一致）、(e) 全文の数値の列が旧画面を含む
+  {
+    const fixed = Date.parse('2026-10-13T21:45:00+09:00');
+    const legacyCtx = await newContext(vp, { [WORKSPACE_KEY]: twoLegs });
+    const lp = await legacyCtx.newPage();
+    await lp.clock.setFixedTime(fixed);
+    await lp.goto(pageUrl('legacy'));
+    await waitReady(lp, 'legacy');
+    const legacy = await lp.evaluate(() => ({
+      text: document.querySelector('header.header')?.textContent ?? '',
+      months: [...document.querySelectorAll('.head-month')].map((m) => {
+        const t = m.textContent ?? '';
+        return {
+          id: /(\d{4}-\d{2}) 限/.exec(t)?.[1] ?? null,
+          f: /F ([0-9,]+)/.exec(t)?.[1] ?? null,
+          atm: /ATM（.）\s*([0-9,]+)/.exec(t)?.[1] ?? null,
+        };
+      }),
+    }));
+    await legacyCtx.close();
+
+    const ctx = await newContext(vp, { [WORKSPACE_KEY]: twoLegs });
+    const page = await ctx.newPage();
+    await page.clock.setFixedTime(fixed);
+    await page.goto(pageUrl('next'));
+    await waitReady(page, 'next');
+    if (phoneSize) await setShell(page, 'board', 'peek');
+    const second = legacy.months[1];
+    await page.click(`section.board [aria-label="限月"] button[aria-label="${second?.id} 限"]`);
+    await page.waitForTimeout(150);
+    const label = (await pillLabel(page)) ?? '';
+    const other = legacy.months[0];
+    check(
+      `#87 AC-11(d) ${tag} 限月 ${second?.id} でピルの F・ATM が旧画面の同じ限月と一致`,
+      !!second?.f &&
+        !!second.atm &&
+        label.includes(`F ${second.f} · ATM ${second.atm}`) &&
+        !label.includes(`F ${other?.f} `),
+      `${label}／旧 F ${second?.f}・ATM ${second?.atm}`,
+    );
+    const pop = await popText(page);
+    const miss = missingTokens(tokens(legacy.text), tokens(pop));
+    check(
+      `#87 AC-11(e) ${tag} ピルの全文の数値の列が旧画面の header.header の列をすべて含む`,
+      tokens(legacy.text).length > 20 && miss.length === 0,
+      `旧 ${tokens(legacy.text).length} 個・ピル ${tokens(pop).length} 個${miss.length ? `・足りない ${miss.join(' ')}` : ''}`,
+    );
+    await ctx.close();
+  }
+
+  // AC-15 (a) 復元のトーストが出て 6 秒の後に消える（知らせの行は無い）、(e) タブの切り替えで [元に戻す] だけ消える
+  {
+    const ctx = await newContext(vp, { [WORKSPACE_KEY]: twoLegs });
+    const page = await ctx.newPage();
+    await page.goto(pageUrl('next'));
+    await waitReady(page, 'next', { keepNotes: true });
+    const t0 = Date.now();
+    const restored = await page
+      .textContent('.toast.note[data-kind="note-restored"] .txt')
+      .catch(() => null);
+    const notices = await page.locator('.notices, .notice').count();
+    check(
+      `#87 AC-15(a) ${tag} 知らせの行が無く、トースト「前回の作業を復元した（足 2 本…」`,
+      notices === 0 && (restored ?? '').startsWith('前回の作業を復元した（足 2 本'),
+      `${restored}`,
+    );
+    // (e) 復元のトーストが出ている間に: 足の × → [元に戻す] 付き → 共有 URL を開く（新しいタブ = 作業中のタブが変わる）
+    if (phoneSize) await setShell(page, 'positions', 'full');
+    await page.click('section.positions li.leg:nth-child(1) button[data-op="remove"]');
+    const undoBefore = await page.locator('.toast:not(.note)', { hasText: '元に戻す' }).count();
+    await page.evaluate((hash) => {
+      location.hash = hash;
+    }, share.hash);
+    await page
+      .waitForSelector('.toast.note[data-kind="note-shared"]', { timeout: 3000 })
+      .catch(() => {});
+    const e = await page.evaluate(() => ({
+      undo: [...document.querySelectorAll('.toast:not(.note)')].filter((t) =>
+        t.textContent?.includes('元に戻す'),
+      ).length,
+      kinds: [...document.querySelectorAll('.toast.note')].map((t) => t.getAttribute('data-kind')),
+    }));
+    const elapsed = Date.now() - t0;
+    check(
+      `#87 AC-15(e) ${tag} タブが変わると [元に戻す] 付きは消え、復元・共有を開いた知らせは残る`,
+      undoBefore === 1 &&
+        e.undo === 0 &&
+        e.kinds.includes('note-restored') &&
+        e.kinds.includes('note-shared'),
+      `前 ${undoBefore}・後 ${e.undo}・${e.kinds.join(' ')}・${elapsed}ms`,
+    );
+    const rest = Math.max(0, 6500 - (Date.now() - t0));
+    await page.waitForTimeout(rest);
+    const left = await page.locator('.toast.note[data-kind="note-restored"]').count();
+    check(`#87 AC-15(a) ${tag} 復元のトーストは 6 秒の後に消える`, left === 0, `残り ${left}`);
+    await ctx.close();
+  }
+
+  // AC-15 (b) 壊れた作業の保存 → 警告のトーストが 10 秒後も残り、[閉じる] で消える
+  {
+    const ctx = await newContext(vp, { [WORKSPACE_KEY]: '{' });
+    const page = await ctx.newPage();
+    await page.goto(pageUrl('next'));
+    await waitReady(page, 'next', { keepNotes: true });
+    const sel = '.toast.note.warn[data-kind="note-invalid"]';
+    const text = await page.textContent(`${sel} .txt`).catch(() => null);
+    await page.waitForTimeout(10000);
+    const still = await page.locator(sel).count();
+    await page.click(`${sel} button`);
+    const after = await page.locator(sel).count();
+    check(
+      `#87 AC-15(b) ${tag} 壊れた保存の警告のトーストが 10 秒後も残り、[閉じる] で消える`,
+      (text ?? '').startsWith('保存した作業を読めなかった') && still === 1 && after === 0,
+      `${text}・10 秒後 ${still}・閉じた後 ${after}`,
+    );
+    await ctx.close();
+  }
+
+  // AC-15 (c) 別のページの保存 → 警告のタグ「別のタブ」、押すと全文と [閉じる]、閉じるとタグが消え [最新] へ
+  {
+    const ctx = await newContext(vp, { [WORKSPACE_KEY]: twoLegs });
+    const page = await ctx.newPage();
+    await page.goto(pageUrl('next'));
+    await waitReady(page, 'next');
+    await writeFromOtherPage(ctx, `${twoLegs} `);
+    await page.waitForSelector('.warn-btn', { timeout: 5000 }).catch(() => {});
+    const btn = (await page.textContent('.warn-btn').catch(() => null)) ?? '';
+    await page.click('.warn-btn').catch(() => {});
+    const full = (await page.textContent('.warn-tags .popover').catch(() => null)) ?? '';
+    await page.click('.warn-tags .popover button:has-text("閉じる")').catch(() => {});
+    const after = await page.evaluate(() => ({
+      tags: document.querySelectorAll('.warn-tags').length,
+      focus: document.activeElement?.textContent?.trim() ?? null,
+    }));
+    check(
+      `#87 AC-15(c) ${tag} 別のタブの保存で警告のタグ、押すと全文と [閉じる]、閉じるとタグが消え [最新] へ`,
+      btn.includes('別のタブ') &&
+        full.includes('別のタブで作業が保存された') &&
+        after.tags === 0 &&
+        after.focus === '最新',
+      `${btn}・${JSON.stringify(after)}`,
+    );
+    await ctx.close();
+  }
+
+  // AC-15 (d) タブが 6 個のときに共有 URL → 確認のダイアログ。[置き換える] で足が URL の足に、[やめる] で変わらない
+  {
+    const ctx = await newContext(vp, { [WORKSPACE_KEY]: busyWorkspace });
+    const page = await ctx.newPage();
+    await page.goto(pageUrl('next'));
+    await waitReady(page, 'next');
+    const open = async () => {
+      await page.evaluate((hash) => {
+        location.hash = hash;
+      }, share.hash);
+      await page.waitForSelector('dialog.sheet[open]', { timeout: 5000 }).catch(() => {});
+      return (await page.textContent('dialog.sheet[open]').catch(() => null)) ?? '';
+    };
+    const t1 = await open();
+    await page.click('dialog.sheet[open] button:has-text("置き換える")');
+    await page.waitForTimeout(800);
+    const replaced = JSON.parse((await savedLegs(page)) ?? 'null');
+    const t2 = await open();
+    const before = await savedLegs(page);
+    await page.click('dialog.sheet[open] button:has-text("やめる")');
+    await page.waitForTimeout(800);
+    const kept = await savedLegs(page);
+    const dialogs = await page.locator('dialog.sheet[open]').count();
+    check(
+      `#87 AC-15(d) ${tag} 6 個で共有 URL → 確認、[置き換える] で足 ${replaced?.length} 本、[やめる] で変わらない`,
+      t1.includes('タブは 6 個まで') &&
+        t2.includes('タブは 6 個まで') &&
+        replaced?.length === SHARE_LEGS &&
+        kept === before &&
+        dialogs === 0,
+      `足 ${replaced?.length}`,
+    );
+    await ctx.close();
+  }
 }
 
 try {

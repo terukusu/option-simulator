@@ -364,9 +364,9 @@ export function addedToast(leg: Leg): { kind: 'leg-add'; text: string } {
   return { kind: 'leg-add', text };
 }
 
-/** [元に戻す] の無いトーストだけを残す（タブの切り替え。消えるものが無ければ同じ参照）。 */
+/** [元に戻す] の無いトーストと keep 付き（#87）だけを残す（タブの切り替え。消えるものが無ければ同じ参照）。 */
 export function dropUndoToasts(list: readonly Toast[]): Toast[] {
-  const next = list.filter((t) => !t.undo);
+  const next = list.filter((t) => !t.undo || t.keep === true);
   return next.length === list.length ? (list as Toast[]) : next;
 }
 

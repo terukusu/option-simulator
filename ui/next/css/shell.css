@@ -1,12 +1,13 @@
 /*
- * 骨組み（docs/ui-redesign.md §2・§10.1・§11-7）: トップバー → 知らせの行 → 本体（3 段階のグリッド）。
+ * 骨組み（docs/ui-redesign.md §2・§10.1・§11-7）: トップバー → 本体（3 段階のグリッド）。
+ * 知らせは #87 でトースト・トップバーの警告のタグへ移した（知らせの行は無い）。
  * 本体 .layout の data-panel・data-sheet・data-market（ui/view/shell.ts の状態）で領域を出し分ける。
  * ページはスクロールしない。スクロールは各パネルの .panel-body だけ。
  */
 
 .screen {
   display: grid;
-  grid-template-rows: var(--top-h) auto minmax(0, 1fr);
+  grid-template-rows: var(--top-h) minmax(0, 1fr);
   height: 100dvh;
   min-height: 0;
 }
@@ -34,46 +35,9 @@
   text-overflow: ellipsis;
 }
 
-.top .spacer {
-  flex: 1;
-}
-
-/* ===== 知らせの行（暫定。#87 でトーストとトップバーのタグへ移す） ===== */
-.notices {
-  grid-row: 2;
-  display: flex;
-  flex-direction: column;
-  gap: var(--sp-1);
-  max-height: 30dvh;
-  padding: 6px var(--sp-3);
-  overflow: auto;
-  overscroll-behavior: contain;
-  border-bottom: 1px solid var(--line);
-  background: var(--s1);
-}
-
-.notice {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px 10px;
-  color: var(--ink-2);
-  font-size: var(--fs-sub);
-}
-
-.notice.warn {
-  color: var(--warn);
-}
-
-.notice > .acts {
-  display: inline-flex;
-  gap: 6px;
-  margin-left: auto;
-}
-
 /* ===== 本体 ===== */
 .layout {
-  grid-row: 3;
+  grid-row: 2;
   display: grid;
   min-height: 0;
   min-width: 0;
@@ -301,10 +265,6 @@ section.panel {
   .top {
     gap: var(--sp-2);
     padding: 0 10px;
-  }
-
-  .notices {
-    padding: var(--sp-1) 10px;
   }
 
   .layout {

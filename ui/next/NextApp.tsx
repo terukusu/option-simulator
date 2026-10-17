@@ -1,18 +1,26 @@
 import type { ComponentChildren } from 'preact';
-import { useCallback, useEffect, useReducer, useRef, useState } from 'preact/hooks';
-import { type Boot, useAppController } from '../components/useAppController';
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'preact/hooks';
+import { type Boot, DEV_FIXTURES, useAppController } from '../components/useAppController';
 import { useMediaQuery } from '../components/useMediaQuery';
+import { loaderNote } from '../load';
 import type { PrefsRead } from '../prefs';
 import { legAtStrike, MAX_TABS } from '../state';
 import { marketAddPlan, marketAddToast } from '../view/boardPanel';
 import { fmtNum } from '../view/format';
 import { keptBoardNote } from '../view/header';
 import { PC_QUERY, PHONE_QUERY } from '../view/layout';
+import { marketPill } from '../view/marketPill';
+import {
+  LOAD_FAILED_KIND,
+  legErrorToast,
+  loadFailedToast,
+  noticeRoute,
+  warnTagsModel,
+} from '../view/notices';
 import { shareReplaceConfirmText } from '../view/persistNote';
 import type { DXUnit } from '../view/scenario';
 import { INITIAL_SHELL, layoutTier, shellReduce } from '../view/shell';
 import type { MarketAdd } from './market/BoardMonth';
-import { Notices } from './Notices';
 import { PanelHead } from './PanelHead';
 import { Toasts, useToasts } from './parts/Toast';
 import { Board } from './regions/Board';
@@ -23,35 +31,22 @@ import { Smile } from './regions/Smile';
 import { Stage } from './regions/Stage';
 import { Shell } from './Shell';
 import { TopBar } from './TopBar';
+import { ShareConfirm } from './top/ShareConfirm';
 import { useTheme } from './useTheme';
-
-/** 板の読み込みの知らせ（旧画面と同じ文） */
-function boardNotice(
-  hasChain: boolean,
-  loading: boolean,
-  error: { message: string } | null,
-  kept: string | null,
-): { text: string; warn: boolean } | null {
-  if (loading) return { text: '読み込み中…', warn: false };
-  if (!hasChain) {
-    return error
-      ? { text: '板を読めない。[最新] で読み直すか、板の JSON を選んでください。', warn: true }
-      : { text: '板の JSON を選んでください。', warn: false };
-  }
-  if (error) return { text: kept ? `${error.message}。${kept}` : error.message, warn: true };
-  return null;
-}
 
 /**
  * 新しい画面のルート（`?ui=next`。docs/ui-redesign.md §2・§10.1）。作業の状態・保存・共有は旧画面と同じ
  * useAppController（キー・形式を変えない）、見た目の状態（パネル・シート・市場）はここのローカル（保存しない）。
- * #81 の器（トップバー・知らせの行・見出し行・ドック）に、#82 で舞台（regions/Stage.tsx）を入れた。
+ * #81 の器（トップバー・見出し行・ドック）に、#82 で舞台（regions/Stage.tsx）を入れた。
  * 舞台で選んだ足（selectedLeg）はここのローカル（保存しない）。行使価格の変更はトーストの [元に戻す] で戻せる。
  * #83 でシナリオ（regions/Scenario.tsx）を入れた。ΔX の単位はここのローカル（保存しない。#87 の設定も同じ値を触る）。
  * #84 でポジション（regions/Positions.tsx。key = 作業中のタブ）を入れた。タブが変わったら [元に戻す] 付きのトーストを閉じる。
  * #86 で指標 · テール（regions/Metrics.tsx。c.metrics と state.feePerLot だけを渡す = pure が効く）を入れた。
  * #85 で板・スマイル（regions/Board.tsx・Smile.tsx。state の値を個別に渡す = pure が効く）を入れた。板・スマイルから
  * 足を入れたら [元に戻す]（removeLeg）付きのトーストを出し、入れた足を選ぶ（市場のパネルは開いたまま）。
+ * #87 (A) で知らせの行をやめ、知らせをトースト / トップバーの警告のタグ / 共有を開く確認のダイアログ / 市場ピルへ
+ * 振り分けた（ui/view/notices.ts）。トーストへ振り分けた知らせは push してから c.closeNote で消す（新しい画面の
+ * c.notes に残るのは警告のタグのものだけ。旧画面は別の useAppController なので変わらない）。
  */
 export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
   const c = useAppController(boot);
@@ -72,7 +67,34 @@ export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
     },
     [tier],
   );
-  const { push, dropUndo } = toasts;
+  const { push, dropUndo, drop } = toasts;
+  // 知らせ（#87）: トーストに振り分けるものは出してから消す。警告のタグのものは c.notes に残す
+  const { notes, closeNote } = c;
+  useEffect(() => {
+    for (const n of notes) {
+      const r = noticeRoute(n);
+      if (r.to !== 'toast') continue;
+      push(r.toast);
+      closeNote(n.kind);
+    }
+  }, [notes, closeNote, push]);
+  // 読み込みの失敗: 失敗した瞬間に警告のトースト、次に成功したら（loadError が null に戻ったら）消す
+  const { loadError, legError } = state;
+  const hasChain = state.chain !== null;
+  const keptNote = hasChain ? keptBoardNote(state.fetchedAt, state.boardStale) : null;
+  const failRef = useRef(loadError);
+  useEffect(() => {
+    if (failRef.current === loadError) return;
+    failRef.current = loadError;
+    if (loadError) push(loadFailedToast(hasChain, loadError, keptNote));
+    else drop(LOAD_FAILED_KIND);
+  }, [loadError, hasChain, keptNote, push, drop]);
+  // 足を追加できない: 警告のトーストに出して消す（同じ文がもう一度来ても出す）
+  useEffect(() => {
+    if (legError === null) return;
+    push(legErrorToast(legError));
+    dispatch({ type: 'clearLegError' });
+  }, [legError, push, dispatch]);
   // タブが変わったら [元に戻す] 付きのトーストを閉じる（別のタブでは restoreLeg が何もしないボタンを残さない。#84）
   const tabRef = useRef(state.activeTab);
   useEffect(() => {
@@ -121,6 +143,21 @@ export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
     [dispatch, push],
   );
   const monthId = c.month?.id ?? chain?.months[0]?.id ?? '';
+  // 市場ピル・警告のタグ（#87）: シナリオの操作では入力が変わらない（TopBar は pure）
+  const { header } = c;
+  const { loading, sourceLabel } = state;
+  const pill = useMemo(
+    () =>
+      marketPill(header, monthId || null, {
+        loading,
+        error: loadError,
+        kept: keptNote,
+        loaderNote: loaderNote(loading, sourceLabel),
+      }),
+    [header, monthId, loading, loadError, keptNote, sourceLabel],
+  );
+  const warn = useMemo(() => warnTagsModel(notes), [notes]);
+  const cancelShare = useCallback(() => c.setPendingShare(null), [c.setPendingShare]);
   const emptyMarket = (title: string, seg: ComponentChildren) => (
     <>
       <PanelHead title={title}>{seg}</PanelHead>
@@ -131,34 +168,18 @@ export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
   return (
     <div class="screen">
       <TopBar
+        pill={pill}
+        warn={warn}
+        tier={tier}
         loading={state.loading}
-        onLatest={c.onLatest}
         theme={theme.pref}
         onTheme={theme.choose}
-      />
-      <Notices
-        notes={c.notes}
-        onCloseNote={c.closeNote}
-        shareConfirm={
-          pendingShare
-            ? shareReplaceConfirmText(
-                MAX_TABS,
-                pendingShare.legs.length,
-                c.tabsView.active.name,
-                c.curLegs.length,
-              )
-            : null
-        }
-        onConfirmShare={c.confirmShare}
-        onCancelShare={() => c.setPendingShare(null)}
-        board={boardNotice(
-          state.chain !== null,
-          state.loading,
-          state.loadError,
-          state.chain ? keptBoardNote(state.fetchedAt, state.boardStale) : null,
-        )}
-        legError={state.legError}
-        onClearLegError={() => dispatch({ type: 'clearLegError' })}
+        sourceLabel={sourceLabel}
+        fixtures={DEV_FIXTURES}
+        onLatest={c.onLatest}
+        onFile={c.onFile}
+        onFixture={c.onFixture}
+        onCloseNote={closeNote}
       />
       <Shell
         tier={tier}
@@ -224,7 +245,21 @@ export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
           )
         }
       />
-      <Toasts toasts={toasts.toasts} onUndo={toasts.undo} />
+      <ShareConfirm
+        text={
+          pendingShare
+            ? shareReplaceConfirmText(
+                MAX_TABS,
+                pendingShare.legs.length,
+                c.tabsView.active.name,
+                c.curLegs.length,
+              )
+            : null
+        }
+        onReplace={c.confirmShare}
+        onCancel={cancelShare}
+      />
+      <Toasts toasts={toasts.toasts} onUndo={toasts.undo} onDismiss={toasts.dismiss} />
     </div>
   );
 }
