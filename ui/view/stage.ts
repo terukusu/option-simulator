@@ -12,6 +12,7 @@ import { type Domain, linear, pixelToValue } from '../chart/scale';
 import type { UiLeg } from '../state';
 import { DASH, fmtDateTime, fmtSigned } from './format';
 import { fmtAmount, type MetricsModel } from './metrics';
+import { type FullRow, premiumFullRows } from './metricsPanel';
 import { axisX, PNL_MARGIN, type PnlBase, type PnlChartModel } from './pnlChart';
 import type { ReadoutModel } from './readout';
 import {
@@ -447,6 +448,11 @@ export interface BigReadoutItem {
   sub: string;
   /** 損益の符号の色（0・欠損は null） */
   tone: 'gain' | 'loss' | null;
+  /**
+   * 全文（タップ / Enter / Space のポップオーバーの中身。#107）。副題のある項目（date・expiry・delta・premium）だけ。
+   * theta・vega・empty は null（押せない）
+   */
+  full: FullRow[] | null;
 }
 
 const toneOf = (s: string): 'gain' | 'loss' | null =>
@@ -481,6 +487,7 @@ export function bigReadout(
     unit: string,
     sub: string,
     tone: boolean,
+    full: FullRow[] | null = null,
   ): BigReadoutItem => ({
     key,
     tier,
@@ -490,7 +497,13 @@ export function bigReadout(
     unit: unitFor(value, unit),
     sub,
     tone: tone ? toneOf(value) : null,
+    full,
   });
+  /** 見出し + 値（+ 単位）の 1 行目 */
+  const head = (label: string, value: string): FullRow => {
+    const un = unitFor(value, u);
+    return { k: label, v: un ? `${value} ${un}` : value };
+  };
   if (r.empty) {
     return [
       item('date', 'base', '損益 · 今日（シナリオ 0）', DASH, '', '', false),
@@ -502,21 +515,25 @@ export function bigReadout(
     ];
   }
   const g = r.greeks;
-  const sigma = Number.isFinite(dSigma) && dSigma !== 0 ? ` · Δσ ${fmtSigned(dSigma, 1)}` : '';
+  const sigma = Number.isFinite(dSigma) ? dSigma : 0;
   const prem =
     premium === null
-      ? { label: '受取 − 支払', value: DASH, sub: '' }
+      ? { label: '受取 − 支払', value: DASH, sub: '', full: null }
       : premium.stake !== null
         ? {
             label: '掛け金',
             value: fmtAmount(premium.stake, r.unit),
             sub: `支払 ${fmtAmount(premium.paid, r.unit)}`,
+            full: premiumFullRows(premium, r.unit),
           }
         : {
             label: '受取 − 支払',
             value: fmtAmount(premium.net, r.unit, true),
             sub: `受取 ${fmtAmount(premium.received, r.unit)}`,
+            full: premiumFullRows(premium, r.unit),
           };
+  const deltaValue = `${fmtSigned(g.deltaLarge, 2)} (${fmtSigned(g.deltaMini, 1)})`;
+  const gamma = `${fmtSigned(g.gammaPer100, 3)} /100円`;
   return [
     item(
       'date',
@@ -524,22 +541,27 @@ export function bigReadout(
       dateLabel,
       r.text.pnlDate,
       u,
-      `X ${r.text.x} (${r.text.dX}/${r.text.dXPct}%)${sigma}`,
+      // Δσ は全文と IV レールの吹き出しで読む（副題を 1 行に収める。#107）
+      `X ${r.text.x} (${r.text.dX}/${r.text.dXPct}%)`,
       true,
+      [
+        head(dateLabel, r.text.pnlDate),
+        { k: 'X', v: r.text.x },
+        { k: 'ΔX', v: `${r.text.dX} / ${r.text.dXPct}%` },
+        { k: 'Δσ', v: `${fmtSigned(sigma, 1)} pt` },
+      ],
     ),
-    item('expiry', 'base', '満期（SQ）', r.text.pnlExpiry, u, `今日 ${r.text.pnlToday}`, true),
-    item(
-      'delta',
-      'base',
-      'Δ ラージ(ミニ)',
-      `${fmtSigned(g.deltaLarge, 2)} (${fmtSigned(g.deltaMini, 1)})`,
-      '',
-      `Γ ${fmtSigned(g.gammaPer100, 3)} /100円`,
-      false,
-    ),
+    item('expiry', 'base', '満期（SQ）', r.text.pnlExpiry, u, `今日 ${r.text.pnlToday}`, true, [
+      head('満期（SQ）', r.text.pnlExpiry),
+      head('今日', r.text.pnlToday),
+    ]),
+    item('delta', 'base', 'Δ ラージ(ミニ)', deltaValue, '', `Γ ${gamma}`, false, [
+      { k: 'Δ ラージ(ミニ)', v: deltaValue },
+      { k: 'Γ', v: gamma },
+    ]),
     item('theta', 'x1', 'Θ / 日', r.text.theta, u, '', false),
     item('vega', 'x1', 'V / pt', r.text.vega, u, '', false),
-    item('premium', 'x2', prem.label, prem.value, u, prem.sub, false),
+    item('premium', 'x2', prem.label, prem.value, u, prem.sub, false, prem.full),
   ];
 }
 

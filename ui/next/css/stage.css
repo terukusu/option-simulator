@@ -660,6 +660,29 @@ section.stage > .panel-body.stage-main {
   min-width: 0;
 }
 
+/* 全文のある項目（#107）: 面・枠を持たない透明なボタン（押すと上に全文のポップオーバー） */
+.ro > .pop-wrap {
+  display: flex;
+  min-width: 0;
+}
+
+.ro-btn {
+  display: block;
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
+  text-align: left;
+}
+
+.ro-btn > .k,
+.ro-btn > .v,
+.ro-btn > .s {
+  display: block;
+}
+
 /* 見出し・副題は列の幅を決めない（値だけで決める）。入らなければ省略記号 */
 .ro .k,
 .ro .s {

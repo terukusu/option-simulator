@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { hintAlign, hintNext } from '../../ui/view/hint';
+import { hintAlign, hintNext, revealDelta } from '../../ui/view/hint';
 
 /** #63: 説明の吹き出し（ⓘ）の開閉と寄せ。 */
 describe('hintNext（開閉）', () => {
@@ -36,5 +36,29 @@ describe('hintAlign（左右の寄せ）', () => {
 
   it('幅 0 の行（測れない）は start', () => {
     expect(hintAlign(10, 0, 0)).toBe('start');
+  });
+});
+
+/** #107: 開いた全文のポップオーバーをスクロールする祖先（.panel-body）の中で見せる量。 */
+describe('revealDelta（祖先の scrollTop の増分）', () => {
+  it('入っていれば 0', () => {
+    expect(revealDelta(120, 300, 100, 500)).toBe(0);
+    expect(revealDelta(120, 500, 100, 500)).toBe(0);
+  });
+
+  it('下にはみ出す量だけ正', () => {
+    expect(revealDelta(300, 560, 100, 500)).toBe(60);
+  });
+
+  it('上端を越えて動かさない（host の高さが足りないときは上端を揃える）', () => {
+    expect(revealDelta(150, 700, 100, 400)).toBe(50);
+    expect(revealDelta(100, 700, 100, 400)).toBe(0);
+  });
+
+  it('負にならない・NaN は 0', () => {
+    expect(revealDelta(50, 700, 100, 400)).toBe(0);
+    expect(revealDelta(Number.NaN, 700, 100, 400)).toBe(0);
+    expect(revealDelta(150, Number.NaN, 100, 400)).toBe(0);
+    expect(revealDelta(150, 700, 100, Number.NaN)).toBe(0);
   });
 });

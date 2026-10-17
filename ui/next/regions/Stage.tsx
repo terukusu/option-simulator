@@ -92,7 +92,7 @@ export function Stage(p: {
             dispatch={dispatch}
           />
         )}
-        <BigReadout items={items} />
+        <BigReadout items={items} mini={mini} />
       </div>
     </>
   );

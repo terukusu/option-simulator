@@ -11,6 +11,7 @@ import {
   UNIT_HINT,
 } from '../../view/metricsPanel';
 import { PanelHead } from '../PanelHead';
+import { FullText } from '../parts/FullText';
 import { Popover } from '../parts/Popover';
 
 interface Props {
@@ -20,15 +21,29 @@ interface Props {
   feePerLot: number;
 }
 
+/**
+ * タイル（§5 の .tile）。6 枚とも押せて、タップ / Enter / Space で全文のポップオーバー（#107。中身は表示モデルの full）。
+ * 外側の div は格子の 1 枠（余白・背景はボタン .tile-btn）。ボタンの中は phrasing content だけ（span）。
+ */
 function Tile({ t }: { t: MetricTile }) {
   return (
     <div class="tile" data-tile={t.key}>
-      <div class="k">{t.k}</div>
-      <div class={t.tone ? `v ${t.tone}` : 'v'}>
-        <span>{t.v}</span>
-        {t.unit && <small>{t.unit}</small>}
-      </div>
-      <div class="s">{t.s}</div>
+      <Popover
+        buttonClass="tile-btn"
+        within=".panel-body"
+        button={
+          <>
+            <span class="k">{t.k}</span>
+            <span class={t.tone ? `v ${t.tone}` : 'v'}>
+              <span>{t.v}</span>
+              {t.unit && <small>{t.unit}</small>}
+            </span>
+            <span class="s">{t.s}</span>
+          </>
+        }
+      >
+        <FullText rows={t.full} />
+      </Popover>
     </div>
   );
 }

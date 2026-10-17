@@ -106,17 +106,41 @@ table.tail td .txt {
   }
 }
 
+/* 外側の .tile は格子の 1 枠（余白・背景は持たない）。面はボタン .tile-btn（#107: 押すと全文のポップオーバー） */
 .tile {
+  display: flex;
+  min-width: 0;
+}
+
+.tile > .pop-wrap {
+  display: flex;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* 計器の見た目のまま（枠・影・ホバーの面の変化を足さない）。開いている間だけ内側の線 */
+.tile-btn {
+  display: block;
+  flex: 1 1 auto;
   min-width: 0;
   padding: var(--sp-2) 10px;
+  border: 0;
   border-radius: var(--r-sm);
   background: var(--s2);
+  text-align: left;
+  /* フォーカスで .panel-body がスクロールしたときにフォーカスの輪が端で切れない */
+  scroll-margin: var(--sp-2);
+}
+
+.tile-btn[aria-expanded="true"] {
+  box-shadow: inset 0 0 0 1px var(--line-2);
 }
 
 /* 見出しと値は折り返さず切れない（検査する）。副題だけ省略記号 */
 .tile .k,
 .tile .v,
 .tile .s {
+  display: block;
   overflow: hidden;
   white-space: nowrap;
 }
