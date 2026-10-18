@@ -45,7 +45,8 @@
 //                                          IV 推移（#79 段 B）: 4 幅 × ダーク / ライトで IV 推移を開いた状態（PC は市場の Seg、タブレットは
 //                                          ドックのスマイル → [スマイル | IV 推移]、スマホはスマイルのシート peek / hidden / full）の縦・横・
 //                                          折り返しと、見出し・道具の行（足・ローソク / 線・⟳）・読み取りの 1 行・凡例が切れない
-//                                          （scrollWidth ≤ clientWidth）・描画域の高さ・進行中の足が 1 本。線のモードも同じ検査
+//                                          （scrollWidth ≤ clientWidth）・描画域の高さ・進行中の足が 1 本。線のモードも同じ検査。
+//                                          段 C で「今」の印 1 個・シナリオの水準の線 1 本（凡例に値が入っても切れない）を足した
 //   npm run ui:check -- --parts            部品の見本（?parts。dev だけ）
 //   npm run ui:check -- --flows            保存・共有・テーマ・キーボードの手順（#81 AC-11・AC-12）と入口の手順（#91: クエリなし・
 //                                          古い ?ui=next と旧画面を開いていた ui の値で同じ画面・部品の見本の ?parts・旧画面のときの
@@ -100,6 +101,10 @@
 //                                          と IV 推移の手順（#79 段 B AC-10・AC-12: atm_iv への要求の回数 = 起動 0 → 開く 1 → 閉じて開き
 //                                          直す 1 → ⟳ 2 → 足の切替（1 分・5 分・15 分は 1 回を共有、読み済みは 0）→ トップバーの [最新] で
 //                                          増えない、.iv-bar.progress・.iv-line.progress が 1 個、失敗 → [再試行]。390×844 と 1440×900）
+//                                          と IV 推移の追加読み込み・重ね（#79 段 C AC-9・AC-11: 左へパンして端から 10 本で左の 1 回分
+//                                          （UTC の 0 時・end = 読み済みの start・読み中は 2 本目なし・左上のバッジ）、前に足しても横の
+//                                          目盛りが同じ、空の左 3 回で止まる、「今」の印 1 個 / 表の last_at が板より後なら 0 個、
+//                                          PC はシナリオの水準 = 今 + 5.00（Δσ +5）→ [急落] で 今 + 30.00（Δσ 20 + β 1 × 10%））
 //   --url <base>                           dev サーバーを起こさず、その URL を使う（例 http://127.0.0.1:5173/?parts）
 //   --dom <file>                           body の下の要素の tag.class の並びを書き出す（DOM の変化の比較用）
 //   --shots <dir>                          スクリーンショットを書く（合成の板だけ。リポジトリに入れない）
@@ -1655,6 +1660,8 @@ async function ivCheck(page, label, want = {}) {
       height: wrap ? Math.round(wrap.getBoundingClientRect().height) : 0,
       bars: sec.querySelectorAll('.iv-bar').length,
       progress: sec.querySelectorAll('.iv-bar.progress, .iv-line.progress').length,
+      now: sec.querySelectorAll('.iv-now').length,
+      scenario: sec.querySelectorAll('.iv-scenario').length,
       svg: !!sec.querySelector('.iv-wrap svg'),
     };
   });
@@ -1667,6 +1674,9 @@ async function ivCheck(page, label, want = {}) {
   const bad = [...r.bad];
   if (!r.svg) bad.push('描画域に svg が無い');
   if (r.progress !== 1) bad.push(`進行中の足 ${r.progress} 個（1 のはず）`);
+  // 段 C: 合成の表の最後の行（板の 50 分前）より新しい板 = 「今」の印 1 個、twoLegs のシナリオ（ΔX −400・Δσ +2）= 水準の線 1 本
+  if (r.now !== 1) bad.push(`「今」の印 ${r.now} 個（1 のはず）`);
+  if (r.scenario !== 1) bad.push(`シナリオの水準 ${r.scenario} 本（1 のはず）`);
   if (want.minHeight && r.height < want.minHeight)
     bad.push(`描画域の高さ ${r.height}px（${want.minHeight}px 以上のはず）`);
   const ok = r.n > 0 && bad.length === 0;
@@ -2067,6 +2077,8 @@ async function runFlows() {
   for (const vp of [phone, pc]) await motionLoafFlow(vp);
   // #79 段 B IV 推移の遅延ロード・最新化・足の切替・進行中の足（AC-10・AC-12）
   for (const vp of [phone, pc]) await ivFlows(vp);
+  // #79 段 C IV 推移の追加読み込み・「今」の印・シナリオの水準（AC-9・AC-11）
+  for (const vp of [phone, pc]) await ivMoreFlows(vp);
 }
 
 // ---- 舞台の手順（#82）
@@ -7505,17 +7517,22 @@ async function ivFlows(vp) {
     route.fulfill({ status: 500, contentType: 'text/plain', body: 'x' }),
   );
   const page = await ctx.newPage();
+  // 右端の 1 回分（範囲なし）だけを数える（段 C: 足が少ない 15 分足などは左の追加読み込み = start= の要求が出る）
   const reqs = [];
+  const all = [];
   page.on('request', (r) => {
-    if (r.url().includes('atm_iv')) reqs.push(new URL(r.url()).search);
+    if (!r.url().includes('atm_iv')) return;
+    const q = new URL(r.url()).search;
+    all.push(q);
+    if (!q.includes('start=')) reqs.push(q);
   });
   await page.goto(pageUrl('next'));
   await waitReady(page, 'next');
   await page.waitForTimeout(1500);
   check(
     `#79 AC-10 ${tag} 起動して 1.5 秒: IV のエンドポイントへの要求が 0 回`,
-    reqs.length === 0,
-    `${reqs.length} 回`,
+    all.length === 0,
+    `${all.length} 回`,
   );
 
   const toIv = async () => {
@@ -7545,8 +7562,8 @@ async function ivFlows(vp) {
   const shown = await ready();
   check(
     `#79 AC-10 ${tag} IV 推移を開くと 1 回（右端 = tf=1h だけ）で描く`,
-    shown && reqs.length === 1 && reqs[0] === '?tf=1h',
-    `${reqs.join(' ')}・描画 ${shown}`,
+    shown && all.length === 1 && reqs[0] === '?tf=1h',
+    `${all.join(' ')}・描画 ${shown}`,
   );
   const prog = await page.locator('section.smile .iv-bar.progress').count();
   check(`#79 AC-12 ${tag} 右端の進行中の足は .iv-bar.progress（1 個）`, prog === 1, `${prog} 個`);
@@ -7563,8 +7580,8 @@ async function ivFlows(vp) {
   await page.waitForTimeout(500);
   check(
     `#79 AC-10 ${tag} 閉じて開き直しても再要求しない（1 回のまま）`,
-    reqs.length === 1,
-    `${reqs.length} 回`,
+    all.length === 1,
+    `${all.length} 回`,
   );
 
   await page.click('section.smile .iv-refresh');
@@ -7598,9 +7615,9 @@ async function ivFlows(vp) {
   await tfClick('15 分足');
   await tfClick('1 時間足');
   check(
-    `#79 ${tag} 足の切替: 1 分で 1 回、5 分・15 分は 1 分を共有、1 時間は読み済み（要求 3 回）`,
+    `#79 ${tag} 足の切替: 1 分で 1 回、5 分・15 分は 1 分を共有、1 時間は読み済み（右端の要求 3 回。左の追加は別に数える）`,
     n1 === 3 && reqs.length === 3 && reqs[2] === '?tf=1m',
-    reqs.join(' '),
+    `${reqs.join(' ')}（左 ${all.length - reqs.length} 回）`,
   );
 
   // トップバーの [最新] では IV を読み直さない
@@ -7651,6 +7668,223 @@ async function ivFlows(vp) {
       failedShown && ok,
     );
     await ctx2.close();
+  }
+}
+
+// ---- IV 推移の追加読み込み・「今」の印・シナリオの水準（#79 段 C AC-9・AC-11）
+async function ivMoreFlows(vp) {
+  const tag = `${vp.width}x${vp.height}`;
+  const isPc = vp.width >= 1200;
+  const isAtmIv = (url) => url.pathname.endsWith('/atm_iv');
+  const open = async (page) => {
+    if (isPc) await page.click('section.panel .panel-head .seg button:has-text("IV 推移")');
+    else {
+      await setShell(page, 'smile', 'peek');
+      await page.click('section.smile .panel-head .seg button:has-text("IV 推移")');
+    }
+    return page
+      .waitForFunction(
+        () =>
+          !!document.querySelector('section.smile .iv-wrap svg') &&
+          !document.querySelector('section.smile .iv-loading'),
+        undefined,
+        { timeout: 10000 },
+      )
+      .then(() => true)
+      .catch(() => false);
+  };
+  /** 横の目盛り（ラベル → x） */
+  const ticks = (page) =>
+    page.$$eval('section.smile .iv-wrap .ax .tx', (els) =>
+      els.map((e) => [e.textContent, Number(e.getAttribute('x'))]),
+    );
+  const yTicks = (page) =>
+    page.$$eval('section.smile .iv-wrap .ax .ty', (els) => els.map((e) => e.textContent).join(' '));
+  /** 描画域で ← を押して左へパン（cond が true になるまで。最大 n 回） */
+  const panLeft = async (page, cond, n = 80) => {
+    await page.focus('section.smile .iv-wrap');
+    for (let i = 0; i < n && !cond(); i++) await page.keyboard.press('ArrowLeft');
+  };
+  const leftOf = (list) => list.filter((q) => q.includes('start='));
+
+  // (a) 左へパンして端から 10 本で左の 1 回分。読み中は 2 本目を出さない・左上のバッジ。前に足しても横の目盛りが同じ
+  {
+    const ctx = await newContext(vp, { [WORKSPACE_KEY]: twoLegs });
+    const reqs = [];
+    let release = null;
+    await ctx.route(isAtmIv, async (route) => {
+      const q = new URL(route.request().url()).search;
+      reqs.push(q);
+      if (q.includes('start=') && leftOf(reqs).length === 1) {
+        // 最初の左の応答を止めておく（読み中のバッジ・2 本目が出ないこと・応答の前後の目盛りを見る）
+        await new Promise((r) => {
+          release = r;
+        });
+      }
+      await route.fallback();
+    });
+    const page = await ctx.newPage();
+    await page.goto(pageUrl('next'));
+    await waitReady(page, 'next');
+    const shown = await open(page);
+    await panLeft(page, () => leftOf(reqs).length > 0);
+    // デバウンス（250ms）を待つ
+    await page
+      .waitForFunction(
+        () => !!document.querySelector('section.smile .iv-badge.left.iv-loading'),
+        undefined,
+        {
+          timeout: 3000,
+        },
+      )
+      .catch(() => {});
+    await page.waitForTimeout(600);
+    const left = leftOf(reqs);
+    const badge = await page.locator('section.smile .iv-badge.left.iv-loading').count();
+    const q = new URLSearchParams(left[0] ?? '');
+    const aligned =
+      /T00:00:00Z$/.test(q.get('start') ?? '') && /T00:00:00Z$/.test(q.get('end') ?? '');
+    check(
+      `#79 AC-9 ${tag} 左へパンして端から 10 本で左の 1 回分（tf=1h・UTC の 0 時・end = 読み済みの start 2026-08-15）、読み中は 2 本目なし・左上のバッジ`,
+      shown &&
+        left.length === 1 &&
+        q.get('tf') === '1h' &&
+        aligned &&
+        q.get('end') === '2026-08-15T00:00:00Z' &&
+        badge === 1,
+      `${left.join(' ')}・バッジ ${badge}`,
+    );
+    const before = await ticks(page);
+    release?.();
+    await page
+      .waitForFunction(() => !document.querySelector('section.smile .iv-badge.left'), undefined, {
+        timeout: 5000,
+      })
+      .catch(() => {});
+    await page.waitForTimeout(150);
+    const after = await ticks(page);
+    // 読む前に見えていた足の目盛りは同じ位置のまま（左の余白だった所に前の足が入って目盛りが増えるのはよい）
+    const at = new Map(after);
+    const kept = before.every(([l, x]) => at.has(l) && Math.abs(at.get(l) - x) < 1);
+    const fmt = (t) => t.map(([l, x]) => `${l}@${Math.round(x)}`).join(' ');
+    check(
+      `#79 AC-9 ${tag} 前に足しても表示の時間範囲が変わらない（読む前の横の目盛りが同じ位置）`,
+      before.length > 0 && kept,
+      `${fmt(before)} → ${fmt(after)}`,
+    );
+    if (shotsDir) await page.screenshot({ path: join(shotsDir, `flows-iv-left-${tag}.png`) });
+    await ctx.close();
+  }
+
+  // (b) 空の左が 3 回続けば止まる（空の後は続けて次を読む）
+  {
+    const ctx = await newContext(vp, { [WORKSPACE_KEY]: twoLegs });
+    const reqs = [];
+    await ctx.route(isAtmIv, async (route) => {
+      const url = new URL(route.request().url());
+      reqs.push(url.search);
+      if (!url.searchParams.has('start')) return route.fallback();
+      const iso = (v) => `${new Date(Date.parse(v)).toISOString().slice(0, 19)}+00:00`;
+      return route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          schema_version: 1,
+          tf: url.searchParams.get('tf'),
+          start: iso(url.searchParams.get('start')),
+          end: iso(url.searchParams.get('end')),
+          last_at: null,
+          bars: [],
+        }),
+      });
+    });
+    const page = await ctx.newPage();
+    await page.goto(pageUrl('next'));
+    await waitReady(page, 'next');
+    await open(page);
+    await panLeft(page, () => leftOf(reqs).length > 0);
+    await page.waitForTimeout(2000);
+    const n3 = leftOf(reqs).length;
+    await panLeft(page, () => false, 10);
+    await page.waitForTimeout(800);
+    check(
+      `#79 AC-9 ${tag} 空の左が 3 回続けば止まる（パンし直しても読まない）`,
+      n3 === 3 && leftOf(reqs).length === 3,
+      `${n3} → ${leftOf(reqs).length} 回`,
+    );
+    await ctx.close();
+  }
+
+  // (c) 「今」の印: 合成の表の last_at（板の 50 分前）より新しい板なら 1 個、last_at が板より後なら 0 個
+  for (const late of [false, true]) {
+    const ctx = await newContext(vp, { [WORKSPACE_KEY]: twoLegs });
+    if (late) {
+      await ctx.route(isAtmIv, async (route) => {
+        const res = await route.fetch();
+        const body = await res.json();
+        body.last_at = '2026-10-13T21:40:00+09:00';
+        await route.fulfill({ response: res, body: JSON.stringify(body) });
+      });
+    }
+    const page = await ctx.newPage();
+    await page.goto(pageUrl('next'));
+    await waitReady(page, 'next');
+    await open(page);
+    await page.waitForTimeout(300);
+    const marks = await page.locator('section.smile .iv-now').count();
+    const legend = await page.locator('section.smile .iv-legend .now').count();
+    check(
+      late
+        ? `#79 AC-11 ${tag} 表の last_at が板の snapshot_at より後なら「今」の印は出ない`
+        : `#79 AC-11 ${tag} 表の最後の行より新しい板なら「今」の印が 1 個（凡例にも値）`,
+      late ? marks === 0 && legend === 0 : marks === 1 && legend === 1,
+      `印 ${marks}・凡例 ${legend}`,
+    );
+    await ctx.close();
+  }
+
+  // (d) PC: シナリオの水準 = 今 + 5.00（ΔX 0・Δσ +5）→ [急落]（ΔX −10%・Δσ 20・β 1）で 今 + 30.00
+  if (isPc) {
+    const ws = JSON.parse(twoLegs);
+    ws.tabs[0].position.scenario = {
+      ...ws.tabs[0].position.scenario,
+      dX: 0,
+      dSigma: 5,
+      beta: 1,
+      skew: 0,
+    };
+    const ctx = await newContext(vp, { [WORKSPACE_KEY]: JSON.stringify(ws) });
+    const page = await ctx.newPage();
+    await page.goto(pageUrl('next'));
+    await waitReady(page, 'next');
+    await open(page);
+    await page.waitForTimeout(300);
+    const num = (sel) =>
+      page
+        .textContent(sel)
+        .then((t) => Number((t ?? '').replace(/[^\d.-]/g, '')))
+        .catch(() => Number.NaN);
+    const now = await num('section.smile .iv-legend .now');
+    const sc = await num('section.smile .iv-legend .sc');
+    const y1 = await page.getAttribute('section.smile .iv-scenario', 'y1').catch(() => null);
+    const ty1 = await yTicks(page);
+    check(
+      `#79 AC-11 ${tag} ΔX 0・Δσ +5 でシナリオの水準 = 今 + 5.00（${now} → ${sc}）`,
+      Number.isFinite(now) && Math.abs(sc - now - 5) < 0.0051 && y1 !== null,
+    );
+    await page.click('section.scenario .chip:has-text("急落")');
+    await page.waitForTimeout(300);
+    const sc2 = await num('section.smile .iv-legend .sc');
+    const y2 = await page.getAttribute('section.smile .iv-scenario', 'y1').catch(() => null);
+    const ty2 = await yTicks(page);
+    // 水準は縦軸に入る（足より上なら縦軸の上端が広がるので、線の y は上端付近のまま目盛りが変わる）
+    check(
+      `#79 AC-11 ${tag} [急落]（ΔX −10%・Δσ 20・β 1）で水準 = 今 + 30.00（${sc2}）、縦軸が水準まで広がる`,
+      Math.abs(sc2 - now - 30) < 0.0051 && y2 !== null && (y2 !== y1 || ty2 !== ty1),
+      `y ${y1} → ${y2}・縦の目盛り ${ty1} → ${ty2}`,
+    );
+    if (shotsDir) await page.screenshot({ path: join(shotsDir, `flows-iv-scenario-${tag}.png`) });
+    await ctx.close();
   }
 }
 

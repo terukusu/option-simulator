@@ -1,12 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import { ChainLoadError, loadAtmIv } from '../../data/adapter';
-import { atmIvParamTime, atmIvUrl, validateAtmIvJson } from '../../data/atmIv';
+import { type AtmIvSource, atmIvParamTime, atmIvUrl, validateAtmIvJson } from '../../data/atmIv';
 import {
+  atmIvQuery,
   SYNTH_IV_FIRST,
   SYNTH_IV_LAST_AT,
   SYNTH_IV_NOW,
   synthAtmIv,
 } from '../../scripts/devFixtures.mjs';
+import { ivLeftRange, ivRangeAt, ivRightRange } from '../../ui/view/ivLoad';
 
 /**
  * #79 段 B: `/api/atm_iv` の JSON の検証と読み込み（data/atmIv.ts・data/adapter.ts の loadAtmIv）。
@@ -165,5 +167,48 @@ describe('dev の合成の応答（scripts/devFixtures.mjs の synthAtmIv。架�
     const r = validateAtmIvJson(json, '1h');
     expect(r.ok && r.value.bars.length === 0 && r.value.lastAt === null).toBe(true);
     expect(synthAtmIv('5m')).toBeNull();
+  });
+});
+
+describe('dev の範囲の検査（サーバーの parse_request と同じ。#79 段 C）', () => {
+  const D = 86400;
+  const day = Math.floor(SYNTH_IV_NOW / D) * D;
+  const url = (tf: AtmIvSource, start: number, end: number) =>
+    atmIvUrl('/fixtures/atm_iv', tf, { start, end });
+
+  it('UTC の 0 時・最大の日数以下・2010-01-01 以降だけ通る（end は今の UTC の日の翌 0 時に縮める）', () => {
+    expect(atmIvQuery(url('1h', day - 100 * D, day))?.range).toEqual({
+      start: day - 100 * D,
+      end: day,
+    });
+    expect(atmIvQuery(url('1h', day - 101 * D, day))).toBeNull();
+    expect(atmIvQuery(url('1m', day - 3 * D + 3600, day))).toBeNull();
+    expect(atmIvQuery(url('1d', day - 399 * D, day + 30 * D))?.range?.end).toBe(day + D);
+    expect(
+      atmIvQuery(url('1d', Date.UTC(2009, 11, 31) / 1000, Date.UTC(2010, 5, 1) / 1000)),
+    ).toBeNull();
+    expect(atmIvQuery('/fixtures/atm_iv?tf=1h&start=2026-10-01T00:00:00')).toBeNull();
+    expect(atmIvQuery('/fixtures/atm_iv?tf=1h')).toEqual({ tf: '1h', range: null });
+  });
+
+  it('画面の追加読み込みの範囲（左・右・足の切替の 1 回分）はこの検査に通る', () => {
+    for (const src of ['1m', '1h', '1d'] as const) {
+      const e = {
+        bars: [],
+        start: day - 2 * D,
+        end: SYNTH_IV_NOW,
+        lastAt: null,
+        rightLoaded: true,
+        leftDone: false,
+        emptyLeft: 0,
+      };
+      const left = ivLeftRange(e, src);
+      if (!left) throw new Error('左の範囲が無い');
+      expect(atmIvQuery(url(src, left.start, left.end))).not.toBeNull();
+      const right = ivRightRange({ ...e, end: day - D }, src);
+      expect(atmIvQuery(url(src, right.start, right.end))).not.toBeNull();
+      const at = ivRangeAt(SYNTH_IV_NOW - 40 * D + 777, src);
+      expect(atmIvQuery(url(src, at.start, at.end))).not.toBeNull();
+    }
   });
 });

@@ -19,6 +19,7 @@ import { marketAddPlan, marketAddToast } from '../view/boardPanel';
 import { closedTabText, restoreTabError, type ShareResult, shareResultView } from '../view/boxTabs';
 import { fmtNum } from '../view/format';
 import { keptBoardNote } from '../view/header';
+import { ivNowValue } from '../view/ivHistory';
 import { PC_QUERY, PHONE_QUERY } from '../view/layout';
 import { marketPill } from '../view/marketPill';
 import {
@@ -86,6 +87,7 @@ import { useTheme } from './useTheme';
  * #79 段 B で IV 推移（market/IvHistory.tsx）を入れた。読み込みの状態は常駐の useIvHistory（パネルを閉じても残る・
  * 保存しない）。見えたら（ivVisible）初めての 1 回だけ右端を読む。データ元が API のときは /api/atm_iv、dev の合成の板・
  * ファイルのときは dev だけ /fixtures/atm_iv（本番のビルドは常に /api/atm_iv）。トップバーの [最新] では読み直さない。
+ * 段 C で左右の追加読み込み（useIvHistory）・「今」の 1 点（ivNowValue）・シナリオの水準（state.scenario と舞台の X₀）を足した。
  */
 export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
   const c = useAppController(boot);
@@ -96,6 +98,13 @@ export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
   const ivEndpoint =
     import.meta.env.DEV && state.sourceLabel !== API_LABEL ? '/fixtures/atm_iv' : '/api/atm_iv';
   const iv = useIvHistory(ivVisible(shell, tier), ivEndpoint);
+  // IV 推移の「今」の 1 点（#79 段 C）: 今の板の生の気配から optionchan と同じ定義の iv30（板・カレンダーが変わったときだけ）
+  const boardJson = state.chain?.json ?? null;
+  const { nonTradingDays } = state.calendar;
+  const ivNow = useMemo(
+    () => (boardJson ? ivNowValue(boardJson, nonTradingDays) : null),
+    [boardJson, nonTradingDays],
+  );
   // 全体のキー 1〜5・G・T・Ctrl / ⌘ + K（#89。パレットの行の実行も同じ ctx）
   const [paletteOpen, setPaletteOpen] = useState(false);
   const onPalette = useCallback(() => setPaletteOpen(true), []);
@@ -493,7 +502,13 @@ export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
             <IvHistory
               load={iv.load}
               view={iv.view}
-              nonTradingDays={state.calendar.nonTradingDays}
+              bars={iv.bars}
+              viewport={iv.viewport}
+              leftSlack={iv.leftSlack}
+              now={ivNow}
+              scenario={state.scenario}
+              x0={c.positions?.ctx.x0 ?? Number.NaN}
+              nonTradingDays={nonTradingDays}
               seg={seg}
               onRefresh={iv.refresh}
               onRetry={iv.retry}

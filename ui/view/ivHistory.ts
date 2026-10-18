@@ -7,10 +7,17 @@
  *   日中 08:45〜15:45・夜間 17:00〜翌 06:00（JST）で、その日（夜間は始まる日）が取引日のときだけ数える。日足は間に
  *   取引日が 1 日でもあれば分ける。取引日 = 土日と取引カレンダーの is_trading_day = false の日以外
  * - 右端の足は進行中（表は直近 1〜2 時間を作り直す）: 右端まで読んであれば最後の 1 本を .progress で描く
+ * - 「今」の 1 点（段 C）: 今の板から optionchan と同じ定義で計算した iv30（model/constantMaturity.ts）を、表の最後の行
+ *   （応答の last_at の最大）より新しい板のときだけ右端に印で足す（ivNowValue・ivNowPoint）
+ * - シナリオの水準（段 C）: 基準（「今」、無ければ最新の足の close）にシナリオの ATM（x_eff = 0）の Δσ + Δσ_β を当てた
+ *   水準を横の破線で重ねる（ivScenarioLevel。model/scenario.ts の sigmaAt をそのまま使う）
+ * - 追加読み込み（段 C）: 端から何本かは ivEdges、読み込みの後に見ている時刻を保つ（右端に付いていれば右端に付いていく）
+ *   のは ivFollowViewport。規則は ui/view/ivLoad.ts
  * - 色は持たない（CSS のクラス名だけ）。値は iv30 の %（pt）で小数 2 桁、時刻は JST
  */
 
-import type { AtmIvSource, IvBar } from '../../data';
+import type { AtmIvSource, ChainJson, IvBar } from '../../data';
+import { type CmMethod, constantMaturityIv, type Scenario, SIGMA_MIN, sigmaAt } from '../../model';
 import { clampViewport, type Domain, linear, niceTicks, padDomain } from '../chart/scale';
 import { DASH, fmtNum } from './format';
 
@@ -250,6 +257,103 @@ export function resolveIvViewport(
   return clampViewport([n - IV_INITIAL_BARS[tf] - 0.5, full[1]], full, minWidth);
 }
 
+/** 左に読む余地があるときの左の余白（本） */
+export const IV_LEFT_SLACK = 10;
+
+/**
+ * 読み込みの後の表示範囲（index）: 前の足の並び prev と次 next の共通の足で、見ている時刻が動かないようにずらす
+ * （前に足したら足した本数だけ右へ、左を捨てたら捨てた本数だけ左へ）。右端の足が見えていた（viewport[1] ≥ prev の最後）
+ * なら右端に付いていく（右に足した本数もずらす）。明示の表示範囲が無い・前の足が無い・共通の時刻が無い（読み済みを
+ * 置き換えた）ときは null（初期表示）
+ */
+export function ivFollowViewport(
+  prev: readonly IvBar[],
+  next: readonly IvBar[],
+  viewport: Domain | null,
+): Domain | null {
+  if (!viewport || prev.length === 0 || next.length === 0) return null;
+  if (prev === next) return viewport;
+  const first = next[0] as IvBar;
+  const ip = lowerBound(prev, first.t);
+  if (ip >= prev.length) return null;
+  const t = (prev[ip] as IvBar).t;
+  const inx = lowerBound(next, t);
+  if (inx >= next.length || (next[inx] as IvBar).t !== t) return null;
+  const shift = viewport[1] >= prev.length - 1 ? next.length - prev.length : inx - ip;
+  return shift === 0 ? viewport : [viewport[0] + shift, viewport[1] + shift];
+}
+
+/** 表示範囲が端から IV_EDGE_BARS 本未満か（左: 左端が最初の足から、右: 右端が最後の足から）。足が 0 本（右端の 1 回分が
+ * 空 = 休場・取り込みの停止）なら左だけ（左へ読めるようにする） */
+export function ivEdges(
+  viewport: Domain,
+  n: number,
+  edgeBars: number,
+): { left: boolean; right: boolean } {
+  if (n === 0) return { left: true, right: false };
+  return { left: viewport[0] < edgeBars, right: viewport[1] > n - 1 - edgeBars };
+}
+
+/** UNIX 秒が属する取引日の 00:00 JST（日足の足の t。サーバーの trading_day と同じ: 17:00 からは次の取引日、土日・休業日は飛ばす） */
+export function ivTradingDayStart(t: number, nonTradingDays: ReadonlySet<string>): number {
+  let d = jstDayIndex(t + 7 * 3600);
+  for (let i = 0; i < 30 && !isIvTradingDay(d, nonTradingDays); i++) d++;
+  return d * DAY_S - JST_S;
+}
+
+/** 今の板の iv30（「今」の 1 点の値）。t = スナップショットの UNIX 秒 */
+export interface IvNowValue {
+  t: number;
+  iv: number;
+  method: CmMethod;
+}
+
+/** 今の板（板の JSON の生の気配）から iv30 を計算する（出なければ null） */
+export function ivNowValue(
+  json: ChainJson,
+  nonTradingDays: ReadonlySet<string>,
+): IvNowValue | null {
+  const at = Date.parse(json.snapshot_at);
+  const r = constantMaturityIv(
+    at,
+    json.months.map((m) => ({ lastTradingDay: m.last_trading_day, rows: m.rows })),
+    nonTradingDays,
+  );
+  return r ? { t: Math.floor(at / 1000), iv: r.iv30, method: r.method } : null;
+}
+
+/**
+ * 「今」の印の位置（足の index）と値。表の最後の行（lastAt）より新しい板のときだけ（lastAt が無ければ比べない）。
+ * 今の足の区間が最後の足と同じならその足の index、違えば n（最後の足の右）。足が無ければ null
+ */
+export function ivNowPoint(
+  now: IvNowValue | null,
+  bars: readonly IvBar[],
+  tf: IvTf,
+  lastAt: number | null,
+  nonTradingDays: ReadonlySet<string>,
+): { index: number; iv: number } | null {
+  const n = bars.length;
+  if (!now || n === 0) return null;
+  if (lastAt !== null && !(now.t > lastAt)) return null;
+  const sec = IV_TF_SECONDS[tf];
+  const bucket =
+    tf === '1d' ? ivTradingDayStart(now.t, nonTradingDays) : Math.floor(now.t / sec) * sec;
+  return { index: bucket <= (bars[n - 1] as IvBar).t ? n - 1 : n, iv: now.iv };
+}
+
+/**
+ * シナリオの水準（pt）: 基準 base（%）にシナリオの ATM（x_eff = 0 = フォワード ATM。スキュー Δs は効かない）の
+ * Δσ + Δσ_β を当てた値。absolute は base + Δσ + Δσ_β、relative は base·(1 + Δσ/100) + Δσ_β、下限 σ_min。
+ * ΔX = Δσ = 0（今と同じ）・基準が無い・X₀ が正でなければ null
+ */
+export function ivScenarioLevel(base: number | null, sc: Scenario, x0: number): number | null {
+  if (base === null || !Number.isFinite(base)) return null;
+  if (sc.dX === 0 && sc.dSigma === 0) return null;
+  if (!(Number.isFinite(x0) && x0 > 0)) return null;
+  return sigmaAt(() => base / 100, 1, 1, 1, x0, x0 + sc.dX, sc, SIGMA_MIN) * 100;
+}
+
 /** 描画域の余白（px。縦の目盛りは左） */
 export const IV_MARGIN = { left: 40, right: 10, top: 10, bottom: 22 } as const;
 
@@ -446,6 +550,10 @@ export interface IvChartInput {
   cursor: number | null;
   /** 右端（最新）まで読んである = 最後の足は進行中 */
   rightLoaded: boolean;
+  /** 「今」の印（ivNowPoint の結果。無ければ null） */
+  now?: { index: number; iv: number } | null;
+  /** シナリオの水準（pt。無ければ null） */
+  scenario?: number | null;
 }
 
 export interface IvChartModel {
@@ -466,6 +574,10 @@ export interface IvChartModel {
   yTicks: { y: number; label: string }[];
   /** カーソルの縦線の x（無ければ null） */
   cursorX: number | null;
+  /** 「今」の印の座標（無ければ null） */
+  nowPt: { x: number; y: number } | null;
+  /** シナリオの水準の横線の y（無ければ null） */
+  scenarioY: number | null;
 }
 
 /** [i0, i1] の足の安値〜高値（無ければ null） */
@@ -491,7 +603,15 @@ export function ivChartModel(p: IvChartInput): IvChartModel {
   // 中心が表示範囲に入る足（線は端の 1 本外まで描いて切る）
   const i0 = Math.max(0, Math.ceil(viewport[0]));
   const i1 = Math.min(n - 1, Math.floor(viewport[1]));
-  const base = lowHigh(bars, i0, i1) ?? lowHigh(bars, 0, n - 1);
+  const seen = lowHigh(bars, i0, i1) ?? lowHigh(bars, 0, n - 1);
+  // 縦軸: 見えている足の安値〜高値と、見えている「今」・シナリオの水準
+  const now = p.now && p.now.index >= viewport[0] && p.now.index <= viewport[1] ? p.now : null;
+  const scenario = p.scenario ?? null;
+  let base: Domain | null = seen;
+  for (const v of [now?.iv ?? null, scenario]) {
+    if (v === null || !Number.isFinite(v)) continue;
+    base = base ? [Math.min(base[0], v), Math.max(base[1], v)] : [v, v];
+  }
   const yDomain: Domain = base ? padDomain(base, 0.08, 0.25) : [0, 1];
   const sy = linear(yDomain, [h - IV_MARGIN.bottom, IV_MARGIN.top]);
   const r1 = (v: number) => Math.round(v * 10) / 10;
@@ -578,6 +698,8 @@ export function ivChartModel(p: IvChartInput): IvChartModel {
     xTicks,
     yTicks,
     cursorX: c === null ? null : r1(sx(c)),
+    nowPt: now && n > 0 ? { x: r1(sx(now.index)), y: r1(sy(now.iv)) } : null,
+    scenarioY: scenario !== null && Number.isFinite(scenario) && n > 0 ? r1(sy(scenario)) : null,
   };
 }
 
@@ -595,7 +717,7 @@ export const IV_HINT =
   'ドラッグ / 1 本指でパン · ホイール / ピンチで拡大 · ダブルタップ / R で初期表示 · ホバー / 長押しで足を読む · , . で 1 本ずつ';
 /** ⓘ のデータの説明 */
 export const IV_NOTE =
-  'ATM IV（30 日固定）= 期近・次限月の ATM の IV を残存 30 日に補間した値（%）。表は毎時作り直すので、右端の足は確定前（薄く描く）。読むのは開いたときと ⟳ だけ（トップバーの [最新] では読み直さない）。欠け（立会中に 30 分以上 / 足 1 本以上の空き）で線を切る';
+  'ATM IV（30 日固定）= 期近・次限月の ATM の IV を残存 30 日に補間した値（%。モデルの ATM IV とは別の定義）。表は毎時作り直すので、右端の足は確定前（薄く描く）。読むのは開いたとき・⟳・左右の端へパンしたときだけ（トップバーの [最新] では読み直さない）。欠け（立会中に 30 分以上 / 足 1 本以上の空き）で線を切る。● 今 = 今の板から同じ定義で計算した値（表より新しい板のとき）、┄ シナリオ = 今に Δσ と β × ΔX% を当てた水準';
 /** 描画域の名前（role="application"） */
 export const IV_PLOT_LABEL = 'IV 推移のグラフ（矢印でパン・+ − で拡大・, . で足を読む）';
 /** 1〜5 の行き先の枠の名前（スマイルのパネルで IV 推移を見せているとき） */

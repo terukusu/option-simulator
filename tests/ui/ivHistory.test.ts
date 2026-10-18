@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { IvBar } from '../../data';
+import { ZERO_SCENARIO } from '../../model';
 import {
   barsForTf,
   IV_INITIAL_BARS,
@@ -12,8 +13,12 @@ import {
   ivFullDomain,
   ivIndexAt,
   ivKeepOf,
+  ivNowPoint,
+  ivNowValue,
   ivReadout,
+  ivScenarioLevel,
   ivSource,
+  ivTradingDayStart,
   jstDayIndex,
   lineSegments,
   mergeBars,
@@ -21,6 +26,7 @@ import {
   resolveIvViewport,
   sessionMinutesBetween,
 } from '../../ui/view/ivHistory';
+import { fixture } from '../support/fixtures';
 import { barsAt, everyStep, jst } from '../support/synthIv';
 
 /**
@@ -379,5 +385,128 @@ describe('ivChartModel（描画の座標）', () => {
 
   it('足の長さの表（秒）', () => {
     expect(IV_TF_SECONDS).toEqual({ '1m': 60, '5m': 300, '15m': 900, '1h': 3600, '1d': 86400 });
+  });
+});
+
+// ---- 段 C: 「今」の 1 点とシナリオの水準（AC11）
+describe('AC11: 「今」の 1 点', () => {
+  const bars = barsAt(everyStep(jst('2026-11-02T09:00'), H, 10), 8);
+  const last = bars.at(-1)?.t as number;
+  const now = (t: number, iv = 23.45) => ({ t, iv, method: 'm1' as const });
+
+  it('表の最後の行（last_at）より新しい板のときだけ出る。snapshot_at ≤ last_at なら出ない、last_at が無ければ比べない', () => {
+    const lastAt = last + 40 * M;
+    expect(ivNowPoint(now(lastAt + 60), bars, '1h', lastAt, NTD)).toEqual({ index: 9, iv: 23.45 });
+    expect(ivNowPoint(now(lastAt), bars, '1h', lastAt, NTD)).toBeNull();
+    expect(ivNowPoint(now(lastAt - 600), bars, '1h', lastAt, NTD)).toBeNull();
+    expect(ivNowPoint(now(lastAt + 60), bars, '1h', null, NTD)).not.toBeNull();
+    expect(ivNowPoint(null, bars, '1h', null, NTD)).toBeNull();
+    expect(ivNowPoint(now(lastAt + 60), [], '1h', null, NTD)).toBeNull();
+  });
+
+  it('今の足の区間が最後の足と同じならその足の index、違えば最後の足の右（n）', () => {
+    // 1 時間足: 最後の足 = 18:00〜19:00。18:50 の板は同じ足、19:05 は次の足
+    expect(ivNowPoint(now(last + 50 * M), bars, '1h', last + 20 * M, NTD)?.index).toBe(9);
+    expect(ivNowPoint(now(last + 65 * M), bars, '1h', last + 20 * M, NTD)?.index).toBe(10);
+    // 日足: 17:00 からは次の取引日（金曜の夜間は月曜。11-03 は取引の無い平日）
+    const days = barsAt([jst('2026-11-02T00:00')], 9);
+    expect(ivNowPoint(now(jst('2026-11-02T14:00')), days, '1d', null, NTD)?.index).toBe(0);
+    expect(ivNowPoint(now(jst('2026-11-02T17:30')), days, '1d', null, NTD)?.index).toBe(1);
+    expect(ivTradingDayStart(jst('2026-11-02T17:30'), NTD)).toBe(jst('2026-11-04T00:00'));
+    expect(ivTradingDayStart(jst('2026-11-06T21:00'), NTD)).toBe(jst('2026-11-09T00:00'));
+    expect(ivTradingDayStart(jst('2026-11-07T03:00'), NTD)).toBe(jst('2026-11-09T00:00'));
+    expect(ivTradingDayStart(jst('2026-11-05T16:59'), NTD)).toBe(jst('2026-11-05T00:00'));
+  });
+
+  it('合成の板（fixtures/synthetic/latest.json）から iv30 が出る（定義は model/constantMaturity.ts。値は架空）', () => {
+    const json = fixture('latest');
+    const v = ivNowValue(json, new Set());
+    expect(v?.t).toBe(Date.parse(json.snapshot_at) / 1000);
+    expect(v?.method).toBe('m1');
+    expect(v?.iv).toBeGreaterThan(5);
+    expect(v?.iv).toBeLessThan(80);
+    // 印が無ければ出ない
+    const none = structuredClone(json);
+    for (const m of none.months) for (const r of m.rows) r.call.is_atm = r.put.is_atm = false;
+    expect(ivNowValue(none, new Set())).toBeNull();
+  });
+
+  it('描画: 見えている「今」の印は縦軸に入り、座標が出る。表示範囲の外なら縦軸に入れない', () => {
+    const many = barsAt(everyStep(jst('2026-11-02T09:00'), H, 300), 7);
+    const input = {
+      bars: many,
+      tf: '1h' as const,
+      mode: 'candle' as const,
+      viewport: resolveIvViewport(many, '1h', null, null),
+      segments: lineSegments(many, '1h', NTD),
+      width: 600,
+      height: 300,
+      cursor: null,
+      rightLoaded: true,
+    };
+    const hi = Math.max(...many.slice(-130).map((b) => b.h));
+    const m = ivChartModel({ ...input, now: { index: 300, iv: hi + 10 } });
+    expect(m.yDomain[1]).toBeGreaterThan(hi + 10);
+    expect(m.nowPt?.x).toBeGreaterThan(m.candles.at(-1)?.x as number);
+    expect(m.nowPt?.y).toBeGreaterThanOrEqual(10);
+    const off = ivChartModel({ ...input, viewport: [0, 100], now: { index: 300, iv: hi + 10 } });
+    expect(off.nowPt).toBeNull();
+    expect(off.yDomain[1]).toBeLessThan(hi + 10);
+    expect(ivChartModel(input).nowPt).toBeNull();
+  });
+});
+
+describe('AC11: シナリオの水準', () => {
+  const x0 = 41000;
+  it('ΔX = 0・Δσ = +5 → 今 + 5pt、ΔX = −10%・Δσ = +5・β = 1.0 → 今 + 15pt', () => {
+    expect(ivScenarioLevel(20, { ...ZERO_SCENARIO, dSigma: 5 }, x0)).toBeCloseTo(25, 9);
+    expect(
+      ivScenarioLevel(20, { ...ZERO_SCENARIO, dX: -0.1 * x0, dSigma: 5, beta: 1 }, x0),
+    ).toBeCloseTo(35, 9);
+  });
+
+  it('スキュー Δs は効かない（x_eff = 0）、相対モードは base·(1 + Δσ/100) + Δσ_β、下限 1%', () => {
+    expect(ivScenarioLevel(20, { ...ZERO_SCENARIO, dSigma: 5, skew: 3 }, x0)).toBeCloseTo(25, 9);
+    expect(
+      ivScenarioLevel(20, { ...ZERO_SCENARIO, dSigma: 10, ivShift: 'relative' }, x0),
+    ).toBeCloseTo(22, 9);
+    expect(
+      ivScenarioLevel(
+        20,
+        { ...ZERO_SCENARIO, dX: 0.05 * x0, dSigma: 10, beta: 2, ivShift: 'relative' },
+        x0,
+      ),
+    ).toBeCloseTo(12, 9);
+    expect(ivScenarioLevel(20, { ...ZERO_SCENARIO, dSigma: -40 }, x0)).toBeCloseTo(1, 9);
+  });
+
+  it('ΔX = Δσ = 0（今と同じ）・基準が無い・X₀ が正でなければ出さない', () => {
+    expect(ivScenarioLevel(20, ZERO_SCENARIO, x0)).toBeNull();
+    expect(ivScenarioLevel(20, { ...ZERO_SCENARIO, skew: 2, beta: 3 }, x0)).toBeNull();
+    expect(ivScenarioLevel(null, { ...ZERO_SCENARIO, dSigma: 5 }, x0)).toBeNull();
+    expect(ivScenarioLevel(20, { ...ZERO_SCENARIO, dSigma: 5 }, Number.NaN)).toBeNull();
+  });
+
+  it('描画: 水準の横線の y（縦軸に入る）。Δσ を上げると上（y が小さく）へ動く', () => {
+    const bars = barsAt(everyStep(jst('2026-11-02T09:00'), H, 50), 7);
+    const input = {
+      bars,
+      tf: '1h' as const,
+      mode: 'line' as const,
+      viewport: resolveIvViewport(bars, '1h', null, null),
+      segments: lineSegments(bars, '1h', NTD),
+      width: 600,
+      height: 300,
+      cursor: null,
+      rightLoaded: true,
+    };
+    // 足の範囲（18〜22 前後）の中の水準は縦軸を変えず、Δσ を上げると上へ
+    const a = ivChartModel({ ...input, scenario: 19.5 });
+    const b = ivChartModel({ ...input, scenario: 20.5 });
+    expect(b.yDomain).toEqual(a.yDomain);
+    expect(b.scenarioY as number).toBeLessThan(a.scenarioY as number);
+    // 足より上の水準は縦軸に入る
+    expect(ivChartModel({ ...input, scenario: 30 }).yDomain[1]).toBeGreaterThan(30);
+    expect(ivChartModel(input).scenarioY).toBeNull();
   });
 });
