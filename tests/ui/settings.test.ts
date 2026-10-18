@@ -6,12 +6,18 @@ import { describe, expect, it } from 'vitest';
 import { buildCalendar, normalizeChain } from '../../data';
 import bundledJson from '../../data/calendar/calendar.json';
 import { CALENDAR } from '../../ui/calendar';
-import { THEME_PREFS } from '../../ui/prefs';
+import { DEFAULT_MARGIN_PREFS, THEME_PREFS } from '../../ui/prefs';
 import { parseFee } from '../../ui/state';
 import { headerModel } from '../../ui/view/header';
 import { DEFAULT_PNL_Y } from '../../ui/view/pnlChart';
 import {
   feeField,
+  MARGIN_FIELD_ERROR,
+  MARGIN_FIELDS,
+  MARGIN_RESET,
+  MARGIN_SETTINGS_NOTES,
+  marginField,
+  marginFieldText,
   SETTINGS_NO_BOARD_TEXT,
   type SettingsInput,
   settingsModel,
@@ -124,5 +130,74 @@ describe('feeField（parseFee と同じ文・結果）', () => {
     expect(feeField('300')).toEqual({ value: 300, error: null });
     expect(feeField('0')).toEqual({ value: 0, error: null });
     expect(feeField('100,000')).toEqual({ value: 100_000, error: null });
+  });
+});
+
+/** #131 AC15: 証拠金（概算）の欄の判定（入力ごと。範囲は ui/prefs.ts と同じ） */
+describe('証拠金の欄（#131）', () => {
+  it('欄の並びと見出し（単位つき）', () => {
+    expect(MARGIN_FIELDS.map((f) => f.key)).toEqual([
+      'capitalYen',
+      'factorPct',
+      'rangePct',
+      'ivUpPt',
+      'ivDownPt',
+    ]);
+    expect(MARGIN_FIELDS.map((f) => f.label)).toEqual([
+      '資金（円）',
+      '掛け目（%）',
+      '値動き幅 R（%）',
+      'IV の上げ幅（pt）',
+      'IV の下げ幅（pt）',
+    ]);
+  });
+
+  it('資金: 空欄・0 は未設定、桁区切り可、負・小数・範囲外・文字はエラー文', () => {
+    expect(marginField('capitalYen', '')).toEqual({ ok: true, value: null });
+    expect(marginField('capitalYen', '  ')).toEqual({ ok: true, value: null });
+    expect(marginField('capitalYen', '0')).toEqual({ ok: true, value: null });
+    expect(marginField('capitalYen', '12,345,678')).toEqual({ ok: true, value: 12_345_678 });
+    expect(marginField('capitalYen', '1000000000000')).toEqual({ ok: true, value: 1e12 });
+    for (const t of ['-1', '−1', '1.5', '1000000000001', 'abc', '1e', 'Infinity', 'NaN']) {
+      expect(marginField('capitalYen', t), t).toEqual({
+        ok: false,
+        error: MARGIN_FIELD_ERROR.capitalYen,
+      });
+    }
+  });
+
+  it('掛け目・R・IV の幅: 範囲の両端は通る、外・空欄・文字はエラー文', () => {
+    const cases = [
+      ['factorPct', '50', '300', ['49', '301', '']],
+      ['rangePct', '1', '30', ['0.5', '31', '-8']],
+      ['ivUpPt', '0', '50', ['-1', '51', 'x']],
+      ['ivDownPt', '0', '30', ['-0.5', '31', '']],
+    ] as const;
+    for (const [key, lo, hi, bad] of cases) {
+      expect(marginField(key, lo)).toEqual({ ok: true, value: Number(lo) });
+      expect(marginField(key, hi)).toEqual({ ok: true, value: Number(hi) });
+      for (const t of bad) {
+        expect(marginField(key, t), `${key} ${t}`).toEqual({
+          ok: false,
+          error: MARGIN_FIELD_ERROR[key],
+        });
+      }
+    }
+    expect(marginField('rangePct', '8.5')).toEqual({ ok: true, value: 8.5 });
+  });
+
+  it('欄の文字列・[既定に戻す] は幅と掛け目だけ（資金は戻さない）・注記', () => {
+    expect(marginFieldText('capitalYen', DEFAULT_MARGIN_PREFS)).toBe('');
+    expect(marginFieldText('capitalYen', { ...DEFAULT_MARGIN_PREFS, capitalYen: 5_000_000 })).toBe(
+      '5000000',
+    );
+    expect(marginFieldText('factorPct', DEFAULT_MARGIN_PREFS)).toBe('120');
+    expect(MARGIN_RESET).toEqual({ factorPct: 120, rangePct: 8, ivUpPt: 8, ivDownPt: 4 });
+    expect('capitalYen' in MARGIN_RESET).toBe(false);
+    const notes = MARGIN_SETTINGS_NOTES.join(' ');
+    expect(notes).toContain('概算');
+    expect(notes).toContain('仮置き');
+    expect(notes).toContain('深い OTM');
+    expect(notes).toContain('JSCC');
   });
 });

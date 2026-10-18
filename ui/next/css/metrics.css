@@ -92,6 +92,12 @@ table.tail td .txt {
   z-index: 1;
 }
 
+/* テールの証拠金の表（#131）: 余力 < 0 の行は loss の色（td.loss）と「追証」の印 */
+table.tail.margin-tail td small.call {
+  color: var(--loss);
+  font-weight: 600;
+}
+
 /* ===== タイル（§5 の .tile）: 既定 2 列、.panel-body ≥ 520px で 3 列 ===== */
 .metric-tiles {
   display: grid;

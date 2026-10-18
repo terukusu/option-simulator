@@ -18,8 +18,10 @@
 //                                          900（ドックで指標を開く）・1440 で。内訳を開いた状態（360 peek・390 full・900・1440）の
 //                                          縦・横・折り返し・読み取り。
 //                                          副題（#107）: タイルの .s・読み取りの .s の切れがすべて全文のボタン（aria-expanded）の中
-//                                          で、ボタンの数がタイル 6・読み取りの全文のある項目（ミニは 0）。既定の足と掛け金の足
+//                                          で、ボタンの数がタイル 8・読み取りの全文のある項目（ミニは 0）。既定の足と掛け金の足
 //                                          （買い 2 本）は千円（自動）で切れ 0、円固定の足（売り 5 枚）は件数だけ
+//                                          証拠金（#131）: 資金あり（prefs の capital_yen）の売り 5 枚 × 4 幅 × ダーク / ライトで
+//                                          縦・横・折り返し・読み取り、タイル 8 枚・テール表・テールの証拠金の表が切れない・表が 5 行
 //                                          市場（#85）: 板の列の数（360・390・900・1200×800・1280×800 で 5、1440 で 7、1800×1000 で 9）・
 //                                          見えている行のセル・道具の行・脚注の F / ATM / SQ・スマイルの道具の行・操作行（選択なし / あり）・
 //                                          凡例が切れていない・.board-wrap が横にはみ出さない・スマイルの描画域（360 peek で 140px 以上）。
@@ -63,7 +65,7 @@
 //                                          ヘッジ・舞台の足マーカー → 行の強調・Long Animation Frame。390×844 と 1440×900）と指標の手順
 //                                          （#86: 旧画面から控えた内訳・テール表の値との一致（scripts/uiCheck.expect.json）・タイル 5 と読み取りの一致・Δσ ±0.5 の追従
 //                                          （390 は IV レールの ↑ / ↓）・Long Animation Frame。390×844 と 1440×900）と副題の全文の手順
-//                                          （#107: タイル 6 枚のタップで全文・内訳との一致・Esc でボタンへ戻る・外側で閉じる・
+//                                          （#107: タイル 8 枚（#131 で 6 → 8）のタップで全文・内訳との一致・Esc でボタンへ戻る・外側で閉じる・
 //                                          同時に 1 つ・Tab → Enter / Space・窓と .panel-body の中・読み取りの損益の全文（上に開く）と
 //                                          ハンドルで閉じる・Long Animation Frame。390×844 と 1440×900）と市場の手順
 //                                          （#85: bid / ask で足が入る・追従・[元に戻す]・ジャンプと強調・ask ≤ 50 円・put / call・限月・
@@ -184,7 +186,8 @@ const mode = parts ? 'parts' : 'next';
 // ---- 足 2 本の作業（版 2）: workspace-v2.json のタブ A だけ（fixture は変えない）
 const fixture = JSON.parse(readFileSync(join(root, 'tests/ui/saved/workspace-v2.json'), 'utf8'));
 const twoLegs = JSON.stringify({ ...fixture, active: 0, tabs: [fixture.tabs[0]] });
-const prefsText = (theme) => JSON.stringify({ schema_version: 1, theme });
+/** 端末の設定（版 1）。extra = 証拠金のキー（#131。capital_yen など） */
+const prefsText = (theme, extra = {}) => JSON.stringify({ schema_version: 1, theme, ...extra });
 const share = JSON.parse(readFileSync(join(root, 'tests/ui/saved/share-v1.json'), 'utf8'));
 
 // ---- 旧画面から控えた期待値（#91。scripts/uiCheck.expect.json）。合成の板・twoLegs の sha256 が控えたときと違えば
@@ -981,6 +984,9 @@ async function measureAll() {
     console.log(
       `副題の検査: ${subStats.pass} / ${subStats.total} 状態で pass、切れ ${subStats.cut} 件（うち円固定 ${subStats.cutYen} 件。すべて全文のボタンの中）`,
     );
+    // 資金ありの売り 5 枚（#131 AC18）
+    await marginAll();
+    console.log(`証拠金の検査（#131）: ${marginStats.pass} / ${marginStats.total} 状態で pass`);
     // 市場の追加の状態（1200 / 1280 / 1800・322 行の板・字幅 2 通り。#85）
     await marketSweep();
     console.log(
@@ -1371,6 +1377,73 @@ async function subtitleAll() {
     }
   }
 }
+
+/** 架空の資金（#131。端末の設定の capital_yen） */
+const MARGIN_CAPITAL = 60_000_000;
+/** 売り 5 枚ずつ（千円・自動）= 証拠金の額・余力の桁が大きい足 */
+const sellFive = withLegs(legsOf('sell', 5));
+
+/**
+ * 証拠金（#131 AC18）: 資金あり（prefs に capital_yen）の売り 5 枚 × 4 幅 × ダーク / ライト。スマホは「指標」peek と
+ * full、900 はドックで指標、1440 はそのまま。各状態で縦・横・折り返し・読み取り（report）、タイル 8 枚・テール表・
+ * テールの証拠金の表（table.tail.margin-tail）の切れ 0（metricsCheck）、表が 5 行・余力のタイルが — でない。
+ * 1440 では内訳を開いた状態も測る（証拠金の群の行）
+ */
+async function marginAll() {
+  for (const [w, h] of SIZES) {
+    for (const theme of ['dark', 'light']) {
+      const ctx = await newContext(
+        { width: w, height: h },
+        {
+          [WORKSPACE_KEY]: sellFive,
+          [PREFS_KEY]: prefsText(theme, { capital_yen: MARGIN_CAPITAL }),
+        },
+      );
+      const page = await ctx.newPage();
+      await page.goto(pageUrl('next'));
+      await waitReady(page, 'next');
+      const tag = `next ${theme} 証拠金`;
+      const shot = `next-${w}x${h}-${theme}-margin`;
+      const states = w <= PHONE_MAX ? ['peek', 'full'] : w >= 1200 ? ['pc'] : ['dock'];
+      for (const st of states) {
+        if (st === 'peek' || st === 'full') {
+          if (!(await setShell(page, 'metrics', st))) {
+            failed = true;
+            console.log(`${tag} metrics/${st} ${w}x${h}: 画面の状態を作れない  ← NG`);
+            continue;
+          }
+        } else if (st === 'dock') {
+          await page.click('.dock button[data-panel="metrics"]');
+        }
+        await page.waitForTimeout(150);
+        const lbl = `${tag} ${st}`;
+        const want = w <= PHONE_MAX ? 3 : w >= 1200 ? 6 : 5;
+        await report(page, lbl, w, h, `${shot}-${st}`);
+        await readoutCheck(page, `${lbl} ${w}x${h}`, want);
+        await metricsCheck(page, `${lbl} ${w}x${h}`);
+        const r = await page.evaluate(() => {
+          const sec = document.querySelector('section.metrics');
+          return {
+            tiles: sec?.querySelectorAll('.tile').length ?? 0,
+            rows: sec?.querySelectorAll('table.tail.margin-tail tbody tr').length ?? 0,
+            room: sec?.querySelector('.tile[data-tile="room"] .v > span')?.textContent ?? '',
+            margin: sec?.querySelector('.tile[data-tile="margin"] .v > span')?.textContent ?? '',
+          };
+        });
+        const ok = r.tiles === 8 && r.rows === 5 && r.room !== '—' && r.margin !== '—';
+        marginStats.total++;
+        if (ok) marginStats.pass++;
+        else failed = true;
+        console.log(
+          `${lbl} ${w}x${h}: タイル ${r.tiles}・証拠金の表 ${r.rows} 行・必要証拠金 ${r.margin}・余力 ${r.room} ${ok ? 'pass' : '← NG'}`,
+        );
+        if (st === 'pc') await breakdownOpenCheck(page, lbl, w, h, `${shot}-kv`, want);
+      }
+      await ctx.close();
+    }
+  }
+}
+const marginStats = { pass: 0, total: 0 };
 
 /** 足 2 本のタブ A + タブ「ヘッジ案」（重ねる相手）の作業 */
 const twoTabs = JSON.stringify({ ...fixture, active: 0, tabs: [fixture.tabs[0], fixture.tabs[1]] });
@@ -2012,9 +2085,17 @@ async function runFlows() {
     await page.click('[role="menuitemradio"]:has-text("ライト")');
     check('AC-11(c) 「ライト」で html[data-theme="light"]', (await theme()) === 'light');
     const prefs = await page.evaluate((k) => localStorage.getItem(k), PREFS_KEY);
+    let pv = null;
+    try {
+      pv = JSON.parse(prefs ?? 'null');
+    } catch {}
+    // #131: 証拠金のキー（margin_*。資金は未設定なので capital_yen は無い）も同じキーに書く
     check(
-      'AC-11(c) option-simulator.prefs が {"schema_version":1,"theme":"light"}',
-      prefs === '{"schema_version":1,"theme":"light"}',
+      'AC-11(c) option-simulator.prefs が版 1・theme light（証拠金の既定のキーつき、資金なし）',
+      pv?.schema_version === 1 &&
+        pv?.theme === 'light' &&
+        pv?.margin_factor_pct === 120 &&
+        !('capital_yen' in (pv ?? {})),
       String(prefs),
     );
     await page.reload();
@@ -3392,7 +3473,7 @@ async function metricsFlows(vp) {
     page.evaluate((m) => {
       const main = (el) => el?.querySelector(':scope > span')?.textContent ?? null;
       const col = (i) =>
-        [...document.querySelectorAll(`${m} table.tail tbody tr`)].map((tr) => {
+        [...document.querySelectorAll(`${m} table.tail:not(.margin-tail) tbody tr`)].map((tr) => {
           const td = tr.querySelectorAll('td')[i];
           return td
             ? `${main(td.querySelector('.txt'))} ${td.querySelector('.txt small')?.textContent}`
@@ -3413,14 +3494,20 @@ async function metricsFlows(vp) {
     await page.waitForTimeout(150);
     const now = await page.evaluate(
       ({ m, re }) => {
-        const tokens = [
-          ...document.querySelectorAll(`${m} .kv-grid > .k, ${m} .kv-grid > .v`),
-        ].flatMap((el) => el.textContent.match(new RegExp(re, 'g')) ?? []);
+        // 旧画面に無い証拠金の群（#131）より前の行だけ
+        const kvs = [];
+        for (const el of document.querySelector(`${m} .kv-grid`)?.children ?? []) {
+          if (el.classList.contains('grp') && el.textContent === '証拠金（概算・保守寄り）') break;
+          if (el.classList.contains('k') || el.classList.contains('v')) kvs.push(el);
+        }
+        const tokens = kvs.flatMap((el) => el.textContent.match(new RegExp(re, 'g')) ?? []);
         const pair = (el) => [
           el?.querySelector(':scope > span')?.textContent.trim() ?? '',
           el?.querySelector('small')?.textContent.trim() ?? '',
         ];
-        const tail = [...document.querySelectorAll(`${m} table.tail tbody tr`)].flatMap((tr) => [
+        const tail = [
+          ...document.querySelectorAll(`${m} table.tail:not(.margin-tail) tbody tr`),
+        ].flatMap((tr) => [
           ...pair(tr.querySelector('th')),
           ...[...tr.querySelectorAll('td')].flatMap((td) => pair(td.querySelector('.txt'))),
         ]);
@@ -3631,7 +3718,7 @@ async function subtitleFlows(vp) {
     );
 
   // (a)(f) 各タイルをタップ → 開く・中身が全文（内訳・見た目の値と一致）・窓と .panel-body の中・縦・横 0px
-  const keys = ['maxProfit', 'maxLoss', 'bep', 'premium', 'scenario', 'greeks'];
+  const keys = ['maxProfit', 'maxLoss', 'bep', 'premium', 'scenario', 'greeks', 'margin', 'room'];
   const tileBtn = (k) => `${M} .tile[data-tile="${k}"] .tile-btn`;
   const kvHas = (v) => kv.some(([, bv]) => bv.includes(v));
   for (const k of keys) {
