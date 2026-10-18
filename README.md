@@ -23,14 +23,14 @@ npm run fixtures   # 合成の板 JSON（fixtures/synthetic/）を作り直す�
 npm run fixtures -- --wide  # 322 行 × 2 限月の板を fixtures/local/synthetic_wide.json に書く（性能の確認用。コミットしない）
 ```
 
-再設計の新しい画面（docs/ui-redesign.md。全部そろうまでは `?ui=next` でだけ開く。#81 の時点は骨組みだけ）は `npm run dev` の `/?ui=next`、部品の見本は `/?ui=next&parts`（dev だけ）。画面の検査 `npm run ui:check` は Playwright の Chromium でページの縦・横スクロールと折り返しの件数を測る（CI には入れない。手元で流して PR に出力を貼る。規約は docs/ui-redesign.md 10.1）。
+画面は docs/ui-redesign.md の設計（#91 で既定に切り替え旧画面を削除。クエリによらず同じ画面）。部品の見本は `npm run dev` の `/?parts`（dev だけ）。画面の検査 `npm run ui:check` は Playwright の Chromium でページの縦・横スクロールと折り返しの件数を測る（CI には入れない。手元で流して PR に出力を貼る。規約は docs/ui-redesign.md 10.1）。
 
 ```sh
 npx playwright install chromium   # 初回だけ（ブラウザは手元のキャッシュに入る。npm ci では落とさない）
-npm run ui:check                  # 新しい画面: 360 / 390 / 900 / 1440 × ダーク / ライト（スマホはシート 3 段階）。縦か横が 0 より大きければ exit 1
+npm run ui:check                  # 画面: 360 / 390 / 900 / 1440 × ダーク / ライト（スマホはシート 3 段階）。縦か横が 0 より大きければ exit 1
 npm run ui:check -- --parts --max-wraps 0   # 部品の見本で折り返し 0 件
 npm run ui:check -- --flows       # 保存・共有・テーマ・キーボードの手順を pass / fail で出す
-npm run ui:check -- --legacy --dom /tmp/a.txt   # 旧画面（?ui=next なし）。--dom は要素の tag.class の並び（旧画面が変わらないことの比較用）
+npm run ui:check -- --dom <file>  # 要素の tag.class の並びを書き出す（DOM の変化の比較用）
 npm run ui:check -- --shots <dir> # スクリーンショット（合成の板だけ。リポジトリに入れない）。--url <base> で起動中の dev サーバーを使う
 ```
 

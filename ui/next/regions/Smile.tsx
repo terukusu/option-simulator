@@ -165,7 +165,7 @@ function SmileView(p: SmileRegionProps) {
         </div>
         <div class="smile-legend">
           {legend.map((i) => (
-            <span key={i.key} class={`lg ${i.cls}`} title={i.text}>
+            <span key={i.key} class={i.cls} title={i.text}>
               <span class="full">{i.text}</span>
               <span class="short" aria-hidden="true">
                 {i.short}

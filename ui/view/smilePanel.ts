@@ -1,5 +1,5 @@
 /**
- * 新しい画面（`?ui=next`）のスマイルの表示モデル（純関数。#85、docs/ui-redesign.md §3・§4.3・§11 決定 12）。
+ * 画面のスマイルの表示モデル（純関数。#85、docs/ui-redesign.md §3・§4.3・§11 決定 12）。
  * 座標・点・線は今の `ui/view/smile.ts`（smileModel・smileMarkX）のまま。ここは操作行・凡例・線の種類の文字列だけ。
  */
 

@@ -5,7 +5,7 @@
  * metricsModel を呼び直さず数値を作り直さない（fmtAmount・fmtRatio・fmtNum・fmtSigned の出力を連ねるだけ）。
  *
  * - タイル 6 枚: 満期 最大利益・満期 最大損失・満期 BEP・受取 − 支払 or 掛け金・指定日 + シナリオ・合計グリーク
- * - 内訳: 旧画面の `dl.metrics-list`（ui/components/Metrics.tsx）の項目を同じ順・同じ桁で 2 列の行に
+ * - 内訳: 旧画面の内訳の dl（#91 で削除）の項目を同じ順・同じ桁で 2 列の行に
  * - テール表: 5 行 × {SQ, 指定日 + シナリオ}。損益の大きさのバーの長さ（10 セルの |損益| の最大で正規化）
  *
  * 色は整形後の文字列の先頭（+ → gain、− → loss、それ以外 null。丸めて 0 になった値は無色）。
@@ -302,7 +302,7 @@ export function metricTiles(m: MetricsModel): MetricTile[] {
 }
 
 /**
- * 内訳の行（旧 `dl.metrics-list` と同じ順・同じ桁）。1 つの dd に複数の値があった項目は行に分ける。
+ * 内訳の行（旧画面の内訳の dl と同じ順・同じ桁）。1 つの dd に複数の値があった項目は行に分ける。
  * 点の並び（BEP・N 倍の原資産）は 2 点ずつの行に分け、続きの行の見出しは空。empty なら空
  */
 export function metricsBreakdown(m: MetricsModel): BreakdownRow[] {

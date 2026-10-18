@@ -2,7 +2,7 @@
  * ポジ帳（名前を付けて保存したポジションの一覧）の保存形式・検証・操作・書き出し / 読み込み（純関数）。
  * 設計 docs/design.md M8・13.4（#70）。
  *
- * - 保存は端末ごと（localStorage の 1 キーに全件）。I/O は ui/bookIo.ts、画面は ui/components/Book.tsx
+ * - 保存は端末ごと（localStorage の 1 キーに全件）。I/O は ui/bookIo.ts、画面は ui/next/BookDialog.tsx
  * - 入れ物は版つき（`schema_version`）。項目の中身は 1 ポジションの文書（#23 の作業の形式 版 1 = `POSITION_DOC_VERSION`）
  *   そのもので、検証・読み替えは ui/persist.ts の readWorkspaceValue と共有する。#71 で作業のキーは版 2（タブの並び）に
  *   上がったが、項目・書き出すファイルは 1 ポジションの文書の版 1 のまま（ロールバックした画面でも一覧を読める）

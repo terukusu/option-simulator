@@ -140,7 +140,7 @@ function SmilePlotView(p: SmilePlotProps) {
       inert={!active}
     >
       <div
-        class={model.empty ? 'smile-wrap plot-empty' : 'smile-wrap'}
+        class="smile-wrap"
         ref={ref}
         tabIndex={model.empty || !active ? -1 : 0}
         role="application"

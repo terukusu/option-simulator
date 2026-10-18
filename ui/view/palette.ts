@@ -1,5 +1,5 @@
 /**
- * 新しい画面（`?ui=next`）のコマンドパレット（#89 段 B。docs/ui-redesign.md §4.6・§5）の行・検索・キー（純関数）。
+ * 画面のコマンドパレット（#89 段 B。docs/ui-redesign.md §4.6・§5）の行・検索・キー（純関数）。
  * Preact・DOM・時計・storage に依存しない。部品は ui/next/parts/Palette.tsx、行の実行の振り分けは NextApp。
  *
  * - 行は既存の規則の関数（presetChips・evalChips・pinMenuRows・addMenuModel・marketAddPlan など）の結果を写すだけ

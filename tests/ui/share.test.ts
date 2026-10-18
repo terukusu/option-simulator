@@ -20,6 +20,7 @@ import {
   toBase64Url,
   URL_MAX,
   URL_WARN,
+  withoutUiParam,
 } from '../../ui/share';
 import { type Action, initialState, MAX_TABS, reduce, type State } from '../../ui/state';
 import { fixture } from '../support/fixtures';
@@ -429,4 +430,53 @@ describe('開き方', () => {
       expect({ ...rest, pnlViewport: null }).toEqual({ ...before, pnlViewport: null });
     },
   );
+});
+
+describe('withoutUiParam（#91: 共有 URL と #p= を開いた後の URL から ui を落とす）', () => {
+  it.each([
+    ['', ''],
+    ['?', ''],
+    ['?&&', ''],
+    ['?ui=next', ''],
+    ['?ui=legacy', ''],
+    ['?ui', ''],
+    ['?ui=', ''],
+    ['?ui=next&ui=x', ''],
+    ['?a=1&ui=next&b=2', '?a=1&b=2'],
+    ['?ui=next&parts', '?parts'],
+    ['?xui=next&uix=1', '?xui=next&uix=1'],
+    ['?a=%20&ui=next', '?a=%20'],
+    ['?a=+&b=%2B', '?a=+&b=%2B'],
+    ['?u%69=next', ''],
+    ['?a=1&&b=2', '?a=1&b=2'],
+    ['a=1&ui=next', '?a=1'],
+  ])('%j → %j', (input, want) => {
+    expect(withoutUiParam(input)).toBe(want);
+  });
+
+  const samples = [
+    '',
+    '?',
+    '?ui=next',
+    '?a=1&ui=next&b=2',
+    '?ui=next&parts',
+    '??ui=1',
+    '?u%69=x&UI=1&ui%3D=2',
+    '?a=%E3%81%82&ui=legacy&c',
+    '?=x&ui&=',
+  ];
+  it.each(samples)('%j: 冪等・結果に ui が無い・ui 以外の値は URLSearchParams で同じ', (s) => {
+    const out = withoutUiParam(s);
+    expect(withoutUiParam(out)).toBe(out);
+    expect(new URLSearchParams(out).has('ui')).toBe(false);
+    expect(out === '' || out.startsWith('?')).toBe(true);
+    const entries = (q: string) => {
+      const e: [string, string][] = [];
+      new URLSearchParams(q).forEach((v, k) => {
+        e.push([k, v]);
+      });
+      return e;
+    };
+    expect(entries(out)).toEqual(entries(s).filter(([k]) => k !== 'ui'));
+  });
 });

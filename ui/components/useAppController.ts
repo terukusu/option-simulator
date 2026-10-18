@@ -1,8 +1,8 @@
 /**
- * 画面の状態と保存の操作（#81 で ui/components/App.tsx から切り出した。中身はそのまま）。
+ * 画面の状態と保存の操作（#81 で旧画面の App.tsx から切り出した。中身はそのまま。旧画面は #91 で削除）。
  * 状態（ui/state.ts の reducer）・板とカレンダーの読み込み・自動保存（debounce・別のタブ）・URL 共有（`#p=`）・
- * 保存一覧の操作・表示モデルの useMemo を持ち、JSX を持たない。旧画面（App.tsx）と新しい画面（ui/next/NextApp.tsx）が
- * 同じフックを使う（どちらの画面でも保存の形式・キー・動きが同じ）。
+ * 保存一覧の操作・表示モデルの useMemo を持ち、JSX を持たない。画面（ui/next/NextApp.tsx）がこのフックを使う
+ * （保存の形式・キー・動きは旧画面のときと同じ）。
  */
 
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'preact/hooks';
@@ -59,6 +59,7 @@ import {
   type SharedPosition,
   shareOpenAction,
   shareOpenMode,
+  withoutUiParam,
 } from '../share';
 import { reduce } from '../state';
 import { readKey, removeKey, writeKey } from '../storage';
@@ -84,7 +85,6 @@ import { readoutModel } from '../view/readout';
 import { evalTimeTargets } from '../view/scenario';
 import { scenarioAtmMark } from '../view/scenarioAtm';
 import { openInNewTabError, tabsModel } from '../view/tabs';
-import type { BookMessage } from './Book';
 
 /** dev サーバーだけが配る合成の板（本番のビルドではこの分岐ごと消える） */
 export const DEV_FIXTURES: readonly string[] = import.meta.env.DEV
@@ -98,6 +98,12 @@ export interface Boot {
 }
 
 const NO_BOOT: Boot = { storage: null, read: { kind: 'empty' } };
+
+/** 保存一覧・書き出し / 読み込みの結果の知らせ（#91 で旧画面の Book.tsx から移した。形は同じ） */
+export interface BookMessage {
+  text: string;
+  warn: boolean;
+}
 
 /** 保存一覧の上書きを戻すための写し（#87 (C)。prev = 上書きの直前に読み直した項目、written = 書いた項目） */
 export interface OverwriteSnap {
@@ -375,10 +381,11 @@ export function useAppController(boot: Boot = NO_BOOT) {
       const hash = window.location.hash;
       if (!isShareHash(hash)) return;
       try {
+        // `ui` のクエリも落とす（#91。古い `?ui=next#p=…` を開いてもアドレスバーに残さない。他のクエリは残す）
         window.history.replaceState(
           window.history.state,
           '',
-          window.location.pathname + window.location.search,
+          window.location.pathname + withoutUiParam(window.location.search),
         );
       } catch {
         // 消せなくても開く（再読み込みでもう一度開くだけ）
@@ -425,7 +432,8 @@ export function useAppController(boot: Boot = NO_BOOT) {
     const s = stateRef.current;
     const name = s.tabs.find((t) => t.id === s.activeTab)?.name ?? '';
     const { origin, pathname, search } = window.location;
-    return encodeShareUrl(toSaved(s, Date.now()), name, origin + pathname + search);
+    // 受け手は既定の入口で開く（#91。`ui` のクエリを落とす。他のクエリは残す）
+    return encodeShareUrl(toSaved(s, Date.now()), name, origin + pathname + withoutUiParam(search));
   }, []);
 
   // 開いたら 1 回だけ読む（本番 = API、dev = 合成の latest）
@@ -904,5 +912,5 @@ export function useAppController(boot: Boot = NO_BOOT) {
   };
 }
 
-/** 旧画面・新しい画面が使う状態と操作 */
+/** 画面（ui/next/NextApp.tsx）が使う状態と操作 */
 export type AppController = ReturnType<typeof useAppController>;

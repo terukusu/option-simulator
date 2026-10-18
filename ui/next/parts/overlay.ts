@@ -3,7 +3,6 @@ import { useCallback, useEffect, useState } from 'preact/hooks';
 /**
  * 開いているメニュー / ポップオーバーの id を 1 つだけ持つ小さな購読ストア（#81。docs/ui-redesign.md §5）。
  * Menu・Popover が共有する（同時に開くのは 1 つだけ。別のものを開くと前のものが閉じる）。
- * 旧画面の Hint とは共有しない（新旧は同じ画面に出ない）。
  */
 
 let openId: string | null = null;

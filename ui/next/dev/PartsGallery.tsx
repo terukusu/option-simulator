@@ -1,5 +1,5 @@
 /**
- * 部品の見本（dev だけ。`?ui=next&parts`。#81）。全部品の各状態（選択・hot・長いラベル・無効）を 1 画面に並べ、
+ * 部品の見本（dev だけ。`?parts`。古い `?ui=next&parts` も。#81）。全部品の各状態（選択・hot・長いラベル・無効）を 1 画面に並べ、
  * 折り返しの検出（npm run ui:check -- --parts）とスクリーンショットを当てる。
  * ui/next/main.tsx の import.meta.env.DEV の分岐からだけ読む（本番のビルドに入らない）。値はすべて架空。
  */
@@ -47,7 +47,7 @@ export function PartsGallery() {
     <main class="parts-gallery">
       <h1>部品の見本</h1>
       <p class="gal-note">
-        dev だけ（?ui=next&parts）。値は架空。各部品の選択・強調・長いラベル・無効の状態を並べる。
+        dev だけ（?parts）。値は架空。各部品の選択・強調・長いラベル・無効の状態を並べる。
       </p>
 
       <section class="gal-sec" aria-label="セグメント">

@@ -84,7 +84,7 @@ const tile = (tiles: MetricTile[], key: MetricTile['key']) => {
   return t;
 };
 
-// ------------------------------------------------ 旧 Metrics（ui/components/Metrics.tsx）の dl の文字列の写し
+// ------------------------------------------------ 旧画面の指標（#91 で削除）の dl の文字列の写し
 
 /** 旧 Amount の textContent（金額 + 単位。— と ∞ には単位を付けない） */
 function oldAmount(v: number | null, u: AmountUnit, signed = false): string {

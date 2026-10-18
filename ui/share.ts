@@ -363,3 +363,19 @@ export function shareOpenAction(shared: SharedPosition, mode: 'replace' | 'newTa
     name: shared.name,
   };
 }
+
+/**
+ * `location.search` から `ui` のクエリだけを落とす（#91。共有 URL の base と `#p=` を開いた後の URL。docs/ui-redesign.md 10.1）。
+ * `&` で分けた断片のうち、キーを `URLSearchParams` と同じ規則で復号した値が `ui` のものだけを除き、残りは入力の文字列のまま
+ * 同じ順でつなぐ（再直列化しない = `%20` などを書き換えない）。空の断片は捨てる。残りが無ければ `''`。例外を投げない
+ */
+export function withoutUiParam(search: string): string {
+  const body = search.startsWith('?') ? search.slice(1) : search;
+  const kept = body.split('&').filter((part) => {
+    if (part === '') return false;
+    // 先頭に & を付けて渡す（URLSearchParams は文字列の先頭の ? を 1 つ捨てるので、断片の ? を残すため）
+    // 断片は 1 つなので、has('ui') = その断片のキーが ui
+    return !new URLSearchParams(`&${part}`).has('ui');
+  });
+  return kept.length ? `?${kept.join('&')}` : '';
+}

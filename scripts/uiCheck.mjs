@@ -3,9 +3,10 @@
 //
 // 前提: `npm ci` の後に一度 `npx playwright install chromium`（ブラウザは手元のキャッシュに入る。リポジトリには入らない）。
 // 板は dev サーバーの合成の板（fixtures/synthetic/ の latest）。足は tests/ui/saved/workspace-v2.json のタブ A（足 2 本）を
-// 作業の保存（版 2）として localStorage に入れて開く（UI の操作に依存しない。旧画面にも同じ足）。
+// 作業の保存（版 2）として localStorage に入れて開く（UI の操作に依存しない）。
 //
-//   npm run ui:check                       新しい画面（?ui=next）: 360 / 390 / 900 / 1440 × ダーク / ライト、
+//   npm run ui:check                       画面（クエリなし。#91 で既定に切り替え旧画面を削除）: 360 / 390 / 900 / 1440 ×
+//                                          ダーク / ライト、
 //                                          スマホはシート hidden / peek / full × パネル 5 つ。各状態で舞台の読み取り
 //                                          （.readout .ro）が画面内に見えているか（スマホ 3・900 で 5・1440 で 6。#82）。
 //                                          シナリオ（#83）の .stepper .val b・チップが切れていないか（scrollWidth ≤ clientWidth）を
@@ -41,31 +42,32 @@
 //                                          面モード（#88 段 A）: 360 / 390（シート hidden / peek）・900・1440 × ダーク / ライトで面に
 //                                          切り替えて縦・横・折り返し・読み取り、凡例行の [線 | 面]（ある幅で）・色の見本・±vmax が
 //                                          切れず画面内・canvas がある。1280×800・1800×1000 は記録だけ（--shots の撮影用）
-//   npm run ui:check -- --parts            部品の見本（?ui=next&parts。dev だけ）
-//   npm run ui:check -- --legacy           旧画面（?ui=next なし）
-//   npm run ui:check -- --flows            保存・共有・テーマ・キーボードの手順（#81 AC-11・AC-12）と舞台の手順
+//   npm run ui:check -- --parts            部品の見本（?parts。dev だけ）
+//   npm run ui:check -- --flows            保存・共有・テーマ・キーボードの手順（#81 AC-11・AC-12）と入口の手順（#91: クエリなし・
+//                                          古い ?ui=next と旧画面を開いていた ui の値で同じ画面・部品の見本の ?parts・旧画面のときの
+//                                          保存（版 1 / 2）を開く）と舞台の手順
 //                                          （#82: ハンドル・IV / 時間レール・キー・足マーカー・Long Animation Frame）とシナリオの手順
 //                                          （#83: ステッパーの ± / Shift / スクラブ / ホイール / キー / 数値入力・プリセット・評価時刻・
 //                                          前提・#82 のレールとの一致・Long Animation Frame。390×844 と 1440×900）と作業台の手順
 //                                          （#84: 枚数・⇄・× と [元に戻す]・全クリアと [元に戻す]・詳細の入力・足の追加ダイアログ・
 //                                          ヘッジ・舞台の足マーカー → 行の強調・Long Animation Frame。390×844 と 1440×900）と指標の手順
-//                                          （#86: 旧画面の内訳・テール表との値の一致・タイル 5 と読み取りの一致・Δσ ±0.5 の追従
+//                                          （#86: 旧画面から控えた内訳・テール表の値との一致（scripts/uiCheck.expect.json）・タイル 5 と読み取りの一致・Δσ ±0.5 の追従
 //                                          （390 は IV レールの ↑ / ↓）・Long Animation Frame。390×844 と 1440×900）と副題の全文の手順
 //                                          （#107: タイル 6 枚のタップで全文・内訳との一致・Esc でボタンへ戻る・外側で閉じる・
 //                                          同時に 1 つ・Tab → Enter / Space・窓と .panel-body の中・読み取りの損益の全文（上に開く）と
 //                                          ハンドルで閉じる・Long Animation Frame。390×844 と 1440×900）と市場の手順
 //                                          （#85: bid / ask で足が入る・追従・[元に戻す]・ジャンプと強調・ask ≤ 50 円・put / call・限月・
 //                                          スマイルの操作。390×844・1440×900・1800×1000。322 行の板の Long Animation Frame・限月の切替の
-//                                          時間。新しい画面の限月・種別・絞り込み・横軸が再読み込みと旧画面に残る）とトップバーの手順
+//                                          時間。限月・種別・絞り込み・横軸が再読み込みと作業の保存に残る）とトップバーの手順
 //                                          （#87 (A): [最新] の読み込み中 / 失敗（/api/chain を差し替え）・失敗のトーストが成功で消える・
-//                                          ⋯ > ファイルを開く…・限月の切替と旧画面の F / ATM の一致・全文の数値の列が旧画面の header.header
+//                                          ⋯ > ファイルを開く…・限月の切替と旧画面（控え）の F / ATM の一致・全文の数値の列が旧画面（控え）の header.header
 //                                          を含む・復元のトースト 6 秒・壊れた保存の警告のトースト・別のタブの警告のタグ・タブが 6 個の
 //                                          共有を開く確認・タブの切り替えで [元に戻す] だけ消える。390×844 と 1440×900）と BOX タブの手順
 //                                          （#87 (B) AC-12: ＋ の空 / 複製・クリックと ← → Home End・名前を変える…（B2 / 空 / 重複）・
 //                                          閉じる → [元に戻す]（切り替えても残る = AC-15(e)）・6 個で ＋ が disabled・切り替え 10 回の
 //                                          Long Animation Frame。390×844 と 1440×900）と URL 共有の手順（AC-13: タブのメニュー・⋯ の
 //                                          URL をコピー → トースト・クリップボード・新しいコンテキストで同じ足・拒否 = 共有の URL の
-//                                          ダイアログ・旧画面の URL に ui なし・上限の確認で前の共有の警告のトーストを消す。1440×900）。
+//                                          ダイアログ・?ui=next で開いたページからの URL にも ui なし・上限の確認で前の共有の警告のトーストを消す。1440×900）。
 //                                          全クリアの直後の舞台の格子（#111: 1440 で 4 本以上、390 はシート full のミニで 0）と
 //                                          設定と保存一覧の手順（#87 (C) AC-14: ATM の基準・単位・手数料・縦軸・basis・テーマが
 //                                          すぐ効いて保存に入る、保存 → [上書き]（確認なし）→ [元に戻す] で保存一覧がバイト単位で同じ・
@@ -87,19 +89,22 @@
 //                                          Ctrl + K で開く・↑↓ と押せない行・急落・足の追加と [元に戻す]・ATM へ・テーマ / 設定・
 //                                          Esc / 背景で閉じてフォーカスが戻る・開いている間の 1 / G / T と 2 つ目・メニュー / 設定の上・
 //                                          322 行の板で開く / 打つの Long Animation Frame。390×844 と 1440×900）
-//   --url <base>                           dev サーバーを起こさず、その URL を使う（例 http://127.0.0.1:5173/?ui=next&parts）
-//   --dom <file>                           body の下の要素の tag.class の並びを書き出す（旧画面が変わらないことの比較用）
+//   --url <base>                           dev サーバーを起こさず、その URL を使う（例 http://127.0.0.1:5173/?parts）
+//   --dom <file>                           body の下の要素の tag.class の並びを書き出す（DOM の変化の比較用）
 //   --shots <dir>                          スクリーンショットを書く（合成の板だけ。リポジトリに入れない）
 //   --max-wraps <n>                        折り返しが n 件を超えたら失敗にする（渡したときだけ判定）
 //
 // 縦・横 = ページのスクロール量（scrollHeight − innerHeight・scrollWidth − innerWidth）。body が切っている（overflow: hidden）
 // はみ出しも数える（body の scrollHeight − clientHeight との大きい方）。
-// 終了コード: 新しい画面（部品の見本を含む）で縦か横が 0 より大きい、読み取りの検査の失敗、--max-wraps の超過、
+// 既定の実行の全状態（report のすべて）で、旧画面の CSS にだけあったクラス名（scripts/uiCheck.expect.json の old_classes）の
+// 要素を数え、1 個でもあれば失敗（#91。EPIC #92 の終了条件 8）。
+// 終了コード: 画面（部品の見本を含む）で縦か横が 0 より大きい、旧のクラス名の要素、読み取りの検査の失敗、--max-wraps の超過、
 // --flows の fail で 1。
 // 折り返しの規則は EPIC #92 の as-is と同じ: 直下のテキストが 40 字以下の要素で、その中身の行（getClientRects の上端）が
 // 2 つ以上。P・LI・DD・TEXTAREA・OPTION と .help-popover・[role="tooltip"]・閉じた details の中は除く。
 
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -128,15 +133,7 @@ const value = (name) => {
   }
   return v;
 };
-const known = new Set([
-  '--legacy',
-  '--parts',
-  '--flows',
-  '--url',
-  '--dom',
-  '--shots',
-  '--max-wraps',
-]);
+const known = new Set(['--parts', '--flows', '--url', '--dom', '--shots', '--max-wraps']);
 for (const a of args) {
   if (a.startsWith('--') && !known.has(a)) {
     console.error(`知らない引数: ${a}`);
@@ -153,16 +150,37 @@ if (maxWraps !== null && !(Number.isInteger(maxWraps) && maxWraps >= 0)) {
   process.exit(2);
 }
 const urlParams = urlArg ? new URL(urlArg).searchParams : new URLSearchParams();
-const legacy = flag('--legacy');
-const parts = !legacy && (flag('--parts') || urlParams.has('parts'));
+const parts = flag('--parts') || urlParams.has('parts');
 const flows = flag('--flows');
-const mode = legacy ? 'legacy' : parts ? 'parts' : 'next';
+const mode = parts ? 'parts' : 'next';
 
 // ---- 足 2 本の作業（版 2）: workspace-v2.json のタブ A だけ（fixture は変えない）
 const fixture = JSON.parse(readFileSync(join(root, 'tests/ui/saved/workspace-v2.json'), 'utf8'));
 const twoLegs = JSON.stringify({ ...fixture, active: 0, tabs: [fixture.tabs[0]] });
 const prefsText = (theme) => JSON.stringify({ schema_version: 1, theme });
 const share = JSON.parse(readFileSync(join(root, 'tests/ui/saved/share-v1.json'), 'utf8'));
+
+// ---- 旧画面から控えた期待値（#91。scripts/uiCheck.expect.json）。合成の板・twoLegs の sha256 が控えたときと違えば
+// 「期待値が古い」で fail にする（旧画面は消えたので取り直せない。黙って skip しない）
+const EXPECT_PATH = join(root, 'scripts/uiCheck.expect.json');
+const FIXTURE_PATH = 'fixtures/synthetic/latest.json';
+const sha256 = (buf) => createHash('sha256').update(buf).digest('hex');
+const fixtureSha = () => sha256(readFileSync(join(root, FIXTURE_PATH)));
+const twoLegsSha = () => sha256(twoLegs);
+function loadExpect() {
+  if (!existsSync(EXPECT_PATH)) return { data: null, why: 'scripts/uiCheck.expect.json が無い' };
+  const data = JSON.parse(readFileSync(EXPECT_PATH, 'utf8'));
+  const src = data.source ?? {};
+  const why = [];
+  if (src.fixture_sha256 !== fixtureSha()) why.push(`${FIXTURE_PATH} の sha256`);
+  if (src.two_legs_sha256 !== twoLegsSha()) why.push('twoLegs（足 2 本の作業）の sha256');
+  if (why.length)
+    return {
+      data: null,
+      why: `期待値が古い: 合成の板が変わった（${why.join('・')}が控えと違う）。旧画面は消えたので取り直せない。vitest の純関数の比較に寄せるかをその PR で決める`,
+    };
+  return { data, why: '' };
+}
 
 // ---- Playwright（devDependency。無ければ手順を出して終わる）
 let chromium;
@@ -190,11 +208,18 @@ if (urlArg) {
   base = server.resolvedUrls?.local?.[0] ?? 'http://127.0.0.1:5199/';
 }
 const origin = new URL(base).origin;
+/** 古い入口（#91 の前の ?ui=next と、旧画面を開いていた ui の値）。#91 からどれも同じ画面で開く */
+const OLD_ENTRY_NEXT = '?ui=next';
+const OLD_ENTRIES = [OLD_ENTRY_NEXT, '?ui=legacy', '?ui=old', '?a=1&ui=legacy'];
+const entryUrl = (search) => {
+  const u = new URL(base);
+  u.search = search;
+  return u.toString();
+};
+/** 画面はクエリなし（#91）、部品の見本は ?parts */
 const pageUrl = (m) => {
   const u = new URL(base);
-  if (m === 'next') u.search = '?ui=next';
-  else if (m === 'parts') u.search = '?ui=next&parts';
-  else u.search = '';
+  u.search = m === 'parts' ? '?parts' : '';
   return u.toString();
 };
 
@@ -226,9 +251,7 @@ async function newContext(viewport, storage, colorScheme = 'dark') {
  * 閉じるのは要素の click()（フォーカスを動かさない = Tab の順の検査に影響しない）
  */
 async function waitReady(page, m, opts = {}) {
-  if (m === 'legacy') {
-    await page.waitForSelector('.board-table, p.empty', { timeout: 20000 });
-  } else if (m === 'parts') {
+  if (m === 'parts') {
     await page.waitForSelector('.parts-gallery', { timeout: 20000 });
   } else {
     await page.waitForSelector('.layout', { timeout: 20000 });
@@ -279,8 +302,8 @@ function measure(page) {
       if (lines.size > 1)
         wraps.push(`${el.tagName}.${el.getAttribute('class') ?? ''}「${txt.slice(0, 20)}」`);
     }
-    // ページのスクロール量。新しい画面は body が overflow: hidden なので、body の中で切れて見えない分も足す
-    // （ページは動かないが、はみ出しを見逃さない。旧画面の body は切らないので値は変わらない）
+    // ページのスクロール量。body が overflow: hidden なので、body の中で切れて見えない分も足す
+    // （ページは動かないが、はみ出しを見逃さない）
     const d = document.documentElement;
     const b = document.body;
     if (Array.isArray(window.__checkRanges)) window.__checkRanges.push([t0, performance.now()]);
@@ -307,13 +330,44 @@ function domList(page) {
 let failed = false;
 const domOut = [];
 
+/** 旧画面の CSS にだけあったクラス名（#91。控えの old_classes。sha256 によらず使う） */
+const OLD_CLASSES = existsSync(EXPECT_PATH)
+  ? (JSON.parse(readFileSync(EXPECT_PATH, 'utf8')).old_classes ?? [])
+  : [];
+const oldClassStats = { states: 0, found: 0 };
+/** 旧のクラス名の要素の数（名前ごと。0 個の名前は出さない） */
+function oldClassHits(page) {
+  return page.evaluate((names) => {
+    const t0 = performance.now();
+    const hits = [];
+    for (const n of names) {
+      const k = document.querySelectorAll(`.${CSS.escape(n)}`).length;
+      if (k) hits.push(`${n} ${k}`);
+    }
+    // 検査自身の時間を Long Animation Frame の件数から除けるように記録する（measure と同じ）
+    if (Array.isArray(window.__checkRanges)) window.__checkRanges.push([t0, performance.now()]);
+    return hits;
+  }, OLD_CLASSES);
+}
+
 async function report(page, label, w, h, shotName, shot = true) {
   const r = await measure(page);
-  const bad = mode !== 'legacy' && (r.v > 0 || r.h > 0);
+  const hits = await oldClassHits(page);
+  oldClassStats.states++;
+  oldClassStats.found += hits.length;
+  const bad = r.v > 0 || r.h > 0 || hits.length > 0 || OLD_CLASSES.length === 0;
   const over = maxWraps !== null && r.wraps.length > maxWraps;
   if (bad || over) failed = true;
   const mark = bad || over ? '  ← NG' : '';
-  console.log(`${label} ${w}x${h}: 縦 ${r.v}px 横 ${r.h}px 折り返し ${r.wraps.length} 件${mark}`);
+  const old =
+    OLD_CLASSES.length === 0
+      ? '・旧のクラス名の一覧が無い'
+      : hits.length
+        ? `・旧のクラス名 ${hits.join('、')}`
+        : '';
+  console.log(
+    `${label} ${w}x${h}: 縦 ${r.v}px 横 ${r.h}px 折り返し ${r.wraps.length} 件${old}${mark}`,
+  );
   for (const s of r.wraps.slice(0, 30)) console.log(`    ${s}`);
   if (shotsDir && shot) await page.screenshot({ path: join(shotsDir, `${shotName}.png`) });
   return !(bad || over);
@@ -617,17 +671,17 @@ async function setShell(page, panel, sheet) {
 
 async function measureAll() {
   if (shotsDir) mkdirSync(shotsDir, { recursive: true });
-  const themes = mode === 'legacy' ? [null] : ['dark', 'light'];
+  const themes = ['dark', 'light'];
   for (const [w, h] of SIZES) {
     for (const theme of themes) {
       const storage = { [WORKSPACE_KEY]: twoLegs };
-      if (theme) storage[PREFS_KEY] = prefsText(theme);
+      storage[PREFS_KEY] = prefsText(theme);
       const ctx = await newContext({ width: w, height: h }, storage);
       const page = await ctx.newPage();
       await page.goto(pageUrl(mode));
       await waitReady(page, mode);
-      const tag = theme ? `${mode} ${theme}` : mode;
-      const name = `${mode}-${w}x${h}${theme ? `-${theme}` : ''}`;
+      const tag = `${mode} ${theme}`;
+      const name = `${mode}-${w}x${h}-${theme}`;
       // トップバー（#87）: 既定の作業
       if (mode === 'next') await topBarCheck(page, `${tag} ${w}x${h}`);
       if (mode === 'next' && w <= PHONE_MAX) {
@@ -752,7 +806,7 @@ async function measureAll() {
           }
         }
       }
-      if (domFile) domOut.push(`## ${w}x${h}${theme ? ` ${theme}` : ''}`, await domList(page));
+      if (domFile) domOut.push(`## ${w}x${h} ${theme}`, await domList(page));
       await ctx.close();
     }
   }
@@ -802,6 +856,10 @@ async function measureAll() {
       `コマンドパレットの検査（#89）: ${paletteStats.pass} / ${paletteStats.total} 状態で pass`,
     );
   }
+  // 旧のクラス名（#91・EPIC #92 の終了条件 8）: report を通ったすべての状態の合計
+  console.log(
+    `旧のクラス名の検査（#91）: ${OLD_CLASSES.length} 個の名前 × ${oldClassStats.states} 状態で当たり ${oldClassStats.found} 件${OLD_CLASSES.length === 0 || oldClassStats.found ? '  ← NG' : ''}`,
+  );
 }
 
 // ---- 市場（#85）: 板の列の数・切れ・スマイルの描画域の高さ
@@ -1513,7 +1571,6 @@ async function runFlows() {
   const phone = { width: 390, height: 844 };
   const pc = { width: 1440, height: 900 };
   const next = pageUrl('next');
-  const legacyUrl = pageUrl('legacy');
 
   // (a) 開いただけでは作業の保存を書き換えない・ドックのバッジ
   {
@@ -1523,7 +1580,7 @@ async function runFlows() {
     await waitReady(page, 'next');
     await page.waitForTimeout(2000);
     const after = await page.evaluate((k) => localStorage.getItem(k), WORKSPACE_KEY);
-    check('AC-11(a) ?ui=next を開いて 2 秒: 作業の保存がバイト単位で同じ', after === twoLegs);
+    check('AC-11(a) クエリなしで開いて 2 秒: 作業の保存がバイト単位で同じ', after === twoLegs);
     const badge = await page
       .textContent('.dock button[data-panel="positions"] .cnt')
       .catch(() => null);
@@ -1531,11 +1588,12 @@ async function runFlows() {
     await ctx.close();
   }
 
-  // (b) 共有 URL を ?ui=next で開く → 足 3 本、?ui=next が残りフラグメントが消える → 旧画面でも足 3 本
-  {
+  // (b) 共有 URL（share-v1、足 3 本）を古い ?ui=next とクエリなしで開く → 足 3 本、URL に ui も hash も無い（#91 AC-A3(a)）
+  //     → クエリなしで開き直しても足 3 本・保存 3
+  for (const entry of [OLD_ENTRY_NEXT, '']) {
     const ctx = await newContext(phone, {});
     const page = await ctx.newPage();
-    await page.goto(`${next}${share.hash}`);
+    await page.goto(`${entryUrl(entry)}${share.hash}`);
     await waitReady(page, 'next');
     const badge = await page
       .waitForFunction(
@@ -1546,17 +1604,18 @@ async function runFlows() {
       )
       .then(() => '3')
       .catch(() => null);
-    check('AC-11(b) 共有 URL を開いて足 3 本（バッジ）', badge === '3');
+    const label = entry || 'クエリなし';
+    check(`AC-11(b) ${label} で共有 URL を開いて足 3 本（バッジ）`, badge === '3');
     const u = new URL(page.url());
     check(
-      'AC-11(b) URL は ?ui=next が残りフラグメントが消える',
-      u.searchParams.get('ui') === 'next' && u.hash === '',
-      `${u.search}${u.hash}`,
+      `AC-11(b) ${label}: URL に ui も hash も無い（#91 AC-A3(a)）`,
+      !u.searchParams.has('ui') && u.hash === '',
+      `${u.search}${u.hash}` || '(なし)',
     );
     await page.waitForTimeout(1500); // 自動保存（500ms の debounce）
-    await page.goto(legacyUrl);
-    await waitReady(page, 'legacy');
-    const rows = await page.locator('ul.leg-list > li').count();
+    await page.goto(next);
+    await waitReady(page, 'next');
+    const rows = await page.locator('.dock button[data-panel="positions"] .cnt').textContent();
     const saved = await page.evaluate((k) => {
       try {
         const ws = JSON.parse(localStorage.getItem(k) ?? 'null');
@@ -1566,9 +1625,9 @@ async function runFlows() {
       }
     }, WORKSPACE_KEY);
     check(
-      'AC-11(b) ?ui=next なしで開き直すと足 3 本',
-      rows === 3 && saved === 3,
-      `行 ${rows}・保存 ${saved}`,
+      `AC-11(b) ${label} → クエリなしで開き直すと足 3 本`,
+      rows === '3' && saved === 3,
+      `バッジ ${rows}・保存 ${saved}`,
     );
     await ctx.close();
   }
@@ -1612,28 +1671,89 @@ async function runFlows() {
     await ctx.close();
   }
 
-  // (d) prefs がライトのまま旧画面を開く → data-theme 無し・背景色は prefs 無しと同じ
-  {
-    const bg = async (storage) => {
-      const ctx = await newContext(pc, storage, 'dark');
-      const page = await ctx.newPage();
-      await page.goto(legacyUrl);
-      await waitReady(page, 'legacy');
-      const r = await page.evaluate(() => ({
-        theme: document.documentElement.getAttribute('data-theme'),
-        bg: getComputedStyle(document.body).backgroundColor,
-      }));
-      await ctx.close();
-      return r;
-    };
-    const withPrefs = await bg({ [WORKSPACE_KEY]: twoLegs, [PREFS_KEY]: prefsText('light') });
-    const without = await bg({ [WORKSPACE_KEY]: twoLegs });
-    check('AC-11(d) 旧画面の html に data-theme が無い', withPrefs.theme === null);
-    check(
-      'AC-11(d) 旧画面の body の背景色が prefs 無しと同じ',
-      withPrefs.bg === without.bg,
-      `${withPrefs.bg} / ${without.bg}`,
+  // (d) 古い入口（?ui=next・旧画面の入口だった ui の値）を prefs = ライトで開く → 新しい画面で html[data-theme="light"]（#91）
+  for (const entry of OLD_ENTRIES) {
+    const ctx = await newContext(
+      pc,
+      { [WORKSPACE_KEY]: twoLegs, [PREFS_KEY]: prefsText('light') },
+      'dark',
     );
+    const page = await ctx.newPage();
+    await page.goto(entryUrl(entry));
+    await waitReady(page, 'next');
+    const r = await page.evaluate(() => ({
+      theme: document.documentElement.getAttribute('data-theme'),
+      layout: !!document.querySelector('main.layout'),
+    }));
+    check(
+      `AC-11(d) ${entry} を prefs = ライトで開くと main.layout と html[data-theme="light"]`,
+      r.layout && r.theme === 'light',
+      JSON.stringify(r),
+    );
+    await ctx.close();
+  }
+
+  // #91 AC-A1: クエリなし・古い入口のどれでも main.layout があり、旧画面の根（div.app）が無い。dev の部品の見本は
+  // ?parts と古い ?ui=next&parts
+  for (const entry of ['', ...OLD_ENTRIES]) {
+    const ctx = await newContext(pc, { [WORKSPACE_KEY]: twoLegs });
+    const page = await ctx.newPage();
+    await page.goto(entryUrl(entry));
+    await waitReady(page, 'next');
+    const r = await page.evaluate(() => ({
+      layout: document.querySelectorAll('main.layout').length,
+      app: document.querySelectorAll('div.app').length,
+    }));
+    check(
+      `#91 AC-A1 ${entry || 'クエリなし'} で main.layout があり div.app が無い`,
+      r.layout === 1 && r.app === 0,
+      `main.layout ${r.layout}・div.app ${r.app}`,
+    );
+    await ctx.close();
+  }
+  for (const entry of ['?parts', `${OLD_ENTRY_NEXT}&parts`]) {
+    const ctx = await newContext(pc, {});
+    const page = await ctx.newPage();
+    await page.goto(entryUrl(entry));
+    const ok = await page
+      .waitForSelector('.parts-gallery', { timeout: 20000 })
+      .then(() => true)
+      .catch(() => false);
+    check(`#91 AC-A1 ${entry} で部品の見本（.parts-gallery）`, ok);
+    await ctx.close();
+  }
+
+  // #91 AC-A3(d): 旧画面のときに書かれた保存（版 2 の全体・版 1）をクエリなしで開く → 警告のトーストが無く、タブ数・足の本数が
+  // fixture のとおり。枚数を 1 回変えた後の保存の ui.pnl_folded が fixture の値のまま（旧画面の [たたむ] の状態を捨てない）
+  for (const file of ['workspace-v2.json', 'workspace-v1.json']) {
+    const text = readFileSync(join(root, 'tests/ui/saved', file), 'utf8');
+    const doc = JSON.parse(text);
+    const wantTabs = doc.tabs ? doc.tabs.length : 1;
+    const wantLegs = (doc.tabs ? doc.tabs[doc.active].position : doc.position).legs.length;
+    const ctx = await newContext(pc, { [WORKSPACE_KEY]: text });
+    const page = await ctx.newPage();
+    await page.goto(next);
+    await waitReady(page, 'next', { keepNotes: true });
+    const r = await page.evaluate(() => ({
+      warn: document.querySelectorAll('.toast.note.warn').length,
+      tabs: document.querySelectorAll('.boxtabs [role="tab"]').length,
+      legs: document.querySelectorAll('section.positions li.leg').length,
+    }));
+    await page.click('section.positions li.leg:nth-child(1) .stepper > button:last-child');
+    await page.waitForTimeout(900); // 自動保存（500ms の debounce）
+    const folded = await page.evaluate((k) => {
+      try {
+        return JSON.parse(localStorage.getItem(k) ?? 'null')?.ui?.pnl_folded ?? null;
+      } catch {
+        return null;
+      }
+    }, WORKSPACE_KEY);
+    check(
+      `#91 AC-A3(d) ${file} をクエリなしで開く: 警告のトースト 0・タブ ${wantTabs}・足 ${wantLegs}、枚数を変えた後の ui.pnl_folded が ${doc.ui.pnl_folded} のまま`,
+      r.warn === 0 && r.tabs === wantTabs && r.legs === wantLegs && folded === doc.ui.pnl_folded,
+      `警告 ${r.warn}・タブ ${r.tabs}・足 ${r.legs}・pnl_folded ${folded}`,
+    );
+    await ctx.close();
   }
 
   // AC-12 キーボード
@@ -2827,35 +2947,16 @@ async function benchFlows(vp) {
 /** 数値のトークン（要素ごとに取り出して連ねる。見出しの末尾と値の先頭の数字をつなげない） */
 const METRIC_TOKEN = '[+−]?[0-9][0-9,.]*|[+−]∞|なし|—';
 
-/** 旧画面の指標（dl.metrics-list の dt / dd のトークン列とテール表の 30 個） */
-async function legacyMetrics(vp) {
-  const ctx = await newContext(vp, { [WORKSPACE_KEY]: twoLegs });
-  const page = await ctx.newPage();
-  await page.goto(pageUrl('legacy'));
-  await waitReady(page, 'legacy');
-  const r = await page.evaluate((re) => {
-    const tokens = [
-      ...document.querySelectorAll('dl.metrics-list > dt, dl.metrics-list > dd'),
-    ].flatMap((el) => el.textContent.match(new RegExp(re, 'g')) ?? []);
-    // 主の文字列（.note を除く）と .note
-    const split = (el) => {
-      const c = el.cloneNode(true);
-      for (const n of c.querySelectorAll('.note')) n.remove();
-      return [c.textContent.trim(), el.querySelector('.note')?.textContent.trim() ?? ''];
-    };
-    const tail = [...document.querySelectorAll('table.tail-table tbody tr')].flatMap((tr) =>
-      [...tr.querySelectorAll('th, td')].flatMap(split),
-    );
-    return { tokens, tail };
-  }, METRIC_TOKEN);
-  await ctx.close();
-  return r;
-}
+/** #87 AC-11(d)(e) の時刻（旧画面の header.header を控えたときと同じ固定の時刻） */
+const HEADER_FIXED_TIME = '2026-10-13T21:45:00+09:00';
 
 async function metricsFlows(vp) {
   const tag = `${vp.width}x${vp.height}`;
   const phoneSize = vp.width <= PHONE_MAX;
-  const old = phoneSize ? null : await legacyMetrics(vp);
+  const ex = phoneSize ? null : loadExpect();
+  const old = ex?.data?.metrics?.[tag] ?? null;
+  if (ex && !old)
+    check(`#86 AC-10 ${tag} 控えた旧画面の指標がある`, false, ex.why || `${tag} が無い`);
   const ctx = await newContext(vp, { [WORKSPACE_KEY]: twoLegs });
   await ctx.addInitScript(LOAF_INIT);
   const page = await ctx.newPage();
@@ -2889,7 +2990,7 @@ async function metricsFlows(vp) {
     }, M);
   const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 
-  // AC-10: 旧画面と同じ値（1440×900）
+  // AC-10: 旧画面から控えた値と同じ（1440×900。scripts/uiCheck.expect.json）
   if (old) {
     const toggle = page.locator(`${M} .mx-toggle`);
     await toggle.click();
@@ -2916,12 +3017,12 @@ async function metricsFlows(vp) {
       { m: M, re: METRIC_TOKEN },
     );
     check(
-      `#86 AC-10(a) ${tag} 内訳のトークン列が旧画面の dl.metrics-list と一致（${now.tokens.length} 個）`,
+      `#86 AC-10(a) ${tag} 内訳のトークン列が旧画面の dl.metrics-list（控え）と一致（${now.tokens.length} 個）`,
       now.tokens.length > 20 && same(now.tokens, old.tokens),
       same(now.tokens, old.tokens) ? '' : `新 ${now.tokens.join(' ')} / 旧 ${old.tokens.join(' ')}`,
     );
     check(
-      `#86 AC-10(b) ${tag} テール表の 30 個が旧画面と一致`,
+      `#86 AC-10(b) ${tag} テール表の 30 個が旧画面（控え）と一致`,
       now.tail.length === 30 && same(now.tail, old.tail),
       same(now.tail, old.tail)
         ? now.tail.slice(0, 6).join(' ')
@@ -3873,7 +3974,10 @@ async function marketWideFlows(vp) {
   await ctx.close();
 }
 
-/** AC-12: 新しい画面で限月・種別・ask ≤ 50 円・横軸を替え → 再読み込み → 旧画面で同じ */
+/**
+ * AC-12: 限月・種別・ask ≤ 50 円・横軸を替え → 再読み込みで残る・作業の保存（版 2）の ui.month_id・ui.target・
+ * ui.filter_ask・ui.smile_axis が選んだ値（旧画面が読んでいたのと同じキー。#91 で旧画面と比べる手順を置き換えた）
+ */
 async function marketPersistFlow() {
   const vp = { width: 1440, height: 900 };
   const ctx = await newContext(vp, { [WORKSPACE_KEY]: twoLegs, [PREFS_KEY]: prefsText('dark') });
@@ -3905,33 +4009,26 @@ async function marketPersistFlow() {
     nextMonth === monthText && nextTarget === 'call' && nextFilter === 'true',
     `${nextMonth}・${nextTarget}・${nextFilter}`,
   );
-  await page.goto(pageUrl('legacy'));
-  // 表示中の限月が 2 つ目なので、先頭の .board-table（隠れた限月）ではなく表示中の板を待つ
-  await page.waitForSelector('.board:not(.inactive) .board-table', { timeout: 20000 });
-  await page.waitForTimeout(400);
-  const old = await page.evaluate(() => ({
-    month: document.querySelector('nav.tabs button[aria-pressed="true"]')?.textContent?.trim(),
-    target: document
-      .querySelector(
-        '.board:not(.inactive) fieldset[aria-label="対象の種別"] button[aria-pressed="true"]',
-      )
-      ?.textContent?.trim(),
-    filter: [...document.querySelectorAll('.board:not(.inactive) .board-tools > button')]
-      .find((b) => b.textContent?.includes('ask'))
-      ?.getAttribute('aria-pressed'),
-    axis: document
-      .querySelector(
-        '.smile:not(.inactive) fieldset[aria-label="横軸"] button[aria-pressed="true"]',
-      )
-      ?.textContent?.trim(),
-  }));
+  const ws = await page.evaluate((k) => {
+    try {
+      return JSON.parse(localStorage.getItem(k) ?? 'null');
+    } catch {
+      return null;
+    }
+  }, WORKSPACE_KEY);
+  const u = ws?.ui ?? {};
   check(
-    '#85 AC-12 旧画面（?ui=next なし）で同じ限月・種別・絞り込み・横軸',
-    old.month === monthLabel &&
-      old.target === 'call' &&
-      old.filter === 'true' &&
-      old.axis === 'moneyness',
-    JSON.stringify(old),
+    '#85 AC-12 再読み込みの後の作業の保存の ui.month_id・target・filter_ask・smile_axis が選んだ値（旧画面が読むキー）',
+    `${u.month_id} 限` === monthLabel &&
+      u.target === 'call' &&
+      u.filter_ask === true &&
+      u.smile_axis === 'moneyness',
+    JSON.stringify({
+      month_id: u.month_id,
+      target: u.target,
+      filter_ask: u.filter_ask,
+      smile_axis: u.smile_axis,
+    }),
   );
   await ctx.close();
 }
@@ -4471,26 +4568,18 @@ async function topFlows(vp) {
     await ctx.close();
   }
 
-  // AC-11 (d) 限月の切替でピルの F・ATM がその限月（旧画面の Header と一致）、(e) 全文の数値の列が旧画面を含む
+  // AC-11 (d) 限月の切替でピルの F・ATM がその限月（旧画面の Header の控えと一致）、(e) 全文の数値の列が控えを含む
   {
-    const fixed = Date.parse('2026-10-13T21:45:00+09:00');
-    const legacyCtx = await newContext(vp, { [WORKSPACE_KEY]: twoLegs });
-    const lp = await legacyCtx.newPage();
-    await lp.clock.setFixedTime(fixed);
-    await lp.goto(pageUrl('legacy'));
-    await waitReady(lp, 'legacy');
-    const legacy = await lp.evaluate(() => ({
-      text: document.querySelector('header.header')?.textContent ?? '',
-      months: [...document.querySelectorAll('.head-month')].map((m) => {
-        const t = m.textContent ?? '';
-        return {
-          id: /(\d{4}-\d{2}) 限/.exec(t)?.[1] ?? null,
-          f: /F ([0-9,]+)/.exec(t)?.[1] ?? null,
-          atm: /ATM（.）\s*([0-9,]+)/.exec(t)?.[1] ?? null,
-        };
-      }),
-    }));
-    await legacyCtx.close();
+    const fixed = Date.parse(HEADER_FIXED_TIME);
+    const ex = loadExpect();
+    const old = ex.data?.header?.[tag] ?? null;
+    if (!old) {
+      check(
+        `#87 AC-11(d)(e) ${tag} 控えた旧画面の header.header がある`,
+        false,
+        ex.why || `${tag} が無い`,
+      );
+    }
 
     const ctx = await newContext(vp, { [WORKSPACE_KEY]: twoLegs });
     const page = await ctx.newPage();
@@ -4498,13 +4587,13 @@ async function topFlows(vp) {
     await page.goto(pageUrl('next'));
     await waitReady(page, 'next');
     if (phoneSize) await setShell(page, 'board', 'peek');
-    const second = legacy.months[1];
+    const second = old?.months[1];
     await page.click(`section.board [aria-label="限月"] button[aria-label="${second?.id} 限"]`);
     await page.waitForTimeout(150);
     const label = (await pillLabel(page)) ?? '';
-    const other = legacy.months[0];
+    const other = old?.months[0];
     check(
-      `#87 AC-11(d) ${tag} 限月 ${second?.id} でピルの F・ATM が旧画面の同じ限月と一致`,
+      `#87 AC-11(d) ${tag} 限月 ${second?.id} でピルの F・ATM が旧画面（控え）の同じ限月と一致`,
       !!second?.f &&
         !!second.atm &&
         label.includes(`F ${second.f} · ATM ${second.atm}`) &&
@@ -4512,11 +4601,12 @@ async function topFlows(vp) {
       `${label}／旧 F ${second?.f}・ATM ${second?.atm}`,
     );
     const pop = await popText(page);
-    const miss = missingTokens(tokens(legacy.text), tokens(pop));
+    const oldText = old?.text ?? '';
+    const miss = missingTokens(tokens(oldText), tokens(pop));
     check(
-      `#87 AC-11(e) ${tag} ピルの全文の数値の列が旧画面の header.header の列をすべて含む`,
-      tokens(legacy.text).length > 20 && miss.length === 0,
-      `旧 ${tokens(legacy.text).length} 個・ピル ${tokens(pop).length} 個${miss.length ? `・足りない ${miss.join(' ')}` : ''}`,
+      `#87 AC-11(e) ${tag} ピルの全文の数値の列が旧画面の header.header の列（控え）をすべて含む`,
+      tokens(oldText).length > 20 && miss.length === 0,
+      `旧 ${tokens(oldText).length} 個・ピル ${tokens(pop).length} 個${miss.length ? `・足りない ${miss.join(' ')}` : ''}`,
     );
     await ctx.close();
   }
@@ -4848,12 +4938,13 @@ async function shareFlows(vp) {
     JSON.stringify(
       (ws?.tabs?.[ws.active]?.position?.legs ?? []).map((l) => [l.side, l.strike, l.qty, l.entry]),
     );
-  // タブのメニューと ⋯ の URL をコピー → トースト・クリップボード（#p=・?ui=next）→ 新しいコンテキストで同じ足
-  {
+  // タブのメニューと ⋯ の URL をコピー → トースト・クリップボード（#p= があり ui が無い。#91）→ 新しいコンテキストで同じ足。
+  // クエリなしで開いたページと、古い ?ui=next で開いたページ（URL をコピーしても ui が付かない = #91 AC-A3(b)）の両方
+  for (const entry of ['', OLD_ENTRY_NEXT]) {
     const ctx = await newContext(vp, { [WORKSPACE_KEY]: twoLegs });
     await ctx.grantPermissions(['clipboard-read', 'clipboard-write'], { origin });
     const page = await ctx.newPage();
-    await page.goto(pageUrl('next'));
+    await page.goto(entryUrl(entry));
     await waitReady(page, 'next');
     const orig = legsOf(await savedWorkspace(page));
     const copy = async (open) => {
@@ -4882,14 +4973,18 @@ async function shareFlows(vp) {
     };
     const viaTab = await copy(() => page.click(CHIP));
     const viaMore = await copy(() => page.click('button[aria-label="メニュー"]'));
-    for (const [name, r] of [
-      ['タブのメニュー', viaTab],
-      ['⋯', viaMore],
-    ]) {
+    // 古い入口で開いたページは ⋯ からだけ（タブのメニューと同じ makeShareUrl）
+    const pairs = entry
+      ? [[`${entry} で開いたページの ⋯`, viaMore]]
+      : [
+          ['タブのメニュー', viaTab],
+          ['⋯', viaMore],
+        ];
+    for (const [name, r] of pairs) {
       let opened = '';
-      let ui = null;
+      let hasUi = true;
       try {
-        ui = new URL(r.url).searchParams.get('ui');
+        hasUi = new URL(r.url).searchParams.has('ui');
         const c2 = await newContext(vp, {});
         const p2 = await c2.newPage();
         await p2.goto(r.url);
@@ -4901,9 +4996,9 @@ async function shareFlows(vp) {
         opened = `開けない ${e.message}`;
       }
       check(
-        `#87 AC-13 ${tag} ${name}の URL をコピー → トースト・#p= と ?ui=next・開くと同じ足`,
-        copied.test(r.toast) && r.url.includes('#p=') && ui === 'next' && opened === orig,
-        `${r.toast}・ui=${ui}・足 ${opened === orig ? '同じ' : `${opened} / ${orig}`}`,
+        `#87 AC-13 ${tag} ${name}の URL をコピー → トースト・#p= があり ui が無い（#91）・開くと同じ足`,
+        copied.test(r.toast) && r.url.includes('#p=') && !hasUi && opened === orig,
+        `${r.toast}・ui ${hasUi ? 'あり' : 'なし'}・足 ${opened === orig ? '同じ' : `${opened} / ${orig}`}`,
       );
     }
     await ctx.close();
@@ -4938,31 +5033,6 @@ async function shareFlows(vp) {
       `#87 AC-13 ${tag} クリップボードを拒否 → 共有の URL のダイアログに同じ URL が全文選択`,
       r.title === '共有の URL' && r.same && r.all && r.focus,
       JSON.stringify(r),
-    );
-    await ctx.close();
-  }
-
-  // 旧画面の URL をコピー → クリップボードの URL に ui が無い
-  {
-    const ctx = await newContext(vp, { [WORKSPACE_KEY]: twoLegs });
-    await ctx.grantPermissions(['clipboard-read', 'clipboard-write'], { origin });
-    const page = await ctx.newPage();
-    await page.goto(pageUrl('legacy'));
-    await waitReady(page, 'legacy');
-    await page.click('.work-tab-more');
-    const btn = 'button:has-text("URL をコピー"):not([disabled]):not([aria-disabled="true"])';
-    await page.waitForSelector(btn, { timeout: 5000 }).catch(() => {});
-    await page.click(btn).catch(() => {});
-    await page.waitForTimeout(300);
-    const url = await page.evaluate(() => navigator.clipboard.readText()).catch(() => '');
-    let hasUi = true;
-    try {
-      hasUi = new URL(url).searchParams.has('ui');
-    } catch {}
-    check(
-      `#87 AC-13 ${tag} 旧画面の URL をコピーの URL に ui が無い`,
-      url.includes('#p=') && !hasUi,
-      url ? `${new URL(url).search || '(search なし)'}` : 'コピーされない',
     );
     await ctx.close();
   }
@@ -6791,6 +6861,8 @@ async function paletteWideFlow(vp) {
   await ctx.close();
 }
 
+// 開く URL（#91: 既定はクエリなし。--parts は ?parts）
+console.log(`URL: ${pageUrl(mode)}`);
 try {
   if (flows) await runFlows();
   else await measureAll();

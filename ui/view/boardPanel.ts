@@ -1,8 +1,8 @@
 /**
- * 新しい画面（`?ui=next`）の板の表示モデル（純関数。#85、docs/ui-redesign.md §2.4・§4.3・§5・§5.2）。
+ * 画面の板の表示モデル（純関数。#85、docs/ui-redesign.md §2.4・§4.3・§5・§5.2）。
  * Preact・DOM に依存しない。数値は `ui/view/board.ts` の `boardRows` の値を書式化するだけで、作り直さない。
  *
- * - 列の段階は板の枠（`section.board`、枠線を含む）の幅で 9 / 7 / 5（今の `boardColumns` は旧画面用のまま）
+ * - 列の段階は板の枠（`section.board`、枠線を含む）の幅で 9 / 7 / 5（`boardColumns` は旧画面用だったもの。値は変えない）
  * - 行の文字列（`boardRowTexts`）は板と限月だけで決まる（タブの足・列の段階・限月の切替では作り直さない）
  * - バッジ（`boardBadges`）は作業中のタブの OP の足を売り / 買いで別々に合計する
  */

@@ -1,5 +1,5 @@
 /**
- * 新しい画面（`?ui=next`）の全体のキー（#89 段 A。docs/ui-redesign.md §4.6）。
+ * 画面の全体のキー（#89 段 A。docs/ui-redesign.md §4.6）。
  * 1〜5 = パネル・G = 描画域・T = テーマ・Ctrl / ⌘ + K = コマンドパレット（段 B）。
  * 純関数（Preact・DOM に依存しない）。document の keydown は ui/next/useGlobalKeys.ts だけが受ける。
  */

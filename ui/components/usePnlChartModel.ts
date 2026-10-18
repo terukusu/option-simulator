@@ -1,6 +1,6 @@
 /**
- * 損益グラフの表示モデルの memo の連鎖（DOM・CSS を持たないフック）。旧画面の PnlChart と新しい画面の舞台
- * （ui/next/regions/Stage.tsx）が共有する（#82。docs/ui-redesign.md §10 段 1 d・§10.1）。
+ * 損益グラフの表示モデルの memo の連鎖（DOM・CSS を持たないフック）。舞台（ui/next/regions/Stage.tsx）が使う
+ * （#82 で旧画面の PnlChart と共有するために切り出した。旧画面は #91 で削除。docs/ui-redesign.md §10 段 1 d・§10.1）。
  *
  * - 今日の線は表示範囲・幅・β・動き方が変わったときだけ作る（#6）
  * - 指定日の線は ΔX で作り直さない（#52）
