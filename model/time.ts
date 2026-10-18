@@ -57,6 +57,19 @@ export function nextBusinessDay(date: string, holidays: Holidays): string {
   return d;
 }
 
+/**
+ * instant（epoch ミリ秒）の JST の暦日から n 営業日後までの暦日の数（整数。時刻はそのまま）。
+ * 土日・休業日の instant からも次の営業日から数える（金曜 → 火曜 = 4、月曜が休業なら 5）。
+ * 証拠金の概算の保有期間（2 営業日。設計 5.10）に使う。
+ */
+export function businessDaysAhead(instant: number, n: number, holidays: Holidays): number {
+  const set = toSet(holidays);
+  const start = formatDate(Math.floor((instant + JST_OFFSET_MS) / DAY_MS) * DAY_MS);
+  let d = start;
+  for (let i = 0; i < n; i++) d = nextBusinessDay(d, set);
+  return Math.round((parseDate(d) - parseDate(start)) / DAY_MS);
+}
+
 /** その月の第 2 金曜（month は 1〜12）。 */
 export function secondFriday(year: number, month: number): string {
   const first = Date.UTC(year, month - 1, 1);
