@@ -8,6 +8,7 @@
  * - σ' = max(σ_min, σ_base(x_eff) + Δσ_total)
  *
  * ΔX% は評価点の X'（グラフの横軸・テール表の各列）から (X' − X₀) / X₀ × 100 で求める。
+ * sticky moneyness で F_i' ≤ 0（#144）は σ' = σ_min（価格は本源的価値で σ に依らない）、x_eff は F_i から。
  */
 
 import type { Smile } from './smile';
@@ -115,7 +116,8 @@ export function scenarioIvShift(input: ScenarioIvInput): {
   betaPt: number;
 } {
   const { k, Fi, FiPrime, x0, xPrime, scenario } = input;
-  const fEff = scenario.ivDynamics === 'sticky_strike' ? Fi : FiPrime;
+  // F_i' ≤ 0（円モードの basis が負の足を X' ≈ 0 に置いたとき。#144）は ln(K / F') が定義できないので F_i から
+  const fEff = scenario.ivDynamics === 'sticky_strike' || !(FiPrime > 0) ? Fi : FiPrime;
   const xEff = Math.log(k / fEff);
   const dXPct = ((xPrime - x0) / x0) * 100;
   const betaPt = -scenario.beta * dXPct;
@@ -149,7 +151,10 @@ export function sigmaAt(
   sc: Scenario,
   sigmaMin: number,
 ): number {
-  const xEff = Math.log(k / (sc.ivDynamics === 'sticky_strike' ? Fi : FiPrime));
+  const fEff = sc.ivDynamics === 'sticky_strike' ? Fi : FiPrime;
+  // F' ≤ 0 の価格は Black-76 の F ≤ 0 の枝（本源的価値）で σ に依らない。ln(K / F') の NaN を返さない（#144）
+  if (!(fEff > 0)) return sigmaMin;
+  const xEff = Math.log(k / fEff);
   const betaPt = -sc.beta * ((xPrime - x0) / x0) * 100;
   const skewPt = (-sc.skew * xEff) / 0.1;
   const base = sigmaBase(xEff);

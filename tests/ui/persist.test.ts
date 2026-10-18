@@ -916,3 +916,28 @@ describe('作業のキーの版 2（#71 BOX タブ）', () => {
     });
   });
 });
+
+/** #144 AC-7: ΔX の範囲を広げても保存の形式・読める値は変えない（|ΔX| ≤ 1e6 円）。 */
+describe('ΔX の範囲を広げた後の保存（#144）', () => {
+  const X0 = 67_810;
+  for (const dX of [-0.4 * X0, 0.2 * X0, -0.99 * X0, 9 * X0, -1e6, 1e6]) {
+    it(`往復: ΔX ${dX} 円がそのまま戻る`, () => {
+      const s = run(initialState, { type: 'setScenario', patch: { dX } });
+      expect(s.scenario.dX).toBe(dX);
+      const back = bootState(readWorkspace(serializeWorkspace(s, NOW)));
+      expect(back.scenario.dX).toBe(dX);
+    });
+  }
+
+  it('既存の保存（版 1・版 2）の ΔX はそのまま読める', () => {
+    expect(bootState(readWorkspace(JSON.stringify(v1))).scenario.dX).toBe(-1200);
+    expect(bootState(readWorkspace(JSON.stringify(v2))).scenario.dX).toBe(-400);
+  });
+
+  it('|ΔX| > 1e6 は今と同じく読まない（position ごと捨てる）', () => {
+    const s = run(initialState, { type: 'setScenario', patch: { dX: 1e6 } });
+    const text = serializeWorkspace(s, NOW).replaceAll('"dX":1000000', '"dX":1000001');
+    expect(text).toContain('1000001');
+    expect(bootState(readWorkspace(text)).scenario.dX).not.toBe(1000001);
+  });
+});

@@ -244,3 +244,58 @@ describe('#83 B-2 段の起点は今の props の値', () => {
     expect(stepOrigin(2, 1.5, 1)).toBe(2);
   });
 });
+
+/**
+ * #144 AC-4: 数値欄では操作の範囲（ΔX の −90%〜+100%）の外の値を入れられる。そこから ± / キー / スクラブ / ホイールで
+ * 1 段動かしても、押した向きと逆には動かさない（下端の外で − は動かず + は下端へ、上端の外で − は上端へ）。
+ */
+describe('#144 AC-4 範囲の外の値から 1 段動かしても押した向きと逆に動かない', () => {
+  const DX: StepSpec = { min: -90, max: 100, step: 0.5, def: 0 };
+  const DX_YEN: StepSpec = { min: -61000, max: 67800, step: 100, def: 0 };
+
+  it('下端の外（−95%）: − は動かず、+ は下端（−90）へ', () => {
+    expect(stepperMove(DX, -95, -1, false)).toBe(-95);
+    expect(stepperMove(DX, -95, -10, false)).toBe(-95);
+    expect(stepperMove(DX, -95, 1, false)).toBe(-90);
+    expect(stepperMove(DX, -95, 10, false)).toBe(-90);
+    // 端数を保つ段（d と同じ stepFree。範囲に収めてから 1 段）も押した向きにだけ動く
+    expect(stepperMove(DX, -99, 1, true)).toBe(-89.5);
+    expect(stepperMove(DX, -99, -1, true)).toBe(-99);
+  });
+
+  it('上端の外（+900%）: + は動かず、− は上端（100）へ', () => {
+    expect(stepperMove(DX, 900, 1, false)).toBe(900);
+    expect(stepperMove(DX, 900, 10, false)).toBe(900);
+    expect(stepperMove(DX, 900, -1, false)).toBe(100);
+    expect(stepperMove(DX, 900, -10, false)).toBe(100);
+    expect(stepperMove(DX, 900, -1, true)).toBe(99.5);
+    expect(stepperMove(DX, 900, 1, true)).toBe(900);
+  });
+
+  it('円: −67,132 円（−99%）で − は動かず、+ は −61,000 へ。610,290 円で − は 67,800 へ', () => {
+    expect(stepperMove(DX_YEN, -67132, -1, false)).toBe(-67132);
+    expect(stepperMove(DX_YEN, -67132, 1, false)).toBe(-61000);
+    expect(stepperMove(DX_YEN, 610290, 1, false)).toBe(610290);
+    expect(stepperMove(DX_YEN, 610290, -1, false)).toBe(67800);
+  });
+
+  it('範囲の中の値では今と同じ', () => {
+    expect(stepperMove(DX, 0, 1, false)).toBe(0.5);
+    expect(stepperMove(DX, -90, -1, false)).toBe(-90);
+    expect(stepperMove(DX, 100, 1, false)).toBe(100);
+    expect(stepperMove(DX, 99.5, 10, false)).toBe(100);
+  });
+
+  it('Home / End: 範囲の外で逆向きになるなら動かない。R は常に既定値', () => {
+    expect(stepperJump(DX, 'min', -95)).toBe(-95);
+    expect(stepperJump(DX, 'max', -95)).toBe(100);
+    expect(stepperJump(DX, 'max', 900)).toBe(900);
+    expect(stepperJump(DX, 'min', 900)).toBe(-90);
+    expect(stepperJump(DX, 'def', -95)).toBe(0);
+    expect(stepperJump(DX, 'def', 900)).toBe(0);
+    // 範囲の中・value を渡さないときは今と同じ
+    expect(stepperJump(DX, 'min', 10)).toBe(-90);
+    expect(stepperJump(DX, 'max', 10)).toBe(100);
+    expect(stepperJump(DX, 'min')).toBe(-90);
+  });
+});

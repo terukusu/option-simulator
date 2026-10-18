@@ -101,3 +101,37 @@ describe('基準原資産 X と basis（AC24 の式）', () => {
     expect(underlyingAt(F2, X0, 60000, 'pct')).toBeCloseTo((60000 * F2) / X0, 9);
   });
 });
+
+/**
+ * #144: sticky moneyness で F_i' ≤ 0（円モードで basis_i < 0 の足を X' ≈ 0 に置いたとき）は x_eff = ln(K / F') が
+ * 定義できない。σ' は σ_min（F ≤ 0 の Black-76 は本源的価値で σ に依らない）、x_eff は F_i から。
+ */
+describe("F_i' ≤ 0 の sticky moneyness（#144）", () => {
+  const basis = -1_500;
+  const Fi = X0 + basis;
+  const sc: Scenario = { ...ZERO_SCENARIO, dX: -0.99 * X0, ivDynamics: 'sticky_moneyness' };
+
+  it("σ' は σ_min（NaN にしない）、x_eff・Δσ_total は有限", () => {
+    const input = at(64_000, sc, boardSigmaBase(smile), Fi);
+    expect(input.FiPrime).toBeLessThanOrEqual(0);
+    expect(scenarioSigma(input)).toBe(0.01);
+    expect(scenarioSigma({ ...input, sigmaMin: 0.02 })).toBe(0.02);
+    const shift = scenarioIvShift(input);
+    expect(Number.isFinite(shift.xEff)).toBe(true);
+    expect(shift.xEff).toBeCloseTo(Math.log(64_000 / Fi), 12);
+    expect(Number.isFinite(shift.shiftPt)).toBe(true);
+    // F' = 0 ちょうども同じ
+    const zero = { ...input, FiPrime: 0 };
+    expect(scenarioSigma(zero)).toBe(0.01);
+    expect(Number.isFinite(scenarioIvShift(zero).xEff)).toBe(true);
+  });
+
+  it("F_i' > 0 と sticky strike は今と同じ", () => {
+    const ok = at(64_000, { ...sc, dX: -0.5 * X0 }, boardSigmaBase(smile), Fi);
+    expect(ok.FiPrime).toBeGreaterThan(0);
+    expect(scenarioIvShift(ok).xEff).toBeCloseTo(Math.log(64_000 / ok.FiPrime), 12);
+    const strike = at(64_000, { ...sc, ivDynamics: 'sticky_strike' }, boardSigmaBase(smile), Fi);
+    expect(Number.isFinite(scenarioSigma(strike))).toBe(true);
+    expect(scenarioIvShift(strike).xEff).toBeCloseTo(Math.log(64_000 / Fi), 12);
+  });
+});

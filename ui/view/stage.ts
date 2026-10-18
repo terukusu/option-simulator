@@ -610,8 +610,9 @@ export function bigReadout(
       dateLabel,
       r.text.pnlDate,
       u,
-      // Δσ は全文と IV レールの吹き出しで読む（副題を 1 行に収める。#107）
-      `X ${r.text.x} (${r.text.dX}/${r.text.dXPct}%)`,
+      // Δσ は全文と IV レールの吹き出しで読む（副題を 1 行に収める。#107）。|ΔX| ≥ 100% は % を整数にする
+      // （+900% と円の最大でも幅 360px に収める。全文は小数 1 桁のまま。#144）
+      `X ${r.text.x} (${r.text.dX}/${Math.abs(r.dXPct) >= 100 ? fmtSigned(r.dXPct, 0) : r.text.dXPct}%)`,
       true,
       [
         head(dateLabel, r.text.pnlDate),

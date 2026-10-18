@@ -964,6 +964,8 @@ async function measureAll() {
       // タブの名前が上限（12 文字）の長さ（レビュー block-1 の回帰の検査）
       await pinCheck(w, h, true);
     }
+    // ΔX の数値欄の端（+900%・円の最大）の 360px（#144 AC-13）
+    await wideDXCheck();
     console.log(`読み取りの検査: ${readoutStats.pass} / ${readoutStats.total} 状態で pass`);
     console.log(
       `シナリオの値・チップの検査: ${scenarioStats.pass} / ${scenarioStats.total} 状態で pass`,
@@ -1387,6 +1389,66 @@ const twoTabsLong = JSON.stringify({
  * ピン 3 本（今の線を残す × 2 + ヘッジ案を重ねる）の凡例: 各ピンの番号と × が凡例行の中に見え（幅 > 0）、× の当たりが
  * 24px 以上・中心の elementFromPoint が × 自身、× を押すとそのピンが外れる。この状態の縦・横・折り返し・読み取りも測る
  */
+/**
+ * #144 AC-13: 幅 360px で ΔX を数値欄の上端（+900%）と円の最大（⌊9X₀⌋）にした状態でも、シナリオの .stepper .val b・
+ * 読み取りの帯が切れず、横スクロールが出ない（シート peek / full）。
+ */
+async function wideDXCheck() {
+  const [w, h] = [360, 780];
+  const ctx = await newContext({ width: w, height: h }, { [WORKSPACE_KEY]: twoLegs });
+  const page = await ctx.newPage();
+  await page.goto(pageUrl('next'));
+  await waitReady(page, 'next');
+  const val = 'section.scenario .stepper[data-name="dX"] > .val';
+  const input = `${val} input`;
+  const enter = async (text) => {
+    await page.dblclick(val);
+    await page.waitForSelector(input);
+    await page.fill(input, text);
+    await page.keyboard.press('Enter');
+    await page.waitForTimeout(200);
+  };
+  const measureAll = async (label) => {
+    for (const sheet of ['peek', 'full']) {
+      const ok = await setShell(page, 'scenario', sheet);
+      const lbl = `#144 ${label} scenario/${sheet}`;
+      if (!ok) {
+        failed = true;
+        console.log(`${lbl} ${w}x${h}: 画面の状態を作れない  ← NG`);
+        continue;
+      }
+      await page.waitForTimeout(150);
+      await report(page, lbl, w, h, `wide-dx-${label}-${sheet}`);
+      await readoutCheck(page, `${lbl} ${w}x${h}`, 3);
+      await scenarioCheck(page, `${lbl} ${w}x${h}`);
+      const shown = (await page.textContent(`${val} b`).catch(() => null)) ?? '';
+      console.log(`${lbl} ${w}x${h}: ΔX の表示「${shown}」`);
+    }
+  };
+  await setShell(page, 'scenario', 'peek');
+  await enter('900');
+  await measureAll('+900%');
+  // 円の最大: 範囲の外を入れて文言の上端を読み、その値を入れる
+  await page.click('section.scenario details.adv summary');
+  await page.click('section.scenario .seg[aria-label="ΔX の単位"] button:has-text("円")');
+  await page.click('section.scenario details.adv summary');
+  await page.dblclick(val);
+  await page.waitForSelector(input);
+  await page.fill(input, '99999999');
+  const alert =
+    (await page.textContent('section.scenario .scn-err[role="alert"]').catch(() => null)) ?? '';
+  const max = /〜([\d,]+) 円/.exec(alert)?.[1] ?? '';
+  await page.keyboard.press('Escape');
+  if (max === '') {
+    failed = true;
+    console.log(`#144 円の最大を読めない「${alert}」  ← NG`);
+  } else {
+    await enter(max);
+    await measureAll(`円の最大 ${max}`);
+  }
+  await ctx.close();
+}
+
 async function pinCheck(w, h, long) {
   const ctx = await newContext(
     { width: w, height: h },
@@ -2609,7 +2671,8 @@ async function scenarioFlows(vp) {
     );
   }
 
-  // (b) ΔX の数値入力: -3 Enter → X₀ × −3%、-99 → 赤く保存は変わらない、Esc で元の表示
+  // (b) ΔX の数値入力: -3 Enter → X₀ × −3%、-99 Enter → X₀ × −99%（#144 の数値欄の下端）、-100 → 赤く保存は
+  // 変わらない、Esc で元の表示、900 Enter → X₀ × 9 で舞台のハンドル（シナリオ点の縦線）が描画域の中（#144 AC-12）
   {
     // X₀ = ΔX = 0 のときの副題の X'（整数に丸めた値）。合成の板の X₀ は整数でないので、丸めの分を許す
     await page.focus(val('dX'));
@@ -2617,28 +2680,36 @@ async function scenarioFlows(vp) {
     await page.waitForTimeout(100);
     const sub = (await page.textContent(`${val('dX')} small`)) ?? '';
     const x0 = Number((/X ([\d,]+)/.exec(sub)?.[1] ?? 'NaN').replaceAll(',', ''));
-    await page.dblclick(val('dX'));
     const input = `${val('dX')} input`;
-    await page.waitForSelector(input);
-    await page.fill(input, '-3');
-    await page.keyboard.press('Enter');
-    const a = (await saved()).scenario;
-    const dX = a?.dX ?? Number.NaN;
+    const enter = async (text) => {
+      await page.dblclick(val('dX'));
+      await page.waitForSelector(input);
+      await page.fill(input, text);
+      await page.keyboard.press('Enter');
+      return (await saved()).scenario?.dX ?? Number.NaN;
+    };
+    const dX3 = await enter('-3');
     check(
-      `#83 AC-10(b) ${tag} ΔX に -3 Enter → 保存の ΔX ${dX} = X₀ × −3%（X₀ ≈ ${x0}）`,
-      close(dX, pctHalf * -6) && Math.abs(dX - x0 * -0.03) <= 0.03 * 0.5 + 0.01,
+      `#83 AC-10(b) ${tag} ΔX に -3 Enter → 保存の ΔX ${dX3} = X₀ × −3%（X₀ ≈ ${x0}）`,
+      close(dX3, pctHalf * -6) && Math.abs(dX3 - x0 * -0.03) <= 0.03 * 0.5 + 0.01,
       `+0.5% の ${pctHalf} × −6 = ${pctHalf * -6}`,
+    );
+    const dX = await enter('-99');
+    check(
+      `#144 AC-12 ${tag} ΔX に -99 Enter → 保存の ΔX ${dX} = X₀ × −0.99（X₀ ≈ ${x0}）`,
+      close(dX, pctHalf * -198) && Math.abs(dX - x0 * -0.99) <= 0.99 * 0.5 + 0.01,
+      `+0.5% の ${pctHalf} × −198 = ${pctHalf * -198}`,
     );
     const shown = await page.textContent(`${val('dX')} b`);
     await page.dblclick(val('dX'));
     await page.waitForSelector(input);
-    await page.fill(input, '-99');
+    await page.fill(input, '-100');
     const inv = await page.getAttribute(input, 'aria-invalid');
     const alert =
       (await page.textContent('section.scenario .scn-err[role="alert"]').catch(() => null)) ?? '';
     const b = (await saved()).scenario;
     check(
-      `#83 AC-10(b) ${tag} -99 → aria-invalid="true"・保存は変わらない`,
+      `#144 AC-12 ${tag} -100 → aria-invalid="true"・保存は変わらない`,
       inv === 'true' && b?.dX === dX && alert.startsWith('原資産 ΔXは'),
       `「${alert}」`,
     );
@@ -2651,6 +2722,35 @@ async function scenarioFlows(vp) {
       `#83 AC-10(b) ${tag} Esc で元の表示（${back}）`,
       gone && back === shown && err === 0 && (await saved()).scenario?.dX === dX,
     );
+    const dX900 = await enter('900');
+    await page.waitForTimeout(300);
+    const line = await page.evaluate(() => {
+      const l = document.querySelector('section.stage .chart line.vline');
+      const svg = l?.ownerSVGElement;
+      if (!l || !svg) return null;
+      const n = (el, k) => Number(el.getAttribute(k));
+      const r = l.getBoundingClientRect();
+      const box = svg.getBoundingClientRect();
+      return {
+        x: n(l, 'x1'),
+        lo: n(svg, 'x'),
+        hi: n(svg, 'x') + n(svg, 'width'),
+        inBox: r.left >= box.left - 0.5 && r.right <= box.right + 0.5,
+      };
+    });
+    check(
+      `#144 AC-12 ${tag} 900 Enter → 保存の ΔX ${dX900} = X₀ × 9・ハンドルの縦線が描画域の中`,
+      close(dX900, pctHalf * 1800) &&
+        line !== null &&
+        line.x >= line.lo &&
+        line.x <= line.hi &&
+        line.inBox,
+      JSON.stringify(line),
+    );
+    // 後の手順のために ΔX を 0 に戻す
+    await page.focus(val('dX'));
+    await page.keyboard.press('r');
+    await page.waitForTimeout(100);
   }
 
   // (e) 前提: β の ＋ → 1.1、sticky moneyness、basis 減衰、ΔX 円（表示は円・状態の ΔX は同じ）

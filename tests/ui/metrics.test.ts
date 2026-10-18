@@ -21,6 +21,7 @@ import {
 } from '../../ui/view/metrics';
 import { type PnlBase, pnlDomains } from '../../ui/view/pnlChart';
 import { positionModel } from '../../ui/view/position';
+import { extremeBases, nonFinitePaths } from '../support/extremeScenarios';
 import { fixture } from '../support/fixtures';
 import { M1, M2, makeMarket } from '../support/market';
 
@@ -351,4 +352,28 @@ describe('最大損益と BEP（AC-8）', () => {
     expect(m.days).toBeCloseTo(base.maxDays, 9);
     expect(m.scenarioPoint.legs.every((l) => l.state === 'expired')).toBe(true);
   });
+});
+
+/**
+ * #144 AC-6: ΔX −99% / +900%（sticky strike・moneyness、basis が負の足で F' ≤ 0 を含む）、d = 0 と d = 最遠の SQ
+ * （満期）で、シナリオ点の損益・合計グリーク・足別の値が有限。
+ */
+describe('ΔX の数値欄の端で指標が有限（#144）', () => {
+  for (const [name, b] of extremeBases()) {
+    it(name, () => {
+      const X = b.ctx.x0;
+      for (const ratio of [-0.99, 9])
+        for (const ivDynamics of ['sticky_strike', 'sticky_moneyness'] as const)
+          for (const days of [0, b.maxDays]) {
+            const sc: Scenario = { ...ZERO_SCENARIO, dX: ratio * X, days, ivDynamics };
+            const m = metricsModel({ base: b, scenario: sc, unit: 'auto' });
+            const tag = `${ratio} ${ivDynamics} d=${days}`;
+            expect(m.empty, tag).toBe(false);
+            expect(nonFinitePaths(m.scenarioPoint), tag).toEqual([]);
+            expect(m.scenarioPoint.legs.length, tag).toBe(b.legs.length);
+            expect(nonFinitePaths(m.dateBreakevens), tag).toEqual([]);
+            expect(nonFinitePaths(m.tail), tag).toEqual([]);
+          }
+    });
+  }
 });

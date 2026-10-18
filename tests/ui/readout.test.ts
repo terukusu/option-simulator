@@ -10,6 +10,8 @@ import {
 } from '../../ui/view/pnlChart';
 import { readoutModel } from '../../ui/view/readout';
 import { scenarioMarks } from '../../ui/view/scenarioMarks';
+import { bigReadout } from '../../ui/view/stage';
+import { extremeBases, nonFinitePaths } from '../support/extremeScenarios';
 import { M1, M2, makeMarket } from '../support/market';
 import { PERF_LEGS } from '../support/perfPosition';
 
@@ -110,5 +112,48 @@ describe('読み取りの帯（AC-9）', () => {
     const noLegs = { ...base, legs: [] };
     const m2 = metricsModel({ base: noLegs, scenario: ZERO_SCENARIO, unit: 'auto' });
     expect(readoutModel({ base: noLegs, metrics: m2, scenario: ZERO_SCENARIO }).empty).toBe(true);
+  });
+});
+
+/** #144 AC-6: ΔX −99% / +900%（sticky strike・moneyness、basis が負の足で F' ≤ 0 を含む）、d = 0 と満期で有限。 */
+describe('ΔX の数値欄の端で読み取りの数値が有限（#144）', () => {
+  for (const [name, b] of extremeBases()) {
+    it(name, () => {
+      const X = b.ctx.x0;
+      for (const ratio of [-0.99, 9])
+        for (const ivDynamics of ['sticky_strike', 'sticky_moneyness'] as const)
+          for (const days of [0, b.maxDays]) {
+            const sc: Scenario = { ...ZERO_SCENARIO, dX: ratio * X, days, ivDynamics };
+            const metrics = metricsModel({ base: b, scenario: sc, unit: 'auto' });
+            const r = readoutModel({ base: b, metrics, scenario: sc });
+            const tag = `${ratio} ${ivDynamics} d=${days}`;
+            expect(r.empty, tag).toBe(false);
+            expect([r.x, r.dX, r.dXPct, r.days].every(Number.isFinite), tag).toBe(true);
+            expect(nonFinitePaths(r.pnl), tag).toEqual([]);
+            expect(nonFinitePaths(r.greeks), tag).toEqual([]);
+            for (const t of Object.values(r.text)) expect(t, tag).not.toMatch(/NaN|Infinity|∞/);
+          }
+    });
+  }
+});
+
+/** #144 AC-13: 読み取りの副題の ΔX% は |ΔX| ≥ 100% で整数（幅 360px に収める）。全文は小数 1 桁のまま。 */
+describe('読み取りの副題の ΔX%（#144）', () => {
+  const sub = (dX: number) => {
+    const sc: Scenario = { ...ZERO_SCENARIO, dX };
+    const metrics = metricsModel({ base, scenario: sc, unit: 'auto' });
+    const r = readoutModel({ base, metrics, scenario: sc });
+    const date = bigReadout(r, metrics.premium, null).find((it) => it.key === 'date');
+    return { sub: date?.sub ?? '', pct: r.text.dXPct, full: JSON.stringify(date?.full ?? null) };
+  };
+
+  it('+900% → 「/+900%)」、−99% → 「/−99.0%)」、−40% → 「/−40.0%)」。全文は小数 1 桁', () => {
+    const up = sub(9 * x0);
+    expect(up.sub).toMatch(/\/\+900%\)$/);
+    expect(up.full).toContain(`${up.pct}%`);
+    expect(up.pct).toBe('+900.0');
+    expect(sub(-0.99 * x0).sub).toMatch(/\/−99\.0%\)$/);
+    expect(sub(-0.4 * x0).sub).toMatch(/\/−40\.0%\)$/);
+    expect(sub(1.5 * x0).sub).toMatch(/\/\+150%\)$/);
   });
 });

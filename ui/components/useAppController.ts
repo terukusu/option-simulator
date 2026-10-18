@@ -79,10 +79,10 @@ import {
   shareNote,
 } from '../view/persistNote';
 import { ghostSource, overlayBases, resolvePins } from '../view/pins';
-import { pnlDomains, zoomViewport } from '../view/pnlChart';
+import { pnlDomains, scenarioFull, withScenarioFull, zoomViewport } from '../view/pnlChart';
 import { positionModel } from '../view/position';
 import { readoutModel } from '../view/readout';
-import { evalTimeTargets } from '../view/scenario';
+import { clampDXInput, evalTimeTargets } from '../view/scenario';
 import { scenarioAtmMark } from '../view/scenarioAtm';
 import { openInNewTabError, tabsModel } from '../view/tabs';
 
@@ -468,10 +468,17 @@ export function useAppController(boot: Boot = NO_BOOT) {
     [chain, state.legs, atmBasis, calendar, settings],
   );
   // 損益グラフの横軸の範囲・満期の折れ点など（足・板が変わったときだけ。ドラッグ中は作り直さない）
-  const pnlBase = useMemo(
+  const pnlBoard = useMemo(
     () =>
       chain && positions ? pnlDomains(chain, positions.prepared, positions.ctx, settings) : null,
     [chain, positions, settings],
+  );
+  // 全域にシナリオ点 X₀ + ΔX を足す（#144。板の全域の外の点へ縮小・パンで行ける）。端は 0.05X₀ の格子なので
+  // ΔX の連続の操作で base が変わる（= 線を作り直す）のは格子を跨ぐときだけ
+  const fullExt = pnlBoard ? scenarioFull(pnlBoard, state.scenario.dX) : null;
+  const pnlBase = useMemo(
+    () => (pnlBoard && fullExt ? withScenarioFull(pnlBoard, fullExt) : null),
+    [pnlBoard, fullExt?.[0], fullExt?.[1]],
   );
   const pnlBaseRef = useRef(pnlBase);
   pnlBaseRef.current = pnlBase;
@@ -507,6 +514,14 @@ export function useAppController(boot: Boot = NO_BOOT) {
     () => (chain ? evalTimeTargets(chain, state.legs, calendar) : []),
     [chain, state.legs, calendar],
   );
+  // 保存・URL から読んだ ΔX・X₀ の変化で数値欄の範囲（−99%〜+900%）の外になった ΔX を端へ寄せる（#144。X ≤ 0 にしない）
+  const x0Now = positions?.ctx.x0 ?? Number.NaN;
+  const dXNow = state.scenario.dX;
+  useEffect(() => {
+    if (!(Number.isFinite(x0Now) && x0Now > 0)) return;
+    const clamped = clampDXInput(dXNow, x0Now);
+    if (clamped !== dXNow) dispatch({ type: 'setScenario', patch: { dX: clamped } });
+  }, [x0Now, dXNow]);
   const { pnlViewport } = state;
   const onZoom = useCallback(
     (factor: number) => {

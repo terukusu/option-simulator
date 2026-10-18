@@ -122,19 +122,31 @@ export function stepFree(spec: StepSpec, value: number, n: number): number {
   return clampTo(cur + n * step, min, max);
 }
 
-/** n 段動かす（keepFraction なら stepFree、なければ stepBy の格子） */
+/**
+ * n 段動かす（keepFraction なら stepFree、なければ stepBy の格子）。範囲の外の値（数値欄で入れた ΔX の −95% など。
+ * #144）からは押した向きと逆に動かさない（下端の外で − は動かず + は下端へ、上端の外で − は上端へ）。
+ */
 export function stepperMove(
   spec: StepSpec,
   value: number,
   n: number,
   keepFraction: boolean,
 ): number {
-  return keepFraction ? stepFree(spec, value, n) : stepBy(spec, value, n);
+  const v = keepFraction ? stepFree(spec, value, n) : stepBy(spec, value, n);
+  return (n < 0 && v > value) || (n > 0 && v < value) ? value : v;
 }
 
-/** Home / End / R の行き先 */
-export function stepperJump(spec: StepSpec, to: 'min' | 'max' | 'def'): number {
-  return to === 'min' ? spec.min : to === 'max' ? spec.max : spec.def;
+/**
+ * Home / End / R の行き先。value（今の値）が範囲の外で、端へ行くと逆向きになるなら value のまま（#144。
+ * 下端の外で Home、上端の外で End）。R は常に既定値。
+ */
+export function stepperJump(spec: StepSpec, to: 'min' | 'max' | 'def', value?: number): number {
+  if (to === 'def') return spec.def;
+  if (value !== undefined) {
+    if (to === 'min' && value < spec.min) return value;
+    if (to === 'max' && value > spec.max) return value;
+  }
+  return to === 'min' ? spec.min : spec.max;
 }
 
 /**
