@@ -117,3 +117,33 @@ class LRUCache:
                 self._items.popitem(last=False)
 
         return self._flight.run(key, load, lookup, store)
+
+
+class ExpiringLRUCache:
+    """キーごとの値を最大 maxsize 件、値ごとの期限（get の ttl 秒）つきで持つ（/api/atm_iv。#79）。
+    期限切れの値は使わずに読み直す。古いもの（最後に使った順）から捨てる。例外はキャッシュしない"""
+
+    def __init__(self, maxsize: int, monotonic: Callable[[], float] = time.monotonic):
+        self.maxsize = maxsize
+        self._monotonic = monotonic
+        self._items: OrderedDict = OrderedDict()  # key → (値, 期限)
+        self._flight = _SingleFlight()
+
+    def get(self, key, load: Callable[[], object], ttl: float):
+        def lookup():
+            item = self._items.get(key)
+            if item is not None and self._monotonic() < item[1]:
+                self._items.move_to_end(key)
+                return True, item[0]
+            return False, None
+
+        def store(v):
+            self._items[key] = (v, self._monotonic() + ttl)
+            self._items.move_to_end(key)
+            while len(self._items) > self.maxsize:
+                self._items.popitem(last=False)
+
+        return self._flight.run(key, load, lookup, store)
+
+    def __len__(self) -> int:
+        return len(self._items)

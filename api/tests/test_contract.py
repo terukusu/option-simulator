@@ -2,7 +2,8 @@
 
 - 静的: sql/*.sql が contract.py に宣言した列だけを宣言の順で SELECT し、宣言した Relation だけを読む
 - 照合: 環境変数 OPTIONCHAN_SCHEMA_DIR（optionchan の固定コミット = api/contract/optionchan_commit.txt の
-  schema/tokyo）があれば、宣言の各列が schema JSON にあり型が一致し、コードが非 NULL を前提にする列は REQUIRED。
+  schema/。Relation.schema_file はここからの相対パス = tokyo/*.json・cm/atm_cm_iv.json）があれば、宣言の各列が
+  schema JSON にあり型が一致し、コードが非 NULL を前提にする列は REQUIRED。
   変数が無ければ skip（CI はリポジトリ変数 OPTIONCHAN_REPO があるときだけ渡す）。変数があるのに読めなければ fail
 """
 
@@ -47,12 +48,26 @@ def test_required_columns_are_declared():
         assert rel.required <= {c for c, _ in rel.columns}, rel.name
 
 
+def test_schema_files_are_relative_to_schema_dir():
+    # OPTIONCHAN_SCHEMA_DIR は schema/（tokyo と cm の両方を引く）
+    for rel in contract.RELATIONS.values():
+        assert re.fullmatch(r"(tokyo|cm)/\w+\.json", rel.schema_file), rel.name
+    assert contract.RELATIONS["atm_cm_iv"].schema_file == "cm/atm_cm_iv.json"
+
+
+def test_outputs_are_declared_queries():
+    assert set(contract.OUTPUTS) <= set(contract.QUERY_NAMES)
+    assert contract.output_columns("latest_runs") == contract.RELATIONS["latest_runs"].columns
+    assert [c for c, _ in contract.output_columns("atm_cm_iv")] == ["started_at", "open", "high", "low", "close",
+                                                                    "last_at"]
+
+
 def test_pinned_commit_format():
     text = (API_ROOT / "contract" / "optionchan_commit.txt").read_text(encoding="ascii")
     assert re.fullmatch(r"[0-9a-f]{40}\n", text)
 
 
-@pytest.mark.skipif(not SCHEMA_DIR, reason="OPTIONCHAN_SCHEMA_DIR（固定コミットの schema/tokyo）のときだけ")
+@pytest.mark.skipif(not SCHEMA_DIR, reason="OPTIONCHAN_SCHEMA_DIR（固定コミットの schema/）のときだけ")
 @pytest.mark.parametrize("name", contract.QUERY_NAMES)
 def test_contract_matches_optionchan_schema(name):
     rel = contract.RELATIONS[name]

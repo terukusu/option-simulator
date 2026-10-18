@@ -107,7 +107,7 @@ URL 共有（#72、2026-10-16）: M8 のうち **URL（圧縮 JSON）** を入�
 | AC22 テール表: −5〜−40% × {SQ, 指定日} の損益と受取プレミアムの倍率が出て、SQ 列は満期損益の式、指定日列はシナリオ IV（β 込み）の Black-76 と一致する | 単体テスト |
 | AC23 急落プリセット / β: プリセット「−10% / +20pt / +3」を β = 1 で適用すると、ATM IV は **+30pt**（プリセットの +20pt と β の +10pt は独立に加算）、10% OTM の put は **+33.16pt**（Δs × x_eff / 0.1 で x_eff = ln 0.9 ≒ −0.105 なので +3.16pt が加わる） | 単体テスト |
 | AC24 複数限月の横軸: 1 限月・2 限月・先物の足を同じ横軸に載せたとき、各足の原資産が `X' + basis_i`（円）または `X' × F_i / X₀`（%）で動き、X' = X₀ で各限月の F が板の F に戻る。**満期の折れ点が横軸上で `K − basis_i`** に出る | 単体テスト |
-| AC25 契約: optionchan のテーブル関数 4 本とビュー `trading_calendar_latest` の列・型が、固定したコミットの `schema/tokyo/*.json` と一致し、SQL の dry run が通る | CI（スキーマ照合）、`OPTIONCHAN_BQ_TEST=1` で dry run |
+| AC25 契約: optionchan のテーブル関数 4 本とビュー `trading_calendar_latest`・表 `atm_cm_iv`（#79）の列・型が、固定したコミットの `schema/tokyo/*.json`・`schema/cm/atm_cm_iv.json` と一致し、SQL の dry run が通る | CI（スキーマ照合）、`OPTIONCHAN_BQ_TEST=1` で dry run |
 | AC26 スライダー操作: 数値入力・矢印キー（1 刻み / Shift 10 刻み）・R（リセット）・+ / −（拡大）が効き、日数の上限が最遠の SQ、「SQ 日 9:00」「取引最終日 15:45」ボタンで評価時刻がその時刻になる | ブラウザで操作、単体テスト（評価時刻） |
 | AC27 ポジション一覧: 各足の IV（編集可）と足別グリークが出る | スナップショットテスト |
 | AC28 ピン留め: 現在の線と指標をゴーストで残し、足を変えても比較できる（最大 3 本） | ブラウザで操作 + 状態・線の単体テスト（`tests/ui/pins.test.ts`）+ 性能テスト（#22） |
@@ -161,7 +161,7 @@ JPX の商品一覧（2026-10-13）にある日経225の商品は、先物 3 つ
 
 ### 4.1 契約（依存するインターフェース）
 
-データセット `optionchan_tokyo`（東京）。読むのは **テーブル関数 4 本とビュー `trading_calendar_latest`** だけ（生テーブルは読まない）。テーブル関数の引数はすべて `(start_at TIMESTAMP, end_at TIMESTAMP)` の半開区間 `[start_at, end_at)`。
+データセット `optionchan_tokyo`（東京）。読むのは **テーブル関数 4 本とビュー `trading_calendar_latest`、表 `atm_cm_iv`**（IV 推移。#79 で追加）だけ（板・先物・現物の生テーブルは読まない）。テーブル関数の引数はすべて `(start_at TIMESTAMP, end_at TIMESTAMP)` の半開区間 `[start_at, end_at)`。`atm_cm_iv` はテーブル関数が無いので表を直接読む（#79 の判断 2 = (a)。optionchan が提示したのも表）。
 
 | テーブル関数 | 使う列 | 意味 |
 |---|---|---|
@@ -170,9 +170,10 @@ JPX の商品一覧（2026-10-13）にある日経225の商品は、先物 3 つ
 | `future_price_latest` | `price`, `price_time`, `contract_month` | 先物（スナップショット 1 回に 1 行。ラージの直近四半期限月） |
 | `spot_price_latest` | `price`, `price_time` | 日経平均 |
 | `trading_calendar_latest`（ビュー） | `version_at`, `calendar_date`, `is_trading_day`, `status`, `name`, `covered_until`, `listed_until` | 取引カレンダーの最新版（版の全行）。SQ 日・取引最終日の休業日には **全行**（`is_trading_day` を問わない）+ 土日を使う（7.5） |
+| `atm_cm_iv`（表。#79） | `created_at`, `iv30` | 30 日固定の ATM IV（%。optionchan の `sql/cm/atm_cm.sql` が取り込み 1 回ごとに作る。毎時 45 分に直近 2 時間、JST 7 時台に前日 07:00〜当日 07:00 を作り直す）。月パーティション（`created_at`）で **`requirePartitionFilter` が無い**ので、SQL の静的検査（`api/tests/test_atm_iv.py`）で `created_at >= @start_at AND created_at < @end_at` を必須にし、ジョブの `maximum_bytes_billed` を 64 MiB に下げる（7.3）。`method`・限月ごとの列は読まない |
 
-- 列の型・意味は optionchan の `schema/tokyo/*.json`。API が使う列・型・非 NULL の前提は `api/src/simulator_api/contract.py` に 1 か所で宣言し（SQL は宣言した列だけを明示。`SELECT *` を使わない）、CI の job `check` で **固定したコミット**（`api/contract/optionchan_commit.txt`）の JSON と照合する。optionchan のリポジトリ名はリポジトリ変数 `OPTIONCHAN_REPO` で渡し、未設定の fork・clone では notice を出してスキップする。SQL は dry run（課金 0。`OPTIONCHAN_BQ_TEST=1` のときだけ手元で）で見積もりと結果の列・型を検査する（AC25）
-- optionchan への依頼（R1・R2）は 13.3。読み取り権限の付与は simulator の bootstrap で済む（R0）
+- 列の型・意味は optionchan の `schema/tokyo/*.json` と `schema/cm/atm_cm_iv.json`。API が使う列・型・非 NULL の前提は `api/src/simulator_api/contract.py` に 1 か所で宣言し（SQL は宣言した列だけを明示。`SELECT *` を使わない）、CI の job `check` で **固定したコミット**（`api/contract/optionchan_commit.txt`）の JSON と照合する（`schema/` を sparse checkout し、`contract.py` の `schema_file` は `schema/` からの相対パス `tokyo/…`・`cm/…`。集計して返す `atm_cm_iv` の結果の列は `contract.OUTPUTS`）。optionchan のリポジトリ名はリポジトリ変数 `OPTIONCHAN_REPO` で渡し、未設定の fork・clone では notice を出してスキップする。SQL は dry run（課金 0。`OPTIONCHAN_BQ_TEST=1` のときだけ手元で）で見積もりと結果の列・型を検査する（AC25）
+- optionchan への依頼（R1・R2・R7）は 13.3。読み取り権限の付与は simulator の bootstrap で済む（R0）
 
 ### 4.2 限月と先物の限月
 
@@ -533,6 +534,7 @@ JPX の商品一覧（2026-10-13）にある日経225の商品は、先物 3 つ
 | `GET /api/chain` | 使える最新スナップショット（7.2）の 2 限月分の板・先物・現物・時刻・`reason` を 1 つの JSON で。約 1,100 行、gzip で数十 KB |
 | `GET /api/chain?at=<ISO 時刻>` | **後段**（#33 では 400 `{"error":"bad_request"}`。入力値は応答・ログに出さない）。案: `at` 以前で最新の使えるスナップショット（14 日以内）を `latest_runs` で `snapshot_at` に解決してから 1 秒の窓で読む。使う画面（過去時点の閲覧・「清算値」モード）が MVP に無く、異なる `at` ごとに約 150 MiB を読むので、連打制限（1 クライアント 10 回 / 分。キーは IAP のユーザー ID ヘッダのハッシュをメモリ内にだけ持つ）だけでは費用を抑えきれない。上限の設計と一緒に入れる |
 | `GET /api/calendar` | 取引カレンダーの最新版（`trading_calendar_latest`。7.5）。`{schema_version: 1, source: "bigquery", version_at, covered_until, listed_until, days: [{date, is_trading_day, status, name}]}`（版の全行、日付の昇順。`version_at` は +09:00）。板とは別のエンドポイント（更新頻度が違い、板の無い限月・手入力の足・`file` アダプタでも使うため。板の JSON 版 1 の形を変えない）。`Cache-Control: private, max-age=3600`、`ETag` = `version_at`。ブラウザは本番で開いたときと [最新] で読む（型・検証・同梱の版へのフォールバックは 7.5。#39） |
+| `GET /api/atm_iv?tf=<1m\|1h\|1d>[&start=<ISO>&end=<ISO>]` | IV 推移（#79）: 表 `atm_cm_iv` の `iv30`（30 日固定の ATM IV、%）の足。`tf` は完全一致（5m・15m は画面が 1m から束ねる）。`start`・`end` は両方か無し。ISO 8601 の **オフセット付き**（`Z` か `±HH:MM`、秒まで）で **UTC の 0 時ちょうど**（キャッシュのキーと BigQuery の結果キャッシュを効かせる）。両方無ければ右端（最新）の 1 回分 = `end` = 明日の UTC の 0 時、`start` = `end` − 既定の日数（1m 3 日・1h 60 日・1d 365 日）。`end` は明日の UTC の 0 時に縮め（端末の時計の進みで 400 にしない）、縮めた後の `end − start` が 1 回の最大（1m 3 日・1h 100 日・1d 400 日）以下、`2010-01-01T00:00:00Z ≤ start < end`。応答 `{schema_version: 1, tf, start, end, last_at, bars: [{t, o, h, l, c}]}`（時刻は +09:00。`start`・`end` は実際に読んだ範囲で `end` は `min(end, now)`、`last_at` は範囲の中の最後の行の `created_at`（`iv30` が NULL の行も含む。無ければ null）、`bars` は `t` の昇順・重複なし、`t` は足の始まり（1m・1h は UNIX 秒で切った時刻、1d はその取引日の 00:00 JST）、値は %、`iv30` が全部 NULL の足は返さない）。日足は 1 時間足を取引日に束ねる（取引日 = JST + 7 時間の日付から土日・`is_trading_day = false` の日を飛ばした最初の日。optionchan のビューアーと同じ。祝日取引の実施日は取引日、読んだ範囲の先頭の取引日は出さない）。不正は 400 `{"error":"bad_request"}`（値は応答・ログに出さない。ログはパラメータ名だけ）、BigQuery の失敗・上限超過・`DATA_SOURCE=file` は 503 `{"error":"unavailable"}`。`Cache-Control: private, max-age=3600`（確定した範囲 = `end ≤ now − 48 時間`）/ `private, max-age=60`（それ以外）、ETag なし、gzip。画面は IV 推移を開いたときと最新化ボタンでだけ読む（#79 段 B） |
 | `GET /healthz` | 設定の読み込みだけ（BigQuery に触れない） |
 
 JSON（版 1。縦切り 1b で確定。型は `data/chainTypes.ts`、検証は `data/chainJson.ts`）:
@@ -591,11 +593,13 @@ F の推定・補間・ATM の判定はブラウザ（`model/`）。`sq_date`・
 | `option_price_latest` 1 秒の窓（必要列 = 4.1 の 20 列） | **約 152 MiB**（2026-10-14 の実測。UTC 日パーティション全体を読むので、書き込みの終わった日は時刻に依らずほぼ同じ。書き込み中の当日はそれより小さい） |
 | `future_price_latest` + `spot_price_latest` 1 秒 | 約 230〜300 KB |
 | `trading_calendar_latest`（7 列） | 約 12〜31 KB |
+| `atm_cm_iv`（2 列。#79。2026-10-18 の dry run） | 1m 3 日 約 0.17 MiB、1h 60 日 約 0.67 MiB・100 日 約 0.95 MiB、1d 400 日 + 読み足し 11 日 約 3.4 MiB（全期間でも約 20 MiB、全列なら約 112 MiB）。実課金はキャッシュが効かない 1 回 = 最小課金 10 MiB |
 
 - 1 回 ≒ 152 MiB ≒ 0.0009 USD（東京のオンデマンド $6.25 / TiB）。BigQuery の結果キャッシュは立会中（テーブルが毎分更新）は効かない
 - 抑制: (1) サーバーのキャッシュキーは **`snapshot_at`**（実装は `(snapshot_at, finished_at)`。再処理で書き直されたら取り直す。`latest_runs` だけを TTL 10 秒で引き、変わったときだけ板を取る。使えない板も「不採用」として覚える）。(2) **single-flight**（同時リクエストを 1 本にまとめる。`latest_runs`・板・カレンダー）。(3) `MAX_BYTES_BILLED` **512 MiB**（既定かつ上限。超える値は起動時にエラー）。全ジョブにパラメータ化（`ScalarQueryParameter`）と `maximum_bytes_billed`。(4) ブラウザは自動ポーリングしない（手動の [最新] だけ）。(5) `?at=` は後段（7.1。#33 では 400）。(6) `Cache-Control: private, max-age=60`、`ETag` = `"<snapshot_at>-<finished_at>-<reason>-<カレンダーの版>"`（UTC の秒）、`If-None-Match` で 304、gzip
 - optionchan のプロジェクトは **1 日 32 GiB のクエリ量上限**（runbook「コスト」）。1 回 150 MB なら 1 日 200 回で上限。手動操作だけなら 1 日 20〜50 回。監視は BigQuery の監査ログ（Cloud Logging の `jobChange`）を simulator の SA で絞った日ごとの集計（D8。手順は `api/README.md`「クエリ量の監視」。`INFORMATION_SCHEMA.JOBS_BY_PROJECT` は最小のスキャンが 512 MiB を超えるので使わない）
 - 待ちの短縮（#95）: カレンダー（キャッシュが新しくないときだけ）は `latest_runs` と、現物は板と同時に読む（先物 → 板の順序は変えない）。ジョブ数・スキャン量は並列にしても同じで、増えるのは **板が不採用の候補の現物 1 本**（最小課金 10 MiB）だけ。実行は `query_and_wait`（jobs.query。ジョブは今どおり作るので監査ログの監視は変わらない）。`bq_job` のログは処理バイト数だけを持ち、課金量は監査ログで見る
+- IV 推移（`/api/atm_iv`。#79）の抑制: (7) このクエリだけ `maximum_bytes_billed` を **`min(MAX_BYTES_BILLED, 64 MiB)`**（`settings.QUERY_MAX_BYTES_BILLED`。予期しない全期間・全列の読み込みの保険。D8 は (a) のまま）、(8) サーバーのキャッシュ（キー = `(tf, start, end)`、確定した範囲（`end ≤ now − 48 時間` = 表の作り直しの外）は 24 時間・それ以外は 300 秒、64 件）+ single-flight、(9) 右端の `end` を UTC の 0 時にそろえ SQL に `CURRENT_TIMESTAMP()` を使わないので、表が変わる（毎時 45 分）までは BigQuery の結果キャッシュで課金 0（2026-10-18 に実測: 同じ SQL・パラメータの 2 回目は cacheHit・課金 0）、(10) 1 日の回数の制限は付けない（オーナー決定）。ブラウザは自動で読まない（IV 推移を開いたときと最新化ボタンだけ）。最悪のケース（1h を 400 日まで + 1d を 2010 年まで左へ読む）でも 1 セッション約 24 ジョブ ≈ 240 MiB（キャッシュが効かないとき）で、32 GiB / 日の 1% 未満
 - 後段の候補（費用をさらに下げる）: optionchan の ingest が最新板の JSON を GCS に書く / 最新だけの小さい表を持つ（R4）
 - 採らない案: 生 HTML（GCS）を直接解析（optionchan の内部形式に結合する）
 
@@ -800,6 +804,7 @@ F の推定・補間・ATM の判定はブラウザ（`model/`）。`sq_date`・
 | K10 | 板の無い限月は MVP で手入力、段階 2 で 1・2 限月のスマイルからの理論値（Q4） | 2026-10-13 |
 | K11 | 時間外・引け後の板の既定は板寄せ前の最後のスナップショット。清算値 + IV 逆算は参照列・切替（Q5） | 2026-10-13 |
 | K12 | UI は Preact 10（hooks）、グラフは自前の SVG（座標は `ui/chart/scale.ts` の純関数で共用）。スマイルからの足の追加・グラフのジェスチャーは #11、取引カレンダーは #14（写し）・#39（API の版と同梱の版）（10 章・7.5） | 2026-10-14 |
+| K13 | IV 推移（#79）: チャートは **自前の SVG**（K12 のまま。依存を増やさない）、系列は **30 日固定の `iv30` だけ**、スマホ・タブレットは **スマイルのパネルの中の [スマイル \| IV 推移] の切替**（ドックは今のまま）、表示は **ローソク足と折れ線の切替（既定ローソク足）**。main の判断（オーナーの推奨どおり）: 表 `atm_cm_iv` を直接読む（4.1 の改訂 + R7）、D8 は (a) のまま新エンドポイントだけ 64 MiB（7.3）、「開くたび」= アプリを開いて IV 推移を初めて見たとき + 最新化ボタン | 2026-10-18 |
 
 ### 13.2 オーナー判断が要るもの
 
@@ -824,6 +829,7 @@ F の推定・補間・ATM の判定はブラウザ（`model/`）。`sq_date`・
 | R4 | 最新板の JSON を ingest が GCS に書く / 最新だけの小さい表（クエリ費用の削減） | 任意 | 後段 | 7.3、8.1 の D |
 | R5 | 3 限月以降のページの取り込み（行数 1.3〜1.5 倍の見積もり。ページの有無・形式は要確認） | Q4 の (c) を選ぶなら | 段階 3 | 5.7 |
 | R6 | ミニオプションのページの取り込み | K1 の後段 | 後段 | 3.1 |
+| R7 | 表 `atm_cm_iv` の `created_at`・`iv30` を **公開インターフェース**として扱う（変更時に告知。CI のスキーマ照合で検知はする）。#79 で表を直接読むことにしたため（テーブル関数は無い）。起票はしない（R1 と同じ扱い） | 任意（望ましい） | #79 | 4.1 |
 
 ### 13.4 実装時に決めるもの
 
@@ -937,6 +943,13 @@ F の推定・補間・ATM の判定はブラウザ（`model/`）。`sq_date`・
   - 保存しない: `State` の中だけ。作業の版 2・保存一覧・URL の形式は変えない（`persistKey`・`serializeWorkspace`・`toSaved` は既知のキーだけ組み立てるのでピンは入らない。テストで固定）。ゴーストを同じ値で復元するにはピンした時点の板（20〜35 万字）も要り、localStorage の見積もり（#23・#70）を崩すため。保存するなら作業の版 3 で重ね（tab の添字・saved の足）だけを足す
   - 性能（手元の測定、node、足 10 本・322 行 × 2 限月、30 回の最小値。測定時はマシンの負荷が高く（load average 2.6〜3.7・2 コア）、既存の #6・#11 の値も Phase 1 の測定の約 1.5 倍）: 重ね 3 本でのスライダー 1 回（ピンの線 3 本の作り直し + グラフ + 番号ラベル + 一覧 + 指標・テール表）**14.5〜15.8 ms**、ゴースト 3 本でのパン 1 フレーム（今の 3 本の線 + ピン 3 本。パンの格子の使い回しあり）**15.1〜15.5 ms**（ピン無しのパンの #11 とほぼ同じ。ほとんどが今の線の 1,000 点）、ピン 3 本での長押しドラッグ 1 フレーム **4.6〜5.5 ms**。性能テスト 3 件で 16 ms 以内を固定（`tests/ui/perf.test.ts`）。レビュー後に拡大縮小 1 フレーム（ゴースト 3 本、幅を毎回変える）を足して 4 件: 負荷の低いとき（load 0.3〜0.6）で点の上限 200 のままだと 15.5〜15.7 ms（中央値 16.1〜16.5）、拡大縮小の間 100 点にして **13.7〜13.8 ms**（中央値 14.1〜14.8）。同じ条件でスライダー 12.1〜12.4・パン 12.5〜12.7・長押しドラッグ 3.7 ms。ピンの線 1 本（250 点）は約 1.5 ms で、最初の計画（250 点）では負荷の高いときにスライダー 1 回が 18 ms になったため上限を 200 点に下げた
   - **オーナー確認の対象**（既定で実装。変えるときは 1 か所）: (1) ピンは **2 種類の併用**（ゴースト = 固定 / 重ね = 今の板・今のシナリオで描き直す。片方にするなら `ui/pins.ts` の `PinSource` の種類を減らす）、(2) ピンの線の既定は**期中 1 本**（切替で満期。`DEFAULT_PIN_LINE`）、(3) ピンは**保存しない**、(4) 保存一覧の行に **[重ねる]**（行のボタンが 7 個。代案はピンの行に [保存一覧から…] を置いて一覧を「重ねる」モードで開く）
+- IV 推移の API（**決定（2026-10-18、#79 段 A）**。定数は `api/src/simulator_api/settings.py` の「IV 推移」の 1 か所、純関数は `atm_iv.py`）
+  - 足: `1m`・`1h`・`1d`（5m・15m は画面が 1m から束ねる = 切替で BigQuery を読み直さない）。1 回の最大日数 1m 3・1h 100・1d 400（optionchan のビューアーの `BARS_RANGE` と同じ）、右端の既定（画面の 1 回分と同じ）1m 3・1h 60・1d 365。下限 `2010-01-01T00:00:00Z`（ビューアーの `BARS_EPOCH`）
+  - 範囲は **UTC の 0 時にそろえる**（そろっていなければ 400）。右端の `end` は明日の UTC の 0 時（未来。表に未来の行は無いので結果は now までと同じで、パラメータが 1 日中同じになり BigQuery の結果キャッシュが効く）。`end` の上限を超えたら 400 にせず縮める（ビューアーと同じ）
+  - 日足は 1 時間足（`@step = 3600`）を `[start − 10 日, min(end + 1 日, 明日の UTC の 0 時))` で読み、取引日に束ねる。休業日は取引カレンダーの **`is_trading_day = false` の日**（ビューアーの `trading_holidays.sql` と同じ。SQ の規則（版の全行。7.5）とは別の集合）。カレンダーは `/api/calendar` と同じ TTL のキャッシュ。版の掲載範囲の外の平日は取引日
+  - 1m・1h の束ねは SQL（UNIX 秒で切る。`TIMESTAMP_SECONDS(UNIX_SECONDS(created_at) − MOD(UNIX_SECONDS(created_at), @step))`）、`iv30` が全部 NULL の足は `last_at`（NULL の行も含めた最大）を取ってから Python が捨てる（ビューアーの `drop_empty`）
+  - キャッシュ: 確定 = `end ≤ now − 48 時間`（表は毎時 45 分に直近 2 時間、JST 7 時台に前日 07:00〜当日 07:00 を作り直す = 48 時間より古い行は変わらない）。確定 24 時間・それ以外 300 秒、64 件（`ExpiringLRUCache`）、single-flight、例外はキャッシュしない。`Cache-Control` は確定 3600 秒 / それ以外 60 秒
+  - ログ: `atm_iv_served`（`tf`・`days`・`bars`・`cache` = hit / miss・`elapsed_ms`）と既存の `bq_job`。範囲・IV の値は出さない。400 は `bad_request` と `param`（`tf` / `start` / `end` / `range`）だけ
 - カレンダーの更新手順: **決定（2026-10-16、#39。#14 の定期同期を置き換え）** — 本番は開くたびに API から最新の版を読む（7.5）。同梱の版（`data/calendar/calendar.json`）は自動更新せず、必要なとき（期限切れが近い・新しい年の公表）に手で作り直して PR（README の手順）
 
 ### 13.5 リスク
@@ -1017,6 +1030,14 @@ optionchan-gcp の bootstrap / prod を写すだけでは足りないもの。
 | テスト | `terraform test`（`infra/bootstrap/tests/`・`infra/prod/tests/`、モックのプロバイダ。資格情報なしで CI の `check` job で回る）: bootstrap は公開の拒否、WIF の条件、apply SA の subject、データセットの付与の型と role。prod は IAP 有効・`ingress`・IAM の検査が有効、`run.invoker` が IAP のサービスエージェント 1 件だけ、イメージが digest か `src-<20hex>` のタグ参照だけ、8.3 の値（AC11） |
 
 ## 変更履歴
+
+### 2026-10-18 IV 推移 (A) API と契約（#79 段 A）
+
+- 4.1: 読むものに表 `atm_cm_iv`（`created_at`・`iv30`）を足した（「生テーブルは読まない」→ 板・先物・現物の生テーブルは読まない）。照合は `schema/tokyo/*.json` と `schema/cm/atm_cm_iv.json`（CI の sparse checkout を `schema/tokyo` + `schema/cm` に、`OPTIONCHAN_SCHEMA_DIR` を `schema/` に）。固定コミットを optionchan の #117 の後に上げた（simulator が照合する既存の 5 本の JSON は変わっていない）
+- 2.2 AC25: 照合の対象に `atm_cm_iv` を足した
+- 7.1: `GET /api/atm_iv` を足した。7.3: スキャン量の表に `atm_cm_iv`、抑制に (7)〜(10)（64 MiB・キャッシュ・結果キャッシュ・回数の制限なし）
+- 13.1: K13（IV 推移の 4 つのオーナー決定と main の判断）。13.3: R7。13.4: IV 推移の API の値
+- 画面はまだ呼ばない（段 B で表示）。本番の挙動・BigQuery のジョブは変わらない
 
 ### 2026-10-18 既定の画面の切替と旧画面の削除（#91 段 A）
 

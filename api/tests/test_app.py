@@ -342,3 +342,129 @@ def test_warm_only_for_default_runner(monkeypatch, tmp_path):
     assert started == []
     create_app(cfg=CFG)
     assert len(started) == 1
+
+
+# ---- /api/atm_iv（#79 AC3・AC5） ----
+
+def atm_world():
+    from support import cm_rows
+
+    w = World()
+    w.add_fixture(load_fixture("latest"))
+    w.cm = cm_rows(jst(2026, 10, 13, 8, 45), jst(2026, 10, 13, 21, 0), value=lambda t: 20.0 + t.minute / 100)
+    return w
+
+
+def test_atm_iv_ok_headers():
+    client, runner, _ = make(world=atm_world())
+    res = client.get("/api/atm_iv?tf=1h")
+    assert res.status_code == 200
+    assert res.headers["Content-Type"] == "application/json; charset=utf-8"
+    assert res.headers["Cache-Control"] == "private, max-age=60"
+    assert "ETag" not in res.headers
+    assert_security_headers(res)
+    body = res.get_json()
+    assert set(body) == {"schema_version", "tf", "start", "end", "last_at", "bars"}
+    assert body["schema_version"] == 1 and body["tf"] == "1h" and body["bars"]
+    assert set(body["bars"][0]) == {"t", "o", "h", "l", "c"}
+    assert runner.names() == ["atm_cm_iv"]  # 板・カレンダーは読まない
+    gz = client.get("/api/atm_iv?tf=1h", headers={"Accept-Encoding": "gzip"})
+    assert gz.headers["Content-Encoding"] == "gzip" and json.loads(gzip.decompress(gz.data)) == body
+    assert runner.names() == ["atm_cm_iv"]  # 2 回目はキャッシュ
+
+
+def test_atm_iv_settled_cache_control():
+    client, _, _ = make(world=atm_world())
+    res = client.get("/api/atm_iv?tf=1h&start=2026-09-01T00:00:00Z&end=2026-10-11T00:00:00Z")
+    assert res.status_code == 200 and res.headers["Cache-Control"] == "private, max-age=3600"
+
+
+@pytest.mark.parametrize("tf,days", [("1m", 3), ("1h", 100), ("1d", 400)])
+def test_atm_iv_max_range_boundary(tf, days):
+    client, runner, _ = make(world=atm_world())
+    end = "2026-10-14T00:00:00Z"
+    start = (jst(2026, 10, 14, 9) - timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    res = client.get("/api/atm_iv", query_string={"tf": tf, "start": start, "end": end})
+    assert res.status_code == 200, (tf, days)
+    over = (jst(2026, 10, 14, 9) - timedelta(days=days + 1)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    runner.reset()
+    res = client.get("/api/atm_iv", query_string={"tf": tf, "start": over, "end": end})
+    assert res.status_code == 400 and res.get_json() == {"error": "bad_request"}
+    assert runner.calls == []
+
+
+@pytest.mark.parametrize("query", [
+    {"tf": "5m"},
+    {},
+    {"tf": "1h", "start": "2026-10-01T00:00:00Z"},
+    {"tf": "1h", "start": "2026-10-01T00:00:00", "end": "2026-10-02T00:00:00"},
+    {"tf": "1h", "start": "2026-10-01T00:00:00.5Z", "end": "2026-10-02T00:00:00Z"},
+    {"tf": "1h", "start": "2026-10-01T03:00:00Z", "end": "2026-10-02T00:00:00Z"},
+    {"tf": "1h", "start": "2026-10-02T00:00:00Z", "end": "2026-10-01T00:00:00Z"},
+    {"tf": "1d", "start": "2009-01-01T00:00:00Z", "end": "2009-06-01T00:00:00Z"},
+])
+def test_atm_iv_bad_request_without_reflection(query, capsys):
+    client, runner, _ = make(world=atm_world())
+    probe = "<script>x</script>"
+    q = dict(query)
+    q["tf"] = q.get("tf", "") + ("" if q.get("tf") in ("1h", "1d") else probe)
+    res = client.get("/api/atm_iv", query_string=q)
+    assert res.status_code == 400
+    assert res.get_json() == {"error": "bad_request"}
+    assert res.headers["Cache-Control"] == "no-store"
+    assert_security_headers(res)
+    assert b"script" not in res.data and b"2026" not in res.data and b"2009" not in res.data
+    out = capsys.readouterr().out
+    assert "script" not in out and "2026-10" not in out and "2009" not in out
+    rec = json.loads(out.splitlines()[-1])
+    assert rec["event"] == "bad_request" and rec["endpoint"] == "atm_iv"
+    assert rec["param"] in ("tf", "start", "end", "range")
+    assert runner.calls == []
+
+
+def test_atm_iv_unknown_params_ignored():
+    client, _, _ = make(world=atm_world())
+    assert client.get("/api/atm_iv?tf=1m&foo=1").status_code == 200
+
+
+def test_atm_iv_runner_error_is_503_with_type_only(capsys):
+    secret = "projects/123456: bytesBilledLimitExceeded for user@example.com"
+    client, _, _ = make(world=atm_world(), errors={"atm_cm_iv": RuntimeError(secret)})
+    res = client.get("/api/atm_iv?tf=1h")
+    assert res.status_code == 503 and res.get_json() == {"error": "unavailable"}
+    assert res.headers["Cache-Control"] == "no-store"
+    out = capsys.readouterr().out
+    assert "123456" not in out and "example.com" not in out and "bytesBilled" not in out
+    rec = [json.loads(line) for line in out.splitlines() if '"query_failed"' in line][-1]
+    assert rec["endpoint"] == "atm_iv" and rec["error_type"] == "RuntimeError"
+
+
+def test_atm_iv_concurrent_requests_share_one_job():
+    gate = threading.Event()
+    w = atm_world()
+    clock = Clock(jst(2026, 10, 13, 21, 46))
+    runner = FakeRunner(w, gate=gate)
+    app = create_app(runner=runner, clock=clock, monotonic=clock.monotonic, cfg=CFG)
+    codes = []
+
+    def work():
+        codes.append(app.test_client().get("/api/atm_iv?tf=1h").status_code)
+
+    threads = [threading.Thread(target=work) for _ in range(8)]
+    for t in threads:
+        t.start()
+    runner.started["atm_cm_iv"].wait(5)
+    threading.Event().wait(0.2)
+    gate.set()
+    for t in threads:
+        t.join(10)
+    assert codes == [200] * 8
+    assert runner.count("atm_cm_iv") == 1
+
+
+def test_atm_iv_file_source_is_503(tmp_path):
+    f = tmp_path / "chain.json"
+    f.write_text(json.dumps(load_fixture("latest")), encoding="utf-8")
+    client = create_app(cfg=st.Settings(data_source="file", chain_file=f)).test_client()
+    assert client.get("/api/atm_iv?tf=1h").status_code == 503
+    assert client.get("/api/atm_iv?tf=5m").status_code == 400

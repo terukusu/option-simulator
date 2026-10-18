@@ -100,6 +100,7 @@ class World:
         self.futures: dict[datetime, list[dict]] = {}
         self.spots: dict[datetime, list[dict]] = {}
         self.calendar: list[dict] = calendar_rows()
+        self.cm: list[tuple[datetime, float | None]] = []  # atm_cm_iv の (created_at, iv30)
 
     def add(self, at, options, future_price, spot_price=None, rows_option=800, finished_after=40):
         """rows_option は latest_runs の行数（判定用の小さな板でも既定は 800 行として扱う）"""
@@ -188,11 +189,40 @@ class FakeRunner:
         if name == "trading_calendar":
             return [dict(r) for r in w.calendar]
         start, end = params["start_at"], params["end_at"]
+        if name == "atm_cm_iv":
+            return cm_bars([p for p in w.cm if start <= p[0] < end], params["step"])
         if name == "latest_runs":
             rows = [dict(r) for r in w.runs if start <= r["snapshot_at"] < end]
             return sorted(rows, key=lambda r: r["snapshot_at"], reverse=True)
         table = {"option_price": w.options, "future_price": w.futures, "spot_price": w.spots}[name]
         return [dict(r) for at, rows in table.items() if start <= at < end for r in rows]
+
+
+def cm_rows(start: datetime, end: datetime, every_minutes=1, value=lambda t: 20.0) -> list[tuple]:
+    """合成の atm_cm_iv の (created_at, iv30)（架空の IV）。[start, end) の every_minutes 分ごと。
+    value(t) が None ならその行の iv30 は NULL"""
+    out, t = [], start
+    while t < end:
+        out.append((t, value(t)))
+        t += timedelta(minutes=every_minutes)
+    return out
+
+
+def cm_bars(points: list[tuple], step: int) -> list[dict]:
+    """sql/atm_cm_iv.sql と同じ束ね方（偽の runner 用）: UNIX 秒で step 秒に切り、open / close = 時間順で最初 / 最後の
+    NULL でない値、high / low = 最大 / 最小、last_at = NULL の行を含めた created_at の最大。全部 NULL の足も行を返す"""
+    groups: dict[int, list[tuple]] = {}
+    for at, iv in sorted(points):
+        ts = int(at.timestamp())
+        groups.setdefault(ts - ts % step, []).append((at, iv))
+    rows = []
+    for key in sorted(groups):
+        ps = groups[key]
+        vals = [iv for _, iv in ps if iv is not None]
+        rows.append({"started_at": datetime.fromtimestamp(key, UTC), "open": vals[0] if vals else None,
+                     "high": max(vals) if vals else None, "low": min(vals) if vals else None,
+                     "close": vals[-1] if vals else None, "last_at": max(at for at, _ in ps)})
+    return rows
 
 
 class Clock:

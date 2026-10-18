@@ -70,7 +70,7 @@ jobs:
         working-directory: api
         run: uv run --locked pytest -q
       # optionchan との契約（AC25）: API が宣言した列（api/src/simulator_api/contract.py）を optionchan の固定コミット
-      # （api/contract/optionchan_commit.txt）の schema/tokyo と照合する。リポジトリ名はリポジトリ変数 OPTIONCHAN_REPO
+      # （api/contract/optionchan_commit.txt）の schema/tokyo・schema/cm と照合する。リポジトリ名はリポジトリ変数 OPTIONCHAN_REPO
       # （<OWNER>/<REPO>）で渡し、未設定（fork・clone）なら notice を出してスキップする
       - name: optionchan の固定コミット
         id: optionchan
@@ -93,13 +93,15 @@ jobs:
           repository: ${{ vars.OPTIONCHAN_REPO }}
           ref: ${{ steps.optionchan.outputs.sha }}
           path: .optionchan
-          sparse-checkout: schema/tokyo
+          sparse-checkout: |
+            schema/tokyo
+            schema/cm
           persist-credentials: false
       - name: optionchan との契約の照合
         if: steps.optionchan.outputs.enabled == 'true'
         working-directory: api
         env:
-          OPTIONCHAN_SCHEMA_DIR: ${{ github.workspace }}/.optionchan/schema/tokyo
+          OPTIONCHAN_SCHEMA_DIR: ${{ github.workspace }}/.optionchan/schema
         run: uv run --locked pytest -q -rs tests/test_contract.py
       # Terraform（infra/、#35・#36）。資格情報なし: fmt・validate と、モックのプロバイダの terraform test だけ
       # （prod の plan は下の terraform-plan job と deploy.yml。bootstrap の plan は infra/README.md）
