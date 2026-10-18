@@ -1902,6 +1902,8 @@ async function runFlows() {
   // #89 段 B コマンドパレットの手順（AC-B5）
   for (const vp of [phone, pc]) await paletteFlows(vp);
   for (const vp of [phone, pc]) await paletteWideFlow(vp);
+  // #91 段 C 動きの長いフレーム（AC-C3）
+  for (const vp of [phone, pc]) await motionLoafFlow(vp);
 }
 
 // ---- 舞台の手順（#82）
@@ -6857,6 +6859,176 @@ async function paletteWideFlow(vp) {
     `#89 AC-B5(j) ${tag} パレットを開く・64 と打つの Long Animation Frame（50ms 超）が 0 件`,
     loafOk && opened && l1.length === 0 && l2.length === 0,
     `${loafOk ? '' : 'LoAF を測れない・'}開く ${l1.map((d) => Math.round(d)).join(',') || 0} 件 / 打つ ${l2.map((d) => Math.round(d)).join(',') || 0} 件・${rows}`,
+  );
+  await ctx.close();
+}
+
+/**
+ * #91 AC-C3（終了条件 6）: 動き（§6）を入れても長いフレームが増えないこと。クエリなし・390×844 / 1440×900。
+ * 連続の操作（ステッパー 3 本・レール 2 本・描画域のキー × 20 回、ハンドルのドラッグ、ホイールの拡大縮小、描画域のパン、
+ * 面の上のドラッグ）は 50ms 超が 0 件で判定。離散の変更（プリセット 5 種 = 急落・下落・反発・リセット・評価時刻の SQ、
+ * 枚数 ± 10 回・⇄・タブの切替・ピンの追加）は件数を参考の行に出す（判定しない。動きを入れる前と後の件数を PR に並べる）
+ */
+async function motionLoafFlow(vp) {
+  const tag = `${vp.width}x${vp.height}`;
+  const phoneSize = vp.width <= PHONE_MAX;
+  const ctx = await newContext(vp, { [WORKSPACE_KEY]: twoTabs });
+  await ctx.addInitScript(LOAF_INIT);
+  const page = await ctx.newPage();
+  await page.goto(pageUrl('next'));
+  await waitReady(page, 'next');
+  const loafOk = await page.evaluate(() => window.__loafOk === true);
+  const mark = () => page.evaluate(() => window.__loaf.length);
+  const since = (i) =>
+    page.evaluate(
+      (n) =>
+        window.__loaf
+          .slice(n)
+          .filter((d) => d > 50)
+          .map(Math.round),
+      i,
+    );
+  const center = async (sel) => {
+    const b = await page.locator(sel).first().boundingBox();
+    if (!b) throw new Error(`${sel} が無い`);
+    return { x: b.x + b.width / 2, y: b.y + b.height / 2, b };
+  };
+  const drag = async (from, dx, dy, steps) => {
+    await page.mouse.move(from.x, from.y);
+    await page.mouse.down();
+    await page.mouse.move(from.x + dx, from.y + dy, { steps });
+    await page.mouse.up();
+  };
+  const keys = async (sel, key, n) => {
+    await page.focus(sel);
+    for (let i = 0; i < n; i++) {
+      await page.keyboard.press(key);
+      await page.waitForTimeout(16);
+    }
+  };
+  const measureOp = async (fn) => {
+    const m = await mark();
+    await fn();
+    await page.waitForTimeout(400); // 動き（最長 220ms）が終わるまで
+    return since(m);
+  };
+  const reset = async () => {
+    await page.focus('.chart');
+    await page.keyboard.press('0');
+    await page.waitForTimeout(100);
+  };
+  const cont = [];
+  const disc = [];
+  if (phoneSize) await setShell(page, 'scenario', 'peek');
+  await reset();
+  const st = (f) => `section.scenario .stepper[data-name="${f}"] > .val`;
+  for (const [name, sel, key] of [
+    ['ステッパー Δσ のキー ↑ 20 回', st('dSigma'), 'ArrowUp'],
+    ['ステッパー d のキー ↑ 20 回', st('days'), 'ArrowUp'],
+    ['ステッパー ΔX のキー ↑ 20 回', st('dX'), 'ArrowUp'],
+    ['IV レールのキー ↓ 20 回', '.ivrail', 'ArrowDown'],
+    ['時間レールのキー ← 20 回', '.timerail', 'ArrowLeft'],
+    ['描画域のキー ← 20 回', '.chart', 'ArrowLeft'],
+  ]) {
+    cont.push([name, await measureOp(() => keys(sel, key, 20))]);
+  }
+  await reset();
+  cont.push([
+    'ハンドルのドラッグ 30 回の move',
+    await measureOp(async () => drag(await center('.chart .handle-hit'), 60, 0, 30)),
+  ]);
+  {
+    const c = await center('.chart');
+    const at = { x: c.b.x + c.b.width * 0.3, y: c.b.y + c.b.height * 0.35 };
+    cont.push([
+      'ホイールの拡大縮小 20 回',
+      await measureOp(async () => {
+        await page.mouse.move(at.x, at.y);
+        for (let i = 0; i < 20; i++) {
+          await page.mouse.wheel(0, i < 10 ? -60 : 60);
+          await page.waitForTimeout(16);
+        }
+      }),
+    ]);
+    cont.push(['描画域のパン 30 回の move', await measureOp(() => drag(at, -90, 0, 30))]);
+  }
+  await page.focus('.chart');
+  await page.keyboard.press('r');
+  await reset();
+  await toSurface(page);
+  await page.waitForTimeout(250);
+  {
+    const dot = await surfaceDot(page);
+    cont.push([
+      '面の上のドラッグ 30 回の move',
+      dot ? await measureOp(() => drag(dot, 60, -40, 30)) : null,
+    ]);
+  }
+  await toSurface(page, '線');
+  await reset();
+  for (const [name, n] of cont) {
+    check(
+      `#91 AC-C3 ${tag} ${name}で長いフレーム（50ms 超）0 件`,
+      loafOk && Array.isArray(n) && n.length === 0,
+      !loafOk
+        ? '未対応'
+        : n === null
+          ? '操作できない'
+          : `${n.length} 件${n.length ? ` ${n.join(',')}ms` : ''}`,
+    );
+  }
+
+  // 離散の変更（参考。判定しない）
+  for (const name of ['急落', '下落', '反発', 'リセット']) {
+    disc.push([
+      `プリセット ${name}`,
+      await measureOp(() => page.click(`section.scenario .chip:has-text("${name}")`)),
+    ]);
+  }
+  disc.push([
+    'プリセット 評価時刻の SQ',
+    await measureOp(() => page.click('section.scenario .chip:has-text("SQ")')),
+  ]);
+  await reset();
+  if (phoneSize) await setShell(page, 'positions', 'peek');
+  const qty = 'section.positions li.leg:nth-child(1) .stepper';
+  disc.push([
+    '枚数 ± 10 回',
+    await measureOp(async () => {
+      for (let i = 0; i < 10; i++) {
+        await page.click(`${qty} > button:${i % 2 === 0 ? 'last-child' : 'first-child'}`);
+        await page.waitForTimeout(16);
+      }
+    }),
+  ]);
+  disc.push([
+    '⇄',
+    await measureOp(() =>
+      page.click('section.positions li.leg:nth-child(1) button[data-op="flip"]'),
+    ),
+  ]);
+  await page.click('section.positions li.leg:nth-child(1) button[data-op="flip"]');
+  await page.waitForTimeout(300);
+  disc.push([
+    'タブの切替',
+    await measureOp(async () => {
+      await page.click('.boxtabs [role="tab"]:nth-child(2)');
+      await page.waitForTimeout(300);
+      await page.click('.boxtabs [role="tab"]:nth-child(1)');
+    }),
+  ]);
+  if (phoneSize) await setShell(page, 'positions', 'hidden');
+  disc.push([
+    'ピンの追加',
+    await measureOp(async () => {
+      await page.click('button[aria-label="ピン"]');
+      await page.click('[role="menuitem"]:has-text("今の線を残す")');
+    }),
+  ]);
+  console.log(
+    `      参考 #91 AC-C3 ${tag} 離散の変更の長いフレーム（50ms 超）: ${disc
+      .map(([n, l]) => `${n} ${l.length}${l.length ? `（${l.join(',')}ms）` : ''}`)
+      .join('・')}`,
   );
   await ctx.close();
 }
