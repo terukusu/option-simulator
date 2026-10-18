@@ -104,7 +104,10 @@ def test_every_job_has_maximum_bytes_billed():
     runner = bq.BigQueryRunner(cfg, client=client)
     t = datetime(2026, 10, 13, tzinfo=UTC)
     for name in contract.QUERY_NAMES:
-        runner(name, {} if name == "trading_calendar" else {"start_at": t, "end_at": t + timedelta(seconds=1)})
+        params = {} if name == "trading_calendar" else {"start_at": t, "end_at": t + timedelta(seconds=1)}
+        if name == "atm_cm_iv":
+            params["step"] = 3600
+        runner(name, params)
     assert len(client.queries) == len(contract.QUERY_NAMES)
     assert all(q["job_config"].maximum_bytes_billed == 1048576 for q in client.queries)
     assert all(q["wait_timeout"] == st.JOB_TIMEOUT_SECONDS for q in client.queries)
@@ -230,3 +233,27 @@ def test_concurrent_calls_fit_connection_pool():
     for t in threads:
         t.join(10)
     assert len(client.queries) == n
+
+
+def test_atm_cm_iv_job_has_64mib_cap():
+    # #79 AC2・判断 6: atm_cm_iv は min(MAX_BYTES_BILLED, 64 MiB)。他のクエリは設定の値のまま。パラメータは
+    # TIMESTAMP・INT64 の ScalarQueryParameter
+    from google.cloud import bigquery
+
+    client = FakeClient()
+    runner = bq.BigQueryRunner(CFG, client=client)
+    start = datetime(2026, 9, 1, tzinfo=UTC)
+    end = datetime(2026, 10, 1, tzinfo=UTC)
+    runner("atm_cm_iv", {"start_at": start, "end_at": end, "step": 3600})
+    runner("trading_calendar", {})
+    cfg = client.queries[0]["job_config"]
+    assert cfg.maximum_bytes_billed == 64 * 1024**2 == st.QUERY_MAX_BYTES_BILLED["atm_cm_iv"]
+    assert client.queries[1]["job_config"].maximum_bytes_billed == st.MAX_BYTES_BILLED_LIMIT
+    assert all(isinstance(p, bigquery.ScalarQueryParameter) for p in cfg.query_parameters)
+    params = {p.name: (p.type_, p.value) for p in cfg.query_parameters}
+    assert params == {"start_at": ("TIMESTAMP", start), "end_at": ("TIMESTAMP", end), "step": ("INT64", 3600)}
+    sql = "\n".join(line for line in client.queries[0]["sql"].splitlines() if not line.lstrip().startswith("--"))
+    assert "`example-project.example_dataset.atm_cm_iv`" in sql and "2026" not in sql and "3600" not in sql
+    # 設定の上限のほうが小さければ設定の値
+    small = bq.BigQueryRunner(st.Settings(project="example-project", maximum_bytes_billed=1048576), client=client)
+    assert small.job_config("atm_cm_iv", {}).maximum_bytes_billed == 1048576

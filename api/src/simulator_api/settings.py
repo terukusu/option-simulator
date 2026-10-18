@@ -47,6 +47,27 @@ QUERY_THREADS = 4  # 候補内の並列（カレンダー・現物を別のス�
 BQ_CONCURRENCY = 10
 DELAYED_MINUTES = 15  # JPX のページの遅れ（板の JSON の delayed_minutes）
 
+# ---- IV 推移（/api/atm_iv。表 atm_cm_iv の iv30、#79。docs/design.md 7.1・7.3・13.4） ----
+# 足 → (読む足の秒数, 1 回の最大日数, 右端の既定の日数)。最大はビューアーの BARS_RANGE と同じ。既定は画面の 1 回分と同じ
+# （5m・15m は画面が 1m から束ねる）。1d は 1 時間足を読んで取引日に束ねる
+ATM_IV_TIMEFRAMES: dict[str, tuple[int, int, int]] = {
+    "1m": (60, 3, 3),
+    "1h": (3600, 100, 60),
+    "1d": (3600, 400, 365),
+}
+ATM_IV_EPOCH_ISO = "2010-01-01T00:00:00+00:00"  # start の下限（ビューアーの BARS_EPOCH。これより前のデータは無い）
+ATM_IV_DAILY_LOOKBEHIND_DAYS = 10  # 日足: start の何日前から 1 時間足を読むか（ビューアーと同じ）
+ATM_IV_SETTLED_HOURS = 48  # end がこれより古い範囲は確定（表の作り直し = 毎時 45 分の直近 2 時間・07 時台の前日分の外）
+ATM_IV_TTL_SECONDS = 300  # 確定していない範囲（右端を含む）のサーバーのキャッシュ
+ATM_IV_SETTLED_TTL_SECONDS = 86400  # 確定した範囲のサーバーのキャッシュ
+ATM_IV_CACHE_SIZE = 64  # キャッシュの件数（キー = (tf, start, end)）
+ATM_IV_MAX_AGE_SECONDS = 60  # Cache-Control（確定していない範囲）
+ATM_IV_SETTLED_MAX_AGE_SECONDS = 3600  # Cache-Control（確定した範囲）
+
+# クエリごとの maximum_bytes_billed の上限（設定の MAX_BYTES_BILLED との小さい方。#79 の判断 6: 予期しない全期間・全列の
+# 読み込みの保険。atm_cm_iv は 2 列で全期間 ≈ 20 MiB、全列 ≈ 112 MiB）
+QUERY_MAX_BYTES_BILLED: dict[str, int] = {"atm_cm_iv": 64 * MiB}
+
 DATA_SOURCES = ("bigquery", "file")
 
 

@@ -12,6 +12,9 @@ runner: (name, params) -> 行（dict）のリスト。name は sql/<name>.sql、
   読み、板が不採用なら現物は捨てる（読み直しの候補ごとに現物 1 本が増えうる）
 - 並列: カレンダー（新しくないときだけ）は latest_runs と、現物は板と同時に、ChainService ごとの上限付きのスレッド
   （QUERY_THREADS）で読む。片方が失敗したら両方の終わりを待ってから例外（キャッシュしない）
+- /api/atm_iv（#79）: AtmIvService。キー = (tf, start, end)（正規化した後）、値 = 応答の Payload。期限付きの LRU
+  （確定した範囲 = end ≤ now − 48 時間は 24 時間、それ以外 300 秒、ATM_IV_CACHE_SIZE 件）+ single-flight。日足は
+  ChainService と同じカレンダーのキャッシュを使う
 """
 
 import concurrent.futures
@@ -23,10 +26,10 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
 
+from . import atm_iv, chain, usable
 from . import calendar as cal_mod
-from . import chain, usable
 from . import settings as st
-from .cache import LRUCache, TTLCache
+from .cache import ExpiringLRUCache, LRUCache, TTLCache
 from .log import log
 
 ONE_SECOND = timedelta(seconds=1)
@@ -102,6 +105,7 @@ class ChainService:
         # プールのタスク（カレンダー・現物）はプールの他のタスクを待たない（カレンダーの single-flight の leader は
         # 必ず実行中）ので詰まらない
         self._pool = concurrent.futures.ThreadPoolExecutor(max_workers=st.QUERY_THREADS, thread_name_prefix="bq")
+        self._atm_iv = AtmIvService(runner, clock, monotonic, calendar=self._calendar_value)
 
     def _query(self, budget: _Budget, name: str, params: dict) -> list[dict]:
         budget.check()
@@ -183,6 +187,55 @@ class ChainService:
                            snapshot_at=sel.run.snapshot_at)
 
 
+    def atm_iv(self, req: atm_iv.AtmIvRequest) -> Payload:
+        return self._atm_iv.get(req)
+
+
+class AtmIvService:
+    """/api/atm_iv の中身。calendar: (budget) -> Calendar（日足の休業日。ChainService._calendar_value）"""
+
+    def __init__(self, runner, clock, monotonic=time.monotonic, calendar=None):
+        self.runner = runner
+        self.clock = clock
+        self.monotonic = monotonic
+        self._calendar = calendar
+        self._cache = ExpiringLRUCache(st.ATM_IV_CACHE_SIZE, monotonic)
+
+    def _load(self, req: atm_iv.AtmIvRequest, now: datetime, budget: _Budget) -> Payload:
+        start_at, end_at, step = atm_iv.read_window(req, now)
+        budget.check()
+        rows = self.runner("atm_cm_iv", {"start_at": start_at, "end_at": end_at, "step": step})
+        bars, last_at = atm_iv.bars_from_rows(rows, req.start, req.end)
+        if req.tf == "1d":
+            if self._calendar is None:
+                raise Unavailable("calendar")
+            holidays = atm_iv.non_trading_days(self._calendar(budget))
+            bars = atm_iv.daily_bars(bars, holidays, req, start_at, now)
+        body, gz = _encode(atm_iv.atm_iv_json(req, now, bars, last_at))
+        return _AtmIvPayload(body, gz, None, bars=len(bars))
+
+    def get(self, req: atm_iv.AtmIvRequest) -> Payload:
+        started = self.monotonic()
+        budget = _Budget(self.monotonic)
+        now = self.clock()
+        loaded = []
+
+        def load():
+            loaded.append(1)
+            return self._load(req, now, budget)
+
+        ttl = st.ATM_IV_SETTLED_TTL_SECONDS if atm_iv.is_settled(req, now) else st.ATM_IV_TTL_SECONDS
+        payload = self._cache.get((req.tf, req.start, req.end), load, ttl)
+        log("INFO", "atm_iv_served", tf=req.tf, days=(req.end - req.start).days, bars=payload.bars,
+            cache="miss" if loaded else "hit", elapsed_ms=round((self.monotonic() - started) * 1000))
+        return payload
+
+
+@dataclass(frozen=True)
+class _AtmIvPayload(Payload):
+    bars: int = 0
+
+
 class FileChainService:
     """DATA_SOURCE=file: GCP なしで動かす（clone した人・コンテナの起動確認）。CHAIN_FILE の JSON をそのまま返す。
     検査は schema_version == 1 だけ（中身の検証はブラウザの parseChainJson）。カレンダーは無い（503）"""
@@ -201,4 +254,7 @@ class FileChainService:
         return ChainResult(body, gzip.compress(body, mtime=0), None, reason=str(obj.get("reason", "")))
 
     def calendar(self) -> Payload:
+        raise Unavailable("file_source")
+
+    def atm_iv(self, req) -> Payload:
         raise Unavailable("file_source")

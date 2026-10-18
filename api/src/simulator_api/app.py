@@ -2,6 +2,7 @@
 
 - GET /api/chain: 使える最新の板（7.2）を JSON 版 1 で（data/chainTypes.ts）。?at= は後段（#33 では 400）
 - GET /api/calendar: 取引カレンダーの最新版（trading_calendar_latest）
+- GET /api/atm_iv?tf=<1m|1h|1d>[&start=&end=]: IV 推移（表 atm_cm_iv の iv30 の足。atm_iv.py。#79）
 - GET /healthz: 設定の読み込みだけ（BigQuery に触れない）
 - 静的ファイル: 環境変数 STATIC_DIR があるときだけ / と /assets/<path>（Vite のビルド成果物 = dist/）と、
   dist/ 直下の決まった名前（ROOT_FILES。manifest とアイコン。#90）
@@ -13,7 +14,7 @@ from datetime import UTC, datetime
 
 from flask import Flask, Response, request, send_from_directory
 
-from . import bq
+from . import atm_iv, bq
 from . import settings as st
 from .log import log
 from .service import ChainService, FileChainService, Unavailable
@@ -75,13 +76,14 @@ def create_app(runner=None, clock=None, monotonic=None, cfg: st.Settings | None 
     app = Flask(__name__, static_folder=None)
     if cfg is None:
         cfg = st.from_env()
+    clock = clock or _now
     if cfg.data_source == "file":
         service = FileChainService(cfg.chain_file)
     else:
         if runner is None:
             runner = bq.BigQueryRunner(cfg)
             runner.start_warm()  # import・Client・トークンをバックグラウンドで（起動プローブ・/ を待たせない）
-        service = ChainService(runner, clock or _now, monotonic or time.monotonic)
+        service = ChainService(runner, clock, monotonic or time.monotonic)
 
     @app.after_request
     def security_headers(res):
@@ -119,6 +121,18 @@ def create_app(runner=None, clock=None, monotonic=None, cfg: st.Settings | None 
     @app.get("/api/calendar")
     def api_calendar():
         return serve("calendar", service.calendar, "private, max-age=3600")
+
+    @app.get("/api/atm_iv")
+    def api_atm_iv():
+        now = clock()
+        try:
+            req = atm_iv.parse_request(request.args, now)
+        except atm_iv.BadRequest as e:
+            # 入力値は応答・ログに出さない（反射しない）。どのパラメータかだけ
+            log("INFO", "bad_request", endpoint="atm_iv", param=e.param)
+            return _error(400, "bad_request")
+        max_age = st.ATM_IV_SETTLED_MAX_AGE_SECONDS if atm_iv.is_settled(req, now) else st.ATM_IV_MAX_AGE_SECONDS
+        return serve("atm_iv", lambda: service.atm_iv(req), f"private, max-age={max_age}")
 
     if cfg.static_dir is not None:
         static_dir = cfg.static_dir.resolve()

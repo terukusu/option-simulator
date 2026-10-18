@@ -5,7 +5,7 @@ import time
 
 import pytest
 
-from simulator_api.cache import LRUCache, TTLCache
+from simulator_api.cache import ExpiringLRUCache, LRUCache, TTLCache
 
 
 class Mono:
@@ -121,3 +121,60 @@ def test_lru_evicts_oldest():
     c.get("c", lambda: 3)  # b が落ちる
     assert c.get("a", lambda: 100) == 1
     assert c.get("b", lambda: 200) == 200
+
+
+# ---- 期限付きの LRU（/api/atm_iv。#79 AC5） ----
+
+def test_expiring_lru_ttl_per_entry():
+    mono = Mono()
+    c = ExpiringLRUCache(4, monotonic=mono)
+    calls = []
+
+    def load(v):
+        return lambda: calls.append(v) or v
+
+    assert c.get("right", load("r1"), ttl=300) == "r1"
+    assert c.get("old", load("o1"), ttl=86400) == "o1"
+    mono.t = 299.9
+    assert c.get("right", load("r2"), ttl=300) == "r1"
+    mono.t = 300.0
+    assert c.get("right", load("r2"), ttl=300) == "r2"  # 期限切れは読み直す
+    mono.t = 86399.9
+    assert c.get("old", load("o2"), ttl=86400) == "o1"
+    mono.t = 86400.0
+    assert c.get("old", load("o2"), ttl=86400) == "o2"
+    assert calls == ["r1", "o1", "r2", "o2"]
+
+
+def test_expiring_lru_evicts_least_recent():
+    c = ExpiringLRUCache(2, monotonic=Mono())
+    c.get("a", lambda: 1, ttl=10)
+    c.get("b", lambda: 2, ttl=10)
+    c.get("a", lambda: 99, ttl=10)
+    c.get("c", lambda: 3, ttl=10)
+    assert len(c) == 2
+    assert c.get("a", lambda: 100, ttl=10) == 1
+    assert c.get("b", lambda: 200, ttl=10) == 200
+
+
+def test_expiring_lru_single_flight_and_errors():
+    c = ExpiringLRUCache(4)
+    gate = threading.Event()
+    calls = []
+
+    def load():
+        calls.append(1)
+        gate.wait(5)
+        return "v"
+
+    threads, results, errors = concurrently(8, lambda: c.get("k", load, ttl=60))
+    while not calls:
+        pass
+    time.sleep(0.1)
+    gate.set()
+    for t in threads:
+        t.join(5)
+    assert results == ["v"] * 8 and not errors and len(calls) == 1
+    with pytest.raises(RuntimeError):
+        c.get("e", lambda: (_ for _ in ()).throw(RuntimeError("x")), ttl=60)
+    assert c.get("e", lambda: "ok", ttl=60) == "ok"  # 例外はキャッシュしない

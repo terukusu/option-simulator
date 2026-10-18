@@ -2,7 +2,8 @@
 
 - SQL は sql/*.sql にだけ置く。ファイル中の識別子は ${project}・${dataset} だけで、起動時に設定（環境変数）から埋める
   （リクエストの値は入らない）。値はすべてクエリパラメータ（ScalarQueryParameter）で渡す
-- すべてのジョブに maximum_bytes_billed・location・use_legacy_sql=False と待ち上限を付ける
+- すべてのジョブに maximum_bytes_billed・location・use_legacy_sql=False と待ち上限を付ける。maximum_bytes_billed は
+  設定の値と、クエリごとの上限（settings.QUERY_MAX_BYTES_BILLED。atm_cm_iv は 64 MiB）の小さい方
 - 実行は query_and_wait（jobs.query）。ジョブは今どおり作る（監査ログで監視できる。ジョブを作らない設定は使わない）
 - ジョブごとに処理バイト数をログに出す（bq_job。課金量は監査ログ）。SQL・パラメータの値・例外本文は出さない
 - Client の生成（import・資格情報のトークンの取得）は 1 回だけ（ロック）。warm でワーカーの起動時にバックグラウンドで
@@ -93,12 +94,15 @@ class BigQueryRunner:
         thread.start()
         return thread
 
-    def job_config(self, params: dict):
+    def maximum_bytes_billed(self, name: str) -> int:
+        return min(self.cfg.maximum_bytes_billed, st.QUERY_MAX_BYTES_BILLED.get(name, self.cfg.maximum_bytes_billed))
+
+    def job_config(self, name: str, params: dict):
         from google.cloud import bigquery
 
         return bigquery.QueryJobConfig(
             query_parameters=[bigquery.ScalarQueryParameter(k, param_type(v), v) for k, v in params.items()],
-            maximum_bytes_billed=self.cfg.maximum_bytes_billed,
+            maximum_bytes_billed=self.maximum_bytes_billed(name),
             use_legacy_sql=False,
             job_timeout_ms=st.JOB_TIMEOUT_SECONDS * 1000,
         )
@@ -106,7 +110,7 @@ class BigQueryRunner:
     def __call__(self, name: str, params: dict) -> list[dict]:
         with self._slots:
             started = self._monotonic()
-            result = self.client.query_and_wait(self.sql[name], job_config=self.job_config(params),
+            result = self.client.query_and_wait(self.sql[name], job_config=self.job_config(name, params),
                                                 location=self.cfg.location, wait_timeout=st.JOB_TIMEOUT_SECONDS)
             rows = [dict(row.items()) for row in result]
             log("INFO", "bq_job", name=name, total_bytes_processed=result.total_bytes_processed,

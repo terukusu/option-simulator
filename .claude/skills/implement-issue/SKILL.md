@@ -41,7 +41,7 @@ allowed-tools: [Read, Edit, Write, Bash, Glob, Grep, Agent, TaskCreate, TaskUpda
 | 設計 | `docs/design.md` | — | **設計の正**。実装が設計と違うなら設計書も同じ PR で更新する |
 
 - **縦切り 2 より前（`api/`・`infra/` が無い間）は本番が無く、デプロイ対象は常に「なし」**。`test -d infra` で判定する
-- データ元は optionchan の BigQuery（データセット `optionchan_tokyo` のテーブル関数 4 本。`docs/design.md` 4.1 の契約）。**読み取りのみ**。生テーブルはアプリから読まない。契約（列・型）は CI で optionchan の固定コミットの `schema/tokyo/*.json` と照合する（AC25）
+- データ元は optionchan の BigQuery（データセット `optionchan_tokyo` のテーブル関数 4 本・ビュー `trading_calendar_latest`・表 `atm_cm_iv`。`docs/design.md` 4.1 の契約）。**読み取りのみ**。4.1 に無い表（板・先物・現物の生テーブルなど）はアプリから読まない。契約（列・型）は CI で optionchan の固定コミットの `schema/tokyo/*.json`・`schema/cm/atm_cm_iv.json` と照合する（AC25）
 - optionchan 側の変更（列の追加、テーブル関数の変更、取り込み範囲の拡張など）が要るときは、**optionchan のリポジトリに Issue で依頼する**（本リポジトリでは実装しない）。依頼先のリポジトリ名は推測せずユーザーに確認して `OPTIONCHAN_REPO=<OWNER>/<REPO>` とし、起票前に本文をユーザーに見せて承認を得る。依頼は `docs/design.md` 13.3 の表にも追記する
 - 検証コマンド（CI と同じ。Node 24 = `.node-version`）: `npm ci && npm run typecheck && npm run lint && npm test && npm run build`、続けて `ci.yml` の「ビルド成果物の検査」と同じ確認。将来 `api/` は pytest、`infra/` は `terraform fmt -check` / `validate` / `plan`。`ci.yml` に検査が増えたら手元でもそれに従う
 - **価格モデル（`model/`）の変更は、文献値・性質テスト・合成板での検証を必須とする**（「Phase 3 テスト方針」）
@@ -170,7 +170,7 @@ block とするのは次の 4 類型のみ。改善提案・好みは block に�
 3. **調査**: 変更対象ファイル、呼び出し元（`grep -rn`）、`docs/design.md` の該当節と AC、既存テスト（`tests/`）。データに触れる場合は optionchan の契約（4.1）とテーブル関数（`bq ls --routines --project_id="$P" optionchan_tokyo`、SQL は `--dry_run` でスキャン量）。縦切り 2 以降でインフラに触れる場合は Cloud Run の現状（`gcloud run services describe simulator --region "$REGION" --project "$P"` の image・リビジョン・traffic）
 4. **ドリフト確認**（該当するときだけ）:
    - `infra/` を変更する計画では、`main` の作業ツリーで `terraform -chdir=infra/<prod|bootstrap> plan` を取り、**今回の変更前から出ている差分**（コンソールでの手作業変更など）が無いか確認する。あれば handoff の `## 未解決・懸念` に「ドリフトあり: <リソース>」と書く。**ドリフトがある状態で apply する計画は、先にドリフトを解消する（取り込む / 戻す）かの判断をユーザーに求める前提で書く**
-   - データの契約に触れる計画では、CI が照合する optionchan の固定コミットと、optionchan の最新の `schema/tokyo/*.json`・テーブル関数の差を確認する（差があれば同じく懸念に書く）
+   - データの契約に触れる計画では、CI が照合する optionchan の固定コミットと、optionchan の最新の `schema/tokyo/*.json`・`schema/cm/*.json`・テーブル関数の差を確認する（差があれば同じく懸念に書く）
 5. **計画に含める内容**:
    - AC と計画ステップの 1 対 1 対応
    - 変更対象ファイル一覧、デプロイ対象一覧
