@@ -29,6 +29,13 @@ import { boardBadges, boardRowTexts } from '../../ui/view/boardPanel';
 import { bookListModel } from '../../ui/view/bookList';
 import { headerModel, keptBoardNote } from '../../ui/view/header';
 import { hedgeModel } from '../../ui/view/hedge';
+import {
+  ivChartModel,
+  ivFullDomain,
+  lineSegments,
+  resampleBars,
+  resolveIvViewport,
+} from '../../ui/view/ivHistory';
 import { marketPill } from '../../ui/view/marketPill';
 import { metricsModel } from '../../ui/view/metrics';
 import { metricsPanel } from '../../ui/view/metricsPanel';
@@ -89,6 +96,7 @@ import { tabsModel } from '../../ui/view/tabs';
 import { M1, M2, makeMarket } from '../support/market';
 import { BUDGET_MS, expectWithinBudget, RECORD_RUNS, record } from '../support/perf';
 import { PERF_LEGS } from '../support/perfPosition';
+import { barsAt, jst } from '../support/synthIv';
 
 /**
  * AC-18 の補助（計算部分）: 322 行の板の限月切替で作り直す表示モデル（板の行・スマイル・ヘッダ）の
@@ -1373,6 +1381,66 @@ describe('性能（#88 AC-8: 面モードの 1 フレーム）', () => {
         return surfaceFrame(scenario, [a, a + w], null, null);
       },
       { warmup: 5, runs: RECORD_RUNS },
+    );
+  });
+});
+
+/**
+ * #79 段 B: IV 推移の描き直しの 1 フレーム（パン・拡大のたびに ivChartModel だけを作り直す。線の区間は足が変わったとき
+ * だけ）。最悪のケース = 1 分足を覚える上限 9 日 ≈ 1 万本（立会の 1,140 分 × 9 日）を全域で表示（架空の値）。
+ */
+describe('性能（#79 IV 推移の 1 フレーム）', () => {
+  const times: number[] = [];
+  for (let d = 0; times.length < 10_260; d++) {
+    const day = jst('2026-10-01T08:45') + d * 86400;
+    const wd = new Date((day + 9 * 3600) * 1000).getUTCDay();
+    if (wd === 0 || wd === 6) continue;
+    for (let m = 0; m < 420; m++) times.push(day + m * 60);
+    for (let m = 0; m < 780; m++) times.push(day + (8 * 60 + 15) * 60 + m * 60);
+  }
+  const bars = barsAt(times, 11);
+  const ntd = new Set<string>();
+  const segments = lineSegments(bars, '1m', ntd);
+  const full = ivFullDomain(bars.length);
+  const input = (mode: 'candle' | 'line', a: number) => ({
+    bars,
+    tf: '1m' as const,
+    mode,
+    viewport: [full[0] + a, full[1] - 40 + a] as const,
+    segments,
+    width: 900,
+    height: 420,
+    cursor: null,
+    rightLoaded: true,
+  });
+
+  for (const mode of ['candle', 'line'] as const) {
+    it(`全域のパンの 1 フレーム（1 分足 ${bars.length.toLocaleString('en-US')} 本・${mode}）が ${BUDGET_MS} ms 以内（30 回の最小値）`, () => {
+      let tick = 0;
+      const frame = () => {
+        tick = (tick + 1) % 40;
+        const m = ivChartModel(input(mode, tick));
+        return m.candles.length + m.line.length;
+      };
+      expect(frame()).toBeGreaterThan(1000);
+      expectWithinBudget(`#79 IV 推移のパン（${mode}）`, frame, { warmup: 10, runs: 30 });
+    });
+  }
+
+  it('初期表示（1 時間足 120 本）の 1 フレームと、足を替えたときの束ね直し・線の区間（記録のみ）', () => {
+    const view = resolveIvViewport(bars, '1m', null, null);
+    record(
+      '#79 IV 推移の初期表示の 1 フレーム（240 本）',
+      () => ivChartModel({ ...input('candle', 0), viewport: view }).candles.length,
+      {
+        warmup: 5,
+        runs: RECORD_RUNS,
+      },
+    );
+    record(
+      '#79 足の切替（1 分 → 5 分の束ね直し + 線の区間）',
+      () => lineSegments(resampleBars(bars, 300), '5m', ntd).length,
+      { warmup: 3, runs: RECORD_RUNS },
     );
   });
 });

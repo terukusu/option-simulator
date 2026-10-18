@@ -4,12 +4,15 @@ import {
   chartMode,
   dockPanels,
   INITIAL_SHELL,
+  ivVisible,
   layoutTier,
   MARKET_VIEWS,
   SHEET_SNAP_PX,
   SHEET_TAP_PX,
   type ShellState,
+  SMILE_VIEWS,
   shellReduce,
+  smileView,
   visiblePanel,
 } from '../../ui/view/shell';
 
@@ -85,11 +88,37 @@ describe('shellReduce', () => {
     );
   });
 
-  it('市場の見え方の一覧は 1 か所（#85。#79 が 1 行足す）', () => {
+  it('市場の見え方の一覧は 1 か所（#85。#79 で IV 推移を 1 行足した）', () => {
     expect(MARKET_VIEWS.map((v) => [v.value, v.text])).toEqual([
       ['board', '板'],
       ['smile', 'スマイル'],
+      ['iv', 'IV 推移'],
     ]);
+    expect(shellReduce(at({}), { type: 'market', market: 'iv' })).toEqual(at({ market: 'iv' }));
+  });
+
+  it('#79: スマホ・タブレットのスマイルのパネルの [スマイル | IV 推移]（PC 以外の board はスマイル）', () => {
+    expect(SMILE_VIEWS.map((v) => [v.value, v.text])).toEqual([
+      ['smile', 'スマイル'],
+      ['iv', 'IV 推移'],
+    ]);
+    expect(smileView(at({}))).toBe('smile');
+    expect(smileView(at({ market: 'smile' }))).toBe('smile');
+    expect(smileView(at({ market: 'iv' }))).toBe('iv');
+  });
+
+  it('#79: IV 推移が見えているか（PC = 市場が iv、タブレット = スマイルのパネルで iv、スマホ = それに加えて hidden でない）', () => {
+    const iv = (s: Partial<ShellState>) => at({ market: 'iv', ...s });
+    expect(ivVisible(iv({}), 'pc')).toBe(true);
+    expect(ivVisible(at({ market: 'smile' }), 'pc')).toBe(false);
+    expect(ivVisible(at({ market: 'board', panel: 'smile' }), 'tablet')).toBe(false);
+    expect(ivVisible(iv({ panel: 'smile' }), 'tablet')).toBe(true);
+    expect(ivVisible(iv({ panel: 'smile', sheet: 'hidden' }), 'tablet')).toBe(true);
+    expect(ivVisible(iv({ panel: 'board' }), 'tablet')).toBe(false);
+    expect(ivVisible(iv({ panel: 'smile' }), 'phone')).toBe(true);
+    expect(ivVisible(iv({ panel: 'smile', sheet: 'full' }), 'phone')).toBe(true);
+    expect(ivVisible(iv({ panel: 'smile', sheet: 'hidden' }), 'phone')).toBe(false);
+    expect(ivVisible(iv({ panel: 'positions' }), 'phone')).toBe(false);
   });
 
   it('タブレットで scenario は選べない（positions に読み替える）', () => {

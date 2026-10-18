@@ -42,6 +42,10 @@
 //                                          面モード（#88 段 A）: 360 / 390（シート hidden / peek）・900・1440 × ダーク / ライトで面に
 //                                          切り替えて縦・横・折り返し・読み取り、凡例行の [線 | 面]（ある幅で）・色の見本・±vmax が
 //                                          切れず画面内・canvas がある。1280×800・1800×1000 は記録だけ（--shots の撮影用）
+//                                          IV 推移（#79 段 B）: 4 幅 × ダーク / ライトで IV 推移を開いた状態（PC は市場の Seg、タブレットは
+//                                          ドックのスマイル → [スマイル | IV 推移]、スマホはスマイルのシート peek / hidden / full）の縦・横・
+//                                          折り返しと、見出し・道具の行（足・ローソク / 線・⟳）・読み取りの 1 行・凡例が切れない
+//                                          （scrollWidth ≤ clientWidth）・描画域の高さ・進行中の足が 1 本。線のモードも同じ検査
 //   npm run ui:check -- --parts            部品の見本（?parts。dev だけ）
 //   npm run ui:check -- --flows            保存・共有・テーマ・キーボードの手順（#81 AC-11・AC-12）と入口の手順（#91: クエリなし・
 //                                          古い ?ui=next と旧画面を開いていた ui の値で同じ画面・部品の見本の ?parts・旧画面のときの
@@ -93,6 +97,9 @@
 //                                          足マーカーの legmark-in 120ms・シート peek → full の height 0.18s、reducedMotion: 'reduce' で
 //                                          0s / なし。AC-C6: 読み直しで ATM へ跳び直さない。AC-C7: 1〜5 の行き先の名前。AC-C3: 連続の
 //                                          操作の Long Animation Frame 0 件と離散の変更の件数（参考）。390×844 と 1440×900）
+//                                          と IV 推移の手順（#79 段 B AC-10・AC-12: atm_iv への要求の回数 = 起動 0 → 開く 1 → 閉じて開き
+//                                          直す 1 → ⟳ 2 → 足の切替（1 分・5 分・15 分は 1 回を共有、読み済みは 0）→ トップバーの [最新] で
+//                                          増えない、.iv-bar.progress・.iv-line.progress が 1 個、失敗 → [再試行]。390×844 と 1440×900）
 //   --url <base>                           dev サーバーを起こさず、その URL を使う（例 http://127.0.0.1:5173/?parts）
 //   --dom <file>                           body の下の要素の tag.class の並びを書き出す（DOM の変化の比較用）
 //   --shots <dir>                          スクリーンショットを書く（合成の板だけ。リポジトリに入れない）
@@ -891,6 +898,9 @@ async function measureAll() {
     console.log(
       `コマンドパレットの検査（#89）: ${paletteStats.pass} / ${paletteStats.total} 状態で pass`,
     );
+    // IV 推移（#79 段 B AC-13）
+    await ivSweep();
+    console.log(`IV 推移の検査（#79）: ${ivStats.pass} / ${ivStats.total} 状態で pass`);
   }
   // 旧のクラス名（#91・EPIC #92 の終了条件 8）: report を通ったすべての状態の合計
   console.log(
@@ -1595,6 +1605,115 @@ async function surfaceAll() {
   }
 }
 
+// ---- IV 推移（#79 段 B）
+const ivStats = { pass: 0, total: 0 };
+
+/** IV 推移を開く（PC は市場の Seg、それ以外はスマイルのパネルの [スマイル | IV 推移]。スマホはシートも作る） */
+async function openIv(page, w, sheet = 'peek') {
+  if (w >= 1200) {
+    await page.click('section.board .panel-head .seg button:has-text("IV 推移")');
+  } else {
+    if (w <= PHONE_MAX) await setShell(page, 'smile', sheet === 'hidden' ? 'peek' : sheet);
+    else await page.click('.dock button[data-panel="smile"]');
+    await page.waitForTimeout(120);
+    const seg = page.locator('section.smile .panel-head .seg button:has-text("IV 推移")');
+    if ((await seg.getAttribute('aria-pressed')) !== 'true') await seg.click();
+    if (w <= PHONE_MAX && sheet === 'hidden') await setShell(page, 'smile', 'hidden');
+  }
+  await page.waitForSelector('section.smile .iv-wrap svg', { timeout: 10000 }).catch(() => null);
+  await page.waitForTimeout(150);
+}
+
+/**
+ * IV 推移の検査（AC-13）: 見出し行・道具の行（足の Seg・形の Seg・⟳）・読み取りの 1 行・凡例が切れていない
+ * （scrollWidth ≤ clientWidth）、道具の行の要素が section の中、描画域の高さ（want.minHeight 以上）、
+ * 進行中の足（ローソクは .iv-bar.progress、線は .iv-line.progress）が 1 個
+ */
+async function ivCheck(page, label, want = {}) {
+  const r = await page.evaluate(() => {
+    const sec = document.querySelector('section.smile');
+    const vis = (el) => !!el && el.getClientRects().length > 0;
+    if (!vis(sec) || !sec.querySelector('.iv-tools')) return null;
+    const sb = sec.getBoundingClientRect();
+    const bad = [];
+    let n = 0;
+    for (const el of sec.querySelectorAll(
+      '.panel-head > h2, .panel-head .seg > button, .iv-tools, .iv-tools .seg > button, .iv-refresh, .iv-readout, .iv-legend, .iv-legend > span',
+    )) {
+      if (!vis(el)) continue;
+      n++;
+      const b = el.getBoundingClientRect();
+      if (el.scrollWidth > el.clientWidth || b.right > sb.right + 0.5 || b.left < sb.left - 0.5)
+        bad.push(
+          `${el.tagName.toLowerCase()}.${(el.getAttribute('class') ?? '').trim().replace(/\s+/g, '.')}「${(el.textContent ?? '').trim().slice(0, 12)}」${el.scrollWidth}/${el.clientWidth}`,
+        );
+    }
+    const wrap = sec.querySelector('.iv-wrap');
+    return {
+      n,
+      bad,
+      height: wrap ? Math.round(wrap.getBoundingClientRect().height) : 0,
+      bars: sec.querySelectorAll('.iv-bar').length,
+      progress: sec.querySelectorAll('.iv-bar.progress, .iv-line.progress').length,
+      svg: !!sec.querySelector('.iv-wrap svg'),
+    };
+  });
+  ivStats.total++;
+  if (!r) {
+    failed = true;
+    console.log(`${label}: IV 推移が見えない  ← NG`);
+    return false;
+  }
+  const bad = [...r.bad];
+  if (!r.svg) bad.push('描画域に svg が無い');
+  if (r.progress !== 1) bad.push(`進行中の足 ${r.progress} 個（1 のはず）`);
+  if (want.minHeight && r.height < want.minHeight)
+    bad.push(`描画域の高さ ${r.height}px（${want.minHeight}px 以上のはず）`);
+  const ok = r.n > 0 && bad.length === 0;
+  if (ok) ivStats.pass++;
+  else failed = true;
+  console.log(
+    `${label}: IV 推移 高さ ${r.height}px・${r.n} 個 ${ok ? 'pass' : `${bad.join('・')}  ← NG`}`,
+  );
+  return ok;
+}
+
+/** 4 幅 × ダーク / ライトで IV 推移を開いた状態（スマホはシート 3 段階）。線のモードも測る */
+async function ivSweep() {
+  for (const [w, h] of SIZES) {
+    for (const theme of ['dark', 'light']) {
+      const ctx = await newContext(
+        { width: w, height: h },
+        { [WORKSPACE_KEY]: twoLegs, [PREFS_KEY]: prefsText(theme) },
+      );
+      const page = await ctx.newPage();
+      await page.goto(pageUrl('next'));
+      await waitReady(page, 'next');
+      const tag = `next ${theme} IV 推移`;
+      const name = `next-${w}x${h}-${theme}-iv`;
+      const sheets = w <= PHONE_MAX ? ['peek', 'full', 'hidden'] : [null];
+      for (const sheet of sheets) {
+        await openIv(page, w, sheet ?? 'peek');
+        const lbl = `${tag}${sheet ? ` ${sheet}` : ''}`;
+        await report(page, lbl, w, h, `${name}${sheet ? `-${sheet}` : ''}`);
+        if (sheet !== 'hidden') {
+          // 360 peek は高さの余裕が最も小さい（スマイルと同じ 140px を下限にしない = 道具・読み取りの 2 行の分）
+          await ivCheck(page, `${lbl} ${w}x${h}`, {
+            minHeight: w <= PHONE_MAX && sheet === 'peek' ? 80 : 160,
+          });
+        }
+      }
+      // 線のモード（スマホは peek に戻して）
+      if (w <= PHONE_MAX) await openIv(page, w, 'peek');
+      await page.click('section.smile .iv-tools button:has-text("線")');
+      await page.waitForTimeout(150);
+      await report(page, `${tag} 線`, w, h, `${name}-line`);
+      await ivCheck(page, `${tag} 線 ${w}x${h}`, {});
+      await ctx.close();
+    }
+  }
+}
+
 // ---- 手順（AC-11・AC-12）
 const results = [];
 function check(name, ok, detail = '') {
@@ -1946,6 +2065,8 @@ async function runFlows() {
   for (const vp of [phone, pc]) await motionFlows(vp);
   for (const vp of [phone, pc]) await motionFlows(vp, true);
   for (const vp of [phone, pc]) await motionLoafFlow(vp);
+  // #79 段 B IV 推移の遅延ロード・最新化・足の切替・進行中の足（AC-10・AC-12）
+  for (const vp of [phone, pc]) await ivFlows(vp);
 }
 
 // ---- 舞台の手順（#82）
@@ -7368,6 +7489,169 @@ async function motionFlows(vp, reduced = false) {
     );
   }
   await ctx.close();
+}
+
+// ---- IV 推移の手順（#79 段 B AC-10・AC-12）
+async function ivFlows(vp) {
+  const tag = `${vp.width}x${vp.height}`;
+  const isPc = vp.width >= 1200;
+  const ctx = await newContext(vp, { [WORKSPACE_KEY]: twoLegs });
+  // トップバーの [最新] は合成の板（latest）に差し替える（手元の API を起こさない）
+  const latestText = readFileSync(join(root, FIXTURE_PATH), 'utf8');
+  await ctx.route('**/api/chain**', (route) =>
+    route.fulfill({ status: 200, contentType: 'application/json', body: latestText }),
+  );
+  await ctx.route('**/api/calendar**', (route) =>
+    route.fulfill({ status: 500, contentType: 'text/plain', body: 'x' }),
+  );
+  const page = await ctx.newPage();
+  const reqs = [];
+  page.on('request', (r) => {
+    if (r.url().includes('atm_iv')) reqs.push(new URL(r.url()).search);
+  });
+  await page.goto(pageUrl('next'));
+  await waitReady(page, 'next');
+  await page.waitForTimeout(1500);
+  check(
+    `#79 AC-10 ${tag} 起動して 1.5 秒: IV のエンドポイントへの要求が 0 回`,
+    reqs.length === 0,
+    `${reqs.length} 回`,
+  );
+
+  const toIv = async () => {
+    if (isPc) await page.click('section.panel .panel-head .seg button:has-text("IV 推移")');
+    else {
+      await setShell(page, 'smile', 'peek');
+      await page.click('section.smile .panel-head .seg button:has-text("IV 推移")');
+    }
+  };
+  const toSmile = async () => {
+    if (isPc) await page.click('section.smile .panel-head .seg button:has-text("板")');
+    else await page.click('section.smile .panel-head .seg button:has-text("スマイル")');
+  };
+  const ready = () =>
+    page
+      .waitForFunction(
+        () =>
+          !!document.querySelector('section.smile .iv-wrap svg') &&
+          !document.querySelector('section.smile .iv-loading') &&
+          document.querySelector('section.smile .iv-refresh')?.disabled === false,
+        undefined,
+        { timeout: 10000 },
+      )
+      .then(() => true)
+      .catch(() => false);
+  await toIv();
+  const shown = await ready();
+  check(
+    `#79 AC-10 ${tag} IV 推移を開くと 1 回（右端 = tf=1h だけ）で描く`,
+    shown && reqs.length === 1 && reqs[0] === '?tf=1h',
+    `${reqs.join(' ')}・描画 ${shown}`,
+  );
+  const prog = await page.locator('section.smile .iv-bar.progress').count();
+  check(`#79 AC-12 ${tag} 右端の進行中の足は .iv-bar.progress（1 個）`, prog === 1, `${prog} 個`);
+
+  // 閉じて開き直す（PC: 市場を板 → IV 推移、スマホ: スマイル → IV 推移・ドックで別のパネル → スマイル）
+  await toSmile();
+  await page.waitForTimeout(200);
+  if (!isPc) {
+    await setShell(page, 'positions', 'peek');
+    await setShell(page, 'smile', 'peek');
+  }
+  await toIv();
+  await ready();
+  await page.waitForTimeout(500);
+  check(
+    `#79 AC-10 ${tag} 閉じて開き直しても再要求しない（1 回のまま）`,
+    reqs.length === 1,
+    `${reqs.length} 回`,
+  );
+
+  await page.click('section.smile .iv-refresh');
+  const refreshed = await ready();
+  check(
+    `#79 AC-10 ${tag} 最新化ボタンで右端の 1 回（2 回）`,
+    refreshed && reqs.length === 2 && reqs[1] === '?tf=1h',
+    reqs.join(' '),
+  );
+
+  // 線のモードの進行中の区間
+  await page.click('section.smile .iv-tools button:has-text("線")');
+  await page.waitForTimeout(150);
+  const lp = await page.locator('section.smile .iv-line.progress').count();
+  check(
+    `#79 AC-12 ${tag} 線のモードは最後の区間を .iv-line.progress（1 個）`,
+    lp === 1,
+    `${lp} 個`,
+  );
+  await page.click('section.smile .iv-tools button:has-text("ローソク")');
+
+  // 足の切替: 1 分 → 1 回、5 分・15 分は 1 分を共有、1 時間は読み済み
+  const tfClick = async (label) => {
+    await page.click(`section.smile .iv-tools button[aria-label="${label}"]`);
+    await ready();
+    await page.waitForTimeout(200);
+  };
+  await tfClick('1 分足');
+  const n1 = reqs.length;
+  await tfClick('5 分足');
+  await tfClick('15 分足');
+  await tfClick('1 時間足');
+  check(
+    `#79 ${tag} 足の切替: 1 分で 1 回、5 分・15 分は 1 分を共有、1 時間は読み済み（要求 3 回）`,
+    n1 === 3 && reqs.length === 3 && reqs[2] === '?tf=1m',
+    reqs.join(' '),
+  );
+
+  // トップバーの [最新] では IV を読み直さない
+  await page.click('header.top > button.btn');
+  await page.waitForSelector('.pill[data-state="ready"]', { timeout: 10000 }).catch(() => {});
+  await page.waitForTimeout(800);
+  check(
+    `#79 ${tag} トップバーの [最新] では IV を読み直さない（3 回のまま）`,
+    reqs.length === 3,
+    `${reqs.length} 回`,
+  );
+  if (shotsDir) await page.screenshot({ path: join(shotsDir, `flows-iv-${tag}.png`) });
+  await ctx.close();
+
+  // 失敗 → 読み込めませんでした + [再試行] → 成功
+  {
+    const ctx2 = await newContext(vp, { [WORKSPACE_KEY]: twoLegs });
+    let fail = true;
+    await ctx2.route('**/fixtures/atm_iv**', (route) =>
+      fail
+        ? route.fulfill({
+            status: 503,
+            contentType: 'application/json',
+            body: '{"error":"unavailable"}',
+          })
+        : route.fallback(),
+    );
+    const p2 = await ctx2.newPage();
+    await p2.goto(pageUrl('next'));
+    await waitReady(p2, 'next');
+    if (isPc) await p2.click('section.panel .panel-head .seg button:has-text("IV 推移")');
+    else {
+      await setShell(p2, 'smile', 'peek');
+      await p2.click('section.smile .panel-head .seg button:has-text("IV 推移")');
+    }
+    const failedShown = await p2
+      .waitForSelector('section.smile .iv-failed button', { timeout: 5000 })
+      .then(() => true)
+      .catch(() => false);
+    fail = false;
+    if (failedShown) await p2.click('section.smile .iv-failed button');
+    const ok = await p2
+      .waitForSelector('section.smile .iv-wrap svg', { timeout: 10000 })
+      .then(() => true)
+      .catch(() => false);
+    check(
+      `#79 ${tag} 失敗（503）で「読み込めませんでした」と [再試行]、押すと描く`,
+      failedShown && ok,
+    );
+    await ctx2.close();
+  }
 }
 
 // 開く URL（#91: 既定はクエリなし。--parts は ?parts）

@@ -68,6 +68,7 @@ option-simulator の画面を「書類」から「計器」に作り直すため
 - 舞台の中はページをスクロールさせない（`touch-action: none`）。スクロールはシートの中だけ
 - 板の表は 5 列（K・bid・ask・IV b/a・Δ）、put / call はセグメントで切替
 - 読み取りは 3 つ（指定日の損益・満期・Δ）。Θ・V・受取はシートの指標で見る
+- スマイルのパネルの見出しに **[スマイル | IV 推移]**（#79。ドックは 5 のまま。IV 推移は §4.7）
 
 ### 2.3 タブレット（720〜1199px、例 900×1100）
 
@@ -83,6 +84,7 @@ option-simulator の画面を「書類」から「計器」に作り直すため
 - 2 列。左 = 舞台 + シナリオ（常設なのでドックに「シナリオ」は無い）、右 = ドックで切り替える 1 枚（ポジション / 板 / 指標 / スマイル）
 - シナリオのステッパーは 2 行 2 列（シナリオの幅 ≈ 518px < 600px。#83）。シナリオの高さは画面の高さの 40%（40dvh）まで（それより高ければ中だけスクロール。舞台を縮めすぎない）
 - 読み取りは 5 つ（指定日・満期・Δ・Θ・V）。個数は舞台の幅のコンテナクエリで決める（< 480px で 3、480〜599px で 5、≥ 600px で 6。#82）
+- スマイルのパネルの見出しに **[スマイル | IV 推移]**（#79。ドックは 4 のまま）
 
 ### 2.4 PC（≥ 1200px、例 1440×900）
 
@@ -103,7 +105,7 @@ option-simulator の画面を「書類」から「計器」に作り直すため
 - 列の比: 市場 `minmax(340px, 30%)` / 舞台 `1fr` / 作業台 `minmax(360px, min(28%, 420px))`。1280 で舞台 ≈ 540px、1440 で ≈ 600px、1800 で ≈ 760px
 - 板の列数は **板の枠の幅** で決める（≥ 540px で 9 列、≥ 410px で 7 列 = Δ 無し、未満は 5 列 + put/call セグメント）。1800px 以上で 9 列になる。枠の幅は `section.board` の幅（枠線を含む。1800×1000 で 540px、1440×900 で 432px、1280×800 で 384px）で測る（`.panel-body` の `clientWidth` は枠線の 1px を除くので 1800 で 539px になり 9 列にならない。#85）。実機の等幅（Menlo / SF Mono、半角 0.6em）で 322 行の板の最小幅は 9 列 475px・7 列 403px（§5 の `table.board` の詰め方 + バッジを K の数字の下に積む）。試作品の CSS（セルの左右 5px・ボタン 8px・バッジを K の左右）では 9 列 585px・7 列 502px が要り入らない
 - 舞台・シナリオはコンテナクエリで自分の幅に合わせる（読み取りの個数・ステッパーの列数・拡大ボタンの表示）。読み取りは舞台の幅 ≥ 600px で 6 つ（480〜599px は 5 つ、< 480px は 3 つ）。シナリオのステッパーは幅 ≥ 600px で 1 行 4 列（1440 のシナリオ ≈ 605px。4 列では ± を 24px に詰め、値の欄 ≈ 83px に最長の「−27,100 円」≈ 71px が入る）、未満は 2 行 2 列（#83）
-- ドックは無い。板 / スマイルは市場列のセグメントで切替。各列は独立にスクロール
+- ドックは無い。板 / スマイル / IV 推移（#79）は市場列のセグメントで切替。各列は独立にスクロール
 
 ---
 
@@ -306,6 +308,19 @@ option-simulator の画面を「書類」から「計器」に作り直すため
 
 ---
 
+### 4.7 IV 推移（#79）
+
+ATM IV の 30 日固定（optionchan の表 `atm_cm_iv` の `iv30`、%）の推移。今の IV が過去に比べてどれだけ高いかを見てから建てる（IV スパイクを売る戦略）ための計器。
+
+- 置き場所: PC は市場の列のセグメント `[板 | スマイル | IV 推移]`（`MARKET_VIEWS`。描くのは `section.smile` の領域）、スマホ・タブレットはスマイルのパネルの見出しの `[スマイル | IV 推移]`（`SMILE_VIEWS`。ドックは増やさない。オーナー判断 4）。状態は `ShellState.market` 1 つ（PC 以外では `board` はスマイル）
+- 並び: 見出し行（「IV 推移」・Seg・ⓘ）→ 道具の行（足 `[1分 5分 15分 1時間 日足]`・形 `[ローソク | 線]`・最新化 ⟳）→ 読み取りの 1 行（カーソルの足の時刻と 始 / 高 / 安 / 終。カーソルが無ければ最新の足。右端は「確定前」）→ 描画域（自前の SVG）→ 凡例。360px で道具の行は 1 行（Seg の左右を詰め、パネルの幅 < 400px では文字を 11px に）
+- 読み込み: 起動時は読まない。初めて見えたときに今の足の右端の 1 回分（1 分 3 日・1 時間 60 日・日足 365 日）。閉じて開き直しても読み直さない。⟳ で右端を読み直し、時刻をキーにつなぐ。トップバーの [最新] では読み直さない。読み中は描画域に「読み込み中…」（足があれば右上に「更新中…」）、失敗は「読み込めませんでした」+ [再試行]（足があれば右上に「更新できません」+ [再試行]）、0 本は「データがありません」。トーストは出さない
+- 足: 既定 1 時間。5 分・15 分は 1 分の読み込みから束ねる。足を替えても見ていた時間の範囲を保つ
+- 操作: ドラッグ / 1 本指 = パン、ホイール・ピンチ = 拡大（カーソル / 指の位置を固定）、ダブルタップ / ダブルクリック / R = 初期表示、+ − ← → は描画域にフォーカスしたとき（`useChartGestures`。スマイル・損益グラフと同じ）。PC のホバー・タッチの長押し = カーソル（読み取りの 1 行と縦の点線）。タップでカーソルを外す。, . で 1 本ずつ
+- 描画: 横軸は足の index（取引の無い時間・休日は詰まる）、時刻の目盛りは JST（細かい区切りから、ラベルが重ならない（間引くのが 3 割まで）最も細かいもの。日中は 時:分、日付が変わる所は 月/日、日足は 月 / 年）。縦軸は見えている足の安値〜高値に余白。ローソクは陽線 `--gain`・陰線 `--loss`、線は `--accent`。欠け（立会中に max(足, 30 分) 以上の空き）で線を切る（1 本だけの区間は点）。右端の足は進行中として薄く（`.iv-bar.progress` / `.iv-line.progress`）
+- 初期表示: 右端から 1 分 240・5 分 150・15 分 120・1 時間 120・日足 100 本 + 右に 3 本の余白。最小幅 10 本
+- 段 C で足す: 左へのパンの追加読み込み（端から 10 本・250ms・同時 1 本・左 3 回空で止める・上限）、「今」の 1 点（今の板から optionchan と同じ定義の iv30）、シナリオの Δσ を当てた水準の線
+
 ## 5. 部品の一覧
 
 | 部品 | 用途 | 仕様 |
@@ -452,7 +467,7 @@ option-simulator の画面を「書類」から「計器」に作り直すため
 | `Loader`（最新 / ファイルを開く… / 表示中） | トップバー [最新]、⋯ > ファイルを開く…、市場ピルのポップオーバーに「表示中」。#87 で `ui/next/TopBar.tsx` | dev の fixture 選択は ⋯ に（`menuitemradio`） |
 | `Header`（板の時刻・鮮度・日経・先物・F・ATM・前提） | 市場ピル（要約）+ ポップオーバー（全文）。ATM 基準は設定。#87 で `ui/next/top/MarketPill.tsx`（表示モデル `ui/view/marketPill.ts`。`headerModel` の文字列を選ぶだけ） | 「古い板」「A で代用」「古い」はピルのタグ。ATM の基準の切替は ⋯ > 設定…（#87 (C)。`ui/next/SettingsDialog.tsx`） |
 | `.persist-notes`（復元・保存の知らせ） | トースト。保存できない / 別タブ / 新しい版はトップバーの警告タグ + ポップオーバー。#87 で `ui/next/top/WarnTags.tsx`・共有を開く確認は `ui/next/top/ShareConfirm.tsx`（振り分けは `ui/view/notices.ts`） | 文言は `persistNote` のまま |
-| `nav.tabs`（限月） | 板 / スマイルのセグメント。#85 で共用の `ui/next/market/MonthSeg.tsx`（文字 `11月限`・`aria-label` `2026-11 限`。選択肢は `ui/view/boardPanel.ts` の `monthSegOptions`） | 市場の見え方の一覧は `ui/view/shell.ts` の `MARKET_VIEWS`（#79 が 1 行足す） |
+| `nav.tabs`（限月） | 板 / スマイルのセグメント。#85 で共用の `ui/next/market/MonthSeg.tsx`（文字 `11月限`・`aria-label` `2026-11 限`。選択肢は `ui/view/boardPanel.ts` の `monthSegOptions`） | 市場の見え方の一覧は `ui/view/shell.ts` の `MARKET_VIEWS`（#79 で IV 推移を 1 行足した。スマホ・タブレットのスマイルのパネルは `SMILE_VIEWS`） |
 | `Board`（ツール行・表） | 板パネル（市場列 / 引き出し）。#85 で `ui/next/regions/Board.tsx` + `ui/next/market/BoardMonth.tsx`（表示モデル `ui/view/boardPanel.ts`） | 列数は枠幅で 9 / 7 / 5 |
 | `PnlChart`（操作行・描画域・凡例・ピン一覧） | 舞台（凡例行・描画域・レール）。縦軸モード・拡大は ⋯ とボタン。ピン一覧は凡例のポップオーバー | [たたむ] は廃止（シート全開で舞台がミニに） |
 | `WorkTabs`（BOX タブ・＋・⋯） | トップバーのチップ。⋯ は「作業中のタブをもう一度押す」 | `ui/next/top/BoxTabs.tsx`・`RenameDialog.tsx`・`ShareUrlDialog.tsx`・`useShareCopy.ts`（表示モデル `ui/view/boxTabs.ts`。#87 (B)） |
@@ -461,6 +476,7 @@ option-simulator の画面を「書類」から「計器」に作り直すため
 | `Positions`（行・詳細・全クリア） | ポジション（同じ形）。全クリアは ⋯。#84 で `ui/next/regions/Positions.tsx`（表示モデル `ui/view/positionsRegion.ts`） | 確認ダイアログなし（× と全クリアはトーストの [元に戻す]） |
 | `Metrics`（単位・手数料・指標・足別・テール表） | 指標パネル（タイル + 内訳の折りたたみ + テール表）。#86 で `ui/next/regions/Metrics.tsx`（表示モデル `ui/view/metricsPanel.ts`）。単位・手数料は ⋯ > 設定…（#87 (C)。`ui/next/SettingsDialog.tsx`、表示モデル `ui/view/settings.ts`）。足別はポジションの詳細（#84） | 内訳は今の `dl.metrics-list` と同じ順・同じ桁 |
 | `Smile` | スマイルパネル。#85 で `ui/next/regions/Smile.tsx` + `ui/next/market/SmilePlot.tsx`（表示モデル `ui/view/smilePanel.ts`。座標は今の `ui/view/smile.ts`） | 拡大は見出し行、操作行はグラフの下 |
+| （新規。今の画面に無い。optionchan のビューアーの `/atm_iv`） | IV 推移（#79）。PC は市場の Seg、スマホ・タブレットはスマイルのパネルの中の切替。`ui/next/market/IvHistory.tsx` + `IvPlot.tsx`（表示モデル `ui/view/ivHistory.ts`、読み込みの規則 `ui/view/ivLoad.ts`、状態 `ui/components/useIvHistory.ts`） | §4.7。ライブラリは使わない（K12・K13） |
 | `Hedge` | ポジションの末尾の節。目標 Δ・限月は ⋯ > ヘッジの設定…（#84。`ui/next/regions/Positions.tsx` の節と `HedgeDialog.tsx`） | |
 | `LegForms`（先物 / 手入力 OP） | ポジションの ⋯ > 「足を追加…」のダイアログ（#84。`ui/next/regions/LegDialog.tsx`、検証は `ui/view/positionsRegion.ts`） | |
 | `Book`（保存一覧） | ⋯ > 保存一覧（N）…（ダイアログ。形は今のまま）。#87 (C) で `ui/next/BookDialog.tsx`（表示モデルは `ui/view/bookList.ts` のまま）。⋯ の項目は `ui/view/topMenu.ts` | 変えたのは [上書き] だけ（即実行 + [元に戻す]） |
@@ -515,6 +531,7 @@ option-simulator の画面を「書類」から「計器」に作り直すため
 - **検査（#91）**: 既定の実行・`--flows` の URL はクエリなし（`--parts` は `?parts`）。`--legacy` は無い（知らない引数 = exit 2）。旧画面と比べていた手順のうち #86 AC-10(a)(b)・#87 AC-11(d)(e) は `scripts/uiCheck.expect.json`（旧画面を消す前に旧画面の DOM から控えた値。合成の板・架空の値と、出どころの commit・日付・`fixtures/synthetic/latest.json` と足 2 本の作業の sha256）と比べる。sha256 が控えと違えば「期待値が古い」で fail にする（旧画面が無いので取り直せない。その PR で vitest の純関数の比較 = `tests/ui/metricsPanel.test.ts`・`marketPill.test.ts` に寄せるかを決める。黙って skip しない）。#85 AC-12 は再読み込みの後の作業の保存の `ui.*`（旧画面が読んでいたのと同じキー）、#81 AC-11(b)(d)・#87 AC-13 は古い入口（`?ui=next`・`?ui=legacy`）で開く手順に置き換えた。既定の実行の全状態で、旧のクラス名（`old_classes`。旧 `ui/style.css` のセレクタにあって新しい CSS に無い名前）の要素が 0 個（`querySelectorAll`。外れたら失敗）。新しい CSS で一覧の名前を使うときは、その PR で `old_classes` からその名前を外し、理由を書く（それ以外は手で編集しない）。**ui:check は CI に入れない**: Playwright のブラウザの取得・`--flows` の所要時間・Long Animation Frame の揺れ（#85 AC-10(b)・#87 AC-17）のため。画面を触る PR に出力を貼る運用を続ける。控え（`header.*.text`）には同梱のカレンダーの版の日付も入るので、`data/calendar/calendar.json` を作り直しても古くなる（`#87 AC-11(e)` が「足りない」日付のトークンで fail したら、まずカレンダーの更新を疑う）
 - **動き**（#91 段 C。§6）: 時間はトークン（`--dur-fast` 120ms・`--dur` 180ms・`--dur-ro` 200ms・`--dur-line` 220ms。`prefers-reduced-motion: reduce` で 0ms）だけで書き、ms を直書きしない。線と塗りは `stage.css` の `transition: d var(--dur-line) ease-out`、読み取りの数字は `color var(--dur-ro)`、足マーカーは `@keyframes legmark-in`（`--marker-rise` = `MARKER_BAND_PX`）、シートは `shell.css` の `height var(--dur)`。連続の変更の間は舞台の `.stage-main` の `[data-live]`（押下・パルス）か `.live`（大きさの変化・連打）で線・塗り・読み取りの transition を `none` にする（マーカーの animation は切らない。外したときに全部のマーカーで始め直すため）。`.live` の規則は `ui/view/motion.ts` の純関数（`liveNext`・`liveOn`・`LIVE_SETTLE_MS` = `PIN_SETTLE_MS`）、時刻とタイマーは `ui/next/live.ts` のストア（`liveHold()` = 押している間・離して 2 フレーム後に外す、`livePulse()` = 最後から 120ms、`useLiveAttr(ref)` = 今の値を要素の `data-live` 属性に直接入れる（Preact の props に無い属性なので描き直しと競合せず、切り替えで舞台を描き直さない。`style` 属性ではないので CSP の規則の内）、document の keydown（capture）で `repeat` のときパルス）。発生源は `Stage` の `.stage-main` の pointerdown（capture）・wheel（capture）と、舞台の大きさの変化・連打（線の `d` の文字列が前の変化から `LINE_MS` 未満で変わった。`liveBurst`。どちらも描画の中で前の値と比べて同じ描画で付け、パルスで保つ）、`Stepper` のスクラブ・ホイール・± の長押しの 2 段目から（`dispatch` より先に呼ぶ = 同じ描画に入る）。凡例行（プリセット・ズーム・ピン）は `.stage-main` の外なので離散のまま。既存の `.chart.surf.live`（#88）はそのまま。`dispatch` の中身・回数・保存は変えない。**検査**: 既定の実行と `--parts` のコンテキストは `reducedMotion: 'reduce'`（終わった後の配置を測る）、`--flows` は `no-preference`（実際の動きで測る。動きの直後に配置・線を読む手順は `settleMotion` で CSS の transition と `legmark-in` の終わりを待つ）。1〜5 の行き先の枠には `role="group"` と `aria-label`（`ui/view/keys.ts` の `PANEL_FOCUS_LABEL`。隠している側の板の表には付けない）。板の ATM へ跳ぶ要求は `NextApp` の `atmJumpDone`（ref）で 1 回だけ消費する（`Board` を作り直しても跳ばない。`Board` の省略可能な `atmJumpDone`）。板を読み直した（`chain` が新しいオブジェクト）ときに枠が ATM へ戻るのは #85 の「初めて見えたときに ATM へ」（強調なし）の規則で、跳ぶ要求とは別（手のスクロールは保たない）
 
+- **IV 推移**（#79 段 B。§4.7）: 読み込みと見え方（足・形・表示範囲・足の切替の前の時間の範囲）は `NextApp` に常駐する `ui/components/useIvHistory.ts`（DOM を持たない。fetch・AbortController だけ。パネルを閉じても残る・保存しない）。規則は純関数の `ui/view/ivLoad.ts`（reducer。出す要求・止める要求を返す）と `ui/view/ivHistory.ts`（欠け・束ね直し・表示範囲・描画の座標）。見えているかは `ivVisible(shell, tier)`（`ui/view/shell.ts`）。データ元は本番は `/api/atm_iv`、dev は合成の板・ファイルを表示中なら `/fixtures/atm_iv`（`scripts/devFixtures.mjs` の `synthAtmIv`。架空の値・決まった関数。合成の板の `snapshot_at` を今、表の最後の行をその 50 分前とし、深夜 02 時台は NULL）。取引の無い平日は `Calendar.nonTradingDays`（`is_trading_day = false`）。CSS は `css/iv.css`。検査は `npm run ui:check` の既定の実行に IV 推移を開いた状態（4 幅 × ダーク / ライト・スマホはシート 3 段階・線のモード）、`--flows` に要求の回数（起動 0 → 開く 1 → 開き直し 1 → ⟳ 2 → 足の切替 → [最新] で増えない）・進行中の足・失敗と [再試行]
 ---
 
 ## 11. 論点と決定（2026-10-16）
@@ -688,3 +705,9 @@ option-simulator の画面を「書類」から「計器」に作り直すため
 - 照合（#91 の PR）: 9 の 16 部品 → 新しい置き場所と存在を確かめる検査（`ui:check` の項目名 / テスト名）が 16 / 16、改訂前のマニュアルの §2〜§15 の見出し 51 個 → 改訂後の節が 51 / 51（欠け 0。見出しごとの廃止は [たたむ] の 1 個 = 決定 7、節の中での廃止は確認ダイアログ = 決定 8）。マニュアルの中のリンクは全部が同じファイルの見出しのアンカーに一致（照合のスクリプトは PR に書き、コミットしない）
 - EPIC #92 の終了条件 1・2・5・6・7・8 の判定表（値・コマンド・日付）は #91 の PR に載せた。終了条件 6 の Long Animation Frame の揺れ・322 行の板の重さは性能の見直しの別 Issue へ、読み上げの領域・パレットの inert・h1・チップ行・連打の競合と実機の手動確認（iPhone・読み上げソフト・日本語入力・Firefox の `d` の補間）は a11y と操作の見直しの別 Issue へ移した（性能 #123、a11y と操作 #124）
 - 記録（未対応の差。判定しない）: 旧画面の凡例の下にあった **ピンの一覧**（条件・満期の最大損失・シナリオ点の損益）は新しい画面に無い（4.5 の「一覧は凡例の ① にマウスを載せた / 長押しのポップオーバー」は未実装。表示モデル `pinListModel` は残っている）。マニュアルには今ある操作だけを書いた。戻す作業は #125
+
+### 2026-10-18 IV 推移 (B) 表示（#79 段 B）
+
+- §2.2・§2.3: スマイルのパネルの見出しに [スマイル | IV 推移]。§2.4: 市場の Seg に IV 推移
+- §4.7 を足した（置き場所・並び・読み込み・足・操作・描画・初期表示。段 C の追加読み込み・「今」・シナリオの水準は予告）
+- §9: `MARKET_VIEWS` に 1 行足した注記と、IV 推移の行。§10.1: IV 推移の状態・規則・dev の応答・検査

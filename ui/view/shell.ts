@@ -1,6 +1,6 @@
 /**
  * 画面の見た目の状態（#81。docs/ui-redesign.md §2・§10.1・§11-7）。
- * パネル・シートの開き具合・市場（板 / スマイル）。ui/state.ts には入れず、保存しない（再読み込みで既定に戻る）。
+ * パネル・シートの開き具合・市場（板 / スマイル / IV 推移）。ui/state.ts には入れず、保存しない（再読み込みで既定に戻る）。
  * 純関数（Preact に依存しない）。部品は ui/next/Shell.tsx。
  */
 
@@ -10,13 +10,24 @@ export type PanelId = 'positions' | 'board' | 'scenario' | 'metrics' | 'smile';
 /** スマホのシート。hidden = 隠す（舞台が最大）/ peek = 覗く（42dvh）/ full = 全開（舞台はミニ 92px） */
 export type SheetStage = 'hidden' | 'peek' | 'full';
 /**
- * 市場の見え方の一覧（PC の見出しの Seg。#85。#79 の IV 推移はここに 1 行足す）。
+ * 市場の見え方の一覧（PC の見出しの Seg。#85。#79 で IV 推移を 1 行足した）。IV 推移は PC では市場の列の
+ * section.smile の領域に描く（板と同じく市場の列を入れ替える）。
  */
 export const MARKET_VIEWS = [
   { value: 'board', text: '板' },
   { value: 'smile', text: 'スマイル' },
+  { value: 'iv', text: 'IV 推移' },
 ] as const;
 export type MarketView = (typeof MARKET_VIEWS)[number]['value'];
+/**
+ * スマホ・タブレットのスマイルのパネルの見出しの Seg（#79。オーナー判断 4: ドックを増やさず、パネルの中で切り替える）。
+ * 送るのは同じ { type: 'market' }（PC 以外では board は「スマイル」と同じ）
+ */
+export const SMILE_VIEWS = [
+  { value: 'smile', text: 'スマイル' },
+  { value: 'iv', text: 'IV 推移' },
+] as const;
+export type SmileView = (typeof SMILE_VIEWS)[number]['value'];
 /** 舞台のグラフの表示（凡例行の [線 | 面]。#88） */
 export const CHART_MODES = [
   { value: 'line', text: '線' },
@@ -50,6 +61,22 @@ export type ShellAction =
 
 const PHONE_DOCK: readonly PanelId[] = ['positions', 'board', 'scenario', 'metrics', 'smile'];
 const TABLET_DOCK: readonly PanelId[] = ['positions', 'board', 'metrics', 'smile'];
+
+/** スマイルのパネル（PC は市場の列の section.smile）に描くもの（PC 以外では board は smile） */
+export function smileView(s: ShellState): SmileView {
+  return s.market === 'iv' ? 'iv' : 'smile';
+}
+
+/**
+ * IV 推移が見えているか（#79。初めて true になったときに右端を読む）。PC は市場が iv、タブレットはパネルがスマイルで
+ * iv、スマホはそれに加えてシートが hidden でない
+ */
+export function ivVisible(s: ShellState, tier: Tier): boolean {
+  if (s.market !== 'iv') return false;
+  if (tier === 'pc') return true;
+  if (visiblePanel(s, tier) !== 'smile') return false;
+  return tier === 'tablet' || s.sheet !== 'hidden';
+}
 
 /** 舞台のグラフの表示（既定 line） */
 export function chartMode(s: ShellState): ChartMode {

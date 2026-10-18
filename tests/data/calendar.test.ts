@@ -62,6 +62,14 @@ describe('AC-1: validateCalendarJson・buildCalendar（検証）', () => {
     expect(c.origin).toBe('api');
   });
 
+  it('#79: 取引の無い平日 = is_trading_day = false の日だけ（祝日取引の実施日は入らない）。壊れた版は空', () => {
+    const c = buildCalendar(synthCalendar(), 'api');
+    expect([...c.nonTradingDays]).toEqual(['2026-12-31', '2027-01-01']);
+    expect(c.nonTradingDays.has('2027-02-11')).toBe(false);
+    expect(c.holidays.has('2027-02-11')).toBe(true);
+    expect([...buildCalendar({ schema_version: 2 }, 'api').nonTradingDays]).toEqual([]);
+  });
+
   it('版の日付は version_at の JST の日付（UTC の表記でも）', () => {
     // 2026-10-13T15:30Z = 10/14 00:30 JST
     expect(
