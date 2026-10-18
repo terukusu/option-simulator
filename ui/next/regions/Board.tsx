@@ -1,4 +1,5 @@
 import type { ComponentChildren } from 'preact';
+import type { MutableRef } from 'preact/hooks';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks';
 import type { Chain } from '../../../data';
 import type { AtmBasis, OptionType } from '../../../model';
@@ -67,6 +68,11 @@ export interface BoardRegionProps {
    * jump(atmK)。表がまだ無い（板を開いた直後・幅 0）あいだは ATM_JUMP_FRAMES まで次のフレームで試し直す
    */
   atmJump?: number;
+  /**
+   * 消費した「ATM へ」の連番（#91 段 C。NextApp の ref）。渡すと、連番がこれと違うときだけ 1 回跳び、跳べた・試し直しを
+   * 使い切ったらこれに入れる（読み直しなどで Board を作り直しても最後の要求でもう一度跳ばない）。省略時は値が変わるたび
+   */
+  atmJumpDone?: MutableRef<number>;
 }
 
 /** 外からの ATM へで表ができるのを待つフレームの上限 */
@@ -188,14 +194,18 @@ function BoardView(p: BoardRegionProps) {
     }
     return scrollTo(atmK, true);
   };
-  const { atmJump = 0 } = p;
+  const { atmJump = 0, atmJumpDone } = p;
   useEffect(() => {
-    if (atmJump <= 0) return;
+    if (atmJump <= 0 || (atmJumpDone && atmJumpDone.current === atmJump)) return;
     let n = 0;
     let frame = 0;
     const tick = () => {
       frame = 0;
-      if (!jumpRef.current() && ++n < ATM_JUMP_FRAMES) frame = requestAnimationFrame(tick);
+      if (!jumpRef.current() && ++n < ATM_JUMP_FRAMES) {
+        frame = requestAnimationFrame(tick);
+        return;
+      }
+      if (atmJumpDone) atmJumpDone.current = atmJump;
     };
     tick();
     return () => {

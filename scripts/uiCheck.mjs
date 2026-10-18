@@ -88,12 +88,17 @@
 //                                          390×844 と 1440×900、900×1100 は参考）とコマンドパレットの手順（#89 段 B AC-B5:
 //                                          Ctrl + K で開く・↑↓ と押せない行・急落・足の追加と [元に戻す]・ATM へ・テーマ / 設定・
 //                                          Esc / 背景で閉じてフォーカスが戻る・開いている間の 1 / G / T と 2 つ目・メニュー / 設定の上・
-//                                          322 行の板で開く / 打つの Long Animation Frame。390×844 と 1440×900）
+//                                          322 行の板で開く / 打つの Long Animation Frame。390×844 と 1440×900）と動きの手順
+//                                          （#91 段 C AC-C1・C2: プリセットの直後の線の transition d 0.22s・ドラッグ中の .live と 0s・
+//                                          足マーカーの legmark-in 120ms・シート peek → full の height 0.18s、reducedMotion: 'reduce' で
+//                                          0s / なし。AC-C6: 読み直しで ATM へ跳び直さない。AC-C7: 1〜5 の行き先の名前。AC-C3: 連続の
+//                                          操作の Long Animation Frame 0 件と離散の変更の件数（参考）。390×844 と 1440×900）
 //   --url <base>                           dev サーバーを起こさず、その URL を使う（例 http://127.0.0.1:5173/?parts）
 //   --dom <file>                           body の下の要素の tag.class の並びを書き出す（DOM の変化の比較用）
 //   --shots <dir>                          スクリーンショットを書く（合成の板だけ。リポジトリに入れない）
 //   --max-wraps <n>                        折り返しが n 件を超えたら失敗にする（渡したときだけ判定）
 //
+// 動き（#91 段 C）: 既定の実行・--parts は reducedMotion: 'reduce'（終わった後の配置を測る）、--flows は no-preference。
 // 縦・横 = ページのスクロール量（scrollHeight − innerHeight・scrollWidth − innerWidth）。body が切っている（overflow: hidden）
 // はみ出しも数える（body の scrollHeight − clientHeight との大きい方）。
 // 既定の実行の全状態（report のすべて）で、旧画面の CSS にだけあったクラス名（scripts/uiCheck.expect.json の old_classes）の
@@ -234,12 +239,20 @@ try {
   process.exit(2);
 }
 
+/**
+ * 動き（#91 段 C。§6）のエミュレーション: 既定の実行・--parts は reduce（動きが終わった後の配置を測る。途中の高さ・線で
+ * 揺れない）、--flows は no-preference（実際の動きで測る）。コンテキストはすべてこの値で作る
+ */
+const REDUCED_MOTION = flows ? 'no-preference' : 'reduce';
+
 /** localStorage を入れた新しいコンテキスト（UI を操作しない・再読み込みで入れ直さない） */
-async function newContext(viewport, storage, colorScheme = 'dark') {
+async function newContext(viewport, storage, colorScheme = 'dark', extra = {}) {
   const localStorage = Object.entries(storage).map(([name, v]) => ({ name, value: v }));
   return browser.newContext({
     viewport,
     colorScheme,
+    reducedMotion: REDUCED_MOTION,
+    ...extra,
     storageState: { cookies: [], origins: localStorage.length ? [{ origin, localStorage }] : [] },
   });
 }
@@ -273,6 +286,28 @@ async function closeNotes(page) {
       timeout: 3000,
     })
     .catch(() => {});
+}
+
+/**
+ * 動き（#91 段 C）が終わるまで待つ: CSS の transition（線・塗りの d・読み取りの色・シートの高さ）と足マーカーの
+ * legmark-in の finished（上限 1 秒）。板の強調（0.9 秒）・トーストは待たない。--flows で動きの直後に配置・線を読む手順に挟む
+ */
+async function settleMotion(page) {
+  await page.evaluate(() =>
+    Promise.race([
+      Promise.all(
+        document
+          .getAnimations()
+          .filter(
+            (a) =>
+              (typeof CSSTransition !== 'undefined' && a instanceof CSSTransition) ||
+              a.animationName === 'legmark-in',
+          )
+          .map((a) => a.finished.catch(() => null)),
+      ),
+      new Promise((r) => setTimeout(r, 1000)),
+    ]),
+  );
 }
 
 /** ページのスクロールと折り返し（EPIC の as-is と同じ規則） */
@@ -665,6 +700,7 @@ async function setShell(page, panel, sheet) {
     }
     await page.waitForTimeout(120);
   }
+  await settleMotion(page); // シートの高さ（#91 段 C。180ms）
   const cur = await st();
   return cur.panel === panel && cur.sheet === sheet;
 }
@@ -1615,7 +1651,10 @@ async function runFlows() {
     await page.waitForTimeout(1500); // 自動保存（500ms の debounce）
     await page.goto(next);
     await waitReady(page, 'next');
-    const rows = await page.locator('.dock button[data-panel="positions"] .cnt').textContent();
+    const rows = await page
+      .locator('.dock button[data-panel="positions"] .cnt')
+      .textContent()
+      .catch(() => null);
     const saved = await page.evaluate((k) => {
       try {
         const ws = JSON.parse(localStorage.getItem(k) ?? 'null');
@@ -1841,6 +1880,7 @@ async function runFlows() {
       await page.mouse.down();
       await page.mouse.move(x, y + dy, { steps: 4 });
       await page.mouse.up();
+      await settleMotion(page); // シートの高さ（#91 段 C）が止まってから次のつまみを測る
     };
     await drag(-60);
     seq.push(await st());
@@ -1902,6 +1942,10 @@ async function runFlows() {
   // #89 段 B コマンドパレットの手順（AC-B5）
   for (const vp of [phone, pc]) await paletteFlows(vp);
   for (const vp of [phone, pc]) await paletteWideFlow(vp);
+  // #91 段 C 動き（AC-C1・C2・C6・C7）と長いフレーム（AC-C3）
+  for (const vp of [phone, pc]) await motionFlows(vp);
+  for (const vp of [phone, pc]) await motionFlows(vp, true);
+  for (const vp of [phone, pc]) await motionLoafFlow(vp);
 }
 
 // ---- 舞台の手順（#82）
@@ -5740,6 +5784,7 @@ async function surfaceDprFlow() {
     viewport: { width: 1440, height: 900 },
     deviceScaleFactor: 2,
     colorScheme: 'dark',
+    reducedMotion: REDUCED_MOTION,
     storageState: { cookies: [], origins: [{ origin, localStorage }] },
   });
   const page = await ctx.newPage();
@@ -6041,6 +6086,7 @@ async function touchContext(storage) {
     isMobile: true,
     deviceScaleFactor: 2,
     colorScheme: 'dark',
+    reducedMotion: REDUCED_MOTION,
     storageState: { cookies: [], origins: localStorage.length ? [{ origin, localStorage }] : [] },
   });
 }
@@ -6858,6 +6904,467 @@ async function paletteWideFlow(vp) {
     loafOk && opened && l1.length === 0 && l2.length === 0,
     `${loafOk ? '' : 'LoAF を測れない・'}開く ${l1.map((d) => Math.round(d)).join(',') || 0} 件 / 打つ ${l2.map((d) => Math.round(d)).join(',') || 0} 件・${rows}`,
   );
+  await ctx.close();
+}
+
+/**
+ * #91 AC-C3（終了条件 6）: 動き（§6）を入れても長いフレームが増えないこと。クエリなし・390×844 / 1440×900。
+ * 連続の操作（ステッパー 3 本・レール 2 本・描画域のキー × 20 回、ハンドルのドラッグ、ホイールの拡大縮小、描画域のパン、
+ * 面の上のドラッグ）は 50ms 超が 0 件で判定。離散の変更（プリセット 5 種 = 急落・下落・反発・リセット・評価時刻の SQ、
+ * 枚数 ± 10 回・⇄・タブの切替・ピンの追加）は件数を参考の行に出す（判定しない。動きを入れる前と後の件数を PR に並べる）
+ */
+async function motionLoafFlow(vp) {
+  const tag = `${vp.width}x${vp.height}`;
+  const phoneSize = vp.width <= PHONE_MAX;
+  const ctx = await newContext(vp, { [WORKSPACE_KEY]: twoTabs });
+  await ctx.addInitScript(LOAF_INIT);
+  const page = await ctx.newPage();
+  await page.goto(pageUrl('next'));
+  await waitReady(page, 'next');
+  const loafOk = await page.evaluate(() => window.__loafOk === true);
+  const mark = () => page.evaluate(() => window.__loaf.length);
+  const since = (i) =>
+    page.evaluate(
+      (n) =>
+        window.__loaf
+          .slice(n)
+          .filter((d) => d > 50)
+          .map(Math.round),
+      i,
+    );
+  const center = async (sel) => {
+    const b = await page.locator(sel).first().boundingBox();
+    if (!b) throw new Error(`${sel} が無い`);
+    return { x: b.x + b.width / 2, y: b.y + b.height / 2, b };
+  };
+  const drag = async (from, dx, dy, steps) => {
+    await page.mouse.move(from.x, from.y);
+    await page.mouse.down();
+    await page.mouse.move(from.x + dx, from.y + dy, { steps });
+    await page.mouse.up();
+  };
+  const keys = async (sel, key, n) => {
+    await page.focus(sel);
+    for (let i = 0; i < n; i++) {
+      await page.keyboard.press(key);
+      await page.waitForTimeout(16);
+    }
+  };
+  const measureOp = async (fn) => {
+    const m = await mark();
+    await fn();
+    await page.waitForTimeout(400); // 動き（最長 220ms）が終わるまで
+    return since(m);
+  };
+  const reset = async () => {
+    await page.focus('.chart');
+    await page.keyboard.press('0');
+    await page.waitForTimeout(100);
+  };
+  const cont = [];
+  const disc = [];
+  if (phoneSize) await setShell(page, 'scenario', 'peek');
+  await reset();
+  const st = (f) => `section.scenario .stepper[data-name="${f}"] > .val`;
+  for (const [name, sel, key] of [
+    ['ステッパー Δσ のキー ↑ 20 回', st('dSigma'), 'ArrowUp'],
+    ['ステッパー d のキー ↑ 20 回', st('days'), 'ArrowUp'],
+    ['ステッパー ΔX のキー ↑ 20 回', st('dX'), 'ArrowUp'],
+    ['IV レールのキー ↓ 20 回', '.ivrail', 'ArrowDown'],
+    ['時間レールのキー ← 20 回', '.timerail', 'ArrowLeft'],
+    ['描画域のキー ← 20 回', '.chart', 'ArrowLeft'],
+  ]) {
+    cont.push([name, await measureOp(() => keys(sel, key, 20))]);
+  }
+  await reset();
+  cont.push([
+    'ハンドルのドラッグ 30 回の move',
+    await measureOp(async () => drag(await center('.chart .handle-hit'), 60, 0, 30)),
+  ]);
+  {
+    const c = await center('.chart');
+    const at = { x: c.b.x + c.b.width * 0.3, y: c.b.y + c.b.height * 0.35 };
+    cont.push([
+      'ホイールの拡大縮小 20 回',
+      await measureOp(async () => {
+        await page.mouse.move(at.x, at.y);
+        for (let i = 0; i < 20; i++) {
+          await page.mouse.wheel(0, i < 10 ? -60 : 60);
+          await page.waitForTimeout(16);
+        }
+      }),
+    ]);
+    cont.push(['描画域のパン 30 回の move', await measureOp(() => drag(at, -90, 0, 30))]);
+  }
+  await page.focus('.chart');
+  await page.keyboard.press('r');
+  await reset();
+  await toSurface(page);
+  await page.waitForTimeout(250);
+  {
+    const dot = await surfaceDot(page);
+    cont.push([
+      '面の上のドラッグ 30 回の move',
+      dot ? await measureOp(() => drag(dot, 60, -40, 30)) : null,
+    ]);
+  }
+  await toSurface(page, '線');
+  await reset();
+  for (const [name, n] of cont) {
+    check(
+      `#91 AC-C3 ${tag} ${name}で長いフレーム（50ms 超）0 件`,
+      loafOk && Array.isArray(n) && n.length === 0,
+      !loafOk
+        ? '未対応'
+        : n === null
+          ? '操作できない'
+          : `${n.length} 件${n.length ? ` ${n.join(',')}ms` : ''}`,
+    );
+  }
+
+  // 離散の変更（参考。判定しない）
+  for (const name of ['急落', '下落', '反発', 'リセット']) {
+    disc.push([
+      `プリセット ${name}`,
+      await measureOp(() => page.click(`section.scenario .chip:has-text("${name}")`)),
+    ]);
+  }
+  disc.push([
+    'プリセット 評価時刻の SQ',
+    await measureOp(() => page.click('section.scenario .chip:has-text("SQ")')),
+  ]);
+  await reset();
+  if (phoneSize) await setShell(page, 'positions', 'peek');
+  const qty = 'section.positions li.leg:nth-child(1) .stepper';
+  disc.push([
+    '枚数 ± 10 回',
+    await measureOp(async () => {
+      for (let i = 0; i < 10; i++) {
+        await page.click(`${qty} > button:${i % 2 === 0 ? 'last-child' : 'first-child'}`);
+        await page.waitForTimeout(16);
+      }
+    }),
+  ]);
+  disc.push([
+    '⇄',
+    await measureOp(() =>
+      page.click('section.positions li.leg:nth-child(1) button[data-op="flip"]'),
+    ),
+  ]);
+  await page.click('section.positions li.leg:nth-child(1) button[data-op="flip"]');
+  await page.waitForTimeout(300);
+  disc.push([
+    'タブの切替',
+    await measureOp(async () => {
+      await page.click('.boxtabs [role="tab"]:nth-child(2)');
+      await page.waitForTimeout(300);
+      await page.click('.boxtabs [role="tab"]:nth-child(1)');
+    }),
+  ]);
+  if (phoneSize) await setShell(page, 'positions', 'hidden');
+  disc.push([
+    'ピンの追加',
+    await measureOp(async () => {
+      await page.click('button[aria-label="ピン"]');
+      await page.click('[role="menuitem"]:has-text("今の線を残す")');
+    }),
+  ]);
+  console.log(
+    `      参考 #91 AC-C3 ${tag} 離散の変更の長いフレーム（50ms 超）: ${disc
+      .map(([n, l]) => `${n} ${l.length}${l.length ? `（${l.join(',')}ms）` : ''}`)
+      .join('・')}`,
+  );
+  await ctx.close();
+}
+
+/**
+ * #91 段 C（AC-C1・C2・C6・C7。docs/ui-redesign.md §6・§10.1「動き」）: クエリなし・390×844 / 1440×900。
+ * (a) プリセットを押した直後の線（指定日・満期）の transition が d 0.22s（と読み取りの色 0.2s）(b) ハンドル・IV レール・
+ * 時間レールを押してドラッグしている間 .stage-main の .live / [data-live]・線の transition-duration 0s、離して 200ms 後に .live が無い
+ * (c) 足を追加した直後の新しい足マーカーに legmark-in（120ms）(d) スマホのシート peek → full の直後に height 0.18s・
+ * 終わった後に縦・横 0 (e) reduced = reducedMotion: 'reduce' のコンテキストで (a)(c)(d) が 0s / animation なし
+ * (g) パレットの ATM へ → 板を手で 300px → [最新] で読み直す → scrollTop が ±1px (h) 1〜5 の行き先の名前が空でなく互いに違う
+ */
+async function motionFlows(vp, reduced = false) {
+  const tag = `${vp.width}x${vp.height}${reduced ? ' reduce' : ''}`;
+  const ac = reduced ? '#91 AC-C2' : '#91 AC-C1';
+  const phoneSize = vp.width <= PHONE_MAX;
+  const ctx = await newContext(
+    vp,
+    { [WORKSPACE_KEY]: twoLegs },
+    'dark',
+    reduced ? { reducedMotion: 'reduce' } : {},
+  );
+  const page = await ctx.newPage();
+  await page.goto(pageUrl('next'));
+  await waitReady(page, 'next');
+  const lineStyle = () =>
+    page.evaluate(() =>
+      [
+        ...document.querySelectorAll(
+          'section.stage .chart .ln.date, section.stage .chart .ln.expiry',
+        ),
+      ].map((el) => {
+        const cs = getComputedStyle(el);
+        return {
+          kind: el.classList.contains('date') ? 'date' : 'expiry',
+          prop: cs.transitionProperty,
+          dur: cs.transitionDuration,
+          anims: el.getAnimations().length,
+        };
+      }),
+    );
+  const live = () =>
+    page.evaluate(
+      () =>
+        document.querySelector('section.stage .stage-main')?.matches('.live, [data-live]') === true,
+    );
+  const frames = (n) =>
+    page.evaluate(
+      (k) =>
+        new Promise((r) => {
+          const f = (i) => (i <= 0 ? r() : requestAnimationFrame(() => f(i - 1)));
+          f(k);
+        }),
+      n,
+    );
+  const center = async (sel) => {
+    const b = await page.locator(sel).first().boundingBox();
+    if (!b) throw new Error(`${sel} が無い`);
+    return { x: b.x + b.width / 2, y: b.y + b.height / 2 };
+  };
+  const want = reduced ? '0s' : '0.22s';
+
+  // (a) プリセット
+  {
+    if (phoneSize) await setShell(page, 'scenario', 'peek');
+    await page.focus('.chart');
+    await page.keyboard.press('0');
+    await settleMotion(page);
+    // 前の線の変化から LINE_MS（220ms）未満の変更は連打 = 即時（§6）なので、間を空けてから押す
+    await page.waitForTimeout(300);
+    await page.click('section.scenario .chip:has-text("急落")');
+    const ls = await lineStyle();
+    const ro = await page.evaluate(() => {
+      const el = document.querySelector('section.stage .readout .ro .v');
+      return el ? getComputedStyle(el).transitionDuration : null;
+    });
+    check(
+      `${ac}(a) ${tag} プリセットを押した直後の指定日・満期の線の transition が d ${want}`,
+      ls.length === 2 &&
+        ls.every(
+          (l) =>
+            l.prop
+              .split(',')
+              .map((x) => x.trim())
+              .includes('d') && l.dur === want,
+        ),
+      `${ls.map((l) => `${l.kind} ${l.prop} ${l.dur}・animation ${l.anims}`).join(' / ')}`,
+    );
+    check(
+      `${reduced ? '#91 AC-C2' : '#91 §6'} ${tag} 読み取りの数字の色の transition が ${reduced ? '0s' : '0.2s'}`,
+      ro === (reduced ? '0s' : '0.2s'),
+      `${ro}`,
+    );
+    await settleMotion(page);
+    await page.click('section.scenario .chip:has-text("リセット")');
+    await settleMotion(page);
+  }
+
+  // (b) 連続の変更の .live（reduce では測らない）
+  if (!reduced) {
+    for (const [name, sel, dx, dy] of [
+      ['ハンドル', '.chart .handle-hit', 20, 0],
+      ['IV レール', '.ivrail .knob', 0, -20],
+      ['時間レール', '.timerail .knob', 20, 0],
+    ]) {
+      const at = await center(sel);
+      await page.mouse.move(at.x, at.y);
+      await page.mouse.down();
+      await page.mouse.move(at.x + dx, at.y + dy, { steps: 5 });
+      await frames(2);
+      const during = { live: await live(), ls: await lineStyle() };
+      await page.mouse.up();
+      // 離して 2 フレーム後に hold を外す。ドラッグの最後の線の変化は連打のパルス（LIVE_SETTLE_MS 120ms）でも保つ
+      await frames(2);
+      await page.waitForTimeout(200);
+      const after = await live();
+      check(
+        `#91 AC-C1(b) ${tag} ${name}のドラッグ中は .stage-main の .live / [data-live]・線の transition-duration 0s、離して 200ms 後に .live なし`,
+        during.live && during.ls.length >= 1 && during.ls.every((l) => l.dur === '0s') && !after,
+        `中 ${during.live}・${during.ls.map((l) => l.dur).join(',')}・後 ${after}`,
+      );
+      await settleMotion(page);
+    }
+    await page.focus('.chart');
+    await page.keyboard.press('0');
+    await settleMotion(page);
+  }
+
+  // (c) 足の追加 → 新しいマーカーに legmark-in
+  {
+    if (phoneSize) await setShell(page, 'board', 'peek');
+    const before = await page.evaluate(() =>
+      [...document.querySelectorAll('.chart .legmark')].map((m) => m.getAttribute('data-leg-id')),
+    );
+    await page.locator(`${ACTIVE_WRAP} tr.atm button[aria-label*=" bid "]`).first().click();
+    const anim = await page
+      .waitForFunction(
+        (ids) => {
+          const m = [...document.querySelectorAll('.chart .legmark')].find(
+            (x) => !ids.includes(x.getAttribute('data-leg-id')),
+          );
+          if (!m) return null;
+          return m.getAnimations().map((a) => ({
+            name: a.animationName ?? '',
+            dur: a.effect?.getTiming().duration ?? null,
+          }));
+        },
+        before,
+        { timeout: 3000 },
+      )
+      .then((h) => h.jsonValue())
+      .catch(() => null);
+    const ok = reduced
+      ? Array.isArray(anim) && !anim.some((a) => a.name === 'legmark-in')
+      : Array.isArray(anim) && anim.some((a) => a.name === 'legmark-in' && a.dur === 120);
+    check(
+      `${ac}(c) ${tag} 足を追加した直後の新しい足マーカーに ${reduced ? 'animation なし' : 'legmark-in（120ms）'}`,
+      ok,
+      JSON.stringify(anim),
+    );
+    await settleMotion(page);
+  }
+
+  // (d) スマホのシート peek → full の高さ
+  if (phoneSize) {
+    await setShell(page, 'scenario', 'peek');
+    await page.click('section.scenario .grabber');
+    const t = await page.evaluate(() => {
+      const el = document.querySelector('section.scenario');
+      if (!el) return null;
+      const cs = getComputedStyle(el);
+      return {
+        prop: cs.transitionProperty,
+        dur: cs.transitionDuration,
+        running: el
+          .getAnimations()
+          .filter((a) => a.transitionProperty === 'height')
+          .map((a) => a.effect?.getTiming().duration ?? null),
+        sheet: document.querySelector('.layout')?.getAttribute('data-sheet'),
+      };
+    });
+    await settleMotion(page);
+    const m = await measure(page);
+    const wantSheet = reduced ? '0s' : '0.18s';
+    check(
+      `${ac}(d) ${tag} シート peek → full の直後の高さの transition が ${wantSheet}${reduced ? '' : '（走っている）'}・終わった後に縦 0・横 0`,
+      t !== null &&
+        t.sheet === 'full' &&
+        t.prop
+          .split(',')
+          .map((x) => x.trim())
+          .includes('height') &&
+        t.dur === wantSheet &&
+        (reduced ? t.running.length === 0 : t.running.length === 1) &&
+        m.v === 0 &&
+        m.h === 0,
+      `${JSON.stringify(t)}・縦 ${m.v}・横 ${m.h}`,
+    );
+    await setShell(page, 'scenario', 'peek');
+  }
+  if (reduced) {
+    await ctx.close();
+    return;
+  }
+
+  // (g) AC-C6: パレットの ATM へ → 手で 300px → [最新]（読み直し。/api/chain を同じ合成の板に差し替える）。
+  //     atmJump の要求は 1 回で消費する = 読み直しの後に ATM への「跳び」（強調 .hit の付く jump）が起きない。
+  //     読み直しで板が新しいオブジェクトになると、#85 の規則（初めて見えたときに ATM へ。強調なし）で枠は ATM の位置に
+  //     戻る（手のスクロールは保たない）。Issue の AC-C6 の文言（scrollTop が読み直しの前と同じ）とはここが違う（handoff）
+  {
+    const boardText = readFileSync(join(root, FIXTURE_PATH), 'utf8');
+    await ctx.route('**/api/calendar**', (route) =>
+      route.fulfill({ status: 500, contentType: 'text/plain', body: 'x' }),
+    );
+    await ctx.route('**/api/chain**', (route) =>
+      route.fulfill({ status: 200, contentType: 'application/json', body: boardText }),
+    );
+    await page.evaluate(() => {
+      if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+    });
+    await openPalette(page);
+    await page.keyboard.type('ATM');
+    await page.waitForTimeout(100);
+    await page.keyboard.press('Enter');
+    await page.waitForTimeout(1200); // 強調（0.9 秒）が消えるまで
+    const top = await page.evaluate((sel) => {
+      const w = document.querySelector(sel);
+      if (!w) return null;
+      const atm = w.scrollTop;
+      w.scrollTop += 300;
+      return { atm, manual: w.scrollTop };
+    }, ACTIVE_WRAP);
+    await page.waitForTimeout(300);
+    // 読み直しの間に板の行へ強調（.hit = atmJump / [ATM] の jump）が付いたら記録する
+    await page.evaluate(() => {
+      window.__hit = 0;
+      const root = document.querySelector('section.board');
+      if (!root) return;
+      new MutationObserver(() => {
+        if (root.querySelector('tr.hit')) window.__hit += 1;
+      }).observe(root, {
+        subtree: true,
+        attributes: true,
+        attributeFilter: ['class'],
+        childList: true,
+      });
+    });
+    await page.click('header.top > button.btn');
+    await page.waitForSelector('.pill[data-state="loading"]', { timeout: 2000 }).catch(() => null);
+    await page.waitForSelector('.pill[data-state="ready"]', { timeout: 10000 });
+    await page.waitForTimeout(1000);
+    await closeNotes(page);
+    const after = await page.evaluate(
+      (sel) => ({ top: document.querySelector(sel)?.scrollTop ?? null, hit: window.__hit }),
+      ACTIVE_WRAP,
+    );
+    check(
+      `#91 AC-C6 ${tag} パレットの ATM へ → 板を手で 300px → [最新] で読み直しても ATM へ跳び直さない（強調なし）・枠は #85 の規則の ATM の位置（±1px）`,
+      top !== null && after.top !== null && after.hit === 0 && Math.abs(after.top - top.atm) <= 1,
+      `ATM ${top?.atm}・手 ${top?.manual} → 読み直し後 ${after.top}・強調 ${after.hit} 回`,
+    );
+  }
+
+  // (h) AC-C7: 1〜5 の行き先の名前
+  {
+    if (phoneSize) await setShell(page, 'positions', 'hidden');
+    const names = [];
+    for (const key of ['1', '2', '3', '4', '5']) {
+      await page.evaluate(() => {
+        if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+      });
+      await page.keyboard.press(key);
+      await page.waitForTimeout(250);
+      names.push(
+        await page.evaluate(() => {
+          const el = document.activeElement;
+          return {
+            role: el?.getAttribute('role') ?? null,
+            label: el?.getAttribute('aria-label') ?? '',
+          };
+        }),
+      );
+    }
+    const labels = names.map((n) => n.label.trim());
+    check(
+      `#91 AC-C7 ${tag} 1〜5 で移る 5 つの枠の名前が空でなく互いに違う（role group）`,
+      labels.every((l) => l.length > 0) &&
+        new Set(labels).size === 5 &&
+        names.every((n) => n.role === 'group'),
+      names.map((n) => `${n.role}「${n.label}」`).join('・'),
+    );
+  }
   await ctx.close();
 }
 

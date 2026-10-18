@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'preact/hooks';
 import type { IvDynamics } from '../../../model';
 import type { AppController } from '../../components/useAppController';
+import { PANEL_FOCUS_LABEL } from '../../view/keys';
 import type { DXUnit } from '../../view/scenario';
 import {
   advSummary,
@@ -136,7 +137,13 @@ export function Scenario(p: { c: AppController; dXUnit: DXUnit; onDXUnit: (u: DX
           </p>
         </Popover>
       </PanelHead>
-      <div class="panel-body scn-body" tabIndex={-1}>
+      {/* biome-ignore lint/a11y/useSemanticElements: 1〜5 の行き先のスクロールする枠に名前を付ける（fieldset にしない） */}
+      <div
+        class="panel-body scn-body"
+        tabIndex={-1}
+        role="group"
+        aria-label={PANEL_FOCUS_LABEL.scenario}
+      >
         <div class="scn-grid">{view.steppers.map(stepper)}</div>
         {error !== null && (
           <p class="scn-err" role="alert">

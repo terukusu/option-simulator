@@ -303,6 +303,8 @@ export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
   // コマンドパレット（#89 段 B）: 行は開いている間だけ作る（閉じている間は舞台・シナリオの操作に何も足さない）。
   // 依存は行に使う値だけ（c は毎回新しいオブジェクト）
   const [atmJump, setAtmJump] = useState(0);
+  /** 消費した atmJump（#91 段 C。Board を作り直しても同じ要求で跳ばない） */
+  const atmJumpDone = useRef(0);
   const atmK = paletteOpen ? paletteAtmK(chain, monthId, c.atmBasis) : null;
   const items = useMemo(
     () =>
@@ -465,6 +467,7 @@ export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
               onAdd={onMarketAdd}
               marketSeg={seg}
               atmJump={atmJump}
+              atmJumpDone={atmJumpDone}
             />
           ) : (
             emptyMarket('板', seg)

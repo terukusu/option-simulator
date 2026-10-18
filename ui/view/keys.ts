@@ -52,6 +52,18 @@ export const PANEL_KEY: Readonly<Record<PanelId, string>> = {
   smile: '5',
 };
 
+/**
+ * 1〜5 の行き先の枠（`useGlobalKeys.ts` の PANEL_FOCUS）の読み上げの名前（#91 段 C AC-C7。`role="group"` の
+ * `aria-label`）。section の名前（ポジション・板 など）と重ならない「中の枠」の名前。5 つとも違う
+ */
+export const PANEL_FOCUS_LABEL: Readonly<Record<PanelId, string>> = {
+  positions: 'ポジションの一覧',
+  board: '板の表',
+  scenario: 'シナリオの入力',
+  metrics: '指標とテールの表',
+  smile: 'スマイルの図',
+};
+
 /** 描画域にフォーカス・テーマ切替のキーの表示 */
 export const CHART_KEY = 'G';
 export const THEME_KEY = 'T';

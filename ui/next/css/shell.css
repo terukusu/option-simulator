@@ -304,6 +304,8 @@ section.panel .board-wrap:focus-visible {
     border-top: 1px solid var(--line-2);
     border-radius: var(--r-sheet) var(--r-sheet) 0 0;
     background: var(--s2);
+    /* peek ⇄ full の高さを補間（§6。#91 段 C）。hidden ⇄ peek は display の切替なので即時 */
+    transition: height var(--dur) var(--ease);
   }
 
   .layout[data-panel="positions"] section.positions,
@@ -324,13 +326,13 @@ section.panel .board-wrap:focus-visible {
     height: 42dvh;
   }
 
-  /* 全開: 舞台はミニ（92px）。[たたむ] は無い（§11-7） */
-  .layout[data-sheet="full"] {
-    grid-template-rows: auto minmax(0, 1fr) var(--dock-h);
-  }
-
-  .layout[data-sheet="full"] section.stage {
-    height: 92px;
+  /*
+   * 全開: 舞台はミニ（92px）。[たたむ] は無い（§11-7）。行は peek と同じ（舞台 1fr / シート auto / ドック）で、
+   * シートの高さを明示する（高さを補間できるように。#91 段 C）
+   */
+  .layout[data-sheet="full"] section.panel.side,
+  .layout[data-sheet="full"] section.scenario {
+    height: calc(100dvh - var(--top-h) - var(--dock-h) - 92px);
   }
 
   .panel-head {

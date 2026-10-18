@@ -12,6 +12,7 @@ import {
   type BoardRowText,
   type BoardSideText,
 } from '../../view/boardPanel';
+import { PANEL_FOCUS_LABEL } from '../../view/keys';
 
 /** 板・スマイルから足を入れる（NextApp。トースト・[元に戻す]・入れた足の選択） */
 export type MarketAdd = (expiry: string, k: number, type: OptionType, side: Side) => void;
@@ -219,10 +220,13 @@ const NO_BADGE = { call: undefined, put: undefined };
 const BoardTable = pure(function BoardTable(p: TableProps) {
   const heads = BOARD_COLUMN_HEADS[p.cols];
   return (
+    // biome-ignore lint/a11y/useSemanticElements: 1〜5 の行き先のスクロールする枠に名前を付ける（fieldset にしない）
     <div
       class={p.visible ? 'board-wrap' : 'board-wrap side-hidden'}
       // 全体のキー 2 の行き先・クリックで ↓・PageDown がこの枠を動かす（#89。隠している側は持たない）
       tabIndex={p.visible ? -1 : undefined}
+      role="group"
+      aria-label={p.visible ? PANEL_FOCUS_LABEL.board : undefined}
       data-side={p.only ?? 'both'}
       aria-hidden={p.visible ? undefined : true}
     >

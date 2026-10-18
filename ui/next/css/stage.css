@@ -804,6 +804,8 @@ section.stage > .panel-body.stage-main {
   line-height: 1.15;
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
+  /* 色だけ 200ms（§6。#91 段 C。.stage-main.live / [data-live] の中では切る = 下の「動き」） */
+  transition: color var(--dur-ro) ease-out;
 }
 
 .ro.hero .v {
@@ -933,5 +935,47 @@ section.stage > .panel-body.stage-main {
 
   .layout[data-sheet="full"] .ro.hero .v {
     font-size: 20px;
+  }
+}
+
+/*
+ * ===== 動き（§6・§10.1「動き」。#91 段 C） =====
+ * 離散の変更: 損益の線・塗りの d を 220ms ease-out で補間（CSS の d の補間に対応しないブラウザでは即時。path の命令の
+ * 並びが前後で違うときも即時）、読み取りの数字は色だけ 200ms、足マーカーは入ったときに下から 120ms。
+ * 読み取りの数字の色の transition は .ro .v に書いた。連続の変更の間は .stage-main.live / [data-live] で
+ * transition を切る（ui/next/live.ts）。reduced-motion はトークンが 0ms。
+ * マーカーの animation は .live で切らない（外したときに全部のマーカーで animation が始め直すため）
+ */
+.chart .ln,
+.chart .fill-gain,
+.chart .fill-loss {
+  transition: d var(--dur-line) ease-out;
+}
+
+.stage-main.live .chart .ln,
+.stage-main.live .chart .fill-gain,
+.stage-main.live .chart .fill-loss,
+.stage-main.live .ro .v,
+.stage-main[data-live] .chart .ln,
+.stage-main[data-live] .chart .fill-gain,
+.stage-main[data-live] .chart .fill-loss,
+.stage-main[data-live] .ro .v {
+  transition: none;
+}
+
+@keyframes legmark-in {
+  from {
+    opacity: 0;
+    transform: translateY(var(--marker-rise));
+  }
+}
+
+.chart .legmark {
+  animation: legmark-in var(--dur-fast) var(--ease) backwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chart .legmark {
+    animation: none;
   }
 }
