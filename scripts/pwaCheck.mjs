@@ -7,7 +7,7 @@
 //
 //   npm run pwa:check [-- --base http://127.0.0.1:8080]
 //
-// `/` と `/?ui=next` を開いて、
+// `/` と古い入口 `/?ui=next`・`/?ui=legacy`（#91 からどれも同じ画面）を開いて、
 //   (a) CDP の Page.getAppManifest の errors が 0 件・url のパスが /manifest.webmanifest
 //   (b) manifest の要求に cookie が付く（crossorigin="use-credentials" の効き目。検査用の cookie を 1 つ入れて開く）
 //   (c) コンソールの CSP 違反（Refused to / Content Security Policy）が 0 件・/favicon.svg が 200
@@ -36,7 +36,7 @@ const ok = (cond, label) => {
 
 const browser = await chromium.launch();
 try {
-  for (const path of ['/', '/?ui=next']) {
+  for (const path of ['/', '/?ui=next', '/?ui=legacy']) {
     console.log(`--- ${path}`);
     const context = await browser.newContext();
     await context.addCookies([COOKIE]);

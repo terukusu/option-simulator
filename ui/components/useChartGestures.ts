@@ -8,7 +8,7 @@
  * - scrub を渡したとき（損益グラフ。#52）: 長押し（6px 未満のまま 450ms）・縦線の ±12px の押下でつかみ、
  *   指の位置を onScrub に要素の座標で渡す。キー , . < > は onScrubKey に渡す。長押しの OS のメニュー
  *   （contextmenu）を止める
- * - 新しい画面の舞台（#82。旧画面・スマイルは渡さない = 今のまま）: scrub.grabPx でつかむ幅、arrowPan: false で
+ * - 舞台（#82。スマイルは渡さない = 今のまま。旧画面の損益グラフも渡さなかった）: scrub.grabPx でつかむ幅、arrowPan: false で
  *   ← / → をパンに使わず onScrubKey(key, shiftKey) へ、markers で足マーカーのタップ・長押しドラッグ
  *   （onMarkerTap / onMarkerDrag（1 フレーム 1 回）/ onMarkerDrop / onMarkerCancel）。マーカーの上の dblclick は
  *   リセットしない。長押しでつかんだ（ハンドル・マーカー）ときは onLongPress

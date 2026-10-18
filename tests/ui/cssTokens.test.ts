@@ -1,14 +1,13 @@
 import { describe, expect, it } from 'vitest';
 
 /**
- * #81: 新しい画面の CSS（ui/next/**\/*.css）の色はトークンだけ（docs/ui-redesign.md §7・§10.1）。
+ * #81: 画面の CSS（ui/**\/*.css。#91 で旧画面の ui/style.css を消して対象を広げた）の色はトークンだけ
+ * （docs/ui-redesign.md §7・§10.1）。
  *
  * (a) 色の値（hex・rgb()・hsl()・色の名前）は tokens.css のテーマの定義
  *     （`:root, :root[data-theme="dark"]` と `:root[data-theme="light"]`）の中だけ。color-mix() もトークン同士
  * (b) §7 の表のトークンがダーク・ライトの両方にあり、値が表と一致する
  * (c) var(--x) で使う名前がすべて定義済み
- *
- * 旧画面の ui/style.css は #91 で消すまで対象外。
  */
 /**
  * 一覧は import.meta.glob の鍵だけ（読み込まない）、中身は Node の fs で読む
@@ -20,7 +19,7 @@ const fs = (
   }
 ).process.getBuiltinModule('node:fs');
 const files: Record<string, string> = Object.fromEntries(
-  Object.keys(import.meta.glob('../../ui/next/**/*.css')).map((path) => [
+  Object.keys(import.meta.glob('../../ui/**/*.css')).map((path) => [
     path,
     fs.readFileSync(new URL(path, import.meta.url), 'utf8'),
   ]),

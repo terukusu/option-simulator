@@ -1,6 +1,6 @@
 /*
- * 新しい画面（?ui=next）の CSS の入口（docs/ui-redesign.md §10.1）。旧画面の ui/style.css とは排他
- * （新しい画面では旧 CSS を無効にする。ui/main.tsx）。後続の領域の CSS は css/<region>.css を末尾に足す。
+ * 画面の CSS の入口（docs/ui-redesign.md §10.1。#91 から唯一の CSS。旧画面の ui/style.css は削除）。
+ * ui/next/main.tsx が import する。後続の領域の CSS は css/<region>.css を末尾に足す。
  */
 @import "./css/tokens.css";
 @import "./css/base.css";

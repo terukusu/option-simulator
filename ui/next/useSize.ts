@@ -2,7 +2,6 @@ import { useEffect, useRef, useState } from 'preact/hooks';
 
 /**
  * 要素の幅と高さ（CSS px、整数に切り捨て）を ResizeObserver で追う DOM のフック（#82。舞台の描画域・レール）。
- * 旧画面の useWidth（幅だけ・最小 200）は変えない。
  */
 export function useSize<T extends HTMLElement = HTMLDivElement>(
   initialWidth: number,

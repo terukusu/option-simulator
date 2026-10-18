@@ -1,5 +1,5 @@
 /**
- * 説明の吹き出し（ⓘ、#63）の純関数。部品は ui/components/Hint.tsx。
+ * 説明の吹き出し（ⓘ、#63）の純関数。部品は ui/next/parts/Popover.tsx・Menu.tsx（旧画面の Hint は #91 で削除）。
  */
 
 /** 開閉のきっかけ。toggle = ⓘ を押した、outside = 外側のタップ、escape = Esc、other = 他の ⓘ が開いた。 */

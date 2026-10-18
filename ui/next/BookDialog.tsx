@@ -1,6 +1,7 @@
 import type { ComponentChildren } from 'preact';
 import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
 import { NAME_MAX } from '../book';
+import type { BookMessage } from '../components/useAppController';
 import { PINS_FULL_TEXT } from '../pins';
 import {
   type BookConfirm,
@@ -22,7 +23,7 @@ export interface BookDialogProps {
   legCount: number;
   hasBoard: boolean;
   defaultName: string;
-  message: { text: string; warn: boolean } | null;
+  message: BookMessage | null;
   onClose: () => void;
   onSave: (name: string) => boolean;
   onOpen: (id: string) => boolean;
@@ -50,7 +51,7 @@ const NO_BOARD_PIN = '板が無いので重ねられない（板を読むと重�
 const PIN_TITLE = '今の板・今のシナリオ・今の設定で損益グラフに線を重ねる（ピン）';
 
 /**
- * 保存一覧のダイアログ（#87 (C)。docs/ui-redesign.md §3・§4.5。旧 ui/components/Book.tsx の項目・文・条件を写す）。
+ * 保存一覧のダイアログ（#87 (C)。docs/ui-redesign.md §3・§4.5。旧画面の保存一覧（#91 で削除）の項目・文・条件を写した）。
  * 表示モデルは ui/view/bookList.ts のまま（c.bookView）。変えたのは [上書き] だけ（確認なしで即実行 + [元に戻す]）。
  * 削除・未保存の作業がある [開く]・[空にする…] は今と同じ行の中の確認。名前は JSX のテキスト / 属性だけ。
  */

@@ -1,5 +1,5 @@
 /*
- * 新しい画面（?ui=next）のトークン（docs/ui-redesign.md §7・§10.1）。
+ * 画面のトークン（docs/ui-redesign.md §7・§10.1）。
  * 色の値（hex・rgb / hsl の関数・色の名前）を書けるのは、この下の 2 つのテーマの定義の中だけ
  * （tests/ui/cssTokens.test.ts が確かめる）。足りない色は役割の名前でここに足す。
  * html[data-theme] には JS（ui/next/useTheme.ts・ui/main.tsx）が解決した値（dark / light）を入れる。
