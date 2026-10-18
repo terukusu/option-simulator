@@ -2,7 +2,8 @@ import { useMemo, useState } from 'preact/hooks';
 import type { IvDynamics } from '../../../model';
 import type { AppController } from '../../components/useAppController';
 import { PANEL_FOCUS_LABEL } from '../../view/keys';
-import type { DXUnit } from '../../view/scenario';
+import { revealViewport } from '../../view/pnlChart';
+import { type DXUnit, fromDisplay } from '../../view/scenario';
 import {
   advSummary,
   basisAction,
@@ -95,6 +96,14 @@ export function Scenario(p: { c: AppController; dXUnit: DXUnit; onDXUnit: (u: DX
         parse: (t) => parseStepperInput(v.field, t, input),
         text: (n) => editText(v.field, n, input),
         onError: setError,
+        // ΔX の数値欄で確定した点が横軸の表示範囲の外なら、その点まで表示範囲を広げる（#144。反対側の端は保つ）
+        ...(v.field === 'dX' && {
+          onCommit: (n: number) => {
+            if (!base) return;
+            const vp = revealViewport(base, state.pnlViewport, fromDisplay('dX', n, x0, dXUnit));
+            if (vp) dispatch({ type: 'setPnlViewport', viewport: vp });
+          },
+        }),
       }}
       onChange={(n) => {
         const a = stepperAction(v.field, n, input);

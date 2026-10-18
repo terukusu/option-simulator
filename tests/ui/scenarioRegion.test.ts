@@ -241,15 +241,32 @@ describe('#83 AC-4 数値入力', () => {
   const input = inputOf(twoLegs);
   const dXSpec = sliderSpec('dX', { x0: input.x0, maxDays: input.maxDays, dXUnit: 'pct' });
 
-  it('ΔX（%）に -3.5 → 状態の ΔX が fromDisplay(-3.5)、-50・abc は parseSliderInput と同じ文言で拒否', () => {
+  it('ΔX（%）に -3.5 → 状態の ΔX が fromDisplay(-3.5)、-100・900.5・abc は parseSliderInput と同じ文言で拒否', () => {
     const r = parseStepperInput('dX', '-3.5', input);
     expect(r).toEqual({ ok: true, value: -3.5 });
     const s = apply(twoLegs, r.ok ? stepperAction('dX', r.value, input) : null);
     expect(s.scenario.dX).toBe(fromDisplay('dX', -3.5, input.x0, 'pct'));
-    for (const t of ['-50', 'abc']) {
+    for (const t of ['-100', '900.5', 'NaN', 'Infinity', '', 'abc']) {
       const bad = parseStepperInput('dX', t, input);
       expect(bad).toEqual(parseSliderInput(t, dXSpec));
       expect(bad.ok).toBe(false);
+    }
+  });
+
+  it('#144 AC-2: ΔX の数値欄は操作の範囲（−90%〜+100%）より広い −99%〜+900%（円は ⌈−0.99X₀⌉〜⌊9X₀⌋）', () => {
+    for (const t of ['-99', '-95', '150', '900']) {
+      expect(parseStepperInput('dX', t, input)).toEqual({ ok: true, value: Number(t) });
+    }
+    const s = apply(twoLegs, stepperAction('dX', -99, input));
+    expect(s.scenario.dX).toBeCloseTo(-0.99 * input.x0, 9);
+    expect(input.x0 + s.scenario.dX).toBeGreaterThan(0);
+    const yen = { ...input, dXUnit: 'yen' as const };
+    const lo = Math.ceil(-0.99 * input.x0);
+    const hi = Math.floor(9 * input.x0);
+    expect(parseStepperInput('dX', String(lo), yen)).toEqual({ ok: true, value: lo });
+    expect(parseStepperInput('dX', String(hi), yen)).toEqual({ ok: true, value: hi });
+    for (const t of [String(lo - 1), String(hi + 1), String(-input.x0), 'NaN', '']) {
+      expect(parseStepperInput('dX', t, yen).ok).toBe(false);
     }
   });
 

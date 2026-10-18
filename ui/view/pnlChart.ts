@@ -109,7 +109,10 @@ export interface PnlBase {
   /** 指定日 d の上限（最遠の足の SQ までの暦日） */
   maxDays: number;
   initial: Domain;
+  /** 縮小・パンの上限。板の全域（boardFull）に、その外のシナリオ点 X₀ + ΔX を足したもの（#144。withScenarioFull） */
   full: Domain;
+  /** 板の全限月の行使価格と初期範囲の全域（pnlDomains が作る。指標の BEP の探索範囲） */
+  boardFull: Domain;
   minWidth: number;
   xLo: number;
 }
@@ -183,9 +186,55 @@ export function pnlDomains(
     maxDays: maxScenarioDays(legs),
     initial,
     full,
+    boardFull: full,
     minWidth,
     xLo,
   };
+}
+
+/** シナリオ点の外の余白と、広げた全域の端の格子（X₀ に対する割合。#144） */
+export const SCENARIO_FULL_PAD_RATIO = 0.05;
+
+/**
+ * シナリオ点 X_s = X₀ + ΔX を含む全域（#144）。X_s が板の全域（boardFull）の内側（両端含む）・非有限なら boardFull
+ * そのもの（同じ参照）。外なら、その側の端を X_s ∓ 0.05X₀ を 0.05X₀ の格子に外向きに丸めた値へ広げる（0.5% 刻みの
+ * 連続の操作で全域が毎段変わらない = 線を作り直すのは格子を跨ぐときだけ）。下端は xLo より下にしない。
+ */
+export function scenarioFull(base: PnlBase, dX: number): Domain {
+  const board = base.boardFull;
+  const x0 = base.ctx.x0;
+  const xs = x0 + dX;
+  if (!Number.isFinite(xs) || (xs >= board[0] && xs <= board[1])) return board;
+  const g = SCENARIO_FULL_PAD_RATIO * x0;
+  if (!(g > 0)) return board;
+  if (xs < board[0]) {
+    const lo = Math.max((Math.floor(xs / g) - 1) * g, base.xLo);
+    return lo < board[0] ? [lo, board[1]] : board;
+  }
+  return [board[0], (Math.ceil(xs / g) + 1) * g];
+}
+
+/** 全域を差し替えた base（値が同じなら同じ参照。線の memo は base の参照を鍵にする） */
+export function withScenarioFull(base: PnlBase, full: Domain): PnlBase {
+  return full[0] === base.full[0] && full[1] === base.full[1] ? base : { ...base, full };
+}
+
+/**
+ * 数値欄で確定した ΔX の点 X_s を見せる表示範囲（#144）。今の表示範囲（全域 = scenarioFull で収めたもの）に X_s が
+ * 入っていれば null。X_s が全域の外（xLo より下）・非有限でも null。それ以外は X_s の側の端だけを X_s ∓ 0.05X₀
+ * （全域の端まで）に動かし、反対側の端は保つ（広げる）。
+ */
+export function revealViewport(base: PnlBase, viewport: Domain | null, dX: number): Domain | null {
+  const xs = base.ctx.x0 + dX;
+  if (!Number.isFinite(xs)) return null;
+  const full = scenarioFull(base, dX);
+  if (xs < full[0] || xs > full[1]) return null;
+  const cur = clampViewport(viewport ?? base.initial, full, base.minWidth);
+  if (xs >= cur[0] && xs <= cur[1]) return null;
+  const pad = SCENARIO_FULL_PAD_RATIO * base.ctx.x0;
+  const next: Domain =
+    xs < cur[0] ? [Math.max(xs - pad, full[0]), cur[1]] : [cur[0], Math.min(xs + pad, full[1])];
+  return clampViewport(next, full, base.minWidth);
 }
 
 export type PnlLineKind = 'expiry' | 'date' | 'today';

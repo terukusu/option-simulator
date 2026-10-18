@@ -30,8 +30,11 @@ import {
   pnlChartModel,
   pnlDomains,
   pnlViewDomain,
+  revealViewport,
+  scenarioFull,
   todayLine,
   todayScenario,
+  withScenarioFull,
   zoomViewport,
 } from '../../ui/view/pnlChart';
 import { positionModel } from '../../ui/view/position';
@@ -1020,5 +1023,106 @@ describe('描画域の高さ（#61）', () => {
     expect(pnlChartHeight(559, false)).toBe(220);
     expect(pnlChartHeight(560, false)).toBe(260);
     expect(pnlChartHeight(900, false)).toBe(260);
+  });
+});
+
+/** #144 AC-5: シナリオ点 X₀ + ΔX が板の全域の外でも、パン・縮小で行ける・数値欄で確定したら見える。 */
+describe('シナリオ点と横軸の全域・表示範囲（#144）', () => {
+  const legs = uiLegs(latest, [
+    { expiry: m1.id, k: k30, type: 'put', side: 'sell', entry: 30 },
+    { expiry: m1.id, k: 72_000, type: 'call', side: 'sell' },
+  ]);
+  const base = baseOf(latest, legs);
+  const X = base.ctx.x0;
+  const g = 0.05 * X;
+  const onGrid = (v: number) => Math.abs(v / g - Math.round(v / g)) < 1e-9;
+
+  it('pnlDomains の全域は板の全域（boardFull）と同じ', () => {
+    expect(base.boardFull).toEqual(base.full);
+  });
+
+  it('シナリオ点が板の全域の外なら全域をその点まで広げる（内側なら同じ参照）', () => {
+    // 内側（両端を含む）・非有限は boardFull の参照そのもの
+    for (const dX of [0, -0.1 * X, base.boardFull[0] - X, base.boardFull[1] - X, Number.NaN]) {
+      expect(scenarioFull(base, dX)).toBe(base.boardFull);
+    }
+    // 上: +900% → 上端は X_s + 0.05X₀ を 0.05X₀ の格子に外向きに丸めた値、下端は変えない
+    const up = scenarioFull(base, 9 * X);
+    expect(up[0]).toBe(base.boardFull[0]);
+    expect(up[1]).toBeGreaterThanOrEqual(10 * X + g - 1e-6);
+    expect(up[1]).toBeLessThan(10 * X + 2 * g);
+    expect(onGrid(up[1])).toBe(true);
+    // 下: −90%（板の全域の下端より下とする）
+    const xs = X * 0.1;
+    expect(xs).toBeLessThan(base.boardFull[0]);
+    const dn = scenarioFull(base, xs - X);
+    expect(dn[1]).toBe(base.boardFull[1]);
+    expect(dn[0]).toBeLessThanOrEqual(xs - g + 1e-6);
+    expect(dn[0]).toBeGreaterThanOrEqual(Math.max(xs - 2 * g, base.xLo));
+    expect(xs).toBeGreaterThanOrEqual(dn[0]);
+    // 0.5% 刻みの連続の操作で全域の端は格子を跨ぐときだけ変わる（10 段に 1 回）
+    const ends = new Set<number>();
+    for (let i = 0; i < 40; i++) ends.add(scenarioFull(base, X * (2 + i * 0.005))[1]);
+    expect(ends.size).toBeLessThanOrEqual(5);
+  });
+
+  it('点が足の F が 0 になる X（xLo）より下なら全域を xLo より下に広げない', () => {
+    for (const dX of [-X, -2 * X, -0.999 * X]) {
+      const f = scenarioFull(base, dX);
+      expect(f[0]).toBeGreaterThanOrEqual(base.xLo);
+      expect(f[1]).toBe(base.boardFull[1]);
+    }
+    // 下端が xLo に止まるときは X_s が xLo 以上なら含む
+    const f = scenarioFull(base, base.xLo + 1 - X);
+    expect(f[0]).toBeGreaterThanOrEqual(base.xLo);
+    expect(f[0]).toBeLessThanOrEqual(base.xLo + 1);
+  });
+
+  it('withScenarioFull: 全域が同じ値なら同じ参照、違えば full だけ差し替える（boardFull は保つ）', () => {
+    expect(withScenarioFull(base, scenarioFull(base, 0))).toBe(base);
+    expect(withScenarioFull(base, [base.full[0], base.full[1]])).toBe(base);
+    const wide = withScenarioFull(base, scenarioFull(base, 9 * X));
+    expect(wide).not.toBe(base);
+    expect(wide.boardFull).toBe(base.boardFull);
+    expect(wide.initial).toBe(base.initial);
+    expect(wide.full[1]).toBeGreaterThan(10 * X);
+    // 縮小を繰り返すと広げた全域まで行ける（パン・縮小でシナリオ点へ）
+    let vp: Domain = wide.initial;
+    for (let i = 0; i < 200; i++) vp = zoomAt(vp, 1.1, X, wide.full, wide.minWidth);
+    const m = chartOf(wide, { viewport: vp });
+    expect(m.domain).toEqual(wide.full);
+    expect(allFinite(m)).toBe(true);
+  });
+
+  it('数値欄で確定した点が表示範囲の外なら表示範囲を広げ（反対側の端は保つ）、内側なら null', () => {
+    const cur = pnlViewDomain(base, null);
+    // 内側・非有限
+    expect(revealViewport(base, null, 0)).toBeNull();
+    expect(revealViewport(base, null, Number.NaN)).toBeNull();
+    expect(revealViewport(base, cur, cur[1] - X)).toBeNull();
+    // 上: +900%
+    const up = revealViewport(base, null, 9 * X) as Domain;
+    expect(up).not.toBeNull();
+    expect(up[0]).toBeCloseTo(cur[0], 9);
+    expect(up[1]).toBeCloseTo(10 * X + g, 6);
+    expect(10 * X).toBeLessThanOrEqual(up[1]);
+    // 結果は広げた全域で収めた値と同じ
+    const wide = withScenarioFull(base, scenarioFull(base, 9 * X));
+    expect(pnlViewDomain(wide, up)).toEqual(up);
+    // 下: 今の表示範囲の下端より下の点
+    const xs = cur[0] - 0.2 * X;
+    const dn = revealViewport(base, cur, xs - X) as Domain;
+    expect(dn[1]).toBeCloseTo(cur[1], 9);
+    expect(dn[0]).toBeLessThanOrEqual(xs);
+    expect(dn[0]).toBeGreaterThanOrEqual(Math.max(xs - g, base.xLo) - 1e-6);
+    // 拡大した表示範囲（一部）の右の外の点 → 左端は保つ
+    const vp: Domain = [X - 500, X + 500];
+    const r = revealViewport(base, vp, 2_000) as Domain;
+    expect(r[0]).toBe(X - 500);
+    expect(r[1]).toBeCloseTo(X + 2_000 + g, 6);
+  });
+
+  it('点が xLo より下（全域の外）なら表示範囲を動かさない（null）', () => {
+    expect(revealViewport(base, null, base.xLo - 10 - X)).toBeNull();
   });
 });

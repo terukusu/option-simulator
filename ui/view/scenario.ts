@@ -26,9 +26,17 @@ import { daysToExpire } from './pnlChart';
 export type SliderField = 'days' | 'dX' | 'dSigma' | 'skew';
 export type DXUnit = 'pct' | 'yen';
 
-/** ΔX の範囲（X₀ に対する割合。設計 5.4） */
-export const DX_MIN_RATIO = -0.4;
-export const DX_MAX_RATIO = 0.2;
+/**
+ * ΔX の操作の範囲（X₀ に対する割合。設計 5.4・#144）: ステッパーの ± / キー / スクラブ / ホイール / Home・End、
+ * 舞台のハンドル・長押し・面のドラッグ、舞台のキー
+ */
+export const DX_MIN_RATIO = -0.9;
+export const DX_MAX_RATIO = 1.0;
+/** ΔX の数値欄の範囲（X₀ に対する割合。#144）: 下は X > 0 を保つ */
+export const DX_INPUT_MIN_RATIO = -0.99;
+export const DX_INPUT_MAX_RATIO = 9;
+/** ΔX の絶対値の上限（円）。保存・URL の検査（ui/persist.ts）と数値欄の上限（9X₀ と小さい方）に使う */
+export const DX_ABS_MAX = 1e6;
 /** 円表示の ΔX の刻み */
 export const DX_YEN_STEP = 100;
 /** Shift・PageUp/PageDown の刻みの倍数 */
@@ -47,6 +55,9 @@ export interface SliderSpec {
   def: number;
   /** 操作できない（足 0 本の d、X₀ が決まらない ΔX） */
   disabled: boolean;
+  /** 数値欄で受け付ける範囲（表示の単位。省略時は min / max。ΔX だけ操作の範囲より広い。#144） */
+  inputMin?: number;
+  inputMax?: number;
 }
 
 export interface SliderContext {
@@ -57,6 +68,17 @@ export interface SliderContext {
 }
 
 const validX0 = (x0: number) => Number.isFinite(x0) && x0 > 0;
+const dXInputMax = (x0: number) => Math.min(DX_INPUT_MAX_RATIO * x0, DX_ABS_MAX);
+
+/**
+ * 状態の ΔX（円）を数値欄の範囲 [−0.99X₀, min(9X₀, 1e6)] に収める（読み込み・X₀ の変化。#144）。格子には乗せない
+ * （範囲の中なら同じ値）。X₀ が無効なら dX をそのまま、非有限の dX は 0。
+ */
+export function clampDXInput(dX: number, x0: number): number {
+  if (!Number.isFinite(dX)) return 0;
+  if (!validX0(x0)) return dX;
+  return clamp(dX, DX_INPUT_MIN_RATIO * x0, dXInputMax(x0));
+}
 
 /** スライダーの範囲・刻み・既定値。 */
 export function sliderSpec(field: SliderField, ctx: SliderContext): SliderSpec {
@@ -97,6 +119,8 @@ export function sliderSpec(field: SliderField, ctx: SliderContext): SliderSpec {
           step: 0.5,
           def: 0,
           disabled: false,
+          inputMin: DX_INPUT_MIN_RATIO * 100,
+          inputMax: Math.min(DX_INPUT_MAX_RATIO * 100, (DX_ABS_MAX / ctx.x0) * 100),
         };
       }
       // 円: 100 円の格子（0 を含む）に乗る内側の端
@@ -109,6 +133,9 @@ export function sliderSpec(field: SliderField, ctx: SliderContext): SliderSpec {
         step: DX_YEN_STEP,
         def: 0,
         disabled: false,
+        // 数値欄は整数円で −0.99X₀〜min(9X₀, 1e6) の内側
+        inputMin: Math.ceil(DX_INPUT_MIN_RATIO * ctx.x0),
+        inputMax: Math.floor(dXInputMax(ctx.x0)),
       };
     }
     case 'dSigma':
@@ -148,7 +175,7 @@ export const DRAG_DX_STEP = 10;
 export const KEY_DX_STEP = DX_YEN_STEP;
 export const KEY_DX_BIG = 1000;
 
-/** ΔX の範囲（−40%〜+20% の内側で、step の格子に乗る端。X₀ は有効な値であること）。 */
+/** ΔX の操作の範囲（−90%〜+100% の内側で、step の格子に乗る端。X₀ は有効な値であること）。 */
 export function dXRange(x0: number, step: number = DRAG_DX_STEP): [number, number] {
   return [
     snapZero(Math.ceil((DX_MIN_RATIO * x0) / step) * step),
@@ -237,19 +264,24 @@ export function stepSlider(
   }
 }
 
-const rangeText = (spec: SliderSpec) => {
+const rangeText = (spec: SliderSpec, lo: number, hi: number) => {
   const digits = spec.field === 'days' ? 2 : spec.step < 1 ? 1 : 0;
   const f = (v: number) => fmtNum(Math.trunc(v * 10 ** digits) / 10 ** digits, digits);
-  return `${f(spec.min)}〜${f(spec.max)} ${spec.unit}`;
+  return `${f(lo)}〜${f(hi)} ${spec.unit}`;
 };
 
-/** 数値欄の文字列 → 表示の単位の値。範囲外・非数は固定の文言（入力文字列は含めない）。 */
+/**
+ * 数値欄の文字列 → 表示の単位の値。範囲は数値欄の範囲（inputMin / inputMax。省略時は min / max）。範囲外・非数は
+ * 固定の文言（入力文字列は含めない）。
+ */
 export function parseSliderInput(text: string, spec: SliderSpec): Parsed<number> {
+  const lo = spec.inputMin ?? spec.min;
+  const hi = spec.inputMax ?? spec.max;
   const v = parseNum(text);
-  if (Number.isFinite(v) && v >= spec.min - 1e-9 && v <= spec.max + 1e-9) {
-    return { ok: true, value: clamp(v, spec.min, spec.max) };
+  if (Number.isFinite(v) && v >= lo - 1e-9 && v <= hi + 1e-9) {
+    return { ok: true, value: clamp(v, lo, hi) };
   }
-  return { ok: false, message: `${spec.label}は ${rangeText(spec)}` };
+  return { ok: false, message: `${spec.label}は ${rangeText(spec, lo, hi)}` };
 }
 
 /** β（pt / 1%）: 0〜10。 */
@@ -266,10 +298,13 @@ export function toDisplay(field: SliderField, value: number, x0: number, unit: D
   return validX0(x0) ? (value / x0) * 100 : 0;
 }
 
-/** 表示の単位 → 状態の値（ΔX は円）。 */
+/**
+ * 表示の単位 → 状態の値（ΔX は円）。% からの換算は ±DX_ABS_MAX に収める（上限の % を円に戻したときの
+ * 丸めで保存の検査 |dX| ≤ DX_ABS_MAX を超えないように）。
+ */
 export function fromDisplay(field: SliderField, value: number, x0: number, unit: DXUnit): number {
   if (field !== 'dX' || unit === 'yen') return value;
-  return validX0(x0) ? (x0 * value) / 100 : 0;
+  return validX0(x0) ? clamp((x0 * value) / 100, -DX_ABS_MAX, DX_ABS_MAX) : 0;
 }
 
 /** 数値欄の初期文字列（表示の単位）。 */

@@ -14,6 +14,7 @@ import { type Action, initialState, reduce, type State } from '../../ui/state';
 import { maxScenarioDays, pnlDomains } from '../../ui/view/pnlChart';
 import { positionModel } from '../../ui/view/position';
 import {
+  clampDXInput,
   DRAG_DX_STEP,
   daysToTarget,
   dXFromAxis,
@@ -48,11 +49,11 @@ describe('スライダーの仕様（設計 5.4）', () => {
     expect(sliderSpec('days', { ...ctx, maxDays: Number.NaN }).max).toBe(0);
   });
 
-  it('ΔX: % は −40〜+20・0.5%、円は 100 円の格子に乗る −0.4X₀〜+0.2X₀。X₀ が決まらなければ無効', () => {
-    expect(sliderSpec('dX', ctx)).toMatchObject({ min: -40, max: 20, step: 0.5, unit: '%' });
+  it('ΔX のステッパー: % は −90〜+100・0.5%、円は 100 円の格子に乗る −0.9X₀〜+1.0X₀。X₀ が決まらなければ無効', () => {
+    expect(sliderSpec('dX', ctx)).toMatchObject({ min: -90, max: 100, step: 0.5, unit: '%' });
     const yen = sliderSpec('dX', { ...ctx, dXUnit: 'yen' });
-    // −0.4 × 67,810 = −27,124 → −27,100、0.2 × 67,810 = 13,562 → 13,500
-    expect(yen).toMatchObject({ min: -27_100, max: 13_500, step: 100, unit: '円' });
+    // −0.9 × 67,810 = −61,029 → −61,000、1.0 × 67,810 = 67,810 → 67,800
+    expect(yen).toMatchObject({ min: -61_000, max: 67_800, step: 100, unit: '円' });
     expect(sliderSpec('dX', { ...ctx, x0: Number.NaN }).disabled).toBe(true);
     expect(sliderSpec('dX', { ...ctx, x0: 0 }).disabled).toBe(true);
   });
@@ -69,6 +70,16 @@ describe('スライダーの仕様（設計 5.4）', () => {
     expect(fromDisplay('dX', 300, X0, 'yen')).toBe(300);
     expect(toDisplay('dSigma', 3, X0, 'pct')).toBe(3);
     expect(fromDisplay('dX', 5, Number.NaN, 'pct')).toBe(0);
+  });
+
+  it('ΔX の % → 円は ±1e6 円を超えない（上限の % を戻したときの丸め）', () => {
+    // 架空の X₀（1e6 円の頭打ちが効く大きさ）
+    for (const x0 of [111_112, 123_456.789, 333_333.33]) {
+      const spec = sliderSpec('dX', { ...ctx, x0 });
+      const hi = spec.inputMax ?? Number.NaN;
+      expect(Math.abs(fromDisplay('dX', hi, x0, 'pct'))).toBeLessThanOrEqual(1e6);
+      expect(Math.abs(fromDisplay('dX', 1e4, x0, 'pct'))).toBe(1e6);
+    }
   });
 });
 
@@ -103,8 +114,8 @@ describe('キー操作の状態遷移（AC-4）', () => {
     expect(stepSlider(sigma, -10, 'ArrowLeft', true)).toBe(-10);
     expect(stepSlider(days, 0, 'ArrowLeft', false)).toBe(0);
     expect(stepSlider(days, 55, 'ArrowRight', true)).toBe(58.5);
-    expect(stepSlider(dxPct, 20, 'PageUp', false)).toBe(20);
-    expect(stepSlider(dxYen, -27_100, 'ArrowLeft', false)).toBe(-27_100);
+    expect(stepSlider(dxPct, 100, 'PageUp', false)).toBe(100);
+    expect(stepSlider(dxYen, -61_000, 'ArrowLeft', false)).toBe(-61_000);
     expect(stepSlider(sigma, 3, 'Home', false)).toBe(-10);
     expect(stepSlider(sigma, 3, 'End', false)).toBe(40);
     expect(stepSlider(days, 3, 'End', false)).toBe(58.5);
@@ -167,6 +178,49 @@ describe('数値入力（AC-4）', () => {
     expect(parseSliderInput('58.6', days).ok).toBe(false);
     expect(parseSliderInput('-1', days).ok).toBe(false);
     expect(parseSliderInput('1', sliderSpec('days', { ...ctx, maxDays: 0 })).ok).toBe(false);
+  });
+
+  it('ΔX の数値欄: % は −99〜+900、円は ⌈−0.99X₀⌉〜⌊9X₀⌋ を受け付け、−100・+900.5・円の −X₀・NaN・Infinity・空は固定の文言で拒否（入力文字列を含めない）（#144 AC-2）', () => {
+    expect(dxPct).toMatchObject({ min: -90, max: 100, inputMin: -99, inputMax: 900 });
+    expect(parseSliderInput('-99', dxPct)).toEqual({ ok: true, value: -99 });
+    expect(parseSliderInput('−95', dxPct)).toEqual({ ok: true, value: -95 });
+    expect(parseSliderInput('900', dxPct)).toEqual({ ok: true, value: 900 });
+    expect(parseSliderInput('+250.5', dxPct)).toEqual({ ok: true, value: 250.5 });
+    const yen = sliderSpec('dX', { ...ctx, dXUnit: 'yen' });
+    // ⌈−0.99 × 67,810⌉ = ⌈−67,131.9⌉ = −67,131、9 × 67,810 = 610,290
+    expect(yen).toMatchObject({ inputMin: -67_131, inputMax: 610_290 });
+    expect(parseSliderInput('−67,131', yen)).toEqual({ ok: true, value: -67_131 });
+    expect(parseSliderInput('610,290', yen)).toEqual({ ok: true, value: 610_290 });
+    for (const [spec, bad, msg] of [
+      [
+        dxPct,
+        ['-100', '-99.5', '900.5', '1000', 'NaN', 'Infinity', '-Infinity', '', 'abc', '1e400'],
+        '原資産 ΔXは −99.0〜900.0 %',
+      ],
+      [
+        yen,
+        [String(-X0), '-67132', '610291', 'NaN', 'Infinity', '', 'x'],
+        '原資産 ΔXは −67,131〜610,290 円',
+      ],
+    ] as Array<[SliderSpec, string[], string]>) {
+      for (const t of bad) {
+        const r = parseSliderInput(t, spec);
+        expect(r).toEqual({ ok: false, message: msg });
+      }
+    }
+    // 受け付けた値で X₀ + ΔX > 0
+    for (const t of ['-99', '-98.5']) {
+      const r = parseSliderInput(t, dxPct);
+      if (!r.ok) throw new Error(t);
+      expect(X0 + fromDisplay('dX', r.value, X0, 'pct')).toBeGreaterThan(0);
+    }
+    // 上限は保存の検査（|ΔX| ≤ 1e6 円）を超えない: X₀ = 200,000 なら +500%（1e6 円）まで
+    const big = { x0: 200_000, maxDays: 58.5 };
+    expect(sliderSpec('dX', { ...big, dXUnit: 'pct' }).inputMax).toBe(500);
+    expect(sliderSpec('dX', { ...big, dXUnit: 'yen' }).inputMax).toBe(1_000_000);
+    expect(parseSliderInput('500.5', sliderSpec('dX', { ...big, dXUnit: 'pct' })).ok).toBe(false);
+    // X₀ が決まらなければ数値欄の範囲は付けない（無効）
+    expect(sliderSpec('dX', { ...ctx, x0: Number.NaN }).inputMin).toBeUndefined();
   });
 
   it('β: 0〜10（0 で連動なし）', () => {
@@ -304,9 +358,10 @@ describe('「SQ 日 9:00」「取引最終日 15:45」ボタン（AC-5）', () =
 describe('グラフ上の ΔX（#52）', () => {
   const x0 = 33_912.34;
 
-  it('範囲: −40% / +20% の内側の格子の端', () => {
-    expect(dXRange(x0)).toEqual([-13_560, 6_780]);
-    expect(dXRange(x0, 100)).toEqual([-13_500, 6_700]);
+  it('範囲: −90% / +100% の内側の格子の端（#144）', () => {
+    // −0.9 × 33,912.34 = −30,521.1 → −30,520、33,912.34 → 33,910
+    expect(dXRange(x0)).toEqual([-30_520, 33_910]);
+    expect(dXRange(x0, 100)).toEqual([-30_500, 33_900]);
     expect(DRAG_DX_STEP).toBe(10);
   });
 
@@ -315,13 +370,13 @@ describe('グラフ上の ΔX（#52）', () => {
     expect(dXFromAxis(x0 + 1_235.1, x0)).toBe(1_240);
     expect(dXFromAxis(x0 - 4.9, x0)).toBe(0);
     expect(dXFromAxis(x0 - 777.7, x0)).toBe(-780);
-    expect(dXFromAxis(x0 * 2, x0)).toBe(6_780);
-    expect(dXFromAxis(0, x0)).toBe(-13_560);
+    expect(dXFromAxis(x0 * 3, x0)).toBe(33_910);
+    expect(dXFromAxis(0, x0)).toBe(-30_520);
     for (const v of [x0 * 0.3, x0 * 0.7, x0, x0 * 1.1, x0 * 1.5]) {
       const d = dXFromAxis(v, x0) as number;
       expect(Number.isInteger(d / 10)).toBe(true);
-      expect(d).toBeGreaterThanOrEqual(-0.4 * x0);
-      expect(d).toBeLessThanOrEqual(0.2 * x0);
+      expect(d).toBeGreaterThanOrEqual(-0.9 * x0);
+      expect(d).toBeLessThanOrEqual(1.0 * x0);
     }
   });
 
@@ -343,8 +398,8 @@ describe('グラフ上の ΔX（#52）', () => {
     expect(stepDXKey(1_230, '.', x0)).toBe(1_330);
     expect(stepDXKey(1_270, ',', x0)).toBe(1_170);
     // 範囲はドラッグと共通（10 円の格子の内側の端）
-    expect(stepDXKey(6_650, '>', x0)).toBe(6_780);
-    expect(stepDXKey(-13_200, '<', x0)).toBe(-13_560);
+    expect(stepDXKey(33_250, '>', x0)).toBe(33_910);
+    expect(stepDXKey(-30_200, '<', x0)).toBe(-30_520);
     // 非有限の ΔX は 0 から
     expect(stepDXKey(Number.NaN, '.', x0)).toBe(100);
   });
@@ -356,10 +411,19 @@ describe('グラフ上の ΔX（#52）', () => {
     // 端から内側へは動く
     expect(stepDXKey(hi, ',', x0)).toBe(hi - 100);
     expect(stepDXKey(lo, '.', x0)).toBe(lo + 100);
-    // 範囲の外の値（% のスライダーの +20% = 6,782.468 円）から押しても逆向きにならない
-    const pctMax = 0.2 * x0;
+    // 範囲の外の値（% のステッパーの +100% = 33,912.34 円）から押しても逆向きにならない
+    const pctMax = 1.0 * x0;
     expect(stepDXKey(pctMax, '.', x0)).toBe(pctMax);
-    expect(stepDXKey(pctMax, ',', x0)).toBe(6_680);
+    expect(stepDXKey(pctMax, ',', x0)).toBe(33_810);
+    // 数値欄で入れた操作の範囲の外の値（−99% / +900%）からも逆向きにならない（#144 AC-3）
+    for (const v of [-0.99 * x0, -0.95 * x0, 9 * x0, 2 * x0]) {
+      for (const k of ['.', '>']) expect(stepDXKey(v, k, x0) as number).toBeGreaterThanOrEqual(v);
+      for (const k of [',', '<']) expect(stepDXKey(v, k, x0) as number).toBeLessThanOrEqual(v);
+    }
+    expect(stepDXKey(-0.99 * x0, ',', x0)).toBe(-0.99 * x0);
+    expect(stepDXKey(-0.99 * x0, '.', x0)).toBe(-30_520);
+    expect(stepDXKey(9 * x0, '.', x0)).toBe(9 * x0);
+    expect(stepDXKey(9 * x0, ',', x0)).toBe(33_910);
     // 押した向きと逆に動くことはない（多数の値）
     for (let v = lo - 50; v <= hi + 50; v += 37) {
       for (const k of ['.', '>']) expect(stepDXKey(v, k, x0) as number).toBeGreaterThanOrEqual(v);
@@ -384,5 +448,40 @@ describe('グラフ上の ΔX（#52）', () => {
     ]) {
       expect(stepDXKey(0, k, x0)).toBeNull();
     }
+  });
+});
+
+/** #144 AC-7: 読み込み・X₀ の変化で、数値欄の範囲（−99%〜min(+900%, 1e6 円)）の外の ΔX を端へ寄せる。 */
+describe('clampDXInput（#144）', () => {
+  const x0 = 33_912.34;
+
+  it('範囲の中はそのまま（同じ値）。−40% の既存の値・% で入れた −99% の端数も動かない', () => {
+    for (const v of [0, -0.4 * x0, 0.2 * x0, -0.99 * x0, 9 * x0, -30_520, 12_345.6]) {
+      expect(clampDXInput(v, x0)).toBe(v);
+    }
+  });
+
+  it('外は端へ: 下は −0.99X₀（X > 0 を保つ）、上は min(9X₀, 1e6)', () => {
+    expect(clampDXInput(-x0, x0)).toBe(-0.99 * x0);
+    expect(clampDXInput(-1e6, x0)).toBe(-0.99 * x0);
+    expect(clampDXInput(10 * x0, x0)).toBe(9 * x0);
+    expect(clampDXInput(1e6, 200_000)).toBe(1e6);
+    expect(clampDXInput(1e6 + 1, 200_000)).toBe(1e6);
+    // X₀ が下がって −40,000 円が −99% より下になった
+    expect(clampDXInput(-40_000, x0)).toBe(-0.99 * x0);
+    expect(x0 + clampDXInput(-40_000, x0)).toBeGreaterThan(0);
+  });
+
+  it('冪等。X₀ が無効なら dX をそのまま、非有限の dX は 0', () => {
+    for (const v of [-1e6, -x0, 0, 5e5, 1e6]) {
+      const once = clampDXInput(v, x0);
+      expect(clampDXInput(once, x0)).toBe(once);
+    }
+    for (const bad of [Number.NaN, 0, -1, Number.POSITIVE_INFINITY]) {
+      expect(clampDXInput(-50_000, bad)).toBe(-50_000);
+    }
+    expect(clampDXInput(Number.NaN, x0)).toBe(0);
+    expect(clampDXInput(Number.POSITIVE_INFINITY, x0)).toBe(0);
+    expect(clampDXInput(Number.NaN, Number.NaN)).toBe(0);
   });
 });

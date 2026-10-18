@@ -25,6 +25,8 @@ export interface StepperEdit {
   parse: (text: string) => Parsed<number>;
   text: (v: number) => string;
   onError: (message: string | null) => void;
+  /** 数値入力で値を確定したあと（表示の単位の値。変えずに閉じたときは呼ばない。#144: ΔX の点を横軸に見せる） */
+  onCommit?: (v: number) => void;
 }
 
 interface Props {
@@ -191,7 +193,10 @@ export function Stepper(p: Props) {
       c.edit.onError(o.message);
       return false;
     }
-    if (o.type === 'set') now(o.value);
+    if (o.type === 'set') {
+      now(o.value);
+      c.edit.onCommit?.(o.value);
+    }
     closeEdit(refocus);
     return true;
   };
@@ -291,8 +296,8 @@ export function Stepper(p: Props) {
         tabIndex={disabled ? -1 : 0}
         aria-label={p.label}
         aria-valuenow={value}
-        aria-valuemin={spec.min}
-        aria-valuemax={spec.max}
+        aria-valuemin={Math.min(spec.min, value)}
+        aria-valuemax={Math.max(spec.max, value)}
         aria-valuetext={p.sub ? `${text} ${p.sub}` : text}
         aria-disabled={disabled ? 'true' : undefined}
         onKeyDown={(e) => {
@@ -314,7 +319,7 @@ export function Stepper(p: Props) {
           const k = stepperKey(e.key, e.shiftKey);
           if (k === null) return;
           e.preventDefault();
-          now('n' in k ? move(cur(), k.n) : stepperJump(spec, k.to));
+          now('n' in k ? move(cur(), k.n) : stepperJump(spec, k.to, cur()));
         }}
         onPointerDown={
           g

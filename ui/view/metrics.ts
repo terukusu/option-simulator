@@ -224,7 +224,8 @@ export function metricsModel(input: MetricsInput): MetricsModel {
       legs,
       sc,
       ctx,
-      { lo: base.full[0], hi: base.full[1] },
+      // 板の全域（シナリオ点で広げた全域では同じ点数で解像度が落ちる。#144）
+      { lo: base.boardFull[0], hi: base.boardFull[1] },
       settings,
       DATE_BEP_SAMPLES,
     ),

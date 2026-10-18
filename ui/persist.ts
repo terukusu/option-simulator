@@ -60,6 +60,7 @@ import {
 } from './state';
 import { HEDGE_TARGET_MAX, type HedgeAt, type HedgeSettings } from './view/hedge';
 import type { PnlYMode, PnlYSettings } from './view/pnlChart';
+import { DX_ABS_MAX } from './view/scenario';
 import type { SmileAxis } from './view/smile';
 
 /** 作業の保存のキー（origin ごと） */
@@ -77,8 +78,6 @@ export const MAX_TABS_READ = 20;
 
 /** 保存する足の本数の上限（壊れた・巨大な値で固まらない） */
 export const MAX_SAVED_LEGS = 200;
-/** ΔX の絶対値の上限（円） */
-const DX_MAX = 1e6;
 /** 保存した板のデータ元の名前の長さの上限 */
 const LABEL_MAX = 64;
 
@@ -542,7 +541,7 @@ function readScenario(v: unknown): Scenario | null {
   if (
     !isFiniteNum(s.days) ||
     !isFiniteNum(s.dX) ||
-    Math.abs(s.dX) > DX_MAX ||
+    Math.abs(s.dX) > DX_ABS_MAX ||
     !isFiniteNum(s.dSigma) ||
     !isFiniteNum(s.skew) ||
     !isFiniteNum(s.beta) ||
