@@ -1,6 +1,7 @@
 import { Fragment } from 'preact';
 import { useId, useState } from 'preact/hooks';
 import { pure } from '../../components/pure';
+import { PANEL_FOCUS_LABEL } from '../../view/keys';
 import type { MetricsModel } from '../../view/metrics';
 import {
   METRICS_EMPTY_TEXT,
@@ -89,7 +90,13 @@ function MetricsView({ model, feePerLot }: Props) {
           <p>{TAIL_HINT}</p>
         </Popover>
       </PanelHead>
-      <div class="panel-body mx-body" tabIndex={-1}>
+      {/* biome-ignore lint/a11y/useSemanticElements: 1〜5 の行き先のスクロールする枠に名前を付ける（fieldset にしない） */}
+      <div
+        class="panel-body mx-body"
+        tabIndex={-1}
+        role="group"
+        aria-label={PANEL_FOCUS_LABEL.metrics}
+      >
         {view.empty ? (
           <div class="empty-state">
             <p>{METRICS_EMPTY_TEXT}</p>

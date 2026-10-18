@@ -3,6 +3,7 @@ import type { AppController } from '../../components/useAppController';
 import { type LegPatch, type Parsed, parseEntry, parseIvPct, parseQty } from '../../state';
 import { fmtNum } from '../../view/format';
 import type { HedgeAt } from '../../view/hedge';
+import { PANEL_FOCUS_LABEL } from '../../view/keys';
 import { type PositionRow, SIDE_LABEL, toggledSide } from '../../view/position';
 import {
   type DetailItem,
@@ -147,7 +148,14 @@ export function Positions(p: Props) {
         </Popover>
         <Menu label="ポジションの操作" button="⋯" items={items} />
       </PanelHead>
-      <div class="panel-body pos-body" ref={bodyRef} tabIndex={-1}>
+      {/* biome-ignore lint/a11y/useSemanticElements: 1〜5 の行き先のスクロールする枠に名前を付ける（fieldset にしない） */}
+      <div
+        class="panel-body pos-body"
+        ref={bodyRef}
+        tabIndex={-1}
+        role="group"
+        aria-label={PANEL_FOCUS_LABEL.positions}
+      >
         {rows.length === 0 ? (
           <div class="empty-state">
             <p>板の bid（売り）/ ask（買い）を押すか、⋯ の「足を追加…」で足を入れる</p>

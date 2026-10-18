@@ -5,6 +5,7 @@ import type { AtmBasis } from '../../../model';
 import { type Domain, zoom } from '../../chart/scale';
 import { pure } from '../../components/pure';
 import type { Action } from '../../state';
+import { PANEL_FOCUS_LABEL } from '../../view/keys';
 import { type SmileAxis, smileModel } from '../../view/smile';
 import {
   SMILE_AXIS_OPTIONS,
@@ -89,7 +90,13 @@ function SmileView(p: SmileRegionProps) {
           <p>{SMILE_LEGEND_HINT}</p>
         </Popover>
       </PanelHead>
-      <div class="panel-body market-body" tabIndex={-1}>
+      {/* biome-ignore lint/a11y/useSemanticElements: 1〜5 の行き先のスクロールする枠に名前を付ける（fieldset にしない） */}
+      <div
+        class="panel-body market-body"
+        tabIndex={-1}
+        role="group"
+        aria-label={PANEL_FOCUS_LABEL.smile}
+      >
         <div class="smile-tools">
           <MonthSeg
             months={chain.months}

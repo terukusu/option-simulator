@@ -18,6 +18,7 @@ import {
   stepperMove,
   wheelStep,
 } from '../../view/stepper';
+import { livePulse } from '../live';
 
 /** 数値入力（#83）。parse は表示の単位の値、text は開いたときの文字列、onError はエラーの文言（null で消す） */
 export interface StepperEdit {
@@ -104,7 +105,7 @@ export function Stepper(p: Props) {
     pending.current = null;
     emit(v);
   };
-  /** 1 フレーム 1 回（スクラブ・ホイール） */
+  /** 1 フレーム 1 回（スクラブ・ホイール）。連続の変更なので舞台の補間を切る（§6 の `.live`。dispatch より先に） */
   const queue = (v: number) => {
     pending.current = v;
     if (frame.current) return;
@@ -112,7 +113,10 @@ export function Stepper(p: Props) {
       frame.current = 0;
       const next = pending.current;
       pending.current = null;
-      if (next !== null) emit(next);
+      if (next !== null) {
+        livePulse();
+        emit(next);
+      }
     });
   };
   const move = (from: number, n: number) => {
@@ -228,6 +232,8 @@ export function Stepper(p: Props) {
           stopRepeat();
           return;
         }
+        // 長押しの連続（2 段目から）は連続の変更（§6 の `.live`）。最初の 1 段は離散のまま補間する
+        livePulse();
         emit(next);
       }
       r.frame = requestAnimationFrame(tick);

@@ -6,6 +6,7 @@ import {
   globalKey,
   type KeySummary,
   PALETTE_KBD,
+  PANEL_FOCUS_LABEL,
   PANEL_KEY,
   PANEL_KEYS,
   panelKeyActions,
@@ -230,5 +231,17 @@ describe('toggledTheme と表示用の定数', () => {
     expect(CHART_KEY).toBe('G');
     expect(THEME_KEY).toBe('T');
     expect(PALETTE_KBD.length).toBeGreaterThan(0);
+  });
+});
+
+/** #91 段 C AC-C7: 1〜5 の行き先の枠の読み上げの名前 */
+describe('PANEL_FOCUS_LABEL', () => {
+  it('5 つのパネルすべてに空でない名前があり、互いに違う', () => {
+    const keys = Object.keys(PANEL_FOCUS_LABEL).sort();
+    expect(keys).toEqual(Object.keys(PANEL_KEY).sort());
+    expect(keys).toHaveLength(5);
+    const labels = Object.values(PANEL_FOCUS_LABEL);
+    for (const l of labels) expect(l.trim().length).toBeGreaterThan(0);
+    expect(new Set(labels).size).toBe(5);
   });
 });

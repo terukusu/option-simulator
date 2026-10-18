@@ -112,8 +112,11 @@
   /* 動き（§6） */
   --dur-fast: 120ms;
   --dur: 180ms;
+  --dur-ro: 200ms;
   --dur-line: 220ms;
   --ease: cubic-bezier(0.2, 0, 0, 1);
+  /* 足マーカーが現れるときの下からの距離（ui/view/stage.ts の MARKER_BAND_PX と同じ値。#91 段 C） */
+  --marker-rise: 14px;
 }
 
 @media (max-width: 719.98px) {
@@ -128,6 +131,7 @@
   :root {
     --dur-fast: 0ms;
     --dur: 0ms;
+    --dur-ro: 0ms;
     --dur-line: 0ms;
   }
 }

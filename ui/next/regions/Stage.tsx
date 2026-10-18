@@ -1,11 +1,13 @@
 import type { MutableRef } from 'preact/hooks';
-import { useLayoutEffect, useMemo } from 'preact/hooks';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks';
 import type { Domain } from '../../chart/scale';
 import type { AppController } from '../../components/useAppController';
 import { usePnlChartModel } from '../../components/usePnlChartModel';
+import { LIVE_SETTLE_MS, liveBurst } from '../../view/motion';
 import { surfaceActive, surfaceLegend } from '../../view/pnlSurface';
 import type { ChartMode } from '../../view/shell';
 import { bigReadout, stageFrame } from '../../view/stage';
+import { liveHold, livePulse, useLiveAttr } from '../live';
 import { BigReadout } from '../stage/BigReadout';
 import { IvRail } from '../stage/IvRail';
 import { PnlPlot } from '../stage/PnlPlot';
@@ -13,6 +15,26 @@ import { StageHead } from '../stage/StageHead';
 import { TimeRail } from '../stage/TimeRail';
 import { usePnlSurface } from '../stage/usePnlSurface';
 import { useSize } from '../useSize';
+
+const sameStrings = (a: readonly string[], b: readonly string[]) =>
+  a.length === b.length && a.every((x, i) => x === b[i]);
+
+/**
+ * 舞台の描画域・レール・読み取りの上の押下（ハンドル・パン・ピンチ・足マーカー・面の点・IV / 時間レール）: 離すまで
+ * `.live`（§6）。pointerup / pointercancel はどこで離しても window で受ける
+ */
+function onStagePointerDown(e: PointerEvent) {
+  const id = e.pointerId;
+  const release = liveHold();
+  const up = (ev: PointerEvent) => {
+    if (ev.pointerId !== id) return;
+    window.removeEventListener('pointerup', up, true);
+    window.removeEventListener('pointercancel', up, true);
+    release();
+  };
+  window.addEventListener('pointerup', up, true);
+  window.addEventListener('pointercancel', up, true);
+}
 
 /**
  * 舞台（docs/ui-redesign.md §2・§4.1・§5・§8。#82）: 凡例行 → 描画域 + IV レール（右）→ 時間レール → 読み取り。
@@ -50,6 +72,43 @@ export function Stage(p: {
     pins: c.pinTargets,
     pinLine: c.pinLine,
     amountUnit: metrics.unit,
+  });
+  // 動き（§6。#91 段 C）: 連続の変更の間は .stage-main の data-live（押下・パルス。ui/next/live.ts が直接入れる）と
+  // .live（舞台の大きさの変化・連打。描画の中で前の値と比べて同じ描画で付け、パルスで data-live に引き継ぐ。effect で後から
+  // 付けるとその 1 フレームだけ補間が走る）で補間を切る
+  const mainRef = useRef<HTMLDivElement>(null);
+  useLiveAttr(mainRef);
+  const lastSize = useRef<{ width: number; height: number } | null>(null);
+  const resized =
+    lastSize.current !== null &&
+    (lastSize.current.width !== width || lastSize.current.height !== height);
+  useLayoutEffect(() => {
+    const last = lastSize.current;
+    lastSize.current = { width, height };
+    if (last && (last.width !== width || last.height !== height)) livePulse();
+  }, [width, height]);
+  // 連打（前の線の変化から LINE_MS 未満で続く離散の変更 = キー・± のクリックの連打）も連続の変更として同じ描画で切る。
+  // 線が変わったかは d の文字列で見る（model は描き直しのたびに作り直されることがある）
+  const ds = model.lines.map((l) => l.d);
+  const lastDs = useRef(ds);
+  const lastLinesAt = useRef(Number.NEGATIVE_INFINITY);
+  const linesChanged = !sameStrings(lastDs.current, ds);
+  const burst = linesChanged && liveBurst(lastLinesAt.current, performance.now());
+  useLayoutEffect(() => {
+    if (!linesChanged) return;
+    const t = performance.now();
+    if (liveBurst(lastLinesAt.current, t)) livePulse();
+    lastDs.current = ds;
+    lastLinesAt.current = t;
+  });
+  // .live は描画で付けるので、次の描画が来ないと残る。最後に付けた描画から LIVE_SETTLE_MS で 1 回だけ描き直して外す
+  // （その間は data-live のパルスが補間を切っている。続けて変われば次の描画で待ち直す）
+  const liveClass = resized || burst;
+  const [, settle] = useState(0);
+  useEffect(() => {
+    if (!liveClass) return;
+    const id = setTimeout(() => settle((n) => n + 1), LIVE_SETTLE_MS);
+    return () => clearTimeout(id);
   });
   // 描画の後に入れる（描画中に ref へ書かない）
   const { yNow } = p;
@@ -93,7 +152,12 @@ export function Stage(p: {
           dispatch={dispatch}
         />
       )}
-      <div class="panel-body stage-main">
+      <div
+        ref={mainRef}
+        class={liveClass ? 'panel-body stage-main live' : 'panel-body stage-main'}
+        onPointerDownCapture={onStagePointerDown}
+        onWheelCapture={livePulse}
+      >
         <div class="stage-body">
           <PnlPlot
             chartRef={ref}
