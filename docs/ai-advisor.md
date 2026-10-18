@@ -28,7 +28,7 @@ EPIC #141（AI アドバイザー）の 1 本目の spike。後続の #133（鍵
 
 | # | 事実 | 出典 | 確認日 |
 |---|---|---|---|
-| F1 | 料金（基本入力 / 5 分キャッシュの書き込み / 1 時間キャッシュの書き込み / キャッシュの読み取り / 出力）: `claude-opus-5-5` 4 / 5 / 8 / 0.20 / 20、`claude-sonnet-5-5` 2 / 2.50 / 4 / 0.10 / 10、`claude-haiku-5-5`（要求が 10 万トークン以下）0.10 / 0.125 / 0.20 / 0.01 / 0.50、同（10 万トークン超）0.50 / 0.625 / 1 / 0.05 / 2.50、`claude-fable-5-1` 10 / 12.50 / 20 / 0.25 / 50。Opus 5.5・Sonnet 5.5 のキャッシュの読み取りは基本入力の 0.05 倍、ほかは 0.1 倍。`inference_geo: "us"` は 1.1 倍（既定の global は標準の料金） | https://platform.claude.com/docs/en/about-claude/pricing | 2026-10-19 |
+| F1 | 料金（基本入力 / 5 分キャッシュの書き込み / 1 時間キャッシュの書き込み / キャッシュの読み取り / 出力）: `claude-opus-5-5` 4 / 5 / 8 / 0.20 / 20、`claude-sonnet-5-5` 2 / 2.50 / 4 / 0.10 / 10、`claude-haiku-5-5`（要求が 10 万トークン以下）0.10 / 0.125 / 0.20 / 0.01 / 0.50、同（10 万トークン超）0.50 / 0.625 / 1 / 0.05 / 2.50、`claude-fable-5-1` 10 / 12.50 / 20 / 0.25 / 50。キャッシュの読み取りは Opus 5.5・Sonnet 5.5 が基本入力の 0.05 倍、Fable 5.1 が 0.025 倍、Haiku 5.5 が 0.1 倍。`inference_geo: "us"` は 1.1 倍（既定の global は標準の料金） | https://platform.claude.com/docs/en/about-claude/pricing | 2026-10-19 |
 | F2 | 道具を使うときに足される system prompt（tool_choice が auto / none）: Opus 5.5・Sonnet 5.5・Haiku 5.5 とも 286 トークン | 同上 | 2026-10-19 |
 | F3 | Opus 5.5 / Sonnet 5.5 は tool_choice の any / tool が 400（auto を使う）。Opus 5.5 は thinking を切れない（調整は effort だけ。既定 medium）。Sonnet 5.5 は `between_tools` で thinking を切れる（effort high 以下）。コンテキスト 1M・最大出力 128K | https://platform.claude.com/docs/en/about-claude/models/overview （Claude Code の claude-api スキルの参照資料でも確認） | 2026-10-19 |
 | F4 | ストリーミングは SSE（server-sent events）。`message_start` → `content_block_start` → `content_block_delta`（`text_delta`・`input_json_delta`・`thinking_delta`）→ `content_block_stop` → `message_delta`（`usage` は累積）→ `message_stop`。途中に `ping`・`error` が挟まる | https://platform.claude.com/docs/en/build-with-claude/streaming | 2026-10-19 |
@@ -97,7 +97,7 @@ A。送る本文の形は中継で許可リストとして検査する（キー�
 ### 論点 2: API の鍵の置き場所と IAM
 - 判断者: オーナー
 
-EPIC #141 の (b)。Issue と #120 の当初の方針は「Secret Manager に置く」だが、調べる中で **鍵そのものを持たない** 方式（WIF。F13）があると分かったので並べる。どの案でも、鍵（または交換したトークン）はブラウザに出さず、応答・ログに出さない（終了条件 5。検査は `repo-values-check.sh`・`csp-check.sh`・`gcloud logging read`）。
+EPIC #141 の (b)。Issue と #120 の当初の方針は「Secret Manager に置く」だが、調べる中で **鍵そのものを持たない** 方式（Anthropic の Workload Identity Federation。以下「Anthropic の WIF」。infra/bootstrap の GitHub Actions → GCP の WIF とは別物。F13）があると分かったので並べる。どの案でも、鍵（または交換したトークン）はブラウザに出さず、応答・ログに出さない（終了条件 5。検査は `repo-values-check.sh`・`csp-check.sh`・`gcloud logging read`）。
 
 #### 選択肢
 
@@ -105,7 +105,7 @@ EPIC #141 の (b)。Issue と #120 の当初の方針は「Secret Manager に置
 |---|---|---|---|---|
 | A | **Secret Manager を `infra/bootstrap`（所有者の apply）に**: `google_project_service`（secretmanager。`disable_on_destroy = false`）、シークレットの入れ物（値は Terraform に入れない。所有者が `gcloud secrets versions add --data-file=-` で標準入力から投入）、`google_secret_manager_secret_iam_member`（シークレット単位・`roles/secretmanager.secretAccessor`・member は実行 SA `sa-simulator`。追加型）。Cloud Run には `infra/prod` の env の `value_source.secret_key_ref`（版は固定の番号か `latest`）で渡す | 実績のある形。apply SA に Secret Manager の権限を足さない（付録 B の方針のまま）。値は tfstate に入らない | 長命の鍵が存在する（漏れたときの影響が大きい）。発行・投入・ローテーションの手作業が続く。付録 B「API の有効化は simulator 側で宣言しない」の例外になる | 本番の IAM: API の有効化 1 件 + シークレット単位の付与 1 件。Secret Manager の費用は無料枠の範囲の見込み |
 | B | **Secret Manager を `infra/prod`（CI の apply）に** | 変更が CI の承認の流れに乗る | apply SA にプロジェクト単位の `serviceusage.serviceUsageAdmin` と `secretmanager.admin` が要る = 権限が広がり、付録 B「apply SA の権限を絞る」に反する。長命の鍵は A と同じ | 本番の IAM: apply SA への付与が増える |
-| C | **WIF（鍵を持たない）**: Cloud Run の実行 SA のメタデータサーバーから Google の ID トークン（issuer `https://accounts.google.com`、audience `https://api.anthropic.com`、`format=full`）を取り、Anthropic の短命トークンに交換する（F13）。Anthropic 側は Console の「Connect workload」（Google Cloud）で、issuer・Anthropic のサービスアカウント・federation rule（`sub` = 実行 SA の数値の unique ID と `email` を両方固定、audience 固定）を所有者が作る。GCP 側は環境変数でルール ID・組織 ID・サービスアカウント ID・ワークスペース ID を渡すだけ（秘密ではないが個人の値なので、リポジトリに書かず Terraform の変数 / GitHub variables で） | 鍵が存在しないので漏れ・ローテーションが無い。GCP 側の IAM・API の有効化・シークレットが不要。トークンは分単位で失効（ルールの既定 3,600 秒、ウィザードは 600 秒） | Anthropic の組織の admin 権限で所有者が Console のウィザードを回す必要。Python SDK の `WorkloadIdentityCredentials` が `exclude-newer` の範囲の版（1.8.0 まで。F15）にあるか未確認（論点 7）。clone した人には Anthropic 側の設定の手順が増える。#133 の中身が「Secret Manager を足す」から「WIF の値を env に渡す」に変わる | 本番の IAM の変更なし。Cloud Run の env が数個増える |
+| C | **WIF（鍵を持たない）**: Cloud Run の実行 SA のメタデータサーバーから Google の ID トークン（issuer `https://accounts.google.com`、audience `https://api.anthropic.com`、`format=full`）を取り、Anthropic の短命トークンに交換する（F13）。Anthropic 側は Console の「Connect workload」（Google Cloud）で、issuer・Anthropic のサービスアカウント・federation rule（`sub` = 実行 SA の数値の unique ID と `email` を両方固定、audience 固定）を所有者が作る。GCP 側は環境変数でルール ID・組織 ID・サービスアカウント ID・ワークスペース ID を渡すだけ（秘密ではないが個人の値なので、リポジトリに書かず Terraform の変数 / GitHub variables で） | 鍵が存在しないので漏れ・ローテーションが無い。GCP 側の IAM・API の有効化・シークレットが不要。トークンは分単位で失効（ルールの既定 3,600 秒、ウィザードは 600 秒） | Anthropic の組織の admin 権限で所有者が Console のウィザードを回す必要。ID トークンに `email` が入るか（SDK の例の `fetch_id_token` が `format=full` を満たすか）と、Python SDK の `WorkloadIdentityCredentials` が `exclude-newer` の範囲の版（1.8.0 まで。F15）にあるか未確認（論点 7）。clone した人には Anthropic 側の設定の手順が増える。#133 の中身が「Secret Manager を足す」から「WIF の値を env に渡す」に変わる | 本番の IAM の変更なし。Cloud Run の env が数個増える |
 | D | Cloud Run の素の環境変数に鍵（GitHub secret → Terraform の変数） | 最も簡単 | tfstate・plan の出力・Cloud Run の設定（`run.viewer` で読める）に鍵が入る | 不採用の扱い |
 
 比べる観点: 本番の IAM の変更量（A: API の有効化 + 付与 1 件 / C: なし）、所有者の手作業（A: 鍵の発行・投入・ローテーション / C: Console のウィザード 1 回）、漏れたときの影響（A: 長命の鍵 / C: 短命のトークン）、clone した人の手順の量、SDK の対応。
@@ -134,7 +134,7 @@ EPIC #141 の (c)。小問が 3 つ（モデル・上限の値・数え方）あ
 | L2 | 1 日の上限 $3（450 円） | Opus・設計書なしの講評で約 25〜33 回 / 日。#137 の後も温かいキャッシュなら 1 回 約 $0.14 で 20 回ほど | 使い方によっては足りない日がある | 月の最大 約 $93 |
 | L3 | 1 日の上限 $5（750 円） | 余裕がある | 暴走したときの 1 日の損が大きい | 月の最大 約 $155 |
 | C1 | 数え方: インスタンスのメモリ内のカウンタ | 新しい資源・IAM が要らない | 最大 2 インスタンス、`cpu_idle = true`・最小 0 で落ちると 0 に戻る → 最悪 2 倍以上ずれる | 0 |
-| C2 | 数え方: Firestore（Datastore モード）の 1 文書（日付のキー、トランザクションで加算） | インスタンスをまたいで正しい。既に有効な API（プロジェクトに `(default)` の Datastore モードの DB がある） | 実行 SA に `roles/datastore.user` の付与が増える（bootstrap。本番の IAM の変更）。既存の DB の用途が未確認（optionchan 側なら名前空間を分ける） | 無料枠の範囲の見込み |
+| C2 | 数え方: Firestore（Datastore モード）の 1 文書（日付のキー、トランザクションで加算） | インスタンスをまたいで正しい。既に有効な API（プロジェクトに `(default)` の Datastore モードの DB がある） | 実行 SA に `roles/datastore.user` の付与が増える（bootstrap。本番の IAM の変更）。既存の DB の用途が未確認。**プロジェクト単位の付与は既存の `(default)` DB 全体の読み書きに及ぶ**（名前空間は IAM の境界にならない）。付けるなら名前つきの DB を新設し、IAM 条件（`resource.name`）でその DB に絞る | 無料枠の範囲の見込み |
 | C3 | 数え方: GCS のオブジェクト 1 つ（世代番号の前提条件つきの書き換え） | インスタンスをまたいで正しい | 新しいバケットが要る（state のバケットとは混ぜない）。IAM の付与が増える | ほぼ 0 |
 | C4 | 数え方: Anthropic の Console の上限だけ | 実装が要らない | 月の上限しか無い（F10。日単位は無い）。超えると 400 / 429 で止まるだけで、「押す前に残り」は出せない | 0 |
 
@@ -298,7 +298,7 @@ A（日の上限は最後の砦）。
 | システムプロンプト | 約 2,000 字（日本語 1,600 + ASCII 400） | 約 1,750 |
 | 道具の定義 6 本 | JSON の ASCII 3,000 字 + 説明の日本語 600 字 + 道具を使うときの system prompt 286（F2） | 約 2,000 |
 | 文脈 | 正規化した値・ポジション・シナリオの JSON（ASCII 1,500 字 + 日本語 100 字）。最小の見本（架空の JSON）は 888 字で、余裕を見た値 | 約 660 |
-| 要求 1 | 入力 = 上の 3 つの和。出力 = tool_use 4 本 約 300 + thinking 約 1,000（thinking の量は仮定） | 入力 約 4,450 / 出力 約 1,300 |
+| 要求 1 | 入力 = 上の 3 つの和 + 利用者の指示 約 40。出力 = tool_use 4 本 約 300 + thinking 約 1,000（thinking の量は仮定） | 入力 約 4,450 / 出力 約 1,300 |
 | 道具の結果 | JSON の ASCII 2,500 字（最小の見本は 661 字） | 約 930 |
 | 要求 2 | 入力 = 要求 1 の入力 + 出力 + 道具の結果。出力 = 最終の回答 日本語 1,500 字 + thinking 約 1,000 | 入力 約 6,680 / 出力 約 2,500 |
 | **合計** | 道具の往復 1 回（要求 2 本） | **入力 約 11,100 / 出力 約 3,800** |

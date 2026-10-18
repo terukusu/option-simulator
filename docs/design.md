@@ -819,7 +819,7 @@ F の推定・補間・ATM の判定はブラウザ（`model/`）。`sq_date`・
 | D12 | 板の無い限月（3 限月以降）= Q4 | | |
 | D13 | IV の不安定の閾値（分解能の帯 5pt、ask ≤ 5 円）と急落プリセットの値 | 製品判断 | 上の値で始め、使いながら調整 |
 | AI1 | AI アドバイザー: Anthropic API に送るデータの範囲と JPX データの扱い（`docs/ai-advisor.md` 論点 1） | 許可リスト / 許可リスト + 一部の行使価格の気配 / 板まるごと / 送らない | 許可リスト（正規化した値・ポジション・シナリオ・道具の出力。板の行・気配の生の値は送らない）。JPX の情報の利用条件と Anthropic 側の保持の設定をオーナーが確認 |
-| AI2 | AI アドバイザー: API の鍵の置き場所と IAM（論点 2） | WIF（鍵を持たない）/ Secret Manager を `infra/bootstrap` / Secret Manager を `infra/prod` / 素の環境変数 | WIF。使えなければ Secret Manager を `infra/bootstrap`（シークレット単位の `secretAccessor`） |
+| AI2 | AI アドバイザー: API の鍵の置き場所と IAM（論点 2） | WIF（鍵を持たない）/ Secret Manager を `infra/bootstrap` / Secret Manager を `infra/prod` / 素の環境変数 | Anthropic の WIF（鍵を持たない。GitHub Actions → GCP の WIF とは別物）。使えなければ Secret Manager を `infra/bootstrap`（シークレット単位の `secretAccessor`） |
 | AI3 | AI アドバイザー: 費用の 1 日上限・モデル・上限の数え方（論点 3） | モデル `claude-opus-5-5` / `claude-sonnet-5-5` / `claude-haiku-5-5`、上限 $1 / $3 / $5、数え方 メモリ / Firestore / GCS / Console だけ | `claude-opus-5-5`・1 日 $3・Firestore の日のカウンタ + Console のワークスペースの月の上限 |
 | AI4 | AI アドバイザー: 速さの目標（論点 4。EPIC #141 の終了条件 6） | 最初の文字の p50 1,500 / 3,000 / 5,000 ms / 測ってから | 最初の文字 p50 3,000 ms、道具の数字（ブラウザ内）p50 300 ms |
 | AI5 | AI アドバイザー: 道具（simulator の計算）を実行する場所（論点 5） | ブラウザの `model/` を呼ぶ往復 / Python に写す / Node を足す / 往復 + 事前計算 | 往復 + 定型の 1 アクションは事前計算 |
