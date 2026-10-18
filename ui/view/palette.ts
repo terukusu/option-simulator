@@ -18,7 +18,7 @@ import { addMenuModel } from './boxTabs';
 import { CHART_KEY, type GlobalKey, type KeySummary, PANEL_KEY, THEME_KEY } from './keys';
 import { type PinMenuInput, pinMenuRows } from './pins';
 import { evalChips, presetChips, type ScenarioRegionInput } from './scenarioRegion';
-import { CHART_MODES, type PanelId, type ShellAction } from './shell';
+import { CHART_MODES, DOCK_LABELS, type PanelId, type ShellAction } from './shell';
 import type { TabsView } from './tabs';
 import { CLEAR_NO_LEGS_TEXT, THEMES } from './topMenu';
 
@@ -57,13 +57,13 @@ export function paletteGroupName(g: PaletteGroup): string {
   return GROUP_NAME[g];
 }
 
-/** パネルの名前（Shell の見出しと同じ） */
+/** パネルの名前（Shell の見出しと同じ。smile はドックの読み上げの名前 = 「IV」で IV 推移が候補に出る。#130） */
 export const PANEL_NAMES: Readonly<Record<PanelId, string>> = {
   positions: 'ポジション',
   board: '板',
   scenario: 'シナリオ',
   metrics: '指標',
-  smile: 'スマイル',
+  smile: DOCK_LABELS.smile.name,
 };
 const PANEL_ORDER: readonly PanelId[] = ['positions', 'board', 'scenario', 'metrics', 'smile'];
 

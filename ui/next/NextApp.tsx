@@ -40,6 +40,7 @@ import {
   ivVisible,
   layoutTier,
   shellReduce,
+  smileView,
 } from '../view/shell';
 import { bookIoToast, overwrittenText, restoreEntryFailText } from '../view/topMenu';
 import { BookDialog } from './BookDialog';
@@ -498,7 +499,7 @@ export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
           )
         }
         smile={(seg) =>
-          shell.market === 'iv' ? (
+          smileView(shell, tier) === 'iv' ? (
             <IvHistory
               load={iv.load}
               view={iv.view}

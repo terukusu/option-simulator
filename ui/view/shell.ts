@@ -20,12 +20,12 @@ export const MARKET_VIEWS = [
 ] as const;
 export type MarketView = (typeof MARKET_VIEWS)[number]['value'];
 /**
- * スマホ・タブレットのスマイルのパネルの見出しの Seg（#79。オーナー判断 4: ドックを増やさず、パネルの中で切り替える）。
- * 送るのは同じ { type: 'market' }（PC 以外では board は「スマイル」と同じ）
+ * スマホ・タブレットのスマイル（ドックの「IV」）のパネルの見出しの Seg（#79。オーナー判断 4: ドックを増やさず、パネルの
+ * 中で切り替える。#130 で IV 推移を左に）。送るのは同じ { type: 'market' }（PC 以外では board は「IV 推移」と同じ = 既定）
  */
 export const SMILE_VIEWS = [
-  { value: 'smile', text: 'スマイル' },
   { value: 'iv', text: 'IV 推移' },
+  { value: 'smile', text: 'スマイル' },
 ] as const;
 export type SmileView = (typeof SMILE_VIEWS)[number]['value'];
 /** 舞台のグラフの表示（凡例行の [線 | 面]。#88） */
@@ -59,20 +59,36 @@ export type ShellAction =
   | { type: 'market'; market: MarketView }
   | { type: 'chart'; chart: ChartMode };
 
+/**
+ * ドックのボタンの文字と読み上げの名前（#130。smile のパネルは IV 推移とスマイル。ラベルは「IV」）。アイコンは
+ * ui/next/Shell.tsx（JSX）。PANEL_NAMES（パレット）の smile もこの name
+ */
+export const DOCK_LABELS: Readonly<Record<PanelId, { text: string; name: string }>> = {
+  positions: { text: 'ポジ', name: 'ポジション' },
+  board: { text: '板', name: '板' },
+  scenario: { text: 'シナリオ', name: 'シナリオ' },
+  metrics: { text: '指標', name: '指標' },
+  smile: { text: 'IV', name: 'IV 推移 · スマイル' },
+};
+
 const PHONE_DOCK: readonly PanelId[] = ['positions', 'board', 'scenario', 'metrics', 'smile'];
 const TABLET_DOCK: readonly PanelId[] = ['positions', 'board', 'metrics', 'smile'];
 
-/** スマイルのパネル（PC は市場の列の section.smile）に描くもの（PC 以外では board は smile） */
-export function smileView(s: ShellState): SmileView {
-  return s.market === 'iv' ? 'iv' : 'smile';
+/**
+ * スマイルのパネル（PC は市場の列の section.smile）に描くもの。PC は市場が iv のときだけ iv、PC 以外は市場が smile の
+ * ときだけ smile（既定の board は IV 推移。#130）
+ */
+export function smileView(s: ShellState, tier: Tier): SmileView {
+  if (tier === 'pc') return s.market === 'iv' ? 'iv' : 'smile';
+  return s.market === 'smile' ? 'smile' : 'iv';
 }
 
 /**
  * IV 推移が見えているか（#79。初めて true になったときに右端を読む）。PC は市場が iv、タブレットはパネルがスマイルで
- * iv、スマホはそれに加えてシートが hidden でない
+ * smileView が iv（既定）、スマホはそれに加えてシートが hidden でない
  */
 export function ivVisible(s: ShellState, tier: Tier): boolean {
-  if (s.market !== 'iv') return false;
+  if (smileView(s, tier) !== 'iv') return false;
   if (tier === 'pc') return true;
   if (visiblePanel(s, tier) !== 'smile') return false;
   return tier === 'tablet' || s.sheet !== 'hidden';

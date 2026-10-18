@@ -1,15 +1,18 @@
 import { describe, expect, it } from 'vitest';
 import type { IvBar } from '../../data';
 import { ZERO_SCENARIO } from '../../model';
+import { fmtNum } from '../../ui/view/format';
 import {
   barsForTf,
   IV_INITIAL_BARS,
+  IV_MARGIN,
   IV_MODES,
   IV_RIGHT_OFFSET,
   IV_TF_SECONDS,
   IV_TFS,
   isIvTradingDay,
   ivChartModel,
+  ivCrosshair,
   ivFullDomain,
   ivIndexAt,
   ivKeepOf,
@@ -275,7 +278,6 @@ describe('ivChartModel（描画の座標）', () => {
     segments,
     width: 600,
     height: 300,
-    cursor: null,
     rightLoaded: true,
   };
 
@@ -374,17 +376,188 @@ describe('ivChartModel（描画の座標）', () => {
     expect(md.xTicks.every((t) => /^\d{4}$|^\d{1,2}月$/.test(t.label))).toBe(true);
   });
 
-  it('カーソルの縦線は足の x、足が 0 本なら空', () => {
-    const m = ivChartModel({ ...base, cursor: 299 });
-    expect(m.cursorX).toBe(m.candles.at(-1)?.x);
+  it('足が 0 本なら空（ローソクなし）', () => {
     const e = ivChartModel({ ...base, bars: [], segments: [], viewport: ivFullDomain(0) });
     expect(e.empty).toBe(true);
     expect(e.candles).toEqual([]);
-    expect(e.cursorX).toBeNull();
   });
 
   it('足の長さの表（秒）', () => {
     expect(IV_TF_SECONDS).toEqual({ '1m': 60, '5m': 300, '15m': 900, '1h': 3600, '1d': 86400 });
+  });
+});
+
+// ---- #130: 十字線と軸の札（ivCrosshair）。縦線は足に吸着、横線は指 / マウスの高さ（オーナーの決定 2026-10-18）
+describe('#130 AC-1: 十字線と軸の札（ivCrosshair）', () => {
+  const bars = barsAt(everyStep(jst('2026-11-02T09:00'), H, 300), 7);
+  const days = barsAt(everyStep(jst('2026-11-02T00:00'), 86400, 120), 9);
+  const chart = (
+    b: IvBar[],
+    tf: '1h' | '1d',
+    mode: 'candle' | 'line',
+    width = 600,
+    height = 300,
+  ) => {
+    const viewport = resolveIvViewport(b, tf, null, null);
+    const model = ivChartModel({
+      bars: b,
+      tf,
+      mode,
+      viewport,
+      segments: lineSegments(b, tf, NTD),
+      width,
+      height,
+      rightLoaded: true,
+    });
+    return { viewport, model };
+  };
+  /** 見えている足の index の範囲 */
+  const seen = (viewport: readonly [number, number], n: number) =>
+    [Math.max(0, Math.ceil(viewport[0])), Math.min(n - 1, Math.floor(viewport[1]))] as const;
+  const inside = (t: { x: number; y: number; w: number; h: number }, w: number, h: number) =>
+    t.x >= 0 && t.y >= 0 && t.x + t.w <= w + 1e-9 && t.y + t.h <= h + 1e-9 && t.w > 0;
+  /** 縦軸の目盛りの写像（ivChartModel と同じ: yDomain → [下端, 上端]） */
+  const syOf = (m: ReturnType<typeof chart>['model']) => (v: number) =>
+    m.height -
+    IV_MARGIN.bottom -
+    ((v - m.yDomain[0]) / (m.yDomain[1] - m.yDomain[0])) *
+      (m.height - IV_MARGIN.bottom - IV_MARGIN.top);
+  /** その逆（画素 → IV） */
+  const invOf = (m: ReturnType<typeof chart>['model']) => (y: number) =>
+    m.yDomain[0] +
+    ((m.height - IV_MARGIN.bottom - y) / (m.height - IV_MARGIN.bottom - IV_MARGIN.top)) *
+      (m.yDomain[1] - m.yDomain[0]);
+
+  it('十字線: 縦線はカーソルの足の x（ローソク・線の両方）、横線は入力の y（指 / マウスの高さ。足の値に吸着しない）', () => {
+    for (const mode of ['candle', 'line'] as const) {
+      const { viewport, model } = chart(bars, '1h', mode);
+      const [i0, i1] = seen(viewport, bars.length);
+      for (const i of [i0, Math.round((i0 + i1) / 2), i1]) {
+        const b = bars[i] as IvBar;
+        for (const y of [40.5, 150, 260]) {
+          const c = ivCrosshair({ bars, tf: '1h', viewport, cursor: i, y, model });
+          expect(c).not.toBeNull();
+          if (mode === 'candle') {
+            expect(c?.x).toBe(model.candles.find((k) => k.t === b.t)?.x);
+          } else {
+            // 線の頂点（M / L の後の「x y」）の x
+            expect(model.line + model.progress).toContain(`${c?.x} `);
+          }
+          expect(c?.y).toBe(y);
+        }
+      }
+      // 小数のカーソルは四捨五入した足、同じ y なら横線も同じ
+      const r = ivCrosshair({ bars, tf: '1h', viewport, cursor: i1 - 0.4, y: 100, model });
+      expect(r).toEqual(ivCrosshair({ bars, tf: '1h', viewport, cursor: i1, y: 100, model }));
+    }
+  });
+
+  it('横線は描画域の上下の端で止まる。y が無い（キーだけ）ときはカーソルの足の終値の高さ', () => {
+    const { viewport, model } = chart(bars, '1h', 'candle');
+    const i = bars.length - 1;
+    const top = ivCrosshair({ bars, tf: '1h', viewport, cursor: i, y: -50, model });
+    const bottom = ivCrosshair({ bars, tf: '1h', viewport, cursor: i, y: 999, model });
+    expect(top?.y).toBe(IV_MARGIN.top);
+    expect(bottom?.y).toBe(model.height - IV_MARGIN.bottom);
+    const k = ivCrosshair({ bars, tf: '1h', viewport, cursor: i, y: null, model });
+    expect(k?.y).toBeCloseTo(syOf(model)((bars[i] as IvBar).c), 0);
+  });
+
+  it('横軸の札の文字は ivReadout の time（1h・1d）、縦軸の札の文字は横線の高さの IV（目盛りの逆変換・読み取りと同じ小数 2 桁）', () => {
+    for (const [b, tf] of [
+      [bars, '1h'],
+      [days, '1d'],
+    ] as const) {
+      const { viewport, model } = chart(b, tf, 'candle');
+      const [i0, i1] = seen(viewport, b.length);
+      for (const i of [i0, i1]) {
+        for (const y of [IV_MARGIN.top, 123.4, model.height - IV_MARGIN.bottom]) {
+          const c = ivCrosshair({ bars: b, tf, viewport, cursor: i, y, model });
+          expect(c?.xTag.text).toBe(ivReadout(b, tf, i, true).time);
+          expect(c?.yTag.text).toBe(fmtNum(invOf(model)(y), 2));
+        }
+      }
+      // 端の高さ = 縦軸の範囲の端
+      const c = ivCrosshair({ bars: b, tf, viewport, cursor: i1, y: IV_MARGIN.top, model });
+      expect(c?.yTag.text).toBe(fmtNum(model.yDomain[1], 2));
+    }
+    // 桁は読み取りの 始・高・安・終 と同じ小数 2 桁（縦軸の目盛りが整数でも）
+    const { viewport, model } = chart(bars, '1h', 'candle');
+    const c = ivCrosshair({ bars, tf: '1h', viewport, cursor: 299, y: 77, model });
+    expect(c?.yTag.text).toMatch(/^\d+\.\d{2}$/);
+    expect((ivReadout(bars, '1h', 299, true).c.split('.')[1] ?? '').length).toBe(2);
+    // 足の終値の高さ（キーだけ）なら札 = 読み取りの「終」（画素の丸め 0.1px の分だけずれうる）
+    const k = ivCrosshair({ bars, tf: '1h', viewport, cursor: 299, y: null, model });
+    expect(Number(k?.yTag.text)).toBeCloseTo(Number(ivReadout(bars, '1h', 299, true).c), 1);
+    const d = chart(days, '1d', 'candle');
+    const cd = ivCrosshair({
+      bars: days,
+      tf: '1d',
+      viewport: d.viewport,
+      cursor: days.length - 1,
+      y: 100,
+      model: d.model,
+    });
+    expect(cd?.xTag.text).toMatch(/^\d{4}\/\d{2}\/\d{2}$/);
+  });
+
+  it('札は svg の内側に収まる（表示範囲の左端の足・右端の足・縦の上端 / 下端）', () => {
+    for (const [width, height] of [
+      [600, 300],
+      [328, 180],
+      [60, 50],
+    ] as const) {
+      for (const [b, tf] of [
+        [bars, '1h'],
+        [days, '1d'],
+      ] as const) {
+        const { viewport, model } = chart(b, tf, 'candle', width, height);
+        const [i0, i1] = seen(viewport, b.length);
+        for (const i of [i0, i1]) {
+          for (const y of [-100, 0, IV_MARGIN.top, height / 2, height - IV_MARGIN.bottom, 9999]) {
+            const c = ivCrosshair({ bars: b, tf, viewport, cursor: i, y, model });
+            expect(c).not.toBeNull();
+            if (!c) continue;
+            expect(inside(c.xTag, model.width, model.height)).toBe(true);
+            expect(inside(c.yTag, model.width, model.height)).toBe(true);
+            // 縦軸の札は左の余白（右端 = 描画域の左 − 1。狭いときは左端 0 で止める）
+            expect(c.yTag.x + c.yTag.w).toBeLessThanOrEqual(
+              Math.max(model.range[0] - 1, c.yTag.w) + 1e-9,
+            );
+            // 横軸の札は目盛りの行（描画域の下）
+            expect(c.xTag.y).toBeGreaterThanOrEqual(model.height - IV_MARGIN.bottom);
+          }
+        }
+      }
+    }
+  });
+
+  it('カーソルが無い・足 0 本では十字線と札を出さない（null）。カーソルの足が表示範囲の外でも null', () => {
+    const { viewport, model } = chart(bars, '1h', 'candle');
+    expect(ivCrosshair({ bars, tf: '1h', viewport, cursor: null, y: 100, model })).toBeNull();
+    const empty = ivChartModel({
+      bars: [],
+      tf: '1h',
+      mode: 'candle',
+      viewport: ivFullDomain(0),
+      segments: [],
+      width: 600,
+      height: 300,
+      rightLoaded: true,
+    });
+    expect(
+      ivCrosshair({
+        bars: [],
+        tf: '1h',
+        viewport: ivFullDomain(0),
+        cursor: 0,
+        y: 100,
+        model: empty,
+      }),
+    ).toBeNull();
+    // 初期表示は右端の 120 本: 左の足（index 0）は表示範囲の外
+    expect(viewport[0]).toBeGreaterThan(1);
+    expect(ivCrosshair({ bars, tf: '1h', viewport, cursor: 0, y: 100, model })).toBeNull();
   });
 });
 
@@ -441,7 +614,6 @@ describe('AC11: 「今」の 1 点', () => {
       segments: lineSegments(many, '1h', NTD),
       width: 600,
       height: 300,
-      cursor: null,
       rightLoaded: true,
     };
     const hi = Math.max(...many.slice(-130).map((b) => b.h));
@@ -497,7 +669,6 @@ describe('AC11: シナリオの水準', () => {
       segments: lineSegments(bars, '1h', NTD),
       width: 600,
       height: 300,
-      cursor: null,
       rightLoaded: true,
     };
     // 足の範囲（18〜22 前後）の中の水準は縦軸を変えず、Δσ を上げると上へ

@@ -35,12 +35,17 @@
 }
 
 /* ===== 読み取りの 1 行（カーソルの足、無ければ最新の足） ===== */
+/*
+ * 高さは固定（#130）: 「確定前」の札（本文の字）の有無で行の高さが変わると、カーソルを動かした直後に描画域が上下に
+ * ずれ、十字線の横線（指 / マウスの高さ）が指から外れる
+ */
 .iv-readout {
   display: flex;
   flex: 0 0 auto;
   align-items: baseline;
   gap: 10px;
   min-width: 0;
+  height: 26px;
   padding: 5px var(--sp-3);
   overflow: hidden;
   font-family: var(--mono);
@@ -176,6 +181,19 @@
 .iv-wrap .iv-cursor {
   stroke: var(--ink-3);
   stroke-dasharray: 2 3;
+}
+
+/* 軸の札（#130。十字線の時刻 = 横軸、終値 = 縦軸。目盛りの文字の上に重ねる） */
+.iv-wrap .iv-tag rect {
+  fill: var(--ink-2);
+}
+
+.iv-wrap .iv-tag text {
+  dominant-baseline: central;
+  fill: var(--s1);
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+  text-anchor: middle;
 }
 
 /* 読み中・失敗・0 本（描画域の中央）とバッジ（足があるときの最新化。右上） */

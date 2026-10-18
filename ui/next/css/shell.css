@@ -133,6 +133,13 @@ section.panel .board-wrap:focus-visible {
   line-height: 1;
 }
 
+/* IV のアイコン（推移の折れ線の SVG。#130）。字形のアイコンと同じ 18px の箱に収める */
+.dock .ic-line {
+  display: block;
+  width: 18px;
+  height: 18px;
+}
+
 .dock .cnt {
   position: absolute;
   top: 4px;

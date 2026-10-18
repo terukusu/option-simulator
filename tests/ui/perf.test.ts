@@ -31,6 +31,7 @@ import { headerModel, keptBoardNote } from '../../ui/view/header';
 import { hedgeModel } from '../../ui/view/hedge';
 import {
   ivChartModel,
+  ivCrosshair,
   ivFollowViewport,
   ivFullDomain,
   lineSegments,
@@ -1411,7 +1412,6 @@ describe('性能（#79 IV 推移の 1 フレーム）', () => {
     segments,
     width: 900,
     height: 420,
-    cursor: null,
     rightLoaded: true,
   });
 
@@ -1463,5 +1463,25 @@ describe('性能（#79 IV 推移の 1 フレーム）', () => {
       () => ivFollowViewport(resampleBars(head, 300), resampleBars(bars, 300), [10, 200])?.[0] ?? 0,
       { warmup: 3, runs: RECORD_RUNS },
     );
+  });
+
+  it(`#130: 十字線の 1 フレーム（ivCrosshair だけ。1 分足 1 万本の全域でカーソルを 40 段動かす）が ${BUDGET_MS} ms 以内`, () => {
+    const model = ivChartModel(input('candle', 0));
+    const viewport = input('candle', 0).viewport;
+    let tick = 0;
+    const frame = () => {
+      tick = (tick + 1) % 40;
+      const c = ivCrosshair({
+        bars,
+        tf: '1m',
+        viewport,
+        cursor: 200 + tick * 250,
+        y: 40 + tick * 5,
+        model,
+      });
+      return (c?.x ?? 0) + (c?.yTag.w ?? 0);
+    };
+    expect(frame()).toBeGreaterThan(0);
+    expectWithinBudget('#130 IV 推移の十字線', frame, { warmup: 10, runs: 30 });
   });
 });
