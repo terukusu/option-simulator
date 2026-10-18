@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { normalizeChain } from '../../data';
-import { addEntry, BOOK_KEY, clearBook, readBook, removeEntry } from '../../ui/book';
+import { addEntry, BOOK_KEY, clearBook, exportBook, readBook, removeEntry } from '../../ui/book';
 import { commitBook, loadBook } from '../../ui/bookIo';
 import { BOARD_KEY, toSaved } from '../../ui/persist';
+import { DEFAULT_MARGIN_PREFS, PREFS_KEY, serializePrefs } from '../../ui/prefs';
 import { type Action, initialState, reduce, type State } from '../../ui/state';
 import { fixture } from '../support/fixtures';
 
@@ -115,5 +116,30 @@ describe('ポジ帳の読み書き（AC3）', () => {
     expect(st.map.get(BOOK_KEY)).toBe('{broken');
     const res = commitBook(st, () => clearBook(), { allowInvalid: true });
     expect(res.ok && res.read.book.entries).toEqual([]);
+  });
+});
+
+/** #131 AC15: 資金は端末の設定（option-simulator.prefs）だけ。保存一覧の中身・書き出しに載らない */
+describe('資金を保存一覧・書き出しに載せない（#131 AC15）', () => {
+  it('端末の設定に資金があっても、保存一覧の値と書き出しの文字列に資金の値もキーも無い', () => {
+    const CAPITAL = 12_345_678; // 架空
+    const st = new FakeStorage();
+    st.setItem(
+      PREFS_KEY,
+      serializePrefs({ theme: 'auto', margin: { ...DEFAULT_MARGIN_PREFS, capitalYen: CAPITAL } }),
+    );
+    const res = commitBook(st, add('a'));
+    if (!res.ok) throw new Error(res.reason);
+    const out = exportBook(res.read.book, NOW);
+    expect(out.count).toBe(1);
+    const stored = st.getItem(BOOK_KEY) ?? '';
+    expect(stored).not.toBe('');
+    for (const text of [stored, out.text]) {
+      expect(text).not.toContain(String(CAPITAL));
+      expect(text).not.toContain('capital');
+      expect(text).not.toContain('margin_');
+    }
+    // 設定のキーは別（書いたまま残る）
+    expect(st.getItem(PREFS_KEY)).toContain(`"capital_yen":${CAPITAL}`);
   });
 });

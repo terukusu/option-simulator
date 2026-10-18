@@ -61,6 +61,7 @@ import { TopBar } from './TopBar';
 import { ShareConfirm } from './top/ShareConfirm';
 import { ShareUrlDialog } from './top/ShareUrlDialog';
 import { type GlobalKeysCtx, runGlobalKey, useGlobalKeys } from './useGlobalKeys';
+import { usePrefs } from './usePrefs';
 import { useTheme } from './useTheme';
 
 /**
@@ -91,9 +92,11 @@ import { useTheme } from './useTheme';
  * 段 C で左右の追加読み込み（useIvHistory）・「今」の 1 点（ivNowValue）・シナリオの水準（state.scenario と舞台の X₀）を足した。
  */
 export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
-  const c = useAppController(boot);
+  // 端末の設定（テーマ・証拠金。#131）は useAppController より先に（証拠金の項目を渡す）
+  const userPrefs = usePrefs(prefs, boot.storage);
+  const c = useAppController(boot, userPrefs.prefs.margin);
   const { state, dispatch } = c;
-  const theme = useTheme(prefs, boot.storage);
+  const theme = useTheme(userPrefs.prefs.theme, userPrefs.setTheme);
   const tier = layoutTier(useMediaQuery(PHONE_QUERY), useMediaQuery(PC_QUERY));
   const [shell, send] = useReducer(shellReduce, INITIAL_SHELL);
   const ivEndpoint =
@@ -477,7 +480,7 @@ export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
             onClear={onClearLegs}
           />
         }
-        metrics={<Metrics model={c.metrics} feePerLot={state.feePerLot} />}
+        metrics={<Metrics model={c.metrics} feePerLot={state.feePerLot} margin={c.marginView} />}
         board={(seg) =>
           chain && c.header ? (
             <Board
@@ -566,6 +569,8 @@ export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
         dispatch={dispatch}
         onDXUnit={setDXUnit}
         onTheme={theme.choose}
+        margin={userPrefs.prefs.margin}
+        onMargin={userPrefs.setMargin}
       />
       <BookDialog
         open={c.bookOpen}

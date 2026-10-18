@@ -4,15 +4,19 @@
  * 入力は useAppController の `metrics`（ui/view/metrics.ts の metricsModel の出力）と `state.feePerLot` だけで、
  * metricsModel を呼び直さず数値を作り直さない（fmtAmount・fmtRatio・fmtNum・fmtSigned の出力を連ねるだけ）。
  *
- * - タイル 6 枚: 満期 最大利益・満期 最大損失・満期 BEP・受取 − 支払 or 掛け金・指定日 + シナリオ・合計グリーク
- * - 内訳: 旧画面の内訳の dl（#91 で削除）の項目を同じ順・同じ桁で 2 列の行に
+ * - タイル 8 枚: 満期 最大利益・満期 最大損失・満期 BEP・受取 − 支払 or 掛け金・指定日 + シナリオ・合計グリーク・
+ *   必要証拠金（概算）・余力（概算）（#131。値はシナリオの点、副題は今。計算は ui/view/margin.ts の MarginView）
+ * - 内訳: 旧画面の内訳の dl（#91 で削除）の項目を同じ順・同じ桁で 2 列の行に + 証拠金の群（#131）
  * - テール表: 5 行 × {SQ, 指定日 + シナリオ}。損益の大きさのバーの長さ（10 セルの |損益| の最大で正規化）
+ * - テールの証拠金の表（#131）: 5 行 × {必要証拠金, 余力}。余力 < 0 は loss の色と「追証」の印
  *
  * 色は整形後の文字列の先頭（+ → gain、− → loss、それ以外 null。丸めて 0 になった値は無色）。
  * 掛け金（符号なしの支払いの額）は無色（読み取りの premium と同じ）。
  */
 
+import { MARGIN_HORIZON_BUSINESS_DAYS, type MarginParams } from '../../model';
 import { DASH, fmtNum, fmtSigned } from './format';
+import type { MarginCalc, MarginView } from './margin';
 import {
   AMOUNT_UNIT_LABEL,
   type AmountUnit,
@@ -22,7 +26,15 @@ import {
 } from './metrics';
 
 export type Tone = 'gain' | 'loss' | null;
-export type TileKey = 'maxProfit' | 'maxLoss' | 'bep' | 'premium' | 'scenario' | 'greeks';
+export type TileKey =
+  | 'maxProfit'
+  | 'maxLoss'
+  | 'bep'
+  | 'premium'
+  | 'scenario'
+  | 'greeks'
+  | 'margin'
+  | 'room';
 
 /** 全文（タイル・読み取りのポップオーバー）の 1 行。見出しと値（値は内訳と同じ関数・同じ桁の文字列） */
 export interface FullRow {
@@ -74,6 +86,20 @@ export interface TailRowView {
   scenario: TailCellView;
 }
 
+/** テールの証拠金の表の 1 行（#131） */
+export interface MarginTailRowView {
+  key: number;
+  pct: string;
+  x: string;
+  margin: string;
+  /** 余力（資金が未設定なら —） */
+  room: string;
+  /** 余力 < 0 なら loss（警告の色。≥ 0 は無色 = 利益の色にしない） */
+  tone: 'loss' | null;
+  /** 余力 < 0（追証の印を出す） */
+  call: boolean;
+}
+
 export interface MetricsPanelView {
   empty: boolean;
   /** 見出し行の副題（`千円（自動）` / `円（固定）`） */
@@ -85,6 +111,9 @@ export interface MetricsPanelView {
   /** テール表の注記（旧 caption と同じ文。empty なら空） */
   tailCaption: string;
   tail: TailRowView[];
+  /** テールの証拠金の表の注記（#131。empty なら空） */
+  marginTailCaption: string;
+  marginTail: MarginTailRowView[];
 }
 
 export const METRICS_EMPTY_TEXT = '足を追加すると指標が出ます';
@@ -94,6 +123,19 @@ export const UNIT_HINT =
 /** テール表の指定日の列の説明（旧のテール表の ⓘ と同じ文） */
 export const TAIL_HINT =
   '指定日の列 = d・Δσ・Δs・β・動き方はシナリオのまま、原資産だけを各行の値にして再評価（β は行ごとの下落率で IV を上げる）';
+
+/** 証拠金のタイル・表の見出し（「概算」を常に出す。#131） */
+export const MARGIN_TILE_LABEL = '必要証拠金（概算）';
+export const ROOM_TILE_LABEL = '余力（概算）';
+export const MARGIN_GROUP_LABEL = '証拠金（概算・保守寄り）';
+export const MARGIN_TAIL_TITLE = '証拠金（概算。指定日 + シナリオ）';
+/** 資金が未設定のときの余力のタイルの副題 */
+export const ROOM_NO_CAPITAL_TEXT = '資金は ⋯ > 設定…';
+/** 余力 < 0 の行の印 */
+export const MARGIN_CALL_MARK = '追証';
+/** ⓘ の証拠金の文（方式・JSCC との違い・既定は仮置き・深い OTM の売り・Web 試算で確かめる。設計 5.10） */
+export const MARGIN_HINT =
+  '証拠金は概算: 原資産 ±R・±R/2・0 × IV の上げ / 0 / 下げ × 経過 0 / 2 営業日の格子で、損失の最悪値から OP の評価額を引き、掛け目を掛ける。JSCC の VaR 証拠金（過去の値動きとストレスシナリオ）の再現ではない。既定（R 8%・IV +8 / −4pt・掛け目 120%）は仮置きで、深い OTM の売り（±R の外の行使価格）では実額より小さく出うる。建てる前に JSCC の Web 試算か証券会社の額で確かめ、⋯ > 設定… の幅・掛け目で寄せる。余力 = 資金 − 支払 + 受取 − 手数料 + 先物の評価損益 − 必要証拠金。値はシナリオの点、副題は今。';
 
 /** 原資産の点の並び（旧 Metrics と同じ: 無ければ「なし」、` / ` 区切り） */
 export function fmtXs(xs: readonly number[]): string {
@@ -209,8 +251,110 @@ function unitSubOf(m: MetricsModel): string {
   return `${AMOUNT_UNIT_LABEL[m.unit]}${m.unitAuto ? '（自動）' : '（固定）'}`;
 }
 
-/** タイル 6 枚（§5 の `.tile`）。empty なら空 */
-export function metricTiles(m: MetricsModel): MetricTile[] {
+/** 数（%・pt）の文字列（整数なら小数なし、端数があれば小数 1 桁） */
+const fmtParam = (v: number) => fmtNum(v, Number.isInteger(v) ? 0 : 1);
+
+/** 証拠金の前提（`R ±8% · IV +8 / −4pt · 2 営業日 · 掛け目 120%`） */
+export function marginParamsText(p: MarginParams): string {
+  const r = fmtParam(Math.round(p.range * 1000) / 10);
+  const k = fmtParam(Math.round(p.factor * 1000) / 10);
+  return `R ±${r}% · IV +${fmtParam(p.ivUpPt)} / −${fmtParam(p.ivDownPt)}pt · ${MARGIN_HORIZON_BUSINESS_DAYS} 営業日 · 掛け目 ${k}%`;
+}
+
+/** 建てられる倍数の文字列（Infinity = 上限なし、資金なし = —） */
+export function multipleText(m: number | null): string {
+  if (m === null || Number.isNaN(m)) return DASH;
+  if (m === Number.POSITIVE_INFINITY) return '上限なし';
+  return `${fmtNum(m)} 倍`;
+}
+
+/**
+ * 格子の最悪の点（X の % · IV の pt · 経過の日）。必要証拠金 > 0（PFE > NOV ≥ … で PFE > 0）のときだけ
+ * （買いだけなど M = 0 のときは最悪の点が額に効かないので出さない。段 A のレビューの指摘 5）
+ */
+function worstValues(c: MarginCalc | null, p: MarginParams): string[] | null {
+  const w = c?.result.worst;
+  if (!c || !w || !(c.result.pfe > 0) || !(c.result.margin > 0)) return null;
+  const pct = fmtSigned(Math.round(w.priceStep * p.range * 1000) / 10, 1);
+  return [`X ${pct}%`, `IV ${fmtSigned(w.ivPt)}pt`, `経過 +${fmtNum(w.days)} 日`];
+}
+
+const marginOf = (c: MarginCalc | null) => (c ? c.result.margin : null);
+const roomOf = (c: MarginCalc | null) => (c ? c.room : null);
+const roomTone = (v: number | null): 'loss' | null => (v !== null && v < 0 ? 'loss' : null);
+
+/**
+ * 証拠金の行（内訳の群・タイルの全文で共用）: シナリオ点と今の M・PFE・NOV・余力、倍数（今）、最悪の点（シナリオ点）、
+ * 前提（R・IV の幅・保有期間・掛け目）。資金が未設定なら余力・倍数は「—」。360px の内訳の 2 列で切れないよう
+ * 見出し・値は短く、複数の値は行に分ける（続きの行の見出しは空）
+ */
+function marginRows(mv: MarginView, u: AmountUnit): FullRow[] {
+  const A = (v: number | null) => amountText(v, u);
+  const rows: FullRow[] = [];
+  const state = (name: string, c: MarginCalc | null) => {
+    rows.push({ k: `必要証拠金（${name}）`, v: A(marginOf(c)) });
+    rows.push({ k: `PFE（${name}）`, v: A(c ? c.result.pfe : null) });
+    rows.push({ k: `NOV（${name}）`, v: amountText(c ? c.result.nov : null, u, true) });
+    rows.push({ k: `余力（${name}）`, v: A(roomOf(c)) });
+  };
+  state('シナリオ点', mv.point);
+  state('今', mv.now);
+  rows.push({ k: '倍数（今）', v: multipleText(mv.now?.multiple ?? null) });
+  const w = worstValues(mv.point, mv.params);
+  if (w !== null) rows.push(...w.map((v, i) => ({ k: i === 0 ? '最悪の点' : '', v })));
+  const p = mv.params;
+  rows.push({ k: '値動き幅 R', v: `±${fmtParam(Math.round(p.range * 1000) / 10)}%` });
+  rows.push({ k: 'IV の幅', v: `+${fmtParam(p.ivUpPt)} / −${fmtParam(p.ivDownPt)}pt` });
+  rows.push({ k: '保有期間', v: `${MARGIN_HORIZON_BUSINESS_DAYS} 営業日` });
+  rows.push({ k: '掛け目', v: `${fmtParam(Math.round(p.factor * 1000) / 10)}%` });
+  return rows;
+}
+
+/** 必要証拠金・余力のタイル（#131。値 = シナリオの点、副題 = 今） */
+function marginTiles(mv: MarginView | null, u: AmountUnit): MetricTile[] {
+  const ul = AMOUNT_UNIT_LABEL[u];
+  if (!mv) {
+    const none = (key: TileKey, k: string): MetricTile => ({
+      key,
+      k,
+      v: DASH,
+      unit: '',
+      s: '',
+      tone: null,
+      full: [{ k, v: DASH }],
+    });
+    return [none('margin', MARGIN_TILE_LABEL), none('room', ROOM_TILE_LABEL)];
+  }
+  const rows = marginRows(mv, u);
+  const mV = fmtAmount(marginOf(mv.point), u);
+  const marginTile: MetricTile = {
+    key: 'margin',
+    k: MARGIN_TILE_LABEL,
+    v: mV,
+    unit: unitFor(mV, ul),
+    s: `今 ${fmtAmount(marginOf(mv.now), u)}`,
+    tone: null,
+    full: [{ k: MARGIN_TILE_LABEL, v: amountText(marginOf(mv.point), u) }, ...rows],
+  };
+  const room = roomOf(mv.point);
+  const rV = mv.capital === null ? DASH : fmtAmount(room, u);
+  const roomTile: MetricTile = {
+    key: 'room',
+    k: ROOM_TILE_LABEL,
+    v: rV,
+    unit: unitFor(rV, ul),
+    s:
+      mv.capital === null
+        ? ROOM_NO_CAPITAL_TEXT
+        : `今 ${fmtAmount(roomOf(mv.now), u)} · ${multipleText(mv.now?.multiple ?? null)}`,
+    tone: roomTone(room),
+    full: [{ k: ROOM_TILE_LABEL, v: mv.capital === null ? DASH : amountText(room, u) }, ...rows],
+  };
+  return [marginTile, roomTile];
+}
+
+/** タイル 8 枚（§5 の `.tile`。証拠金の 2 枚は #131）。empty なら空 */
+export function metricTiles(m: MetricsModel, margin: MarginView | null = null): MetricTile[] {
   if (m.empty) return [];
   const u = m.unit;
   const ul = AMOUNT_UNIT_LABEL[u];
@@ -298,6 +442,7 @@ export function metricTiles(m: MetricsModel): MetricTile[] {
       tone: null,
       full: greekRows(m),
     },
+    ...marginTiles(margin, u),
   ];
 }
 
@@ -305,7 +450,10 @@ export function metricTiles(m: MetricsModel): MetricTile[] {
  * 内訳の行（旧画面の内訳の dl と同じ順・同じ桁）。1 つの dd に複数の値があった項目は行に分ける。
  * 点の並び（BEP・N 倍の原資産）は 2 点ずつの行に分け、続きの行の見出しは空。empty なら空
  */
-export function metricsBreakdown(m: MetricsModel): BreakdownRow[] {
+export function metricsBreakdown(
+  m: MetricsModel,
+  margin: MarginView | null = null,
+): BreakdownRow[] {
   if (m.empty) return [];
   const u = m.unit;
   const A = (v: number | null, signed = false) => amountText(v, u, signed);
@@ -349,6 +497,11 @@ export function metricsBreakdown(m: MetricsModel): BreakdownRow[] {
   // 8 スプレッドコスト / 建値ずれ
   row('スプレッドコスト', A(premium.spreadCost, true));
   row('建値ずれ', A(premium.entryMismatch, true));
+  // 9 証拠金（概算。#131）
+  if (margin) {
+    group(MARGIN_GROUP_LABEL);
+    add(marginRows(margin, u));
+  }
   return rows;
 }
 
@@ -380,8 +533,31 @@ export function tailRows(m: MetricsModel): TailRowView[] {
   }));
 }
 
-/** 指標パネル全体の表示モデル */
-export function metricsPanel(m: MetricsModel, feePerLot: number): MetricsPanelView {
+/** テールの証拠金の表の行（#131。テール表と同じ行・同じ見出し）。empty・証拠金なしなら空 */
+export function marginTailRows(m: MetricsModel, margin: MarginView | null): MarginTailRowView[] {
+  if (m.empty || !margin) return [];
+  const u = m.unit;
+  return margin.tail.map((r) => {
+    const room = roomOf(r.calc);
+    const call = room !== null && room < 0;
+    return {
+      key: r.shock,
+      pct: fmtPct(r.shock),
+      x: fmtNum(r.x),
+      margin: fmtAmount(marginOf(r.calc), u),
+      room: margin.capital === null ? DASH : fmtAmount(room, u),
+      tone: roomTone(room),
+      call,
+    };
+  });
+}
+
+/** 指標パネル全体の表示モデル（margin = 証拠金の概算。#131。null なら証拠金のタイルは —・表は空） */
+export function metricsPanel(
+  m: MetricsModel,
+  feePerLot: number,
+  margin: MarginView | null = null,
+): MetricsPanelView {
   const unitSub = unitSubOf(m);
   const breakdownNote = `金額の単位 ${unitSub} · 手数料 ${fmtNum(feePerLot)} 円 / 枚`;
   if (m.empty) {
@@ -393,6 +569,8 @@ export function metricsPanel(m: MetricsModel, feePerLot: number): MetricsPanelVi
       breakdownNote,
       tailCaption: '',
       tail: [],
+      marginTailCaption: '',
+      marginTail: [],
     };
   }
   const base = m.tail.premiumBase;
@@ -402,10 +580,16 @@ export function metricsPanel(m: MetricsModel, feePerLot: number): MetricsPanelVi
   return {
     empty: false,
     unitSub,
-    tiles: metricTiles(m),
-    breakdown: metricsBreakdown(m),
+    tiles: metricTiles(m, margin),
+    breakdown: metricsBreakdown(m, margin),
     breakdownNote,
     tailCaption,
     tail: tailRows(m),
+    marginTailCaption: margin
+      ? `必要証拠金と余力（${AMOUNT_UNIT_LABEL[m.unit]}）· ${marginParamsText(margin.params)}${
+          margin.capital === null ? ' · 資金は ⋯ > 設定…' : ''
+        }`
+      : '',
+    marginTail: marginTailRows(m, margin),
   };
 }

@@ -2,13 +2,21 @@ import type { MutableRef } from 'preact/hooks';
 import { useEffect, useMemo, useState } from 'preact/hooks';
 import type { AtmBasis } from '../../model';
 import type { Domain } from '../chart/scale';
-import type { ThemePref } from '../prefs';
+import type { MarginPrefKey, MarginPrefs, ThemePref } from '../prefs';
 import type { Action, MetricsUnitSetting } from '../state';
 import type { HeaderModel } from '../view/header';
 import type { PnlYSettings } from '../view/pnlChart';
 import type { DXUnit } from '../view/scenario';
 import { basisAction, type FutureBasis } from '../view/scenarioRegion';
-import { feeField, settingsModel } from '../view/settings';
+import {
+  feeField,
+  MARGIN_FIELDS,
+  MARGIN_RESET,
+  MARGIN_SETTINGS_NOTES,
+  marginField,
+  marginFieldText,
+  settingsModel,
+} from '../view/settings';
 import { Dialog } from './parts/Dialog';
 import { Seg } from './parts/Seg';
 import { YAxisFields } from './parts/YAxisFields';
@@ -31,11 +39,14 @@ export interface SettingsDialogProps {
   dispatch: (a: Action) => void;
   onDXUnit: (u: DXUnit) => void;
   onTheme: (t: ThemePref) => void;
+  /** 証拠金（概算）の設定（端末の設定。#131） */
+  margin: MarginPrefs;
+  onMargin: (patch: Partial<MarginPrefs>) => void;
 }
 
 /**
  * 設定のダイアログ（#87 (C)。docs/ui-redesign.md §3・§11-9）: ATM の基準・金額の単位・手数料・損益グラフの縦軸・
- * 先物の basis・ΔX の単位・テーマ・前提（読み取り専用）。変えたらすぐ state / prefs に入る（[保存] なし）。
+ * 先物の basis・ΔX の単位・テーマ・証拠金（概算。#131）・前提（読み取り専用）。変えたらすぐ state / prefs に入る（[保存] なし）。
  * 値と選べない理由は ui/view/settings.ts、縦軸の欄は舞台の ⋯ と同じ YAxisFields。開いている間だけ描く。
  */
 export function SettingsDialog(p: SettingsDialogProps) {
@@ -43,6 +54,63 @@ export function SettingsDialog(p: SettingsDialogProps) {
     <Dialog open={p.open} title="設定" onClose={p.onClose} class="settings">
       <SettingsBody {...p} />
     </Dialog>
+  );
+}
+
+/**
+ * 証拠金の 1 欄（手数料の欄と同じ規則: 入力ごとに検証、通って値が変わったら入れる。外で値が変わったら欄を戻す）。
+ * 値は端末の設定（usePrefs の setMargin）。
+ */
+function MarginField({
+  field,
+  margin,
+  onMargin,
+}: {
+  field: { key: MarginPrefKey; label: string };
+  margin: MarginPrefs;
+  onMargin: (patch: Partial<MarginPrefs>) => void;
+}) {
+  const { key, label } = field;
+  const value = margin[key];
+  const [text, setText] = useState(() => marginFieldText(key, margin));
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    const r = marginField(key, text);
+    if (!r.ok || r.value !== value) {
+      setText(marginFieldText(key, margin));
+      setError(null);
+    }
+  }, [value]);
+  const onInput = (t: string) => {
+    setText(t);
+    const r = marginField(key, t);
+    setError(r.ok ? null : r.error);
+    if (r.ok && r.value !== value) onMargin({ [key]: r.value });
+  };
+  const id = `set-margin-${key}`;
+  return (
+    <>
+      <div class="set-line">
+        <label class="set-k" for={id}>
+          {label}
+        </label>
+        <input
+          id={id}
+          class={key === 'capitalYen' ? 'set-input wide' : 'set-input'}
+          type="text"
+          inputMode={key === 'capitalYen' ? 'numeric' : 'decimal'}
+          size={key === 'capitalYen' ? 14 : 6}
+          value={text}
+          aria-invalid={error !== null}
+          onInput={(e) => onInput(e.currentTarget.value)}
+        />
+      </div>
+      {error !== null && (
+        <p class="field-error" role="alert">
+          {error}
+        </p>
+      )}
+    </>
   );
 }
 
@@ -170,6 +238,22 @@ function SettingsBody(p: SettingsDialogProps) {
             onChange={p.onTheme}
           />
         </div>
+      </div>
+      <div class="set-row set-margin">
+        <div class="set-line">
+          <span class="set-k">証拠金（概算）</span>
+          <button type="button" class="btn sm" onClick={() => p.onMargin(MARGIN_RESET)}>
+            既定に戻す
+          </button>
+        </div>
+        {MARGIN_FIELDS.map((f) => (
+          <MarginField field={f} margin={p.margin} onMargin={p.onMargin} key={f.key} />
+        ))}
+        {MARGIN_SETTINGS_NOTES.map((t) => (
+          <p class="set-note" key={t}>
+            {t}
+          </p>
+        ))}
       </div>
       <div class="set-row">
         <div class="set-line">

@@ -52,6 +52,7 @@ import {
   WORKSPACE_KEY,
 } from '../persist';
 import { MAX_PINS, PINS_FULL_TEXT } from '../pins';
+import { DEFAULT_MARGIN_PREFS, type MarginPrefs } from '../prefs';
 import {
   encodeShareUrl,
   isShareHash,
@@ -66,6 +67,14 @@ import { readKey, removeKey, writeKey } from '../storage';
 import { BOOK_FAIL_TEXT, bookListModel, exportDoneText, importDoneText } from '../view/bookList';
 import { headerModel } from '../view/header';
 import { hedgeModel } from '../view/hedge';
+import {
+  capitalOf,
+  type MarginView,
+  marginNow,
+  marginParamsOf,
+  marginPoint,
+  marginTail,
+} from '../view/margin';
 import { metricsModel } from '../view/metrics';
 import {
   bootNote,
@@ -121,7 +130,11 @@ interface Loaded {
   json?: ChainJson;
 }
 
-export function useAppController(boot: Boot = NO_BOOT) {
+/**
+ * margin = 端末の設定の証拠金の項目（usePrefs。#131）。state.ts の reducer・作業の保存・URL 共有には入れない
+ * （資金を保存一覧・書き出し・共有の文字列に載せない）。
+ */
+export function useAppController(boot: Boot = NO_BOOT, margin: MarginPrefs = DEFAULT_MARGIN_PREFS) {
   const [state, dispatch] = useReducer(reduce, boot.read, bootState);
   const seq = useRef(0);
   const calSeq = useRef(0);
@@ -561,6 +574,36 @@ export function useAppController(boot: Boot = NO_BOOT) {
     () => ({ days, dX: 0, dSigma, skew, beta, ivDynamics, ivShift }),
     [days, dSigma, skew, beta, ivDynamics, ivShift],
   );
+  // 証拠金の概算（#131。設計 5.10）: 今 = 足・板・設定・β / 動き方 / IV の入れ方、シナリオの点 = シナリオ、
+  // テール = ΔX 以外のシナリオ（重ねの線と同じ lineScenario。ΔX のドラッグではテールを作り直さない）。資金・パラメータは端末の設定
+  const marginParams = useMemo(() => marginParamsOf(margin), [margin]);
+  const capital = capitalOf(margin);
+  const { holidays } = calendar;
+  const nowScenario = useMemo<Scenario>(
+    () => ({ ...ZERO_SCENARIO, beta, ivDynamics, ivShift }),
+    [beta, ivDynamics, ivShift],
+  );
+  const marginNowCalc = useMemo(
+    () => (pnlBase ? marginNow(pnlBase, nowScenario, marginParams, capital, holidays) : null),
+    [pnlBase, nowScenario, marginParams, capital, holidays],
+  );
+  const marginTailRows = useMemo(
+    () => (pnlBase ? marginTail(pnlBase, lineScenario, marginParams, capital, holidays) : []),
+    [pnlBase, lineScenario, marginParams, capital, holidays],
+  );
+  const marginView = useMemo<MarginView | null>(
+    () =>
+      pnlBase
+        ? {
+            capital,
+            params: marginParams,
+            now: marginNowCalc,
+            point: marginPoint(pnlBase, state.scenario, marginParams, capital, holidays),
+            tail: marginTailRows,
+          }
+        : null,
+    [pnlBase, state.scenario, marginParams, capital, holidays, marginNowCalc, marginTailRows],
+  );
   const pinTargets = useMemo(
     () =>
       resolvePins(pins, {
@@ -892,6 +935,7 @@ export function useAppController(boot: Boot = NO_BOOT) {
     positions,
     pnlBase,
     metrics,
+    marginView,
     readout,
     hedgeView,
     targets,

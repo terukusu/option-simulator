@@ -2,8 +2,12 @@ import { Fragment } from 'preact';
 import { useId, useState } from 'preact/hooks';
 import { pure } from '../../components/pure';
 import { PANEL_FOCUS_LABEL } from '../../view/keys';
+import type { MarginView } from '../../view/margin';
 import type { MetricsModel } from '../../view/metrics';
 import {
+  MARGIN_CALL_MARK,
+  MARGIN_HINT,
+  MARGIN_TAIL_TITLE,
   METRICS_EMPTY_TEXT,
   type MetricTile,
   metricsPanel,
@@ -20,10 +24,12 @@ interface Props {
   model: MetricsModel;
   /** state.feePerLot（表示だけ。入力は #87 の設定） */
   feePerLot: number;
+  /** 証拠金の概算（useAppController の useMemo。#131。板が無ければ null） */
+  margin: MarginView | null;
 }
 
 /**
- * タイル（§5 の .tile）。6 枚とも押せて、タップ / Enter / Space で全文のポップオーバー（#107。中身は表示モデルの full）。
+ * タイル（§5 の .tile）。8 枚とも押せて、タップ / Enter / Space で全文のポップオーバー（#107。中身は表示モデルの full）。
  * 外側の div は格子の 1 枠（余白・背景はボタン .tile-btn）。ボタンの中は phrasing content だけ（span）。
  */
 function Tile({ t }: { t: MetricTile }) {
@@ -78,16 +84,17 @@ function TailCell({ c }: { c: TailCellView }) {
  * 「内訳」の折りたたみ（旧画面の指標の全項目。既定は閉・保存しない）→ テール表（損益のバー付き）。
  * 表示モデルは ui/view/metricsPanel.ts。action は dispatch しない（単位・手数料の入力は #87 の設定）。
  */
-function MetricsView({ model, feePerLot }: Props) {
-  const view = metricsPanel(model, feePerLot);
+function MetricsView({ model, feePerLot, margin }: Props) {
+  const view = metricsPanel(model, feePerLot, margin);
   const [open, setOpen] = useState(false);
   const kvId = useId();
   return (
     <>
       <PanelHead title="指標 · テール" sub={view.unitSub}>
-        <Popover label="金額の単位とテール表" button="ⓘ">
+        <Popover label="金額の単位・テール表・証拠金" button="ⓘ">
           <p>{UNIT_HINT}</p>
           <p>{TAIL_HINT}</p>
+          <p>{MARGIN_HINT}</p>
         </Popover>
       </PanelHead>
       {/* biome-ignore lint/a11y/useSemanticElements: 1〜5 の行き先のスクロールする枠に名前を付ける（fieldset にしない） */}
@@ -163,6 +170,44 @@ function MetricsView({ model, feePerLot }: Props) {
                 ))}
               </tbody>
             </table>
+            {view.marginTail.length > 0 && (
+              <>
+                <div class="sec-head">
+                  <h3>{MARGIN_TAIL_TITLE}</h3>
+                </div>
+                <p class="mx-note">{view.marginTailCaption}</p>
+                <table class="tail margin-tail">
+                  <thead>
+                    <tr>
+                      <th scope="col">原資産</th>
+                      <th scope="col">必要証拠金</th>
+                      <th scope="col">余力</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {view.marginTail.map((r) => (
+                      <tr key={r.key}>
+                        <th scope="row">
+                          <span>{r.pct}</span>
+                          <small>{r.x}</small>
+                        </th>
+                        <td>
+                          <span class="txt">
+                            <span>{r.margin}</span>
+                          </span>
+                        </td>
+                        <td class={r.tone ?? undefined}>
+                          <span class="txt">
+                            <span>{r.room}</span>
+                            {r.call && <small class="call">{MARGIN_CALL_MARK}</small>}
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </>
+            )}
           </>
         )}
       </div>
@@ -170,5 +215,5 @@ function MetricsView({ model, feePerLot }: Props) {
   );
 }
 
-/** 指標パネル。model（useAppController の useMemo）と feePerLot が変わらなければ描き直さない */
+/** 指標パネル。model・margin（useAppController の useMemo）と feePerLot が変わらなければ描き直さない */
 export const Metrics = pure(MetricsView);

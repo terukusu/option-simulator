@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { normalizeChain } from '../../data';
-import { toSaved } from '../../ui/persist';
+import { serializeWorkspace, toSaved } from '../../ui/persist';
+import { DEFAULT_MARGIN_PREFS, readPrefs, serializePrefs } from '../../ui/prefs';
 import {
   encodeShareUrl,
   FRAGMENT_MAX,
@@ -478,5 +479,34 @@ describe('withoutUiParam（#91: 共有 URL と #p= を開いた後の URL から
       return e;
     };
     expect(entries(out)).toEqual(entries(s).filter(([k]) => k !== 'ui'));
+  });
+});
+
+/** #131 AC15: 資金は端末の設定（option-simulator.prefs）だけ。共有の文字列・作業の保存に載らない */
+describe('資金を共有の URL・作業の保存に載せない（#131 AC15）', () => {
+  // 架空の資金（端末の設定に入れた状態。state.ts の reducer には入らない）
+  const CAPITAL = 12_345_678;
+  const prefsText = serializePrefs({
+    theme: 'dark',
+    margin: { ...DEFAULT_MARGIN_PREFS, capitalYen: CAPITAL },
+  });
+
+  it('資金を設定した状態でも、共有の文書（展開後）と作業の保存に資金の値もキーも無い', async () => {
+    expect(readPrefs(prefsText).prefs.margin.capitalYen).toBe(CAPITAL);
+    const s = withLegs(5);
+    const m = made(await encodeShareUrl(toSaved(s, NOW), '売り', BASE));
+    const data = m.url.slice(m.url.indexOf('#p=1.') + 5);
+    const bytes = fromBase64Url(data);
+    if (!bytes) throw new Error('base64url でない');
+    const r = await streamCodec.gunzip(bytes, INFLATED_MAX);
+    if (r.kind !== 'ok') throw new Error(r.kind);
+    const doc = new TextDecoder().decode(r.bytes);
+    const ws = serializeWorkspace(s, NOW);
+    for (const text of [m.url, doc, ws]) {
+      expect(text).not.toContain(String(CAPITAL));
+      expect(text).not.toContain('12,345,678');
+      expect(text).not.toContain('capital');
+      expect(text).not.toContain('margin_');
+    }
   });
 });

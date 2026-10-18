@@ -2,8 +2,17 @@ import { describe, expect, it } from 'vitest';
 import { type Chain, normalizeChain } from '../../data';
 import { DEFAULT_SETTINGS, type ModelSettings, ZERO_SCENARIO } from '../../model';
 import { CALENDAR } from '../../ui/calendar';
+import { DEFAULT_MARGIN_PREFS } from '../../ui/prefs';
 import { type Action, initialState, reduce, type State } from '../../ui/state';
 import { DASH, fmtNum, fmtSigned } from '../../ui/view/format';
+import {
+  capitalOf,
+  type MarginView,
+  marginNow,
+  marginParamsOf,
+  marginPoint,
+  marginTail,
+} from '../../ui/view/margin';
 import {
   AMOUNT_UNIT_LABEL,
   type AmountUnit,
@@ -38,12 +47,32 @@ if (!m1) throw new Error('限月が無い');
 const run = (s: State, ...a: Action[]) => a.reduce(reduce, s);
 const loaded = (c: Chain) => reduce(initialState, { type: 'loaded', chain: c, label: 'latest' });
 
-function metricsOf(s: State): MetricsModel {
+function baseOf(s: State) {
   const settings: ModelSettings = { ...DEFAULT_SETTINGS, feePerLot: s.feePerLot };
   const pm = positionModel(chain, s.legs, s.atmBasis, CALENDAR, settings);
   const base = pnlDomains(chain, pm.prepared, pm.ctx, settings);
   if (!base) throw new Error('基礎が作れない');
-  return metricsModel({ base, scenario: s.scenario, unit: s.metricsUnit });
+  return base;
+}
+
+function metricsOf(s: State): MetricsModel {
+  return metricsModel({ base: baseOf(s), scenario: s.scenario, unit: s.metricsUnit });
+}
+
+/** 証拠金の概算（#131。資金は架空の 5,000 万円。useAppController と同じ組み立て） */
+function marginOf(s: State): MarginView {
+  const base = baseOf(s);
+  const prefs = { ...DEFAULT_MARGIN_PREFS, capitalYen: 50_000_000 };
+  const params = marginParamsOf(prefs);
+  const capital = capitalOf(prefs);
+  const { holidays } = CALENDAR;
+  return {
+    capital,
+    params,
+    now: marginNow(base, s.scenario, params, capital, holidays),
+    point: marginPoint(base, s.scenario, params, capital, holidays),
+    tail: marginTail(base, { ...s.scenario, dX: 0 }, params, capital, holidays),
+  };
 }
 
 const add = (k: number, optionType: 'put' | 'call', side: 'buy' | 'sell'): Action => ({
@@ -147,7 +176,7 @@ const amt = (v: number | null, u: AmountUnit, signed = false) => {
 
 // ------------------------------------------------ AC-2 タイル
 
-describe('タイル 6 枚（#86 AC-2）', () => {
+describe('タイル 8 枚（#86 AC-2・#131）', () => {
   it('(a) ストラングル売り（受取超）: 1〜6 の値と最大損失の −∞・put 側・SQ = 下端', () => {
     const m = metricsOf(strangle);
     const u = m.unit;
@@ -160,6 +189,8 @@ describe('タイル 6 枚（#86 AC-2）', () => {
       'premium',
       'scenario',
       'greeks',
+      'margin',
+      'room',
     ]);
     expect(tiles.map((t) => t.k)).toEqual([
       '満期 最大利益',
@@ -168,6 +199,8 @@ describe('タイル 6 枚（#86 AC-2）', () => {
       '受取 − 支払',
       '指定日 + シナリオ',
       '合計グリーク',
+      '必要証拠金（概算）',
+      '余力（概算）',
     ]);
     const t1 = tile(tiles, 'maxProfit');
     expect(t1.v).toBe(fmtAmount(m.expiry.maxProfit.value, u, true));
@@ -425,6 +458,8 @@ describe('内訳（#86 AC-3: 旧 Metrics と同じ順・同じ値）', () => {
       breakdownNote: '金額の単位 円（自動） · 手数料 0 円 / 枚',
       tailCaption: '',
       tail: [],
+      marginTailCaption: '',
+      marginTail: [],
     });
     expect(metricTiles(m)).toEqual([]);
     expect(metricsBreakdown(m)).toEqual([]);
@@ -580,11 +615,12 @@ describe('全文（#107 AC-1）', () => {
   ];
 
   for (const [name, s] of cases) {
-    it(`${name}: 6 枚とも全文があり、値は内訳の値の文字列の中にある（finite の X・d の行を除く）`, () => {
+    it(`${name}: 8 枚とも全文があり、値は内訳の値の文字列の中にある（finite の X・d の行を除く）`, () => {
       const m = metricsOf(s);
-      const tiles = metricTiles(m);
-      const bd = metricsBreakdown(m);
-      expect(tiles).toHaveLength(6);
+      const mv = marginOf(s);
+      const tiles = metricTiles(m, mv);
+      const bd = metricsBreakdown(m, mv);
+      expect(tiles).toHaveLength(8);
       for (const t of tiles) {
         expect(t.full.length).toBeGreaterThanOrEqual(1);
         for (const r of t.full) {
@@ -745,11 +781,11 @@ describe('副題の短縮（#107 AC-2）', () => {
     }
   });
 
-  it(`売り 2 本・買い 2 本（千円・自動）: 6 枚の副題が幅の単位 ${SUB_MAX_UNITS} 以下`, () => {
+  it(`売り 2 本・買い 2 本（千円・自動）: 8 枚の副題が幅の単位 ${SUB_MAX_UNITS} 以下`, () => {
     for (const s of [strangle, buy2]) {
       const m = metricsOf(s);
       expect(m.unitAuto).toBe(true);
-      for (const t of metricTiles(m)) {
+      for (const t of metricTiles(m, marginOf(s))) {
         expect(widthUnits(t.s), `${t.key}: ${t.s}`).toBeLessThanOrEqual(SUB_MAX_UNITS);
       }
     }
