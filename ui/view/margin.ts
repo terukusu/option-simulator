@@ -40,6 +40,7 @@ export function marginParamsOf(m: MarginPrefs): MarginParams {
     ivUpPt: m.ivUpPt,
     ivDownPt: m.ivDownPt,
     factor: m.factorPct / 100,
+    ignoreLongOptions: m.ignoreLongOptions,
   };
 }
 

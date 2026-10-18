@@ -143,8 +143,15 @@ describe('計算の単位（ui/view/margin.ts）', () => {
   it('設定 → model の単位、資金の未設定・0 は null', () => {
     expect(marginParamsOf(DEFAULT_MARGIN_PREFS)).toEqual(DEFAULT_MARGIN_PARAMS);
     expect(
-      marginParamsOf({ capitalYen: 1, factorPct: 150, rangePct: 10.5, ivUpPt: 12, ivDownPt: 0 }),
-    ).toEqual({ range: 0.105, ivUpPt: 12, ivDownPt: 0, factor: 1.5 });
+      marginParamsOf({
+        capitalYen: 1,
+        factorPct: 150,
+        rangePct: 10.5,
+        ivUpPt: 12,
+        ivDownPt: 0,
+        ignoreLongOptions: false,
+      }),
+    ).toEqual({ range: 0.105, ivUpPt: 12, ivDownPt: 0, factor: 1.5, ignoreLongOptions: false });
     expect(capitalOf(DEFAULT_MARGIN_PREFS)).toBeNull();
     expect(capitalOf(withCapital(0))).toBeNull();
     expect(capitalOf(withCapital(Number.NaN))).toBeNull();
@@ -275,13 +282,16 @@ describe('タイル（#131 AC14）', () => {
     // 全文: 1 行目は見出し + 値、前提の行
     expect(tm.full[0]).toEqual({ k: MARGIN_TILE_LABEL, v: `${tm.v} 千円` });
     expect(tr.full[0]).toEqual({ k: ROOM_TILE_LABEL, v: `${tr.v} 千円` });
-    expect(tm.full.slice(-4)).toEqual([
+    expect(tm.full.slice(-5)).toEqual([
       { k: '値動き幅 R', v: '±8%' },
       { k: 'IV の幅', v: '+8 / −4pt' },
       { k: '保有期間', v: '2 営業日' },
       { k: '掛け目', v: '120%' },
+      { k: '買いの OP', v: '減らさない' },
     ]);
-    expect(marginParamsText(mv.params)).toBe('R ±8% · IV +8 / −4pt · 2 営業日 · 掛け目 120%');
+    expect(marginParamsText(mv.params)).toBe(
+      'R ±8% · IV +8 / −4pt · 2 営業日 · 掛け目 120% · 買い OP 除く',
+    );
     // 最悪の点（PFE > 0 の put 売り）
     expect(point.result.pfe).toBeGreaterThan(0);
     expect(tm.full.some((r) => r.k === '最悪の点')).toBe(true);
@@ -365,9 +375,15 @@ describe('タイル（#131 AC14）', () => {
     expect(multipleText(12_345)).toBe('12,345 倍');
     expect(multipleText(null)).toBe(DASH);
     expect(multipleText(Number.NaN)).toBe(DASH);
-    expect(marginParamsText({ range: 0.105, ivUpPt: 12.5, ivDownPt: 0, factor: 1.5 })).toBe(
-      'R ±10.5% · IV +12.5 / −0pt · 2 営業日 · 掛け目 150%',
-    );
+    expect(
+      marginParamsText({
+        range: 0.105,
+        ivUpPt: 12.5,
+        ivDownPt: 0,
+        factor: 1.5,
+        ignoreLongOptions: false,
+      }),
+    ).toBe('R ±10.5% · IV +12.5 / −0pt · 2 営業日 · 掛け目 150%');
   });
 });
 
@@ -606,5 +622,93 @@ describe('追証の線（#131 AC16）', () => {
   it('止まってから作るまでの時間はピンの線と同じ 120ms', () => {
     expect(MARGIN_LINE_SETTLE_MS).toBe(PIN_SETTLE_MS);
     expect(MARGIN_LINE_SETTLE_MS).toBe(120);
+  });
+});
+
+describe('#149 買いの OP の設定', () => {
+  /** put 売り 2 枚 + 1 本上の put 買い 1 枚（レシオ。架空の値）と、売り 2 枚だけ */
+  const sells2 = run(loaded(chain), add(67_750, 'put', 'sell'), {
+    type: 'editLeg',
+    id: 1,
+    patch: { qty: 2 },
+  });
+  const ratio = run(sells2, add(67_875, 'put', 'buy'));
+  const scenario = { ...ratio.scenario, days: 1, dX: -2000, dSigma: 3 };
+  const onPrefs = withCapital(30_000_000);
+  const offPrefs: MarginPrefs = { ...onPrefs, ignoreLongOptions: false };
+  const ON = marginParamsOf(onPrefs);
+  const OFF = marginParamsOf(offPrefs);
+  const capital = 30_000_000;
+  const mOf = (c: { result: { margin: number } } | null) => c?.result.margin ?? Number.NaN;
+
+  it('#149 設定に従う: 今・シナリオ点・テール・追証の線', () => {
+    expect(ON.ignoreLongOptions).toBe(true);
+    expect(OFF.ignoreLongOptions).toBe(false);
+    expect(OFF).toEqual({ ...ON, ignoreLongOptions: false });
+    const rb = baseOf(ratio);
+    const sb = baseOf(sells2);
+    // 今・点: オン = 売り 2 枚だけ（全足の評価でも同じ。相殺なし）、オフ = 全足の model の値
+    const nowOn = marginNow(rb, scenario, ON, capital, holidays);
+    const nowOff = marginNow(rb, scenario, OFF, capital, holidays);
+    const nowSells = marginNow(sb, scenario, OFF, capital, holidays);
+    expect(Math.abs(mOf(nowOn) - mOf(nowSells))).toBeLessThanOrEqual(1e-6);
+    expect(mOf(nowOff)).toBeLessThan(mOf(nowOn));
+    const pOn = marginPoint(rb, scenario, ON, capital, holidays);
+    const pOff = marginPoint(rb, scenario, OFF, capital, holidays);
+    const pSells = marginPoint(sb, scenario, OFF, capital, holidays);
+    expect(Math.abs(mOf(pOn) - mOf(pSells))).toBeLessThanOrEqual(1e-6);
+    expect(mOf(pOff)).toBeLessThan(mOf(pOn));
+    // model を直に呼んだ値と同じ（式を足さない）
+    const x = rb.ctx.x0 + scenario.dX;
+    expect(mOf(pOff)).toBe(mOf(marginCalc(rb, x, scenario, OFF, capital, holidays)));
+    // 余力（オン）: 買いの支払は引かれる = 売りだけの余力 − 買いの支払 − 手数料（1 円）
+    const premR = premiumSummary(rb.legs, rb.settings);
+    const premS = premiumSummary(sb.legs, sb.settings);
+    const extra = premR.paid - premS.paid + premR.fees - premS.fees;
+    expect(extra).toBeGreaterThan(0);
+    expect(
+      Math.abs((pOn?.room ?? Number.NaN) - ((pSells?.room ?? Number.NaN) - extra)),
+    ).toBeLessThanOrEqual(1);
+    // テール: 各行で同じ関係
+    const tOn = marginTail(rb, { ...scenario, dX: 0 }, ON, capital, holidays);
+    const tOff = marginTail(rb, { ...scenario, dX: 0 }, OFF, capital, holidays);
+    const tSells = marginTail(sb, { ...scenario, dX: 0 }, OFF, capital, holidays);
+    for (const [i, r] of tOn.entries()) {
+      expect(Math.abs(mOf(r.calc) - mOf(tSells[i]?.calc ?? null)), `tail ${i}`).toBeLessThanOrEqual(
+        1e-6,
+      );
+      expect(mOf(r.calc), `tail ${i}`).toBeGreaterThanOrEqual(mOf(tOff[i]?.calc ?? null) - 1e-9);
+    }
+    // 追証の線: オンとオフで違い、オンの線の両側 1 円でオンの余力の符号が変わる
+    const lineOn = marginLine(rb, scenario, ON, capital, holidays);
+    const lineOff = marginLine(rb, scenario, OFF, capital, holidays);
+    expect(lineOn.length).toBeGreaterThanOrEqual(1);
+    expect(lineOn).not.toEqual(lineOff);
+    const sc0 = { ...scenario, dX: 0 };
+    for (const xl of lineOn) {
+      const lo = marginCalc(rb, xl - 1, sc0, ON, capital, holidays)?.room ?? Number.NaN;
+      const hi = marginCalc(rb, xl + 1, sc0, ON, capital, holidays)?.room ?? Number.NaN;
+      expect(Math.sign(lo)).not.toBe(Math.sign(hi));
+    }
+  });
+
+  it('#149 内訳の前提に買いの OP の行、テールの注記にオンの印', () => {
+    const m = metricsOf(ratio);
+    const vOn = viewOf(ratio, onPrefs);
+    const vOff = viewOf(ratio, offPrefs);
+    const rowOf = (mv: MarginView) =>
+      tile(metricTiles(m, mv), 'margin').full.find((r) => r.k === '買いの OP')?.v;
+    expect(rowOf(vOn)).toBe('減らさない');
+    expect(rowOf(vOff)).toBe('相殺する');
+    // 掛け目の行の後
+    const keys = tile(metricTiles(m, vOn), 'margin').full.map((r) => r.k);
+    expect(keys.indexOf('買いの OP')).toBe(keys.indexOf('掛け目') + 1);
+    // 内訳の証拠金の群にも同じ行
+    const bd = metricsBreakdown(m, vOn);
+    expect(bd.find((r) => r.k === '買いの OP')?.v).toBe('減らさない');
+    // テールの注記: オンは末尾に印、オフは #131 の文のまま
+    expect(metricsPanel(m, 0, vOn).marginTailCaption).toContain('· 買い OP 除く');
+    expect(metricsPanel(m, 0, vOff).marginTailCaption).not.toContain('買い OP');
+    expect(marginParamsText(vOff.params)).toBe('R ±8% · IV +8 / −4pt · 2 営業日 · 掛け目 120%');
   });
 });

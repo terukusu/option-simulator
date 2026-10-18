@@ -3,6 +3,7 @@
  * 行 = ATM の基準・金額の単位・手数料・損益グラフの縦軸・先物の basis・ΔX の単位・テーマ・前提（読み取り専用）。
  * β・IV の動き方はシナリオの「モデルの前提」だけに置く（§11-9）。値はすべて既存の state / prefs のまま（保存の形式は変えない）。
  * #131 で証拠金（概算）の節（資金・掛け目・値動き幅 R・IV の上げ / 下げ幅。端末の設定 ui/prefs.ts）の欄の判定を足した。
+ * #149 で同じ節に「買いの OP」の 2 択（減らさない / 相殺する）を足した。
  */
 
 import type { AtmBasis } from '../../model';
@@ -127,14 +128,32 @@ export const MARGIN_SETTINGS_NOTES: readonly string[] = [
   '証拠金は概算（原資産 ±R × IV の上げ / 下げ × 2 営業日の格子の最悪値 × 掛け目）。JSCC の VaR 証拠金の再現ではない',
   '既定（R 8%・IV +8 / −4pt・掛け目 120%）は仮置き。深い OTM の売りでは実額より小さく出うる',
   'JSCC の Web 試算か証券会社の額で確かめ、幅・掛け目で寄せる。資金はこの端末にだけ保存（保存一覧・共有の URL に載せない）',
+  '買いの OP: 減らさない（既定）= 売りの OP と先物だけで計算（証券会社の扱いに合わせる。買いの支払は余力から引く）。相殺する = 全足（JSCC の形）。売りどうしの相殺の扱いは未確認',
 ];
 
-/** [既定に戻す] で戻す項目（幅と掛け目だけ。資金は戻さない） */
+/** 買いの OP の 2 択の値（ignore = 減らさない、offset = 相殺する。#149） */
+export type MarginLongValue = 'ignore' | 'offset';
+
+export const MARGIN_LONG_OPTIONS: SegRow<MarginLongValue>['options'] = [
+  { value: 'ignore', text: '減らさない' },
+  { value: 'offset', text: '相殺する' },
+];
+
+export function marginLongValue(m: MarginPrefs): MarginLongValue {
+  return m.ignoreLongOptions ? 'ignore' : 'offset';
+}
+
+export function marginLongPatch(v: MarginLongValue): Partial<MarginPrefs> {
+  return { ignoreLongOptions: v === 'ignore' };
+}
+
+/** [既定に戻す] で戻す項目（幅・掛け目・買いの OP。資金は戻さない） */
 export const MARGIN_RESET: Partial<MarginPrefs> = {
   factorPct: DEFAULT_MARGIN_PREFS.factorPct,
   rangePct: DEFAULT_MARGIN_PREFS.rangePct,
   ivUpPt: DEFAULT_MARGIN_PREFS.ivUpPt,
   ivDownPt: DEFAULT_MARGIN_PREFS.ivDownPt,
+  ignoreLongOptions: DEFAULT_MARGIN_PREFS.ignoreLongOptions,
 };
 
 /** 欄に出す文字列（資金の未設定は空欄） */

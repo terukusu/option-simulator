@@ -1,6 +1,7 @@
 /**
- * 証拠金の概算（格子の最悪値・掛け目）。設計 docs/design.md 5.10、Issue #131 の AC1〜AC13。
+ * 証拠金の概算（格子の最悪値・掛け目）。設計 docs/design.md 5.10、Issue #131 の AC1〜AC13・#149。
  * 板は合成（tests/support/market.ts。架空の値）。JSCC の額は再現しない（参照値は手計算）。
+ * #131 の AC は「買いの OP で減らさない」をオフ（全足で相殺する JSCC の形）にして固定する。
  */
 
 import { describe, expect, it } from 'vitest';
@@ -27,6 +28,7 @@ import {
 import { type Scenario, sigmaAt, ZERO_SCENARIO } from '../../model/scenario';
 import { businessDaysAhead } from '../../model/time';
 import { FUT, M1, M2, makeMarket, quoteOf } from '../support/market';
+import { rng } from '../support/synthChain';
 
 const { ctx, rows } = makeMarket();
 const rows1 = rows[M1.id] as NonNullable<(typeof rows)[string]>;
@@ -34,7 +36,10 @@ const rows2 = rows[M2.id] as NonNullable<(typeof rows)[string]>;
 
 /** 手数料 > 0（架空の 1 枚 50 円）。AC1 で手数料を含めて照合する */
 const SETTINGS: ModelSettings = { ...DEFAULT_SETTINGS, feePerLot: 50 };
-const P = DEFAULT_MARGIN_PARAMS;
+/** #131 の AC の前提: JSCC の形 = 買いの OP でも相殺する（#149 の設定をオフ） */
+const P: MarginParams = { ...DEFAULT_MARGIN_PARAMS, ignoreLongOptions: false };
+/** #149 の既定: 買いの OP で減らさない */
+const ON: MarginParams = { ...DEFAULT_MARGIN_PARAMS, ignoreLongOptions: true };
 /** 板の時刻（架空の 2026-10-13 火曜の夜）から 2 営業日後 = 木曜 */
 const H = businessDaysAhead(ctx.evalTime, 2, []);
 
@@ -83,9 +88,14 @@ function room(
   capital: number,
   state: MarginState = NOW,
   settings: ModelSettings = SETTINGS,
+  params: MarginParams = P,
 ) {
   const p = prep(legs, settings);
-  return marginRoom(capital, premiumSummary(p, settings), marginAt(p, state, ctx, settings, P));
+  return marginRoom(
+    capital,
+    premiumSummary(p, settings),
+    marginAt(p, state, ctx, settings, params),
+  );
 }
 
 const scale = (legs: readonly Leg[], n: number): Leg[] =>
@@ -95,7 +105,13 @@ const ATM = 67750;
 
 describe('既定値と格子', () => {
   it('既定: R 8%・IV +8 / −4pt・掛け目 120%、原資産は 5 点', () => {
-    expect(P).toEqual({ range: 0.08, ivUpPt: 8, ivDownPt: 4, factor: 1.2 });
+    expect(DEFAULT_MARGIN_PARAMS).toEqual({
+      range: 0.08,
+      ivUpPt: 8,
+      ivDownPt: 4,
+      factor: 1.2,
+      ignoreLongOptions: true,
+    });
     expect([...MARGIN_PRICE_STEPS]).toEqual([-1, -0.5, 0, 0.5, 1]);
     expect(H).toBe(2);
   });
@@ -457,6 +473,235 @@ describe('AC12 追証の線', () => {
     expect(marginCallLevels(buy, sc, ctx, SETTINGS, P, H, 1e9, buyPrem, range)).toEqual([]);
     expect(marginCallLevels(p, sc, ctx, SETTINGS, P, H, 0, prem, range)).toEqual([]);
     expect(marginCallLevels(p, sc, ctx, SETTINGS, P, H, Number.NaN, prem, range)).toEqual([]);
+  });
+});
+
+describe('#149 買いの OP で減らさない', () => {
+  const capital = 50_000_000;
+  /** M の比較に使うフィールド（M・PFE・NOV は 1e-6 円、最悪の点は同じ） */
+  const expectSameMargin = (a: ReturnType<typeof m>, b: ReturnType<typeof m>, name = '') => {
+    expect(Math.abs(a.margin - b.margin), name).toBeLessThanOrEqual(1e-6);
+    expect(Math.abs(a.pfe - b.pfe), name).toBeLessThanOrEqual(1e-6);
+    expect(Math.abs(a.nov - b.nov), name).toBeLessThanOrEqual(1e-6);
+    expect(a.worst, name).toEqual(b.worst);
+  };
+
+  it('#149 既定は買いの OP で減らさない', () => {
+    expect(DEFAULT_MARGIN_PARAMS.ignoreLongOptions).toBe(true);
+  });
+
+  it('#149 オン: 買いだけは必要証拠金 0、余力 = 資金 − 支払 − 手数料', () => {
+    const cases: Array<[string, Leg[]]> = [
+      ['call 買い', [op(M1, 'call', 68500, 'buy')]],
+      ['put 買い', [op(M1, 'put', 66000, 'buy', 2)]],
+      [
+        '限月混在の買い',
+        [op(M1, 'call', 69000, 'buy'), op(M2, 'put', 66000, 'buy'), op(M2, 'call', ATM, 'buy', 3)],
+      ],
+    ];
+    for (const [name, legs] of cases) {
+      const r = m(legs, { params: ON });
+      expect(r, name).toMatchObject({ pfe: 0, nov: 0, margin: 0, futuresPnl: 0, settledCash: 0 });
+      expect(r.worst, name).toBeNull();
+      const prem = premiumSummary(prep(legs), SETTINGS);
+      expect(prem.fees).toBeGreaterThan(0);
+      const a = room(legs, capital, NOW, SETTINGS, ON);
+      expect(Math.abs(a - (capital - prem.paid - prem.fees)), name).toBeLessThanOrEqual(1);
+    }
+  });
+
+  it('#149 オン: 売り 2 + 買い 1 のレシオは売り 2 枚だけと M・PFE・NOV・最悪の点が一致', () => {
+    const sells = [op(M1, 'put', 65000, 'sell', 2)];
+    const ratio = [...sells, op(M1, 'put', 65125, 'buy')];
+    const on = m(ratio, { params: ON });
+    const sellsOnly = m(sells, { params: P });
+    expect(sellsOnly.margin).toBeGreaterThan(0);
+    expectSameMargin(on, sellsOnly);
+    // オフ（相殺あり）は小さい
+    expect(m(ratio, { params: P }).margin).toBeLessThan(on.margin);
+    // 余力: 買いの支払は引かれる
+    const prem = premiumSummary(prep(ratio), SETTINGS);
+    expect(prem.paid).toBeGreaterThan(0);
+    const a = room(ratio, capital, NOW, SETTINGS, ON);
+    expect(
+      Math.abs(a - (capital - prem.paid + prem.received - prem.fees - sellsOnly.margin)),
+    ).toBeLessThanOrEqual(1);
+  });
+
+  it('#149 オン: バーティカルは put 売り単体と一致し、オフ以上', () => {
+    for (const [k1, k2] of [
+      [ATM, 67250],
+      [66000, 64000],
+      [68500, 66500],
+    ] as const) {
+      const vertical = [op(M1, 'put', k1, 'sell'), op(M1, 'put', k2, 'buy')];
+      const on = m(vertical, { params: ON });
+      expectSameMargin(on, m([op(M1, 'put', k1, 'sell')], { params: P }), `${k1}/${k2}`);
+      expect(on.margin).toBeGreaterThanOrEqual(m(vertical, { params: P }).margin);
+    }
+  });
+
+  it('#149 オン: 先物 + 買いの put は先物だけと一致（k × R × X_S × 1,000）', () => {
+    for (const side of ['buy', 'sell'] as const) {
+      for (const x of [ctx.x0, ctx.x0 - 3000]) {
+        const state = { ...NOW, x, scenario: { ...ZERO_SCENARIO, dX: x - ctx.x0 } };
+        const legs = [fut(side), op(M1, 'put', 66000, 'buy', 2)];
+        const on = m(legs, { state, params: ON });
+        const only = m([fut(side)], { state, params: P });
+        expectSameMargin(on, only, `${side} ${x}`);
+        expect(Math.abs(on.futuresPnl - only.futuresPnl)).toBeLessThanOrEqual(1);
+        expect(Math.abs(on.margin - ON.factor * ON.range * x * 1000)).toBeLessThanOrEqual(1);
+        expect(on.nov).toBe(0);
+      }
+    }
+  });
+
+  it('#149 オン: 限月混在（期近の売り + 期先の買い）は売りだけと一致', () => {
+    const sells = [op(M1, 'put', 66000, 'sell'), op(M1, 'call', 69500, 'sell')];
+    const legs = [...sells, op(M2, 'put', 64000, 'buy'), op(M2, 'call', 71000, 'buy', 2)];
+    expectSameMargin(m(legs, { params: ON }), m(sells, { params: P }));
+  });
+
+  it('#149 決済済みの足の清算額はオン / オフで同じ', () => {
+    // M1 の SQ の先（days 40）・下落: M1 の買いの put は本源的価値で清算、M2 の足は生きている
+    const x = ctx.x0 * 0.95;
+    const state: MarginState = {
+      x,
+      scenario: { ...ZERO_SCENARIO, days: 40, dX: x - ctx.x0 },
+      horizonDays: H,
+    };
+    const legs = [
+      op(M1, 'put', ATM, 'buy'),
+      op(M1, 'put', 66000, 'sell'),
+      op(M2, 'put', 66000, 'sell', 2),
+      op(M2, 'put', 64000, 'buy'),
+      fut('buy'),
+    ];
+    const on = m(legs, { state, params: ON });
+    const off = m(legs, { state, params: P });
+    expect(on.settledCash).toBe(off.settledCash);
+    expect(on.futuresPnl).toBe(off.futuresPnl);
+    // 清算額: +1,000 × (ATM − F') − 1,000 × (66,000 − F')（円モード F' = X' + basis）
+    const f = x + (M1.F - ctx.x0);
+    expect(on.settledCash).toBeCloseTo(1000 * (ATM - f) - 1000 * Math.max(0, 66000 - f), 6);
+    // M はオンのほうが大きい（M2 の買いの put を除く）
+    expect(on.margin).toBeGreaterThan(off.margin);
+    expectSameMargin(
+      on,
+      m(
+        [
+          op(M1, 'put', ATM, 'buy'),
+          op(M1, 'put', 66000, 'sell'),
+          op(M2, 'put', 66000, 'sell', 2),
+          fut('buy'),
+        ],
+        {
+          state,
+          params: P,
+        },
+      ),
+    );
+  });
+
+  it('#149 性質: M(オン) ≥ M(オフ)、買いの OP が無ければ一致', () => {
+    // 根拠: OP の価値 ≥ 0 なので、買いの OP の足を除くと格子の損失は高々その評価額 L だけ減り、
+    // NOV はちょうど L だけ減る → PFE − NOV は減らない
+    const next = rng(149);
+    const pick = <T>(xs: readonly T[]): T => xs[Math.floor(next() * xs.length)] as T;
+    const strikes = [64000, 65000, 66000, 67000, ATM, 68500, 69000, 70000];
+    const randomLeg = (): Leg => {
+      for (;;) {
+        if (next() < 0.2) {
+          return fut(pick(['buy', 'sell'] as const), 1 + Math.floor(next() * 3));
+        }
+        try {
+          return op(
+            pick([M1, M2] as const),
+            pick(['call', 'put'] as const),
+            pick(strikes),
+            pick(['buy', 'sell'] as const),
+            1 + Math.floor(next() * 3),
+          );
+        } catch {
+          // 板に両側気配が無い行使価格は引き直す
+        }
+      }
+    };
+    let withLong = 0;
+    let withoutLong = 0;
+    for (let n = 0; n < 240; n++) {
+      const legs = Array.from({ length: 1 + Math.floor(next() * 4) }, randomLeg);
+      const x = ctx.x0 * (0.9 + 0.2 * next());
+      const state: MarginState = {
+        x,
+        scenario: { ...ZERO_SCENARIO, dX: x - ctx.x0, days: Math.floor(next() * 3) * 20 },
+        horizonDays: H,
+      };
+      const on = m(legs, { state, params: ON });
+      const off = m(legs, { state, params: P });
+      const name = `#${n}`;
+      expect(on.margin, name).toBeGreaterThanOrEqual(off.margin - 1e-9);
+      expect(on.settledCash, name).toBe(off.settledCash);
+      expect(on.futuresPnl, name).toBe(off.futuresPnl);
+      const hasLong = legs.some((l) => l.kind === 'option' && l.side === 'buy');
+      if (hasLong) {
+        withLong++;
+        // オン = 買いの OP を取り除いたポジションのオフ
+        const rest = legs.filter((l) => !(l.kind === 'option' && l.side === 'buy'));
+        const r = m(rest, { state, params: P });
+        expect(Math.abs(on.margin - r.margin), name).toBeLessThanOrEqual(1e-6);
+        expect(Math.abs(on.pfe - r.pfe), name).toBeLessThanOrEqual(1e-6);
+        expect(Math.abs(on.nov - r.nov), name).toBeLessThanOrEqual(1e-6);
+        expect(Math.abs(on.futuresPnl - r.futuresPnl), name).toBeLessThanOrEqual(1e-6);
+      } else {
+        withoutLong++;
+        expect(on, name).toEqual(off);
+      }
+    }
+    expect(withLong).toBeGreaterThan(20);
+    expect(withoutLong).toBeGreaterThan(20);
+  });
+
+  it('#149 オン: SQ の直前・T = 0 ちょうど・SQ の直後で NaN・∞ が無い', () => {
+    const legs = [
+      op(M1, 'put', ATM, 'sell'),
+      op(M2, 'put', 66000, 'sell', 2),
+      fut('sell'),
+      op(M1, 'call', 69000, 'buy'),
+    ];
+    const p = prep(legs);
+    const t0 = (p[0] as PreparedLeg).T0 * 365;
+    for (const days of [t0 - 1e-4, t0 - 30 / 86400, t0, t0 + 1e-9]) {
+      const r = marginAt(p, { ...NOW, scenario: { ...ZERO_SCENARIO, days } }, ctx, SETTINGS, ON);
+      for (const v of [r.pfe, r.nov, r.margin, r.futuresPnl, r.settledCash]) {
+        expect(Number.isFinite(v), `days=${days}`).toBe(true);
+      }
+      expect(r.margin).toBeGreaterThanOrEqual(0);
+    }
+  });
+
+  it('#149 オン: 追証の線は売りと先物だけで余力 0', () => {
+    const sells = [op(M1, 'put', ATM, 'sell', 2)];
+    const ratio = [...sells, op(M1, 'put', 67875, 'buy')];
+    const p = prep(ratio);
+    const prem = premiumSummary(p, SETTINGS);
+    const sellsP = prep(sells);
+    const sc: Scenario = { ...ZERO_SCENARIO, days: 3 };
+    const range = { lo: ctx.x0 * 0.5, hi: ctx.x0 * 1.5 };
+    const at = (x: number) => ({ x, scenario: { ...sc, dX: x - ctx.x0 }, horizonDays: H });
+    // 余力 = 全足の支払・受取・手数料 − 売りだけの M
+    const roomSells = (cap: number, x: number) =>
+      marginRoom(cap, prem, marginAt(sellsP, at(x), ctx, SETTINGS, P));
+    const cap = 30_000_000;
+    const on = marginCallLevels(p, sc, ctx, SETTINGS, ON, H, cap, prem, range);
+    const off = marginCallLevels(p, sc, ctx, SETTINGS, P, H, cap, prem, range);
+    expect(on.length).toBeGreaterThanOrEqual(1);
+    for (const x of on) {
+      expect(Math.sign(roomSells(cap, x - 1))).not.toBe(Math.sign(roomSells(cap, x + 1)));
+    }
+    expect(on).not.toEqual(off);
+    // 下側の線はオン（M が大きい）のほうが X₀ に近い
+    expect(on[0] as number).toBeGreaterThan((off[0] ?? Number.NEGATIVE_INFINITY) as number);
   });
 });
 

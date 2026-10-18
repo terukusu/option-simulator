@@ -16,14 +16,21 @@ const M0 = DEFAULT_MARGIN_PREFS;
 const DEF = { theme: 'auto', margin: M0 };
 /** 証拠金の既定のキー（書き出しの末尾） */
 const M0_JSON =
-  '"margin_factor_pct":120,"margin_range_pct":8,"margin_iv_up_pt":8,"margin_iv_down_pt":4';
+  '"margin_factor_pct":120,"margin_range_pct":8,"margin_iv_up_pt":8,"margin_iv_down_pt":4,"margin_ignore_long_options":true';
 
 describe('readPrefs', () => {
   it('キーと版', () => {
     expect(PREFS_KEY).toBe('option-simulator.prefs');
     expect(PREFS_SCHEMA_VERSION).toBe(1);
     expect(DEFAULT_PREFS).toEqual(DEF);
-    expect(M0).toEqual({ capitalYen: null, factorPct: 120, rangePct: 8, ivUpPt: 8, ivDownPt: 4 });
+    expect(M0).toEqual({
+      capitalYen: null,
+      factorPct: 120,
+      rangePct: 8,
+      ivUpPt: 8,
+      ivDownPt: 4,
+      ignoreLongOptions: true,
+    });
   });
 
   it('無い・JSON でない・形が違う・値が不正 → 既定（書いてよい）', () => {
@@ -87,6 +94,7 @@ describe('証拠金の設定（#131 AC15）', () => {
     rangePct: 10.5,
     ivUpPt: 12,
     ivDownPt: 0,
+    ignoreLongOptions: false,
   };
 
   it('往復: 書き出し → 読み取りで同じ値（JSON のキーは capital_yen・margin_*）', () => {
@@ -99,6 +107,7 @@ describe('証拠金の設定（#131 AC15）', () => {
       margin_range_pct: 10.5,
       margin_iv_up_pt: 12,
       margin_iv_down_pt: 0,
+      margin_ignore_long_options: false,
     });
     expect(readPrefs(text)).toEqual({ prefs: { theme: 'dark', margin: custom }, writable: true });
     // 範囲の両端
@@ -108,6 +117,7 @@ describe('証拠金の設定（#131 AC15）', () => {
       rangePct: 30,
       ivUpPt: 50,
       ivDownPt: 30,
+      ignoreLongOptions: true,
     };
     expect(readPrefs(serializePrefs({ theme: 'auto', margin: ends })).prefs.margin).toEqual(ends);
     const lows: MarginPrefs = {
@@ -116,6 +126,7 @@ describe('証拠金の設定（#131 AC15）', () => {
       rangePct: 1,
       ivUpPt: 0,
       ivDownPt: 0,
+      ignoreLongOptions: false,
     };
     expect(readPrefs(serializePrefs({ theme: 'auto', margin: lows })).prefs.margin).toEqual(lows);
   });
@@ -180,6 +191,7 @@ describe('証拠金の設定（#131 AC15）', () => {
         rangePct: Infinity,
         ivUpPt: -1,
         ivDownPt: 99,
+        ignoreLongOptions: 'false' as unknown as boolean,
       },
     });
     expect(nan).toBe(`{"schema_version":1,"theme":"auto",${M0_JSON}}`);
@@ -191,6 +203,47 @@ describe('証拠金の設定（#131 AC15）', () => {
       theme: 'sepia',
     });
     expect(readPrefs(text)).toEqual({ prefs: DEF, writable: true });
+  });
+});
+
+describe('#149 買いの OP の設定', () => {
+  it('#149 買いの OP の設定: 無い・不正 → 既定（オン）、オフを往復、版は 1', () => {
+    const custom: MarginPrefs = {
+      capitalYen: 5_000_000,
+      factorPct: 150,
+      rangePct: 10,
+      ivUpPt: 12,
+      ivDownPt: 2,
+      ignoreLongOptions: false,
+    };
+    const good = JSON.parse(serializePrefs({ theme: 'dark', margin: custom }));
+    expect(good.schema_version).toBe(1);
+    expect(good.margin_ignore_long_options).toBe(false);
+    // オフの往復・オンの往復
+    expect(readPrefs(JSON.stringify(good)).prefs.margin).toEqual(custom);
+    const on = { ...custom, ignoreLongOptions: true };
+    expect(readPrefs(serializePrefs({ theme: 'dark', margin: on })).prefs.margin).toEqual(on);
+    // キーなし（#149 より前の保存）→ オン、他の項目はそのまま
+    const { margin_ignore_long_options: _, ...noKey } = good;
+    expect(readPrefs(JSON.stringify(noKey))).toEqual({
+      prefs: { theme: 'dark', margin: on },
+      writable: true,
+    });
+    // boolean でない値 → オン、他の項目とテーマは残る
+    for (const v of ['false', 0, 1, null, [], {}]) {
+      const r = readPrefs(JSON.stringify({ ...good, margin_ignore_long_options: v }));
+      expect(r.writable, String(v)).toBe(true);
+      expect(r.prefs.theme).toBe('dark');
+      expect(r.prefs.margin, JSON.stringify(v)).toEqual(on);
+    }
+    // 書き出しは常に書く（boolean でなければ既定 = オン）
+    expect(serializePrefs({ theme: 'auto', margin: M0 })).toContain(
+      '"margin_ignore_long_options":true',
+    );
+    const broken = { ...M0, ignoreLongOptions: 0 as unknown as boolean };
+    expect(
+      JSON.parse(serializePrefs({ theme: 'auto', margin: broken })).margin_ignore_long_options,
+    ).toBe(true);
   });
 });
 

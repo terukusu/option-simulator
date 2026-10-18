@@ -11,10 +11,14 @@ import { basisAction, type FutureBasis } from '../view/scenarioRegion';
 import {
   feeField,
   MARGIN_FIELDS,
+  MARGIN_LONG_OPTIONS,
   MARGIN_RESET,
   MARGIN_SETTINGS_NOTES,
+  type MarginLongValue,
   marginField,
   marginFieldText,
+  marginLongPatch,
+  marginLongValue,
   settingsModel,
 } from '../view/settings';
 import { Dialog } from './parts/Dialog';
@@ -249,6 +253,15 @@ function SettingsBody(p: SettingsDialogProps) {
         {MARGIN_FIELDS.map((f) => (
           <MarginField field={f} margin={p.margin} onMargin={p.onMargin} key={f.key} />
         ))}
+        <div class="set-line">
+          <span class="set-k">買いの OP</span>
+          <Seg<MarginLongValue>
+            label="買いの OP で証拠金を減らさない"
+            value={marginLongValue(p.margin)}
+            options={MARGIN_LONG_OPTIONS}
+            onChange={(v) => p.onMargin(marginLongPatch(v))}
+          />
+        </div>
         {MARGIN_SETTINGS_NOTES.map((t) => (
           <p class="set-note" key={t}>
             {t}

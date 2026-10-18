@@ -7,8 +7,10 @@
  *   × IV の平行移動 {+ivUpPt, 0, −ivDownPt}（pt）× 経過 {0, h}（h = S から 2 営業日後までの暦日）
  * - 評価は legValue（Black-76 + シナリオ IV の式 5.4。β 込み）だけ。IV の平行移動は足の σ_base を
  *   x ↦ σ_base(x) + δ に包んで入れる（relative モードでも式を通した後の差がちょうど pt）
- * - V(S) = Σ_生きている足 符号 × 枚数 × 乗数 × 評価価格（建値・手数料を含まない）
- * - PFE = max(0, max_格子 (V(S) − V(格子)))、NOV = Σ_生きている OP の足 符号 × 枚数 × 乗数 × 評価価格
+ * - M の足 = 生きている足のうち、ignoreLongOptions なら売りの OP と先物だけ（買いの OP で減らさない。
+ *   証券会社の扱い。#149）、そうでなければ全部（JSCC の形）
+ * - V(S) = Σ_M の足 符号 × 枚数 × 乗数 × 評価価格（建値・手数料を含まない）
+ * - PFE = max(0, max_格子 (V(S) − V(格子)))、NOV = Σ_M の足のうち OP 符号 × 枚数 × 乗数 × 評価価格
  * - 必要証拠金 M = k × max(0, PFE − NOV)
  * - 余力 A = 資金 − 支払 + 受取 − 手数料（全足）+ 先物の評価損益（生きている足）+ 決済済みの足の清算額 − M
  *
@@ -36,6 +38,11 @@ export interface MarginParams {
   ivDownPt: number;
   /** 掛け目 k（倍率。1.2 = 120%） */
   factor: number;
+  /**
+   * 買いの OP で証拠金を減らさない（true = M の足は生きている売りの OP と先物だけ。証券会社の扱い。
+   * false = 全足で相殺する JSCC の形）。余力の他の項は全足のまま。#149
+   */
+  ignoreLongOptions: boolean;
 }
 
 /** 既定値（仮置き。設定で変えられる。設計 5.10） */
@@ -44,6 +51,7 @@ export const DEFAULT_MARGIN_PARAMS: MarginParams = {
   ivUpPt: 8,
   ivDownPt: 4,
   factor: 1.2,
+  ignoreLongOptions: true,
 };
 
 /** 原資産の格子（R に対する比） */
@@ -79,7 +87,7 @@ export interface MarginResult {
   futuresPnl: number;
   /** S で SQ を過ぎた足の清算額（円） */
   settledCash: number;
-  /** 損失が最大になった格子の点（生きている足が無ければ null） */
+  /** 損失が最大になった格子の点（M の足が無ければ null） */
   worst: MarginWorst | null;
 }
 
@@ -128,28 +136,33 @@ function marginOn(
   params: MarginParams,
 ): MarginResult {
   const sc = state.scenario;
-  const alive: boolean[] = [];
+  // M に入れる足（格子の内側では配列の参照だけ）
+  const inMargin: boolean[] = [];
   let v0 = 0;
   let nov = 0;
   let futuresPnl = 0;
   let settledCash = 0;
-  let anyAlive = false;
+  let anyInMargin = false;
   for (const p of legs) {
     const live = Number.isFinite(p.F) && p.T0 - sc.days / 365 > 0;
-    alive.push(live);
+    const longOption = p.leg.kind === 'option' && p.sign > 0;
+    const counted = live && !(params.ignoreLongOptions && longOption);
+    inMargin.push(counted);
     if (!Number.isFinite(p.F)) continue;
     const w = p.sign * p.leg.qty * p.multiplier;
+    if (live && !counted) continue; // 生きている買いの OP（オン）: 支払は余力の他の項に入っている
     const v = legValue(p, state.x, sc, ctx, settings);
     if (!live) {
       settledCash += p.leg.kind === 'future' ? w * (v - p.leg.entry) : w * v;
       continue;
     }
-    anyAlive = true;
+    anyInMargin = true;
     v0 += w * v;
     if (p.leg.kind === 'option') nov += w * v;
     else futuresPnl += w * (v - p.leg.entry);
   }
-  if (!anyAlive) {
+  // M の足が無い = 生きている先物も無い（先物は常に M の足）ので futuresPnl も 0
+  if (!anyInMargin) {
     return { pfe: 0, nov: 0, margin: 0, futuresPnl: 0, settledCash, worst: null };
   }
   let maxLoss = Number.NEGATIVE_INFINITY;
@@ -162,7 +175,7 @@ function marginOn(
         const x = state.x * (1 + s * params.range);
         let v = 0;
         for (let i = 0; i < layer.legs.length; i++) {
-          if (!alive[i]) continue;
+          if (!inMargin[i]) continue;
           const p = layer.legs[i] as PreparedLeg;
           v += p.sign * p.leg.qty * p.multiplier * legValue(p, x, scT, ctx, settings);
         }

@@ -1514,7 +1514,8 @@ describe('性能（#131 AC17: 証拠金と追証の線）', () => {
   const base = built;
   const { holidays } = CALENDAR;
   const capital = 15_000_000;
-  const params = DEFAULT_MARGIN_PARAMS;
+  // 全足を評価する重い側（買いの OP でも相殺する。#149 の設定をオフ）で測る
+  const params = { ...DEFAULT_MARGIN_PARAMS, ignoreLongOptions: false };
   const scenario0 = { ...ZERO_SCENARIO, days: 5 };
   const today = todayLine(base, null, 1000, scenario0);
   const now = marginNow(base, scenario0, params, capital, holidays);
