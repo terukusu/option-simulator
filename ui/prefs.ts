@@ -9,6 +9,7 @@
  * （足したキーは省略可・項目ごとに不正ならその項目だけ既定）。版を上げると、ロールバックした旧バンドルが
  * 「新しい版 → 書かない」になりテーマを保存できなくなるため。資金は端末にだけ置く（作業の保存・保存一覧・
  * 書き出し・URL 共有には載せない）。
+ * #149 で「買いの OP で証拠金を減らさない」（boolean。既定 true）を足した。版は 1 のまま（無い・boolean でない → 既定）。
  */
 
 export const PREFS_KEY = 'option-simulator.prefs';
@@ -30,9 +31,12 @@ export interface MarginPrefs {
   ivUpPt: number;
   /** IV の下げ幅（pt） */
   ivDownPt: number;
+  /** 買いの OP で証拠金を減らさない（true = 売りの OP と先物だけで計算。#149） */
+  ignoreLongOptions: boolean;
 }
 
-export type MarginPrefKey = keyof MarginPrefs;
+/** 数値の項目（欄で入れるもの。買いの OP の 2 択は除く） */
+export type MarginPrefKey = Exclude<keyof MarginPrefs, 'ignoreLongOptions'>;
 
 /** 証拠金の設定の範囲（両端を含む。設計 5.10 の表）。資金は整数 */
 export const MARGIN_PREF_RANGE: Record<MarginPrefKey, { min: number; max: number }> = {
@@ -50,7 +54,11 @@ export const DEFAULT_MARGIN_PREFS: MarginPrefs = {
   rangePct: 8,
   ivUpPt: 8,
   ivDownPt: 4,
+  ignoreLongOptions: true,
 };
+
+/** 買いの OP の設定の JSON のキー（#149） */
+const IGNORE_LONG_JSON_KEY = 'margin_ignore_long_options';
 
 /** JSON のキー（項目ごと） */
 const MARGIN_JSON_KEY: Record<MarginPrefKey, string> = {
@@ -87,6 +95,8 @@ function readMargin(o: Record<string, unknown>): MarginPrefs {
     const v = o[MARGIN_JSON_KEY[key]];
     if (isMarginPrefValue(key, v)) m[key] = v;
   }
+  const ignore = o[IGNORE_LONG_JSON_KEY];
+  if (typeof ignore === 'boolean') m.ignoreLongOptions = ignore;
   return m;
 }
 
@@ -118,7 +128,7 @@ export function readPrefs(text: string | null): PrefsRead {
   return { prefs: { theme: o.theme, margin: readMargin(o) }, writable: true };
 }
 
-/** 書き出す（既知のキーだけ。資金が未設定ならキーを書かない。範囲外の値は既定にして書く）。 */
+/** 書き出す（既知のキーだけ。資金が未設定ならキーを書かない。範囲外・型違いの値は既定にして書く）。 */
 export function serializePrefs(p: Prefs): string {
   const out: Record<string, unknown> = { schema_version: PREFS_SCHEMA_VERSION, theme: p.theme };
   const m = p.margin ?? DEFAULT_MARGIN_PREFS;
@@ -128,6 +138,10 @@ export function serializePrefs(p: Prefs): string {
   for (const key of ['factorPct', 'rangePct', 'ivUpPt', 'ivDownPt'] as const) {
     out[MARGIN_JSON_KEY[key]] = isMarginPrefValue(key, m[key]) ? m[key] : DEFAULT_MARGIN_PREFS[key];
   }
+  out[IGNORE_LONG_JSON_KEY] =
+    typeof m.ignoreLongOptions === 'boolean'
+      ? m.ignoreLongOptions
+      : DEFAULT_MARGIN_PREFS.ignoreLongOptions;
   return JSON.stringify(out);
 }
 

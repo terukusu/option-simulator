@@ -14,10 +14,13 @@ import {
   feeField,
   MARGIN_FIELD_ERROR,
   MARGIN_FIELDS,
+  MARGIN_LONG_OPTIONS,
   MARGIN_RESET,
   MARGIN_SETTINGS_NOTES,
   marginField,
   marginFieldText,
+  marginLongPatch,
+  marginLongValue,
   SETTINGS_NO_BOARD_TEXT,
   type SettingsInput,
   settingsModel,
@@ -192,12 +195,39 @@ describe('証拠金の欄（#131）', () => {
       '5000000',
     );
     expect(marginFieldText('factorPct', DEFAULT_MARGIN_PREFS)).toBe('120');
-    expect(MARGIN_RESET).toEqual({ factorPct: 120, rangePct: 8, ivUpPt: 8, ivDownPt: 4 });
+    expect(MARGIN_RESET).toEqual({
+      factorPct: 120,
+      rangePct: 8,
+      ivUpPt: 8,
+      ivDownPt: 4,
+      ignoreLongOptions: true,
+    });
     expect('capitalYen' in MARGIN_RESET).toBe(false);
     const notes = MARGIN_SETTINGS_NOTES.join(' ');
     expect(notes).toContain('概算');
     expect(notes).toContain('仮置き');
     expect(notes).toContain('深い OTM');
     expect(notes).toContain('JSCC');
+  });
+});
+
+describe('#149 買いの OP の設定', () => {
+  it('#149 証拠金の節に買いの OP の 2 択、既定に戻すでオン', () => {
+    expect(MARGIN_LONG_OPTIONS).toEqual([
+      { value: 'ignore', text: '減らさない' },
+      { value: 'offset', text: '相殺する' },
+    ]);
+    expect(marginLongValue(DEFAULT_MARGIN_PREFS)).toBe('ignore');
+    expect(marginLongValue({ ...DEFAULT_MARGIN_PREFS, ignoreLongOptions: false })).toBe('offset');
+    expect(marginLongPatch('offset')).toEqual({ ignoreLongOptions: false });
+    expect(marginLongPatch('ignore')).toEqual({ ignoreLongOptions: true });
+    // [既定に戻す] はオンに戻す。資金は戻さない
+    expect(MARGIN_RESET.ignoreLongOptions).toBe(true);
+    expect('capitalYen' in MARGIN_RESET).toBe(false);
+    // 数値の欄には入れない（2 択は別の行）
+    expect(MARGIN_FIELDS.map((f) => f.key as string)).not.toContain('ignoreLongOptions');
+    const notes = MARGIN_SETTINGS_NOTES.join(' ');
+    expect(notes).toContain('買いの OP');
+    expect(notes).toContain('売りの OP と先物だけ');
   });
 });

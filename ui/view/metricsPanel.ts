@@ -254,11 +254,21 @@ function unitSubOf(m: MetricsModel): string {
 /** 数（%・pt）の文字列（整数なら小数なし、端数があれば小数 1 桁） */
 const fmtParam = (v: number) => fmtNum(v, Number.isInteger(v) ? 0 : 1);
 
-/** 証拠金の前提（`R ±8% · IV +8 / −4pt · 2 営業日 · 掛け目 120%`） */
+/** テールの証拠金の表の注記の末尾（買いの OP で減らさない設定のとき。#149） */
+export const MARGIN_IGNORE_LONG_MARK = ' · 買い OP 除く';
+
+/** 内訳の前提の「買いの OP」の行の値（#149） */
+export const MARGIN_LONG_ROW_TEXT = { ignore: '減らさない', offset: '相殺する' } as const;
+
+/**
+ * 証拠金の前提（`R ±8% · IV +8 / −4pt · 2 営業日 · 掛け目 120%`。買いの OP で減らさないなら末尾に
+ * ` · 買い OP 除く`）
+ */
 export function marginParamsText(p: MarginParams): string {
   const r = fmtParam(Math.round(p.range * 1000) / 10);
   const k = fmtParam(Math.round(p.factor * 1000) / 10);
-  return `R ±${r}% · IV +${fmtParam(p.ivUpPt)} / −${fmtParam(p.ivDownPt)}pt · ${MARGIN_HORIZON_BUSINESS_DAYS} 営業日 · 掛け目 ${k}%`;
+  const long = p.ignoreLongOptions ? MARGIN_IGNORE_LONG_MARK : '';
+  return `R ±${r}% · IV +${fmtParam(p.ivUpPt)} / −${fmtParam(p.ivDownPt)}pt · ${MARGIN_HORIZON_BUSINESS_DAYS} 営業日 · 掛け目 ${k}%${long}`;
 }
 
 /** 建てられる倍数の文字列（Infinity = 上限なし、資金なし = —） */
@@ -285,7 +295,7 @@ const roomTone = (v: number | null): 'loss' | null => (v !== null && v < 0 ? 'lo
 
 /**
  * 証拠金の行（内訳の群・タイルの全文で共用）: シナリオ点と今の M・PFE・NOV・余力、倍数（今）、最悪の点（シナリオ点）、
- * 前提（R・IV の幅・保有期間・掛け目）。資金が未設定なら余力・倍数は「—」。360px の内訳の 2 列で切れないよう
+ * 前提（R・IV の幅・保有期間・掛け目・買いの OP）。資金が未設定なら余力・倍数は「—」。360px の内訳の 2 列で切れないよう
  * 見出し・値は短く、複数の値は行に分ける（続きの行の見出しは空）
  */
 function marginRows(mv: MarginView, u: AmountUnit): FullRow[] {
@@ -307,6 +317,10 @@ function marginRows(mv: MarginView, u: AmountUnit): FullRow[] {
   rows.push({ k: 'IV の幅', v: `+${fmtParam(p.ivUpPt)} / −${fmtParam(p.ivDownPt)}pt` });
   rows.push({ k: '保有期間', v: `${MARGIN_HORIZON_BUSINESS_DAYS} 営業日` });
   rows.push({ k: '掛け目', v: `${fmtParam(Math.round(p.factor * 1000) / 10)}%` });
+  rows.push({
+    k: '買いの OP',
+    v: p.ignoreLongOptions ? MARGIN_LONG_ROW_TEXT.ignore : MARGIN_LONG_ROW_TEXT.offset,
+  });
   return rows;
 }
 
