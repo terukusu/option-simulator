@@ -2,6 +2,7 @@ import type { MutableRef } from 'preact/hooks';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks';
 import type { Domain } from '../../chart/scale';
 import type { AppController } from '../../components/useAppController';
+import { useMarginLine } from '../../components/useMarginLine';
 import { usePnlChartModel } from '../../components/usePnlChartModel';
 import { LIVE_SETTLE_MS, liveBurst } from '../../view/motion';
 import { surfaceActive, surfaceLegend } from '../../view/pnlSurface';
@@ -61,6 +62,8 @@ export function Stage(p: {
   const { scenario } = state;
   const { ref, width, height } = useSize<HTMLDivElement>(320, 160);
   const frame = stageFrame(width, height, mini);
+  // 追証の線（#131）: 止まってから作る（ミニの舞台には描かないので作らない）
+  const marginLine = useMarginLine(mini ? null : c.marginLineInput);
   const { model, pinMarks, marks } = usePnlChartModel({
     base,
     scenario,
@@ -72,6 +75,7 @@ export function Stage(p: {
     pins: c.pinTargets,
     pinLine: c.pinLine,
     amountUnit: metrics.unit,
+    marginLine,
   });
   // 動き（§6。#91 段 C）: 連続の変更の間は .stage-main の data-live（押下・パルス。ui/next/live.ts が直接入れる）と
   // .live（舞台の大きさの変化・連打。描画の中で前の値と比べて同じ描画で付け、パルスで data-live に引き継ぐ。effect で後から

@@ -264,6 +264,17 @@ export interface PnlMarker {
 
 export type PnlYUnit = 'yen' | 'thousand';
 
+/** 追証の線の 1 本（縦の破線と札） */
+export interface PnlMarginCall {
+  x: number;
+  px: number;
+  /** 札の寄せ: start = 線の右に置く、end = 線の左に置く（描画域の右端に近いとき） */
+  anchor: 'start' | 'end';
+}
+
+/** 追証の札を線の左へ寄せる、描画域の右端からの距離（px） */
+export const MARGIN_CALL_LABEL_PX = 36;
+
 /** ピンの線の入力（ui/view/pins.ts の pinLineData。番号ごとに 1 本） */
 export interface PnlPinInput {
   no: number;
@@ -294,6 +305,11 @@ export interface PnlChartModel {
   kinks: PnlMarker[];
   /** 表示範囲内の満期の BEP */
   breakevens: PnlMarker[];
+  /**
+   * 追証の線（#131。設計 5.10）: 表示範囲内の X と画素、札「追証」の寄せ（右端に近ければ左へ）。資金が未設定・
+   * 操作中（止まる前）・範囲外は無し
+   */
+  marginCalls: PnlMarginCall[];
   /** X₀ の縦線の画素（範囲外は null） */
   x0Px: number | null;
   /** シナリオ点 X₀ + ΔX（ΔX ≠ 0 のとき。範囲外・ΔX = 0 は画素 null） */
@@ -340,6 +356,8 @@ export interface PnlChartInput {
   scenarioAtm?: { monthId: string; k: number; F: number } | null;
   /** ピンの線の値（#22。表示範囲で作ったもの。縦軸の自動に入れて path にする） */
   pins?: readonly PnlPinInput[];
+  /** 追証の線の X（#131。ui/view/margin.ts の marginLine。止まった後の値。操作中・資金なしは空） */
+  marginLine?: readonly number[] | undefined;
 }
 
 /** 縦軸の目盛りの文言（千円は値 / 1,000。刻みに合わせて小数を出す）。 */
@@ -365,6 +383,7 @@ function emptyModel(input: PnlChartInput): PnlChartModel {
     pins: [],
     kinks: [],
     breakevens: [],
+    marginCalls: [],
     x0Px: null,
     scenarioX: Number.NaN,
     scenarioPx: null,
@@ -590,6 +609,13 @@ export function pnlChartModel(input: PnlChartInput): PnlChartModel {
   const breakevens = base.profile.breakevens
     .filter(inside)
     .map((x) => ({ x, y: 0, px: sx(x), py: sy(0) }));
+  const callEdge = left + pw - MARGIN_CALL_LABEL_PX;
+  const marginCalls: PnlMarginCall[] = (input.marginLine ?? [])
+    .filter((x) => Number.isFinite(x) && inside(x))
+    .map((x) => {
+      const px = sx(x);
+      return { x, px, anchor: px > callEdge ? 'end' : 'start' };
+    });
 
   const yUnit: PnlYUnit =
     Math.max(Math.abs(yDomain[0]), Math.abs(yDomain[1])) >= THOUSAND_YEN_FROM ? 'thousand' : 'yen';
@@ -609,6 +635,7 @@ export function pnlChartModel(input: PnlChartInput): PnlChartModel {
     pins,
     kinks,
     breakevens,
+    marginCalls,
     x0Px: inside(ctx.x0) ? sx(ctx.x0) : null,
     scenarioX,
     scenarioPx: scenario.dX !== 0 && inside(scenarioX) ? sx(scenarioX) : null,

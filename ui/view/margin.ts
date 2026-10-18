@@ -17,17 +17,21 @@ import {
   DAY_MS,
   type Holidays,
   MARGIN_HORIZON_BUSINESS_DAYS,
+  MARGIN_LINE_SAMPLES,
   type MarginParams,
   type MarginResult,
   marginAt,
+  marginCallLevels,
   marginRoom,
   maxMultiple,
   premiumSummary,
   type Scenario,
   TAIL_SHOCKS,
 } from '../../model';
+import { PIN_SETTLE_MS } from '../pins';
 import type { MarginPrefs } from '../prefs';
 import { clampDays, type PnlBase } from './pnlChart';
+import { DX_ABS_MAX, DX_INPUT_MAX_RATIO, DX_INPUT_MIN_RATIO } from './scenario';
 
 /** 端末の設定（% と pt）→ model の単位（小数・倍率） */
 export function marginParamsOf(m: MarginPrefs): MarginParams {
@@ -146,4 +150,68 @@ export function marginTail(
     const x = base.ctx.x0 * (1 + shock);
     return { shock, x, calc: marginCalc(base, x, scenario, params, capital, holidays) };
   });
+}
+
+/** 追証の線: 連続の操作が止まってから作るまでの時間（ms。ピンの線の描き直しの PIN_SETTLE_MS と同じ） */
+export const MARGIN_LINE_SETTLE_MS = PIN_SETTLE_MS;
+/** 追証の線: 板の全域の外（ΔX の数値欄で行ける範囲）の片側の分割数（行使価格が無く余力が滑らかな側） */
+export const MARGIN_LINE_OUTER_SAMPLES = 8;
+
+/**
+ * 追証の線の探索範囲（#144 と揃える）: 板の全域（boardFull。分割 MARGIN_LINE_SAMPLES）と、その外で ΔX の数値欄
+ * （−99%〜+900%、上限 1e6 円）が届く範囲（片側 MARGIN_LINE_OUTER_SAMPLES）。全域はシナリオ点で広がるが（scenarioFull）、
+ * 線の範囲は ΔX に依らない（ΔX で作り直さない）。下端は xLo と 0.01X₀ の大きい方（X > 0）
+ */
+export function marginLineRanges(
+  base: PnlBase,
+): Array<{ lo: number; hi: number; samples: number }> {
+  const x0 = base.ctx.x0;
+  const [bLo, bHi] = base.boardFull;
+  const out: Array<{ lo: number; hi: number; samples: number }> = [];
+  const lo = Math.max(base.xLo, (1 + DX_INPUT_MIN_RATIO) * x0);
+  const hi = x0 + Math.min(DX_INPUT_MAX_RATIO * x0, DX_ABS_MAX);
+  if (lo < bLo) out.push({ lo, hi: bLo, samples: MARGIN_LINE_OUTER_SAMPLES });
+  out.push({ lo: Math.max(bLo, lo), hi: bHi, samples: MARGIN_LINE_SAMPLES });
+  if (hi > bHi) out.push({ lo: bHi, hi, samples: MARGIN_LINE_OUTER_SAMPLES });
+  return out.filter((r) => Number.isFinite(r.lo) && Number.isFinite(r.hi) && r.lo < r.hi);
+}
+
+/**
+ * 追証の線の X（円、1 円に丸め、昇順・重複なし）。scenario は ΔX 以外のシナリオ（ΔX は見ない）、d は clampDays。
+ * 資金が未設定・余力がどこでも正・評価が有限でない点は線にしない（[]）
+ */
+export function marginLine(
+  base: PnlBase,
+  scenario: Scenario,
+  params: MarginParams,
+  capital: number | null,
+  holidays: Holidays,
+): number[] {
+  if (capital === null) return [];
+  const { legs, ctx, settings } = base;
+  const { days } = clampDays(scenario, base.maxDays);
+  const sc: Scenario = { ...scenario, days, dX: 0 };
+  const horizonDays = businessDaysAhead(
+    ctx.evalTime + days * DAY_MS,
+    MARGIN_HORIZON_BUSINESS_DAYS,
+    holidays,
+  );
+  const premium = premiumSummary(legs, settings);
+  const xs = new Set<number>();
+  for (const r of marginLineRanges(base)) {
+    const found = marginCallLevels(
+      legs,
+      sc,
+      ctx,
+      settings,
+      params,
+      horizonDays,
+      capital,
+      premium,
+      r,
+      r.samples,
+    );
+    for (const x of found) if (Number.isFinite(x)) xs.add(x);
+  }
+  return [...xs].sort((a, b) => a - b);
 }

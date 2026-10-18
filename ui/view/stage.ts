@@ -243,6 +243,47 @@ export function strikeAtPx(
   return best;
 }
 
+// ---------------------------------------------------------------- 追証の札（#131）
+
+/** 追証の線の札の文言 */
+export const MARGIN_CALL_TEXT = '追証';
+/** 札の基線の、描画域の上端からの距離（px。X₀ の札（上端 + 10）の 1 段下） */
+export const MARGIN_CALL_LABEL_DY = 22;
+/** 線と札の間（px） */
+const MARGIN_CALL_LABEL_GAP = 3;
+
+export interface MarginCallLabel {
+  x: number;
+  labelX: number;
+  labelY: number;
+  anchor: 'start' | 'end';
+  /** 札の箱（描画域の SVG の座標。交点のラベルが避ける） */
+  box: MarkObstacle;
+}
+
+/**
+ * 追証の線の札の位置（10px の文字。labelWidth がその幅の見積もり）。線の右（anchor start）か、描画域の右端に近い線は
+ * 左（end。pnlChartModel が決める）。箱は交点のラベル（stageMarkLabels）の obstacles に入れて重ならないようにする
+ */
+export function marginCallLabels(
+  chart: Pick<PnlChartModel, 'marginCalls' | 'plot'>,
+): MarginCallLabel[] {
+  const labelY = chart.plot.top + MARGIN_CALL_LABEL_DY;
+  const w = labelWidth(MARGIN_CALL_TEXT);
+  return chart.marginCalls.map((m) => {
+    const end = m.anchor === 'end';
+    const labelX = end ? m.px - MARGIN_CALL_LABEL_GAP : m.px + MARGIN_CALL_LABEL_GAP;
+    const [a, b] = end ? [labelX - w, labelX] : [labelX, labelX + w];
+    return {
+      x: m.x,
+      labelX,
+      labelY,
+      anchor: m.anchor,
+      box: { x0: a - 2, x1: b + 2, y0: labelY - 10, y1: labelY + 3 },
+    };
+  });
+}
+
 // ---------------------------------------------------------------- 交点のラベルの退避
 
 /** ハンドルからラベルまでの追加の間隔（px。scenarioMarks の LABEL_PAD 4px と合わせて 16px。§8） */

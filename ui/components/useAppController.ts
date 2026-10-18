@@ -94,6 +94,7 @@ import { readoutModel } from '../view/readout';
 import { clampDXInput, evalTimeTargets } from '../view/scenario';
 import { scenarioAtmMark } from '../view/scenarioAtm';
 import { openInNewTabError, tabsModel } from '../view/tabs';
+import type { MarginLineInput } from './useMarginLine';
 
 /** dev サーバーだけが配る合成の板（本番のビルドではこの分岐ごと消える） */
 export const DEV_FIXTURES: readonly string[] = import.meta.env.DEV
@@ -583,13 +584,23 @@ export function useAppController(boot: Boot = NO_BOOT, margin: MarginPrefs = DEF
     () => ({ ...ZERO_SCENARIO, beta, ivDynamics, ivShift }),
     [beta, ivDynamics, ivShift],
   );
+  // 今・テールは全域（ΔX で広がる）を使わないので板の基礎（pnlBoard）で memo する（ΔX が全域の格子を跨いでも作り直さない）
   const marginNowCalc = useMemo(
-    () => (pnlBase ? marginNow(pnlBase, nowScenario, marginParams, capital, holidays) : null),
-    [pnlBase, nowScenario, marginParams, capital, holidays],
+    () => (pnlBoard ? marginNow(pnlBoard, nowScenario, marginParams, capital, holidays) : null),
+    [pnlBoard, nowScenario, marginParams, capital, holidays],
   );
   const marginTailRows = useMemo(
-    () => (pnlBase ? marginTail(pnlBase, lineScenario, marginParams, capital, holidays) : []),
-    [pnlBase, lineScenario, marginParams, capital, holidays],
+    () => (pnlBoard ? marginTail(pnlBoard, lineScenario, marginParams, capital, holidays) : []),
+    [pnlBoard, lineScenario, marginParams, capital, holidays],
+  );
+  // 追証の線の入力（段 C）: ΔX 以外のシナリオと板の基礎・資金・パラメータだけ（ΔX・パン・拡大で参照が変わらない）。
+  // 線は舞台（useMarginLine）が止まってから作る。資金が未設定なら null（線なし）
+  const marginLineInput = useMemo<MarginLineInput | null>(
+    () =>
+      pnlBoard && capital !== null
+        ? { base: pnlBoard, scenario: lineScenario, params: marginParams, capital, holidays }
+        : null,
+    [pnlBoard, lineScenario, marginParams, capital, holidays],
   );
   const marginView = useMemo<MarginView | null>(
     () =>
@@ -936,6 +947,7 @@ export function useAppController(boot: Boot = NO_BOOT, margin: MarginPrefs = DEF
     pnlBase,
     metrics,
     marginView,
+    marginLineInput,
     readout,
     hedgeView,
     targets,
