@@ -119,7 +119,7 @@ describe('paletteItems（AC-B2）', () => {
       ['板', '2'],
       ['シナリオ', '3'],
       ['指標', '4'],
-      ['スマイル', '5'],
+      ['IV 推移 · スマイル', '5'],
       ['グラフにフォーカス', 'G'],
     ]);
     expect(panel.every((i) => !i.disabled)).toBe(true);
@@ -363,6 +363,14 @@ describe('paletteFilter（AC-B3）', () => {
     expect(hit.map((r) => r.label)).toEqual(['ダーク']);
     // 片方だけの語ではもっと当たる
     expect(paletteFilter(items, 'テーマ').length).toBe(4);
+  });
+
+  it('#130: IV・iv・ＩＶ で IV 推移（とスマイル）のパネルの行（キー 5）が候補に出る、スマイル でも出る', () => {
+    const row = items.find((r) => r.id === 'panel:smile');
+    expect(row?.label).toBe('IV 推移 · スマイル');
+    for (const q of ['IV', 'iv', 'ＩＶ', 'IV 推移', 'スマイル']) {
+      expect(paletteFilter(items, q)).toContain(row);
+    }
   });
 
   it('(e) 当たらない語で 0 件', () => {

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   CHART_MODES,
   chartMode,
+  DOCK_LABELS,
   dockPanels,
   INITIAL_SHELL,
   ivVisible,
@@ -97,28 +98,70 @@ describe('shellReduce', () => {
     expect(shellReduce(at({}), { type: 'market', market: 'iv' })).toEqual(at({ market: 'iv' }));
   });
 
-  it('#79: スマホ・タブレットのスマイルのパネルの [スマイル | IV 推移]（PC 以外の board はスマイル）', () => {
+  it('#130: スマホ・タブレットの IV のパネルの [IV 推移 | スマイル]（PC 以外の既定 board は IV 推移、PC は市場が iv のときだけ iv）', () => {
     expect(SMILE_VIEWS.map((v) => [v.value, v.text])).toEqual([
-      ['smile', 'スマイル'],
       ['iv', 'IV 推移'],
+      ['smile', 'スマイル'],
     ]);
-    expect(smileView(at({}))).toBe('smile');
-    expect(smileView(at({ market: 'smile' }))).toBe('smile');
-    expect(smileView(at({ market: 'iv' }))).toBe('iv');
+    for (const tier of ['phone', 'tablet'] as const) {
+      expect(smileView(INITIAL_SHELL, tier)).toBe('iv');
+      expect(smileView(at({ market: 'board' }), tier)).toBe('iv');
+      expect(smileView(at({ market: 'iv' }), tier)).toBe('iv');
+      expect(smileView(at({ market: 'smile' }), tier)).toBe('smile');
+    }
+    expect(smileView(INITIAL_SHELL, 'pc')).toBe('smile');
+    expect(smileView(at({ market: 'smile' }), 'pc')).toBe('smile');
+    expect(smileView(at({ market: 'iv' }), 'pc')).toBe('iv');
+    // パネルの中でスマイルを選ぶと、閉じて（別のパネル）開き直してもスマイルのまま（市場は保つ）
+    let s = shellReduce(at({ panel: 'smile' }), { type: 'market', market: 'smile' });
+    s = shellReduce(s, { type: 'dock', panel: 'board', tier: 'phone' });
+    s = shellReduce(s, { type: 'dock', panel: 'smile', tier: 'phone' });
+    expect(smileView(s, 'phone')).toBe('smile');
   });
 
-  it('#79: IV 推移が見えているか（PC = 市場が iv、タブレット = スマイルのパネルで iv、スマホ = それに加えて hidden でない）', () => {
+  it('#130: ドックのボタンの文字（smile = IV）と読み上げの名前、ボタンの数はスマホ 5・タブレット 4・PC 0 のまま', () => {
+    expect(Object.entries(DOCK_LABELS).map(([id, d]) => [id, d.text])).toEqual([
+      ['positions', 'ポジ'],
+      ['board', '板'],
+      ['scenario', 'シナリオ'],
+      ['metrics', '指標'],
+      ['smile', 'IV'],
+    ]);
+    expect(DOCK_LABELS.smile.name).toBe('IV 推移 · スマイル');
+    expect(dockPanels('phone').map((id) => DOCK_LABELS[id].text)).toEqual([
+      'ポジ',
+      '板',
+      'シナリオ',
+      '指標',
+      'IV',
+    ]);
+    expect(dockPanels('tablet').map((id) => DOCK_LABELS[id].text)).toEqual([
+      'ポジ',
+      '板',
+      '指標',
+      'IV',
+    ]);
+    expect(dockPanels('pc')).toEqual([]);
+  });
+
+  it('#79・#130: IV 推移が見えているか（PC = 市場が iv、タブレット = IV のパネルで smileView が iv、スマホ = それに加えて hidden でない）', () => {
     const iv = (s: Partial<ShellState>) => at({ market: 'iv', ...s });
     expect(ivVisible(iv({}), 'pc')).toBe(true);
     expect(ivVisible(at({ market: 'smile' }), 'pc')).toBe(false);
-    expect(ivVisible(at({ market: 'board', panel: 'smile' }), 'tablet')).toBe(false);
+    expect(ivVisible(at({ market: 'board' }), 'pc')).toBe(false);
+    // 既定の状態（market = board）でパネルが smile
+    expect(ivVisible(at({ panel: 'smile' }), 'tablet')).toBe(true);
+    expect(ivVisible(at({ panel: 'smile', sheet: 'hidden' }), 'tablet')).toBe(true);
+    expect(ivVisible(at({ panel: 'smile' }), 'phone')).toBe(true);
+    expect(ivVisible(at({ panel: 'smile', sheet: 'full' }), 'phone')).toBe(true);
+    expect(ivVisible(at({ panel: 'smile', sheet: 'hidden' }), 'phone')).toBe(false);
+    // パネルの中でスマイルを選んでいる
+    expect(ivVisible(at({ market: 'smile', panel: 'smile' }), 'tablet')).toBe(false);
+    expect(ivVisible(at({ market: 'smile', panel: 'smile' }), 'phone')).toBe(false);
     expect(ivVisible(iv({ panel: 'smile' }), 'tablet')).toBe(true);
-    expect(ivVisible(iv({ panel: 'smile', sheet: 'hidden' }), 'tablet')).toBe(true);
     expect(ivVisible(iv({ panel: 'board' }), 'tablet')).toBe(false);
-    expect(ivVisible(iv({ panel: 'smile' }), 'phone')).toBe(true);
-    expect(ivVisible(iv({ panel: 'smile', sheet: 'full' }), 'phone')).toBe(true);
-    expect(ivVisible(iv({ panel: 'smile', sheet: 'hidden' }), 'phone')).toBe(false);
     expect(ivVisible(iv({ panel: 'positions' }), 'phone')).toBe(false);
+    expect(ivVisible(at({ panel: 'positions' }), 'tablet')).toBe(false);
   });
 
   it('タブレットで scenario は選べない（positions に読み替える）', () => {

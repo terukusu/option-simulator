@@ -43,10 +43,15 @@
 //                                          切り替えて縦・横・折り返し・読み取り、凡例行の [線 | 面]（ある幅で）・色の見本・±vmax が
 //                                          切れず画面内・canvas がある。1280×800・1800×1000 は記録だけ（--shots の撮影用）
 //                                          IV 推移（#79 段 B）: 4 幅 × ダーク / ライトで IV 推移を開いた状態（PC は市場の Seg、タブレットは
-//                                          ドックのスマイル → [スマイル | IV 推移]、スマホはスマイルのシート peek / hidden / full）の縦・横・
+//                                          ドックの IV → [IV 推移 | スマイル]、スマホは IV のシート peek / hidden / full）の縦・横・
 //                                          折り返しと、見出し・道具の行（足・ローソク / 線・⟳）・読み取りの 1 行・凡例が切れない
 //                                          （scrollWidth ≤ clientWidth）・描画域の高さ・進行中の足が 1 本。線のモードも同じ検査。
-//                                          段 C で「今」の印 1 個・シナリオの水準の線 1 本（凡例に値が入っても切れない）を足した
+//                                          段 C で「今」の印 1 個・シナリオの水準の線 1 本（凡例に値が入っても切れない）を足した。
+//                                          #130: 各状態で描画域にフォーカスして , → 十字線 2 本・札 2 個が svg の内側・横の札 = 読み取りの
+//                                          時刻・縦の札 = 横線の高さの IV。ドックの IV（スマホ 360 / 390・タブレット 900 × ダーク / ライト:
+//                                          .lbl が「IV」・切れ / 折り返し 0・スマホでアイコンの svg 1 個）と初めて開いたときの中身
+//                                          （aria-label「IV 推移」・Seg の 1 つ目が押されている）。スマホ・タブレットのスマイルの検査は
+//                                          パネルの中で [スマイル] を選んでから（smileTab）
 //   npm run ui:check -- --parts            部品の見本（?parts。dev だけ）
 //   npm run ui:check -- --flows            保存・共有・テーマ・キーボードの手順（#81 AC-11・AC-12）と入口の手順（#91: クエリなし・
 //                                          古い ?ui=next と旧画面を開いていた ui の値で同じ画面・部品の見本の ?parts・旧画面のときの
@@ -105,6 +110,11 @@
 //                                          （UTC の 0 時・end = 読み済みの start・読み中は 2 本目なし・左上のバッジ）、前に足しても横の
 //                                          目盛りが同じ、空の左 3 回で止まる、「今」の印 1 個 / 表の last_at が板より後なら 0 個、
 //                                          PC はシナリオの水準 = 今 + 5.00（Δσ +5）→ [急落] で 今 + 30.00（Δσ 20 + β 1 × 10%））
+//                                          と IV 推移の十字線（#130 AC-7: 1440×900 のホバーで十字線・札（横線 = マウスの高さ・縦の札 =
+//                                          その高さの IV・上端で止まる・外れて 0）・キー , . で端の足まで札が svg の内側、390×844 の
+//                                          タッチ（CDP）の長押し 500ms → 横・縦に動かす → 離す → タップで消える・ページとシートが動かない）
+//                                          とドックの IV の既定と保持（390×844・900×1100: 起動 0 回 → IV で IV 推移・1 回 → [スマイル] →
+//                                          別のパネル → IV でスマイルのまま・タブレットのキー 5）
 //   --url <base>                           dev サーバーを起こさず、その URL を使う（例 http://127.0.0.1:5173/?parts）
 //   --dom <file>                           body の下の要素の tag.class の並びを書き出す（DOM の変化の比較用）
 //   --shots <dir>                          スクリーンショットを書く（合成の板だけ。リポジトリに入れない）
@@ -717,6 +727,83 @@ async function setShell(page, panel, sheet) {
   return cur.panel === panel && cur.sheet === sheet;
 }
 
+/**
+ * スマホ・タブレットの IV のパネル（smile）の中で [スマイル] を選ぶ（#130。開いたときの既定は IV 推移。押されていれば
+ * クリックしない）。スマイルを測る所はこれを呼んでから測る（呼ばないと IV 推移を測ってしまう）。PC では呼ばない
+ */
+async function smileTab(page) {
+  const seg = page.locator('section.smile .panel-head .seg button:has-text("スマイル")');
+  if ((await seg.getAttribute('aria-pressed').catch(() => null)) !== 'true') await seg.click();
+  await page
+    .waitForSelector('section.smile .smile-month:not(.inactive) .smile-wrap', { timeout: 10000 })
+    .catch(() => null);
+  await page.waitForTimeout(120);
+}
+
+const dockStats = { pass: 0, total: 0 };
+
+/**
+ * ドックの IV（#130 AC-5）: smile のボタンの .lbl が「IV」・切れ / 折り返し 0（scrollWidth ≤ clientWidth・行が 1 つ）、
+ * スマホでアイコン（.ic の svg）が 1 個見えている（タブレットは .ic を隠す）。ボタンの数はスマホ 5・タブレット 4
+ */
+async function dockIvCheck(page, label, phone) {
+  const r = await page.evaluate(() => {
+    const btns = [...document.querySelectorAll('.dock > button')];
+    const b = document.querySelector('.dock button[data-panel="smile"]');
+    const lbl = b?.querySelector('.lbl');
+    if (!b || !lbl) return null;
+    const lines = new Set([...lbl.getClientRects()].map((q) => Math.round(q.top))).size;
+    const ics = [...b.querySelectorAll('.ic svg')].filter((e) => {
+      const q = e.getBoundingClientRect();
+      return q.width > 0 && q.height > 0;
+    }).length;
+    return {
+      n: btns.length,
+      text: (lbl.textContent ?? '').trim(),
+      cut: lbl.scrollWidth > lbl.clientWidth || b.scrollWidth > b.clientWidth,
+      lines,
+      ics,
+      name: b.getAttribute('aria-label'),
+    };
+  });
+  dockStats.total++;
+  const bad = [];
+  if (!r) bad.push('ドックの smile のボタンが無い');
+  else {
+    if (r.text !== 'IV') bad.push(`ラベル「${r.text}」（IV のはず）`);
+    if (r.cut) bad.push('ラベルが切れている');
+    if (r.lines !== 1) bad.push(`ラベルが ${r.lines} 行`);
+    if (r.n !== (phone ? 5 : 4)) bad.push(`ボタン ${r.n} 個`);
+    if (r.ics !== (phone ? 1 : 0)) bad.push(`アイコンの svg が ${r.ics} 個見えている`);
+    if (r.name !== 'IV 推移 · スマイル') bad.push(`読み上げの名前「${r.name}」`);
+  }
+  const ok = bad.length === 0;
+  if (ok) dockStats.pass++;
+  else failed = true;
+  console.log(`${label}: ドックの IV ${ok ? 'pass' : `${bad.join('・')}  ← NG`}`);
+}
+
+/** ドックの IV を初めて開いた直後（#130 AC-5）: section.smile の aria-label が「IV 推移」・Seg の 1 つ目が「IV 推移」で押されている */
+async function ivFirstOpenCheck(page, label) {
+  const r = await page.evaluate(() => {
+    const sec = document.querySelector('section.smile');
+    const first = sec?.querySelector('.panel-head .seg > button');
+    return {
+      name: sec?.getAttribute('aria-label') ?? null,
+      first: (first?.textContent ?? '').trim(),
+      pressed: first?.getAttribute('aria-pressed') ?? null,
+      iv: !!sec?.querySelector('.iv-tools'),
+    };
+  });
+  dockStats.total++;
+  const ok = r.name === 'IV 推移' && r.first === 'IV 推移' && r.pressed === 'true' && r.iv;
+  if (ok) dockStats.pass++;
+  else failed = true;
+  console.log(
+    `${label}: 初めて開いた IV のパネル ${ok ? 'pass' : `aria-label「${r.name}」・1 つ目「${r.first}」 pressed=${r.pressed}・IV 推移 ${r.iv}  ← NG`}`,
+  );
+}
+
 async function measureAll() {
   if (shotsDir) mkdirSync(shotsDir, { recursive: true });
   const themes = ['dark', 'light'];
@@ -758,6 +845,7 @@ async function measureAll() {
             `${tag} full ${w}x${h}: section.stage の高さ ${stageH}px（92px のはず）  ← NG`,
           );
         }
+        await dockIvCheck(page, `${tag} ${w}x${h}`, true);
         // 残りのパネル × シート 3 段階（読み取りと、縦・横・折り返し）
         for (const panel of PANELS.slice(1)) {
           for (const sheet of ['peek', 'hidden', 'full']) {
@@ -769,6 +857,11 @@ async function measureAll() {
               continue;
             }
             await page.waitForTimeout(100);
+            if (panel === 'smile' && sheet === 'peek') {
+              // #130: 初めて開いた IV のパネルは IV 推移。スマイルの検査は [スマイル] を選んでから（hidden・full は保つ）
+              await ivFirstOpenCheck(page, `${lbl} ${w}x${h}`);
+              await smileTab(page);
+            }
             const scn = panel === 'scenario' && sheet !== 'hidden';
             const mx = panel === 'metrics' && sheet !== 'hidden';
             const mk = (panel === 'board' || panel === 'smile') && sheet !== 'hidden';
@@ -835,10 +928,15 @@ async function measureAll() {
             await readoutCheck(page, `${tag} metrics ${w}x${h}`, want);
             await metricsCheck(page, `${tag} metrics ${w}x${h}`);
             await breakdownOpenCheck(page, `${tag} metrics`, w, h, `${name}-metrics-kv`, want);
-            // 市場（#85）: ドックで「板」「スマイル」（選択なし / あり）
+            // 市場（#85）: ドックで「板」「スマイル」（選択なし / あり）。#130: ドックの IV は初めは IV 推移 → [スマイル]
+            await dockIvCheck(page, `${tag} ${w}x${h}`, false);
             for (const view of ['board', 'smile']) {
               await page.click(`.dock button[data-panel="${view}"]`);
               await page.waitForTimeout(150);
+              if (view === 'smile') {
+                await ivFirstOpenCheck(page, `${tag} ${view} ${w}x${h}`);
+                await smileTab(page);
+              }
               await report(page, `${tag} ${view}`, w, h, `${name}-${view}`);
               await readoutCheck(page, `${tag} ${view} ${w}x${h}`, want);
               await marketCheck(page, `${tag} ${view} ${w}x${h}`, { cols: marketCols(w) });
@@ -906,6 +1004,10 @@ async function measureAll() {
     // IV 推移（#79 段 B AC-13）
     await ivSweep();
     console.log(`IV 推移の検査（#79）: ${ivStats.pass} / ${ivStats.total} 状態で pass`);
+    console.log(
+      `IV 推移の十字線と札の検査（#130）: ${ivCrossStats.pass} / ${ivCrossStats.total} 状態で pass`,
+    );
+    console.log(`ドックの IV の検査（#130）: ${dockStats.pass} / ${dockStats.total} で pass`);
   }
   // 旧のクラス名（#91・EPIC #92 の終了条件 8）: report を通ったすべての状態の合計
   console.log(
@@ -1165,10 +1267,13 @@ async function marketSweep() {
       for (const view of ['board', 'smile']) {
         const sheets = phone ? ['peek', 'full'] : [null];
         for (const sheet of sheets) {
-          if (phone) await setShell(page, view, sheet);
-          else if (tablet) {
+          if (phone) {
+            await setShell(page, view, sheet);
+            if (view === 'smile') await smileTab(page);
+          } else if (tablet) {
             await page.click(`.dock button[data-panel="${view}"]`);
             await page.waitForTimeout(150);
+            if (view === 'smile') await smileTab(page);
           } else if (view === 'smile') {
             // PC: 市場の Seg で板 → スマイル
             await page.click('section.board .panel-head .seg button:has-text("スマイル")');
@@ -1613,7 +1718,10 @@ async function surfaceAll() {
 // ---- IV 推移（#79 段 B）
 const ivStats = { pass: 0, total: 0 };
 
-/** IV 推移を開く（PC は市場の Seg、それ以外はスマイルのパネルの [スマイル | IV 推移]。スマホはシートも作る） */
+/**
+ * IV 推移を開く（PC は市場の Seg、それ以外はドックの IV のパネルの [IV 推移 | スマイル]。#130 で既定は IV 推移 = 押されて
+ * いればクリックしない。スマホはシートも作る）
+ */
 async function openIv(page, w, sheet = 'peek') {
   if (w >= 1200) {
     await page.click('section.board .panel-head .seg button:has-text("IV 推移")');
@@ -1688,7 +1796,32 @@ async function ivCheck(page, label, want = {}) {
   return ok;
 }
 
-/** 4 幅 × ダーク / ライトで IV 推移を開いた状態（スマホはシート 3 段階）。線のモードも測る */
+const ivCrossStats = { pass: 0, total: 0 };
+
+/**
+ * 十字線と軸の札（#130 AC-5）: 描画域にフォーカスして , （カーソルの足 = 最新の 1 本前）→ 十字線 2 本・札 2 個・札の矩形が
+ * svg の内側・横の札 = 読み取りの時刻・縦の札 = 横線の高さの IV（キーだけのときは足の終値の高さ。小数 2 桁）
+ */
+async function ivCrossCheck(page, label) {
+  await page.focus('section.smile .iv-wrap');
+  await page.keyboard.press(',');
+  await page.waitForTimeout(80);
+  const st = await ivCrossState(page);
+  ivCrossStats.total++;
+  const ok =
+    st?.lines === 2 &&
+    st.tags.length === 2 &&
+    st.tags.every((t) => t.inside) &&
+    st.xTag === st.time &&
+    ivYTagOk(st);
+  if (ok) ivCrossStats.pass++;
+  else failed = true;
+  console.log(
+    `${label}: 十字線 ${st?.lines ?? 0} 本・札 ${st ? st.tags.map((t) => `${t.axis}「${t.text}」${t.inside ? '' : '（外）'}`).join(' ') : '-'}・読み取り ${st?.time ?? '-'} ${ok ? 'pass' : '← NG'}`,
+  );
+}
+
+/** 4 幅 × ダーク / ライトで IV 推移を開いた状態（スマホはシート 3 段階）。線のモードも測る。#130 で十字線と札 */
 async function ivSweep() {
   for (const [w, h] of SIZES) {
     for (const theme of ['dark', 'light']) {
@@ -1711,6 +1844,7 @@ async function ivSweep() {
           await ivCheck(page, `${lbl} ${w}x${h}`, {
             minHeight: w <= PHONE_MAX && sheet === 'peek' ? 80 : 160,
           });
+          await ivCrossCheck(page, `${lbl} ${w}x${h}`);
         }
       }
       // 線のモード（スマホは peek に戻して）
@@ -1719,6 +1853,7 @@ async function ivSweep() {
       await page.waitForTimeout(150);
       await report(page, `${tag} 線`, w, h, `${name}-line`);
       await ivCheck(page, `${tag} 線 ${w}x${h}`, {});
+      await ivCrossCheck(page, `${tag} 線 ${w}x${h}`);
       await ctx.close();
     }
   }
@@ -2079,6 +2214,10 @@ async function runFlows() {
   for (const vp of [phone, pc]) await ivFlows(vp);
   // #79 段 C IV 推移の追加読み込み・「今」の印・シナリオの水準（AC-9・AC-11）
   for (const vp of [phone, pc]) await ivMoreFlows(vp);
+  // #130 IV 推移の十字線と軸の札（AC-7 (a)〜(c)）、ドックの IV の既定と保持（AC-7 (d)）
+  await ivCrossFlows(pc);
+  await ivCrossTouchFlow();
+  for (const vp of [phone, { width: 900, height: 1100 }]) await ivDockFlows(vp);
 }
 
 // ---- 舞台の手順（#82）
@@ -3879,8 +4018,10 @@ async function marketFlows(vp) {
   }
 
   // (h) スマイル: タップ・もう一度タップ・長押し + 横ドラッグ・. ・[×]・[売り]・ホイール / ⟲・横軸
-  if (phoneSize) await setShell(page, 'smile', 'peek');
-  else await page.click('section.board .panel-head .seg button:has-text("スマイル")');
+  if (phoneSize) {
+    await setShell(page, 'smile', 'peek');
+    await smileTab(page);
+  } else await page.click('section.board .panel-head .seg button:has-text("スマイル")');
   await page.waitForTimeout(250);
   const S = 'section.smile .smile-month:not(.inactive) .smile-wrap';
   const actK = () =>
@@ -4111,8 +4252,10 @@ async function marketWideFlows(vp) {
       await twoFrames(page);
     }
   });
-  if (phoneSize) await setShell(page, 'smile', 'peek');
-  else await page.click('section.board .panel-head .seg button:has-text("スマイル")');
+  if (phoneSize) {
+    await setShell(page, 'smile', 'peek');
+    await smileTab(page);
+  } else await page.click('section.board .panel-head .seg button:has-text("スマイル")');
   await page.waitForTimeout(300);
   const sb = await page
     .locator('section.smile .smile-month:not(.inactive) .smile-wrap')
@@ -7669,6 +7812,302 @@ async function ivFlows(vp) {
     );
     await ctx2.close();
   }
+}
+
+// ---- IV 推移の十字線と軸の札（#130 AC-7）。縦線は足に吸着、横線は指 / マウスの高さ（オーナーの決定 2026-10-18）
+/** 十字線・札の状態（svg の座標）。縦軸の目盛り（y → 値）も返す */
+const ivCrossState = (page) =>
+  page.evaluate(() => {
+    const sec = document.querySelector('section.smile');
+    const svg = sec?.querySelector('.iv-wrap svg');
+    if (!sec || !svg) return null;
+    const W = Number(svg.getAttribute('width'));
+    const H = Number(svg.getAttribute('height'));
+    const tags = [...sec.querySelectorAll('.iv-tag')].map((g) => {
+      const r = g.querySelector('rect');
+      const x = Number(r?.getAttribute('x'));
+      const y = Number(r?.getAttribute('y'));
+      const w = Number(r?.getAttribute('width'));
+      const h = Number(r?.getAttribute('height'));
+      return {
+        axis: g.classList.contains('x') ? 'x' : 'y',
+        text: (g.querySelector('text')?.textContent ?? '').trim(),
+        inside: x >= 0 && y >= 0 && x + w <= W + 0.01 && y + h <= H + 0.01 && w > 0,
+      };
+    });
+    const hl = sec.querySelector('.iv-cross .iv-cursor.h');
+    const vl = sec.querySelector('.iv-cross .iv-cursor.v');
+    const box = svg.getBoundingClientRect();
+    return {
+      W,
+      H,
+      lines: sec.querySelectorAll('.iv-cross .iv-cursor').length,
+      tags,
+      xTag: tags.find((t) => t.axis === 'x')?.text ?? null,
+      yTag: tags.find((t) => t.axis === 'y')?.text ?? null,
+      hy: hl ? Number(hl.getAttribute('y1')) : null,
+      vx: vl ? Number(vl.getAttribute('x1')) : null,
+      time: (sec.querySelector('.iv-readout .time')?.textContent ?? '').trim(),
+      ticks: [...sec.querySelectorAll('.iv-wrap .ax .ty')].map((t) => [
+        Number(t.getAttribute('y')),
+        (t.textContent ?? '').trim(),
+      ]),
+      left: box.left,
+      top: box.top,
+    };
+  });
+
+/** 縦軸の札の文字が横線の高さの IV（目盛りの 2 点から逆に読んだ値と 0.02 以内・読み取りと同じ小数 2 桁）か */
+function ivYTagOk(st) {
+  if (!st || st.hy === null || st.yTag === null || st.ticks.length < 2) return false;
+  const num = (t) => Number(t.replace('−', '-').replace(/,/g, ''));
+  const [y0, l0] = st.ticks[0];
+  const [y1, l1] = st.ticks[st.ticks.length - 1];
+  if (!(Math.abs(y1 - y0) > 0)) return false;
+  const v = num(l0) + ((st.hy - y0) * (num(l1) - num(l0))) / (y1 - y0);
+  return /^\d+\.\d{2}$/.test(st.yTag) && Math.abs(num(st.yTag) - v) <= 0.02;
+}
+
+/** PC 1440×900: マウスのホバーで十字線・札、外れると消える。キー , . で端の足まで札が svg の内側 */
+async function ivCrossFlows(vp) {
+  const tag = `${vp.width}x${vp.height}`;
+  const ctx = await newContext(vp, { [WORKSPACE_KEY]: twoLegs });
+  const page = await ctx.newPage();
+  await page.goto(pageUrl('next'));
+  await waitReady(page, 'next');
+  await openIv(page, vp.width);
+  const box = await page.locator('section.smile .iv-wrap').boundingBox();
+  if (!box) {
+    check(`#130 AC-7(a) ${tag} IV 推移の描画域`, false, '描画域が無い');
+    await ctx.close();
+    return;
+  }
+  // (a) ホバー: 2 か所（高さを変える）で十字線 2 本・札 2 個、横の札 = 読み取りの時刻、横線 = マウスの高さ、縦の札 = その高さの IV
+  const seen = [];
+  for (const [fx, fy] of [
+    [0.5, 0.35],
+    [0.7, 0.6],
+  ]) {
+    const mx = box.x + box.width * fx;
+    const my = box.y + box.height * fy;
+    await page.mouse.move(mx, my);
+    await page.waitForTimeout(120);
+    const st = await ivCrossState(page);
+    seen.push(st);
+    const yOk = st && st.hy !== null && Math.abs(st.hy - (my - st.top)) <= 0.6;
+    check(
+      `#130 AC-7(a) ${tag} ホバー（${fx}, ${fy}）: 十字線 2 本・札 2 個（svg の内側）、横の札 = 読み取りの時刻、横線 = マウスの高さ、縦の札 = その高さの IV（小数 2 桁）`,
+      st?.lines === 2 &&
+        st.tags.length === 2 &&
+        st.tags.every((t) => t.inside) &&
+        st.xTag === st.time &&
+        yOk &&
+        ivYTagOk(st),
+      st
+        ? `線 ${st.lines}・札 ${st.tags.map((t) => `${t.axis}「${t.text}」${t.inside ? '' : '（外）'}`).join(' ')}・読み取り ${st.time}・横線 y ${st.hy}（マウス ${Math.round((my - st.top) * 10) / 10}）`
+        : '描画域が無い',
+    );
+  }
+  check(
+    `#130 AC-7(a) ${tag} ホバーの位置を変えると縦の札が変わる（足の値に吸着しない）`,
+    seen[0]?.yTag !== seen[1]?.yTag && seen[0]?.hy !== seen[1]?.hy,
+    `${seen[0]?.yTag} → ${seen[1]?.yTag}`,
+  );
+  // 描画域の上の余白（上端より上）にマウス → 横線は上端で止まる
+  await page.mouse.move(box.x + box.width * 0.5, box.y + 2);
+  await page.waitForTimeout(120);
+  const top = await ivCrossState(page);
+  check(
+    `#130 AC-7(a) ${tag} 描画域の上端より上では横線が上端（y = 10）で止まり、札は svg の内側`,
+    top?.hy === 10 && top.tags.every((t) => t.inside),
+    `横線 y ${top?.hy}`,
+  );
+  await page.mouse.move(box.x + box.width / 2, box.y - 40);
+  await page.waitForTimeout(150);
+  const out = await ivCrossState(page);
+  check(
+    `#130 AC-7(a) ${tag} マウスが外れると十字線 0 本・札 0 個`,
+    out?.lines === 0 && out.tags.length === 0,
+    `線 ${out?.lines}・札 ${out?.tags.length}`,
+  );
+  // (c) キー , . を端まで: 右端の足（. = 最新の足）、, を押し続けて見えている左端の足まで。札は常に svg の内側
+  await page.focus('section.smile .iv-wrap');
+  await page.keyboard.press('.');
+  await page.waitForTimeout(80);
+  const right = await ivCrossState(page);
+  let last = null;
+  let bad = 0;
+  let steps = 0;
+  for (; steps < 400; steps++) {
+    await page.keyboard.press(',');
+    const st = await ivCrossState(page);
+    if (!st || st.lines === 0) break;
+    if (!st.tags.every((t) => t.inside) || st.xTag !== st.time) bad++;
+    last = st;
+  }
+  check(
+    `#130 AC-7(c) ${tag} キー . で右端の足・, を押し続けて左端の足まで、札は svg の内側で横の札 = 読み取りの時刻（見えている範囲の外へ出たら十字線なし）`,
+    right?.lines === 2 &&
+      right.tags.every((t) => t.inside) &&
+      right.xTag === right.time &&
+      last !== null &&
+      bad === 0 &&
+      steps > 10,
+    `右端 ${right?.xTag}（x ${right?.vx}）→ 左端 ${last?.xTag}（x ${last?.vx}）・${steps} 本・外 ${bad} 回`,
+  );
+  if (shotsDir) await page.screenshot({ path: join(shotsDir, `flows-iv-cross-${tag}.png`) });
+  await ctx.close();
+}
+
+/** 390×844 のタッチ（CDP）: 長押し 500ms で十字線・札、横に動かすと時刻が変わる、離してタップで消える。ページ・シートは動かない */
+async function ivCrossTouchFlow() {
+  const tag = '390x844 touch';
+  const ctx = await touchContext({ [WORKSPACE_KEY]: twoLegs });
+  const page = await ctx.newPage();
+  await page.goto(pageUrl('next'));
+  await waitReady(page, 'next');
+  await page.tap('.dock button[data-panel="smile"]');
+  await page.waitForSelector('section.smile .iv-wrap svg', { timeout: 10000 }).catch(() => null);
+  await page.waitForTimeout(300);
+  const box = await page.locator('section.smile .iv-wrap').boundingBox();
+  if (!box) {
+    check(`#130 AC-7(b) ${tag} IV 推移の描画域`, false, '描画域が無い');
+    await ctx.close();
+    return;
+  }
+  const shell = () =>
+    page.evaluate(() => ({
+      sheet: document.querySelector('.layout')?.getAttribute('data-sheet'),
+      body: document.querySelector('section.smile > .panel-body')?.scrollTop ?? null,
+      sy: window.scrollY,
+    }));
+  const s0 = await shell();
+  const cdp = await ctx.newCDPSession(page);
+  const touch = (type, touchPoints) => cdp.send('Input.dispatchTouchEvent', { type, touchPoints });
+  const a = { x: Math.round(box.x + box.width * 0.6), y: Math.round(box.y + box.height * 0.45) };
+  await touch('touchStart', [{ ...a, id: 0 }]);
+  await page.waitForTimeout(500);
+  await page.waitForTimeout(80);
+  const st1 = await ivCrossState(page);
+  for (let i = 1; i <= 6; i++) {
+    await touch('touchMove', [{ x: a.x - i * 10, y: a.y + i * 5, id: 0 }]);
+    await page.waitForTimeout(20);
+  }
+  await page.waitForTimeout(120);
+  const st2 = await ivCrossState(page);
+  const s1 = await shell();
+  await touch('touchEnd', []);
+  await page.waitForTimeout(150);
+  const st3 = await ivCrossState(page);
+  // タップ（押してすぐ離す）で消える
+  await touch('touchStart', [{ ...a, id: 0 }]);
+  await page.waitForTimeout(40);
+  await touch('touchEnd', []);
+  await page.waitForTimeout(200);
+  const st4 = await ivCrossState(page);
+  const s2 = await shell();
+  const yAt = (st, y) => st && st.hy !== null && Math.abs(st.hy - (y - st.top)) <= 0.6;
+  check(
+    `#130 AC-7(b) ${tag} 500ms の長押しで十字線 2 本・札 2 個、横の札 = 読み取りの時刻、横線 = 指の高さ、縦の札 = その高さの IV`,
+    st1?.lines === 2 &&
+      st1.tags.length === 2 &&
+      st1.tags.every((t) => t.inside) &&
+      st1.xTag === st1.time &&
+      yAt(st1, a.y) &&
+      ivYTagOk(st1),
+    st1
+      ? `線 ${st1.lines}・札 ${st1.xTag} / ${st1.yTag}・読み取り ${st1.time}・横線 y ${st1.hy}`
+      : '',
+  );
+  check(
+    `#130 AC-7(b) ${tag} そのまま左へ 60px・下へ 30px 動かすと札の時刻と縦の札が変わり、読み取りと一致`,
+    st2?.lines === 2 &&
+      st2.xTag !== st1?.xTag &&
+      st2.xTag === st2.time &&
+      st2.yTag !== st1?.yTag &&
+      yAt(st2, a.y + 30),
+    `${st1?.xTag} → ${st2?.xTag}・${st1?.yTag} → ${st2?.yTag}`,
+  );
+  check(
+    `#130 AC-7(b) ${tag} 離しても残り、タップで消える。長押しの間ページ・シート・.panel-body が動かない`,
+    st3?.lines === 2 &&
+      st4?.lines === 0 &&
+      st4.tags.length === 0 &&
+      s1.sheet === s0.sheet &&
+      s1.body === s0.body &&
+      s1.sy === s0.sy &&
+      s2.sheet === s0.sheet &&
+      s2.sy === 0,
+    `離した後 ${st3?.lines} 本・タップ後 ${st4?.lines} 本・シート ${s0.sheet}→${s1.sheet}→${s2.sheet}・scrollTop ${s0.body}→${s1.body}・scrollY ${s1.sy}`,
+  );
+  if (shotsDir) await page.screenshot({ path: join(shotsDir, `flows-iv-cross-${tag}.png`) });
+  await ctx.close();
+}
+
+/**
+ * スマホ・タブレット（#130 AC-7 (d)）: 起動 → atm_iv 0 回 → ドックの IV で IV 推移・1 回 → [スマイル] → 別のパネル →
+ * ドックの IV でスマイルのまま。タブレットはキー 5 でもパネルが開き中身（スマイル）を保つ
+ */
+async function ivDockFlows(vp) {
+  const tag = `${vp.width}x${vp.height}`;
+  const phoneSize = vp.width <= PHONE_MAX;
+  const ctx = await newContext(vp, { [WORKSPACE_KEY]: twoLegs });
+  const page = await ctx.newPage();
+  const reqs = [];
+  page.on('request', (r) => {
+    if (r.url().includes('atm_iv')) reqs.push(r.url());
+  });
+  await page.goto(pageUrl('next'));
+  await waitReady(page, 'next');
+  await page.waitForTimeout(1000);
+  const n0 = reqs.length;
+  const view = () =>
+    page.evaluate(() => {
+      const sec = document.querySelector('section.smile');
+      return {
+        name: sec?.getAttribute('aria-label') ?? null,
+        iv: !!sec?.querySelector('.iv-tools'),
+        smile: !!sec?.querySelector('.smile-wrap'),
+        panel: document.querySelector('.layout')?.getAttribute('data-panel'),
+      };
+    });
+  await page.click('.dock button[data-panel="smile"]');
+  await page.waitForSelector('section.smile .iv-wrap svg', { timeout: 10000 }).catch(() => null);
+  await page.waitForTimeout(300);
+  const v1 = await view();
+  check(
+    `#130 AC-7(d) ${tag} 起動直後は atm_iv 0 回、ドックの IV で IV 推移が出て 1 回`,
+    n0 === 0 && v1.name === 'IV 推移' && v1.iv && reqs.length === 1,
+    `起動 ${n0} 回 → ${reqs.length} 回・${v1.name}`,
+  );
+  await smileTab(page);
+  const v2 = await view();
+  await page.click(`.dock button[data-panel="${phoneSize ? 'board' : 'positions'}"]`);
+  await page.waitForTimeout(200);
+  await page.click('.dock button[data-panel="smile"]');
+  await page.waitForTimeout(300);
+  const v3 = await view();
+  check(
+    `#130 AC-7(d) ${tag} [スマイル] → 別のパネル → ドックの IV でスマイルのまま（要求は 1 回のまま）`,
+    v2.name === 'スマイル' && v2.smile && v3.name === 'スマイル' && v3.smile && reqs.length === 1,
+    `${v2.name} → ${v3.name}・${reqs.length} 回`,
+  );
+  if (!phoneSize) {
+    await page.click('.dock button[data-panel="positions"]');
+    await page.waitForTimeout(150);
+    await page.evaluate(() => {
+      if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+    });
+    await page.keyboard.press('5');
+    await page.waitForTimeout(250);
+    const v4 = await view();
+    check(
+      `#130 AC-7(d) ${tag} キー 5 で IV のパネルが開き、中身はスマイルのまま`,
+      v4.panel === 'smile' && v4.name === 'スマイル' && v4.smile,
+      `${v4.panel}・${v4.name}`,
+    );
+  }
+  await ctx.close();
 }
 
 // ---- IV 推移の追加読み込み・「今」の印・シナリオの水準（#79 段 C AC-9・AC-11）

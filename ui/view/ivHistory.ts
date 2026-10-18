@@ -546,8 +546,6 @@ export interface IvChartInput {
   segments: readonly (readonly [number, number])[];
   width: number;
   height: number;
-  /** カーソルの足の index（無ければ null） */
-  cursor: number | null;
   /** 右端（最新）まで読んである = 最後の足は進行中 */
   rightLoaded: boolean;
   /** 「今」の印（ivNowPoint の結果。無ければ null） */
@@ -572,8 +570,6 @@ export interface IvChartModel {
   progress: string;
   xTicks: IvTick[];
   yTicks: { y: number; label: string }[];
-  /** カーソルの縦線の x（無ければ null） */
-  cursorX: number | null;
   /** 「今」の印の座標（無ければ null） */
   nowPt: { x: number; y: number } | null;
   /** シナリオの水準の横線の y（無ければ null） */
@@ -683,8 +679,6 @@ export function ivChartModel(p: IvChartInput): IvChartModel {
     ...t,
     x: r1(t.x),
   }));
-  const c =
-    p.cursor === null || n === 0 ? null : Math.min(Math.max(Math.round(p.cursor), 0), n - 1);
   return {
     empty: n === 0,
     width: w,
@@ -697,9 +691,93 @@ export function ivChartModel(p: IvChartInput): IvChartModel {
     progress,
     xTicks,
     yTicks,
-    cursorX: c === null ? null : r1(sx(c)),
     nowPt: now && n > 0 ? { x: r1(sx(now.index)), y: r1(sy(now.iv)) } : null,
     scenarioY: scenario !== null && Number.isFinite(scenario) && n > 0 ? r1(sy(scenario)) : null,
+  };
+}
+
+/** 軸の札（塗りの矩形の左上・大きさと文字。px） */
+export interface IvTag {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  text: string;
+}
+
+/** 十字線（縦線 = カーソルの足の x、横線 = 指 / マウスの高さ）と軸の札（横軸 = 足の時刻、縦軸 = その高さの IV） */
+export interface IvCrosshair {
+  x: number;
+  y: number;
+  xTag: IvTag;
+  yTag: IvTag;
+}
+
+/** 札の高さ（px）と文字の左右の余白の合計（横軸・縦軸） */
+export const IV_TAG_H = 15;
+const IV_TAG_PAD_X = 8;
+const IV_TAG_PAD_Y = 6;
+
+export interface IvCrosshairInput {
+  bars: readonly IvBar[];
+  tf: IvTf;
+  viewport: Domain;
+  /** カーソルの足の index（無ければ null） */
+  cursor: number | null;
+  /**
+   * 横線の高さ（要素の座標の画素。指 / マウスの縦の位置）。null = 縦の位置が無い（キー , . だけで置いた）ときで、
+   * カーソルの足の終値の高さに置く
+   */
+  y: number | null;
+  /** ivChartModel の結果（同じ bars・viewport・幅・高さで作ったもの） */
+  model: Pick<IvChartModel, 'empty' | 'width' | 'height' | 'range' | 'yDomain'>;
+}
+
+/**
+ * カーソルの十字線と軸の札（#130。ivChartModel から分ける = カーソルの移動で 1 万本の座標を作り直さない。O(1)）。
+ * 縦線は足に吸着（カーソルの足の x）、横線は足の値に吸着せず指 / マウスの高さ（オーナーの決定 2026-10-18: 足の値は
+ * 読み取りの行で分かるので、十字線は任意の水準を調べるのに使う）。横線は描画域の上下の端で止める。
+ * 横軸の札の文字 = 読み取りの時刻（ivTimeText）、縦軸の札の文字 = 横線の高さの IV（縦軸の目盛りの逆変換。桁は読み取りの
+ * 始・高・安・終と同じ小数 2 桁 = fmtIvPt。任意の水準を測るので目盛りの桁では粗い）。横軸の札は目盛りの行（下の余白）に、縦軸の札は目盛りの列（左の余白。右端 = 描画域の左 − 1）に置き、
+ * svg の外へはみ出さないよう端で寄せる。カーソルが無い・足 0 本・カーソルの足が表示範囲（画素の range）の外なら null
+ */
+export function ivCrosshair(p: IvCrosshairInput): IvCrosshair | null {
+  const { bars, model } = p;
+  const n = bars.length;
+  if (p.cursor === null || n === 0 || model.empty) return null;
+  const c = Math.min(Math.max(Math.round(p.cursor), 0), n - 1);
+  const b = bars[c] as IvBar;
+  const { range, width, height } = model;
+  const r1 = (v: number) => Math.round(v * 10) / 10;
+  const x = r1(linear(p.viewport, range)(c));
+  if (x < range[0] || x > range[1]) return null;
+  const clamp = (v: number, lo: number, hi: number) => Math.min(Math.max(v, lo), Math.max(hi, lo));
+  const yPx: Domain = [height - IV_MARGIN.bottom, IV_MARGIN.top];
+  const y = r1(
+    clamp(p.y ?? linear(model.yDomain, yPx)(b.c), IV_MARGIN.top, height - IV_MARGIN.bottom),
+  );
+  const xText = ivTimeText(b.t, p.tf);
+  const xw = r1(Math.min(labelPx(xText) + IV_TAG_PAD_X, width));
+  const yText = fmtIvPt(linear(yPx, model.yDomain)(y));
+  const yw = r1(Math.min(labelPx(yText) + IV_TAG_PAD_Y, width));
+  const yRight = range[0] - 1;
+  return {
+    x,
+    y,
+    xTag: {
+      x: r1(clamp(x - xw / 2, 0, width - xw)),
+      y: r1(clamp(height - IV_MARGIN.bottom + 3, 0, height - IV_TAG_H)),
+      w: xw,
+      h: IV_TAG_H,
+      text: xText,
+    },
+    yTag: {
+      x: r1(Math.max(0, yRight - yw)),
+      y: r1(clamp(y - IV_TAG_H / 2, 0, height - IV_TAG_H)),
+      w: yw,
+      h: IV_TAG_H,
+      text: yText,
+    },
   };
 }
 
@@ -714,7 +792,7 @@ export function ivIndexAt(x: number, viewport: Domain, range: Domain, n: number)
 
 /** ⓘ の操作の説明 */
 export const IV_HINT =
-  'ドラッグ / 1 本指でパン · ホイール / ピンチで拡大 · ダブルタップ / R で初期表示 · ホバー / 長押しで足を読む · , . で 1 本ずつ';
+  'ドラッグ / 1 本指でパン · ホイール / ピンチで拡大 · ダブルタップ / R で初期表示 · ホバー / 長押しの十字線で足を読む · , . で 1 本ずつ';
 /** ⓘ のデータの説明 */
 export const IV_NOTE =
   'ATM IV（30 日固定）= 期近・次限月の ATM の IV を残存 30 日に補間した値（%。モデルの ATM IV とは別の定義）。表は毎時作り直すので、右端の足は確定前（薄く描く）。読むのは開いたとき・⟳・左右の端へパンしたときだけ（トップバーの [最新] では読み直さない）。欠け（立会中に 30 分以上 / 足 1 本以上の空き）で線を切る。● 今 = 今の板から同じ定義で計算した値（表より新しい板のとき）、┄ シナリオ = 今に Δσ と β × ΔX% を当てた水準';

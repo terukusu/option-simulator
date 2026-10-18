@@ -72,11 +72,15 @@ function IvHistoryView(p: IvHistoryProps) {
   );
   const base = nowPt?.iv ?? (right ? bars.at(-1)?.c : p.now?.iv) ?? null;
   const level = ivScenarioLevel(base, p.scenario, p.x0);
-  // カーソルはその足の並びの index（足・読み込みが変わったら外す）
-  const [cur, setCur] = useState<{ bars: readonly IvBar[]; i: number } | null>(null);
+  // カーソルはその足の並びの index と十字線の横線の高さ（画素。足・読み込みが変わったら外す）
+  const [cur, setCur] = useState<{ bars: readonly IvBar[]; i: number; y: number | null } | null>(
+    null,
+  );
   const cursor = cur && cur.bars === bars ? cur.i : null;
+  const cursorY = cur && cur.bars === bars ? cur.y : null;
   const onCursor = useMemo(
-    () => (i: number | null) => setCur(i === null ? null : { bars, i }),
+    () => (i: number | null, y?: number | null) =>
+      setCur(i === null ? null : { bars, i, y: y ?? null }),
     [bars],
   );
   // 右端の足が進行中（表の作り直しの中。立会の外・週末で表が止まっていれば確定として描く）
@@ -146,6 +150,7 @@ function IvHistoryView(p: IvHistoryProps) {
           segments={segments}
           rightLoaded={rightLoaded}
           cursor={cursor}
+          cursorY={cursorY}
           leftSlack={p.leftSlack}
           now={nowPt}
           scenario={level}

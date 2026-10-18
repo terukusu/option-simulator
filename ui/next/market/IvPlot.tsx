@@ -1,4 +1,4 @@
-import { useId, useMemo } from 'preact/hooks';
+import { useId, useMemo, useRef } from 'preact/hooks';
 import type { IvBar } from '../../../data';
 import type { Domain } from '../../chart/scale';
 import { pure } from '../../components/pure';
@@ -9,6 +9,7 @@ import {
   type IvMode,
   type IvTf,
   ivChartModel,
+  ivCrosshair,
   ivFullDomain,
   ivIndexAt,
 } from '../../view/ivHistory';
@@ -23,6 +24,8 @@ export interface IvPlotProps {
   segments: readonly (readonly [number, number])[];
   rightLoaded: boolean;
   cursor: number | null;
+  /** 十字線の横線の高さ（要素の座標の画素。指 / マウスの縦の位置。無ければ null = 足の終値の高さ） */
+  cursorY: number | null;
   /** 左の余白（本。左に読む余地があれば IV_LEFT_SLACK） */
   leftSlack: number;
   /** 「今」の印（ivNowPoint。無ければ null） */
@@ -36,17 +39,17 @@ export interface IvPlotProps {
   /** 読み中のバッジ（足があるとき。left = 左の追加は左上、right = 最新化・右の追加は右上） */
   busy: 'left' | 'right' | null;
   onViewport: (v: Domain | null) => void;
-  onCursor: (i: number | null) => void;
+  onCursor: (i: number | null, y?: number | null) => void;
   onRetry: () => void;
 }
 
 /**
  * IV 推移の描画域（#79。自前の SVG。docs/ui-redesign.md §4.7）。座標は ui/view/ivHistory.ts の ivChartModel、
  * 拡大・パン・ピンチ・ホイール・キーは useChartGestures（スマイル・損益グラフと共用）。PC のホバー・タッチの長押しで
- * カーソルの足を選ぶ（読み取りの 1 行）。高さは残りの高さ（useSize）。色は CSS のクラスだけ（style 属性なし）。
+ * カーソルの足を選ぶ（読み取りの 1 行と十字線・軸の札 = ivCrosshair。#130）。高さは残りの高さ（useSize）。色は CSS のクラスだけ（style 属性なし）。
  */
 function IvPlotView(p: IvPlotProps) {
-  const { bars, viewport, cursor, onCursor } = p;
+  const { bars, viewport, cursor, cursorY, onCursor } = p;
   const n = bars.length;
   const { ref, width, height } = useSize(480, 200);
   const model = useMemo(
@@ -59,30 +62,27 @@ function IvPlotView(p: IvPlotProps) {
         segments: p.segments,
         width,
         height,
-        cursor,
         rightLoaded: p.rightLoaded,
         now: p.now,
         scenario: p.scenario,
       }),
-    [
-      bars,
-      p.tf,
-      p.mode,
-      viewport,
-      p.segments,
-      width,
-      height,
-      cursor,
-      p.rightLoaded,
-      p.now,
-      p.scenario,
-    ],
+    [bars, p.tf, p.mode, viewport, p.segments, width, height, p.rightLoaded, p.now, p.scenario],
   );
   const { range } = model;
+  // 十字線と軸の札はカーソルだけで作り直す（O(1)。上のモデルはカーソルに依存しない）
+  const cross = useMemo(
+    () => ivCrosshair({ bars, tf: p.tf, viewport, cursor, y: cursorY, model }),
+    [bars, p.tf, viewport, cursor, cursorY, model],
+  );
   // 描画域の外（目盛りの余白）に線・足をはみ出させない
   const clipId = `iv-clip-${useId().replace(/[^\w-]/g, '')}`;
   const full = ivFullDomain(n, p.leftSlack);
   const indexAt = (x: number) => ivIndexAt(x, viewport, range, n);
+  // 指 / マウスの縦の位置（要素の座標）。長押し・ドラッグの scrub は x だけを返すので、押下・移動のたびにここで控える
+  const pointerY = useRef<number | null>(null);
+  const trackY = (e: PointerEvent) => {
+    pointerY.current = e.clientY - (e.currentTarget as HTMLElement).getBoundingClientRect().top;
+  };
 
   useChartGestures(ref, {
     viewport,
@@ -93,11 +93,12 @@ function IvPlotView(p: IvPlotProps) {
     onViewport: p.onViewport,
     onTap: () => onCursor(null),
     scrub: { linePx: null },
-    onScrub: (x) => onCursor(indexAt(x)),
+    onScrub: (x) => onCursor(indexAt(x), pointerY.current),
     onScrubKey: (key) => {
       if (key !== ',' && key !== '.') return false;
       const from = cursor ?? n - 1;
-      onCursor(Math.min(Math.max(from + (key === ',' ? -1 : 1), 0), n - 1));
+      // 横線の高さは保つ（キーだけで置いたときは最初の足の終値の高さから）
+      onCursor(Math.min(Math.max(from + (key === ',' ? -1 : 1), 0), n - 1), cursorY ?? cross?.y);
       return true;
     },
   });
@@ -135,11 +136,13 @@ function IvPlotView(p: IvPlotProps) {
       tabIndex={n === 0 ? -1 : 0}
       role="application"
       aria-label={IV_PLOT_LABEL}
+      onPointerDown={trackY}
       onPointerMove={(e) => {
+        trackY(e);
         if (e.pointerType !== 'mouse' || e.buttons !== 0 || n === 0) return;
         const r = e.currentTarget.getBoundingClientRect();
         const x = e.clientX - r.left;
-        onCursor(x >= range[0] && x <= range[1] ? indexAt(x) : null);
+        onCursor(x >= range[0] && x <= range[1] ? indexAt(x) : null, pointerY.current);
       }}
       onPointerLeave={(e) => {
         if (e.pointerType === 'mouse') onCursor(null);
@@ -218,8 +221,33 @@ function IvPlotView(p: IvPlotProps) {
               <title>今</title>
             </circle>
           )}
-          {model.cursorX !== null && (
-            <line class="iv-cursor" x1={model.cursorX} x2={model.cursorX} y1={8} y2={h - 22} />
+          {cross && (
+            <g class="iv-cross">
+              <line class="iv-cursor v" x1={cross.x} x2={cross.x} y1={8} y2={h - 22} />
+              <line class="iv-cursor h" x1={range[0]} x2={range[1]} y1={cross.y} y2={cross.y} />
+              <g class="iv-tag x">
+                <rect
+                  x={cross.xTag.x}
+                  y={cross.xTag.y}
+                  width={cross.xTag.w}
+                  height={cross.xTag.h}
+                />
+                <text x={cross.xTag.x + cross.xTag.w / 2} y={cross.xTag.y + cross.xTag.h / 2}>
+                  {cross.xTag.text}
+                </text>
+              </g>
+              <g class="iv-tag y">
+                <rect
+                  x={cross.yTag.x}
+                  y={cross.yTag.y}
+                  width={cross.yTag.w}
+                  height={cross.yTag.h}
+                />
+                <text x={cross.yTag.x + cross.yTag.w / 2} y={cross.yTag.y + cross.yTag.h / 2}>
+                  {cross.yTag.text}
+                </text>
+              </g>
+            </g>
           )}
         </svg>
       )}
