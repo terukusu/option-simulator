@@ -31,6 +31,7 @@ import { headerModel, keptBoardNote } from '../../ui/view/header';
 import { hedgeModel } from '../../ui/view/hedge';
 import {
   ivChartModel,
+  ivFollowViewport,
   ivFullDomain,
   lineSegments,
   resampleBars,
@@ -1440,6 +1441,26 @@ describe('性能（#79 IV 推移の 1 フレーム）', () => {
     record(
       '#79 足の切替（1 分 → 5 分の束ね直し + 線の区間）',
       () => lineSegments(resampleBars(bars, 300), '5m', ntd).length,
+      { warmup: 3, runs: RECORD_RUNS },
+    );
+  });
+
+  it('#79 段 C: 「今」の印・シナリオの水準つきのパン（line）が予算内、左に足した後の追従（5 分の束ね直し 2 回 + ivFollowViewport）は記録', () => {
+    let tick = 0;
+    const frame = () => {
+      tick = (tick + 1) % 40;
+      const m = ivChartModel({
+        ...input('line', tick),
+        now: { index: bars.length, iv: 21 },
+        scenario: 26,
+      });
+      return m.line.length + (m.scenarioY ?? 0);
+    };
+    expectWithinBudget('#79 IV 推移のパン（今・シナリオつき）', frame, { warmup: 10, runs: 30 });
+    const head = bars.slice(1140);
+    record(
+      '#79 左に足した後の追従（1 分足 1 万本 → 5 分の束ね直し 2 回 + 追従）',
+      () => ivFollowViewport(resampleBars(head, 300), resampleBars(bars, 300), [10, 200])?.[0] ?? 0,
       { warmup: 3, runs: RECORD_RUNS },
     );
   });

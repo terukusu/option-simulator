@@ -31,6 +31,10 @@ export const SYNTH_IV_LAST_AT = SYNTH_IV_NOW - 50 * 60;
 export const SYNTH_IV_FIRST = Date.parse('2025-04-01T00:00:00+09:00') / 1000;
 const DAY = 86400;
 const JST = 9 * 3600;
+/** start の下限（サーバーの ATM_IV_EPOCH_ISO） */
+const IV_EPOCH = Date.parse('2010-01-01T00:00:00Z') / 1000;
+/** 1 回の最大の日数（サーバーの ATM_IV_TIMEFRAMES） */
+const IV_MAX_DAYS = { '1m': 3, '1h': 100, '1d': 400 };
 /** 取引の無い平日（同梱の取引カレンダーの is_trading_day = false。合成の行もこの日は作らない） */
 const NON_TRADING = new Set(
   JSON.parse(
@@ -160,7 +164,7 @@ function buildSynthAtmIv(tf, range, now) {
 }
 
 /** `?tf=&start=&end=` を読む（形が違えば null = 400） */
-function atmIvQuery(url) {
+export function atmIvQuery(url) {
   const q = new URLSearchParams(url.split('?')[1] ?? '');
   const tf = q.get('tf') ?? '';
   if (!(tf in IV_TF)) return null;
@@ -168,9 +172,17 @@ function atmIvQuery(url) {
   const e = q.get('end');
   if ((s === null) !== (e === null)) return null;
   if (s === null || e === null) return { tf, range: null };
+  // サーバー（api/src/simulator_api/atm_iv.py の parse_request）と同じ検査: オフセット付き・UTC の 0 時ちょうど・
+  // 2010-01-01 ≤ start < end・end は今の UTC の日の翌 0 時に縮め、縮めた後の end − start が 1 回の最大以下（#79 段 C。
+  // 画面の追加読み込みの範囲の誤りを dev で 400 にする）
+  const iso = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(Z|[+-]\d{2}:\d{2})$/;
+  if (!iso.test(s) || !iso.test(e)) return null;
   const start = Date.parse(s) / 1000;
-  const end = Date.parse(e) / 1000;
-  if (!Number.isFinite(start) || !Number.isFinite(end) || !(start < end)) return null;
+  const end0 = Date.parse(e) / 1000;
+  if (!Number.isFinite(start) || !Number.isFinite(end0)) return null;
+  if (start % DAY !== 0 || end0 % DAY !== 0) return null;
+  const end = Math.min(end0, (Math.floor(SYNTH_IV_NOW / DAY) + 1) * DAY);
+  if (start < IV_EPOCH || !(start < end) || end - start > IV_MAX_DAYS[tf] * DAY) return null;
   return { tf, range: { start, end } };
 }
 

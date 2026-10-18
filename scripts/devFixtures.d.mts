@@ -26,3 +26,8 @@ export function synthAtmIv(
   last_at: string | null;
   bars: { t: string; o: number; h: number; l: number; c: number }[];
 } | null;
+
+/** `/fixtures/atm_iv?tf=&start=&end=` の検査（サーバーの parse_request と同じ。形が違えば null = 400） */
+export function atmIvQuery(
+  url: string,
+): { tf: string; range: { start: number; end: number } | null } | null;

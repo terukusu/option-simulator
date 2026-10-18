@@ -1,23 +1,26 @@
 import type { ComponentChildren } from 'preact';
 import { useMemo, useState } from 'preact/hooks';
 import type { IvBar } from '../../../data';
+import type { Scenario } from '../../../model';
 import type { Domain } from '../../chart/scale';
 import { pure } from '../../components/pure';
 import type { IvView } from '../../components/useIvHistory';
 import {
-  barsForTf,
+  fmtIvPt,
   IV_FOCUS_LABEL,
   IV_HINT,
   IV_MODES,
   IV_NOTE,
   IV_TFS,
   type IvMode,
+  type IvNowValue,
   type IvTf,
+  ivNowPoint,
   ivReadout,
+  ivScenarioLevel,
   lineSegments,
-  resolveIvViewport,
 } from '../../view/ivHistory';
-import { type IvLoadState, ivLoadView } from '../../view/ivLoad';
+import { type IvLoadState, ivInProgress, ivLoadView } from '../../view/ivLoad';
 import { PanelHead } from '../PanelHead';
 import { Popover } from '../parts/Popover';
 import { Seg } from '../parts/Seg';
@@ -26,6 +29,15 @@ import { IvPlot } from './IvPlot';
 export interface IvHistoryProps {
   load: IvLoadState;
   view: IvView;
+  /** useIvHistory の bars・viewport・leftSlack（表示する足・表示範囲・左の余白） */
+  bars: readonly IvBar[];
+  viewport: Domain;
+  leftSlack: number;
+  /** 今の板の iv30（ivNowValue。出なければ null） */
+  now: IvNowValue | null;
+  /** シナリオと舞台の X₀（シナリオの水準） */
+  scenario: Scenario;
+  x0: number;
   /** 取引カレンダーの is_trading_day = false の日（欠けの判定） */
   nonTradingDays: ReadonlySet<string>;
   /** 見出しの Seg（PC は市場の Seg、スマホ・タブレットは [スマイル | IV 推移]） */
@@ -37,8 +49,6 @@ export interface IvHistoryProps {
   onViewport: (v: Domain | null) => void;
 }
 
-const EMPTY: readonly IvBar[] = [];
-
 /**
  * IV 推移（#79。docs/ui-redesign.md §4.7）: 見出し行（タイトル・Seg・ⓘ）→ 道具の行（足・ローソク / 線・最新化 ⟳）→
  * 読み取りの 1 行（カーソルの足、無ければ最新の足の 始 / 高 / 安 / 終）→ 描画域（market/IvPlot.tsx）→ 凡例。
@@ -47,16 +57,21 @@ const EMPTY: readonly IvBar[] = [];
 function IvHistoryView(p: IvHistoryProps) {
   const { load, view } = p;
   const tf = load.tf;
-  const { entry, loading, failed } = ivLoadView(load);
-  const bars = useMemo(() => (entry ? barsForTf(entry.bars, tf) : EMPTY), [entry, tf]);
+  const { bars, viewport } = p;
+  const { entry, loading, pending, failed, failedSide } = ivLoadView(load);
   const segments = useMemo(
     () => lineSegments(bars, tf, p.nonTradingDays),
     [bars, tf, p.nonTradingDays],
   );
-  const viewport = useMemo(
-    () => resolveIvViewport(bars, tf, view.viewport, view.keep),
-    [bars, tf, view.viewport, view.keep],
+  // 「今」の印（右端まで読んであり、表の最後の行より新しい板のときだけ）とシナリオの水準（基準 = 今、無ければ最新の
+  // 足の close。右端まで読んでいなければ（遠い側を捨てた）最後の足は最新でないので今の値だけ）
+  const right = entry?.rightLoaded ?? false;
+  const nowPt = useMemo(
+    () => (right ? ivNowPoint(p.now, bars, tf, load.lastAt, p.nonTradingDays) : null),
+    [right, p.now, bars, tf, load.lastAt, p.nonTradingDays],
   );
+  const base = nowPt?.iv ?? (right ? bars.at(-1)?.c : p.now?.iv) ?? null;
+  const level = ivScenarioLevel(base, p.scenario, p.x0);
   // カーソルはその足の並びの index（足・読み込みが変わったら外す）
   const [cur, setCur] = useState<{ bars: readonly IvBar[]; i: number } | null>(null);
   const cursor = cur && cur.bars === bars ? cur.i : null;
@@ -64,7 +79,8 @@ function IvHistoryView(p: IvHistoryProps) {
     () => (i: number | null) => setCur(i === null ? null : { bars, i }),
     [bars],
   );
-  const rightLoaded = entry?.rightLoaded ?? false;
+  // 右端の足が進行中（表の作り直しの中。立会の外・週末で表が止まっていれば確定として描く）
+  const rightLoaded = ivInProgress(entry);
   const ro = ivReadout(bars, tf, cursor, rightLoaded);
   const status = !entry
     ? failed
@@ -130,15 +146,34 @@ function IvHistoryView(p: IvHistoryProps) {
           segments={segments}
           rightLoaded={rightLoaded}
           cursor={cursor}
+          leftSlack={p.leftSlack}
+          now={nowPt}
+          scenario={level}
           status={status}
-          busy={loading && !!entry}
+          failedSide={failedSide}
+          busy={loading && entry ? (pending === 'left' ? 'left' : 'right') : null}
           onViewport={p.onViewport}
           onCursor={onCursor}
           onRetry={p.onRetry}
         />
         <div class="iv-legend">
-          <span class="line">ATM IV（30 日固定・%）</span>
-          <span class="prog">薄い足 = 確定前</span>
+          <span class="line">
+            ATM IV<span class="long">（30 日固定・%）</span>
+          </span>
+          {nowPt && (
+            <span
+              class="now"
+              title="今の板から計算した 30 日固定の ATM IV（表の最後の行より新しい）"
+            >
+              ● 今 {fmtIvPt(nowPt.iv)}
+            </span>
+          )}
+          {level !== null && (
+            <span class="sc" title="シナリオの Δσ と β を ATM に当てた水準">
+              ┄ シナリオ {fmtIvPt(level)}
+            </span>
+          )}
+          {rightLoaded && <span class="prog">薄い足 = 確定前</span>}
         </div>
       </div>
     </>

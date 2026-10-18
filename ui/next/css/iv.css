@@ -160,6 +160,19 @@
   fill: var(--accent);
 }
 
+/* 「今」の 1 点（今の板から計算した iv30。表の最後の行より新しいとき）とシナリオの水準（横の破線） */
+.iv-wrap .iv-now {
+  fill: var(--ink);
+  stroke: var(--s1);
+  stroke-width: 1.5;
+}
+
+.iv-wrap .iv-scenario {
+  stroke: var(--handle);
+  stroke-dasharray: 5 3;
+  stroke-width: 1.25;
+}
+
 .iv-wrap .iv-cursor {
   stroke: var(--ink-3);
   stroke-dasharray: 2 3;
@@ -192,6 +205,12 @@
   font-size: var(--fs-sm);
 }
 
+/* 左の追加読み込みの読み中・失敗（左上） */
+.iv-badge.left {
+  right: auto;
+  left: 46px;
+}
+
 /* ===== 凡例 ===== */
 .iv-legend {
   display: flex;
@@ -208,6 +227,27 @@
 
 .iv-legend > .line {
   color: var(--accent);
+}
+
+.iv-legend > .now {
+  color: var(--ink);
+  font-family: var(--mono);
+}
+
+.iv-legend > .sc {
+  color: var(--handle);
+  font-family: var(--mono);
+}
+
+@container (max-width: 419.98px) {
+  .iv-legend {
+    gap: 8px;
+  }
+
+  .iv-legend > .prog,
+  .iv-legend .long {
+    display: none;
+  }
 }
 
 /*

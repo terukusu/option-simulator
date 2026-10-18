@@ -23,10 +23,18 @@ export interface IvPlotProps {
   segments: readonly (readonly [number, number])[];
   rightLoaded: boolean;
   cursor: number | null;
+  /** 左の余白（本。左に読む余地があれば IV_LEFT_SLACK） */
+  leftSlack: number;
+  /** 「今」の印（ivNowPoint。無ければ null） */
+  now: { index: number; iv: number } | null;
+  /** シナリオの水準（pt。無ければ null） */
+  scenario: number | null;
   /** 描画域の上に重ねる状態（読み中・失敗・0 本） */
   status: 'ready' | 'loading' | 'failed' | 'empty';
-  /** 読み中のバッジ（足があるときの最新化） */
-  busy: boolean;
+  /** 失敗した要求の側（左の追加は左上のバッジ） */
+  failedSide: string | null;
+  /** 読み中のバッジ（足があるとき。left = 左の追加は左上、right = 最新化・右の追加は右上） */
+  busy: 'left' | 'right' | null;
   onViewport: (v: Domain | null) => void;
   onCursor: (i: number | null) => void;
   onRetry: () => void;
@@ -53,13 +61,27 @@ function IvPlotView(p: IvPlotProps) {
         height,
         cursor,
         rightLoaded: p.rightLoaded,
+        now: p.now,
+        scenario: p.scenario,
       }),
-    [bars, p.tf, p.mode, viewport, p.segments, width, height, cursor, p.rightLoaded],
+    [
+      bars,
+      p.tf,
+      p.mode,
+      viewport,
+      p.segments,
+      width,
+      height,
+      cursor,
+      p.rightLoaded,
+      p.now,
+      p.scenario,
+    ],
   );
   const { range } = model;
   // 描画域の外（目盛りの余白）に線・足をはみ出させない
   const clipId = `iv-clip-${useId().replace(/[^\w-]/g, '')}`;
-  const full = ivFullDomain(n);
+  const full = ivFullDomain(n, p.leftSlack);
   const indexAt = (x: number) => ivIndexAt(x, viewport, range, n);
 
   useChartGestures(ref, {
@@ -182,6 +204,20 @@ function IvPlotView(p: IvPlotProps) {
               </>
             )}
           </g>
+          {model.scenarioY !== null && (
+            <line
+              class="iv-scenario"
+              x1={range[0]}
+              x2={range[1]}
+              y1={model.scenarioY}
+              y2={model.scenarioY}
+            />
+          )}
+          {model.nowPt && (
+            <circle class="iv-now" cx={model.nowPt.x} cy={model.nowPt.y} r={3.5}>
+              <title>今</title>
+            </circle>
+          )}
           {model.cursorX !== null && (
             <line class="iv-cursor" x1={model.cursorX} x2={model.cursorX} y1={8} y2={h - 22} />
           )}
@@ -193,8 +229,23 @@ function IvPlotView(p: IvPlotProps) {
         </p>
       )}
       {p.status === 'failed' && (
-        <div class={n > 0 ? 'iv-badge iv-failed' : 'iv-state iv-failed'} role="alert">
-          <span>{n > 0 ? '更新できません' : '読み込めませんでした'}</span>
+        <div
+          class={
+            n === 0
+              ? 'iv-state iv-failed'
+              : p.failedSide === 'left'
+                ? 'iv-badge left iv-failed'
+                : 'iv-badge iv-failed'
+          }
+          role="alert"
+        >
+          <span>
+            {n === 0
+              ? '読み込めませんでした'
+              : p.failedSide === 'left'
+                ? '過去を読めません'
+                : '更新できません'}
+          </span>
           <button type="button" class="btn sm" onClick={p.onRetry}>
             再試行
           </button>
@@ -202,8 +253,11 @@ function IvPlotView(p: IvPlotProps) {
       )}
       {p.status === 'empty' && <p class="iv-state iv-empty">データがありません</p>}
       {p.busy && (
-        <span class="iv-badge iv-loading" role="status">
-          更新中…
+        <span
+          class={p.busy === 'left' ? 'iv-badge left iv-loading' : 'iv-badge iv-loading'}
+          role="status"
+        >
+          {p.busy === 'left' ? '過去を読み込み中…' : '更新中…'}
         </span>
       )}
     </div>
