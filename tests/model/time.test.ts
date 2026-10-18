@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  businessDaysAhead,
   daysUntil,
   isBusinessDay,
   jstInstant,
@@ -89,5 +90,32 @@ describe('T（SQ 日 9:00 JST まで、暦日 / 365）', () => {
     const before = jstInstant('2026-11-13', 8, 59);
     expect(upcomingMonthlyExpiries(before, 1, [])[0]?.id).toBe('2026-11');
     expect(monthlyExpiry(2026, 11, HOLIDAYS).lastTradingDay).toBe('2026-11-10');
+  });
+});
+
+describe('n 営業日後までの暦日（証拠金の保有期間。設計 5.10）', () => {
+  // 2026-10-16 は金曜。休業日は架空（2026-10-19 の月曜）
+  it('金曜 → 火曜 = 4、木曜 → 月曜 = 4、月曜 → 水曜 = 2', () => {
+    expect(businessDaysAhead(jstInstant('2026-10-16', 15, 0), 2, [])).toBe(4);
+    expect(businessDaysAhead(jstInstant('2026-10-15', 10, 0), 2, [])).toBe(4);
+    expect(businessDaysAhead(jstInstant('2026-10-12', 10, 0), 2, [])).toBe(2);
+    expect(businessDaysAhead(jstInstant('2026-10-13', 21, 31), 1, [])).toBe(1);
+  });
+
+  it('休業日を挟む: 月曜が休業なら金曜 → 水曜 = 5', () => {
+    expect(businessDaysAhead(jstInstant('2026-10-16', 15, 0), 2, ['2026-10-19'])).toBe(5);
+    expect(businessDaysAhead(jstInstant('2026-10-16', 15, 0), 2, new Set(['2026-10-19']))).toBe(5);
+  });
+
+  it('土日の S からも次の営業日から数える（JST の暦日）', () => {
+    expect(businessDaysAhead(jstInstant('2026-10-17', 12, 0), 2, [])).toBe(3);
+    expect(businessDaysAhead(jstInstant('2026-10-18', 12, 0), 2, [])).toBe(2);
+    // 金曜 23:59 JST はまだ金曜、土曜 0:30 JST（UTC では金曜）は土曜
+    expect(businessDaysAhead(jstInstant('2026-10-16', 23, 59), 2, [])).toBe(4);
+    expect(businessDaysAhead(jstInstant('2026-10-17', 0, 30), 2, [])).toBe(3);
+  });
+
+  it('n = 0 → 0', () => {
+    expect(businessDaysAhead(jstInstant('2026-10-17', 12, 0), 0, [])).toBe(0);
   });
 });

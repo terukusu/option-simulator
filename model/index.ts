@@ -5,6 +5,7 @@ export * from './constantMaturity';
 export * from './forward';
 export * from './hedge';
 export * from './iv';
+export * from './margin';
 export * from './normal';
 export * from './pnl';
 export * from './position';
