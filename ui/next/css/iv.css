@@ -1,0 +1,229 @@
+/*
+ * IV 推移（#79。docs/ui-redesign.md §4.7）。部品は ui/next/market/IvHistory.tsx・IvPlot.tsx。PC は市場の列の section.smile、
+ * スマホ・タブレットはスマイルのパネルに描く（.panel-body.market-body はスクロールしない。market.css）。
+ * 色はトークンだけ（ローソクの陽線 / 陰線 = --gain / --loss、線 = --accent、進行中の足 = 薄く）。
+ */
+
+/* ===== 道具の行（足・ローソク / 線・最新化）。360px に 1 行で入るよう Seg の左右を詰める ===== */
+.iv-tools {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: var(--sp-2) var(--sp-3);
+  border-bottom: 1px solid var(--line);
+}
+
+.iv-tools .seg > button {
+  padding: 0 7px;
+}
+
+.iv-tools .spacer {
+  flex: 1;
+}
+
+@container (max-width: 399.98px) {
+  .iv-tools {
+    gap: 4px;
+  }
+
+  .iv-tools .seg > button {
+    padding: 0 5px;
+    font-size: var(--fs-sm);
+  }
+}
+
+/* ===== 読み取りの 1 行（カーソルの足、無ければ最新の足） ===== */
+.iv-readout {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
+  padding: 5px var(--sp-3);
+  overflow: hidden;
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+  white-space: nowrap;
+}
+
+.iv-readout > .time {
+  color: var(--ink-2);
+}
+
+.iv-readout .k {
+  margin-right: 3px;
+  color: var(--ink-3);
+  font-family: var(--font);
+}
+
+.iv-readout.progress > .v {
+  color: var(--ink-2);
+}
+
+.iv-readout > .tag {
+  color: var(--ink-3);
+  font-family: var(--font);
+}
+
+@container (max-width: 419.98px) {
+  .iv-readout {
+    gap: 7px;
+  }
+
+  .iv-readout > .tag {
+    display: none;
+  }
+}
+
+/* ===== 描画域 ===== */
+.iv-wrap {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.iv-wrap > svg {
+  position: absolute;
+  inset: 0;
+}
+
+.iv-wrap .grid line {
+  stroke: var(--line);
+}
+
+.iv-wrap .ax text {
+  fill: var(--ink-3);
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+}
+
+.iv-wrap .ax .ty {
+  dominant-baseline: middle;
+  text-anchor: end;
+}
+
+.iv-wrap .ax .tx {
+  text-anchor: middle;
+}
+
+.iv-wrap .iv-bar.wick,
+.iv-wrap .iv-bar .wick {
+  fill: none;
+  stroke-width: 1;
+}
+
+.iv-wrap .iv-bar.up.wick,
+.iv-wrap .iv-bar.up .wick {
+  stroke: var(--gain);
+}
+
+.iv-wrap .iv-bar.down.wick,
+.iv-wrap .iv-bar.down .wick {
+  stroke: var(--loss);
+}
+
+.iv-wrap .iv-bar.up.body,
+.iv-wrap .iv-bar.up .body {
+  fill: var(--gain);
+}
+
+.iv-wrap .iv-bar.down.body,
+.iv-wrap .iv-bar.down .body {
+  fill: var(--loss);
+}
+
+/* 右端の進行中の足（表が作り直す = 確定前） */
+.iv-wrap .iv-bar.progress {
+  opacity: 0.4;
+}
+
+.iv-wrap .iv-line {
+  fill: none;
+  stroke: var(--accent);
+  stroke-linejoin: round;
+  stroke-width: 1.75;
+}
+
+.iv-wrap .iv-line.progress {
+  opacity: 0.4;
+  stroke-dasharray: 3 2;
+}
+
+.iv-wrap .iv-dot {
+  fill: var(--accent);
+}
+
+.iv-wrap .iv-cursor {
+  stroke: var(--ink-3);
+  stroke-dasharray: 2 3;
+}
+
+/* 読み中・失敗・0 本（描画域の中央）とバッジ（足があるときの最新化。右上） */
+.iv-state {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-2);
+  margin: 0;
+  color: var(--ink-3);
+  font-size: 12px;
+}
+
+.iv-badge {
+  position: absolute;
+  top: 6px;
+  right: 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 8px;
+  border-radius: var(--r-sm);
+  background: var(--s3);
+  color: var(--ink-2);
+  font-size: var(--fs-sm);
+}
+
+/* ===== 凡例 ===== */
+.iv-legend {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 10px;
+  min-width: 0;
+  padding: 6px var(--sp-3);
+  overflow: hidden;
+  border-top: 1px solid var(--line);
+  color: var(--ink-3);
+  font-size: var(--fs-sm);
+  white-space: nowrap;
+}
+
+.iv-legend > .line {
+  color: var(--accent);
+}
+
+/*
+ * 市場の Seg が 3 つ（#79）になったので、市場の列の狭い PC（1200〜1439px = 列 360〜432px）では見出し行の Seg・拡大の
+ * ボタンの左右を詰める（スマイルの見出し「スマイル」が切れないように）
+ */
+@media (min-width: 1200px) and (max-width: 1439.98px) {
+  section.market .panel-head {
+    gap: 6px;
+  }
+
+  section.market .panel-head .seg > button {
+    padding: 0 6px;
+  }
+
+  section.market .panel-head .seg.zoom > button {
+    padding: 0 5px;
+  }
+}

@@ -47,6 +47,11 @@ export interface Calendar {
   errors: string[];
   /** SQ 日・取引最終日の判定に使う休業日 = 版の全行の date（is_trading_day を問わない。壊れていれば空） */
   holidays: ReadonlySet<string>;
+  /**
+   * 取引の無い平日 = 版の is_trading_day = false の日（IV 推移の日足・欠けの判定。#79。optionchan のビューアーの
+   * trading_holidays と同じ集合。祝日取引の実施日は入らない。壊れていれば空 = 土日だけ）
+   */
+  nonTradingDays: ReadonlySet<string>;
   /** 確定の最終日 = covered_until（期限切れ・「休業日未確定」の判定。壊れていれば null） */
   coveredUntil: string | null;
   /** 掲載の最終日 = listed_until */
@@ -106,7 +111,7 @@ function checkAscendingDates(dates: unknown[], path: (i: number) => string, e: E
 }
 
 /** ISO 8601 の日時（オフセットつき）か。日付の部分は実在の日、時刻は 00:00〜23:59（:60 は不可）。 */
-function isIsoInstant(v: unknown): v is string {
+export function isIsoInstant(v: unknown): v is string {
   if (typeof v !== 'string' || !ISO_INSTANT.test(v) || !isIsoDate(v.slice(0, 10))) return false;
   const hh = Number(v.slice(11, 13));
   const mm = Number(v.slice(14, 16));
@@ -157,6 +162,7 @@ export function buildCalendar(json: unknown, origin: CalendarOrigin): Calendar {
       ok: false,
       errors: r.errors,
       holidays: new Set(),
+      nonTradingDays: new Set(),
       coveredUntil: null,
       listedUntil: null,
       versionAt: null,
@@ -169,6 +175,7 @@ export function buildCalendar(json: unknown, origin: CalendarOrigin): Calendar {
     ok: true,
     errors: [],
     holidays: new Set(v.days.map((d) => d.date)),
+    nonTradingDays: new Set(v.days.filter((d) => !d.is_trading_day).map((d) => d.date)),
     coveredUntil: v.covered_until,
     listedUntil: v.listed_until,
     versionAt: v.version_at,

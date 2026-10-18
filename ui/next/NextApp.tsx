@@ -8,8 +8,9 @@ import {
   type OverwriteSnap,
   useAppController,
 } from '../components/useAppController';
+import { useIvHistory } from '../components/useIvHistory';
 import { useMediaQuery } from '../components/useMediaQuery';
-import { loaderNote } from '../load';
+import { API_LABEL, loaderNote } from '../load';
 import { MAX_PINS } from '../pins';
 import type { PrefsRead } from '../prefs';
 import { shareSupported } from '../share';
@@ -31,10 +32,18 @@ import { type PaletteRun, paletteAtmK, paletteItems } from '../view/palette';
 import { shareReplaceConfirmText } from '../view/persistNote';
 import { clearUndo } from '../view/positionsRegion';
 import type { DXUnit } from '../view/scenario';
-import { type ChartMode, chartMode, INITIAL_SHELL, layoutTier, shellReduce } from '../view/shell';
+import {
+  type ChartMode,
+  chartMode,
+  INITIAL_SHELL,
+  ivVisible,
+  layoutTier,
+  shellReduce,
+} from '../view/shell';
 import { bookIoToast, overwrittenText, restoreEntryFailText } from '../view/topMenu';
 import { BookDialog } from './BookDialog';
 import type { MarketAdd } from './market/BoardMonth';
+import { IvHistory } from './market/IvHistory';
 import { PanelHead } from './PanelHead';
 import { Palette } from './parts/Palette';
 import { Toasts, useToasts } from './parts/Toast';
@@ -74,6 +83,9 @@ import { useTheme } from './useTheme';
  * #89 段 A で全体のキー（1〜5・G・T。useGlobalKeys）を入れた。
  * #89 段 B でコマンドパレット（Ctrl / ⌘ + K。parts/Palette.tsx）を入れた。行（ui/view/palette.ts）は開いている間だけ
  * 作り、実行の記述を runPalette が dispatch / send / 既存のコールバックへ振り分ける（新しい state の action は無い）。
+ * #79 段 B で IV 推移（market/IvHistory.tsx）を入れた。読み込みの状態は常駐の useIvHistory（パネルを閉じても残る・
+ * 保存しない）。見えたら（ivVisible）初めての 1 回だけ右端を読む。データ元が API のときは /api/atm_iv、dev の合成の板・
+ * ファイルのときは dev だけ /fixtures/atm_iv（本番のビルドは常に /api/atm_iv）。トップバーの [最新] では読み直さない。
  */
 export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
   const c = useAppController(boot);
@@ -81,6 +93,9 @@ export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
   const theme = useTheme(prefs, boot.storage);
   const tier = layoutTier(useMediaQuery(PHONE_QUERY), useMediaQuery(PC_QUERY));
   const [shell, send] = useReducer(shellReduce, INITIAL_SHELL);
+  const ivEndpoint =
+    import.meta.env.DEV && state.sourceLabel !== API_LABEL ? '/fixtures/atm_iv' : '/api/atm_iv';
+  const iv = useIvHistory(ivVisible(shell, tier), ivEndpoint);
   // 全体のキー 1〜5・G・T・Ctrl / ⌘ + K（#89。パレットの行の実行も同じ ctx）
   const [paletteOpen, setPaletteOpen] = useState(false);
   const onPalette = useCallback(() => setPaletteOpen(true), []);
@@ -474,7 +489,19 @@ export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
           )
         }
         smile={(seg) =>
-          chain ? (
+          shell.market === 'iv' ? (
+            <IvHistory
+              load={iv.load}
+              view={iv.view}
+              nonTradingDays={state.calendar.nonTradingDays}
+              seg={seg}
+              onRefresh={iv.refresh}
+              onRetry={iv.retry}
+              onTf={iv.setTf}
+              onMode={iv.setMode}
+              onViewport={iv.setViewport}
+            />
+          ) : chain ? (
             <Smile
               chain={chain}
               monthId={monthId}

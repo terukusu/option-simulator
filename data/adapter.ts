@@ -9,8 +9,10 @@
  * - 手入力は板を読まない（legs.ts の manualOptionLeg / futureLeg）
  *
  * 取引カレンダーは板と別に同一オリジンの `/api/calendar` を読む（loadCalendarJson。7.5）。
+ * IV 推移は IV 推移を開いたときだけ同一オリジンの `/api/atm_iv` を読む（loadAtmIv。7.1。#79）。
  */
 
+import { type AtmIvData, type AtmIvSource, atmIvUrl, validateAtmIvJson } from './atmIv';
 import { type CalendarJson, validateCalendarJson } from './calendar';
 import { type ChainJson, parseChainJson } from './chainJson';
 import { type Chain, type NormalizeOptions, normalizeChain } from './normalize';
@@ -87,7 +89,7 @@ async function fetchText(
   label: string,
   base: Omit<FetchInit, 'signal'>,
   /** 何を読むか（エラーの文言の名詞） */
-  what: '板' | 'カレンダー' = '板',
+  what: '板' | 'カレンダー' | 'IV 推移' = '板',
 ): Promise<string> {
   const init: FetchInit = { ...base };
   if (opts.signal) init.signal = opts.signal;
@@ -194,6 +196,40 @@ export async function loadCalendarJson(opts: CalendarLoadOptions = {}): Promise<
   }
   const r = validateCalendarJson(parsed);
   if (!r.ok) throw new ChainLoadError('カレンダーの JSON が不正（api）', r.errors);
+  return r.value;
+}
+
+export interface AtmIvLoadOptions {
+  /** API の URL（既定は同一オリジンの /api/atm_iv。dev の合成の応答は /fixtures/atm_iv） */
+  endpoint?: string;
+  /** 読む範囲（UNIX 秒。UTC の 0 時にそろえる。省略 = 右端の 1 回分） */
+  range?: { start: number; end: number };
+  fetch?: FetchLike;
+  signal?: AbortSignal;
+}
+
+/**
+ * IV 推移（`/api/atm_iv`。#79）を読んで検証する。fetch の作法は `/api/calendar` と同じ（`cache: 'no-cache'`・
+ * `redirect: 'manual'` でログイン切れを検出）。失敗は ChainLoadError（応答の本文は入れない）。AbortError はそのまま投げる。
+ */
+export async function loadAtmIv(tf: AtmIvSource, opts: AtmIvLoadOptions = {}): Promise<AtmIvData> {
+  const load: LoadOptions = opts.signal ? { signal: opts.signal } : {};
+  const text = await fetchText(
+    opts.fetch ?? defaultFetch,
+    atmIvUrl(opts.endpoint ?? '/api/atm_iv', tf, opts.range),
+    load,
+    'api',
+    { cache: 'no-cache', redirect: 'manual' },
+    'IV 推移',
+  );
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    throw new ChainLoadError('IV 推移の JSON が不正（api）', ['$: JSON として解析できない']);
+  }
+  const r = validateAtmIvJson(parsed, tf);
+  if (!r.ok) throw new ChainLoadError('IV 推移の JSON が不正（api）', r.errors);
   return r.value;
 }
 
