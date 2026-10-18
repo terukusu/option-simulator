@@ -7083,7 +7083,8 @@ async function motionLoafFlow(vp) {
  * 時間レールを押してドラッグしている間 .stage-main の .live / [data-live]・線の transition-duration 0s、離して 200ms 後に .live が無い
  * (c) 足を追加した直後の新しい足マーカーに legmark-in（120ms）(d) スマホのシート peek → full の直後に height 0.18s・
  * 終わった後に縦・横 0 (e) reduced = reducedMotion: 'reduce' のコンテキストで (a)(c)(d) が 0s / animation なし
- * (g) パレットの ATM へ → 板を手で 300px → [最新] で読み直す → scrollTop が ±1px (h) 1〜5 の行き先の名前が空でなく互いに違う
+ * (g) パレットの ATM へ → 板を手で 300px → [最新] で読み直しても ATM へ跳び直さない（強調なし）。枠は #85 の規則で ATM ±1px
+ * (h) 1〜5 の行き先の名前が空でなく互いに違う
  */
 async function motionFlows(vp, reduced = false) {
   const tag = `${vp.width}x${vp.height}${reduced ? ' reduce' : ''}`;
@@ -7281,7 +7282,8 @@ async function motionFlows(vp, reduced = false) {
   // (g) AC-C6: パレットの ATM へ → 手で 300px → [最新]（読み直し。/api/chain を同じ合成の板に差し替える）。
   //     atmJump の要求は 1 回で消費する = 読み直しの後に ATM への「跳び」（強調 .hit の付く jump）が起きない。
   //     読み直しで板が新しいオブジェクトになると、#85 の規則（初めて見えたときに ATM へ。強調なし）で枠は ATM の位置に
-  //     戻る（手のスクロールは保たない）。Issue の AC-C6 の文言（scrollTop が読み直しの前と同じ）とはここが違う（handoff）
+  //     戻る（手のスクロールは保たない）。Issue の AC-C6 は 2026-10-18 にこの言い方へ改訂した（元の「scrollTop が読み直しの
+  //     前と同じ」は #85 の規則と矛盾するため）
   {
     const boardText = readFileSync(join(root, FIXTURE_PATH), 'utf8');
     await ctx.route('**/api/calendar**', (route) =>
