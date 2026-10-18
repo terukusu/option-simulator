@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { boardOptionLeg, normalizeChain } from '../../data';
-import { DEFAULT_SETTINGS } from '../../model';
+import { DEFAULT_MARGIN_PARAMS, DEFAULT_SETTINGS } from '../../model';
 import { preparePosition } from '../../model/position';
 import { ZERO_SCENARIO } from '../../model/scenario';
 import { buildWideChainJson } from '../../scripts/synthBoard';
@@ -38,6 +38,13 @@ import {
   resampleBars,
   resolveIvViewport,
 } from '../../ui/view/ivHistory';
+import {
+  type MarginView,
+  marginLine,
+  marginNow,
+  marginPoint,
+  marginTail,
+} from '../../ui/view/margin';
 import { marketPill } from '../../ui/view/marketPill';
 import { metricsModel } from '../../ui/view/metrics';
 import { metricsPanel } from '../../ui/view/metricsPanel';
@@ -1483,5 +1490,109 @@ describe('性能（#79 IV 推移の 1 フレーム）', () => {
     };
     expect(frame()).toBeGreaterThan(0);
     expectWithinBudget('#130 IV 推移の十字線', frame, { warmup: 10, runs: 30 });
+  });
+});
+
+/**
+ * #131 AC17: 証拠金の概算を足した描き直し（足 10 本・幅 1,000px・資金あり）。
+ * (1) スライダー 1 回（d・ΔX・Δσ・Δs が毎回変わる）: #6 の計算（グラフの表示モデル + 指標 + テール表）+ 証拠金の
+ *     シナリオの点 + テール 5 行 + 指標パネル（タイル・内訳・テールの証拠金の表）。今の証拠金は足・板・β などが変わった
+ *     ときだけ（useAppController の memo）、追証の線はスライダーでは作らない（止まってから。useMarginLine）
+ * (2) 止まった後の 1 回: 追証の線（板の全域 + 数値欄の範囲の探索）+ 線を入れたグラフの表示モデル（線の値は memo 済み）
+ */
+describe('性能（#131 AC17: 証拠金と追証の線）', () => {
+  const { ctx, rows } = makeMarket();
+  const legs = preparePosition(PERF_LEGS, ctx);
+  const board = {
+    months: [
+      { F: M1.F, rows: rows[M1.id] ?? [] },
+      { F: M2.F, rows: rows[M2.id] ?? [] },
+    ],
+  };
+  const built = pnlDomains(board, legs, ctx);
+  if (!built) throw new Error('損益グラフの基礎が作れない');
+  const base = built;
+  const { holidays } = CALENDAR;
+  const capital = 15_000_000;
+  const params = DEFAULT_MARGIN_PARAMS;
+  const scenario0 = { ...ZERO_SCENARIO, days: 5 };
+  const today = todayLine(base, null, 1000, scenario0);
+  const now = marginNow(base, scenario0, params, capital, holidays);
+  let tick = 0;
+
+  function slide(): number {
+    tick = (tick + 1) % 40;
+    const scenario = {
+      ...scenario0,
+      days: 5 + tick * 0.5,
+      dX: -tick * 100,
+      dSigma: tick * 0.5,
+      skew: (tick % 10) * 0.5,
+    };
+    const m = pnlChartModel({
+      base,
+      scenario,
+      viewport: null,
+      pnlY: DEFAULT_PNL_Y,
+      plotWidth: 1000,
+      plotHeight: 260,
+      todayYs: today,
+    });
+    const mm = metricsModel({ base, scenario, unit: 'auto' });
+    const mv: MarginView = {
+      capital,
+      params,
+      now,
+      point: marginPoint(base, scenario, params, capital, holidays),
+      tail: marginTail(base, { ...scenario, dX: 0 }, params, capital, holidays),
+    };
+    const v = metricsPanel(mm, 0, mv);
+    return m.lines.length + mm.tail.rows.length + v.tiles.length + mv.tail.length;
+  }
+
+  // 止まった後の描き直しでは、指定日の線（dateLine）・今日の線はスライダーの最後のフレームで作った memo のまま
+  // （usePnlChartModel）。計測の前（before）に次のシナリオとその指定日の線を用意し、計測には入れない
+  const todayFull = todayLine(base, base.full, 1000, scenario0);
+  let settleScenario = scenario0;
+  let settleDateYs = dateLine(base, base.full, 1000, settleScenario);
+  function nextSettle(): void {
+    tick = (tick + 1) % 40;
+    settleScenario = { ...scenario0, days: 5 + tick * 0.5, dSigma: tick * 0.5 };
+    settleDateYs = dateLine(base, base.full, 1000, settleScenario);
+  }
+
+  function settle(): number {
+    const scenario = settleScenario;
+    const xs = marginLine(base, scenario, params, capital, holidays);
+    const m = pnlChartModel({
+      base,
+      scenario,
+      // 全域を表示（線が描画域に入る）
+      viewport: base.full,
+      pnlY: DEFAULT_PNL_Y,
+      plotWidth: 1000,
+      plotHeight: 260,
+      todayYs: todayFull,
+      dateYs: settleDateYs,
+      marginLine: xs,
+    });
+    return xs.length + m.marginCalls.length;
+  }
+
+  it(`スライダー 1 回（#6 + 証拠金のシナリオの点・テール 5 行・指標パネル）が ${BUDGET_MS} ms 以内（30 回の最小値）`, () => {
+    expect(slide()).toBeGreaterThan(8);
+    expectWithinBudget('#131 スライダー 1 回（証拠金つき）', slide, { warmup: 20, runs: 30 });
+  });
+
+  it(`止まった後の 1 回（追証の線 + グラフの表示モデル）が ${BUDGET_MS} ms 以内（30 回の最小値）`, () => {
+    // 資金 1,500 万円で線が板の全域（描画域）の中に出る形（線が無い = 探索だけ、では測らない）
+    const xs = marginLine(base, scenario0, params, capital, holidays);
+    expect(xs.length).toBeGreaterThan(0);
+    expect(settle()).toBeGreaterThan(1);
+    expectWithinBudget('#131 追証の線（止まった後）', settle, {
+      warmup: 10,
+      runs: 30,
+      before: nextSettle,
+    });
   });
 });

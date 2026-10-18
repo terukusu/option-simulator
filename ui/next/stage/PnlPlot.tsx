@@ -25,7 +25,9 @@ import {
   emptyStageGrid,
   ivRailObstacle,
   legMarkers,
+  MARGIN_CALL_TEXT,
   MARKER_BAND_PX,
+  marginCallLabels,
   type StageFrame,
   stageFill,
   stageHandle,
@@ -113,11 +115,18 @@ export function PnlPlot(p: {
   );
   // 交点のラベルは IV レールの吹き出し（描画域の右に重ねて描く。レールは同じ高さで右隣）も避ける
   const dSigma = scenario.dSigma;
+  // 追証の線の札（#131）: 交点のラベルはこの札の箱も避ける
+  const callLabels = useMemo(() => (mini ? [] : marginCallLabels(model)), [model, mini]);
   const labels = useMemo(() => {
     if (!marks || surfaceOn) return [];
-    const obstacles = mini ? [] : [ivRailObstacle(dSigma, p.height, p.width + frame.offsetX)];
+    const obstacles = mini
+      ? []
+      : [
+          ivRailObstacle(dSigma, p.height, p.width + frame.offsetX),
+          ...callLabels.map((l) => l.box),
+        ];
     return stageMarkLabels(marks, model, obstacles);
-  }, [marks, model, mini, surfaceOn, dSigma, p.height, p.width, frame.offsetX]);
+  }, [marks, model, mini, surfaceOn, dSigma, p.height, p.width, frame.offsetX, callLabels]);
   // 面: 色（テーマが変わったら読み直す。テーマの属性は親のレイアウトの effect が入れるので passive で読む）
   const [colors, setColors] = useState<SurfaceColors | null>(null);
   const { theme } = p;
@@ -407,6 +416,17 @@ export function PnlPlot(p: {
                 y2={bottom}
               />
             )}
+            {!mini &&
+              model.marginCalls.map((m) => (
+                <line
+                  key={`mc${m.x}`}
+                  class="mcall"
+                  x1={m.px}
+                  x2={m.px}
+                  y1={plot.top}
+                  y2={bottom}
+                />
+              ))}
             {!surfaceOn &&
               model.pins.map((pin) => (
                 <path key={`pin${pin.no}`} class={`ln-pin p${pin.no}`} d={pin.d} />
@@ -440,6 +460,11 @@ export function PnlPlot(p: {
               X₀
             </text>
           )}
+          {callLabels.map((l) => (
+            <text key={`mcl${l.x}`} class={`mcall-lbl ${l.anchor}`} x={l.labelX} y={l.labelY}>
+              {MARGIN_CALL_TEXT}
+            </text>
+          ))}
           {!mini &&
             !surfaceOn &&
             marks?.marks.map((m) =>

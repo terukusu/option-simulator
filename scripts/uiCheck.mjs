@@ -987,6 +987,9 @@ async function measureAll() {
     // 資金ありの売り 5 枚（#131 AC18）
     await marginAll();
     console.log(`証拠金の検査（#131）: ${marginStats.pass} / ${marginStats.total} 状態で pass`);
+    console.log(
+      `追証の線の検査（#131）: ${marginLineStats.pass} / ${marginLineStats.total} 状態で pass`,
+    );
     // 市場の追加の状態（1200 / 1280 / 1800・322 行の板・字幅 2 通り。#85）
     await marketSweep();
     console.log(
@@ -1438,12 +1441,74 @@ async function marginAll() {
           `${lbl} ${w}x${h}: タイル ${r.tiles}・証拠金の表 ${r.rows} 行・必要証拠金 ${r.margin}・余力 ${r.room} ${ok ? 'pass' : '← NG'}`,
         );
         if (st === 'pc') await breakdownOpenCheck(page, lbl, w, h, `${shot}-kv`, want);
+        // 追証の線（#131 段 C）: 舞台が出ている状態（スマホの full は舞台がミニなので除く）
+        if (st !== 'full') await marginLineCheck(page, `${lbl} ${w}x${h}`, `${shot}-${st}-line`);
       }
       await ctx.close();
     }
   }
 }
 const marginStats = { pass: 0, total: 0 };
+const marginLineStats = { pass: 0, total: 0 };
+
+/**
+ * 追証の線（#131 AC16・AC20 の画面側）: 全域まで縮小して、縦の破線 line.mcall が 1 本以上・札「追証」が同じ数で
+ * 舞台の SVG の中（横に切れない）。描画域のキー（]）で d を変えた直後は隠れ（0 本）、止まって 120ms 後に戻る
+ */
+async function marginLineCheck(page, lbl, shotName) {
+  // 全域まで縮小（凡例行の［−］が出ていればそれ、スマホは描画域の上のホイール）
+  const btn = page.locator('button[aria-label="縮小"]:visible').first();
+  if ((await btn.count()) > 0) {
+    for (let i = 0; i < 12; i++) await btn.click();
+  } else {
+    const b = await page.locator('.chart:not(.mini)').boundingBox();
+    if (b) {
+      await page.mouse.move(b.x + b.width * 0.5, b.y + b.height * 0.3);
+      for (let i = 0; i < 12; i++) {
+        await page.mouse.wheel(0, 240);
+        await page.waitForTimeout(30);
+      }
+    }
+  }
+  await page.waitForTimeout(400);
+  const read = () =>
+    page.evaluate(() => {
+      const chart = document.querySelector('.chart:not(.mini)');
+      const box = chart?.getBoundingClientRect();
+      const lines = [...(chart?.querySelectorAll('line.mcall') ?? [])];
+      const labels = [...(chart?.querySelectorAll('text.mcall-lbl') ?? [])];
+      const cut = labels.filter((t) => {
+        const b = t.getBoundingClientRect();
+        return !box || b.left < box.left - 0.5 || b.right > box.right + 0.5;
+      }).length;
+      return {
+        lines: lines.length,
+        labels: labels.length,
+        texts: labels.map((t) => t.textContent),
+        cut,
+      };
+    });
+  const r = await read();
+  await page.focus('.chart:not(.mini)');
+  await page.keyboard.press(']');
+  const hidden = (await read()).lines;
+  await page.waitForTimeout(400);
+  const back = (await read()).lines;
+  const ok =
+    r.lines >= 1 &&
+    r.labels === r.lines &&
+    r.texts.every((t) => t === '追証') &&
+    r.cut === 0 &&
+    hidden === 0 &&
+    back >= 1;
+  marginLineStats.total++;
+  if (ok) marginLineStats.pass++;
+  else failed = true;
+  if (shotsDir) await page.screenshot({ path: join(shotsDir, `${shotName}.png`) });
+  console.log(
+    `${lbl}: 追証の線 ${r.lines} 本・札 ${r.labels}（切れ ${r.cut}）・d を変えた直後 ${hidden} 本・止まった後 ${back} 本 ${ok ? 'pass' : '← NG'}`,
+  );
+}
 
 /** 足 2 本のタブ A + タブ「ヘッジ案」（重ねる相手）の作業 */
 const twoTabs = JSON.stringify({ ...fixture, active: 0, tabs: [fixture.tabs[0], fixture.tabs[1]] });

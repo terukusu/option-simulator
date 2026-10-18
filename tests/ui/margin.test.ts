@@ -6,6 +6,7 @@ import {
   DEFAULT_MARGIN_PARAMS,
   DEFAULT_SETTINGS,
   MARGIN_HORIZON_BUSINESS_DAYS,
+  MARGIN_LINE_SAMPLES,
   type ModelSettings,
   marginAt,
   marginRoom,
@@ -13,13 +14,18 @@ import {
   TAIL_SHOCKS,
 } from '../../model';
 import { CALENDAR } from '../../ui/calendar';
+import { PIN_SETTLE_MS } from '../../ui/pins';
 import { DEFAULT_MARGIN_PREFS, type MarginPrefs } from '../../ui/prefs';
 import { type Action, initialState, reduce, type State } from '../../ui/state';
 import { DASH, fmtNum } from '../../ui/view/format';
 import {
   capitalOf,
+  MARGIN_LINE_OUTER_SAMPLES,
+  MARGIN_LINE_SETTLE_MS,
   type MarginView,
   marginCalc,
+  marginLine,
+  marginLineRanges,
   marginNow,
   marginParamsOf,
   marginPoint,
@@ -42,8 +48,23 @@ import {
   ROOM_NO_CAPITAL_TEXT,
   ROOM_TILE_LABEL,
 } from '../../ui/view/metricsPanel';
-import { type PnlBase, pnlDomains } from '../../ui/view/pnlChart';
+import {
+  DEFAULT_PNL_Y,
+  MARGIN_CALL_LABEL_PX,
+  type PnlBase,
+  pnlChartModel,
+  pnlDomains,
+  scenarioFull,
+} from '../../ui/view/pnlChart';
 import { positionModel } from '../../ui/view/position';
+import { DX_INPUT_MAX_RATIO, DX_INPUT_MIN_RATIO } from '../../ui/view/scenario';
+import { labelWidth, scenarioMarks } from '../../ui/view/scenarioMarks';
+import {
+  MARGIN_CALL_LABEL_DY,
+  MARGIN_CALL_TEXT,
+  marginCallLabels,
+  stageMarkLabels,
+} from '../../ui/view/stage';
 import { fixture } from '../support/fixtures';
 import { SUB_MAX_UNITS, widthUnits } from '../support/widthUnits';
 
@@ -410,5 +431,180 @@ describe('内訳とテールの証拠金の表（#131 AC14）', () => {
     const empty = metricsModel({ base: null, scenario: putSell.scenario, unit: 'auto' });
     expect(metricsPanel(empty, 0, mv).marginTail).toEqual([]);
     expect(metricsPanel(empty, 0, mv).tiles).toEqual([]);
+  });
+});
+
+describe('追証の線（#131 AC16）', () => {
+  const base = baseOf(putSell);
+  const { x0 } = base.ctx;
+  const sc = putSell.scenario;
+  const roomAt = (b: PnlBase, x: number, capital: number, scenario = sc) =>
+    marginCalc(b, x, scenario, DEFAULT_MARGIN_PARAMS, capital, holidays)?.room ?? Number.NaN;
+  const chart = (line: readonly number[], viewport: [number, number] | null = null) =>
+    pnlChartModel({
+      base,
+      scenario: sc,
+      viewport,
+      pnlY: DEFAULT_PNL_Y,
+      plotWidth: 600,
+      plotHeight: 220,
+      marginLine: line,
+    });
+
+  it('資金ありの put 売り: X₀ より下に 1 本、両側 1 円で余力の符号が変わる。表示モデルが x と画素を返す', () => {
+    const capital = 12_000_000;
+    const xs = marginLine(base, sc, DEFAULT_MARGIN_PARAMS, capital, holidays);
+    expect(xs).toHaveLength(1);
+    const x = xs[0] as number;
+    expect(x).toBeLessThan(x0);
+    expect(Number.isInteger(x)).toBe(true);
+    expect(Math.sign(roomAt(base, x - 1, capital))).not.toBe(
+      Math.sign(roomAt(base, x + 1, capital)),
+    );
+    expect(roomAt(base, x - 1, capital)).toBeLessThan(0);
+    // 表示モデル: 表示範囲（全域）の中なら x と画素、札は線の右
+    const m = chart(xs, [x - 5000, x + 5000]);
+    expect(m.marginCalls).toHaveLength(1);
+    const c = m.marginCalls[0];
+    expect(c?.x).toBe(x);
+    expect(c?.px).toBeCloseTo(m.plot.left + m.plot.width / 2, 6);
+    expect(c?.anchor).toBe('start');
+  });
+
+  it('資金なしでは線を返さない（表示モデルも空）。余力がどこでも正なら空', () => {
+    expect(marginLine(base, sc, DEFAULT_MARGIN_PARAMS, null, holidays)).toEqual([]);
+    expect(chart([]).marginCalls).toEqual([]);
+    // 入力の無い呼び出し（今までの呼び方）も空
+    expect(
+      pnlChartModel({
+        base,
+        scenario: sc,
+        viewport: null,
+        pnlY: DEFAULT_PNL_Y,
+        plotWidth: 600,
+        plotHeight: 220,
+      }).marginCalls,
+    ).toEqual([]);
+    // 買いだけ: 必要証拠金 0・余力 = 資金 − 支払 − 手数料 > 0（全域で正）
+    const buy = baseOf(buyOnly);
+    expect(marginLine(buy, buyOnly.scenario, DEFAULT_MARGIN_PARAMS, 50_000_000, holidays)).toEqual(
+      [],
+    );
+  });
+
+  it('資金を減らすと線が上がる（3 段で単調）。ストラングル売りは両側に 1 本ずつ', () => {
+    const lines = [20_000_000, 12_000_000, 8_000_000].map(
+      (c) => marginLine(base, sc, DEFAULT_MARGIN_PARAMS, c, holidays)[0] as number,
+    );
+    expect(lines[0]).toBeLessThan(lines[1] as number);
+    expect(lines[1]).toBeLessThan(lines[2] as number);
+    const strangle = run(putSell, add(70_000, 'call', 'sell'));
+    const b2 = baseOf(strangle);
+    const xs = marginLine(b2, strangle.scenario, DEFAULT_MARGIN_PARAMS, 12_000_000, holidays);
+    expect(xs).toHaveLength(2);
+    expect(xs[0]).toBeLessThan(b2.ctx.x0);
+    expect(xs[1]).toBeGreaterThan(b2.ctx.x0);
+  });
+
+  it('ΔX に依らない（ΔX 以外のシナリオで作る）。d・Δσ を変えると線が動く', () => {
+    const capital = 12_000_000;
+    const a = marginLine(base, sc, DEFAULT_MARGIN_PARAMS, capital, holidays);
+    const b = marginLine(base, { ...sc, dX: -9000 }, DEFAULT_MARGIN_PARAMS, capital, holidays);
+    expect(b).toEqual(a);
+    const up = { ...sc, days: 3, dSigma: 10 };
+    const c = marginLine(base, up, DEFAULT_MARGIN_PARAMS, capital, holidays);
+    expect(c).toHaveLength(1);
+    // IV を上げると put 売りの余力が減る → 線が上がる
+    expect(c[0]).toBeGreaterThan(a[0] as number);
+    // その状態で両側の符号が変わる（指定日 + シナリオの曲線）
+    const x = c[0] as number;
+    expect(Math.sign(roomAt(base, x - 1, capital, up))).not.toBe(
+      Math.sign(roomAt(base, x + 1, capital, up)),
+    );
+  });
+
+  it('探索範囲は板の全域 + ΔX の数値欄が届く範囲（#144）。板の外の線も見つける', () => {
+    const rs = marginLineRanges(base);
+    const [bLo, bHi] = base.boardFull;
+    expect(rs.map((r) => r.samples)).toEqual([
+      MARGIN_LINE_OUTER_SAMPLES,
+      MARGIN_LINE_SAMPLES,
+      MARGIN_LINE_OUTER_SAMPLES,
+    ]);
+    expect(rs[0]?.lo).toBeCloseTo(Math.max(base.xLo, (1 + DX_INPUT_MIN_RATIO) * x0), 6);
+    expect(rs[1]).toMatchObject({ lo: bLo, hi: bHi });
+    expect(rs[2]?.hi).toBeCloseTo(x0 * (1 + DX_INPUT_MAX_RATIO), 6);
+    // 数値欄の両端の全域（scenarioFull）は探索範囲（の格子の余白を除く）を含む
+    const fLo = scenarioFull(base, DX_INPUT_MIN_RATIO * x0)[0];
+    const fHi = scenarioFull(base, DX_INPUT_MAX_RATIO * x0)[1];
+    expect(fLo).toBeLessThanOrEqual(rs[0]?.lo as number);
+    expect(fHi).toBeGreaterThanOrEqual(rs[2]?.hi as number);
+    // 大きな資金なら線は板の全域より下（外の区間で見つかる）
+    const capital = 50_000_000;
+    const xs = marginLine(base, sc, DEFAULT_MARGIN_PARAMS, capital, holidays);
+    expect(xs).toHaveLength(1);
+    const x = xs[0] as number;
+    expect(x).toBeLessThan(bLo);
+    expect(Math.sign(roomAt(base, x - 1, capital))).not.toBe(
+      Math.sign(roomAt(base, x + 1, capital)),
+    );
+  });
+
+  it('表示範囲の外は出さない。右端に近い札は線の左へ（anchor end）', () => {
+    const x = marginLine(base, sc, DEFAULT_MARGIN_PARAMS, 12_000_000, holidays)[0] as number;
+    expect(chart([x], [x + 100, x + 10_000]).marginCalls).toEqual([]);
+    expect(chart([x], [x - 10_000, x - 100]).marginCalls).toEqual([]);
+    expect(chart([Number.NaN], null).marginCalls).toEqual([]);
+    const m = chart([x], [x - 10_000, x + 10]);
+    expect(m.marginCalls).toHaveLength(1);
+    const c = m.marginCalls[0];
+    expect((c?.px as number) > m.plot.left + m.plot.width - MARGIN_CALL_LABEL_PX).toBe(true);
+    expect(c?.anchor).toBe('end');
+  });
+
+  it('札「追証」は線の横（上端 + 22px）。交点のラベルは札の箱を避ける', () => {
+    // シナリオ点 = X₀（満期の線が上端近く = 交点のラベルが札の高さに来る形）。線の X は表示モデルの入力で置く
+    const viewport: [number, number] = [x0 - 6000, x0 + 1500];
+    const chartAt = (line: number) =>
+      pnlChartModel({
+        base,
+        scenario: sc,
+        viewport,
+        pnlY: DEFAULT_PNL_Y,
+        plotWidth: 600,
+        plotHeight: 220,
+        marginLine: [line],
+      });
+    const hits = (
+      placed: ReturnType<typeof stageMarkLabels>,
+      box: { x0: number; x1: number; y0: number; y1: number },
+    ) =>
+      placed.some((p) => {
+        const w = labelWidth(p.text) * 1.15;
+        const [a, b] = p.anchor === 'start' ? [p.labelX, p.labelX + w] : [p.labelX - w, p.labelX];
+        return a < box.x1 && box.x0 < b && box.y0 < p.labelY + 7 && p.labelY - 7 < box.y1;
+      });
+    let clashed = 0;
+    for (let off = -400; off <= 100; off += 25) {
+      const m = chartAt(x0 + off);
+      const ls = marginCallLabels(m);
+      expect(ls).toHaveLength(1);
+      const l = ls[0];
+      if (!l) throw new Error('札が無い');
+      expect(l.labelY).toBe(m.plot.top + MARGIN_CALL_LABEL_DY);
+      expect(l.labelX).toBeGreaterThan(m.marginCalls[0]?.px as number);
+      expect(l.box.x1 - l.box.x0).toBeGreaterThanOrEqual(labelWidth(MARGIN_CALL_TEXT));
+      const marks = scenarioMarks({ base, scenario: sc, chart: m, unit: 'thousand' });
+      if (!marks) throw new Error('交点が無い');
+      // 避けないと重なる位置（この検査が意味を持つこと）を数え、避けると重ならない
+      if (hits(stageMarkLabels(marks, m, []), l.box)) clashed++;
+      expect(hits(stageMarkLabels(marks, m, [l.box]), l.box)).toBe(false);
+    }
+    expect(clashed).toBeGreaterThan(0);
+  });
+
+  it('止まってから作るまでの時間はピンの線と同じ 120ms', () => {
+    expect(MARGIN_LINE_SETTLE_MS).toBe(PIN_SETTLE_MS);
+    expect(MARGIN_LINE_SETTLE_MS).toBe(120);
   });
 });

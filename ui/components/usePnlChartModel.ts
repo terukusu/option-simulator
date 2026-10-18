@@ -5,6 +5,7 @@
  * - 今日の線は表示範囲・幅・β・動き方が変わったときだけ作る（#6）
  * - 指定日の線は ΔX で作り直さない（#52）
  * - ピンの線は前回分を使い回し、拡大縮小のフレームは点数を落として、止まって PIN_SETTLE_MS 経ったら描き直す（#22）
+ * - 追証の線（#131）は入力で受ける（useMarginLine が止まってから作った X。ΔX・パン・拡大では変わらない）
  * - pnlChartModel・pinLabels・scenarioMarks はその後（入力が変わったときだけ）
  *
  * 依存配列は旧 PnlChart.tsx のものをそのまま写した（1 つでも変えると perf の前提が崩れる）。
@@ -48,6 +49,8 @@ export interface PnlChartModelInput {
   pinLine: PinLineMode;
   /** 交点のラベルの金額の単位（指標の単位） */
   amountUnit: AmountUnit;
+  /** 追証の線の X（#131。useMarginLine。操作中・資金なしは空） */
+  marginLine?: readonly number[];
 }
 
 export interface PnlChartModelOutput {
@@ -67,6 +70,7 @@ export function usePnlChartModel({
   pins,
   pinLine,
   amountUnit,
+  marginLine,
 }: PnlChartModelInput): PnlChartModelOutput {
   // 今日の線はシナリオ IV を掛けない（d・ΔX・Δσ・Δs のスライダーで変わらない）ので、表示範囲・幅・β・動き方が
   // 変わったときだけ作る（#6。スライダー 1 回の描き直しを指定日の線 + 指標に絞る）
@@ -126,8 +130,21 @@ export function usePnlChartModel({
         dateYs,
         scenarioAtm,
         pins: pinData.lines,
+        marginLine,
       }),
-    [base, scenario, viewport, pnlY, plotWidth, plotHeight, todayYs, dateYs, scenarioAtm, pinData],
+    [
+      base,
+      scenario,
+      viewport,
+      pnlY,
+      plotWidth,
+      plotHeight,
+      todayYs,
+      dateYs,
+      scenarioAtm,
+      pinData,
+      marginLine,
+    ],
   );
   const pinMarks = useMemo(() => pinLabels(model), [model]);
   // シナリオ点の縦線と線の交点・金額のラベル（#52。ΔX = 0 でも X₀ 上に出す）
