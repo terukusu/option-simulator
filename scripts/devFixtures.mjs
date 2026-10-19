@@ -4,6 +4,7 @@
 // Node の型（@types/node）を入れていないので、型検査の対象外の .mjs に置く（型は devFixtures.d.mts）。
 // IV 推移（#79）の合成の応答も `/fixtures/atm_iv?tf=&start=&end=` で配る（`/api/atm_iv` と同じ形。架空の値。種つきの
 // 決まった関数なので、同じ要求には同じ応答）。Docker の context の許可リストの 1 本なので別ファイルにしない。
+// 日次の値（#152）の合成の応答も `/fixtures/atm_daily` で配る（`/api/atm_daily` と同じ形。架空の値。種つき）。
 
 import { readFileSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
@@ -186,6 +187,88 @@ export function atmIvQuery(url) {
   return { tf, range: { start, end } };
 }
 
+// ---- 日次の値の合成の応答（#152。架空の値）
+const ATM_DAILY_PATH = '/fixtures/atm_daily';
+/** 合成の日次の値の始まり（JST の日付の通し番号 = UTC の 1970-01-01 からの日数） */
+const DAILY_FIRST_DAY = Date.parse('2024-04-01T00:00:00Z') / 1000 / DAY;
+const dayIso = (day) => new Date(day * DAY * 1000).toISOString().slice(0, 10);
+
+/** その月の取引最終日（第 2 金曜 = SQ 日を取引日へ繰り上げた日の前の取引日。日の通し番号） */
+function lastTradingDayOf(year, month) {
+  const first = Date.UTC(year, month - 1, 1) / 1000 / DAY;
+  const wd = (((first + 4) % 7) + 7) % 7;
+  let sq = first + ((5 - wd + 7) % 7) + 7;
+  while (!tradingDay(sq)) sq--;
+  let ltd = sq - 1;
+  while (!tradingDay(ltd)) ltd--;
+  return ltd;
+}
+
+/** day 以後で最初の取引最終日と、その次の月の取引最終日（日の通し番号） */
+function contractMonths(day) {
+  const d = new Date(day * DAY * 1000);
+  let y = d.getUTCFullYear();
+  let m = d.getUTCMonth() + 1;
+  let l1 = lastTradingDayOf(y, m);
+  if (l1 < day) {
+    m = m === 12 ? 1 : m + 1;
+    if (m === 1) y++;
+    l1 = lastTradingDayOf(y, m);
+  }
+  const [y2, m2] = m === 12 ? [y + 1, 1] : [y, m + 1];
+  return [l1, lastTradingDayOf(y2, m2)];
+}
+
+/** 標準正規の決まった値（Box–Muller。2 つの hash01 から） */
+function gauss(n) {
+  const u = Math.max(hash01(n * 2 + 1), 1e-12);
+  const v = hash01(n * 2 + 2);
+  return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v);
+}
+
+/**
+ * `/api/atm_daily` と同じ形の合成の応答（架空の値）。取引日だけ（土日・同梱のカレンダーの取引の無い日は行なし）、
+ * 範囲の終わり = now の JST の日付（8:00 前は前日。含まない）。原資産は 1 日 1.1% 前後の種つきの酔歩、IV は下げで
+ * 上がる架空の反応（1% の下げで約 1 pt）と平均への回帰。1 / 2 限月は毎月の取引最終日で切り替わる（2 限月 = 1 限月の
+ * F の 0.02% 上の架空の値）。
+ */
+let dailyCache = null;
+export function synthAtmDaily(now = SYNTH_IV_NOW) {
+  if (dailyCache && dailyCache.now === now) return dailyCache.body;
+  const local = now + JST;
+  let endDay = Math.floor(local / DAY);
+  if (local - endDay * DAY < 8 * 3600) endDay--;
+  const days = [];
+  let s = 30000;
+  let iv = 19;
+  for (let day = DAILY_FIRST_DAY; day < endDay; day++) {
+    if (!tradingDay(day)) continue;
+    const r = 0.011 * gauss(day);
+    s *= Math.exp(r);
+    iv = Math.min(
+      60,
+      Math.max(
+        10,
+        iv + 0.12 * (19 - iv) - 100 * r * (r < 0 ? 1.2 : 0.6) + 0.4 * gauss(day + 100000),
+      ),
+    );
+    const [l1, l2] = contractMonths(day);
+    const f1 = Math.round(s * 100) / 100;
+    days.push({
+      d: dayIso(day),
+      t: `${dayIso(day)}T15:00:00+09:00`,
+      iv: Math.round(iv * 1e4) / 1e4,
+      f1,
+      l1: dayIso(l1),
+      f2: Math.round(s * 1.0002 * 100) / 100,
+      l2: dayIso(l2),
+    });
+  }
+  const body = { schema_version: 1, start: '2010-01-01', end: dayIso(endDay), days };
+  dailyCache = { now, body };
+  return body;
+}
+
 /** @returns {import('vite').Plugin} */
 export function serveSyntheticFixtures() {
   return {
@@ -194,6 +277,13 @@ export function serveSyntheticFixtures() {
     configureServer(server) {
       server.middlewares.use((req, res, next) => {
         const path = (req.url ?? '').split('?')[0] ?? '';
+        if (path === ATM_DAILY_PATH) {
+          // パラメータは読まない（サーバーと同じ）
+          res.setHeader('Content-Type', 'application/json; charset=utf-8');
+          res.setHeader('Cache-Control', 'no-store');
+          res.end(JSON.stringify(synthAtmDaily()));
+          return;
+        }
         if (path === ATM_IV_PATH) {
           const q = atmIvQuery(req.url ?? '');
           const body = q && synthAtmIv(q.tf, q.range);

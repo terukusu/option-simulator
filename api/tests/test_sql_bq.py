@@ -5,7 +5,8 @@ CI では動かさない（BigQuery の認証が要る）。手元で（ADC。gc
 データセットは OPTIONCHAN_BQ_DATASET（既定 optionchan_tokyo）、ロケーションは OPTIONCHAN_BQ_LOCATION。
 
 - 実際の runner と同じ SQL・パラメータの型で dry_run=True・use_query_cache=False のジョブを作る
-- 見積もり（total_bytes_processed）が 512 MiB 以下（atm_cm_iv は 64 MiB 以下。値は -s で表示。PR に記録する）
+- 見積もり（total_bytes_processed）が 512 MiB 以下（atm_cm_iv は 64 MiB 以下、atm_cm_daily は 128 MiB 以下。
+  値は -s で表示。PR に記録する）
 - 結果の列名・型が contract.py の宣言（集計するクエリは OUTPUTS）と一致（dry run の job.schema）
 - atm_cm_iv（#79 AC6）は足ごとの最大の範囲（1m 3 日・1h 100 日・1d 400 日 + 読み足しの 11 日）でも見る
 """
@@ -15,7 +16,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from simulator_api import atm_iv, bq, contract
+from simulator_api import atm_daily, atm_iv, bq, contract
 from simulator_api import settings as st
 
 PROJECT = os.environ.get("OPTIONCHAN_BQ_PROJECT", "")
@@ -41,6 +42,9 @@ def params(name, now):
         return {}
     if name == "atm_cm_iv":
         return atm_iv_params("1h", now)
+    if name == "atm_cm_daily":  # 全期間（#152。確定した範囲の終わりまで）
+        start_at, end_at = atm_daily.read_window(atm_daily.settled_end(now))
+        return {"start_at": start_at, "end_at": end_at}
     if name == "latest_runs":
         return {"start_at": now - timedelta(days=st.SEARCH_DAYS), "end_at": now + timedelta(seconds=1)}
     # 1 秒の窓。日中の後半（UTC の日の終わりに近い時刻 = 同じパーティションに日中 + 夜間 + 翌朝が入る）を見る。
@@ -88,3 +92,7 @@ def test_atm_cm_iv_max_range_dry_run(runner, tf, record_property):
     days = (p["end_at"] - p["start_at"]).days
     dry_run(runner, "atm_cm_iv", p, f"atm_cm_iv {tf} {days} 日", record_property)
     assert runner.maximum_bytes_billed("atm_cm_iv") == 64 * MiB
+
+
+def test_atm_cm_daily_cap_is_128mib(runner):
+    assert runner.maximum_bytes_billed("atm_cm_daily") == 128 * MiB
