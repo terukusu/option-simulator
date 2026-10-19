@@ -16,6 +16,7 @@ import {
   toSaved,
 } from '../../ui/persist';
 import type { PinNo } from '../../ui/pins';
+import { DEFAULT_MARGIN_PREFS } from '../../ui/prefs';
 import {
   type Action,
   initialState,
@@ -24,6 +25,8 @@ import {
   type State,
   type UiLeg,
 } from '../../ui/state';
+import { aiEnvFromState, buildAiContext } from '../../ui/view/aiContext';
+import { markNumbers, parseAiText } from '../../ui/view/aiText';
 import { atmStrike, boardRows } from '../../ui/view/board';
 import { boardBadges, boardRowTexts } from '../../ui/view/boardPanel';
 import { bookListModel } from '../../ui/view/bookList';
@@ -1662,6 +1665,70 @@ describe('性能（#152 追証マップ）', () => {
         warmup: 2,
         runs: RECORD_RUNS,
       },
+    );
+  });
+});
+
+/**
+ * #135: AI の道具の事前計算（[このポジを診断] を押してから送るまでのブラウザの計算）と、流れの文の描き直しの計算。
+ * 足 10 本・322 行 × 2 限月の板・資金あり（追証の水準まで）。事前計算は 300 ms 未満（K15・計画 D10。BUDGET_MS に
+ * 依らない固定の閾値）、返答の文（約 1,200 字）の木と数字の照合は描き直しの予算（BUDGET_MS）以内。
+ */
+describe('性能（#135 AI の事前計算と返答の描き直し）', () => {
+  const chain = normalizeChain(buildWideChainJson());
+  const [m1, m2] = chain.months;
+  if (!m1 || !m2) throw new Error('限月が無い');
+  const add = (expiry: string, k: number, optionType: 'put' | 'call', side: 'buy' | 'sell') =>
+    ({ type: 'addBoardLeg', expiry, k, optionType, side }) as Action;
+  let s: State = reduce(initialState, { type: 'loaded', chain, label: 'wide' });
+  for (const a of [
+    add(m1.id, 64000, 'put', 'sell'),
+    add(m1.id, 70500, 'call', 'sell'),
+    add(m1.id, 60000, 'put', 'buy'),
+    add(m1.id, 73000, 'call', 'buy'),
+    add(m1.id, 55000, 'put', 'sell'),
+    add(m2.id, 62500, 'put', 'sell'),
+    add(m2.id, 72500, 'call', 'sell'),
+    add(m2.id, 60000, 'put', 'buy'),
+    add(m2.id, 75000, 'call', 'buy'),
+    add(m2.id, 67500, 'call', 'buy'),
+  ]) {
+    s = reduce(s, a);
+  }
+  const env = aiEnvFromState(s, { ...DEFAULT_MARGIN_PREFS, capitalYen: 10_000_000 });
+  if (!env?.base) throw new Error('道具の環境が無い');
+  const e = env;
+
+  it('事前計算 5 本 + 文脈の組み立てが 300 ms 未満（10 回の最小値）', () => {
+    expect(e.base?.legs).toHaveLength(10);
+    const r = record('#135 事前計算 5 本 + 文脈', () => buildAiContext(e), {
+      warmup: 2,
+      runs: 10,
+    });
+    expect(r.min).toBeLessThan(300);
+  });
+
+  it(`返答の文（約 1,200 字）の木と数字の照合が ${BUDGET_MS} ms 以内（30 回の最小値）`, () => {
+    const ctx = buildAiContext(e);
+    const para =
+      '−10% の SQ で −1,234 千円、IV が +5pt なら −617 千円。Δ は −0.45 枚（ミニ −4.5 枚）です。';
+    const text = Array.from(
+      { length: 5 },
+      (_, i) => `## 弱点 ${i + 1}: 見出し\n${para}\n${para}\n${para}`,
+    ).join('\n');
+    expect(text.length).toBeGreaterThan(1000);
+    expectWithinBudget(
+      '#135 返答の木 + 数字の照合',
+      () =>
+        parseAiText(text).reduce(
+          (n, b) =>
+            n +
+            (b.kind === 'p' || b.kind === 'h'
+              ? b.inl.reduce((m, x) => m + markNumbers(x.text, [ctx]).length, 0)
+              : 0),
+          0,
+        ),
+      { warmup: 5, runs: 30 },
     );
   });
 });

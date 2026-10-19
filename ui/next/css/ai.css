@@ -1,0 +1,256 @@
+/*
+ * AI のチャット（#135。ui/next/regions/AiChat.tsx。docs/ui-redesign.md 2 章）。section.ai は見出し行 → 会話
+ * （.panel-body。スクロールはここだけ）→ 足元（進み具合・押せない理由・[このポジを診断]・入力欄）の縦の並び。
+ * 返答の文字は折り返す（長い数字・英字も途中で折る = 横スクロールを出さない）。色はトークンだけ。
+ */
+
+section.ai .ai-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
+}
+
+.ai-disclaimer {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-sm);
+  background: var(--s2);
+  color: var(--ink-2);
+  font-size: var(--fs-sub);
+}
+
+.ai-empty,
+.ai-note {
+  color: var(--ink-3);
+  font-size: var(--fs-sub);
+  overflow-wrap: anywhere;
+}
+
+.ai-log {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+
+.ai-msg {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.ai-msg.user {
+  align-self: flex-end;
+  max-width: 88%;
+}
+
+.ai-bubble {
+  padding: 6px 10px;
+  border-radius: var(--r-sm);
+  background: var(--accent-fill);
+  white-space: pre-wrap;
+}
+
+.ai-meta {
+  margin-top: 2px;
+  color: var(--ink-3);
+  font-size: var(--fs-xs);
+  text-align: right;
+}
+
+.ai-answer {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: var(--fs-body);
+  line-height: 1.55;
+}
+
+.ai-answer h3,
+.ai-answer h4 {
+  margin-top: var(--sp-1);
+  font-size: var(--fs-body);
+  font-weight: 700;
+}
+
+.ai-answer h4 {
+  color: var(--ink-2);
+}
+
+.ai-answer p {
+  white-space: pre-wrap;
+}
+
+.ai-answer ul,
+.ai-answer ol {
+  padding-left: 1.4em;
+}
+
+.ai-msg[data-ai-live="true"] .ai-answer {
+  color: var(--ink-2);
+}
+
+/* 照合できない数字（道具の値に無い）。点線の下線 + 警告の色 */
+.ai-unmatched {
+  color: var(--warn);
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
+}
+
+.ai-thinking {
+  color: var(--ink-3);
+  font-size: var(--fs-sub);
+}
+
+.ai-thinking summary {
+  cursor: pointer;
+}
+
+.ai-thinking p {
+  margin-top: var(--sp-1);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.ai-tool {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  min-width: 0;
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--s2);
+  font-size: var(--fs-sub);
+  overflow-wrap: anywhere;
+}
+
+.ai-tool-title {
+  color: var(--ink-2);
+  font-weight: 600;
+}
+
+.ai-tool-input {
+  color: var(--ink-3);
+}
+
+.ai-tool .btn {
+  margin-top: var(--sp-1);
+}
+
+.ai-error {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+  margin-top: var(--sp-1);
+  color: var(--loss);
+  font-size: var(--fs-sub);
+  overflow-wrap: anywhere;
+}
+
+/* ===== 足元 ===== */
+.ai-foot {
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  padding: var(--sp-2) var(--sp-3);
+  border-top: 1px solid var(--line);
+}
+
+.ai-progress {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  min-width: 0;
+  color: var(--accent-ink);
+  font-size: var(--fs-sub);
+  white-space: nowrap;
+}
+
+.ai-progress .spacer {
+  flex: 1;
+}
+
+.ai-sec {
+  color: var(--ink-3);
+  font-variant-numeric: tabular-nums;
+}
+
+.ai-spin {
+  width: 10px;
+  height: 10px;
+  border: 2px solid var(--accent-fill);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: ai-spin 0.9s linear infinite;
+}
+
+@keyframes ai-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ai-spin {
+    animation: none;
+  }
+}
+
+.ai-reason {
+  color: var(--ink-3);
+  font-size: var(--fs-sub);
+  overflow-wrap: anywhere;
+}
+
+.ai-actions {
+  display: flex;
+  gap: var(--sp-2);
+}
+
+.ai-actions .btn {
+  flex: 1 1 auto;
+}
+
+.ai-input {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+
+.ai-input textarea {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 40px;
+  max-height: 120px;
+  padding: 6px 8px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-sm);
+  background: var(--s2);
+  color: var(--ink);
+  font: inherit;
+  font-size: var(--fs-body);
+  resize: vertical;
+}
+
+.ai-answer h4,
+.ai-answer ul,
+.ai-answer ol {
+  margin: 0;
+}
+
+/* PC のトップバーの [AI]（作業台を入れ替えている間） */
+.top .btn[data-ai="top"][aria-pressed="true"] {
+  border-color: var(--accent);
+  background: var(--accent-fill);
+  color: var(--accent-ink);
+}

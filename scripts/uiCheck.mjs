@@ -122,6 +122,14 @@
 //                                          タッチ（CDP）の長押し 500ms → 横・縦に動かす → 離す → タップで消える・ページとシートが動かない）
 //                                          とドックの IV の既定と保持（390×844・900×1100: 起動 0 回 → IV で IV 推移・1 回 → [スマイル] →
 //                                          別のパネル → IV でスマイルのまま・タブレットのキー 5）
+//                                          AI のチャット（#135 AC7）: 360 / 390（AI のシート peek / full）・900（ドックの AI）・1440
+//                                          （トップバーの [AI] で作業台を入れ替え）× ダーク / ライトで縦・横・折り返し・舞台の読み取り、
+//                                          ドック 6 つ（タブレット 5 つ）の文字が切れない、押す前に残り（$）が見出しに見えて切れない、
+//                                          免責の文は初めてだけ（閉じて開き直すと出ない）、偽の SSE の診断の返答を出した状態も測る
+//                                          #135 AC6（--flows）: 390×844 と 1440×900 で [このポジを診断] → 進み具合が出るまで < 1,000 ms・
+//                                          考え中 → 書いています → 完了の順・中止で止まる・終端なし（「切断」）で incomplete・追加の質問の
+//                                          道具のカードと [シナリオに適用] → [元に戻す]・再読み込みで会話が残る（sessionStorage）
+//   --ai                                   #135 の項目だけ（既定の検査・--flows とも。手元の確かめ用）
 //   --url <base>                           dev サーバーを起こさず、その URL を使う（例 http://127.0.0.1:5173/?parts）
 //   --dom <file>                           body の下の要素の tag.class の並びを書き出す（DOM の変化の比較用）
 //   --shots <dir>                          スクリーンショットを書く（合成の板だけ。リポジトリに入れない）
@@ -167,7 +175,7 @@ const value = (name) => {
   }
   return v;
 };
-const known = new Set(['--parts', '--flows', '--url', '--dom', '--shots', '--max-wraps']);
+const known = new Set(['--parts', '--flows', '--url', '--dom', '--shots', '--max-wraps', '--ai']);
 for (const a of args) {
   if (a.startsWith('--') && !known.has(a)) {
     console.error(`知らない引数: ${a}`);
@@ -186,6 +194,7 @@ if (maxWraps !== null && !(Number.isInteger(maxWraps) && maxWraps >= 0)) {
 const urlParams = urlArg ? new URL(urlArg).searchParams : new URLSearchParams();
 const parts = flag('--parts') || urlParams.has('parts');
 const flows = flag('--flows');
+const aiOnly = flag('--ai');
 const mode = parts ? 'parts' : 'next';
 
 // ---- 足 2 本の作業（版 2）: workspace-v2.json のタブ A だけ（fixture は変えない）
@@ -752,7 +761,7 @@ const dockStats = { pass: 0, total: 0 };
 
 /**
  * ドックの IV（#130 AC-5）: smile のボタンの .lbl が「IV」・切れ / 折り返し 0（scrollWidth ≤ clientWidth・行が 1 つ）、
- * スマホでアイコン（.ic の svg）が 1 個見えている（タブレットは .ic を隠す）。ボタンの数はスマホ 5・タブレット 4
+ * スマホでアイコン（.ic の svg）が 1 個見えている（タブレットは .ic を隠す）。ボタンの数はスマホ 6・タブレット 5（#135 で AI）
  */
 async function dockIvCheck(page, label, phone) {
   const r = await page.evaluate(() => {
@@ -781,7 +790,7 @@ async function dockIvCheck(page, label, phone) {
     if (r.text !== 'IV') bad.push(`ラベル「${r.text}」（IV のはず）`);
     if (r.cut) bad.push('ラベルが切れている');
     if (r.lines !== 1) bad.push(`ラベルが ${r.lines} 行`);
-    if (r.n !== (phone ? 5 : 4)) bad.push(`ボタン ${r.n} 個`);
+    if (r.n !== (phone ? 6 : 5)) bad.push(`ボタン ${r.n} 個`);
     if (r.ics !== (phone ? 1 : 0)) bad.push(`アイコンの svg が ${r.ics} 個見えている`);
     if (r.name !== 'IV 推移 · スマイル') bad.push(`読み上げの名前「${r.name}」`);
   }
@@ -1032,6 +1041,8 @@ async function measureAll() {
       `IV 推移の十字線と札の検査（#130）: ${ivCrossStats.pass} / ${ivCrossStats.total} 状態で pass`,
     );
     console.log(`ドックの IV の検査（#130）: ${dockStats.pass} / ${dockStats.total} で pass`);
+    // AI のチャット（#135 AC7）
+    await aiSweep();
   }
   // 旧のクラス名（#91・EPIC #92 の終了条件 8）: report を通ったすべての状態の合計
   console.log(
@@ -2741,6 +2752,8 @@ async function runFlows() {
   for (const vp of [phone, { width: 900, height: 1100 }]) await ivDockFlows(vp);
   // #174 追証マップの開閉の時間・開いたときの滑らかなスクロールとスピナー（AC4）
   for (const vp of [pc, phone]) await holdToggleFlow(vp);
+  // #135 AI のチャットの進み具合・中止・終端なし・道具のカード・会話の保存（AC6）
+  for (const vp of [phone, pc]) await aiFlows(vp);
 }
 
 /**
@@ -9040,10 +9053,314 @@ async function ivMoreFlows(vp) {
   }
 }
 
+// ---- AI のチャット（#135）
+const aiStats = { pass: 0, total: 0 };
+
+/** AI のパネルを開く（スマホ = ドックの AI でシート sheet、タブレット = ドックの AI、PC = トップバーの [AI]） */
+async function openAi(page, w, sheet = 'peek') {
+  if (w >= 1200) {
+    const on = await page.getAttribute('.layout', 'data-bench');
+    if (on !== 'ai') await page.click('.top button[data-ai="top"]');
+  } else if (w <= PHONE_MAX) {
+    if (!(await setShell(page, 'ai', sheet))) return false;
+  } else {
+    await page.click('.dock button[data-panel="ai"]');
+  }
+  await page.waitForSelector('section.ai .ai-foot', { state: 'visible', timeout: 5000 });
+  await page.waitForTimeout(200);
+  return true;
+}
+
+/**
+ * AI のパネルの中（#135 AC7）: 見出しの残り（$ を含む・切れない・窓の中）、[このポジを診断]・入力欄・送信が窓の中、
+ * 見出し・ボタン・進み具合の行が切れていない、.panel-body が横にはみ出していない、ドックの 6 つ（5 つ）のラベルが切れない
+ */
+async function aiCheck(page, label, w) {
+  const r = await page.evaluate(() => {
+    const sec = document.querySelector('section.ai');
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    const inWin = (el) => {
+      if (!el) return false;
+      const q = el.getBoundingClientRect();
+      return (
+        q.width > 0 &&
+        q.height > 0 &&
+        q.left >= -0.5 &&
+        q.right <= vw + 0.5 &&
+        q.top >= -0.5 &&
+        q.bottom <= vh + 0.5
+      );
+    };
+    const cut = (el) => !!el && el.scrollWidth > el.clientWidth + 0.5;
+    const sub = sec?.querySelector('.panel-head .sub');
+    const body = sec?.querySelector('.panel-body');
+    const dock = [...document.querySelectorAll('.dock > button')].map((b) => ({
+      id: b.getAttribute('data-panel'),
+      cut: cut(b.querySelector('.lbl')) || cut(b),
+    }));
+    const heads = [
+      ...(sec?.querySelectorAll(
+        '.panel-head h2, .panel-head .btn, .ai-actions .btn, .ai-input .btn, .ai-progress',
+      ) ?? []),
+    ];
+    return {
+      remaining: (sub?.textContent ?? '').trim(),
+      remainingOk: inWin(sub) && !cut(sub),
+      diagnose: inWin(sec?.querySelector('button[data-ai="diagnose"]')),
+      input: inWin(sec?.querySelector('.ai-input textarea')),
+      send: inWin(sec?.querySelector('button[data-ai="send"]')),
+      cuts: heads.filter(cut).map((e) => (e.textContent ?? '').trim().slice(0, 12)),
+      bodyOver: !!body && body.scrollWidth > body.clientWidth + 0.5,
+      dock,
+      disclaimer: !!sec?.querySelector('[data-ai="disclaimer"]'),
+    };
+  });
+  const bad = [];
+  if (!r.remaining.includes('$')) bad.push(`残りの表示「${r.remaining}」`);
+  if (!r.remainingOk) bad.push('残りが切れている / 窓の外');
+  if (!r.diagnose) bad.push('[このポジを診断] が窓の外');
+  if (!r.input || !r.send) bad.push('入力欄・送信が窓の外');
+  if (r.cuts.length) bad.push(`切れ ${r.cuts.join('、')}`);
+  if (r.bodyOver) bad.push('.panel-body が横にはみ出す');
+  const dockCut = r.dock.filter((d) => d.cut).map((d) => d.id);
+  if (dockCut.length) bad.push(`ドックの切れ ${dockCut.join('、')}`);
+  if (w < 1200 && r.dock.length !== (w <= PHONE_MAX ? 6 : 5))
+    bad.push(`ドック ${r.dock.length} 個`);
+  aiStats.total++;
+  const ok = bad.length === 0;
+  if (ok) aiStats.pass++;
+  else failed = true;
+  console.log(`${label}: AI のパネル ${ok ? 'pass' : `${bad.join('・')}  ← NG`}`);
+  return r;
+}
+
+/** 診断を押して返答（done）まで待つ（偽の SSE。dev だけ） */
+async function aiDiagnoseDone(page) {
+  await page.click('section.ai button[data-ai="diagnose"]');
+  await page.waitForSelector('section.ai .ai-progress', { state: 'detached', timeout: 15000 });
+  await page.waitForTimeout(150);
+}
+
+async function aiSweep() {
+  for (const [w, h] of SIZES) {
+    for (const theme of ['dark', 'light']) {
+      const storage = { [WORKSPACE_KEY]: twoLegs, [PREFS_KEY]: prefsText(theme) };
+      const ctx = await newContext({ width: w, height: h }, storage);
+      const page = await ctx.newPage();
+      await page.goto(pageUrl('next'));
+      await waitReady(page, 'next');
+      const tag = `#135 ${theme} ${w}x${h}`;
+      const want = w <= PHONE_MAX ? 3 : w >= 1200 ? 6 : 5;
+      const sheets = w <= PHONE_MAX ? ['peek', 'full'] : [null];
+      for (const sheet of sheets) {
+        const lbl = sheet ? `${tag} ai/${sheet}` : `${tag} ai`;
+        if (!(await openAi(page, w, sheet ?? 'peek'))) {
+          failed = true;
+          console.log(`${lbl}: AI のパネルを開けない  ← NG`);
+          continue;
+        }
+        await page
+          .waitForFunction(
+            () =>
+              (document.querySelector('section.ai .panel-head .sub')?.textContent ?? '').includes(
+                '$',
+              ),
+            undefined,
+            { timeout: 5000 },
+          )
+          .catch(() => {});
+        await report(page, lbl, w, h, `ai-${w}x${h}-${theme}-${sheet ?? 'open'}`);
+        await readoutCheck(page, lbl, want);
+        const r = await aiCheck(page, lbl, w);
+        if (sheet !== 'full' && !r.disclaimer) {
+          failed = true;
+          console.log(`${lbl}: 初めて開いたのに免責の文が無い  ← NG`);
+        }
+      }
+      // 免責の文を閉じて開き直す → 出ない（prefs）
+      await page.click('section.ai [data-ai="disclaimer"] button');
+      await page.reload();
+      await waitReady(page, 'next');
+      await openAi(page, w, 'peek');
+      const again = await page.$('section.ai [data-ai="disclaimer"]');
+      aiStats.total++;
+      if (again) {
+        failed = true;
+        console.log(`${tag}: 2 回目に開いても免責の文が出る  ← NG`);
+      } else aiStats.pass++;
+      // 診断の返答（偽の SSE）を出した状態
+      await aiDiagnoseDone(page);
+      const lbl = `${tag} 返答あり`;
+      await report(page, lbl, w, h, `ai-${w}x${h}-${theme}-answer`);
+      await readoutCheck(page, lbl, want);
+      await aiCheck(page, lbl, w);
+      await ctx.close();
+    }
+  }
+  console.log(`AI のチャットの検査（#135）: ${aiStats.pass} / ${aiStats.total} で pass`);
+}
+
+/**
+ * #135 AC6: 進み具合（押してから表示まで < 1,000 ms・考え中 → 書いています → 完了の順）・中止・終端なし・道具のカードと
+ * [シナリオに適用]・再読み込みで会話が残る
+ */
+async function aiFlows(vp) {
+  const tag = `#135 ${vp.width}x${vp.height}`;
+  const ctx = await newContext(vp, { [WORKSPACE_KEY]: twoLegs, [PREFS_KEY]: prefsText('dark') });
+  const page = await ctx.newPage();
+  await page.goto(pageUrl('next'));
+  await waitReady(page, 'next');
+  await openAi(page, vp.width, 'full');
+  await page
+    .waitForFunction(
+      () => !document.querySelector('section.ai button[data-ai="diagnose"]')?.disabled,
+      undefined,
+      { timeout: 5000 },
+    )
+    .catch(() => {});
+  // (a) 押してから進み具合まで・相の順
+  const seq = await page.evaluate(
+    () =>
+      new Promise((resolve) => {
+        const phases = [];
+        let shownMs = null;
+        const t0 = performance.now();
+        const obs = new MutationObserver(() => {
+          const p = document.querySelector('section.ai .ai-progress');
+          if (p && shownMs === null) shownMs = performance.now() - t0;
+          const ph = p?.getAttribute('data-ai-phase') ?? 'none';
+          if (phases.at(-1) !== ph) phases.push(ph);
+          if (!p && shownMs !== null) {
+            obs.disconnect();
+            resolve({ shownMs, phases });
+          }
+        });
+        obs.observe(document.querySelector('section.ai'), {
+          subtree: true,
+          childList: true,
+          attributes: true,
+          attributeFilter: ['data-ai-phase'],
+        });
+        document.querySelector('section.ai button[data-ai="diagnose"]').click();
+        setTimeout(() => resolve({ shownMs, phases, timeout: true }), 15000);
+      }),
+  );
+  check(
+    `${tag} [このポジを診断] → 進み具合が出るまで < 1,000 ms`,
+    seq.shownMs !== null && seq.shownMs < 1000,
+    `${Math.round(seq.shownMs ?? -1)} ms`,
+  );
+  const order = ['thinking', 'writing', 'none'].map((x) => seq.phases.indexOf(x));
+  check(
+    `${tag} 考え中 → 書いています → 完了の順`,
+    !seq.timeout && order.every((i) => i >= 0) && order[0] < order[1] && order[1] < order[2],
+    seq.phases.join(' → '),
+  );
+  const weak = await page.$$eval(
+    'section.ai .ai-answer h3',
+    (hs) => hs.filter((h) => h.textContent.startsWith('弱点')).length,
+  );
+  check(`${tag} 返答の弱点の見出しが 3 つ`, weak === 3, `${weak}`);
+  // (b) 中止
+  await page.click('section.ai button[data-ai="diagnose"]');
+  await page
+    .waitForSelector('section.ai .ai-progress[data-ai-phase="thinking"]', { timeout: 5000 })
+    .catch(() => {});
+  await page.click('section.ai button[data-ai="abort"]');
+  const aborted = await page
+    .waitForSelector('section.ai .ai-error[data-code="aborted"]', { timeout: 3000 })
+    .then(() => true)
+    .catch(() => false);
+  const progressGone = (await page.$('section.ai .ai-progress')) === null;
+  check(`${tag} [中止] で止まる（進み具合が消え「中止しました」）`, aborted && progressGone);
+  // (c) 終端なし → incomplete（[もう一度] つき）
+  await page.fill('section.ai .ai-input textarea', '切断のテスト');
+  await page.press('section.ai .ai-input textarea', 'Enter');
+  const inc = await page
+    .waitForSelector('section.ai .ai-error[data-code="incomplete"]', { timeout: 8000 })
+    .then(() => true)
+    .catch(() => false);
+  check(`${tag} done の無い終わりは「途中で切れました」`, inc);
+  // (d) 追加の質問 → 道具のカード → [シナリオに適用] → [元に戻す]
+  await page.fill('section.ai .ai-input textarea', '−6% なら？');
+  await page.press('section.ai .ai-input textarea', 'Enter');
+  await page
+    .waitForSelector('section.ai .ai-progress', { state: 'detached', timeout: 15000 })
+    .catch(() => {});
+  const card = await page.$(
+    'section.ai .ai-tool[data-ai-tool="evaluate_scenario"] button[data-ai="apply"]',
+  );
+  check(`${tag} 追加の質問で道具のカード（evaluate_scenario）と [シナリオに適用]`, card !== null);
+  if (card) {
+    const before = await page.evaluate(
+      (k) => JSON.parse(localStorage.getItem(k) ?? '{}'),
+      WORKSPACE_KEY,
+    );
+    await card.click();
+    await page.waitForTimeout(900);
+    const ws = await page.evaluate(
+      (k) => JSON.parse(localStorage.getItem(k) ?? '{}'),
+      WORKSPACE_KEY,
+    );
+    const sc = ws?.tabs?.[ws.active ?? 0]?.position?.scenario ?? ws?.position?.scenario ?? null;
+    check(
+      `${tag} [シナリオに適用] で日数 3・Δσ +5 が入る`,
+      sc?.days === 3 && sc?.dSigma === 5,
+      JSON.stringify(sc),
+    );
+    const undo = await page.$('.toast button:has-text("元に戻す")');
+    if (undo) await undo.click();
+    await page.waitForTimeout(900);
+    const ws2 = await page.evaluate(
+      (k) => JSON.parse(localStorage.getItem(k) ?? '{}'),
+      WORKSPACE_KEY,
+    );
+    const sc2 = ws2?.tabs?.[ws2.active ?? 0]?.position?.scenario ?? ws2?.position?.scenario ?? null;
+    const sc0 = before?.tabs?.[before.active ?? 0]?.position?.scenario ?? null;
+    check(
+      `${tag} [元に戻す] でシナリオが戻る`,
+      undo !== null && sc2?.days === sc0?.days && sc2?.dSigma === sc0?.dSigma,
+    );
+  }
+  // (e) 再読み込みで会話が残る（sessionStorage の 1 キー）・保存一覧 / 作業の保存に AI のキーが無い
+  const keys = await page.evaluate(() => ({
+    s: Object.keys(sessionStorage),
+    l: Object.keys(localStorage),
+  }));
+  check(
+    `${tag} 会話は sessionStorage の 1 キーだけ`,
+    keys.s.length === 1 && keys.s[0] === 'optsim.ai.v1' && !keys.l.some((k) => k.includes('ai')),
+    JSON.stringify(keys),
+  );
+  await page.reload();
+  await waitReady(page, 'next');
+  await openAi(page, vp.width, 'full');
+  const kept = await page.$$eval('section.ai .ai-msg.user', (xs) => xs.length);
+  check(`${tag} 再読み込みで会話が残る`, kept >= 2, `${kept} 件`);
+  await page.click('section.ai button[data-ai="reset"]');
+  await page.waitForTimeout(200);
+  const empty = await page.evaluate(() => ({
+    n: document.querySelectorAll('section.ai .ai-msg').length,
+    s: sessionStorage.getItem('optsim.ai.v1'),
+  }));
+  check(`${tag} [新しい会話] で消える`, empty.n === 0 && empty.s === null);
+  if (shotsDir) await page.screenshot({ path: join(shotsDir, `flows-ai-${vp.width}.png`) });
+  await ctx.close();
+}
+
 // 開く URL（#91: 既定はクエリなし。--parts は ?parts）
 console.log(`URL: ${pageUrl(mode)}`);
 try {
-  if (flows) await runFlows();
+  if (aiOnly && !parts) {
+    if (flows)
+      for (const vp of [
+        { width: 390, height: 844 },
+        { width: 1440, height: 900 },
+      ])
+        await aiFlows(vp);
+    else await aiSweep();
+  } else if (flows) await runFlows();
   else await measureAll();
 } finally {
   await browser.close();

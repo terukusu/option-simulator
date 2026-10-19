@@ -5,6 +5,9 @@
 // IV 推移（#79）の合成の応答も `/fixtures/atm_iv?tf=&start=&end=` で配る（`/api/atm_iv` と同じ形。架空の値。種つきの
 // 決まった関数なので、同じ要求には同じ応答）。Docker の context の許可リストの 1 本なので別ファイルにしない。
 // 日次の値（#152）の合成の応答も `/fixtures/atm_daily` で配る（`/api/atm_daily` と同じ形。架空の値。種つき）。
+// AI の中継（#135）の偽の応答も `/fixtures/ai/status`・`/fixtures/ai/messages`（偽の SSE。Anthropic を呼ばない）で配る。
+// 診断 = 考え中 → 文（事前計算の値を書き写す）、追加の質問 = tool_use（evaluate_scenario）→ 道具の結果を受けて文。
+// 質問に「切断」を含むと done の無いまま終える（画面の incomplete の確認用）。遅れつき（進み具合の表示の確認用）。
 
 import { readFileSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
@@ -269,6 +272,157 @@ export function synthAtmDaily(now = SYNTH_IV_NOW) {
   return body;
 }
 
+// ---- AI の中継の偽の応答（#135。架空の文。dev サーバーだけ）
+const AI_STATUS_PATH = '/fixtures/ai/status';
+const AI_MESSAGES_PATH = '/fixtures/ai/messages';
+export const SYNTH_AI_STATUS = {
+  schema_version: 1,
+  enabled: true,
+  model: 'claude-opus-5-5',
+  credential: 'fake',
+  counted: true,
+  limit_usd: 3,
+  remaining_usd: 2.4,
+  resets_at: '2026-10-14T00:00:00+09:00',
+};
+/** 偽の SSE の事象の間隔（ms） */
+export const SYNTH_AI_STEP_MS = { thinking: 150, writing: 900, chunk: 120 };
+
+const sse = (event, data) => `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
+const thousand = (v) =>
+  typeof v === 'number'
+    ? `${v < 0 ? '−' : ''}${Math.round(Math.abs(v) / 1000).toLocaleString('en-US')} 千円`
+    : '—';
+
+/** 偽の返答の組み立て（要求の本文 → 事象の列。純関数） */
+export function synthAiReply(body) {
+  const msgs = Array.isArray(body?.messages) ? body.messages : [];
+  const last = msgs.at(-1);
+  const blocks = Array.isArray(last?.content) ? last.content : [];
+  const result = blocks.find((b) => b?.type === 'tool_result');
+  const userText = blocks
+    .filter((b) => b?.type === 'text')
+    .map((b) => b.text)
+    .join('');
+  const pre = body?.context?.precomputed ?? {};
+  if (result) {
+    let r = {};
+    try {
+      r = JSON.parse(result.content?.[0]?.text ?? '{}');
+    } catch {}
+    const text = `その条件（${r?.scenario?.dx_pct ?? '—'}%・${r?.scenario?.days ?? '—'} 日・IV +${r?.scenario?.iv_shift_pt ?? '—'}pt）の損益は ${thousand(r?.pnl_yen)} です。満期なら ${thousand(r?.expiry_pnl_yen)} です。`;
+    return { thinking: '道具の結果を読む', text, stop: 'end_turn' };
+  }
+  if (body?.kind === 'diagnose') {
+    const s = pre.position_summary ?? {};
+    const rows = pre.tail_table?.rows ?? [];
+    const r10 = rows.find((x) => x?.shock_pct === -10) ?? rows[0] ?? {};
+    const r20 = rows.find((x) => x?.shock_pct === -20) ?? rows[1] ?? {};
+    const vega = s?.greeks_now?.vega_yen_per_pt;
+    const theta = s?.greeks_now?.theta_yen_per_day;
+    const text = [
+      '## 弱点 1: 急落で損が膨らむ',
+      `−10% の SQ で ${thousand(r10.sq_pnl_yen)}、−20% では ${thousand(r20.sq_pnl_yen)} です。`,
+      '## 弱点 2: IV の上昇に弱い',
+      `V は ${typeof vega === 'number' ? vega.toLocaleString('en-US') : '—'} 円 / pt です。`,
+      '## 弱点 3: 時間の経過',
+      `Θ は ${typeof theta === 'number' ? theta.toLocaleString('en-US') : '—'} 円 / 日です。`,
+      '## 確かめるとよいこと',
+      '- シナリオで ΔX を下げ、IV を上げて損益を見る',
+    ].join('\n');
+    return { thinking: '事前計算のテール表と格子を見る', text, stop: 'end_turn' };
+  }
+  if (userText.includes('切断')) {
+    return { thinking: '考える', text: '途中まで書いて', stop: null, cut: true };
+  }
+  return {
+    thinking: '条件を決めて道具を呼ぶ',
+    text: '',
+    stop: 'tool_use',
+    tool: {
+      id: `toolu_dev_${msgs.length}`,
+      name: 'evaluate_scenario',
+      input: { dx_pct: -6, days: 3, iv_shift_pt: 5 },
+    },
+  };
+}
+
+function serveAiMessages(req, res) {
+  let raw = '';
+  req.setEncoding('utf8');
+  req.on('data', (c) => {
+    raw += c;
+  });
+  req.on('end', () => {
+    let body = null;
+    try {
+      body = JSON.parse(raw);
+    } catch {
+      res.statusCode = 400;
+      res.setHeader('Content-Type', 'application/json; charset=utf-8');
+      res.end('{"error":"bad_request"}');
+      return;
+    }
+    const reply = synthAiReply(body);
+    res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+    res.setHeader('Cache-Control', 'no-store');
+    const timers = [];
+    let closed = false;
+    res.on('close', () => {
+      closed = true;
+      for (const t of timers) clearTimeout(t);
+    });
+    const at = (ms, fn) =>
+      timers.push(
+        setTimeout(() => {
+          if (!closed) fn();
+        }, ms),
+      );
+    res.write(
+      sse('accepted', {
+        remaining_usd: SYNTH_AI_STATUS.remaining_usd,
+        limit_usd: 3,
+        counted: true,
+      }),
+    );
+    const { thinking, writing, chunk } = SYNTH_AI_STEP_MS;
+    at(thinking, () => res.write(sse('progress', { phase: 'thinking' })));
+    at(thinking * 2, () => res.write(sse('thinking', { text: reply.thinking })));
+    let t = writing;
+    const content = [{ type: 'thinking', thinking: reply.thinking, signature: 'ZGV2LWZha2U=' }];
+    if (reply.text) {
+      at(t, () => res.write(sse('progress', { phase: 'writing' })));
+      const parts = reply.text.match(/[\s\S]{1,24}/g) ?? [];
+      for (const p of parts) {
+        t += chunk;
+        at(t, () => res.write(sse('text', { text: p })));
+      }
+      content.push({ type: 'text', text: reply.text });
+    }
+    if (reply.tool) {
+      t += chunk;
+      at(t, () => {
+        res.write(sse('progress', { phase: 'tool' }));
+        res.write(sse('tool_use', reply.tool));
+      });
+      content.push({ type: 'tool_use', ...reply.tool });
+    }
+    t += chunk;
+    at(t, () => {
+      if (!reply.cut) {
+        res.write(
+          sse('done', {
+            stop_reason: reply.stop,
+            content,
+            remaining_usd: SYNTH_AI_STATUS.remaining_usd - 0.1,
+          }),
+        );
+      }
+      res.end();
+    });
+  });
+}
+
 /** @returns {import('vite').Plugin} */
 export function serveSyntheticFixtures() {
   return {
@@ -277,6 +431,16 @@ export function serveSyntheticFixtures() {
     configureServer(server) {
       server.middlewares.use((req, res, next) => {
         const path = (req.url ?? '').split('?')[0] ?? '';
+        if (path === AI_STATUS_PATH) {
+          res.setHeader('Content-Type', 'application/json; charset=utf-8');
+          res.setHeader('Cache-Control', 'no-store');
+          res.end(JSON.stringify(SYNTH_AI_STATUS));
+          return;
+        }
+        if (path === AI_MESSAGES_PATH && req.method === 'POST') {
+          serveAiMessages(req, res);
+          return;
+        }
         if (path === ATM_DAILY_PATH) {
           // パラメータは読まない（サーバーと同じ）
           res.setHeader('Content-Type', 'application/json; charset=utf-8');

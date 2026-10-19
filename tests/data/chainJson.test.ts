@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { parseChainJson, validateChainJson } from '../../data/chainJson';
+import aiTools from '../../fixtures/synthetic/ai_tools.json';
 import { buildFixtureFiles, sessionStart } from '../../scripts/synthBoard';
 import { RAW_FIXTURES, rawFixture } from '../support/fixtures';
 
@@ -24,9 +25,12 @@ describe('板の JSON の検証', () => {
 
   it('コミット済みの固定 JSON は生成器の出力と一致する（npm run fixtures で作り直す）', () => {
     const files = buildFixtureFiles();
-    expect(Object.keys(files).sort()).toEqual(Object.keys(RAW_FIXTURES).sort());
+    // 板の 3 つと、道具の出力の見本（#135。板ではない）
+    expect(Object.keys(files).sort()).toEqual(
+      [...Object.keys(RAW_FIXTURES), 'ai_tools.json'].sort(),
+    );
     for (const [name, text] of Object.entries(files)) {
-      expect(JSON.parse(text)).toEqual(RAW_FIXTURES[name]);
+      expect(JSON.parse(text)).toEqual(name === 'ai_tools.json' ? aiTools : RAW_FIXTURES[name]);
     }
   });
 

@@ -1,6 +1,7 @@
 import type { ComponentChildren } from 'preact';
 import { useMemo, useRef } from 'preact/hooks';
 import {
+  benchView,
   DOCK_LABELS,
   dockPanels,
   MARKET_VIEWS,
@@ -35,6 +36,18 @@ const DOCK_IC: Record<PanelId, ComponentChildren> = {
       />
     </svg>
   ),
+  // AI（#135）: 吹き出しの SVG（字形の絵文字にしない）
+  ai: (
+    <svg class="ic-line" viewBox="0 0 18 18" width="18" height="18" aria-hidden="true">
+      <path
+        d="M3 4.5h12v7.5H8l-3.5 3v-3H3z"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.6"
+        stroke-linejoin="round"
+      />
+    </svg>
+  ),
 };
 
 /**
@@ -47,6 +60,8 @@ const DOCK_IC: Record<PanelId, ComponentChildren> = {
  * スマホ・タブレットのスマイル（ドックの「IV」）のパネルには [IV 推移 | スマイル]（SMILE_VIEWS。#79・#130）を渡す
  * （板は null のまま）。IV 推移は section.smile の領域に描く（中身は呼び出し側が smileView(state, tier) で選ぶ）。
  * 出し分けは .layout の data-panel・data-sheet・data-market と CSS（style 属性を使わない）。
+ * #135 で AI のチャット（regions/AiChat.tsx）を ai で受ける: スマホ・タブレットはドックの 6 つ目 / 5 つ目のパネル、
+ * PC は作業台の列（ポジション + 指標）を入れ替える（data-bench = ShellState.bench）。舞台は常に見える。
  */
 export function Shell(p: {
   tier: Tier;
@@ -67,6 +82,8 @@ export function Shell(p: {
    */
   board: (marketSeg: ComponentChildren) => ComponentChildren;
   smile: (marketSeg: ComponentChildren) => ComponentChildren;
+  /** AI のチャット（見出し行 + .panel-body + 入力。#135） */
+  ai: ComponentChildren;
 }) {
   const { tier, state, send } = p;
   const panel = visiblePanel(state, tier);
@@ -106,7 +123,13 @@ export function Shell(p: {
   );
   const dock = dockPanels(tier);
   return (
-    <main class="layout" data-panel={panel} data-sheet={state.sheet} data-market={state.market}>
+    <main
+      class="layout"
+      data-panel={panel}
+      data-sheet={state.sheet}
+      data-market={state.market}
+      data-bench={benchView(state)}
+    >
       <section class="stage panel" aria-label="損益グラフ">
         {p.stage}
       </section>
@@ -132,6 +155,10 @@ export function Shell(p: {
       >
         {grabber('smile')}
         {p.smile(smileSeg)}
+      </section>
+      <section class="bench panel side ai" aria-label="AI">
+        {grabber('ai')}
+        {p.ai}
       </section>
       {dock.length > 0 && (
         <nav class="dock" aria-label="パネル">

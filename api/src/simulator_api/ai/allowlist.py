@@ -6,6 +6,13 @@ context に自由な文字列は無い（列挙・日付・時刻の形だけ）
 
 送る本文は検査済みの値から作り直す: context は sort_keys の JSON（決定的）にして最初の user の先頭の text block に置き、
 tool_result の JSON も同じく正規化する。同じ入力 → 同じバイト列（prompt caching の前置きと thinking の履歴を保つ）。
+
+会話の途中で板・ポジション・シナリオが変わったら、ブラウザは最初の context を変えずに、新しい user の発言に
+`{"type": "context_update", "context": {...}}` の block を 1 つ足す（#135。2 件目以降の user だけ・
+tool_result の後ろ）。
+中継はそれを context と同じ形で検査し、`<context_update>{決定的な JSON}</context_update>` の text block にしてその位置に
+置く。前の messages は変えない（追記だけ = Opus 5.5 の preserved thinking と prompt caching の前置きを保つ。
+docs/design.md 14 章）。
 """
 
 import json
@@ -15,7 +22,7 @@ from .shape import DATE, INSTANT, MONTH, Arr, Bad, Bool, Enum, Map, Num, Obj, St
 from .tools import Registry
 
 SCHEMA_VERSION = 1
-KINDS = ("chat",)  # 定型の種類。#135・#140 が足す
+KINDS = ("chat", "diagnose")  # 定型の種類（diagnose = [このポジを診断]。#135）。#140 が足す
 
 MAX_PRICE = 10_000_000  # 価格・行使価格・F の上限（円。形の検査の安全弁）
 MAX_EXPIRIES = 6
@@ -23,6 +30,7 @@ MAX_EXPIRIES_WITH_ROWS = 2
 MAX_ROWS = 600
 MAX_SMILE = 41
 MAX_LEGS = 20
+MAX_QTY = 100_000  # 足の枚数（画面の ui/state.ts の QTY_MAX と同じ）
 MAX_MESSAGES = 60
 MAX_BLOCKS = 20  # 1 件の message の block の数
 MAX_USER_TEXT = 4_000  # 利用者の 1 block
@@ -33,6 +41,8 @@ MAX_FREE_TEXT_TOTAL = 100_000  # 自由文（text・thinking）の合計
 MAX_TOOL_JSON = 50_000  # tool_result の JSON の字数
 CONTEXT_OPEN = "<context>"  # 送る本文で context を包む印（system prompt が参照する）
 CONTEXT_CLOSE = "</context>"
+UPDATE_OPEN = "<context_update>"  # 会話の途中の文脈の更新（#135）
+UPDATE_CLOSE = "</context_update>"
 
 POS = Num(0, MAX_PRICE, lo_open=True)
 NONNEG = Num(0, MAX_PRICE)
@@ -48,11 +58,14 @@ EXPIRY = Obj({
 }, frozenset({"rows"}))
 LEG = Obj({
     "product": Enum(("op", "fut_large", "fut_mini", "fut_micro")), "type": OPT_TYPE, "expiry": MONTH, "k": POS,
-    "side": Enum(("buy", "sell")), "qty": Num(1, 1000, integer=True), "price": NONNEG,
+    "side": Enum(("buy", "sell")), "qty": Num(1, MAX_QTY, integer=True), "price": NONNEG,
 }, frozenset({"type", "k"}))
 SNAPSHOT = Obj({"snapshot_at": INSTANT, "source": Enum(("bigquery", "file", "synthetic", "manual")),
                 "delayed_minutes": Num(0, 60, integer=True)})
-SCENARIO = Obj({"days": Num(0, 400), "iv_shift_pt": Num(-100, 100), "x_range": Arr(POS, 2, fixed=True)})
+# dx_yen・skew_pt・beta・iv_mode は #135 で足した任意のキー（iv_mode が relative なら iv_shift_pt は %）
+SCENARIO = Obj({"days": Num(0, 400), "iv_shift_pt": Num(-100, 100), "x_range": Arr(POS, 2, fixed=True),
+                "dx_yen": Num(-MAX_PRICE, MAX_PRICE), "skew_pt": Num(-50, 50), "beta": Num(0, 10),
+                "iv_mode": Enum(("absolute", "relative"))}, frozenset({"dx_yen", "skew_pt", "beta", "iv_mode"}))
 CAPITAL = Obj({"capital_yen": Num(0, 1e12), "max_loss_yen": Num(0, 1e12)}, frozenset({"max_loss_yen"}))
 
 TOOL_USE_ID = Str(r"[A-Za-z0-9_-]{1,128}", 128)
@@ -114,15 +127,15 @@ def canonical(value) -> str:
     return json.dumps(value, sort_keys=True, ensure_ascii=False, separators=(",", ":"), allow_nan=False)
 
 
-def _check_context(raw, registry: Registry) -> dict:
-    ctx = context_shape(registry).check(raw, "context")
+def _check_context(raw, registry: Registry, path: str = "context") -> dict:
+    ctx = context_shape(registry).check(raw, path)
     with_rows = [i for i, e in enumerate(ctx.get("expiries", [])) if "rows" in e]
     if len(with_rows) > MAX_EXPIRIES_WITH_ROWS:
-        raise Bad(f"context.expiries[{with_rows[MAX_EXPIRIES_WITH_ROWS]}].rows", "size")
+        raise Bad(f"{path}.expiries[{with_rows[MAX_EXPIRIES_WITH_ROWS]}].rows", "size")
     for i, leg in enumerate(ctx.get("position", {}).get("legs", [])):
         is_op = leg["product"] == "op"
         if is_op != ("type" in leg) or is_op != ("k" in leg):
-            raise Bad(f"context.position.legs[{i}]", "shape")
+            raise Bad(f"{path}.position.legs[{i}]", "shape")
     return ctx
 
 
@@ -142,6 +155,13 @@ def _user_block(block, path: str, pending: dict[str, str], registry: Registry, s
     if not isinstance(block, dict):
         raise Bad(path, "type")
     kind = block.get("type")
+    if kind == "context_update":
+        for k in block:
+            if k not in ("type", "context"):
+                raise Bad(f"{path}.<unknown>", "unknown_key")
+        if "context" not in block:
+            raise Bad(f"{path}.context", "missing")
+        return {"type": "context_update", "context": _check_context(block["context"], registry, f"{path}.context")}
     if kind == "text":
         Obj({"type": Enum(("text",)), "text": Text(MAX_USER_TEXT, 1)}).check(block, path)
         return {"type": "text", "text": block["text"]}
@@ -226,7 +246,11 @@ def _check_messages(raw, registry: Registry) -> list[dict]:
             seen_text = False
             for j, b in enumerate(content):
                 blocks.append(_user_block(b, f"{path}.content[{j}]", pending, registry, seen_text))
-                seen_text = seen_text or blocks[-1]["type"] == "text"
+                if blocks[-1]["type"] == "context_update" and (i == 0 or any(
+                        x["type"] == "context_update" for x in blocks[:-1])):
+                    # 最初の発言は context で送る。1 件の発言に 1 つまで
+                    raise Bad(f"{path}.content[{j}]", "order")
+                seen_text = seen_text or blocks[-1]["type"] != "tool_result"
             if pending:
                 raise Bad(f"{path}.content", "missing_tool_result")
         else:
@@ -263,9 +287,16 @@ def parse_request(raw: bytes, registry: Registry) -> AiRequest:
     return AiRequest(kind=kind, context=context, messages=messages)
 
 
+def _upstream_block(b: dict) -> dict:
+    if b["type"] == "context_update":
+        return {"type": "text", "text": f"{UPDATE_OPEN}{canonical(b['context'])}{UPDATE_CLOSE}"}
+    return dict(b)
+
+
 def upstream_messages(req: AiRequest) -> list[dict]:
-    """送る messages: 検査済みの会話の最初の user の先頭に context の block を足したもの（新しい list / dict）"""
+    """送る messages: 検査済みの会話の最初の user の先頭に context の block を足し、context_update を text block にした
+    もの（新しい list / dict）。同じ会話の前の messages は毎回同じバイト列になる（追記だけ）"""
     ctx_block = {"type": "text", "text": f"{CONTEXT_OPEN}{canonical(req.context)}{CONTEXT_CLOSE}"}
-    out = [{"role": m["role"], "content": [dict(b) for b in m["content"]]} for m in req.messages]
+    out = [{"role": m["role"], "content": [_upstream_block(b) for b in m["content"]]} for m in req.messages]
     out[0]["content"].insert(0, ctx_block)
     return out

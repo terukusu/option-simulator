@@ -1,17 +1,23 @@
 /**
  * AI の中継（`POST /api/ai/messages` の SSE・`GET /api/ai/status`。#134）のブラウザ側の受け口: 要求・応答の型と、
- * SSE の解析（純関数）。設計 docs/design.md 7.1・13.4、docs/ai-advisor.md 論点 4・6。画面（ボタン・チャット）は #135。
+ * SSE の解析（純関数）。設計 docs/design.md 7.1・13.4・14 章、docs/ai-advisor.md 論点 4・6。画面は ui/next/regions/AiChat.tsx（#135）。
  *
  * - 会話はブラウザが持ち、毎回全部送る（論点 6 = A）。`done` の `content` をそのまま assistant の履歴に足して次に送る
  *   （thinking の署名を含む。変えない）
  * - サーバーは api/src/simulator_api/ai/relay.py。イベントは `accepted` →（`progress` | `thinking` | `text` | `tool_use`）*
  *   → `done` | `error`
- * - 純関数（DOM・通信に依存しない）。`postAiMessages` だけが fetch の薄い包み
+ * - 会話の途中で板・ポジション・シナリオが変わったら、最初の `context` は変えずに新しい user の発言に `context_update` の
+ *   block を足す（#135。中継が `<context_update>` の text にして後ろに置く = 前の履歴のバイト列を変えない）
+ * - 終わり方（#135）: `done` / `error` の無いまま流れが終わった・途中で読めなくなった → 最後に `incomplete` を 1 回。
+ *   IAP のセッション切れ（リダイレクト・`text/event-stream` でない 200）は `AiRequestError(0, 'session_expired')`、
+ *   fetch の失敗（TypeError）は `AiRequestError(0, 'network')`。中止（AbortError）はそのまま投げる
+ * - 純関数（DOM・通信に依存しない）。`postAiMessages`・`getAiStatus` だけが fetch の薄い包み
  */
 
 export const AI_SCHEMA_VERSION = 1;
 
-export type AiKind = 'chat';
+/** 定型の種類（diagnose = [このポジを診断]。#135） */
+export type AiKind = 'chat' | 'diagnose';
 
 export type AiUserBlock =
   | { type: 'text'; text: string }
@@ -20,7 +26,9 @@ export type AiUserBlock =
       tool_use_id: string;
       content: [{ type: 'text'; text: string }];
       is_error?: boolean;
-    };
+    }
+  /** 会話の途中の文脈の更新（2 件目以降の user の発言・tool_result の後ろに 1 つまで。#135） */
+  | { type: 'context_update'; context: AiContext };
 
 export type AiAssistantBlock =
   | { type: 'text'; text: string }
@@ -66,7 +74,16 @@ export interface AiContext {
       price: number;
     }[];
   };
-  scenario?: { days: number; iv_shift_pt: number; x_range: [number, number] };
+  scenario?: {
+    days: number;
+    iv_shift_pt: number;
+    x_range: [number, number];
+    /** #135 で足した任意のキー（iv_mode が relative なら iv_shift_pt は %） */
+    dx_yen?: number;
+    skew_pt?: number;
+    beta?: number;
+    iv_mode?: 'absolute' | 'relative';
+  };
   capital?: { capital_yen: number; max_loss_yen?: number };
   precomputed?: Record<string, unknown>;
 }
@@ -92,6 +109,8 @@ export type AiEvent =
       remaining_usd: number | null;
     }
   | { type: 'error'; code: string }
+  /** done / error の無いまま流れが終わった・途中で読めなくなった（ブラウザが最後に 1 回足す。#135） */
+  | { type: 'incomplete' }
   | { type: 'unknown'; event: string };
 
 /** `GET /api/ai/status` */
@@ -210,42 +229,139 @@ export class AiRequestError extends Error {
   }
 }
 
+/** 既定の口（dev の合成の応答は `/fixtures/ai/…`。ui/components/useAiChat.ts が選ぶ） */
+export const AI_MESSAGES_PATH = '/api/ai/messages';
+export const AI_STATUS_PATH = '/api/ai/status';
+
+const isAbort = (e: unknown) => e instanceof Error && e.name === 'AbortError';
+
+/** fetch の包み: リダイレクトは追わない（IAP のセッション切れ = session_expired）、失敗は network */
+async function fetchAi(fetchFn: typeof fetch, url: string, init: RequestInit): Promise<Response> {
+  let res: Response;
+  try {
+    res = await fetchFn(url, { ...init, redirect: 'manual', credentials: 'same-origin' });
+  } catch (e) {
+    if (isAbort(e)) throw e;
+    // CORS で落ちた IAP のリダイレクト・オフライン・DNS など（本文は持たない）
+    throw new AiRequestError(0, 'network');
+  }
+  if (res.type === 'opaqueredirect' || (res.status >= 300 && res.status < 400)) {
+    throw new AiRequestError(0, 'session_expired');
+  }
+  return res;
+}
+
+const contentType = (res: Response) => (res.headers.get('Content-Type') ?? '').toLowerCase();
+
+async function failure(res: Response): Promise<AiRequestError> {
+  let code = 'unavailable';
+  let remaining: number | null = null;
+  try {
+    const j: unknown = await res.json();
+    if (isObj(j) && typeof j.error === 'string') code = j.error;
+    if (isObj(j) && typeof j.remaining_usd === 'number') remaining = j.remaining_usd;
+  } catch {
+    // JSON でない応答（IAP の画面など）は unavailable のまま
+  }
+  return new AiRequestError(res.status, code, remaining);
+}
+
 /**
- * `POST /api/ai/messages` を送り、イベントを順に `onEvent` に渡す。事前の失敗は AiRequestError。
- * `signal` で止める（中継は切断を受けて送信先を閉じる。費用は予約額のまま数える）。
+ * `POST /api/ai/messages` を送り、イベントを順に `onEvent` に渡す。事前の失敗は AiRequestError
+ * （`session_expired`・`network` を含む）。`done` / `error` の無い終わり・途中の読み取りの失敗は最後に `incomplete`。
+ * `signal` で止める（中継は切断を受けて送信先を閉じる。費用は予約額のまま数える。AbortError を投げる）。
  */
 export async function postAiMessages(
   body: AiRequest,
   onEvent: (e: AiEvent) => void,
   signal?: AbortSignal,
   fetchFn: typeof fetch = fetch,
+  endpoint: string = AI_MESSAGES_PATH,
 ): Promise<void> {
-  const res = await fetchFn('/api/ai/messages', {
+  const res = await fetchAi(fetchFn, endpoint, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
     signal: signal ?? null,
-    credentials: 'same-origin',
   });
-  if (!res.ok || !res.body) {
-    let code = 'unavailable';
-    let remaining: number | null = null;
-    try {
-      const j: unknown = await res.json();
-      if (isObj(j) && typeof j.error === 'string') code = j.error;
-      if (isObj(j) && typeof j.remaining_usd === 'number') remaining = j.remaining_usd;
-    } catch {
-      // JSON でない応答（IAP の画面など）は unavailable のまま
-    }
-    throw new AiRequestError(res.status, code, remaining);
+  if (!res.ok) throw await failure(res);
+  if (!contentType(res).startsWith('text/event-stream') || !res.body) {
+    // 200 でも SSE でない = IAP のログインの画面など
+    throw new AiRequestError(res.status, 'session_expired');
   }
   const reader = res.body.pipeThrough(new TextDecoderStream()).getReader();
   let rest = '';
-  for (;;) {
-    const { value, done } = await reader.read();
-    if (done) break;
-    const parsed = parseSse(rest + value);
-    rest = parsed.rest;
-    for (const m of parsed.messages) onEvent(toAiEvent(m));
+  let ended = false;
+  try {
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      const parsed = parseSse(rest + value);
+      rest = parsed.rest;
+      for (const m of parsed.messages) {
+        const ev = toAiEvent(m);
+        if (ev.type === 'done' || ev.type === 'error') ended = true;
+        onEvent(ev);
+      }
+    }
+  } catch (e) {
+    if (isAbort(e) || signal?.aborted) throw e;
+    // 途中で読めなくなった（切断）。下で incomplete
   }
+  if (!ended) onEvent({ type: 'incomplete' });
+}
+
+/** `GET /api/ai/status` の形の検査（合わなければ null） */
+export function toAiStatus(v: unknown): AiStatus | null {
+  if (!isObj(v) || typeof v.enabled !== 'boolean' || typeof v.counted !== 'boolean') return null;
+  const cred = v.credential;
+  const credOk =
+    cred === null ||
+    cred === 'api_key' ||
+    cred === 'oauth_token' ||
+    cred === 'wif' ||
+    cred === 'fake';
+  const strOrNull = (x: unknown) => x === null || typeof x === 'string';
+  if (
+    !credOk ||
+    !strOrNull(v.model) ||
+    !strOrNull(v.resets_at) ||
+    !numOrNull(v.limit_usd) ||
+    !numOrNull(v.remaining_usd) ||
+    typeof v.schema_version !== 'number'
+  ) {
+    return null;
+  }
+  return {
+    schema_version: v.schema_version,
+    enabled: v.enabled,
+    model: v.model as string | null,
+    credential: cred as AiStatus['credential'],
+    counted: v.counted,
+    limit_usd: v.limit_usd as number | null,
+    remaining_usd: v.remaining_usd as number | null,
+    resets_at: v.resets_at as string | null,
+  };
+}
+
+/** `GET /api/ai/status`。失敗は AiRequestError（session_expired・network・unavailable） */
+export async function getAiStatus(
+  fetchFn: typeof fetch = fetch,
+  endpoint: string = AI_STATUS_PATH,
+  signal?: AbortSignal,
+): Promise<AiStatus> {
+  const res = await fetchAi(fetchFn, endpoint, { method: 'GET', signal: signal ?? null });
+  if (!res.ok) throw await failure(res);
+  if (!contentType(res).startsWith('application/json')) {
+    throw new AiRequestError(res.status, 'session_expired');
+  }
+  let j: unknown;
+  try {
+    j = await res.json();
+  } catch {
+    throw new AiRequestError(res.status, 'unavailable');
+  }
+  const st = toAiStatus(j);
+  if (!st) throw new AiRequestError(res.status, 'unavailable');
+  return st;
 }

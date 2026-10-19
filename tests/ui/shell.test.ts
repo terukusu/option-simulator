@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
+  aiVisible,
+  benchView,
   CHART_MODES,
   chartMode,
   DOCK_LABELS,
@@ -120,13 +122,14 @@ describe('shellReduce', () => {
     expect(smileView(s, 'phone')).toBe('smile');
   });
 
-  it('#130: ドックのボタンの文字（smile = IV）と読み上げの名前、ボタンの数はスマホ 5・タブレット 4・PC 0 のまま', () => {
+  it('#130・#135: ドックのボタンの文字（smile = IV・ai = AI）と読み上げの名前、ボタンの数はスマホ 6・タブレット 5・PC 0', () => {
     expect(Object.entries(DOCK_LABELS).map(([id, d]) => [id, d.text])).toEqual([
       ['positions', 'ポジ'],
       ['board', '板'],
       ['scenario', 'シナリオ'],
       ['metrics', '指標'],
       ['smile', 'IV'],
+      ['ai', 'AI'],
     ]);
     expect(DOCK_LABELS.smile.name).toBe('IV 推移 · スマイル');
     expect(dockPanels('phone').map((id) => DOCK_LABELS[id].text)).toEqual([
@@ -135,12 +138,14 @@ describe('shellReduce', () => {
       'シナリオ',
       '指標',
       'IV',
+      'AI',
     ]);
     expect(dockPanels('tablet').map((id) => DOCK_LABELS[id].text)).toEqual([
       'ポジ',
       '板',
       '指標',
       'IV',
+      'AI',
     ]);
     expect(dockPanels('pc')).toEqual([]);
   });
@@ -189,10 +194,49 @@ describe('layoutTier / visiblePanel / dockPanels', () => {
     expect(visiblePanel(at({ panel: 'board' }), 'tablet')).toBe('board');
   });
 
-  it('ドックのボタン: スマホ 5・タブレット 4（シナリオ無し）・PC 無し', () => {
-    expect(dockPanels('phone')).toEqual(['positions', 'board', 'scenario', 'metrics', 'smile']);
-    expect(dockPanels('tablet')).toEqual(['positions', 'board', 'metrics', 'smile']);
+  it('ドックのボタン: スマホ 6・タブレット 5（シナリオ無し）・PC 無し', () => {
+    expect(dockPanels('phone')).toEqual([
+      'positions',
+      'board',
+      'scenario',
+      'metrics',
+      'smile',
+      'ai',
+    ]);
+    expect(dockPanels('tablet')).toEqual(['positions', 'board', 'metrics', 'smile', 'ai']);
     expect(dockPanels('pc')).toEqual([]);
+  });
+});
+
+describe('#135 AI のパネル（スマホ・タブレットはドックの 1 枚、PC は作業台の入れ替え）', () => {
+  it('bench: 既定 work、入れ替え・指定・変わらなければ同じ参照', () => {
+    const s = at({});
+    expect(benchView(s)).toBe('work');
+    const ai = shellReduce(s, { type: 'bench' });
+    expect(benchView(ai)).toBe('ai');
+    expect(benchView(shellReduce(ai, { type: 'bench' }))).toBe('work');
+    expect(shellReduce(ai, { type: 'bench', bench: 'ai' })).toBe(ai);
+    expect(benchView(shellReduce(ai, { type: 'bench', bench: 'work' }))).toBe('work');
+  });
+
+  it('PC の open: ai → 作業台を ai、ポジション・指標 → work、板・スマイルはそのまま', () => {
+    const s = at({});
+    const ai = shellReduce(s, { type: 'open', panel: 'ai', tier: 'pc' });
+    expect(benchView(ai)).toBe('ai');
+    expect(benchView(shellReduce(ai, { type: 'open', panel: 'positions', tier: 'pc' }))).toBe(
+      'work',
+    );
+    expect(shellReduce(ai, { type: 'open', panel: 'board', tier: 'pc' })).toBe(ai);
+  });
+
+  it('見えているか: PC = 作業台が ai、タブレット = パネルが ai、スマホ = それに加えて hidden でない', () => {
+    expect(aiVisible(at({ bench: 'ai' }), 'pc')).toBe(true);
+    expect(aiVisible(at({}), 'pc')).toBe(false);
+    expect(aiVisible(at({ panel: 'ai' }), 'tablet')).toBe(true);
+    expect(aiVisible(at({ panel: 'ai', sheet: 'hidden' }), 'tablet')).toBe(true);
+    expect(aiVisible(at({ panel: 'ai', sheet: 'peek' }), 'phone')).toBe(true);
+    expect(aiVisible(at({ panel: 'ai', sheet: 'hidden' }), 'phone')).toBe(false);
+    expect(aiVisible(at({ panel: 'board' }), 'phone')).toBe(false);
   });
 });
 

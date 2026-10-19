@@ -113,7 +113,7 @@ describe('paletteItems（AC-B2）', () => {
     expect(idx).toEqual([...idx].sort((a, b) => a - b));
   });
 
-  it('パネルの行: 1〜5・G のキーの表示、グラフにフォーカスは足 0 本・ミニで押せない', () => {
+  it('パネルの行: 1〜6・G のキーの表示、グラフにフォーカスは足 0 本・ミニで押せない', () => {
     const panel = ofGroup(items, 'panel');
     expect(panel.map((i) => [i.label, i.kbd])).toEqual([
       ['ポジション', '1'],
@@ -121,6 +121,7 @@ describe('paletteItems（AC-B2）', () => {
       ['シナリオ', '3'],
       ['指標', '4'],
       ['IV 推移 · スマイル', '5'],
+      ['AI に相談', '6'],
       ['グラフにフォーカス', 'G'],
     ]);
     expect(panel.every((i) => !i.disabled)).toBe(true);
@@ -129,6 +130,26 @@ describe('paletteItems（AC-B2）', () => {
     expect(g?.disabled).toBe(true);
     expect(g?.run).toBeNull();
     expect(g?.title).toBeTruthy();
+  });
+
+  it('#135: [このポジを診断] の行（押せない理由は aiChat の diagnoseBlocked。省略なら行を出さない）', () => {
+    expect(items.some((i) => i.id === 'panel:diagnose')).toBe(false);
+    const ok = paletteItems({ ...inputOf(twoLegs), aiDiagnoseBlocked: null });
+    const d = ok.find((i) => i.id === 'panel:diagnose');
+    expect(d).toMatchObject({
+      label: 'このポジを診断',
+      disabled: false,
+      run: { kind: 'diagnose' },
+    });
+    const no = paletteItems({
+      ...inputOf(twoLegs),
+      aiDiagnoseBlocked: 'AI は無効です（管理者の設定）',
+    });
+    expect(no.find((i) => i.id === 'panel:diagnose')).toMatchObject({
+      disabled: true,
+      run: null,
+      title: 'AI は無効です（管理者の設定）',
+    });
   });
 
   it('(b) シナリオの行は presetChips と同じ label・disabled・action。X₀ が NaN なら 3 行とも押せず、リセットは押せる', () => {

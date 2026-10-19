@@ -3,10 +3,13 @@ import {
   type AiEvent,
   type AiRequest,
   AiRequestError,
+  getAiStatus,
   parseSse,
   postAiMessages,
   toAiEvent,
+  toAiStatus,
 } from '../../data/aiStream';
+import { aiErrorText } from '../../ui/view/aiChat';
 
 /**
  * #134 AC7: AI の中継の SSE の解析（data/aiStream.ts）。サーバー（api/src/simulator_api/ai/relay.py）の書き方
@@ -161,5 +164,150 @@ describe('postAiMessages', () => {
     const err = await postAiMessages(body, () => {}, undefined, fetchFn).catch((e) => e);
     expect(err).toBeInstanceOf(AiRequestError);
     expect([err.status, err.code, err.remainingUsd]).toEqual([429, 'budget_exceeded', 0.05]);
+  });
+
+  // ---- #135 AC5: 終わり方と切断の区別
+  const sseRes = (text: string, init: ResponseInit = {}) =>
+    new Response(text, {
+      status: 200,
+      headers: { 'Content-Type': 'text/event-stream; charset=utf-8' },
+      ...init,
+    });
+  const run = async (fetchFn: typeof fetch, signal?: AbortSignal) => {
+    const got: AiEvent[] = [];
+    const err = await postAiMessages(body, (e) => got.push(e), signal, fetchFn).then(
+      () => null,
+      (e) => e,
+    );
+    return { got, err };
+  };
+
+  it('done / error の無いまま終わると最後に incomplete を 1 回', async () => {
+    const cut = STREAM.slice(0, STREAM.indexOf('event: done'));
+    const { got, err } = await run((async () => sseRes(cut)) as unknown as typeof fetch);
+    expect(err).toBeNull();
+    expect(got.map((e) => e.type)).toEqual(['accepted', 'progress', 'text', 'incomplete']);
+    // done があれば incomplete は足さない。error で終わっても足さない
+    const ok = await run((async () => sseRes(STREAM)) as unknown as typeof fetch);
+    expect(ok.got.at(-1)?.type).toBe('done');
+    const errEnd = await run((async () =>
+      sseRes(`${cut}event: error\ndata: {"code":"timeout"}\n\n`)) as unknown as typeof fetch);
+    expect(errEnd.got.map((e) => e.type).at(-1)).toBe('error');
+    expect(errEnd.got.some((e) => e.type === 'incomplete')).toBe(false);
+  });
+
+  it('途中で読めなくなったら incomplete（切断）', async () => {
+    const enc = new TextEncoder().encode(STREAM.slice(0, 80));
+    const stream = new ReadableStream<Uint8Array>({
+      start(c) {
+        c.enqueue(enc);
+        c.error(new TypeError('network error'));
+      },
+    });
+    const { got, err } = await run(
+      (async () =>
+        new Response(stream, {
+          status: 200,
+          headers: { 'Content-Type': 'text/event-stream' },
+        })) as unknown as typeof fetch,
+    );
+    expect(err).toBeNull();
+    expect(got.at(-1)).toEqual({ type: 'incomplete' });
+  });
+
+  it('IAP のセッション切れ: リダイレクトと SSE でない 200 は session_expired、fetch の失敗は network', async () => {
+    let init: RequestInit | undefined;
+    const redirect = (async (_u: string, i: RequestInit) => {
+      init = i;
+      return { type: 'opaqueredirect', status: 0, ok: false } as unknown as Response;
+    }) as unknown as typeof fetch;
+    const a = await run(redirect);
+    expect([a.err?.code, a.err?.status]).toEqual(['session_expired', 0]);
+    expect(init?.redirect).toBe('manual');
+    const html = (async () =>
+      new Response('<html>Sign in</html>', {
+        status: 200,
+        headers: { 'Content-Type': 'text/html; charset=utf-8' },
+      })) as unknown as typeof fetch;
+    const b = await run(html);
+    expect(b.err).toBeInstanceOf(AiRequestError);
+    expect(b.err.code).toBe('session_expired');
+    const offline = (async () => {
+      throw new TypeError('Failed to fetch');
+    }) as unknown as typeof fetch;
+    const c = await run(offline);
+    expect([c.err?.code, c.err?.status]).toEqual(['network', 0]);
+    // 3 つとも画面の文言が違う（session_expired は再読み込み、network / incomplete は途中で切れた）
+    const texts = new Set(['session_expired', 'network', 'incomplete'].map((k) => aiErrorText(k)));
+    expect(texts.size).toBe(3);
+    expect(aiErrorText('session_expired')).toContain('再読み込み');
+    expect(aiErrorText('incomplete')).toContain('途中で切れ');
+    expect(aiErrorText('budget_exceeded', 0.05)).toContain('$0.05');
+  });
+
+  it('中止（AbortError）はそのまま投げる（network にしない）', async () => {
+    const ac = new AbortController();
+    const fetchFn = (async (_u: string, i: RequestInit) => {
+      ac.abort();
+      if (i.signal?.aborted) throw new DOMException('aborted', 'AbortError');
+      return sseRes(STREAM);
+    }) as unknown as typeof fetch;
+    const { err } = await run(fetchFn, ac.signal);
+    expect(err?.name).toBe('AbortError');
+  });
+
+  it('送り先は引数（dev の合成の応答）', async () => {
+    const urls: string[] = [];
+    const fetchFn = (async (u: string) => {
+      urls.push(u);
+      return sseRes(STREAM);
+    }) as unknown as typeof fetch;
+    await postAiMessages(body, () => {}, undefined, fetchFn, '/fixtures/ai/messages');
+    await postAiMessages(body, () => {}, undefined, fetchFn);
+    expect(urls).toEqual(['/fixtures/ai/messages', '/api/ai/messages']);
+  });
+});
+
+describe('getAiStatus', () => {
+  const ST = {
+    schema_version: 1,
+    enabled: true,
+    model: 'claude-opus-5-5',
+    credential: 'api_key',
+    counted: true,
+    limit_usd: 3,
+    remaining_usd: 2.4,
+    resets_at: '2026-10-20T00:00:00+09:00',
+  };
+  it('形を検査して返す・形の違いは unavailable・HTML は session_expired', async () => {
+    const json = (v: unknown) =>
+      (async () =>
+        new Response(JSON.stringify(v), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json; charset=utf-8' },
+        })) as unknown as typeof fetch;
+    expect(await getAiStatus(json(ST))).toEqual(ST);
+    const bad = await getAiStatus(json({ ...ST, enabled: 'yes' })).catch((e) => e);
+    expect(bad.code).toBe('unavailable');
+    const html = await getAiStatus(
+      (async () =>
+        new Response('<html/>', {
+          status: 200,
+          headers: { 'Content-Type': 'text/html' },
+        })) as unknown as typeof fetch,
+    ).catch((e) => e);
+    expect(html.code).toBe('session_expired');
+    expect(toAiStatus({ ...ST, credential: 'other' })).toBeNull();
+    expect(
+      toAiStatus({
+        ...ST,
+        enabled: false,
+        model: null,
+        credential: null,
+        limit_usd: null,
+        remaining_usd: null,
+        resets_at: null,
+      })?.enabled,
+    ).toBe(false);
   });
 });

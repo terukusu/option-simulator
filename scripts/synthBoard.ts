@@ -22,6 +22,7 @@ import { roundOptionPrice } from '../model/tick';
 import { jstInstant, sqInstant, yearFraction } from '../model/time';
 import type { Quote } from '../model/types';
 import { makeSvi, rng, sviTotalVariance, synthChain } from '../tests/support/synthChain';
+import { buildAiToolsFixture } from './aiToolsFixture';
 
 export interface MonthSpec {
   contractMonth: string;
@@ -493,6 +494,9 @@ export function serializeChainJson(json: ChainJson): string {
 export function buildFixtureFiles(): Record<string, string> {
   const out: Record<string, string> = {};
   for (const spec of SPECS) out[`${spec.name}.json`] = serializeChainJson(buildChainJson(spec));
+  // 道具の出力の見本（#135。中継の pytest が結果の形に通す）
+  const latest = SPECS.find((s) => s.name === 'latest') as ChainSpec;
+  out['ai_tools.json'] = buildAiToolsFixture(JSON.parse(out[`${latest.name}.json`] as string));
   return out;
 }
 

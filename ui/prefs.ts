@@ -15,6 +15,8 @@
  * （margin_factor_pct・margin_range_pct・margin_iv_up_pt・margin_iv_down_pt）は読まない・書かない。
  * 書き出しは触っていない項目も既定値で書くので、古い値が利用者の選んだ値か旧既定かを区別できず、読むと新しい
  * 既定が効かないため。資金・買いの OP のキーは今のまま。版は 1 のまま。
+ * #135 で「AI の免責の文を見た」（ai_disclaimer_seen。boolean。既定 false。true のときだけ書く）を足した。版は 1 のまま
+ * （無い・boolean でない → false。古い画面はこのキーを読まずに書き直すので消えるが、免責の文がもう 1 回出るだけ）。
  */
 
 export const PREFS_KEY = 'option-simulator.prefs';
@@ -77,7 +79,12 @@ const MARGIN_JSON_KEY: Record<MarginPrefKey, string> = {
 export interface Prefs {
   theme: ThemePref;
   margin: MarginPrefs;
+  /** AI のパネルの免責の文を閉じた（端末で 1 回だけ出す。#135。無い = false） */
+  aiDisclaimerSeen?: boolean;
 }
+
+/** AI の免責の文を見たかの JSON のキー（#135） */
+const AI_DISCLAIMER_JSON_KEY = 'ai_disclaimer_seen';
 
 export const DEFAULT_PREFS: Prefs = { theme: 'auto', margin: { ...DEFAULT_MARGIN_PREFS } };
 
@@ -130,7 +137,9 @@ export function readPrefs(text: string | null): PrefsRead {
   if (typeof version !== 'number' || !Number.isInteger(version) || version < 1) return fallback;
   if (version > PREFS_SCHEMA_VERSION) return { prefs: defaultPrefs(), writable: false };
   if (!isThemePref(o.theme)) return fallback;
-  return { prefs: { theme: o.theme, margin: readMargin(o) }, writable: true };
+  const prefs: Prefs = { theme: o.theme, margin: readMargin(o) };
+  if (o[AI_DISCLAIMER_JSON_KEY] === true) prefs.aiDisclaimerSeen = true;
+  return { prefs, writable: true };
 }
 
 /** 書き出す（既知のキーだけ。資金が未設定ならキーを書かない。範囲外・型違いの値は既定にして書く）。 */
@@ -147,6 +156,7 @@ export function serializePrefs(p: Prefs): string {
     typeof m.ignoreLongOptions === 'boolean'
       ? m.ignoreLongOptions
       : DEFAULT_MARGIN_PREFS.ignoreLongOptions;
+  if (p.aiDisclaimerSeen === true) out[AI_DISCLAIMER_JSON_KEY] = true;
   return JSON.stringify(out);
 }
 
