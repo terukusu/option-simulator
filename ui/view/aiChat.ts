@@ -24,7 +24,7 @@ import type {
 } from '../../data/aiStream';
 
 export const AI_SESSION_KEY = 'optsim.ai.v1';
-/** [このポジを診断] の最初の発言（中継の relay.DIAGNOSE_TEXT と同じ文。system prompt の診断の節が参照する） */
+/** [このポジションを診断] の最初の発言（中継の relay.DIAGNOSE_TEXT と同じ文。system prompt の診断の節が参照する） */
 export const DIAGNOSE_TEXT = 'このポジションを診断してください。';
 /** 中継の上限（allowlist.py の MAX_MESSAGES・MAX_FREE_TEXT_TOTAL・MAX_USER_TEXT） */
 export const MAX_MESSAGES = 60;
@@ -326,7 +326,7 @@ export interface AiGate {
   status: AiStatus | null | { error: string };
 }
 
-/** [このポジを診断] が押せない理由（押せるなら null） */
+/** [このポジションを診断] が押せない理由（押せるなら null） */
 export function diagnoseBlocked(s: AiChatState, g: AiGate): string | null {
   if (!g.hasChain) return '板がありません（板を読んでから押してください）';
   if (g.legCount === 0) return '足がありません（ポジションを組んでから押してください）';

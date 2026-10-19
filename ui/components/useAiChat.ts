@@ -2,7 +2,7 @@
  * AI のチャットのフック（#135。docs/design.md 14 章）。会話の状態は ui/view/aiChat.ts の reducer（純関数）、ここは
  * fetch（data/aiStream.ts）・sessionStorage（1 キー）・道具の実行（ui/view/aiTools.ts）・描き直しのまとめ方だけ。
  *
- * - [このポジを診断] / 送信: 押した瞬間に begin（「道具を計算中」）を描いてから、次のタスクで文脈（事前計算 5 本）を
+ * - [このポジションを診断] / 送信: 押した瞬間に begin（「道具を計算中」）を描いてから、次のタスクで文脈（事前計算 5 本）を
  *   作って送る（計算の前に進み具合を出す = 押して 1 秒以内）
  * - 流れの事象は状態の ref にすぐ入れ、描き直しは 1 フレームに 1 回（text の delta ごとに描かない）
  * - tool_use で止まったら道具を実行して tool_result を足し、次の要求（MAX_TOOL_ROUNDS まで）

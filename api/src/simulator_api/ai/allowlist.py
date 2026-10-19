@@ -22,7 +22,7 @@ from .shape import DATE, INSTANT, MONTH, Arr, Bad, Bool, Enum, Map, Num, Obj, St
 from .tools import Registry
 
 SCHEMA_VERSION = 1
-KINDS = ("chat", "diagnose")  # 定型の種類（diagnose = [このポジを診断]。#135）。#140 が足す
+KINDS = ("chat", "diagnose")  # 定型の種類（diagnose = [このポジションを診断]。#135）。#140 が足す
 
 MAX_PRICE = 10_000_000  # 価格・行使価格・F の上限（円。形の検査の安全弁）
 MAX_EXPIRIES = 6

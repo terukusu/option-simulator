@@ -165,8 +165,8 @@ gcloud logging read 'resource.type="cloud_run_revision" AND resource.labels.serv
 - **許可リスト**（`ai/allowlist.py`）: ブラウザから受けるのは `schema_version`・`kind`・`context`・`messages` だけ（`model`・`system`・`tools`・`max_tokens` などは 400）。`context` のキー・型・範囲・個数を検査し（自由な文字列は無い。板の行は `k`・`type`・`bid`・`ask`・`iv` だけで、JPX のグリーク・`bid_iv` / `ask_iv`・数量・建玉は 400）、`messages` は role の交互・block の型（user は `text`・`tool_result`、assistant は `text`・`thinking`・`redacted_thinking`・`tool_use`）・道具の名前と入出力の形（`ai/tools.py` の登録）を検査する。送る本文は検査済みの値から組み立て直す（`context` は最初の user の先頭の text block に `<context>…</context>` の決定的な JSON）
 - **1 日の上限**（`ai/budget.py`）: 予約 = 入力の見積もり（送る本文の UTF-8 のバイト数 + 2,000。トークン数の上界）× 5 分のキャッシュ書き込みの単価（入力の 1.25 倍）+ `max_tokens` × 出力の単価（µUSD の整数）。`計上額 + 予約額 ≤ 上限` のときだけ送り、終わったら `usage` × 料金表で精算、途中で切れたら予約額のまま。計上の場所が読めない・書けないときは 503 で送らない
 - **SSE**: `accepted`（検査と予約の直後、Anthropic を呼ぶ前）→ `progress`（`thinking` / `writing` / `tool`）・`thinking`・`text`・`tool_use` → `done`（`stop_reason`・assistant の `content`・`remaining_usd`）か `error`（`timeout`・`upstream_auth`・`upstream_rate_limited`・`upstream_overloaded`・`upstream_bad_request`・`upstream_unavailable`・`upstream_incomplete`・`bad_tool_input`）。締め切りは 50 秒
-- **道具**（`ai/tools.py`。#135）: `position_summary`・`tail_table`・`margin_summary`・`scenario_grid`・`smile_position`（入力なし。[このポジを診断] ではブラウザが事前計算して `context.precomputed`）と `evaluate_scenario`（`dx_pct` か `x`・`days`・`iv_shift_pt`・任意の `skew_pt`。範囲は画面のシナリオの欄と同じ）。中継は道具を実行せず、入力（`tool_use`）・結果（`tool_result`・`precomputed`）を形で検査する。計算はブラウザの `ui/view/aiTools.ts` で、生成した見本 `fixtures/synthetic/ai_tools.json` を `tests/test_ai_tools.py` が結果の形に通す（言語をまたぐ契約）
-- **会話の途中の文脈の更新**（#135）: 2 件目以降の user の発言に `{"type": "context_update", "context": {…}}` を 1 つ（`tool_result` の後ろ）。`context` と同じ形で検査し、`<context_update>…</context_update>` の text block にして同じ位置に置く。最初の `context` と前の messages は変えない（Opus 5.5 の preserved thinking・prompt caching の前置きを保つ）。`kind: "diagnose"` は [このポジを診断]（system prompt は 1 つ。`relay.DIAGNOSE_TEXT` が最初の発言）
+- **道具**（`ai/tools.py`。#135）: `position_summary`・`tail_table`・`margin_summary`・`scenario_grid`・`smile_position`（入力なし。[このポジションを診断] ではブラウザが事前計算して `context.precomputed`）と `evaluate_scenario`（`dx_pct` か `x`・`days`・`iv_shift_pt`・任意の `skew_pt`。範囲は画面のシナリオの欄と同じ）。中継は道具を実行せず、入力（`tool_use`）・結果（`tool_result`・`precomputed`）を形で検査する。計算はブラウザの `ui/view/aiTools.ts` で、生成した見本 `fixtures/synthetic/ai_tools.json` を `tests/test_ai_tools.py` が結果の形に通す（言語をまたぐ契約）
+- **会話の途中の文脈の更新**（#135）: 2 件目以降の user の発言に `{"type": "context_update", "context": {…}}` を 1 つ（`tool_result` の後ろ）。`context` と同じ形で検査し、`<context_update>…</context_update>` の text block にして同じ位置に置く。最初の `context` と前の messages は変えない（Opus 5.5 の preserved thinking・prompt caching の前置きを保つ）。`kind: "diagnose"` は [このポジションを診断]（system prompt は 1 つ。`relay.DIAGNOSE_TEXT` が最初の発言）
 - テストは偽の送信先（`ai/gateway.py` の `FakeGateway`）と、本物の SDK に httpx2 の `MockTransport` を渡したもの（送られる見出し・本文を捕まえる。ネットワークに出ない）、偽の Firestore の session。Anthropic・GCP には触れない
 
 ### ログ
@@ -210,7 +210,7 @@ gcloud logging read 'resource.type="cloud_run_revision" AND resource.labels.serv
 
 ## AI の評価（#135）
 
-`npm run ai:eval`（`scripts/aiEval.mjs`）は、合成の板・合成のポジション 10 通り（`scripts/aiEvalCases.ts`）で、画面と同じコード（文脈と事前計算・会話の reducer・道具の往復）を通して中継に送り、[このポジを診断] の返答の弱点の数と数字の照合（`ui/view/aiNumbers.ts`）を出す。送り先は手元で起動した中継（`AI_EVAL_BASE`、既定 `http://127.0.0.1:8080`）で、本番の IAP は越えない。資格情報は中継の環境変数だけ（スクリプトは読まない・出さない）。
+`npm run ai:eval`（`scripts/aiEval.mjs`）は、合成の板・合成のポジション 10 通り（`scripts/aiEvalCases.ts`）で、画面と同じコード（文脈と事前計算・会話の reducer・道具の往復）を通して中継に送り、[このポジションを診断] の返答の弱点の数と数字の照合（`ui/view/aiNumbers.ts`）を出す。送り先は手元で起動した中継（`AI_EVAL_BASE`、既定 `http://127.0.0.1:8080`）で、本番の IAP は越えない。資格情報は中継の環境変数だけ（スクリプトは読まない・出さない）。
 
 ```bash
 # 1) 中継を本物の資格情報で起動（値は表示しない。ログは fixtures/local/ に）

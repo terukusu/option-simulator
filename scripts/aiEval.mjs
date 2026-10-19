@@ -1,7 +1,7 @@
 // AI の評価（`npm run ai:eval`。#135 AC1・AC2、EPIC #141 終了条件 1・2）。合成の板（fixtures/synthetic/latest.json）と
 // 合成のポジション 10 通り（scripts/aiEvalCases.ts）で、画面と同じコード（ui/view/aiContext.ts の文脈と事前計算・
 // ui/view/aiChat.ts の会話の reducer と道具の往復・ui/view/aiTools.ts の道具・data/aiStream.ts の SSE）を通して
-// 中継（POST /api/ai/messages）に送り、[このポジを診断] の返答の弱点の数と数字の照合（ui/view/aiNumbers.ts）を出す。
+// 中継（POST /api/ai/messages）に送り、[このポジションを診断] の返答の弱点の数と数字の照合（ui/view/aiNumbers.ts）を出す。
 // TypeScript のモジュールは Vite のモジュールランナーで読む（依存を増やさない）。
 //
 // 送り先は AI_EVAL_BASE（既定 http://127.0.0.1:8080）= 手元で起動した中継。本番の IAP は越えない。資格情報は中継の

@@ -25,7 +25,7 @@ import { PanelHead } from '../PanelHead';
 export const AI_DISCLAIMER =
   'AI の説明は、この simulator の計算（道具）の数字を使った検討の手伝いです。投資の助言ではありません。売買の判断はご自身で行ってください。';
 export const AI_EMPTY_TEXT =
-  '今のポジションの弱点を、AI が simulator の計算の数字で説明します。[このポジを診断] を押すか、質問を入れてください。';
+  '今のポジションの弱点を、AI が simulator の計算の数字で説明します。[このポジションを診断] を押すか、質問を入れてください。';
 const UNMATCHED_LABEL = '道具の値に無い数字';
 
 export interface AiApply {
@@ -38,7 +38,7 @@ export interface AiApply {
 /** パレット（NextApp）が読む口（AiPanel が描くたびに入れる） */
 export interface AiPanelApi {
   diagnose: () => void;
-  /** パレットの [このポジを診断] が押せない理由（状態をまだ読んでいなければ押せる扱い = 開いてから読む） */
+  /** パレットの [このポジションを診断] が押せない理由（状態をまだ読んでいなければ押せる扱い = 開いてから読む） */
   paletteReason: string | null;
 }
 
@@ -93,7 +93,7 @@ export const AiPanel = pure(AiPanelView);
 /**
  * AI のチャット（#135。docs/ui-redesign.md 2 章・docs/design.md 14 章）。見出し行（残り・[新しい会話]）→ 免責の文
  * （初回だけ）→ 会話（user の吹き出し・考え中の要約（折りたたみ）・返答（aiText の木）・道具のカード）→ 進み具合・
- * 押せない理由 → [このポジを診断] と入力欄。返答・入力は JSX のテキストだけ（HTML を入れない・style 属性を使わない）。
+ * 押せない理由 → [このポジションを診断] と入力欄。返答・入力は JSX のテキストだけ（HTML を入れない・style 属性を使わない）。
  * 照合できない数字（ui/view/aiNumbers.ts）は class の印（点線の下線）。
  */
 export function AiChat(p: {
@@ -204,7 +204,7 @@ export function AiChat(p: {
               chat.diagnose();
             }}
           >
-            このポジを診断
+            このポジションを診断
           </button>
         </div>
         <form

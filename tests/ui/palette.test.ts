@@ -132,12 +132,12 @@ describe('paletteItems（AC-B2）', () => {
     expect(g?.title).toBeTruthy();
   });
 
-  it('#135: [このポジを診断] の行（押せない理由は aiChat の diagnoseBlocked。省略なら行を出さない）', () => {
+  it('#135: [このポジションを診断] の行（押せない理由は aiChat の diagnoseBlocked。省略なら行を出さない）', () => {
     expect(items.some((i) => i.id === 'panel:diagnose')).toBe(false);
     const ok = paletteItems({ ...inputOf(twoLegs), aiDiagnoseBlocked: null });
     const d = ok.find((i) => i.id === 'panel:diagnose');
     expect(d).toMatchObject({
-      label: 'このポジを診断',
+      label: 'このポジションを診断',
       disabled: false,
       run: { kind: 'diagnose' },
     });

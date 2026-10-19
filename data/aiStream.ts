@@ -16,7 +16,7 @@
 
 export const AI_SCHEMA_VERSION = 1;
 
-/** 定型の種類（diagnose = [このポジを診断]。#135） */
+/** 定型の種類（diagnose = [このポジションを診断]。#135） */
 export type AiKind = 'chat' | 'diagnose';
 
 export type AiUserBlock =

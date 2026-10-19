@@ -499,7 +499,7 @@ export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
         openTerm(run.id);
         return;
       case 'diagnose':
-        // AI のパネルを見せて（PC は作業台を AI に）[このポジを診断]
+        // AI のパネルを見せて（PC は作業台を AI に）[このポジションを診断]
         send({ type: 'open', panel: 'ai', tier });
         aiApi.current?.diagnose();
         return;
