@@ -302,6 +302,10 @@ class AiRelay:
                     error = ev.code
                     break
                 t = ev["type"]
+                if t == "meta":  # 送信先の計測（AgentSdkGateway の子の起動 → 最初の事象。#186）
+                    if isinstance(ev.get("spawn_ms"), int):
+                        rec["spawn_ms"] = ev["spawn_ms"]
+                    continue
                 if t in ("thinking", "text"):
                     if first_delta is None:
                         first_delta = ms()

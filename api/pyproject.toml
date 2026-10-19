@@ -10,6 +10,9 @@ dependencies = [
     "google-cloud-bigquery>=3.45,<4",
     # AI の中継（#134、docs/ai-advisor.md 論点 7 = A）。exclude-newer の範囲で固定（1.9.0 は範囲の外）
     "anthropic==1.8.0",
+    # AI_CREDENTIAL=oauth_token の送信路（#186、docs/adr-0005-ai-oauth-via-agent-sdk.md）。同梱の CLI 2.1.283 を
+    # 子プロセスで使う。transcript の形・CLI の環境変数に依存するので版を固定する（exclude-newer の範囲）
+    "claude-agent-sdk==0.2.160",
 ]
 
 [dependency-groups]

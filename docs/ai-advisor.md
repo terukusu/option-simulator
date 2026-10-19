@@ -122,6 +122,8 @@ EPIC #141 の (b)。Issue と #120 の当初の方針は「Secret Manager に置
 
 **追記（#184、2026-10-19、オーナー）**: 案 C（Anthropic の WIF）も足す（「WIF は採らない」を改める）。`AI_CREDENTIAL=wif` で、Secret Manager を使わず ID を素の環境変数（GitHub の repository variables から）で渡す。SDK 1.8.0 に `WorkloadIdentityCredentials` があり（F15 の懸念は解消）、ID トークンはメタデータサーバーから `format=full` で取る（`fetch_id_token` ではなく直接 1 回の GET）。費用は `api_key` と同じく実額で数える。ADR-0001 の追補。
 
+**追記（#186、2026-10-19、オーナー）**: サブスクリプションの OAuth トークンは Messages API の直接呼び出しでは 429 になる（観測）。`oauth_token` の送信路を Claude Agent SDK（同梱の Claude Code CLI）に改め、トークンは子プロセスに `CLAUDE_CODE_OAUTH_TOKEN` としてだけ渡す。本番の既定は `oauth_token`、`wif` とは GitHub の variable で切り替える。規約の文面（Agent SDK の文書・Legal and compliance）と、利用者が自己責任で判断することは [ADR-0005](adr-0005-ai-oauth-via-agent-sdk.md)。
+
 ### 論点 3: 費用の 1 日上限・使うモデル・上限を実装する場所
 - 判断者: オーナー
 
@@ -259,6 +261,8 @@ A（SDK がある言語では SDK を使い、生の HTTP と混ぜない）。
 #### オーナー判断
 
 **実装時に決定（#134、2026-10-19）: A**（公式の Python SDK `anthropic` 1.8.0 を `api/` の依存に固定。`exclude-newer` は据え置き。推移の依存は httpx2・httpcore2・h11・truststore・pydantic・pydantic-core・annotated-types・typing-inspection・jiter・anyio・sniffio・docstring-parser（いずれも MIT / BSD-3-Clause / MIT OR Apache-2.0。`uv.lock` には emscripten だけの httpx2-jsfetch も載るがイメージには入らない）。イメージは約 22 MB 増）。`max_retries=0`、`fallbacks` は付けない。資格情報は中継が選んだ片方を明示で渡す（明示の引数があると SDK は環境変数を読まない）。詳細は design.md 13.4「AI の中継」
+
+**追記（#186、2026-10-19）**: `oauth_token` のときだけ、送信路を Claude Agent SDK（`claude-agent-sdk` 0.2.160、同梱の CLI 2.1.283。MIT・推移の依存 13 個）にした。CLI を要求ごとの子プロセスで動かし、道具は実行させず（`PreToolUse` フックで止める）、事象は `StreamEvent` から今と同じ形に組み立てる。CLI の内部（transcript の形・未文書の環境変数）に依存するので版を固定し、本物の CLI と 127.0.0.1 の偽の Messages API の結合テストで守る。イメージは約 452 MB。詳細は [ADR-0005](adr-0005-ai-oauth-via-agent-sdk.md)
 
 ### 論点 8: 中継の口の守り
 - 判断者: 実装時

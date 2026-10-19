@@ -24,6 +24,16 @@ echo "ok: import"
 # AI の中継の SDK（anthropic。#134）を import できること（AI は無効のまま。Anthropic には触れない）
 docker run --rm "$img" python -c 'import anthropic; print(anthropic.__version__)'
 echo "ok: import anthropic"
+# AI_CREDENTIAL=oauth_token の送信路（claude-agent-sdk。#186）: import でき、同梱の CLI が非 root・ネットワークなしで
+# --version に答え、その版が SDK の同梱の版（_cli_version）と同じこと（Anthropic には触れない）
+want=$(docker run --rm "$img" python -c 'from claude_agent_sdk._cli_version import __cli_version__; print(__cli_version__)')
+got=$(docker run --rm --network none -e CLAUDE_CONFIG_DIR=/tmp/claude-version-check --entrypoint sh "$img" -c \
+  'exec "$(python -c "import claude_agent_sdk, os; print(os.path.join(os.path.dirname(claude_agent_sdk.__file__), \"_bundled\", \"claude\"))")" --version')
+case "$got" in
+  "$want"*) ;;
+  *) fail "同梱の CLI の --version が ${want} でない: ${got}" ;;
+esac
+echo "ok: claude_agent_sdk・同梱の CLI ${want}（非 root）"
 
 # 2. 非 root で動くこと
 uid=$(docker run --rm --entrypoint id "$img" -u)

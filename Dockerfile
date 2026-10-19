@@ -41,7 +41,11 @@ ENV PATH=/opt/venv/bin:$PATH \
     PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     STATIC_DIR=/app/static \
-    PORT=8080
+    PORT=8080 \
+    CLAUDE_AGENT_SDK_SKIP_VERSION_CHECK=1
+# CLAUDE_AGENT_SDK_SKIP_VERSION_CHECK: AI_CREDENTIAL=oauth_token の送信路（claude-agent-sdk。#186）が要求ごとに同梱の CLI の
+# 版を確かめる子（claude -v）を省く（版は uv.lock で固定済み）。同梱の CLI は site-packages/claude_agent_sdk/_bundled/claude
+# （wheel の実行権のまま）。書く場所は要求ごとの一時ディレクトリ（/tmp）だけ
 WORKDIR /app
 USER 10001
 # GCP_PROJECT（必須）・BQ_DATASET・BQ_LOCATION は実行時の環境変数（infra/prod）。

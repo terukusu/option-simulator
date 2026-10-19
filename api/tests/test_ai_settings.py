@@ -88,6 +88,26 @@ def test_daily_limit(raw, micro):
     assert cfg.daily_limit_micro_usd == micro
 
 
+@pytest.mark.parametrize(("env", "kind"), [
+    (ai_env(AI_CREDENTIAL="oauth_token", ANTHROPIC_AUTH_TOKEN=FAKE_TOKEN), "AgentSdkGateway"),
+    (ai_env(AI_CREDENTIAL="api_key", ANTHROPIC_API_KEY=FAKE_KEY, AI_BUDGET_STORE="memory"), "AnthropicGateway"),
+    (ai_env(AI_CREDENTIAL="wif", AI_BUDGET_STORE="memory", **FAKE_WIF_ENV), "AnthropicGateway"),
+    (ai_env(AI_CREDENTIAL="fake"), "FakeGateway"),
+    (ai_env(AI_CREDENTIAL="none"), None),
+    (ai_env(), None),
+], ids=["oauth_token", "api_key", "wif", "fake", "none", "unset"])
+def test_credential_selects_gateway(env, kind):
+    """AI_CREDENTIAL の切り替え（#186 AC3）: oauth_token → Agent SDK 経由、api_key・wif → anthropic SDK、fake → 偽"""
+    from simulator_api.ai.budget import MemoryStore
+    from simulator_api.app import _ai_relay
+
+    cfg = st.ai_from_env(env)
+    relay = _ai_relay(cfg, None, MemoryStore() if cfg.counted else None, None, lambda: None, lambda: 0.0)
+    assert (type(relay.gateway).__name__ if relay.gateway is not None else None) == kind
+    if kind == "AgentSdkGateway":
+        assert cfg.counted is False and FAKE_TOKEN not in repr(relay.gateway)
+
+
 def test_api_key_with_memory_store_warns(capsys):
     cfg = st.ai_from_env(ai_env(AI_CREDENTIAL="api_key", ANTHROPIC_API_KEY=FAKE_KEY, AI_BUDGET_STORE="memory"))
     assert cfg.budget_store == "memory"
