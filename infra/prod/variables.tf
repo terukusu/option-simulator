@@ -40,3 +40,29 @@ variable "simulator_image" {
     error_message = "simulator_image は <region>-docker.pkg.dev/<project>/simulator/simulator の digest 参照か src-<20hex> のタグ参照で指定する。"
   }
 }
+
+# AI の資格情報の種類（#133、docs/adr-0001-ai-credentials-secret-manager.md）。CI は vars.AI_CREDENTIAL を TF_VAR_ai_credential で渡す（未設定は none）。
+# none: 何も載せない（AI は無効）。api_key: ANTHROPIC_API_KEY、oauth_token: ANTHROPIC_AUTH_TOKEN を Secret Manager の参照で載せる（同時には載せない）
+variable "ai_credential" {
+  description = "AI の資格情報の種類（none | api_key | oauth_token）"
+  type        = string
+  default     = "none"
+
+  validation {
+    condition     = contains(["none", "api_key", "oauth_token"], var.ai_credential)
+    error_message = "ai_credential は none・api_key・oauth_token のどれか。"
+  }
+}
+
+# 参照するシークレットの版。latest は起動したインスタンスが最新の版を読む（版を足すと、古いインスタンスはアイドルで消えるまで旧値）。
+# 番号で固定するとデプロイで切り替わる（Google は環境変数では固定を推奨。トレードオフは infra/README.md「AI の資格情報（Secret Manager）」）
+variable "ai_secret_version" {
+  description = "AI の資格情報のシークレットの版（latest か 1 以上の番号）"
+  type        = string
+  default     = "latest"
+
+  validation {
+    condition     = can(regex("^(latest|[1-9][0-9]*)$", var.ai_secret_version))
+    error_message = "ai_secret_version は latest か 1 以上の番号。"
+  }
+}

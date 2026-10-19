@@ -169,6 +169,34 @@ run "defaults" {
     condition     = google_storage_bucket_iam_member.prod_state_apply.bucket == google_storage_bucket.tfstate["prod"].name && google_storage_bucket_iam_member.prod_state_apply.role == "roles/storage.objectUser"
     error_message = "apply SA は prod の state の読み書き"
   }
+
+  # AI の資格情報（#133）: Secret Manager の API（外しても止めない）とシークレット 2 つ（東京だけに複製・PREVENT）
+  assert {
+    condition     = google_project_service.secretmanager.service == "secretmanager.googleapis.com" && google_project_service.secretmanager.disable_on_destroy == false && google_project_service.secretmanager.deletion_policy == "ABANDON"
+    error_message = "Secret Manager の API は Terraform から外しても止めない（disable_on_destroy = false・ABANDON）"
+  }
+  assert {
+    condition     = join(",", sort([for s in google_secret_manager_secret.ai : s.secret_id])) == "simulator-anthropic-api-key,simulator-anthropic-oauth-token"
+    error_message = "シークレットは simulator-anthropic-api-key と simulator-anthropic-oauth-token の 2 つ（infra/prod の local.ai_secrets と同じ名前）"
+  }
+  assert {
+    condition     = alltrue([for s in google_secret_manager_secret.ai : s.deletion_policy == "PREVENT" && s.replication[0].user_managed[0].replicas[0].location == "asia-northeast1" && length(s.replication[0].user_managed[0].replicas) == 1])
+    error_message = "シークレットは PREVENT、複製は asia-northeast1 の 1 つだけ"
+  }
+
+  # 値を読めるのは sa-simulator だけ（シークレット単位の secretAccessor。apply / plan SA・公開の member に付けない）
+  assert {
+    condition     = length(google_secret_manager_secret_iam_member.simulator_ai) == 2
+    error_message = "secretAccessor はシークレットごとに 1 件（計 2 件）"
+  }
+  assert {
+    condition     = alltrue([for k, m in google_secret_manager_secret_iam_member.simulator_ai : m.role == "roles/secretmanager.secretAccessor" && m.member == google_service_account.simulator.member && m.secret_id == google_secret_manager_secret.ai[k].secret_id])
+    error_message = "secretAccessor は各シークレットに sa-simulator で付ける"
+  }
+  assert {
+    condition     = alltrue([for m in google_secret_manager_secret_iam_member.simulator_ai : !contains([google_service_account.tf_apply.member, google_service_account.tf_plan.member, "allUsers", "allAuthenticatedUsers"], m.member)])
+    error_message = "シークレットの読み取りを apply / plan SA・allUsers・allAuthenticatedUsers に付けない"
+  }
 }
 
 run "members" {

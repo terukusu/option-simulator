@@ -30,6 +30,10 @@ env:
   TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
   GCP_SA_TF_PLAN: ${{ vars.GCP_SA_TF_PLAN }}
   TF_VAR_project_id: ${{ vars.GCP_PROJECT_ID }}
+  # AI の資格情報の種類（none | api_key | oauth_token）と版。秘匿値ではない（値は Secret Manager。infra/README.md「AI の資格情報（Secret Manager）」）。
+  # 未設定なら none（AI は無効・環境変数を足さない）と latest
+  TF_VAR_ai_credential: ${{ vars.AI_CREDENTIAL || 'none' }}
+  TF_VAR_ai_secret_version: ${{ vars.AI_SECRET_VERSION || 'latest' }}
   # 失敗時のログ末尾に使うマスク: 9 桁以上の数字（プロジェクト番号等）と、SA 以外のメールアドレス
   MASK_SED: >-
     s/[0-9]{9,}/<num>/g;

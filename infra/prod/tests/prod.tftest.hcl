@@ -168,3 +168,122 @@ run "reject_bad_dataset" {
   }
   expect_failures = [var.bq_dataset]
 }
+
+# AI の資格情報（#133）: api_key のときは ANTHROPIC_API_KEY だけ（ANTHROPIC_AUTH_TOKEN は無い）。値は Secret Manager の参照だけ
+run "ai_api_key" {
+  command = apply
+  variables {
+    ai_credential = "api_key"
+  }
+
+  assert {
+    condition     = join(",", sort([for e in google_cloud_run_v2_service.simulator.template[0].containers[0].env : e.name])) == "AI_CREDENTIAL,ANTHROPIC_API_KEY,BQ_DATASET,BQ_LOCATION,GCP_PROJECT"
+    error_message = "api_key のときは AI_CREDENTIAL と ANTHROPIC_API_KEY を足す（ANTHROPIC_AUTH_TOKEN は載せない）"
+  }
+  assert {
+    condition     = one([for e in google_cloud_run_v2_service.simulator.template[0].containers[0].env : e.value if e.name == "AI_CREDENTIAL"]) == "api_key"
+    error_message = "AI_CREDENTIAL は api_key"
+  }
+  assert {
+    condition     = one([for e in google_cloud_run_v2_service.simulator.template[0].containers[0].env : e.value_source[0].secret_key_ref[0].secret if e.name == "ANTHROPIC_API_KEY"]) == "simulator-anthropic-api-key"
+    error_message = "ANTHROPIC_API_KEY は simulator-anthropic-api-key の参照"
+  }
+  assert {
+    condition     = one([for e in google_cloud_run_v2_service.simulator.template[0].containers[0].env : e.value_source[0].secret_key_ref[0].version if e.name == "ANTHROPIC_API_KEY"]) == "latest"
+    error_message = "版の既定は latest"
+  }
+  assert {
+    condition     = one([for e in google_cloud_run_v2_service.simulator.template[0].containers[0].env : (e.value == null || e.value == "") if e.name == "ANTHROPIC_API_KEY"]) == true
+    error_message = "ANTHROPIC_API_KEY に素の値を入れない（Secret Manager の参照だけ）"
+  }
+}
+
+# oauth_token のときは ANTHROPIC_AUTH_TOKEN だけ（ANTHROPIC_API_KEY は無い）。版は番号で固定できる
+run "ai_oauth_token" {
+  command = apply
+  variables {
+    ai_credential     = "oauth_token"
+    ai_secret_version = "3"
+  }
+
+  assert {
+    condition     = join(",", sort([for e in google_cloud_run_v2_service.simulator.template[0].containers[0].env : e.name])) == "AI_CREDENTIAL,ANTHROPIC_AUTH_TOKEN,BQ_DATASET,BQ_LOCATION,GCP_PROJECT"
+    error_message = "oauth_token のときは AI_CREDENTIAL と ANTHROPIC_AUTH_TOKEN を足す（ANTHROPIC_API_KEY は載せない）"
+  }
+  assert {
+    condition     = one([for e in google_cloud_run_v2_service.simulator.template[0].containers[0].env : e.value if e.name == "AI_CREDENTIAL"]) == "oauth_token"
+    error_message = "AI_CREDENTIAL は oauth_token"
+  }
+  assert {
+    condition     = one([for e in google_cloud_run_v2_service.simulator.template[0].containers[0].env : e.value_source[0].secret_key_ref[0].secret if e.name == "ANTHROPIC_AUTH_TOKEN"]) == "simulator-anthropic-oauth-token"
+    error_message = "ANTHROPIC_AUTH_TOKEN は simulator-anthropic-oauth-token の参照"
+  }
+  assert {
+    condition     = one([for e in google_cloud_run_v2_service.simulator.template[0].containers[0].env : e.value_source[0].secret_key_ref[0].version if e.name == "ANTHROPIC_AUTH_TOKEN"]) == "3"
+    error_message = "版は var.ai_secret_version"
+  }
+  assert {
+    condition     = one([for e in google_cloud_run_v2_service.simulator.template[0].containers[0].env : (e.value == null || e.value == "") if e.name == "ANTHROPIC_AUTH_TOKEN"]) == true
+    error_message = "ANTHROPIC_AUTH_TOKEN に素の値を入れない（Secret Manager の参照だけ）"
+  }
+}
+
+# 種類は 1 つだけ（キーとトークンを同時に選べない）。空・未知の値は拒否
+run "reject_ai_credential_both" {
+  command = plan
+  variables {
+    ai_credential = "both"
+  }
+  expect_failures = [var.ai_credential]
+}
+
+run "reject_ai_credential_empty" {
+  command = plan
+  variables {
+    ai_credential = ""
+  }
+  expect_failures = [var.ai_credential]
+}
+
+# GitHub variable の入力ミスの代表（大文字・前後の空白）も拒否
+run "reject_ai_credential_upper" {
+  command = plan
+  variables {
+    ai_credential = "API_KEY"
+  }
+  expect_failures = [var.ai_credential]
+}
+
+run "reject_ai_credential_space" {
+  command = plan
+  variables {
+    ai_credential = " api_key"
+  }
+  expect_failures = [var.ai_credential]
+}
+
+run "reject_ai_secret_version_zero" {
+  command = plan
+  variables {
+    ai_credential     = "api_key"
+    ai_secret_version = "0"
+  }
+  expect_failures = [var.ai_secret_version]
+}
+
+run "reject_ai_secret_version_word" {
+  command = plan
+  variables {
+    ai_credential     = "api_key"
+    ai_secret_version = "abc"
+  }
+  expect_failures = [var.ai_secret_version]
+}
+
+run "accept_ai_secret_version_number" {
+  command = plan
+  variables {
+    ai_credential     = "api_key"
+    ai_secret_version = "3"
+  }
+}
