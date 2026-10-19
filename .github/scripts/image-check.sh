@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Cloud Run simulator のイメージの中身と起動の検査（GCP の認証は使わない。BigQuery には触れない = /api/* は叩かない）。
+# Cloud Run simulator のイメージの中身と起動の検査（GCP の認証は使わない。BigQuery には触れない = /api/* は
+# /api/ai/status（AI は無効のまま）だけ叩く）。
 # ci.yml の check と deploy.yml の apply job（push の前）で共用する。
 #
 #   image-check.sh <ローカルのイメージ名>   例: simulator:ci
@@ -20,6 +21,9 @@ fail() { echo "NG: $*" >&2; exit 1; }
 # 1. gunicorn と同じ simulator_api.app:app を作れること（設定の検証。GCP_PROJECT はダミー。BigQuery のクライアントは遅延生成）
 docker run --rm -e GCP_PROJECT=example-project "$img" python -c 'from simulator_api.app import app; assert app.name'
 echo "ok: import"
+# AI の中継の SDK（anthropic。#134）を import できること（AI は無効のまま。Anthropic には触れない）
+docker run --rm "$img" python -c 'import anthropic; print(anthropic.__version__)'
+echo "ok: import anthropic"
 
 # 2. 非 root で動くこと
 uid=$(docker run --rm --entrypoint id "$img" -u)
@@ -84,4 +88,8 @@ check /favicon.svg favicon image/svg+xml
 check /apple-touch-icon.png apple-touch-icon image/png
 check /icon-192.png icon-192 image/png
 check /icon-512.png icon-512 image/png
+# AI の中継（#134）: AI_CREDENTIAL を渡さないので無効（enabled: false）。BigQuery・Anthropic・Firestore に触れない
+check /api/ai/status ai-status application/json
+grep -q '"enabled":false' "$work/ai-status.body" || fail "/api/ai/status が enabled: false でない"
+echo "ok: /api/ai/status は無効"
 echo "simulator のイメージの検査: OK"

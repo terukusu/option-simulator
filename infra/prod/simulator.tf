@@ -9,8 +9,8 @@ locals {
 
   # AI の資格情報（#133、docs/adr-0001-ai-credentials-secret-manager.md）。シークレットと sa-simulator の読み取りは infra/bootstrap
   # （ai_credentials.tf の local.ai_secrets と同じ名前。plan SA はシークレットを読めないので data source にしない）。
-  # var.ai_credential で選んだ 1 つだけを環境変数に載せる。キーとトークンを同時に載せない（SDK は ANTHROPIC_API_KEY を優先するので、
-  # 両方あるとトークンを選んだつもりでキーの従量課金になる）
+  # var.ai_credential で選んだ 1 つだけを環境変数に載せる。キーとトークンを同時に載せない（両方あると SDK は X-Api-Key と
+  # Authorization の両方を送り、取り違えの元になる。中継（#134）は両方あると AI を無効にする）
   ai_secrets = {
     api_key     = "simulator-anthropic-api-key"
     oauth_token = "simulator-anthropic-oauth-token"

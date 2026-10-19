@@ -197,6 +197,26 @@ run "defaults" {
     condition     = alltrue([for m in google_secret_manager_secret_iam_member.simulator_ai : !contains([google_service_account.tf_apply.member, google_service_account.tf_plan.member, "allUsers", "allAuthenticatedUsers"], m.member)])
     error_message = "シークレットの読み取りを apply / plan SA・allUsers・allAuthenticatedUsers に付けない"
   }
+
+  # AI の費用の計上（#134、ADR-0004）: Firestore の名前つき DB（Native・東京・削除保護・ABANDON）
+  assert {
+    condition     = google_firestore_database.ai_budget.name == "simulator-ai" && google_firestore_database.ai_budget.type == "FIRESTORE_NATIVE" && google_firestore_database.ai_budget.location_id == "asia-northeast1"
+    error_message = "計上の DB は simulator-ai（FIRESTORE_NATIVE・asia-northeast1。api の AI_FIRESTORE_DATABASE と同じ名前）"
+  }
+  assert {
+    condition     = google_firestore_database.ai_budget.delete_protection_state == "DELETE_PROTECTION_ENABLED" && google_firestore_database.ai_budget.deletion_policy == "ABANDON"
+    error_message = "計上の DB は削除保護つき・Terraform から外しても消さない（ABANDON）"
+  }
+
+  # 読み書きは sa-simulator だけ・その DB に絞る条件つきの datastore.user（追加型）
+  assert {
+    condition     = google_project_iam_member.simulator_ai_budget.role == "roles/datastore.user" && google_project_iam_member.simulator_ai_budget.member == google_service_account.simulator.member
+    error_message = "計上の DB の付与は sa-simulator への roles/datastore.user だけ"
+  }
+  assert {
+    condition     = length(google_project_iam_member.simulator_ai_budget.condition) == 1 && google_project_iam_member.simulator_ai_budget.condition[0].expression == "resource.name == \"projects/example-project/databases/simulator-ai\""
+    error_message = "datastore.user は DB simulator-ai に絞る IAM 条件つき（(default) に及ばない）"
+  }
 }
 
 run "members" {

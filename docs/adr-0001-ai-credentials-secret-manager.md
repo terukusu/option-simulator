@@ -6,7 +6,7 @@
 
 ## 背景
 
-AI アドバイザー（EPIC #141）の中継（#134）は Cloud Run `simulator` の中から Claude を呼ぶ。資格情報は API キー（従量課金）とサブスクリプションの OAuth トークン（`claude setup-token`。有効期間 1 年）の **両方** に対応し、トークンのときは SDK にトークンだけを渡す（K15。SDK は `ANTHROPIC_API_KEY` を `ANTHROPIC_AUTH_TOKEN` より優先するので、両方あるとキーが使われる）。鍵を持たない Anthropic の Workload Identity Federation は採らない（K15）。
+AI アドバイザー（EPIC #141）の中継（#134）は Cloud Run `simulator` の中から Claude を呼ぶ。資格情報は API キー（従量課金）とサブスクリプションの OAuth トークン（`claude setup-token`。有効期間 1 年）の **両方** に対応し、トークンのときは SDK にトークンだけを渡す（K15。両方あると取り違える。**訂正（#134、2026-10-19）**: 当初「SDK は `ANTHROPIC_API_KEY` を優先する」と書いたが、SDK 1.8.0 の `auth_headers` は両方あると `X-Api-Key` と `Authorization: Bearer` の **両方** を送る（API は拒否する）。片方だけを渡す結論は変わらない）。鍵を持たない Anthropic の Workload Identity Federation は採らない（K15）。
 
 制約:
 
@@ -34,7 +34,7 @@ AI アドバイザー（EPIC #141）の中継（#134）は Cloud Run `simulator`
 | C. Anthropic の WIF（鍵を持たない） | 長命の鍵が無い | OAuth トークンに使えない。K15 で不採用 |
 | D. 素の環境変数（GitHub secret → Terraform の変数） | 最も簡単 | state・plan・Cloud Run の設定（plan SA が読める）に値が入る |
 | E. Secret をボリュームでマウント | 読むたびに最新の版 | SDK は環境変数を読むので中継に読み込みの処理が要る。ローテーションは年 1 程度で利点が小さい |
-| F. キーとトークンを両方とも環境変数に置き、アプリで選ぶ | 切り替えに deploy が要らない | SDK の優先順位で取り違える（トークンのつもりでキーの従量課金）。アプリの誤りで両方が使われうる |
+| F. キーとトークンを両方とも環境変数に置き、アプリで選ぶ | 切り替えに deploy が要らない | SDK が両方の見出しを送る・取り違える（トークンのつもりでキーの従量課金）。アプリの誤りで両方が使われうる |
 | G. API の有効化を README の手作業（`gcloud services enable`）にする | 付録 B の方針を守れる | clone した人の手順が増え、Terraform で状態を追えない |
 
 ## 結果
@@ -47,4 +47,6 @@ AI アドバイザー（EPIC #141）の中継（#134）は Cloud Run `simulator`
   - プロジェクトの owner はプロジェクト単位でシークレットを読める
   - API の有効化の直後は伝搬が間に合わず、1 回目の apply でシークレットの作成が失敗することがある（もう一度 plan → apply）
 - OAuth トークンの利用: オーナーは自分専用の利用として、このアプリでサブスクリプションの OAuth トークンを使ってよいと判断した（2026-10-19）。Claude Code の Legal and compliance は製品・サービスを作る開発者に API キーを求めているので、clone して使う人は自分で規約を確かめ、迷うなら `api_key` を使う
-- 未確認（#134 が確かめる）: トークンの失効の方法。Messages API をトークンで直接呼べるか
+- 中継（#134）の渡し方: 環境変数は中継が読み、SDK には選んだ片方だけを明示で渡す（`api_key` → `Anthropic(api_key=…)`、`oauth_token` → `Anthropic(auth_token=…, default_headers={"anthropic-beta": "oauth-2025-04-20"})`。明示の引数があると SDK は環境変数を読まない）。`ANTHROPIC_API_KEY` と `ANTHROPIC_AUTH_TOKEN` が両方ある・選んだ方が無いときは AI を無効にする（WARNING。値は出さない）。pytest で送られる見出しを確かめる
+- Messages API をサブスクリプション（Max プラン）の OAuth トークンで呼んで Opus を使えることは、オーナーが確認した（2026-10-19）
+- 未確認: トークンの失効の方法（#134 では確かめていない）

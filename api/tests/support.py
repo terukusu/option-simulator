@@ -296,3 +296,142 @@ def synth_board(at: datetime, future=30000.0, band_rows=100, quoted=100, ltd=dat
         for typ in (1, 2):
             rows.append(option_row(at, typ, k, ltd2))
     return rows
+
+
+# ---- AI の中継（#134）: 合成の文脈・会話・テスト専用の道具の登録。値はすべて架空 ----
+
+FAKE_KEY = "sk-ant-api03-" + "Zq7XyW3vU9tS1rQ5pO8nM2lK6jH4gF0eD9cB3aZ1yX5wV7uT"  # 鍵の形の架空の値（漏れの検査用）
+FAKE_TOKEN = "sk-ant-oat01-" + "Hj2Kl4Mn6Pq8Rs0Tu2Vw4Xy6Za8Bc0De2Fg4Hi6Jk8Lm0No"  # トークンの形の架空の値
+
+
+def ai_registry():
+    """テスト専用の道具 2 本（#135 の本物の登録でも同じテストが効くように、登録を引数にして使う）"""
+    from simulator_api.ai.shape import Num, Obj
+    from simulator_api.ai.tools import ToolSpec
+
+    payoff = ToolSpec(
+        name="payoff_at", description="満期の損益（テスト用）",
+        input_shape=Obj({"x": Num(0, 1e7, lo_open=True), "days": Num(0, 400)}),
+        result_shape=Obj({"pnl_yen": Num(-1e12, 1e12)}),
+        input_schema={"type": "object", "properties": {"x": {"type": "number"}, "days": {"type": "number"}},
+                      "required": ["x", "days"], "additionalProperties": False})
+    greeks = ToolSpec(
+        name="greeks", description="グリーク（テスト用）", input_shape=Obj({}),
+        result_shape=Obj({"delta_large": Num(-1e6, 1e6), "vega_yen": Num(-1e12, 1e12)}),
+        input_schema={"type": "object", "properties": {}, "additionalProperties": False})
+    return {t.name: t for t in (payoff, greeks)}
+
+
+def ai_context(rows_months=1, with_precomputed=True) -> dict:
+    """合成の板（fixtures/synthetic/latest.json）から作る文脈（許可リストの形）。IV は架空の一定の値"""
+    fx = load_fixture("latest")
+    expiries = []
+    for i, m in enumerate(fx["months"]):
+        ks = [r["k"] for r in m["rows"]]
+        f = float(fx["future"]["price"] or ks[len(ks) // 2])
+        atm = min(ks, key=lambda k: abs(k - f))
+        e = {"expiry": m["contract_month"], "sq_date": m["sq_date"], "t_days": 25.5 + 28 * i, "forward": f,
+             "atm_k": atm, "atm_iv": 18.5, "smile": [{"m": round(-0.5 + 0.1 * j, 2), "iv": 18.5 + abs(j - 5) * 0.4}
+                                                      for j in range(11)]}
+        if i < rows_months:
+            rows = []
+            for r in m["rows"][:80]:
+                for typ, key in (("C", "call"), ("P", "put")):
+                    s = r[key]
+                    rows.append({"k": r["k"], "type": typ, "bid": s["bid"], "ask": s["ask"], "iv": 19.0})
+            e["rows"] = rows
+        expiries.append(e)
+    ctx = {
+        "snapshot": {"snapshot_at": fx["snapshot_at"], "source": "synthetic", "delayed_minutes": 15},
+        "expiries": expiries,
+        "position": {"legs": [
+            {"product": "op", "type": "P", "expiry": expiries[0]["expiry"], "k": expiries[0]["atm_k"] - 500,
+             "side": "sell", "qty": 2, "price": 120},
+            {"product": "op", "type": "P", "expiry": expiries[0]["expiry"], "k": expiries[0]["atm_k"] - 1000,
+             "side": "buy", "qty": 2, "price": 45},
+            {"product": "fut_mini", "expiry": "2026-12", "side": "buy", "qty": 1, "price": 30010},
+        ]},
+        "scenario": {"days": 5, "iv_shift_pt": -2, "x_range": [27000, 33000]},
+        "capital": {"capital_yen": 3_000_000, "max_loss_yen": 300_000},
+    }
+    if with_precomputed:
+        ctx["precomputed"] = {"greeks": {"delta_large": -0.12, "vega_yen": -15000}}
+    return ctx
+
+
+def ai_body(messages=None, context=None, **extra) -> dict:
+    body = {"schema_version": 1, "kind": "chat", "context": ai_context() if context is None else context,
+            "messages": messages if messages is not None else [
+                {"role": "user", "content": [{"type": "text", "text": "このポジションの弱点は？"}]}]}
+    body.update(extra)
+    return body
+
+
+def ai_tool_roundtrip() -> list[dict]:
+    """会話 1 往復 + 道具の往復（AI の thinking・tool_use → ブラウザの tool_result）"""
+    return [
+        {"role": "user", "content": [{"type": "text", "text": "このポジションの弱点は？"}]},
+        {"role": "assistant", "content": [{"type": "text", "text": "下に弱い形です。"}]},
+        {"role": "user", "content": [{"type": "text", "text": "29000 まで下げたら？"}]},
+        {"role": "assistant", "content": [
+            {"type": "thinking", "thinking": "満期の損益を見る", "signature": "c2lnbmF0dXJl"},
+            {"type": "tool_use", "id": "toolu_01AbCd", "name": "payoff_at", "input": {"x": 29000, "days": 0}}]},
+        {"role": "user", "content": [
+            {"type": "tool_result", "tool_use_id": "toolu_01AbCd",
+             "content": [{"type": "text", "text": '{"pnl_yen": -760000}'}]}]},
+    ]
+
+
+SAME_ORIGIN = {"Sec-Fetch-Site": "same-origin", "Origin": "http://localhost"}
+
+
+def ai_settings(credential="fake", limit_micro=3_000_000, deadline=50.0, secret=None):
+    from simulator_api import settings as st
+
+    store = None if credential == "oauth_token" else "memory"
+    if secret is None:
+        secret = {"api_key": FAKE_KEY, "oauth_token": FAKE_TOKEN}.get(credential)
+    return st.AiSettings(credential=credential, daily_limit_micro_usd=limit_micro, budget_store=store,
+                         deadline_seconds=deadline, disabled=None, secret=secret)
+
+
+def ai_app(gateway=None, store=None, ai_cfg=None, registry=None, clock=None, **kw):
+    """AI の中継を偽の送信先・メモリの計上で。戻り値 (client, gateway, store, clock)"""
+    from simulator_api import settings as st
+    from simulator_api.ai.budget import MemoryStore
+    from simulator_api.ai.gateway import FakeGateway
+    from simulator_api.app import create_app
+
+    gateway = FakeGateway() if gateway is None else gateway
+    store = MemoryStore() if store is None else store
+    clock = clock or Clock(jst(2026, 10, 19, 21, 0))
+    app = create_app(runner=FakeRunner(World()), clock=clock, monotonic=clock.monotonic,
+                     cfg=st.Settings(project="example-project"), ai_cfg=ai_cfg or ai_settings(**kw),
+                     ai_gateway=gateway, ai_store=store, ai_registry=ai_registry() if registry is None else registry)
+    return app.test_client(), gateway, store, clock
+
+
+def ai_post(client, body, headers=None, raw: bytes | None = None, content_type="application/json", **kw):
+    data = raw if raw is not None else json.dumps(body, ensure_ascii=False).encode("utf-8")
+    return client.post("/api/ai/messages", data=data, headers=SAME_ORIGIN if headers is None else headers,
+                       content_type=content_type, **kw)
+
+
+def sse_events(text: str) -> list[tuple[str, dict]]:
+    out = []
+    for chunk in text.split("\n\n"):
+        if not chunk.strip():
+            continue
+        lines = dict(line.split(": ", 1) for line in chunk.split("\n"))
+        out.append((lines["event"], json.loads(lines["data"])))
+    return out
+
+
+def log_records(out: str) -> list[dict]:
+    recs = []
+    for line in out.splitlines():
+        try:
+            recs.append(json.loads(line))
+        except ValueError:
+            continue
+    return recs

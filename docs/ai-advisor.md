@@ -42,7 +42,7 @@ EPIC #141（AI アドバイザー）の 1 本目の spike。後続の #133（鍵
 | F12 | prompt caching: 前置きの一致で効く。順序は tools → system → messages。ブレークポイントは最大 4。最小の長さ 512 トークン（Opus 5.5・Sonnet 5.5・Haiku 5.5）。TTL は 5 分（既定。読むと延びる）か 1 時間 | https://platform.claude.com/docs/en/build-with-claude/prompt-caching | 2026-10-19 |
 | F13 | Workload Identity Federation（WIF）: 長命の API キーの代わりに、外部の OIDC トークンを短命の Anthropic のトークンに交換する。Google Cloud（Cloud Run を含む）はメタデータサーバーの ID トークン（issuer `https://accounts.google.com`、audience を指定、`format=full` で SA の email を含める）を使う。ルール（federation rule）は `sub`（SA の数値の unique ID）と `email` を両方固定し、`subject_prefix` は使わない。トークンの寿命はルールの `token_lifetime_seconds`（60〜86400、既定 3600）と ID トークンの残り × 2 の小さい方。交換と更新は SDK が行う（Python は `WorkloadIdentityCredentials` に ID トークンを返す関数を渡す） | https://platform.claude.com/docs/en/manage-claude/workload-identity-federation 、 https://platform.claude.com/docs/en/manage-claude/wif-providers/gcp | 2026-10-19 |
 | F14 | claude-api スキルの参照資料（2026-10-06 時点）は Sonnet 5.5 のキャッシュの読み取りを $0.20 と書くが、公式の料金ページは $0.10（0.05 倍）。**公式を採る** | F1 | 2026-10-19 |
-| F15 | Python SDK `anthropic`（PyPI）: 最新は 1.15.0（2026-10-15）。1.x の依存は `anyio`・`docstring-parser`・`httpx2`・`jiter`・`opentelemetry-api`・`pydantic`・`sniffio`・`typing-extensions`。`exclude-newer = 2026-09-28T00:00:00Z` では 1.9.0（2026-09-28 18:04Z 公開）が入らず、1.8.0（2026-09-22）が上限 | https://pypi.org/project/anthropic/ | 2026-10-19 |
+| F15 | Python SDK `anthropic`（PyPI）: 最新は 1.15.0（2026-10-15）。1.x の依存は `anyio`・`docstring-parser`・`httpx2`・`jiter`・`opentelemetry-api`・`pydantic`・`sniffio`・`typing-extensions`。`exclude-newer = 2026-09-28T00:00:00Z` では 1.9.0（2026-09-28 18:04Z 公開）が入らず、1.8.0（2026-09-22）が上限。**#134 で 1.8.0 を採用**（`uv.lock` に固定。1.8.0 の解決では `opentelemetry-api` は入らず、`httpcore2`・`h11`・`truststore` などが入った） | https://pypi.org/project/anthropic/ | 2026-10-19 |
 
 ## 3. 論点の一覧
 
@@ -116,7 +116,7 @@ EPIC #141 の (b)。Issue と #120 の当初の方針は「Secret Manager に置
 
 #### オーナー判断
 
-**決定（2026-10-19、オーナー）**: API キーと OAuth トークン（Claude のサブスクリプションのもの）の **両方** を使えるようにする。トークンを使うときは SDK に **トークンだけ** を渡す（SDK は `ANTHROPIC_API_KEY` を `ANTHROPIC_AUTH_TOKEN` より優先するので、キーが同時にあるとキーが使われる。トークンのときはキーを渡さない）。WIF は採らない。置き場所は Secret Manager（`infra/bootstrap`、シークレット単位の `secretAccessor`）を基本に #133 で決める。サブスクリプションの OAuth トークンをこの用途で使ってよいかの規約と、トークンの有効期限・更新はオーナーが確かめる（#133）。
+**決定（2026-10-19、オーナー）**: API キーと OAuth トークン（Claude のサブスクリプションのもの）の **両方** を使えるようにする。トークンを使うときは SDK に **トークンだけ** を渡す（トークンのときはキーを渡さない。**訂正（#134、2026-10-19）**: SDK 1.8.0 はキーを優先するのではなく、両方あると `X-Api-Key` と `Authorization: Bearer` の両方を送る。どちらにしても片方だけを渡す結論は同じ。中継は環境変数を SDK に読ませず選んだ片方を明示で渡し、両方の環境変数があれば AI を無効にする）。WIF は採らない。置き場所は Secret Manager（`infra/bootstrap`、シークレット単位の `secretAccessor`）を基本に #133 で決める。サブスクリプションの OAuth トークンをこの用途で使ってよいかの規約と、トークンの有効期限・更新はオーナーが確かめる（#133）。
 
 #133 で A の形（`infra/bootstrap` に API・シークレット 2 つ・付与、`infra/prod` の変数 `ai_credential` で片方だけを環境変数の参照に）にした。背景は [ADR-0001](adr-0001-ai-credentials-secret-manager.md)、手順は `infra/README.md`「AI の資格情報（Secret Manager）」。
 
@@ -229,7 +229,7 @@ A。
 
 #### オーナー判断
 
-未決
+**実装時に決定（#134、2026-10-19）: A**（ブラウザが履歴を持ち毎回全部送る。サーバーは会話を持たない。`done` の `content` を thinking の署名ごとそのまま履歴に足す。送る本文は検査済みの値から決定的に組み立て直す）。定数と詳細は design.md 13.4「AI の中継」
 
 ### 論点 7: 中継の作り方
 - 判断者: 実装時
@@ -255,7 +255,7 @@ A（SDK がある言語では SDK を使い、生の HTTP と混ぜない）。
 
 #### オーナー判断
 
-未決
+**実装時に決定（#134、2026-10-19）: A**（公式の Python SDK `anthropic` 1.8.0 を `api/` の依存に固定。`exclude-newer` は据え置き。推移の依存は httpx2・httpcore2・h11・truststore・pydantic・pydantic-core・annotated-types・typing-inspection・jiter・anyio・sniffio・docstring-parser（いずれも MIT / BSD-3-Clause / MIT OR Apache-2.0。`uv.lock` には emscripten だけの httpx2-jsfetch も載るがイメージには入らない）。イメージは約 22 MB 増）。`max_retries=0`、`fallbacks` は付けない。資格情報は中継が選んだ片方を明示で渡す（明示の引数があると SDK は環境変数を読まない）。詳細は design.md 13.4「AI の中継」
 
 ### 論点 8: 中継の口の守り
 - 判断者: 実装時
@@ -278,7 +278,7 @@ A（日の上限は最後の砦）。
 
 #### オーナー判断
 
-未決
+**実装時に決定（#134、2026-10-19）: A**（`Content-Type: application/json` だけ + `Sec-Fetch-Site: same-origin` か `Origin` が要求のホストと同じ（どちらも無ければ拒否）+ 本文 512 KiB + 同時 2 本・1 分 10 回（インスタンスごと）。CORS の許可は返さない。CSP は変えない）。詳細は design.md 13.4「AI の中継」
 
 ## 見積もり
 

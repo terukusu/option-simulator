@@ -4,7 +4,7 @@ option-simulator の GCP リソースを Terraform で管理する（`docs/desig
 
 | ルート | 中身 | apply する人 | state | state を読める主体 |
 |---|---|---|---|---|
-| `infra/bootstrap` | tfstate バケット 2 つ（`<PROJECT_ID>-sim-tfstate` / `<PROJECT_ID>-sim-tfstate-bootstrap`）、WIF プール `sim-github` / プロバイダ `github-actions`、SA `sa-sim-tf-plan` / `sa-sim-tf-apply` / `sa-simulator` と権限、Artifact Registry `simulator` とリポジトリ単位の付与、`optionchan_tokyo` の読み取り（`sa-simulator`、非権威的）、IAP の閲覧許可（`simulator_iap_members`）、Secret Manager の API の有効化と AI の資格情報の入れ物 2 つ・`sa-simulator` の読み取り（シークレット単位） | 所有者がローカルから（CI は fmt / validate / test だけ） | `gs://<PROJECT_ID>-sim-tfstate-bootstrap/bootstrap/` | 所有者（+ プロジェクトの Editor を持つ既定の SA） |
+| `infra/bootstrap` | tfstate バケット 2 つ（`<PROJECT_ID>-sim-tfstate` / `<PROJECT_ID>-sim-tfstate-bootstrap`）、WIF プール `sim-github` / プロバイダ `github-actions`、SA `sa-sim-tf-plan` / `sa-sim-tf-apply` / `sa-simulator` と権限、Artifact Registry `simulator` とリポジトリ単位の付与、`optionchan_tokyo` の読み取り（`sa-simulator`、非権威的）、IAP の閲覧許可（`simulator_iap_members`）、Secret Manager の API の有効化と AI の資格情報の入れ物 2 つ・`sa-simulator` の読み取り（シークレット単位）、AI の費用の計上の Firestore の名前つき DB `simulator-ai` と `sa-simulator` の条件つきの `datastore.user` | 所有者がローカルから（CI は fmt / validate / test だけ） | `gs://<PROJECT_ID>-sim-tfstate-bootstrap/bootstrap/` | 所有者（+ プロジェクトの Editor を持つ既定の SA） |
 | `infra/prod` | Cloud Run `simulator`（IAP）、IAP のサービスエージェントの `run.invoker`、AI の資格情報の参照（変数 `ai_credential`） | CI（`.github/workflows/deploy.yml`。Environment `prod` の承認後） | `gs://<PROJECT_ID>-sim-tfstate/prod/` | `sa-sim-tf-plan`（読み取り）、`sa-sim-tf-apply`（読み書き）、所有者 |
 
 - API の有効化は宣言しない（optionchan の bootstrap が有効化済み。二重管理を避ける）。clone 利用者は iam・iamcredentials・sts・artifactregistry・run・iap・bigquery・cloudresourcemanager が有効であることを先に確かめる（`gcloud services list --enabled --project "$P"`）
@@ -25,7 +25,7 @@ for d in bootstrap prod; do
 done
 ```
 
-`terraform test` は、bootstrap では公開になる閲覧者（`allUsers`・`allAuthenticatedUsers`・`domain:`）を変数の検証で拒否すること、apply SA を借用できるのが Environment `prod` の subject だけであること、WIF の条件がリポジトリ ID とオーナー ID の両方を含むこと、データセットの読み取りが非権威的な `dataViewer` であること、AI の資格情報のシークレット 2 つ（東京だけに複製・`PREVENT`）の `secretAccessor` が `sa-simulator` だけ（シークレット単位。apply / plan SA・公開の member に付けない）であること、などを確かめる。prod では IAP が有効（`iap_enabled`・`ingress = INGRESS_TRAFFIC_ALL`・`invoker_iam_disabled = false`）、`run.invoker` が IAP のサービスエージェント 1 件だけ、イメージが digest か `src-<20hex>` のタグ参照だけ（`:latest`・別リポジトリ・別イメージ名を拒否）、Cloud Run の値が `docs/design.md` 8.3 どおり、`ai_credential` が `none` なら環境変数が 3 つのまま・`api_key` なら `ANTHROPIC_API_KEY` だけ・`oauth_token` なら `ANTHROPIC_AUTH_TOKEN` だけ（キーとトークンを同時に載せない。値は Secret Manager の参照だけ）、を確かめる。
+`terraform test` は、bootstrap では公開になる閲覧者（`allUsers`・`allAuthenticatedUsers`・`domain:`）を変数の検証で拒否すること、apply SA を借用できるのが Environment `prod` の subject だけであること、WIF の条件がリポジトリ ID とオーナー ID の両方を含むこと、データセットの読み取りが非権威的な `dataViewer` であること、AI の資格情報のシークレット 2 つ（東京だけに複製・`PREVENT`）の `secretAccessor` が `sa-simulator` だけ（シークレット単位。apply / plan SA・公開の member に付けない）であること、AI の費用の計上の Firestore の DB `simulator-ai`（Native・東京・削除保護・`ABANDON`）と、`sa-simulator` だけへの DB に絞る条件つきの `datastore.user` であること、などを確かめる。prod では IAP が有効（`iap_enabled`・`ingress = INGRESS_TRAFFIC_ALL`・`invoker_iam_disabled = false`）、`run.invoker` が IAP のサービスエージェント 1 件だけ、イメージが digest か `src-<20hex>` のタグ参照だけ（`:latest`・別リポジトリ・別イメージ名を拒否）、Cloud Run の値が `docs/design.md` 8.3 どおり、`ai_credential` が `none` なら環境変数が 3 つのまま・`api_key` なら `ANTHROPIC_API_KEY` だけ・`oauth_token` なら `ANTHROPIC_AUTH_TOKEN` だけ（キーとトークンを同時に載せない。値は Secret Manager の参照だけ）、を確かめる。
 
 ## 共通の変数
 
@@ -314,7 +314,7 @@ AI アドバイザー（`docs/ai-advisor.md`）が Claude を呼ぶための資�
 
 - シークレットの入れ物 2 つ（東京だけに複製、`deletion_policy = "PREVENT"`）と、シークレット単位の `roles/secretmanager.secretAccessor`（`sa-simulator` だけ）は `infra/bootstrap/ai_credentials.tf`。apply SA・plan SA には Secret Manager の権限を付けない
 - **値（版）は Terraform に入れない**（state・plan・Cloud Run の設定に値が載らない）。所有者が標準入力から登録する
-- キーとトークンを同時に環境変数に置かない（SDK は `ANTHROPIC_API_KEY` を優先するので、トークンを選んだつもりでキーの従量課金になる）。`infra/prod` の変数 `ai_credential` 1 つで選び、テストで片方だけであることを確かめる
+- キーとトークンを同時に環境変数に置かない（両方あると SDK は `X-Api-Key` と `Authorization: Bearer` の両方を送り、取り違えの元になる。中継（#134）は両方あると AI を無効にし、WARNING `ai_disabled`（`reason: ai_credential_conflict`）を出す）。`infra/prod` の変数 `ai_credential` 1 つで選び、テストで片方だけであることを確かめる
 - Cloud Run は環境変数の参照をインスタンスの起動時に解決する。**参照する版が無い・無効だとインスタンスが起動せず simulator 全体が開けない**。順序は必ず「値の登録 → `AI_CREDENTIAL` の設定」、戻すときは「`none` の deploy → 版の無効化」
 - deploy 時に Cloud Run は実行 SA（`sa-simulator`）がシークレットを読めるかを検査する。bootstrap の apply より先に `AI_CREDENTIAL` を設定すると deploy が失敗する（動いているリビジョンはそのまま）
 
@@ -395,6 +395,47 @@ curl -sf -H "Authorization: Bearer $(gcloud auth print-access-token)" \
 4. `gcloud secrets delete <シークレット> --project "$P"`（付与はシークレットと一緒に消える）。API を止めるなら `gcloud services disable secretmanager.googleapis.com`
 
 **注意**: サブスクリプションの OAuth トークンをこのアプリから使ってよいかは Anthropic の規約（Claude Code の Legal and compliance の「Authentication and credential use」）を利用者が確かめる。製品・サービスとして提供する場合は API キーを使う。
+
+## AI の費用の計上（Firestore）
+
+AI の中継（#134）の 1 日の上限（既定 $3、JST の日）を数える場所（`docs/adr-0004-ai-spend-counter-firestore.md`）。最小 0・最大 2 インスタンスの Cloud Run をまたいで数えるため、Firestore の **名前つき DB** `simulator-ai`（Native モード・`asia-northeast1`）の文書 `ai_spend/<YYYY-MM-DD>` に計上額（µUSD の整数）と回数を置く。`AI_CREDENTIAL=api_key` のときに使い（`AI_BUDGET_STORE` の既定 `firestore`）、`oauth_token` は数えない（読み書きしない）。
+
+- DB と付与は `infra/bootstrap/ai_budget.tf`（所有者の apply）。`sa-simulator` に `roles/datastore.user` を **IAM 条件 `resource.name == "projects/<PROJECT_ID>/databases/simulator-ai"` つき** で付ける（追加型。既存の `(default)` DB には及ばない）。apply SA・plan SA には付けない
+- DB は削除保護つき（`DELETE_PROTECTION_ENABLED`）、Terraform から外しても消さない（`deletion_policy = "ABANDON"`）
+- Firestore の API は optionchan が有効にしている前提（付録 B）。Cloud Run の環境変数は増えない（DB 名は `api/src/simulator_api/settings.py` の定数、プロジェクトは `GCP_PROJECT`）
+- 読めない・書けない（付与の誤り・API の停止・5 秒のタイムアウト）ときは、中継は 503 `unavailable` を返して Anthropic を呼ばない（閉じる側）。ログは `ai_request` の `error: unavailable` と例外の型名
+- 費用: 名前つき DB は無料枠の外で、1 要求あたり読み 1〜2・書き 1〜2（月に 1 セント未満の見込み）
+
+**1. bootstrap の apply**（所有者。「AI の資格情報」の 1 と同じコマンド）
+
+要約の目安: **create 2**（`google_firestore_database.ai_budget`・`google_project_iam_member.simulator_ai_budget`）。「AI の資格情報」の bootstrap がまだなら、その create 5 と合わせて **create 7**。update / delete / replace 0。目安と違うときは apply しない。
+
+**2. Console の月の上限**（所有者の手作業）: Claude Console で simulator 専用のワークスペースを作り、月の上限（日の上限 × 31 程度。既定なら $93）を設定して、そのワークスペースの API キーを「AI の資格情報」の 2 で登録する。中継の日の上限は Firestore が読めて初めて効くので、二重の安全弁にする
+
+**3. 順序**: bootstrap の apply（Firestore と資格情報の入れ物）→ 値の登録 → Console の月の上限 → `AI_CREDENTIAL` の設定と deploy（「AI の資格情報」の 3）→ 4 の確認
+
+**4. 確認**（値は表示しない）
+
+```sh
+gcloud firestore databases describe --database=simulator-ai --project "$P" \
+  --format='value(type,locationId,deleteProtectionState)'   # FIRESTORE_NATIVE asia-northeast1 DELETE_PROTECTION_ENABLED
+# 付与は sa-simulator の 1 件だけで、条件つき
+gcloud projects get-iam-policy "$P" --format=json \
+  | jq -c '[.bindings[] | select(.role == "roles/datastore.user") | {n: (.members | length), cond: .condition.expression}]'
+# 有効にした後の 1 回の要求のあと: 今日（JST）の計上が増えていること（中身は µUSD の整数）
+D=$(TZ=Asia/Tokyo date +%F)
+curl -sf -H "Authorization: Bearer $(gcloud auth print-access-token)" \
+  "https://firestore.googleapis.com/v1/projects/$P/databases/simulator-ai/documents/ai_spend/$D" \
+  | jq -c '{charged: .fields.charged_micro_usd.integerValue, requests: .fields.requests.integerValue}'
+```
+
+**5. 切り戻し・撤去**
+
+| 状況 | 手段 |
+|---|---|
+| 中継が 503 `unavailable` を返し続ける | 4 で付与の条件・DB を確かめる。AI を止めるなら「AI の資格情報」の切り戻し（`AI_CREDENTIAL=none` で deploy） |
+| 計上を手で戻す（誤った計上） | Console の Firestore（DB `simulator-ai`）で `ai_spend/<日付>` の `charged_micro_usd` を直す。日が変われば新しい文書になる |
+| 撤去 | `AI_CREDENTIAL=none` で deploy → `ai_budget.tf` を消す PR → 所有者の plan / apply（付与の delete 1。DB は `ABANDON` で管理から外れるだけ）→ 消すなら `gcloud firestore databases update --database=simulator-ai --delete-protection-state=DISABLED --project "$P"`（変更系。所有者）→ `gcloud firestore databases delete --database=simulator-ai --project "$P"` |
 
 ## `run.admin` の影響範囲
 
