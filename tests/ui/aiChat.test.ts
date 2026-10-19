@@ -76,7 +76,7 @@ const first = run(
 );
 
 describe('aiChatReduce', () => {
-  it('begin → 押した瞬間に「道具を計算中」、send で最初の文脈を固定して発言を足す', () => {
+  it('begin → 押した瞬間に「計算中」、send で最初の文脈を固定して発言を足す', () => {
     const a = aiChatReduce(INITIAL_AI_CHAT, {
       type: 'begin',
       kind: 'diagnose',

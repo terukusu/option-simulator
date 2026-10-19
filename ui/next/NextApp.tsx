@@ -207,7 +207,7 @@ export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
       });
       push({
         kind: 'ai-apply',
-        text: 'AI の道具のシナリオを入れた',
+        text: 'AI が計算したシナリオを入れた',
         undo: () =>
           dispatch({
             type: 'setScenario',

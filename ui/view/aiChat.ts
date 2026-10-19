@@ -5,7 +5,7 @@
  * - 会話はブラウザが持ち、毎回全部送る（論点 6 = A）。最初の文脈（context）は固定し、板・ポジション・シナリオ・資金が
  *   変わったら（指紋 = canonical JSON の比較）次の発言に context_update の block を足す（前の履歴は変えない = preserved
  *   thinking と prompt caching の前置きを保つ）
- * - 1 回の発言（turn）: begin（押した瞬間に「道具を計算中」）→ send（文脈を作って user の発言を足す）→ イベント →
+ * - 1 回の発言（turn）: begin（押した瞬間に「計算中」）→ send（文脈を作って user の発言を足す）→ イベント →
  *   done（stop_reason が tool_use なら道具の結果を足して次の要求。道具の往復は MAX_TOOL_ROUNDS 回まで）
  * - 失敗・中止: その turn の履歴を戻し（次に送る会話の形を壊さない）、途中までの文と理由を failed に残す（[もう一度]）
  * - 保存: sessionStorage の 1 キー（AI_SESSION_KEY）だけ。タブを閉じたら消える。保存一覧・URL 共有・書き出しには
@@ -40,12 +40,12 @@ export const MAX_AI_LEGS = 20;
 export type AiPhase = 'computing' | 'sending' | 'accepted' | 'thinking' | 'writing' | 'tool';
 
 export const PHASE_LABEL: Record<AiPhase, string> = {
-  computing: '道具を計算中',
+  computing: '計算中',
   sending: '送信中',
   accepted: '送信しました',
   thinking: '考え中',
   writing: '書いています',
-  tool: '道具を計算中',
+  tool: '計算中',
 };
 
 export interface AiTurn {
@@ -406,7 +406,7 @@ export function aiErrorText(code: string, remainingUsd: number | null = null): s
     case 'empty':
       return '返答が空でした';
     case 'tool_limit':
-      return `道具の回数の上限（${MAX_TOOL_ROUNDS} 回）で止めました`;
+      return `計算の回数の上限（${MAX_TOOL_ROUNDS} 回）で止めました`;
     case 'refusal':
       return 'AI が答えられない内容でした';
     case 'max_tokens':
