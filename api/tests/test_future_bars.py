@@ -191,6 +191,35 @@ def test_raw_contract_month_one_year_ahead_is_ignored():
     assert future_bars.contract_mismatches(with_m(rows, 60)) == 0
 
 
+# ---- 板の先物の限月（#192。AC-1・AC-2） ----
+
+@pytest.mark.parametrize("at,raw,want", [
+    (jst(2026, 12, 1, 9, 0), date(2027, 12, 1), (2026, 12)),    # SQ のある月の 1 日（生の値は 1 年先）
+    (jst(2026, 12, 10, 16, 59), date(2027, 12, 1), (2026, 12)),  # 取引最終日の 17:00 前
+    (jst(2026, 12, 10, 17, 0), date(2027, 3, 1), (2027, 3)),     # 取引最終日の 17:00 = 次の限月（年の境）
+    (jst(2026, 12, 11, 10, 0), date(2027, 3, 1), (2027, 3)),     # その翌日（SQ 日）
+    (jst(2026, 12, 28, 10, 0), date(2027, 3, 1), (2027, 3)),     # 12 月限の後の 12 月の後半
+    (jst(2026, 10, 20, 21, 30), date(2026, 12, 1), (2026, 12)),  # 四半期の途中（生の値も正しい）
+    (jst(2027, 3, 1, 9, 0), date(2028, 3, 1), (2027, 3)),        # 翌年の SQ のある月の 1 日
+    (jst(2027, 3, 11, 17, 0), date(2027, 6, 1), (2027, 6)),      # 3 月限の取引最終日の 17:00
+])
+def test_board_future_contract_from_calendar(at, raw, want):
+    fut = {"price": 30000.0, "price_time": at.astimezone(atm_iv.JST).replace(tzinfo=None), "contract_month": raw}
+    got, mismatch = future_bars.board_future(fut, at, CAL)
+    assert got["contract_month"] == date(*want, 1)
+    assert mismatch == ((raw.year, raw.month) != want)
+    assert {k: v for k, v in got.items() if k != "contract_month"} == {"price": 30000.0,
+                                                                       "price_time": fut["price_time"]}
+    assert fut["contract_month"] == raw  # 元の dict は変えない
+    # /api/future_bars の足と同じ関数（AC-2）
+    assert future_bars.contract_at(at, NON_TRADING, SQ_HOLIDAYS) == want
+
+
+def test_board_future_raw_missing_is_not_a_mismatch():
+    got, mismatch = future_bars.board_future({"price": None, "price_time": None}, jst(2026, 12, 3, 10, 0), CAL)
+    assert got["contract_month"] == date(2026, 12, 1) and mismatch is False
+
+
 def test_daily_trading_days_and_contracts():
     # 夜間は次の取引日、休業日（11/3）を飛ばす。日足の限月は取引日から
     sessions = [

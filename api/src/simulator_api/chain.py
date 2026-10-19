@@ -6,7 +6,9 @@
   sq_date = カレンダーの規則。規則の取引最終日が板と違えば calendar_mismatch（限月の ID だけ）
 - 行 = 行使価格ごと（昇順）。call / put の片側が無ければ全キー null。type が NULL の行は捨てる。
   同じ (限月, K, type) の重複は最初の 1 行（件数だけログ）
-- 先物の last_trading_day・sq_date はカレンダーから。現物が無ければ {price: null, price_time: null}
+- 先物の last_trading_day・sq_date は渡された contract_month からカレンダーの規則で。contract_month は呼び出し側の値
+  （bigquery は生の値でなく future_bars.board_future が snapshot_at から求めた期近の限月。#192。quotes は供給元の値）。
+  現物が無ければ {price: null, price_time: null}
 - オプションの全キー（quotation・quotation_date・is_atm を含む）を常に出す
 - 供給元に依らない: 行は optionchan の option_price の列名の dict（quotes.py は中立の気配の一覧をこの形にして
   から渡す）。source は板の JSON の表示用の値（既定 bigquery。#154）
