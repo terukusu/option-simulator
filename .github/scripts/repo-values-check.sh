@@ -5,7 +5,7 @@
 #   repo-values-check.sh [dir]
 #
 # - 形の検査（値を知らなくても効く）: run.app のホスト名、許可リスト外のドメインのメールアドレス、
-#   /home/<名前>・/Users/<名前>、10 桁以上の projects/<番号>・service-<番号>、トークン・鍵・署名の形
+#   /home/<名前>・/Users/<名前>、10 桁以上の projects/<番号>・service-<番号>、トークン・鍵・署名の形（Anthropic の sk-ant- を含む）
 # - 値の検査: 環境変数 GCP_PROJECT_ID・GCP_PROJECT_NUMBER・REPO_OWNER のうち空でないものを固定文字列
 #   （大小無視・語単位）で探す。空なら飛ばしたことを 1 行出す
 # - 出力は「NG <検査名>: <ファイル>:<行番号>」と件数だけ（一致した文字列・行の中身・変数の値は出さない）。1 件以上で exit 1
@@ -36,7 +36,8 @@ shape run-app-host '[a-z0-9][a-z0-9-]*-[a-z0-9]+-[a-z]{2,4}\.a\.run\.app|[a-z0-9
 shape home-path '/(home|Users)/[A-Za-z0-9._-]+'
 shape project-number '(projects/|service-)[0-9]{10,}'
 # [X] などはこのファイル自身に一致させないための書き方
-shape token 'ya29\.[A-Za-z0-9_-]|GOCSP[X]-|-----BEGIN [A-Z ]*PRIVATE KEY-----|"private_key_i[d]"|X-Goog-Signatur[e]='
+# [s]k-ant-: Anthropic の API キー・OAuth トークン（sk-ant-<種別>-<本体>。種別は api03・oat01 など。接頭辞だけの説明文には一致しない）
+shape token 'ya29\.[A-Za-z0-9_-]|GOCSP[X]-|-----BEGIN [A-Z ]*PRIVATE KEY-----|"private_key_i[d]"|X-Goog-Signatur[e]=|[s]k-ant-[a-z]+[0-9]*-[A-Za-z0-9_-]{20,}'
 
 # メールアドレスはドメインがプレースホルダの許可リストに無いものだけ。awk には ENVIRON で渡す（-v だと \. が崩れる）
 export REPO_VALUES_ALLOW='^(example\.(com|org|net)|[a-z0-9-]+\.example\.com|example-project\.iam\.gserviceaccount\.com|gcp-sa-[a-z-]+\.iam\.gserviceaccount\.com)$'

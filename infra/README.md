@@ -4,10 +4,11 @@ option-simulator の GCP リソースを Terraform で管理する（`docs/desig
 
 | ルート | 中身 | apply する人 | state | state を読める主体 |
 |---|---|---|---|---|
-| `infra/bootstrap` | tfstate バケット 2 つ（`<PROJECT_ID>-sim-tfstate` / `<PROJECT_ID>-sim-tfstate-bootstrap`）、WIF プール `sim-github` / プロバイダ `github-actions`、SA `sa-sim-tf-plan` / `sa-sim-tf-apply` / `sa-simulator` と権限、Artifact Registry `simulator` とリポジトリ単位の付与、`optionchan_tokyo` の読み取り（`sa-simulator`、非権威的）、IAP の閲覧許可（`simulator_iap_members`） | 所有者がローカルから（CI は fmt / validate / test だけ） | `gs://<PROJECT_ID>-sim-tfstate-bootstrap/bootstrap/` | 所有者（+ プロジェクトの Editor を持つ既定の SA） |
-| `infra/prod` | Cloud Run `simulator`（IAP）、IAP のサービスエージェントの `run.invoker` | CI（`.github/workflows/deploy.yml`。Environment `prod` の承認後） | `gs://<PROJECT_ID>-sim-tfstate/prod/` | `sa-sim-tf-plan`（読み取り）、`sa-sim-tf-apply`（読み書き）、所有者 |
+| `infra/bootstrap` | tfstate バケット 2 つ（`<PROJECT_ID>-sim-tfstate` / `<PROJECT_ID>-sim-tfstate-bootstrap`）、WIF プール `sim-github` / プロバイダ `github-actions`、SA `sa-sim-tf-plan` / `sa-sim-tf-apply` / `sa-simulator` と権限、Artifact Registry `simulator` とリポジトリ単位の付与、`optionchan_tokyo` の読み取り（`sa-simulator`、非権威的）、IAP の閲覧許可（`simulator_iap_members`）、Secret Manager の API の有効化と AI の資格情報の入れ物 2 つ・`sa-simulator` の読み取り（シークレット単位） | 所有者がローカルから（CI は fmt / validate / test だけ） | `gs://<PROJECT_ID>-sim-tfstate-bootstrap/bootstrap/` | 所有者（+ プロジェクトの Editor を持つ既定の SA） |
+| `infra/prod` | Cloud Run `simulator`（IAP）、IAP のサービスエージェントの `run.invoker`、AI の資格情報の参照（変数 `ai_credential`） | CI（`.github/workflows/deploy.yml`。Environment `prod` の承認後） | `gs://<PROJECT_ID>-sim-tfstate/prod/` | `sa-sim-tf-plan`（読み取り）、`sa-sim-tf-apply`（読み書き）、所有者 |
 
 - API の有効化は宣言しない（optionchan の bootstrap が有効化済み。二重管理を避ける）。clone 利用者は iam・iamcredentials・sts・artifactregistry・run・iap・bigquery・cloudresourcemanager が有効であることを先に確かめる（`gcloud services list --enabled --project "$P"`）
+- 例外: Secret Manager（`secretmanager.googleapis.com`）だけは `infra/bootstrap` で有効化する。optionchan が使わない API で、simulator の都合で optionchan を変えないため（`docs/adr-0001-ai-credentials-secret-manager.md`）。Terraform から外しても API は止めない（`disable_on_destroy = false`・`deletion_policy = "ABANDON"`）
 - 付与はすべて追加型（`*_iam_member`）。権威的な型（`*_iam_policy` / `*_iam_binding`、`google_bigquery_dataset_access`）は既存の付与（optionchan のもの）を消すので使わない
 - プロジェクト ID・リポジトリ名はコードに既定値を持たない。`TF_VAR_*` かローカルの `infra/bootstrap/local.auto.tfvars`（`*.tfvars` は gitignore 済み。例は `local.auto.tfvars.example`）で渡す
 - state には IAP の閲覧者のメールなどが入る。**state・plan の全文・ログをリポジトリ・Issue・PR に貼らない**（要約はアドレスと操作だけ）。plan ファイル（`*.tfplan`）も gitignore 済み
@@ -24,7 +25,7 @@ for d in bootstrap prod; do
 done
 ```
 
-`terraform test` は、bootstrap では公開になる閲覧者（`allUsers`・`allAuthenticatedUsers`・`domain:`）を変数の検証で拒否すること、apply SA を借用できるのが Environment `prod` の subject だけであること、WIF の条件がリポジトリ ID とオーナー ID の両方を含むこと、データセットの読み取りが非権威的な `dataViewer` であること、などを確かめる。prod では IAP が有効（`iap_enabled`・`ingress = INGRESS_TRAFFIC_ALL`・`invoker_iam_disabled = false`）、`run.invoker` が IAP のサービスエージェント 1 件だけ、イメージが digest か `src-<20hex>` のタグ参照だけ（`:latest`・別リポジトリ・別イメージ名を拒否）、Cloud Run の値が `docs/design.md` 8.3 どおり、を確かめる。
+`terraform test` は、bootstrap では公開になる閲覧者（`allUsers`・`allAuthenticatedUsers`・`domain:`）を変数の検証で拒否すること、apply SA を借用できるのが Environment `prod` の subject だけであること、WIF の条件がリポジトリ ID とオーナー ID の両方を含むこと、データセットの読み取りが非権威的な `dataViewer` であること、AI の資格情報のシークレット 2 つ（東京だけに複製・`PREVENT`）の `secretAccessor` が `sa-simulator` だけ（シークレット単位。apply / plan SA・公開の member に付けない）であること、などを確かめる。prod では IAP が有効（`iap_enabled`・`ingress = INGRESS_TRAFFIC_ALL`・`invoker_iam_disabled = false`）、`run.invoker` が IAP のサービスエージェント 1 件だけ、イメージが digest か `src-<20hex>` のタグ参照だけ（`:latest`・別リポジトリ・別イメージ名を拒否）、Cloud Run の値が `docs/design.md` 8.3 どおり、`ai_credential` が `none` なら環境変数が 3 つのまま・`api_key` なら `ANTHROPIC_API_KEY` だけ・`oauth_token` なら `ANTHROPIC_AUTH_TOKEN` だけ（キーとトークンを同時に載せない。値は Secret Manager の参照だけ）、を確かめる。
 
 ## 共通の変数
 
@@ -89,7 +90,7 @@ $TF -chdir=infra/bootstrap apply -input=false b.tfplan
 rm -f infra/bootstrap/b.tfplan
 ```
 
-要約の目安（1 回目、`simulator_iap_members = []`）: **create 18・import 1**（`google_storage_bucket.tfstate["bootstrap"]`。ライフサイクルルールを足す in-place update を伴う）、それ以外の update / delete / replace は 0。
+要約の目安（1 回目、`simulator_iap_members = []`）: **create 23・import 1**（`google_storage_bucket.tfstate["bootstrap"]`。ライフサイクルルールを足す in-place update を伴う）、それ以外の update / delete / replace は 0。
 
 | アドレス | 操作 |
 |---|---|
@@ -103,6 +104,11 @@ rm -f infra/bootstrap/b.tfplan
 | `google_artifact_registry_repository.simulator` | create |
 | `google_artifact_registry_repository_iam_member.tf_apply_writer` / `tf_plan_reader` | create 2 |
 | `google_storage_bucket_iam_member.prod_state_plan` / `prod_state_apply` | create 2 |
+| `google_project_service.secretmanager` | create |
+| `google_secret_manager_secret.ai["api_key"]` / `["oauth_token"]` | create 2 |
+| `google_secret_manager_secret_iam_member.simulator_ai["api_key"]` / `["oauth_token"]` | create 2 |
+
+#133 より前に bootstrap を apply 済みなら、AI の資格情報の分は「AI の資格情報（Secret Manager）」の 1 で足す。
 
 目安と違う（特に optionchan のリソースや、ここに無い update / delete / replace が出る）ときは apply しない。optionchan の deploy（`optionchan_tokyo` の IAM を変える apply）と同時に走らせない（データセットの access は読み → 書きで更新されるため）。
 
@@ -166,6 +172,8 @@ gh api $R/environments/prod/deployment-branch-policies --jq '[.branch_policies[]
 gh api $R/branches/main/protection --jq '[.required_status_checks.checks[].context] == ["check"]'   # ブランチ保護は変えない
 ```
 
+AI を使うときは repository variable `AI_CREDENTIAL`（`api_key` か `oauth_token`）と、任意で `AI_SECRET_VERSION`（版の番号）も設定する。どちらも秘匿値ではない（種類と版の番号だけ。値は Secret Manager）。未設定なら `none`・`latest` として扱う（「AI の資格情報（Secret Manager）」）。
+
 ブランチ保護（`main`、必須 check `check`）はこの手順では変えない。Terraform の検査は `check` job の中にあるので名前は変わらない。
 
 ## IAP（OAuth クライアント・サービスエージェント）
@@ -199,7 +207,7 @@ $TF -chdir=infra/bootstrap apply -input=false b.tfplan; rm -f infra/bootstrap/b.
 | サービス | `simulator`（`var.region`、既定 `asia-northeast1`）、`iap_enabled = true`、`ingress = INGRESS_TRAFFIC_ALL`（IAP は run.app の URL に掛かる）、`invoker_iam_disabled = false`、`deletion_protection = false` |
 | 実行 | 第 1 世代、CPU 1・512Mi・リクエスト中だけ CPU、同時実行 8、0〜2 インスタンス、60 秒、SA `sa-simulator`、起動プローブ `/healthz`（BigQuery に触れない） |
 | イメージ | `<region>-docker.pkg.dev/<PROJECT_ID>/simulator/simulator`。タグは入力パスの git のハッシュ `src-<20hex>`（`.github/scripts/image.sh simulator tag`）、Cloud Run には digest で渡す。gunicorn 1 ワーカー・8 スレッド（API のキャッシュ・single-flight をインスタンス内で共有）、uid 10001、`STATIC_DIR=/app/static` |
-| 環境変数 | `GCP_PROJECT`・`BQ_DATASET`・`BQ_LOCATION`（Terraform の変数 `project_id`・`bq_dataset`・`bq_location`）。`MAX_BYTES_BILLED`・`DATA_SOURCE` は API の既定 |
+| 環境変数 | `GCP_PROJECT`・`BQ_DATASET`・`BQ_LOCATION`（Terraform の変数 `project_id`・`bq_dataset`・`bq_location`）。`MAX_BYTES_BILLED`・`DATA_SOURCE` は API の既定。変数 `ai_credential` が `none` 以外のときだけ `AI_CREDENTIAL`（種類）と、`ANTHROPIC_API_KEY` か `ANTHROPIC_AUTH_TOKEN` の片方（Secret Manager の参照。版は `ai_secret_version`） |
 | 権限 | `run.invoker` = IAP のサービスエージェント（`service-<番号>@gcp-sa-iap…`。番号は `data "google_project"`）だけ。閲覧者（`iap.httpsResourceAccessor`）は bootstrap の `simulator_iap_members` |
 
 outputs は置かない（サービスの URL はプロジェクト番号由来の文字列を含む）。
@@ -208,6 +216,7 @@ outputs は置かない（サービスの URL はプロジェクト番号由来�
 
 - **PR**（`ci.yml`）: `check` job が `infra/prod` の validate / test、`.dockerignore` の許可リストと `image.sh simulator paths` の一致、イメージのビルドと検査（`.github/scripts/image-check.sh`。import・非 root・`.git` / `node_modules` / テスト / fixture / `infra` / `.env*` / `*.tfvars` を含まない・同梱の `index.html` の CSP 検査・`/healthz` / `/` / `/assets/*` が 200 で CSP ヘッダ付き）を行う。別 job `terraform-plan` が同じリポジトリのブランチの PR だけ plan SA で `plan -lock=false` し、要約（アドレスと操作・件数、イメージが既存か未作成か）を step summary に書く（必須 check ではない。fork の PR では動かない）
 - **deploy**（`deploy.yml`。`main` への push と `workflow_dispatch`、`concurrency: terraform-prod`）: `plan` job（plan SA）→ 差分があるときだけ `apply` job（Environment `prod`。所有者が GitHub で承認）→ イメージが未作成なら GCP の認証より前にビルド・検査 → apply SA で push → digest であることを確かめて `terraform apply`。plan ファイルは artifact で渡さず、承認後にもう一度 plan して適用する。失敗時のログはマスクして末尾だけ
+- plan・deploy は repository variables `AI_CREDENTIAL`・`AI_SECRET_VERSION` を `TF_VAR_ai_credential`・`TF_VAR_ai_secret_version` で渡す（未設定は `none`・`latest`）
 - repository variables（`GCP_PROJECT_ID`・`TF_STATE_BUCKET`・`GCP_SA_TF_PLAN`）が無い（clone して variables を設定していない）ときは、plan も deploy も notice を出して何もしない
 
 ### prod の state の初期化（所有者、一度だけ。最初の PR の前）
@@ -249,6 +258,7 @@ L=asia-northeast1
 eval "$(GCP_PROJECT_ID=$P .github/scripts/image.sh simulator resolve | grep '^image=')"
 TF_VAR_project_id=$P TF_VAR_simulator_image=$image $TF -chdir=infra/prod plan -lock=false -input=false -detailed-exitcode > /dev/null; echo $?
 # 構成（v2 API）: true、INGRESS_TRAFFIC_ALL、false、sa-simulator、0、2、true、[GCP_PROJECT,BQ_DATASET,BQ_LOCATION]
+# （AI_CREDENTIAL を設定したら envs に AI_CREDENTIAL と ANTHROPIC_API_KEY / ANTHROPIC_AUTH_TOKEN の片方が足される）
 curl -sf -H "Authorization: Bearer $(gcloud auth print-access-token)" \
   "https://run.googleapis.com/v2/projects/$P/locations/$L/services/simulator" \
   | jq -c '{iap: .iapEnabled, ingress, invoker_check_disabled: (.invokerIamDisabled // false), sa: (.template.serviceAccount | split("@")[0]),
@@ -292,17 +302,113 @@ gcloud run services list --project="$P" --format='value(metadata.name,status.lat
 | 初回デプロイが途中で失敗 | サービスはできたが `run.invoker` が無い状態は公開にならない（IAP を通っても 403）。原因を直す PR → deploy。IAP の有効化で失敗したら `gcloud iap settings get --resource-type=cloud-run --region=$L --project="$P"` でクライアントの設定を確かめ、deploy をやり直す | 公開にはならない |
 | 撤去 | `infra/prod/simulator.tf` の 2 リソースを消す PR → deploy（delete 2。`deletion_protection = false`）→ bootstrap の `simulator_iap_members` を `[]` にして apply。#36 の PR の revert は `deploy.yml` も消えて apply されないので、撤去には使わない。Artifact Registry のイメージはクリーンアップポリシーで消える | optionchan は影響なし |
 
+## AI の資格情報（Secret Manager）
+
+AI アドバイザー（`docs/ai-advisor.md`）が Claude を呼ぶための資格情報（#133、`docs/adr-0001-ai-credentials-secret-manager.md`）。API キーとサブスクリプションの OAuth トークン（`claude setup-token`）の両方に対応し、使うのはどちらか片方だけ。
+
+| 種類（`AI_CREDENTIAL`） | シークレット | Cloud Run の環境変数 |
+|---|---|---|
+| `none`（既定。未設定も同じ） | — | 何も足さない（AI は無効） |
+| `api_key` | `simulator-anthropic-api-key` | `AI_CREDENTIAL=api_key`、`ANTHROPIC_API_KEY`（参照） |
+| `oauth_token` | `simulator-anthropic-oauth-token` | `AI_CREDENTIAL=oauth_token`、`ANTHROPIC_AUTH_TOKEN`（参照） |
+
+- シークレットの入れ物 2 つ（東京だけに複製、`deletion_policy = "PREVENT"`）と、シークレット単位の `roles/secretmanager.secretAccessor`（`sa-simulator` だけ）は `infra/bootstrap/ai_credentials.tf`。apply SA・plan SA には Secret Manager の権限を付けない
+- **値（版）は Terraform に入れない**（state・plan・Cloud Run の設定に値が載らない）。所有者が標準入力から登録する
+- キーとトークンを同時に環境変数に置かない（SDK は `ANTHROPIC_API_KEY` を優先するので、トークンを選んだつもりでキーの従量課金になる）。`infra/prod` の変数 `ai_credential` 1 つで選び、テストで片方だけであることを確かめる
+- Cloud Run は環境変数の参照をインスタンスの起動時に解決する。**参照する版が無い・無効だとインスタンスが起動せず simulator 全体が開けない**。順序は必ず「値の登録 → `AI_CREDENTIAL` の設定」、戻すときは「`none` の deploy → 版の無効化」
+- deploy 時に Cloud Run は実行 SA（`sa-simulator`）がシークレットを読めるかを検査する。bootstrap の apply より先に `AI_CREDENTIAL` を設定すると deploy が失敗する（動いているリビジョンはそのまま）
+
+**1. bootstrap の apply**（所有者。「共通の変数」を設定してから）
+
+```sh
+SCRATCH=${SCRATCH:-$(mktemp -d)}
+$TF -chdir=infra/bootstrap plan -input=false -no-color -out=b.tfplan > "$SCRATCH/b-plan.log"
+$TF -chdir=infra/bootstrap show -json b.tfplan | jq -r '.resource_changes[] | select(.change.actions != ["no-op"]) | "\(.address): \(.change.actions | join(","))"'
+$TF -chdir=infra/bootstrap apply -input=false b.tfplan; rm -f infra/bootstrap/b.tfplan
+$TF -chdir=infra/bootstrap plan -input=false -detailed-exitcode > /dev/null; echo $?   # 0
+```
+
+要約の目安: **create 5**（`google_project_service.secretmanager`、`google_secret_manager_secret.ai["api_key"]`・`["oauth_token"]`、`google_secret_manager_secret_iam_member.simulator_ai["api_key"]`・`["oauth_token"]`）、update / delete / replace 0。目安と違うときは apply しない。API の有効化の直後は伝搬が間に合わずシークレットの作成が失敗することがある。そのときは少し待ってもう一度 plan → apply する。
+
+**2. 値の登録**（所有者。使う方だけ。画面・シェルの履歴に出さない）
+
+```sh
+# API キー（Claude Console で作ったもの）
+read -rs V && printf '%s' "$V" | gcloud secrets versions add simulator-anthropic-api-key --project "$P" --data-file=-; unset V
+# OAuth トークン（claude setup-token で出したもの。有効期間は 1 年）
+read -rs V && printf '%s' "$V" | gcloud secrets versions add simulator-anthropic-oauth-token --project "$P" --data-file=-; unset V
+```
+
+`read -rs` は入力を表示しない。値をコマンドラインの引数・ファイル・`--data-file` のパスで渡さない。
+
+**3. 選んで deploy**（所有者）
+
+```sh
+gh variable set AI_CREDENTIAL -R "$REPO" --body api_key      # または oauth_token
+# 任意: 版を番号で固定する（下の「版の指定」）
+# gh variable set AI_SECRET_VERSION -R "$REPO" --body 1
+gh workflow run deploy.yml -R "$REPO" --ref main
+```
+
+`plan` job の要約が **update 1**（`google_cloud_run_v2_service.simulator`）、他 0 なら Environment `prod` の `apply` job を承認する。
+
+**4. 確認**（値は表示しない）
+
+```sh
+L=asia-northeast1
+for s in simulator-anthropic-api-key simulator-anthropic-oauth-token; do
+  gcloud secrets describe $s --project "$P" --format='value(name.basename(),replication.userManaged.replicas[0].location)'
+  gcloud secrets versions list $s --project "$P" --format='value(name.basename(),state)'   # 使う方に ENABLED が 1 件以上
+  # secretAccessor は sa-simulator の 1 件だけ: [{"role":"roles/secretmanager.secretAccessor","n":1,"sim":1}]
+  gcloud secrets get-iam-policy $s --project "$P" --format=json \
+    | jq -c '[.bindings[]? | {role, n: (.members | length), sim: ([.members[] | select(startswith("serviceAccount:sa-simulator@"))] | length)}]'
+done
+# 環境変数の名前と、資格情報が参照（valueSource）で値を持たないこと
+curl -sf -H "Authorization: Bearer $(gcloud auth print-access-token)" \
+  "https://run.googleapis.com/v2/projects/$P/locations/$L/services/simulator" \
+  | jq -c '[.template.containers[0].env[] | {name, ref: (.valueSource.secretKeyRef.secret // null | if . then split("/")[-1] else null end), version: .valueSource.secretKeyRef.version, has_value: (.value != null)}]
+           | map(select(.name | startswith("A")))'
+```
+
+期待（`api_key` のとき）: `AI_CREDENTIAL` が `has_value: true`、`ANTHROPIC_API_KEY` が `ref: "simulator-anthropic-api-key"`・`has_value: false`、`ANTHROPIC_AUTH_TOKEN` は無い。デプロイ後のエラーログ 0 件は prod の「確認」と同じ。
+
+**5. 版の指定とローテーション**
+
+- 既定の `latest` は、インスタンスが起動したときの最新の版を読む。版を足すと新しいインスタンスから新しい値になり、古いインスタンスはアイドルで消える（最小 0 インスタンス）まで旧値のまま。値の差し替えに deploy が要らない
+- Google は環境変数では版の番号の固定を推奨している。固定するなら `AI_SECRET_VERSION` に番号を入れて deploy する（版を足すたびに variable と deploy が要るが、どの値で動いているかが deploy で決まる）
+- ローテーション: 2 で版を足す → すぐに切り替えたいなら `AI_SECRET_VERSION` を新しい番号にして deploy（`latest` のままなら `gh workflow run` では差分が出ないので、急ぐときは番号で） → 新しい値で動くことを確かめてから旧版を `gcloud secrets versions disable <番号> --secret=<シークレット> --project "$P"`。OAuth トークンは 1 年で切れるので期限の前に作り直す
+- `latest` は「最も新しく作った版」を指し、無効な版を飛ばして古い版に戻らない。**最新の版を無効にする（誤った値を登録して disable するなど）ときは、先に `AI_SECRET_VERSION` を有効な版の番号にして deploy するか `AI_CREDENTIAL=none` で deploy する**（`latest` のままだと新しいインスタンスが起動しない）
+
+**6. 切り戻し**
+
+| 状況 | 手段 |
+|---|---|
+| deploy 後に起動しない・AI を止めたい | `gh variable set AI_CREDENTIAL -R "$REPO" --body none`（または `gh variable delete AI_CREDENTIAL`）→ `gh workflow run deploy.yml` → 承認（環境変数が 3 つに戻る）。急ぐときは prod の「切り戻し・撤去」の `update-traffic` で旧リビジョンへ |
+| 鍵・トークンが漏れた | **最初に Anthropic 側で失効**（API キーは Claude Console で無効化。トークンは作り直す）→ `AI_CREDENTIAL=none` で deploy → `gcloud secrets versions disable` / `destroy`。順序を逆にする（版を先に無効にする）と、参照している simulator のインスタンスが起動しなくなる |
+| 付与の誤り | 修正の PR → 1 と同じ plan / apply。急ぐときは `gcloud secrets remove-iam-policy-binding`（あとで Terraform と揃える） |
+
+**7. 撤去**（この順で）
+
+1. `AI_CREDENTIAL` を `none` にして deploy する（環境変数が 3 つに戻る）
+2. 管理から外す（シークレットは `PREVENT` なので Terraform では消さない）: `$TF -chdir=infra/bootstrap state rm 'google_secret_manager_secret_iam_member.simulator_ai'` と `$TF -chdir=infra/bootstrap state rm 'google_secret_manager_secret.ai'`
+3. `ai_credentials.tf` を消す PR をマージし、所有者が plan → apply する。要約は `google_project_service.secretmanager` の delete 1 だけ（`ABANDON`・`disable_on_destroy = false` なので管理から外れるだけで API は止まらない）。他に差分が出たら apply しない
+4. `gcloud secrets delete <シークレット> --project "$P"`（付与はシークレットと一緒に消える）。API を止めるなら `gcloud services disable secretmanager.googleapis.com`
+
+**注意**: サブスクリプションの OAuth トークンをこのアプリから使ってよいかは Anthropic の規約（Claude Code の Legal and compliance の「Authentication and credential use」）を利用者が確かめる。製品・サービスとして提供する場合は API キーを使う。
+
 ## `run.admin` の影響範囲
 
 Cloud Run のサービスを作るには、プロジェクト単位の `roles/run.admin` が要る（サービス単位の付与では作成できない）。このため `sa-sim-tf-apply` は optionchan のサービス（`ingest` / `viewer`）も変更・削除できる。逆に optionchan の apply SA も simulator を変更できる（対称）。緩和策:
 
 - `sa-sim-tf-apply` を借用できるのは Environment `prod`（`main` のみ・所有者の承認必須）の job だけ（WIF の subject で固定）
 - state を分ける（simulator の prod の state には optionchan のリソースが入らないので、Terraform が optionchan のサービスを変えることはない）。plan の要約に optionchan のサービスが出たら承認しない
-- `sa-sim-tf-plan` の `roles/run.viewer` もプロジェクト単位なので、optionchan の Cloud Run の設定（環境変数の名前・値を含む）を読める（optionchan の plan SA と同等。秘匿値は環境変数に置かない）
+- `sa-sim-tf-plan` の `roles/run.viewer` もプロジェクト単位なので、optionchan の Cloud Run の設定（環境変数の名前・値を含む）を読める（optionchan の plan SA と同等。秘匿値は環境変数の値に置かない。AI の資格情報は Secret Manager の参照だけで、plan SA が読めるのは参照の名前と版だけ）
+- `sa-sim-tf-apply` は `run.admin` と `sa-simulator` の `serviceAccountUser` を持つので、承認済みの deploy で任意のイメージを `sa-simulator` で動かせば AI の資格情報を読める。新しい付与ではなく既存の信頼境界（Environment `prod` の承認）の内側（`docs/adr-0001-ai-credentials-secret-manager.md`）
 
 ## 切り戻し・撤去
 
 - 権限の過不足（コードの誤り）: 修正の PR → マージ → 「bootstrap の初回 apply」の 3〜4（plan の要約を確かめてから apply）
 - データセットの付与だけを外す: `simulator_reader` を消す PR → apply（delete 1）。急ぐときは所有者が `bq` で `optionchan_tokyo` の access から `sa-simulator` の 1 件を外し、あとで Terraform と揃える
+- AI の資格情報の撤去は「AI の資格情報（Secret Manager）」の 7
 - 撤去: SA・プール・Artifact Registry は `deletion_policy = "PREVENT"`、バケットは `prevent_destroy` なので Terraform では消えない。`$TF -chdir=infra/bootstrap state rm <アドレス>` で管理から外してから gcloud で削除する（`gcloud iam service-accounts delete` / `gcloud iam workload-identity-pools delete` / `gcloud artifacts repositories delete` / `gcloud storage rm -r`）。WIF のプール・プロバイダは削除後 30 日間 ID が予約される（作り直すなら別の ID）
 - GitHub: `gh secret delete GCP_WIF_PROVIDER -R "$REPO"`、`gh variable delete <名前> -R "$REPO"`（4 つ）、`gh api -X DELETE $R/environments/prod`

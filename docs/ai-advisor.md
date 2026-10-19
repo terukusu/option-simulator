@@ -118,6 +118,8 @@ EPIC #141 の (b)。Issue と #120 の当初の方針は「Secret Manager に置
 
 **決定（2026-10-19、オーナー）**: API キーと OAuth トークン（Claude のサブスクリプションのもの）の **両方** を使えるようにする。トークンを使うときは SDK に **トークンだけ** を渡す（SDK は `ANTHROPIC_API_KEY` を `ANTHROPIC_AUTH_TOKEN` より優先するので、キーが同時にあるとキーが使われる。トークンのときはキーを渡さない）。WIF は採らない。置き場所は Secret Manager（`infra/bootstrap`、シークレット単位の `secretAccessor`）を基本に #133 で決める。サブスクリプションの OAuth トークンをこの用途で使ってよいかの規約と、トークンの有効期限・更新はオーナーが確かめる（#133）。
 
+#133 で A の形（`infra/bootstrap` に API・シークレット 2 つ・付与、`infra/prod` の変数 `ai_credential` で片方だけを環境変数の参照に）にした。背景は [ADR-0001](adr-0001-ai-credentials-secret-manager.md)、手順は `infra/README.md`「AI の資格情報（Secret Manager）」。
+
 ### 論点 3: 費用の 1 日上限・使うモデル・上限を実装する場所
 - 判断者: オーナー
 

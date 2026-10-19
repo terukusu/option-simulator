@@ -789,7 +789,7 @@ F の推定・補間・ATM の判定はブラウザ（`model/`）。`sq_date`・
 | IaC の置き場所 | このリポジトリ（`infra/bootstrap` を所有者が apply、`infra/prod` を CI が apply）。必要なものの一覧・名前は付録 B、手順は `infra/README.md` | optionchan-gcp 側の変更を不要にする |
 | API の言語 | Python（Flask / gunicorn）。ビューアーの `bq.py` / `settings.py` / テスト / Dockerfile を写す | BigQuery の読み方・セキュリティヘッダ・テストの流儀が揃う。API は薄い |
 | 静的ファイル | Vite のビルド成果物を Flask から配る（環境変数 `STATIC_DIR` のディレクトリの `/`（`index.html`、`no-cache`）と `/assets/<path>`（`immutable`）と、`/` 直下の決まった 5 つの名前（`/manifest.webmanifest`・`/favicon.svg`・`/apple-touch-icon.png`・`/icon-192.png`・`/icon-512.png`。`no-cache`、Content-Type は名前ごとに固定、名前の集合は `app.py` の定数 1 か所で変数を含む経路を作らない。#90）。未設定なら 404）。イメージへの同梱はリポジトリ直下の `Dockerfile` の Node ステージ（`npm ci --ignore-scripts` → `npm run build` の `dist/` を `/app/static` に置き、`STATIC_DIR` はイメージの環境変数。#36）。CDN なし。ローカルは Vite の `server.proxy` で `/api` → `127.0.0.1:8080` の Flask（同一オリジン維持） | CSP `script-src 'self'` |
-| 設定 | `GCP_PROJECT`（`bigquery` のとき必須）、`BQ_DATASET`（既定 `optionchan_tokyo`）、`BQ_LOCATION`（既定 `asia-northeast1`）、`MAX_BYTES_BILLED`（既定かつ上限 512 MiB）、`DATA_SOURCE`（`bigquery` / `file`。`file` は `CHAIN_FILE` の JSON をそのまま `/api/chain` で返し、`/api/calendar` は 503。GCP なしの起動確認・clone した人向け）、`CHAIN_FILE`、`STATIC_DIR`。詳細は `api/README.md` | ビューアーと同じ名前 |
+| 設定 | `GCP_PROJECT`（`bigquery` のとき必須）、`BQ_DATASET`（既定 `optionchan_tokyo`）、`BQ_LOCATION`（既定 `asia-northeast1`）、`MAX_BYTES_BILLED`（既定かつ上限 512 MiB）、`DATA_SOURCE`（`bigquery` / `file`。`file` は `CHAIN_FILE` の JSON をそのまま `/api/chain` で返し、`/api/calendar` は 503。GCP なしの起動確認・clone した人向け）、`CHAIN_FILE`、`STATIC_DIR`。詳細は `api/README.md`。AI の資格情報（#133）は `AI_CREDENTIAL`（`api_key` / `oauth_token`。未設定は AI 無効）と、`ANTHROPIC_API_KEY` か `ANTHROPIC_AUTH_TOKEN` の片方（Secret Manager の参照。Terraform の変数 `ai_credential` で選ぶ。[ADR-0001](adr-0001-ai-credentials-secret-manager.md)） | ビューアーと同じ名前 |
 | Cloud Run | ビューアーと同じ（第 1 世代、CPU 1・512Mi・リクエスト中だけ CPU、0〜2 インスタンス、60 秒、digest 指定、同時実行 8、起動プローブ `/healthz`）。gunicorn は 1 ワーカー・8 スレッド（API のキャッシュと single-flight をインスタンス内で共有する。13.4）。`infra/prod/simulator.tf`。検証は apply 後に本番の URL で行い（`infra/README.md`「prod（Cloud Run simulator）」の確認）、戻すときは revert の PR → deploy、急ぐときは `gcloud run services update-traffic` で旧リビジョンへ（#36。リビジョンタグでの事前検証はしない） | 実績のある値。リビジョンタグはビューアーも使っておらず、初回は戻す先の旧リビジョンも利用者もいない。タグを入れると Terraform の `traffic` と deploy の 2 段階化が要る |
 | IAP の権限 | `httpsResourceAccessor`（閲覧者）は **bootstrap（所有者 apply、`local.auto.tfvars`）** に置く。付与には `roles/iap.admin` が要り、apply SA には渡さない | optionchan と同じ |
 
@@ -1134,7 +1134,7 @@ F の推定・補間・ATM の判定はブラウザ（`model/`）。`sq_date`・
 - 前提（EPIC #141）: 計算はすべて simulator（ブラウザの `model/`）で、AI に数字を計算させない。板そのもの（行の配列・気配の生の値）は Anthropic API に送らない。AI に任意のコード・BigQuery のクエリを書かせない（決まった道具だけ）。鍵はブラウザに出さず、IAP を保つ。投資判断は本人
 - スコープ外（発注・口座連携・保有ポジションの管理）は 2.3 のまま
 - 決定は 13.1 の K15（2026-10-19。`docs/ai-advisor.md` の論点 1〜5 の「オーナー判断」）。論点 6〜8 は実装時に決める
-- 観測: 付録 B「API の有効化: simulator 側では宣言しない（optionchan の bootstrap が有効化済み）」は Secret Manager には当てはまらない（2026-10-19 の時点で未有効。論点 2）
+- 資格情報の置き場所（#133）: Secret Manager。API の有効化・シークレット 2 つ（`simulator-anthropic-api-key`・`simulator-anthropic-oauth-token`）・シークレット単位の `secretAccessor`（`sa-simulator` だけ）は `infra/bootstrap`（所有者の apply。付録 B の「API の有効化」の例外）。値は Terraform に入れず所有者が登録する。Cloud Run には `ai_credential` で選んだ片方だけを環境変数の Secret の参照で渡す（キーとトークンを同時に置かない）。判断の背景は [ADR-0001](adr-0001-ai-credentials-secret-manager.md)、手順は `infra/README.md`「AI の資格情報（Secret Manager）」
 - 用語の根拠は画面の用語集のデータ `ui/view/glossary.ts`（#167。JSON に直せる形）を渡せる（渡すのは #137）
 
 ## 付録 A. データの根拠表（2026-10-13 の実測）
@@ -1188,13 +1188,19 @@ optionchan-gcp の bootstrap / prod を写すだけでは足りないもの。
 | Artifact Registry | リポジトリ `simulator` を新設し、apply SA にリポジトリ単位の writer、plan SA に reader（digest を引く）。optionchan と同じクリーンアップポリシー・immutable tags。**bootstrap に置く**（リポジトリ単位の付与の時点でリポジトリが要る。prod に置くと apply SA にプロジェクト単位の `artifactregistry.admin` が要る。#35） |
 | 実行 SA | `sa-simulator`: `optionchan_tokyo` の `dataViewer`（非権威的 member。代替としてテーブル・ルーチン単位の付与もあるが、データセットに他の秘匿データは無いので MVP はデータセット単位）+ プロジェクトの `bigquery.jobUser`。apply SA に `serviceAccountUser` |
 | Cloud Run の権限 | Cloud Run の作成には **プロジェクト単位の `run.admin`** が要り、apply SA の権限が optionchan のサービス（`ingest` / `viewer`）にも及ぶ。代替: (i) 受け入れる（Environment の承認と state の分離で緩和）、(ii) optionchan の prod にサービスだけ置く（B に近づく）。推奨 (i)、影響範囲を runbook に明記 |
-| API の有効化 | simulator 側では宣言しない（optionchan の bootstrap が有効化済み。二重管理を避ける） |
+| API の有効化 | simulator 側では宣言しない（optionchan の bootstrap が有効化済み。二重管理を避ける）。**例外**: Secret Manager は optionchan が使わない API なので `infra/bootstrap` で有効化する（外しても止めない。#133・ADR-0001） |
+| AI の資格情報 | Secret Manager のシークレット 2 つ（API キー・OAuth トークン。東京だけに複製）と、シークレット単位の `secretAccessor`（`sa-simulator` だけ）を **bootstrap に置く**（apply SA に Secret Manager・Service Usage の権限を渡さない）。値（版）は Terraform に入れず、所有者が標準入力から登録する。prod は変数 `ai_credential`（既定 `none`）で片方だけを環境変数の参照にする（#133・ADR-0001） |
 | IAP | prod: `iap_enabled = true`、`run.invoker` = IAP のサービスエージェント。bootstrap: `httpsResourceAccessor` をサービス単位で閲覧者に（`roles/iap.admin` が要るので所有者 apply。apply SA には渡さない） |
 | OAuth クライアント | ビューアーでリージョン単位に設定済みなら流用（`gcloud iap settings get --resource-type=cloud-run --region=<REGION>` で確認）。サービス単位だったら `--service=simulator` で同じクライアントを設定。プロジェクト単位の `iap.httpsResourceAccessor` の継承も確認項目。**clone 利用者は optionchan の runbook「ビューアー」の手順 2〜4（同意画面・クライアント作成・IAP 設定）が丸ごと必要** |
 | GitHub | repository variables（`GCP_PROJECT_ID`、`TF_STATE_BUCKET`、`GCP_SA_TF_PLAN`、`GCP_SA_TF_APPLY`）、secret `GCP_WIF_PROVIDER`（WIF プロバイダの完全名。プロジェクト番号を含む）、Environment `prod`（`main` のみ・required reviewer は所有者）、ブランチ保護（既存の必須 check `check`。変更なし）。Terraform の github プロバイダは使わず gh の手順（`infra/README.md`。所有者の GitHub トークンを Terraform・state に入れない） |
 | テスト | `terraform test`（`infra/bootstrap/tests/`・`infra/prod/tests/`、モックのプロバイダ。資格情報なしで CI の `check` job で回る）: bootstrap は公開の拒否、WIF の条件、apply SA の subject、データセットの付与の型と role。prod は IAP 有効・`ingress`・IAM の検査が有効、`run.invoker` が IAP のサービスエージェント 1 件だけ、イメージが digest か `src-<20hex>` のタグ参照だけ、8.3 の値（AC11） |
 
 ## 変更履歴
+
+### 2026-10-19 AI の資格情報の置き場所（#133）
+
+- `docs/adr-0001-ai-credentials-secret-manager.md` を足した。Secret Manager の API・シークレット 2 つ・`sa-simulator` の読み取りを `infra/bootstrap` に、Cloud Run への渡し方（`ai_credential` で片方だけ）を `infra/prod` に置いた
+- 8.3 の「設定」に `AI_CREDENTIAL`・`ANTHROPIC_API_KEY` / `ANTHROPIC_AUTH_TOKEN`、14 章の観測を決定に書き換え、付録 B の「API の有効化」に例外と「AI の資格情報」の行を足した
 
 ### 2026-10-19 持ちこたえマップを開いたときのスクロールと待ちのスピナー（#174）
 

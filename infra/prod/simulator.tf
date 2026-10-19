@@ -6,6 +6,20 @@
 locals {
   # plan SA は SA を読めないので data source にしない（名前は infra/bootstrap の google_service_account.simulator と同じ）
   sa_simulator = "sa-simulator@${var.project_id}.iam.gserviceaccount.com"
+
+  # AI の資格情報（#133、docs/adr-0001-ai-credentials-secret-manager.md）。シークレットと sa-simulator の読み取りは infra/bootstrap
+  # （ai_credentials.tf の local.ai_secrets と同じ名前。plan SA はシークレットを読めないので data source にしない）。
+  # var.ai_credential で選んだ 1 つだけを環境変数に載せる。キーとトークンを同時に載せない（SDK は ANTHROPIC_API_KEY を優先するので、
+  # 両方あるとトークンを選んだつもりでキーの従量課金になる）
+  ai_secrets = {
+    api_key     = "simulator-anthropic-api-key"
+    oauth_token = "simulator-anthropic-oauth-token"
+  }
+  ai_env_name = {
+    api_key     = "ANTHROPIC_API_KEY"
+    oauth_token = "ANTHROPIC_AUTH_TOKEN"
+  }
+  ai_credentials = var.ai_credential == "none" ? [] : [var.ai_credential]
 }
 
 # IAP のサービスエージェント（service-<番号>@gcp-sa-iap）。番号はコードに書かず data source から組み立てる
@@ -64,6 +78,30 @@ resource "google_cloud_run_v2_service" "simulator" {
       env {
         name  = "BQ_LOCATION"
         value = var.bq_location
+      }
+
+      # AI の資格情報（var.ai_credential が none のときは何も足さない）。AI_CREDENTIAL は中継が種類を知るための素の値（秘匿でない）。
+      # 資格情報そのものは Secret Manager の参照だけで、値は設定・state・plan に入らない。参照はインスタンスの起動時に解決され、
+      # 版が無い・無効だとインスタンスが起動しない（simulator 全体が開けない）ので、値を登録してから AI_CREDENTIAL を設定する。
+      # 切り戻しは none でデプロイしてから版を無効にする（infra/README.md「AI の資格情報（Secret Manager）」）
+      dynamic "env" {
+        for_each = local.ai_credentials
+        content {
+          name  = "AI_CREDENTIAL"
+          value = env.value
+        }
+      }
+      dynamic "env" {
+        for_each = local.ai_credentials
+        content {
+          name = local.ai_env_name[env.value]
+          value_source {
+            secret_key_ref {
+              secret  = local.ai_secrets[env.value]
+              version = var.ai_secret_version
+            }
+          }
+        }
       }
 
       # /healthz は設定の読み込みだけで BigQuery に触れない

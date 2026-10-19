@@ -53,6 +53,8 @@ run 1 'OAuth クライアントのシークレット' "GOCSP""X-abcdef"
 run 1 '秘密鍵' "-----BEGIN ""PRIVATE KEY-----"
 run 1 'SA 鍵の private_key_id' "\"private_key""_id\": \"x\""
 run 1 '署名付き URL' "https://storage.googleapis.com/b/o?X-Goog-""Signature=abc"
+run 1 'Anthropic の API キーの形' "ANTHROPIC_API_KEY=sk-""ant-api03-AbCdEfGhIjKlMnOpQrStUvWxYz0123456789_-x"
+run 1 'Anthropic の OAuth トークンの形' "token sk-""ant-oat01-AbCdEfGhIjKlMnOpQrStUvWxYz0123456789"
 run 1 'プロジェクト ID の値' "project = fake-proj""-123456" GCP_PROJECT_ID=fake-proj-123456
 run 1 'プロジェクト ID の値（バケット名の一部）' "bucket fake-proj""-123456-sim-tfstate" GCP_PROJECT_ID=fake-proj-123456
 run 1 'プロジェクト ID の値（大小無視）' "FAKE-PROJ""-123456" GCP_PROJECT_ID=fake-proj-123456
@@ -69,6 +71,7 @@ run 0 '$P と <OWNER>/<REPO>' 'SA=sa-simulator@$P.iam.gserviceaccount.com <OWNER
 run 0 '/home/<名前>/' 'ls /home/<名前>/'
 run 0 '<SERVICE>-<HASH>-an.a.run.app' 'https://<SERVICE>-<HASH>-an.a.run.app/'
 run 0 'projects/<6 桁>' 'projects/123456/locations'
+run 0 'sk-ant- の接頭辞だけ（説明文）' 'キーは sk-ant- で始まる（sk-ant-api03-... / sk-ant-oat01-...）'
 run 0 '語単位（値の続きが英数字）' 'fake-proj-1234567' GCP_PROJECT_ID=fake-proj-123456
 run 0 '変数が空なら形の検査だけ' 'nothing here'
 if [ "$(printf '%s\n' "$LAST_OUT" | grep -c '^skip: ')" -ne 3 ]; then
