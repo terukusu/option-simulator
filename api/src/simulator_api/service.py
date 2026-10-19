@@ -15,6 +15,8 @@ runner: (name, params) -> 行（dict）のリスト。name は sql/<name>.sql、
 - /api/atm_iv（#79）: AtmIvService。キー = (tf, start, end)（正規化した後）、値 = 応答の Payload。期限付きの LRU
   （確定した範囲 = end ≤ now − 48 時間は 24 時間、それ以外 300 秒、ATM_IV_CACHE_SIZE 件）+ single-flight。日足は
   ChainService と同じカレンダーのキャッシュを使う
+- 供給元（DATA_SOURCE）: ChainService = bigquery（optionchan）、FileChainService = file、QuotesFileService = quotes
+  （中立の気配の一覧のファイル。#154）。値 → 実装の表は sources.py
 - /api/atm_daily（#152）: AtmDailyService。キー = 範囲の終わりの日（atm_daily.settled_end）、値 = 応答の Payload。
   期限付きの LRU（24 時間、ATM_DAILY_CACHE_SIZE 件）+ single-flight。範囲の終わりが変わる（JST 8:00）と読み直す
 """
@@ -28,7 +30,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from . import atm_daily, atm_iv, chain, usable
+from . import atm_daily, atm_iv, chain, quotes, usable
 from . import calendar as cal_mod
 from . import settings as st
 from .cache import ExpiringLRUCache, LRUCache, TTLCache
@@ -305,3 +307,61 @@ class FileChainService:
 
     def atm_daily(self) -> Payload:
         raise Unavailable("file_source")
+
+
+class QuotesFileService:
+    """DATA_SOURCE=quotes: 利用者が自分の API から書き出した中立の気配の一覧（QUOTES_FILE）と取引カレンダー
+    （CALENDAR_FILE。/api/calendar と同じ形）から板を組み立てる（quotes.py。#154）。要求ごとに読む（file と同じ）。
+    検証の失敗は 503（ログは JSON の位置だけ。値は出さない）。IV 推移・日次の値は無い（503）"""
+
+    def __init__(self, quotes_file: Path, calendar_file: Path, clock):
+        self.quotes_file = quotes_file
+        self.calendar_file = calendar_file
+        self.clock = clock
+
+    @staticmethod
+    def _read(path: Path, code: str) -> bytes:
+        """大きさの上限（QUOTES_MAX_FILE_BYTES）を超えるファイルは読まずに 503"""
+        try:
+            if path.stat().st_size > st.QUOTES_MAX_FILE_BYTES:
+                log("WARNING", "file_too_large", code=code)
+                raise Unavailable(code)
+            return path.read_bytes()
+        except OSError:
+            raise Unavailable(code) from None
+
+    def _calendar(self) -> cal_mod.Calendar:
+        raw = self._read(self.calendar_file, "calendar_file")
+        try:
+            return cal_mod.from_json(json.loads(raw))
+        except ValueError as e:
+            log("WARNING", "calendar_file_invalid", detail=str(e))
+            raise Unavailable("calendar_file") from None
+
+    def chain(self) -> ChainResult:
+        cal = self._calendar()
+        raw = self._read(self.quotes_file, "quotes_file")
+        try:
+            q = quotes.parse_quotes(json.loads(raw))
+            obj, reason = quotes.chain_from_quotes(q, cal, self.clock())
+        except quotes.QuotesError as e:
+            log("WARNING", "quotes_file_invalid", detail=str(e))
+            raise Unavailable("quotes_file") from None
+        except ValueError:  # JSON として読めない
+            raise Unavailable("quotes_file") from None
+        except quotes.QuotesUnusable:
+            raise Unavailable("quotes_unusable") from None
+        body, gz = _encode(obj)
+        log("INFO", "chain_served", snapshot_at=chain.instant(q.snapshot_at), reason=reason, source=q.source)
+        return ChainResult(body, gz, None, reason=reason, snapshot_at=q.snapshot_at)
+
+    def calendar(self) -> Payload:
+        cal = self._calendar()
+        body, gz = _encode(cal_mod.calendar_json(cal, source="file"))
+        return Payload(body, gz, f'"{int(cal.version_at.timestamp())}"')
+
+    def atm_iv(self, req) -> Payload:
+        raise Unavailable("quotes_source")
+
+    def atm_daily(self) -> Payload:
+        raise Unavailable("quotes_source")

@@ -79,7 +79,12 @@ ATM_DAILY_MAX_AGE_SECONDS = 3600  # Cache-Control
 # （2026-10-19）、1 年で約 8 MiB 増える）
 QUERY_MAX_BYTES_BILLED: dict[str, int] = {"atm_cm_iv": 64 * MiB, "atm_cm_daily": 128 * MiB}
 
-DATA_SOURCES = ("bigquery", "file")
+# ---- 中立の気配の一覧（DATA_SOURCE=quotes。quotes.py・service.QuotesFileService。#154） ----
+QUOTES_MAX_FILE_BYTES = 16 * MiB  # QUOTES_FILE・CALENDAR_FILE の大きさの上限（超えたら読まずに 503）
+QUOTES_MAX_FUTURE_SECONDS = 300  # snapshot_at が今からこれより先（未来）なら不正（時計・タイムゾーンの誤り）
+
+# 供給元（DATA_SOURCE の値）。値 → 実装の表は sources.py の BUILDERS（docs/data-sources.md「API の供給元の口」。#154）
+DATA_SOURCES = ("bigquery", "file", "quotes")
 
 
 @dataclass(frozen=True)
@@ -90,11 +95,13 @@ class Settings:
     location: str = "asia-northeast1"
     maximum_bytes_billed: int = MAX_BYTES_BILLED_LIMIT
     chain_file: Path | None = None
+    quotes_file: Path | None = None  # DATA_SOURCE=quotes の気配の一覧（中立の形。quotes.py）
+    calendar_file: Path | None = None  # DATA_SOURCE=quotes の取引カレンダー（/api/calendar と同じ形の JSON）
     static_dir: Path | None = None
 
     def __post_init__(self):
         if self.data_source not in DATA_SOURCES:
-            raise ValueError("DATA_SOURCE は bigquery か file")
+            raise ValueError("DATA_SOURCE は " + " / ".join(DATA_SOURCES) + " のどれか")
         if self.data_source == "bigquery" and not _PROJECT_RE.match(self.project):
             raise ValueError("GCP_PROJECT の形式が不正")
         if not _DATASET_RE.match(self.dataset):
@@ -107,6 +114,8 @@ class Settings:
             raise ValueError("MAX_BYTES_BILLED は 1〜536870912（512 MiB）のバイト数")
         if self.data_source == "file" and self.chain_file is None:
             raise ValueError("DATA_SOURCE=file には CHAIN_FILE が必要")
+        if self.data_source == "quotes" and (self.quotes_file is None or self.calendar_file is None):
+            raise ValueError("DATA_SOURCE=quotes には QUOTES_FILE と CALENDAR_FILE が必要")
 
 
 def from_env(env=None) -> Settings:
@@ -129,6 +138,10 @@ def from_env(env=None) -> Settings:
         kwargs["maximum_bytes_billed"] = int(raw)
     if env.get("CHAIN_FILE"):
         kwargs["chain_file"] = Path(env["CHAIN_FILE"])
+    if env.get("QUOTES_FILE"):
+        kwargs["quotes_file"] = Path(env["QUOTES_FILE"])
+    if env.get("CALENDAR_FILE"):
+        kwargs["calendar_file"] = Path(env["CALENDAR_FILE"])
     if env.get("STATIC_DIR"):
         kwargs["static_dir"] = Path(env["STATIC_DIR"])
     return Settings(**kwargs)

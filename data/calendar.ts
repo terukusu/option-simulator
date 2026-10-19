@@ -61,6 +61,8 @@ export interface Calendar {
   /** 版の日付（version_at の JST の日付。ヘッダに出す） */
   versionOn: string | null;
   origin: CalendarOrigin;
+  /** JSON の source（文字列のときだけ。API の版の出どころの表示に使う。#154） */
+  source?: string;
 }
 
 const ISO_DATE = /^(\d{4})-(\d{2})-(\d{2})$/;
@@ -181,6 +183,7 @@ export function buildCalendar(json: unknown, origin: CalendarOrigin): Calendar {
     versionAt: v.version_at,
     versionOn: jstDate(Date.parse(v.version_at)),
     origin,
+    ...(typeof v.source === 'string' ? { source: v.source } : {}),
   };
 }
 

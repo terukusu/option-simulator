@@ -5,6 +5,8 @@ import { CALENDAR } from '../../ui/calendar';
 import { fmtNum } from '../../ui/view/format';
 import {
   calendarAssumption,
+  calendarOriginLabel,
+  delayText,
   headerModel,
   keptBoardNote,
   REASON_LABEL,
@@ -243,6 +245,28 @@ describe('calendarAssumption', () => {
     expect(r.text).toBe('取引カレンダー: optionchan の版（2026-10-14）・確定 2026-10-12 まで');
     expect(r.warning).toBe(
       'カレンダー期限切れ（評価時刻が 2026-10-12 より後。休業日が漏れている可能性）',
+    );
+  });
+});
+
+describe('遅れの表示（#154）', () => {
+  it('分の遅れ / 遅れのない供給元 / 不明', () => {
+    expect(delayText(15)).toBe('約 15 分遅れ');
+    expect(delayText(0)).toBe('遅れなし');
+    expect(delayText(Number.NaN)).toBe('—');
+  });
+});
+
+describe('カレンダーの出どころ（#154）', () => {
+  it('API の版: source が bigquery / 無しなら optionchan の版、それ以外は API の版。同梱は同梱の版', () => {
+    expect(calendarOriginLabel(buildCalendar(bundledJson, 'api'))).toBe('optionchan の版');
+    expect(calendarOriginLabel(buildCalendar({ ...bundledJson, source: 'file' }, 'api'))).toBe(
+      'API の版',
+    );
+    const { source: _s, ...noSource } = bundledJson;
+    expect(calendarOriginLabel(buildCalendar(noSource, 'api'))).toBe('optionchan の版');
+    expect(calendarOriginLabel(buildCalendar({ ...bundledJson, source: 'file' }, 'bundled'))).toBe(
+      '同梱の版',
     );
   });
 });

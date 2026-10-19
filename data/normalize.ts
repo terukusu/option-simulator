@@ -23,6 +23,7 @@ import {
   type ForwardOptions,
   findAtm,
   hasTwoSided,
+  impliedVol,
   midOf,
   type OptionType,
   type Quote,
@@ -54,7 +55,16 @@ export type QuoteState = 'two_sided' | 'bid_only' | 'ask_only' | 'none';
 export interface SideInfo {
   quote: QuoteState;
   mid: number | null;
-  /** 気配はあるのに JPX の bid_iv / ask_iv が両方とも無い（表示用の印。model/ は価格から IV を求める） */
+  /**
+   * 気配の IV（%。表示用）。板が気配の IV を持つ（`Chain.quoteIvProvided`）なら JSON の `bid_iv` / `ask_iv` のまま、
+   * 持たない供給元の板なら気配の価格から Black-76（限月の F・T・r）で求めた値（求まらなければ null）。#154
+   */
+  bidIv: number | null;
+  askIv: number | null;
+  /**
+   * 気配はあるのに JPX の bid_iv / ask_iv が両方とも無い（表示用の印。model/ は価格から IV を求める）。
+   * 板が気配の IV を持たない供給元のとき（`Chain.quoteIvProvided` = false）は付けない
+   */
   jpxIvMissing: boolean;
 }
 
@@ -118,6 +128,11 @@ export interface Chain {
   delayedMinutes: number;
   reason: ChainReason;
   source: string | null;
+  /**
+   * 板が気配の IV（`bid_iv` / `ask_iv`）を持つか（どこか 1 つでも非 null）。持たない供給元の板（docs/data-sources.md）では
+   * 「JPX の IV 欠損」の印を出さず、板の IV 列は気配の価格から求める（#154）
+   */
+  quoteIvProvided: boolean;
   r: number;
   evalTime: number;
   spot: { price: number | null; priceTime: number | null };
@@ -148,14 +163,48 @@ function quoteState(q: Quote): QuoteState {
   return 'none';
 }
 
-function sideInfo(s: ChainSide): SideInfo {
+/** 気配の IV を気配の価格から求める文脈（板が気配の IV を持たないときだけ。持つなら null） */
+interface IvFallback {
+  F: number;
+  T: number;
+  r: number;
+}
+
+/** 価格 → IV（%）。価格が無い・0 以下・解けなければ null */
+function ivPctOf(type: OptionType, price: number | null, k: number, fb: IvFallback): number | null {
+  if (price === null || !(price > 0)) return null;
+  const res = impliedVol(type, price, fb.F, k, fb.T, fb.r);
+  return res.ok ? res.sigma * 100 : null;
+}
+
+function sideInfo(
+  s: ChainSide,
+  type: OptionType,
+  k: number,
+  fallback: IvFallback | null,
+): SideInfo {
   const q = toQuote(s);
   const quote = quoteState(q);
   return {
     quote,
     mid: midOf(q),
-    jpxIvMissing: quote !== 'none' && s.bid_iv === null && s.ask_iv === null,
+    bidIv: fallback ? ivPctOf(type, s.bid, k, fallback) : s.bid_iv,
+    askIv: fallback ? ivPctOf(type, s.ask, k, fallback) : s.ask_iv,
+    jpxIvMissing: !fallback && quote !== 'none' && s.bid_iv === null && s.ask_iv === null,
   };
+}
+
+/** 板のどこかに気配の IV（bid_iv / ask_iv）が 1 つでもあるか */
+function hasQuoteIv(json: ChainJson): boolean {
+  return json.months.some((m) =>
+    m.rows.some(
+      (row) =>
+        row.call.bid_iv !== null ||
+        row.call.ask_iv !== null ||
+        row.put.bid_iv !== null ||
+        row.put.ask_iv !== null,
+    ),
+  );
 }
 
 function parseInstant(s: string | null): number | null {
@@ -186,6 +235,7 @@ function normalizeMonth(
   evalTime: number,
   r: number,
   opts: NormalizeOptions,
+  quoteIvProvided: boolean,
 ): ChainMonth {
   const sqTime = sqInstant(m.sq_date);
   const T = yearFraction(evalTime, sqTime);
@@ -214,6 +264,8 @@ function normalizeMonth(
   const flagged = new Set(violations.map((v) => v.k));
   const nodeByK = new Map((smile?.nodes ?? []).map((n) => [n.k, n]));
   const ivs = smile ? smileAtStrikes(smile, ks, F) : null;
+  // 気配の IV を持たない板: 気配の価格から求める（F が NaN・T が尽きていれば impliedVol が解かない = null）
+  const fallback: IvFallback | null = quoteIvProvided ? null : { F, T, r };
 
   const strikes: StrikeInfo[] = m.rows.map((row, i) => {
     const s = ivs?.[i];
@@ -227,8 +279,8 @@ function normalizeMonth(
       unstable: node?.unstable ?? false,
       node,
       arbitrage: flagged.has(row.k),
-      call: sideInfo(row.call),
-      put: sideInfo(row.put),
+      call: sideInfo(row.call, 'call', row.k, fallback),
+      put: sideInfo(row.put, 'put', row.k, fallback),
     };
   });
 
@@ -268,12 +320,14 @@ export function normalizeChain(json: ChainJson, opts: NormalizeOptions = {}): Ch
   const snapshotAt = Date.parse(json.snapshot_at);
   const evalTime = opts.evalTime ?? snapshotAt;
   const fut = json.future;
+  const quoteIvProvided = hasQuoteIv(json);
   return {
     snapshotAt,
     snapshotAtText: json.snapshot_at,
     delayedMinutes: json.delayed_minutes,
     reason: json.reason,
     source: json.source ?? null,
+    quoteIvProvided,
     r,
     evalTime,
     spot: { price: json.spot.price, priceTime: parseInstant(json.spot.price_time) },
@@ -286,7 +340,7 @@ export function normalizeChain(json: ChainJson, opts: NormalizeOptions = {}): Ch
       sqTime: sqInstant(fut.sq_date),
     },
     months: json.months.map((m) =>
-      normalizeMonth(m, fut.price, fut.contract_month, evalTime, r, opts),
+      normalizeMonth(m, fut.price, fut.contract_month, evalTime, r, opts, quoteIvProvided),
     ),
     json,
   };
