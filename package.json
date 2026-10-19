@@ -17,6 +17,7 @@
     "fixtures": "node scripts/fixtures.mjs",
     "fixtures:check": "node scripts/fixtures.mjs --check",
     "ui:check": "node scripts/uiCheck.mjs",
+    "readme:shots": "node scripts/readmeShots.mjs",
     "icons": "node scripts/icons.mjs",
     "pwa:check": "node scripts/pwaCheck.mjs"
   },
