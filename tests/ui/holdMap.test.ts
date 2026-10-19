@@ -1,5 +1,5 @@
 /**
- * 持ちこたえマップの表示モデル（#152 段 B の B6・B7。ui/view/holdMap.ts）。板・過去の点は合成（架空の値）。
+ * 追証マップの表示モデル（#152 段 B の B6・B7。ui/view/holdMap.ts）。板・過去の点は合成（架空の値）。
  */
 
 import { describe, expect, it } from 'vitest';
@@ -15,6 +15,7 @@ import {
   ZERO_SCENARIO,
 } from '../../model';
 import {
+  HOLD_MAP_CAPTION,
   HOLD_MAP_COMPUTING,
   HOLD_MAP_EMPTY,
   HOLD_MAP_FAILED,
@@ -24,6 +25,8 @@ import {
   HOLD_MAP_MAX_Y_TICKS,
   HOLD_MAP_NO_CAPITAL,
   HOLD_MAP_NO_LEGS,
+  HOLD_MAP_PLOT_LABEL,
+  HOLD_MAP_TITLE,
   type HoldMapResult,
   holdMapBaseScenario,
   holdMapDxX,
@@ -345,5 +348,21 @@ describe('#174 待ちの表示・開いたときのスクロール', () => {
     expect(holdMapReveal(520, 760, 100, 500, true)).toEqual({ delta: 260, behavior: 'auto' });
     // 有限でない値は動かさない
     expect(holdMapReveal(Number.NaN, 800, 100, 500, false).delta).toBe(0);
+  });
+});
+
+describe('#179 名前と見出しの下の説明', () => {
+  it('見出しは「追証マップ」、描画域の名前も同じ名前で始まる', () => {
+    expect(HOLD_MAP_TITLE).toBe('追証マップ');
+    expect(HOLD_MAP_PLOT_LABEL.startsWith('追証マップ')).toBe(true);
+  });
+
+  it('説明は「原資産と IV が同時に動いたときの余力」で始まり、追証の側は概算・実際の判定は引けの清算値と書く', () => {
+    expect(HOLD_MAP_CAPTION.startsWith('原資産と IV が同時に動いたときの余力')).toBe(true);
+    expect(HOLD_MAP_CAPTION).toContain('概算');
+    expect(HOLD_MAP_CAPTION).toContain('引けの清算値');
+    expect(HOLD_MAP_CAPTION).toContain('引けで戻れば追証にならない');
+    // 過去の点の近似は点の注記（holdMapNote）だけに書く（説明に重ねない）
+    expect(HOLD_MAP_CAPTION).not.toContain('近似');
   });
 });

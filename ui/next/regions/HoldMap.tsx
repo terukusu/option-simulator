@@ -24,7 +24,7 @@ import {
 import type { AmountUnit } from '../../view/metrics';
 import { useSize } from '../useSize';
 
-/** 指標パネルに渡す持ちこたえマップの束（NextApp の useMemo。参照が同じなら描き直さない） */
+/** 指標パネルに渡す追証マップの束（NextApp の useMemo。参照が同じなら描き直さない） */
 export interface HoldBundle {
   open: boolean;
   onToggle: () => void;
@@ -192,7 +192,7 @@ function HoldMapPlotView({
 }
 
 /**
- * 持ちこたえマップ（#152。docs/ui-redesign.md §3・docs/design.md 5.11）: 指標 · テールの末尾の折りたたみ（既定は閉・
+ * 追証マップ（#152。docs/ui-redesign.md §3・docs/design.md 5.11）: 指標 · テールの末尾の折りたたみ（既定は閉・
  * 開閉は ShellState.holdMap = セッション中だけ）。表示モデルは ui/view/holdMap.ts、計算の時機は useHoldMap、
  * 過去の点の読み込みは useAtmMoves（どちらも NextApp が持つ）。値は JSX のテキストと SVG の数値の属性だけ。
  */

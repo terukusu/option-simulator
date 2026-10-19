@@ -219,6 +219,27 @@ describe('説明の語（#167 AC-4）', () => {
       ...(t?.aliases ?? []),
     ]);
   });
+
+  it('#179 追証マップ: 見出し・短い形は新しい名前、旧名「持ちこたえマップ」は別名で引ける、追証の側は概算・引けの清算値', () => {
+    const t = termById('hold-map');
+    expect(t?.title).toBe('追証マップ');
+    expect(t?.short).toBe('追証マップ');
+    expect(t?.reading).toBe('おいしょうまっぷ');
+    expect(t?.aliases).toContain('持ちこたえマップ');
+    expect(t && termSearchText(t)).toContain('持ちこたえ');
+    expect(t?.guide).toEqual({
+      anchor: '追証マップ',
+      title: '8 章 作業台: 指標 · テール > 追証マップ',
+    });
+    expect(text('hold-map')).toContain('原資産と IV が同時に動いたときの余力');
+    expect(text('hold-map')).toContain('概算');
+    expect(text('hold-map')).toContain('引けの清算値');
+    // 旧名は別名の 1 か所だけ（見出し・説明・出る場所・関連する用語の文に残さない）
+    for (const u of GLOSSARY) {
+      const strs = [u.title, u.short, u.reading, u.summary, ...u.body, ...u.where, u.guide.title];
+      for (const x of strs) expect(x, u.id).not.toContain('持ちこたえ');
+    }
+  });
 });
 
 describe('説明カードの表示モデル（#167 AC-7）', () => {

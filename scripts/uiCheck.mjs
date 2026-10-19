@@ -54,7 +54,7 @@
 //                                          .lbl が「IV」・切れ / 折り返し 0・スマホでアイコンの svg 1 個）と初めて開いたときの中身
 //                                          （aria-label「IV 推移」・Seg の 1 つ目が押されている）。スマホ・タブレットのスマイルの検査は
 //                                          パネルの中で [スマイル] を選んでから（smileTab）
-//                                          持ちこたえマップ（#174）: 資金あり・売り 5 枚 × 360（指標 peek / full）・390・900・1440 ×
+//                                          追証マップ（#174）: 資金あり・売り 5 枚 × 360（指標 peek / full）・390・900・1440 ×
 //                                          ダーク / ライトで、見出しを枠の下端に置いて開くと描画域が .panel-body の中（見出しと
 //                                          一緒に入る幅では見出しも）、/fixtures/atm_daily を止めた間は枠（≥ 200px）の中にスピナー（reduce では
 //                                          animation none）と `過去の値動きを読み込み中…`（状態の行に無い・切れない）、読めたら消える、
@@ -995,11 +995,9 @@ async function measureAll() {
     console.log(
       `追証の線の検査（#131）: ${marginLineStats.pass} / ${marginLineStats.total} 状態で pass`,
     );
-    // 持ちこたえマップを開いたときのスクロールと待ちのスピナー（#174 AC2・AC3）
+    // 追証マップを開いたときのスクロールと待ちのスピナー（#174 AC2・AC3）
     await holdMapAll();
-    console.log(
-      `持ちこたえマップの検査（#174）: ${holdStats.pass} / ${holdStats.total} 状態で pass`,
-    );
+    console.log(`追証マップの検査（#174）: ${holdStats.pass} / ${holdStats.total} 状態で pass`);
     // 市場の追加の状態（1200 / 1280 / 1800・322 行の板・字幅 2 通り。#85）
     await marketSweep();
     console.log(
@@ -1522,7 +1520,7 @@ const holdPlaced = (r) => {
 };
 
 /**
- * 持ちこたえマップ（#174 AC2・AC3）: 資金あり・売り 5 枚 × 360（指標 peek / full）・390（peek）・900（ドック）・1440 ×
+ * 追証マップ（#174 AC2・AC3）: 資金あり・売り 5 枚 × 360（指標 peek / full）・390（peek）・900（ドック）・1440 ×
  * ダーク / ライト。状態ごとに新しいコンテキスト（過去の値動きはセッションで 1 回だけ読むので）。指標の .panel-body を
  * 一番下までスクロール（見出しが枠の下端）→ /fixtures/atm_daily を止めたまま見出しを押す →
  * (a) rAF 2 回の後（既定の実行は reducedMotion reduce = 即時）に描画域が枠の中（見出しと一緒に入る幅では見出しも）
@@ -1547,7 +1545,7 @@ async function holdMapAll() {
         const release = await holdDailyGate(page);
         await page.goto(pageUrl('next'));
         await waitReady(page, 'next');
-        const lbl = `next ${theme} 持ちこたえマップ ${st} ${w}x${h}`;
+        const lbl = `next ${theme} 追証マップ ${st} ${w}x${h}`;
         let ok = true;
         const ng = (why) => {
           ok = false;
@@ -2741,12 +2739,12 @@ async function runFlows() {
   await ivCrossFlows(pc);
   await ivCrossTouchFlow();
   for (const vp of [phone, { width: 900, height: 1100 }]) await ivDockFlows(vp);
-  // #174 持ちこたえマップの開閉の時間・開いたときの滑らかなスクロールとスピナー（AC4）
+  // #174 追証マップの開閉の時間・開いたときの滑らかなスクロールとスピナー（AC4）
   for (const vp of [pc, phone]) await holdToggleFlow(vp);
 }
 
 /**
- * #174 AC4: 持ちこたえマップの見出しのクリックから rAF 2 回までの時間（開・閉 各 5 回の中央値 ≤ 100ms）。初めて開いたとき
+ * #174 AC4: 追証マップの見出しのクリックから rAF 2 回までの時間（開・閉 各 5 回の中央値 ≤ 100ms）。初めて開いたとき
  * （/fixtures/atm_daily を止めた間）はスピナーが回り（animation-name hm-spin）、滑らかなスクロールが止まった後に描画域が
  * 枠の中（AC2 (a)）。スマホは指標 peek
  */
