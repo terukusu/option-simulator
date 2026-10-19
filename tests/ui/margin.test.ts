@@ -29,19 +29,26 @@ import {
   marginNow,
   marginParamsOf,
   marginPoint,
+  marginPointAt,
   marginTail,
 } from '../../ui/view/margin';
 import { fmtAmount, type MetricsModel, metricsModel } from '../../ui/view/metrics';
 import {
   amountText,
+  FULL_MAX_ROWS,
   ivScaleText,
   MARGIN_CALL_MARK,
   MARGIN_GROUP_LABEL,
   MARGIN_HINT,
+  MARGIN_POINT_NOW_TEXT,
+  MARGIN_POINT_ROW_LABEL,
+  MARGIN_POINT_SAME_TEXT,
   MARGIN_TAIL_TITLE,
   MARGIN_TILE_LABEL,
   type MetricTile,
   marginParamsText,
+  marginPointParts,
+  marginPointText,
   marginTailRows,
   metricsBreakdown,
   metricsPanel,
@@ -109,6 +116,7 @@ function viewOf(s: State, prefs: MarginPrefs): MarginView {
     params,
     now: marginNow(base, s.scenario, params, capital, holidays),
     point: marginPoint(base, s.scenario, params, capital, holidays),
+    at: marginPointAt(base, s.scenario),
     tail: marginTail(base, tailScenario, params, capital, holidays),
   };
 }
@@ -236,6 +244,7 @@ describe('計算の単位（ui/view/margin.ts）', () => {
       params: DEFAULT_MARGIN_PARAMS,
       now: null,
       point: null,
+      at: marginPointAt(base, putSell.scenario),
       tail: [],
     };
     const tiles = metricTiles(m, mv);
@@ -288,10 +297,11 @@ describe('タイル（#131 AC14）', () => {
     expect(now.multiple).not.toBeNull();
     expect(Number.isFinite(now.multiple)).toBe(true);
     expect(tr.s).toBe(`今 ${fmtAmount(now.room, u)} · ${fmtNum(now.multiple)} 倍`);
-    // 全文: 1 行目は見出し + 値、前提の行
+    // 全文: 1 行目は見出し + 値。前提の行は内訳の証拠金の群の末尾（#161 でタイルの全文から外した）
     expect(tm.full[0]).toEqual({ k: MARGIN_TILE_LABEL, v: `${tm.v} 千円` });
     expect(tr.full[0]).toEqual({ k: ROOM_TILE_LABEL, v: `${tr.v} 千円` });
-    expect(tm.full.slice(-5)).toEqual([
+    const bd = metricsBreakdown(m, mv).map((r) => ({ k: r.k, v: r.v }));
+    expect(bd.slice(-5)).toEqual([
       { k: '値動き幅 R', v: '±5%' },
       { k: 'IV の幅', v: '×1.5 / ×0.75' },
       { k: '保有期間', v: '2 営業日' },
@@ -411,15 +421,21 @@ describe('タイル（#131 AC14）', () => {
 });
 
 describe('内訳とテールの証拠金の表（#131 AC14）', () => {
-  it('内訳に証拠金の群（タイルの全文と同じ行）。証拠金なしなら群を出さない', () => {
+  it('内訳に証拠金の群（シナリオ点の行 + シナリオ点 / 今 × 4・倍数・最悪の点・前提）。証拠金なしなら群を出さない', () => {
     const m = metricsOf(putSellDown);
     const mv = viewOf(putSellDown, withCapital(50_000_000));
     const bd = metricsBreakdown(m, mv);
     const gi = bd.findIndex((r) => r.group && r.k === MARGIN_GROUP_LABEL);
     expect(gi).toBeGreaterThan(0);
-    const rows = bd.slice(gi + 1).map((r) => ({ k: r.k, v: r.v }));
-    const tm = tile(metricTiles(m, mv), 'margin');
-    expect(rows).toEqual(tm.full.slice(1));
+    const all = bd.slice(gi + 1).map((r) => ({ k: r.k, v: r.v }));
+    // #164: 先頭はシナリオ点の行（d・ΔX・Δσ の 3 行。続きの見出しは空）
+    const pointRows = marginPointParts(mv.at).map((v, i) => ({
+      k: i === 0 ? MARGIN_POINT_ROW_LABEL : '',
+      v,
+    }));
+    expect(pointRows).toHaveLength(3);
+    expect(all.slice(0, 3)).toEqual(pointRows);
+    const rows = all.slice(3);
     // #150: 必要証拠金・NOV・証拠金所要額・余力 × シナリオ点 / 今（PFE の行は出さない）
     expect(rows.map((r) => r.k).slice(0, 9)).toEqual([
       '必要証拠金（シナリオ点）',
@@ -484,6 +500,192 @@ describe('内訳とテールの証拠金の表（#131 AC14）', () => {
     const empty = metricsModel({ base: null, scenario: putSell.scenario, unit: 'auto' });
     expect(metricsPanel(empty, 0, mv).marginTail).toEqual([]);
     expect(metricsPanel(empty, 0, mv).tiles).toEqual([]);
+  });
+});
+
+describe('#164 シナリオの点の印・#161 タイルの全文の行', () => {
+  const zero = { days: 0, dX: 0, dXPct: 0, dSigma: 0, dSigmaUnit: 'pt' as const, skew: 0 };
+  /** 4 つとも 0 でないシナリオ（架空の値） */
+  const putSellAll = run(putSellDown, { type: 'setScenario', patch: { skew: 1 } });
+  const buyOnlyAll = run(buyOnly, {
+    type: 'setScenario',
+    patch: { days: 2, dX: 1500, dSigma: -3, skew: -0.5 },
+  });
+
+  it('#164 点の文字列: すべて 0 なら「今」、0 でない d・ΔX・Δσ・Δs だけを順に（ΔX は % が 0.0 に丸まると円）', () => {
+    expect(marginPointParts(zero)).toEqual([]);
+    expect(marginPointText(zero)).toBe(MARGIN_POINT_NOW_TEXT);
+    expect(MARGIN_POINT_NOW_TEXT).toBe('今');
+    expect(marginPointText({ ...zero, days: 7 })).toBe('d 7 日');
+    expect(marginPointText({ ...zero, days: 1.5 })).toBe('d 1.5 日');
+    expect(marginPointText({ ...zero, days: 0.25 })).toBe('d 0.25 日');
+    expect(marginPointText({ ...zero, dX: -3000, dXPct: -4.42 })).toBe('ΔX −4.4%');
+    expect(marginPointText({ ...zero, dX: 1000, dXPct: 1.5 })).toBe('ΔX +1.5%');
+    // % が 0.0 に丸まる小さな ΔX は円で（0 でないのに 0 に見えない）
+    expect(marginPointText({ ...zero, dX: 20, dXPct: 0.03 })).toBe('ΔX +20 円');
+    expect(marginPointText({ ...zero, dX: -25, dXPct: -0.04 })).toBe('ΔX −25 円');
+    expect(marginPointText({ ...zero, dSigma: 5 })).toBe('Δσ +5.0 pt');
+    expect(marginPointText({ ...zero, dSigma: -2.5 })).toBe('Δσ −2.5 pt');
+    expect(marginPointText({ ...zero, skew: 1 })).toBe('Δs +1.0');
+    // IV の動かし方が relative なら Δσ は %（Scenario.dSigma の単位）
+    expect(marginPointText({ ...zero, dSigma: 10, dSigmaUnit: '%' })).toBe('Δσ +10.0%');
+    expect(
+      marginPointParts({ ...zero, days: 7, dX: -3000, dXPct: -4.42, dSigma: 5, skew: -0.5 }),
+    ).toEqual(['d 7 日', 'ΔX −4.4%', 'Δσ +5.0 pt', 'Δs −0.5']);
+    expect(marginPointText({ ...zero, days: 7, dSigma: 5 })).toBe('d 7 日 · Δσ +5.0 pt');
+    // 位置の数: d は clampDays、非有限は 0、dXPct = ΔX / X₀ × 100
+    const base = baseOf(putSellDown);
+    const at = marginPointAt(base, putSellDown.scenario);
+    expect(at).toEqual({
+      days: 1,
+      dX: -3000,
+      dXPct: (-3000 / base.ctx.x0) * 100,
+      dSigma: 5,
+      dSigmaUnit: 'pt',
+      skew: 0,
+    });
+    expect(marginPointAt(base, { ...putSellDown.scenario, ivShift: 'relative' }).dSigmaUnit).toBe(
+      '%',
+    );
+    expect(marginPointAt(base, putSell.scenario)).toEqual(zero);
+    expect(
+      marginPointAt(base, {
+        ...putSell.scenario,
+        days: base.maxDays + 100,
+        dX: Number.NaN,
+        dSigma: Number.POSITIVE_INFINITY,
+        skew: Number.NaN,
+      }),
+    ).toEqual({ ...zero, days: base.maxDays });
+  });
+
+  it('#164 タイルの見出しの点: 必要証拠金・余力は「· 」+ 点の文字列、他の 6 枚と証拠金なしは空', () => {
+    for (const s of [putSell, putSellDown, putSellAll]) {
+      const m = metricsOf(s);
+      const mv = viewOf(s, withCapital(50_000_000));
+      const tiles = metricTiles(m, mv);
+      for (const t of tiles) {
+        expect(t.at, t.key).toBe(
+          t.key === 'margin' || t.key === 'room' ? `· ${marginPointText(mv.at)}` : '',
+        );
+      }
+    }
+    const m0 = metricsOf(putSell);
+    expect(tile(metricTiles(m0, viewOf(putSell, withCapital(null))), 'margin').at).toBe('· 今');
+    expect(tile(metricTiles(m0, viewOf(putSell, withCapital(null))), 'room').at).toBe('· 今');
+    const md = metricsOf(putSellDown);
+    const dPct = marginPointParts(viewOf(putSellDown, withCapital(null)).at)[1];
+    expect(tile(metricTiles(md, viewOf(putSellDown, withCapital(null))), 'room').at).toBe(
+      `· d 1 日 · ${dPct} · Δσ +5.0 pt`,
+    );
+    for (const t of metricTiles(m0)) expect(t.at, t.key).toBe('');
+  });
+
+  it('#164 全文と内訳の証拠金の群にシナリオ点の行（今と同じ / 0 でないものを 1 行ずつ）', () => {
+    const groupRows = (m: MetricsModel, mv: MarginView) => {
+      const bd = metricsBreakdown(m, mv);
+      const gi = bd.findIndex((r) => r.group && r.k === MARGIN_GROUP_LABEL);
+      return bd.slice(gi + 1).map((r) => ({ k: r.k, v: r.v }));
+    };
+    // 今と同じ: 1 行
+    const m0 = metricsOf(putSell);
+    const v0 = viewOf(putSell, withCapital(50_000_000));
+    const same = { k: MARGIN_POINT_ROW_LABEL, v: MARGIN_POINT_SAME_TEXT };
+    expect(MARGIN_POINT_ROW_LABEL).toBe('シナリオ点');
+    expect(MARGIN_POINT_SAME_TEXT).toBe('今と同じ');
+    for (const key of ['margin', 'room'] as const) {
+      const t = tile(metricTiles(m0, v0), key);
+      expect(t.full[1]).toEqual(same);
+      expect(t.full[2]?.k).not.toBe('');
+    }
+    expect(groupRows(m0, v0)[0]).toEqual(same);
+    // 4 つとも 0 でない: 4 行（続きの見出しは空）
+    const m4 = metricsOf(putSellAll);
+    const v4 = viewOf(putSellAll, withCapital(50_000_000));
+    const parts = marginPointParts(v4.at);
+    expect(parts).toHaveLength(4);
+    expect(parts[0]).toBe('d 1 日');
+    expect(parts[2]).toBe('Δσ +5.0 pt');
+    expect(parts[3]).toBe('Δs +1.0');
+    const want = parts.map((v, i) => ({ k: i === 0 ? MARGIN_POINT_ROW_LABEL : '', v }));
+    for (const key of ['margin', 'room'] as const) {
+      expect(tile(metricTiles(m4, v4), key).full.slice(1, 5)).toEqual(want);
+    }
+    expect(groupRows(m4, v4).slice(0, 4)).toEqual(want);
+    expect(groupRows(m4, v4)[4]?.k).toBe('必要証拠金（シナリオ点）');
+  });
+
+  it('#164 ⓘ の証拠金の文に証券会社の額との違い（前営業日の清算値で 1 日固定・今の板）', () => {
+    expect(MARGIN_HINT).toContain('前営業日の清算値');
+    expect(MARGIN_HINT).toContain('1 日固定');
+    expect(MARGIN_HINT).toContain('今の板');
+    expect(MARGIN_HINT).toContain('値はシナリオの点');
+    expect(MARGIN_HINT).toContain('「今」');
+  });
+
+  it('#161 タイルの全文は FULL_MAX_ROWS 行以下（8 枚 × 売り・買いだけ・資金あり / なし・シナリオの 4 つとも 0 でない）', () => {
+    expect(FULL_MAX_ROWS).toBe(12);
+    let longest = 0;
+    for (const s of [putSellAll, buyOnlyAll, putSell, buyOnly]) {
+      for (const c of [50_000_000, null]) {
+        const m = metricsOf(s);
+        const tiles = metricTiles(m, viewOf(s, withCapital(c)));
+        expect(tiles).toHaveLength(8);
+        for (const t of tiles) {
+          expect(t.full.length, `${t.key}`).toBeLessThanOrEqual(FULL_MAX_ROWS);
+          longest = Math.max(longest, t.full.length);
+        }
+      }
+    }
+    // 売り・4 つとも 0 でない・最悪の点ありの必要証拠金が最長（見出し + 点 4 + 3 + 最悪の点 3 = 11）
+    expect(longest).toBe(11);
+  });
+
+  it('#161 必要証拠金・余力の全文の行（見出し以外）は内訳の証拠金の群に同じ順で含まれる', () => {
+    for (const s of [putSellAll, buyOnlyAll, putSell]) {
+      for (const c of [50_000_000, null]) {
+        const m = metricsOf(s);
+        const mv = viewOf(s, withCapital(c));
+        const bd = metricsBreakdown(m, mv);
+        const gi = bd.findIndex((r) => r.group && r.k === MARGIN_GROUP_LABEL);
+        const group = bd.slice(gi + 1).map((r) => ({ k: r.k, v: r.v }));
+        for (const key of ['margin', 'room'] as const) {
+          // 部分列（同じ順）: 群の中を前から順に探して全部見つかる
+          let j = 0;
+          for (const r of tile(metricTiles(m, mv), key).full.slice(1)) {
+            while (j < group.length && !(group[j]?.k === r.k && group[j]?.v === r.v)) j++;
+            expect(j, `${key}: ${r.k} ${r.v}`).toBeLessThan(group.length);
+            j++;
+          }
+        }
+      }
+    }
+    // 行の見出し（売り・4 つとも 0 でない）: 値に関わる行だけ（前提は内訳とテールの注記）
+    const m = metricsOf(putSellAll);
+    const tiles = metricTiles(m, viewOf(putSellAll, withCapital(50_000_000)));
+    expect(tile(tiles, 'margin').full.map((r) => r.k)).toEqual([
+      MARGIN_TILE_LABEL,
+      MARGIN_POINT_ROW_LABEL,
+      '',
+      '',
+      '',
+      'NOV（シナリオ点）',
+      '証拠金所要額（シナリオ点）',
+      '必要証拠金（今）',
+      '最悪の点',
+      '',
+      '',
+    ]);
+    expect(tile(tiles, 'room').full.map((r) => r.k)).toEqual([
+      ROOM_TILE_LABEL,
+      MARGIN_POINT_ROW_LABEL,
+      '',
+      '',
+      '',
+      '証拠金所要額（シナリオ点）',
+      '余力（今）',
+      '倍数（今）',
+    ]);
   });
 });
 
@@ -733,16 +935,16 @@ describe('#149 買いの OP の設定', () => {
     const m = metricsOf(ratio);
     const vOn = viewOf(ratio, onPrefs);
     const vOff = viewOf(ratio, offPrefs);
-    const rowOf = (mv: MarginView) =>
-      tile(metricTiles(m, mv), 'margin').full.find((r) => r.k === '買いの OP')?.v;
+    const rowOf = (mv: MarginView) => metricsBreakdown(m, mv).find((r) => r.k === '買いの OP')?.v;
     expect(rowOf(vOn)).toBe('減らさない');
     expect(rowOf(vOff)).toBe('相殺する');
     // 掛け目の行の後
-    const keys = tile(metricTiles(m, vOn), 'margin').full.map((r) => r.k);
+    const keys = metricsBreakdown(m, vOn).map((r) => r.k);
     expect(keys.indexOf('買いの OP')).toBe(keys.indexOf('掛け目') + 1);
-    // 内訳の証拠金の群にも同じ行
-    const bd = metricsBreakdown(m, vOn);
-    expect(bd.find((r) => r.k === '買いの OP')?.v).toBe('減らさない');
+    // #161: タイルの全文には前提の行を出さない（内訳とテールの注記で読む）
+    for (const key of ['margin', 'room'] as const) {
+      expect(tile(metricTiles(m, vOn), key).full.some((r) => r.k === '買いの OP')).toBe(false);
+    }
     // テールの注記: オンは末尾に印、オフは #131 の文のまま
     expect(metricsPanel(m, 0, vOn).marginTailCaption).toContain('· 買い OP 除く');
     expect(metricsPanel(m, 0, vOff).marginTailCaption).not.toContain('買い OP');

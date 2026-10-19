@@ -2391,6 +2391,8 @@ async function runFlows() {
   for (const vp of [phone, pc]) await metricsFlows(vp);
   // #107 副題の全文のポップオーバーの手順（AC-4）
   for (const vp of [phone, pc]) await subtitleFlows(vp);
+  // #161 360x780 の peek で証拠金・余力の全文
+  await marginFull360();
   // #85 市場の手順（AC-9・AC-10・AC-12）: 5 列（390）・7 列（1440）・9 列（1800）
   const wide = { width: 1800, height: 1000 };
   for (const vp of [phone, pc, wide]) await marketFlows(vp);
@@ -3704,6 +3706,52 @@ const openPops = (page) =>
         .length,
   );
 
+/** そのボタンの全文の行・見た目の値・見出しの点の印（#164）・矩形（#107 AC-4・#161 で共用） */
+const popInfoOf = (page, btnSel, hostSel) =>
+  page.evaluate(
+    ({ btnSel, hostSel }) => {
+      const btn = document.querySelector(btnSel);
+      const wrap = btn?.closest('.pop-wrap');
+      const pop = wrap?.querySelector('.popover');
+      if (!btn || !pop) return null;
+      const rows = [];
+      const cells = [...pop.querySelectorAll('.full > span')];
+      for (let i = 0; i + 1 < cells.length; i += 2) {
+        rows.push([cells[i].textContent, cells[i + 1].textContent]);
+      }
+      const v = btn.querySelector('.v');
+      const vText = [
+        v?.querySelector(':scope > span')?.textContent ?? '',
+        v?.querySelector('small')?.textContent ?? '',
+      ]
+        .filter(Boolean)
+        .join(' ');
+      const r = pop.getBoundingClientRect();
+      const h = btn.closest(hostSel)?.getBoundingClientRect();
+      const inWin =
+        r.left >= 0 && r.top >= 0 && r.right <= window.innerWidth && r.bottom <= window.innerHeight;
+      const inHost =
+        !!h &&
+        r.left >= h.left - 0.5 &&
+        r.top >= h.top - 0.5 &&
+        r.right <= h.right + 0.5 &&
+        r.bottom <= h.bottom + 0.5;
+      return {
+        expanded: btn.getAttribute('aria-expanded'),
+        hidden: pop.hidden,
+        up: pop.classList.contains('up'),
+        rows,
+        k: btn.querySelector('.k')?.textContent ?? '',
+        at: btn.querySelector('.at')?.textContent ?? null,
+        vText,
+        inWin,
+        inHost,
+        rect: `${Math.round(r.left)},${Math.round(r.top)}–${Math.round(r.right)},${Math.round(r.bottom)}`,
+      };
+    },
+    { btnSel, hostSel },
+  );
+
 async function subtitleFlows(vp) {
   const tag = `${vp.width}x${vp.height}`;
   const phoneSize = vp.width <= PHONE_MAX;
@@ -3735,58 +3783,14 @@ async function subtitleFlows(vp) {
   await toggle.click();
   await page.waitForTimeout(100);
 
-  /** そのボタンの全文の行・見た目の値・矩形・ページのスクロール */
-  const popInfo = (btnSel, hostSel) =>
-    page.evaluate(
-      ({ btnSel, hostSel }) => {
-        const btn = document.querySelector(btnSel);
-        const wrap = btn?.closest('.pop-wrap');
-        const pop = wrap?.querySelector('.popover');
-        if (!btn || !pop) return null;
-        const rows = [];
-        const cells = [...pop.querySelectorAll('.full > span')];
-        for (let i = 0; i + 1 < cells.length; i += 2) {
-          rows.push([cells[i].textContent, cells[i + 1].textContent]);
-        }
-        const v = btn.querySelector('.v');
-        const vText = [
-          v?.querySelector(':scope > span')?.textContent ?? '',
-          v?.querySelector('small')?.textContent ?? '',
-        ]
-          .filter(Boolean)
-          .join(' ');
-        const r = pop.getBoundingClientRect();
-        const h = btn.closest(hostSel)?.getBoundingClientRect();
-        const inWin =
-          r.left >= 0 &&
-          r.top >= 0 &&
-          r.right <= window.innerWidth &&
-          r.bottom <= window.innerHeight;
-        const inHost =
-          !!h &&
-          r.left >= h.left - 0.5 &&
-          r.top >= h.top - 0.5 &&
-          r.right <= h.right + 0.5 &&
-          r.bottom <= h.bottom + 0.5;
-        return {
-          expanded: btn.getAttribute('aria-expanded'),
-          hidden: pop.hidden,
-          up: pop.classList.contains('up'),
-          rows,
-          k: btn.querySelector('.k')?.textContent ?? '',
-          vText,
-          inWin,
-          inHost,
-          rect: `${Math.round(r.left)},${Math.round(r.top)}–${Math.round(r.right)},${Math.round(r.bottom)}`,
-        };
-      },
-      { btnSel, hostSel },
-    );
+  const popInfo = (btnSel, hostSel) => popInfoOf(page, btnSel, hostSel);
 
   // (a)(f) 各タイルをタップ → 開く・中身が全文（内訳・見た目の値と一致）・窓と .panel-body の中・縦・横 0px
   const keys = ['maxProfit', 'maxLoss', 'bep', 'premium', 'scenario', 'greeks', 'margin', 'room'];
   const tileBtn = (k) => `${M} .tile[data-tile="${k}"] .tile-btn`;
   const kvHas = (v) => kv.some(([, bv]) => bv.includes(v));
+  /** #164: 証拠金・余力のタイルの見出しの点の印と全文のシナリオ点の行 */
+  const pointMarks = [];
   for (const k of keys) {
     await page.click(tileBtn(k));
     await page.waitForTimeout(120);
@@ -3821,10 +3825,24 @@ async function subtitleFlows(vp) {
       i.inWin && i.inHost && m.v === 0 && m.h === 0,
       `${i.rect} 縦 ${m.v} 横 ${m.h}`,
     );
+    if (k === 'margin' || k === 'room') {
+      pointMarks.push({
+        k,
+        ok: (i.at ?? '').startsWith('· ') && i.rows.some(([rk]) => rk === 'シナリオ点'),
+        detail: `${k}「${i.at}」${i.rows.map((r) => r.join(' ')).join(' / ')}`,
+      });
+    } else if (i.at !== null) {
+      pointMarks.push({ k, ok: false, detail: `${k} に点の印「${i.at}」` });
+    }
     // 開いた全文は下のタイルに重なる（押しても閉じない）ので Esc で閉じて次へ
     await page.keyboard.press('Escape');
     await page.waitForTimeout(80);
   }
+  check(
+    `#164 ${tag} 証拠金・余力のタイルの見出しに点の印、全文にシナリオ点の行`,
+    pointMarks.length === 2 && pointMarks.every((x) => x.ok),
+    pointMarks.map((x) => x.detail).join('・'),
+  );
   // (b) Esc で閉じてそのタイルのボタンへフォーカス
   {
     const k = 'premium';
@@ -3940,6 +3958,48 @@ async function subtitleFlows(vp) {
       loafOk ? `${n} 件` : '未対応',
     );
   }
+  await ctx.close();
+}
+
+/**
+ * #161: 360x780 の「指標」peek（.panel-body が最も低い幅）で、必要証拠金・余力のタイルの全文が窓と .panel-body の中・
+ * ページの縦・横 0px（判定は #107 AC-4(f) と同じ）。足は売り 5 枚（最悪の点の行あり）、シナリオは 4 つとも 0 でない
+ * （シナリオ点の行が最も多い = 全文が最も長い）
+ */
+async function marginFull360() {
+  const vp = { width: 360, height: 780 };
+  const tag = `${vp.width}x${vp.height}`;
+  const sells = JSON.parse(sellFiveYen);
+  const t0 = sells.tabs[0];
+  sells.tabs[0] = {
+    ...t0,
+    position: { ...t0.position, scenario: { ...t0.position.scenario, skew: 1 } },
+  };
+  const ctx = await newContext(vp, { [WORKSPACE_KEY]: JSON.stringify(sells) });
+  const page = await ctx.newPage();
+  await page.goto(pageUrl('next'));
+  await waitReady(page, 'next');
+  check(`#161 ${tag} ドックで「指標」を開く（peek）`, await setShell(page, 'metrics', 'peek'));
+  const M = 'section.metrics';
+  const res = [];
+  for (const k of ['margin', 'room']) {
+    const sel = `${M} .tile[data-tile="${k}"] .tile-btn`;
+    await page.click(sel);
+    await page.waitForTimeout(120);
+    const i = await popInfoOf(page, sel, '.panel-body');
+    const m = await measure(page);
+    res.push({
+      ok: !!i && i.expanded === 'true' && i.inHost && i.inWin && m.v === 0 && m.h === 0,
+      detail: i ? `${k} ${i.rows.length} 行 ${i.rect} 縦 ${m.v} 横 ${m.h}` : `${k} 無い`,
+    });
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(80);
+  }
+  check(
+    `#161 ${tag} タイル margin / room の全文が窓と .panel-body の中`,
+    res.length === 2 && res.every((r) => r.ok),
+    res.map((r) => r.detail).join('・'),
+  );
   await ctx.close();
 }
 

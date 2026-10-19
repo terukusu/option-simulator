@@ -11,6 +11,7 @@ import {
   marginNow,
   marginParamsOf,
   marginPoint,
+  marginPointAt,
   marginTail,
 } from '../../ui/view/margin';
 import {
@@ -71,6 +72,7 @@ function marginOf(s: State): MarginView {
     params,
     now: marginNow(base, s.scenario, params, capital, holidays),
     point: marginPoint(base, s.scenario, params, capital, holidays),
+    at: marginPointAt(base, s.scenario),
     tail: marginTail(base, { ...s.scenario, dX: 0 }, params, capital, holidays),
   };
 }

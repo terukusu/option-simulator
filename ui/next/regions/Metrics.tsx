@@ -34,6 +34,7 @@ interface Props {
 /**
  * タイル（§5 の .tile）。8 枚とも押せて、タップ / Enter / Space で全文のポップオーバー（#107。中身は表示モデルの full）。
  * 外側の div は格子の 1 枠（余白・背景はボタン .tile-btn）。ボタンの中は phrasing content だけ（span）。
+ * 見出しの行 .kh = 見出し .k + 点の印 .at（#164。必要証拠金・余力だけ。入らなければ .at だけ省略記号）
  */
 function Tile({ t }: { t: MetricTile }) {
   return (
@@ -43,7 +44,10 @@ function Tile({ t }: { t: MetricTile }) {
         within=".panel-body"
         button={
           <>
-            <span class="k">{t.k}</span>
+            <span class="kh">
+              <span class="k">{t.k}</span>
+              {t.at && <span class="at">{t.at}</span>}
+            </span>
             <span class={t.tone ? `v ${t.tone}` : 'v'}>
               <span>{t.v}</span>
               {t.unit && <small>{t.unit}</small>}

@@ -44,6 +44,7 @@ import {
   marginLine,
   marginNow,
   marginPoint,
+  marginPointAt,
   marginTail,
 } from '../../ui/view/margin';
 import { marketPill } from '../../ui/view/marketPill';
@@ -1546,6 +1547,7 @@ describe('性能（#131 AC17: 証拠金と追証の線）', () => {
       params,
       now,
       point: marginPoint(base, scenario, params, capital, holidays),
+      at: marginPointAt(base, scenario),
       tail: marginTail(base, { ...scenario, dX: 0 }, params, capital, holidays),
     };
     const v = metricsPanel(mm, 0, mv);

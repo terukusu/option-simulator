@@ -152,8 +152,30 @@ table.tail.margin-tail td small.call {
 }
 
 .tile .k {
+  /* .kh の flex の子（#164）: ラベルが入らないときだけ縮む */
+  flex: 0 1 auto;
+  min-width: 0;
   color: var(--ink-3);
   font-size: var(--fs-xs);
+}
+
+/* 見出しの行（#164）: 見出し .k + 点の印 .at。.at が残りの幅を取り、入らなければ .at だけ省略記号。
+   .k はラベルが入らないときだけ縮む（= 既存の「.k が切れない」検査で落ちる。.at の分で縮まない） */
+.tile .kh {
+  display: flex;
+  gap: 0.3em;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.tile .at {
+  flex: 1 1 0;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--ink-3);
+  font-size: var(--fs-xs);
+  text-overflow: ellipsis;
 }
 
 .tile .v {
