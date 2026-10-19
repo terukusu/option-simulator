@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { boardOptionLeg, normalizeChain } from '../../data';
+import type { AiMessage } from '../../data/aiStream';
 import { DEFAULT_MARGIN_PARAMS, DEFAULT_SETTINGS, holdMapAxes, holdMapColumn } from '../../model';
 import { preparePosition } from '../../model/position';
 import { ZERO_SCENARIO } from '../../model/scenario';
@@ -16,6 +17,7 @@ import {
   toSaved,
 } from '../../ui/persist';
 import type { PinNo } from '../../ui/pins';
+import { DEFAULT_MARGIN_PREFS } from '../../ui/prefs';
 import {
   type Action,
   initialState,
@@ -24,6 +26,15 @@ import {
   type State,
   type UiLeg,
 } from '../../ui/state';
+import {
+  type AiChatState,
+  aiChatReduce,
+  chatItems,
+  INITIAL_AI_CHAT,
+  numberSources,
+} from '../../ui/view/aiChat';
+import { aiEnvFromState, buildAiContext } from '../../ui/view/aiContext';
+import { answerModel, markNumbers, parseAiText } from '../../ui/view/aiText';
 import { atmStrike, boardRows } from '../../ui/view/board';
 import { boardBadges, boardRowTexts } from '../../ui/view/boardPanel';
 import { bookListModel } from '../../ui/view/bookList';
@@ -1662,6 +1673,121 @@ describe('性能（#152 追証マップ）', () => {
         warmup: 2,
         runs: RECORD_RUNS,
       },
+    );
+  });
+});
+
+/**
+ * #135: AI の道具の事前計算（[このポジを診断] を押してから送るまでのブラウザの計算）と、流れの文の描き直しの計算。
+ * 足 10 本・322 行 × 2 限月の板・資金あり（追証の水準まで）。事前計算は 300 ms 未満（K15・計画 D10。BUDGET_MS に
+ * 依らない固定の閾値）、返答の文（約 1,200 字）の木と数字の照合は描き直しの予算（BUDGET_MS）以内。
+ */
+describe('性能（#135 AI の事前計算と返答の描き直し）', () => {
+  const chain = normalizeChain(buildWideChainJson());
+  const [m1, m2] = chain.months;
+  if (!m1 || !m2) throw new Error('限月が無い');
+  const add = (expiry: string, k: number, optionType: 'put' | 'call', side: 'buy' | 'sell') =>
+    ({ type: 'addBoardLeg', expiry, k, optionType, side }) as Action;
+  let s: State = reduce(initialState, { type: 'loaded', chain, label: 'wide' });
+  for (const a of [
+    add(m1.id, 64000, 'put', 'sell'),
+    add(m1.id, 70500, 'call', 'sell'),
+    add(m1.id, 60000, 'put', 'buy'),
+    add(m1.id, 73000, 'call', 'buy'),
+    add(m1.id, 55000, 'put', 'sell'),
+    add(m2.id, 62500, 'put', 'sell'),
+    add(m2.id, 72500, 'call', 'sell'),
+    add(m2.id, 60000, 'put', 'buy'),
+    add(m2.id, 75000, 'call', 'buy'),
+    add(m2.id, 67500, 'call', 'buy'),
+  ]) {
+    s = reduce(s, a);
+  }
+  const env = aiEnvFromState(s, { ...DEFAULT_MARGIN_PREFS, capitalYen: 10_000_000 });
+  if (!env?.base) throw new Error('道具の環境が無い');
+  const e = env;
+
+  it('事前計算 5 本 + 文脈の組み立てが 300 ms 未満（10 回の最小値）', () => {
+    expect(e.base?.legs).toHaveLength(10);
+    const r = record('#135 事前計算 5 本 + 文脈', () => buildAiContext(e), {
+      warmup: 2,
+      runs: 10,
+    });
+    expect(r.min).toBeLessThan(300);
+  });
+
+  it(`返答 10 件の会話の流れの 1 フレーム（表示の項目 + 流れている返答の木と照合）が ${BUDGET_MS} ms 以内（30 回の最小値）`, () => {
+    const ctx = buildAiContext(e);
+    const para =
+      '−10% の SQ で −1,234 千円、IV が +5pt なら −617 千円。Δ は −0.45 枚（ミニ −4.5 枚）です。';
+    const reply = Array.from(
+      { length: 5 },
+      (_, i) => `## 弱点 ${i + 1}: 見出し\n${para}\n${para}\n${para}`,
+    ).join('\n');
+    const messages: AiMessage[] = [];
+    for (let i = 0; i < 10; i++) {
+      messages.push({ role: 'user', content: [{ type: 'text', text: `質問 ${i}` }] });
+      messages.push({ role: 'assistant', content: [{ type: 'text', text: reply }] });
+    }
+    let chat: AiChatState = { ...INITIAL_AI_CHAT, context: ctx, lastKey: 'k', messages };
+    chat = aiChatReduce(chat, { type: 'begin', kind: 'chat', text: '続けて', now: 0 });
+    chat = aiChatReduce(chat, { type: 'send', context: ctx, key: 'k' });
+    const sources = numberSources(chat);
+    // 終わった返答の木と印は画面が (text, sources) で memo する（1 回だけ作る）
+    const done = new Map<string, unknown>();
+    const memo = (text: string) => {
+      if (!done.has(text)) done.set(text, answerModel(text, sources));
+      return done.get(text);
+    };
+    for (const it of chatItems(chat)) if (it.kind === 'answer') memo(it.text);
+    let live = '';
+    expectWithinBudget(
+      '#135 返答 10 件の会話の流れの 1 フレーム',
+      () => {
+        live += `${para}\n`;
+        chat = aiChatReduce(chat, { type: 'event', event: { type: 'text', text: `${para}\n` } });
+        let n = 0;
+        for (const it of chatItems(chat)) {
+          if (it.kind !== 'answer') continue;
+          n += it.live ? answerModel(it.text, sources).length : memo(it.text) ? 1 : 0;
+        }
+        return n + live.length;
+      },
+      { warmup: 5, runs: 30 },
+    );
+    // memo しない場合（全部の返答を毎フレーム作り直す）は記録だけ
+    record(
+      '#135 返答 10 件を毎フレーム作り直した場合（記録のみ）',
+      () =>
+        chatItems(chat).reduce(
+          (n, it) => n + (it.kind === 'answer' ? answerModel(it.text, sources).length : 0),
+          0,
+        ),
+      { warmup: 2, runs: RECORD_RUNS },
+    );
+  });
+
+  it(`返答の文（約 1,200 字）の木と数字の照合が ${BUDGET_MS} ms 以内（30 回の最小値）`, () => {
+    const ctx = buildAiContext(e);
+    const para =
+      '−10% の SQ で −1,234 千円、IV が +5pt なら −617 千円。Δ は −0.45 枚（ミニ −4.5 枚）です。';
+    const text = Array.from(
+      { length: 5 },
+      (_, i) => `## 弱点 ${i + 1}: 見出し\n${para}\n${para}\n${para}`,
+    ).join('\n');
+    expect(text.length).toBeGreaterThan(1000);
+    expectWithinBudget(
+      '#135 返答の木 + 数字の照合',
+      () =>
+        parseAiText(text).reduce(
+          (n, b) =>
+            n +
+            (b.kind === 'p' || b.kind === 'h'
+              ? b.inl.reduce((m, x) => m + markNumbers(x.text, [ctx]).length, 0)
+              : 0),
+          0,
+        ),
+      { warmup: 5, runs: 30 },
     );
   });
 });

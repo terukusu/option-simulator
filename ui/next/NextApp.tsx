@@ -17,6 +17,7 @@ import { MAX_PINS } from '../pins';
 import type { PrefsRead } from '../prefs';
 import { shareSupported } from '../share';
 import { legAtStrike, MAX_TABS, restoreTabAction } from '../state';
+import { aiEnvFromState } from '../view/aiContext';
 import { marketAddPlan, marketAddToast } from '../view/boardPanel';
 import { closedTabText, restoreTabError, type ShareResult, shareResultView } from '../view/boxTabs';
 import { fmtNum } from '../view/format';
@@ -36,6 +37,8 @@ import { shareReplaceConfirmText } from '../view/persistNote';
 import { clearUndo } from '../view/positionsRegion';
 import type { DXUnit } from '../view/scenario';
 import {
+  aiVisible,
+  benchView,
   type ChartMode,
   chartMode,
   holdMapVisible,
@@ -54,6 +57,7 @@ import { Palette } from './parts/Palette';
 import { TermCard } from './parts/TermCard';
 import { Toasts, useToasts } from './parts/Toast';
 import { openTerm } from './parts/termCard';
+import { type AiApply, AiPanel, type AiPanelApi } from './regions/AiChat';
 import { Board } from './regions/Board';
 import type { HoldBundle } from './regions/HoldMap';
 import { Metrics } from './regions/Metrics';
@@ -98,6 +102,9 @@ import { useTheme } from './useTheme';
  * 段 C で左右の追加読み込み（useIvHistory）・「今」の 1 点（ivNowValue）・シナリオの水準（state.scenario と舞台の X₀）を足した。
  * #152 で指標 · テールに追証マップ（regions/HoldMap.tsx）を入れた。開閉は ShellState.holdMap（保存しない）、過去の点は
  * 常駐の useAtmMoves（見えたら 1 回だけ /api/atm_daily を読む）、マスの計算は useHoldMap（止まってから列ごと）。
+ * #135 で AI のチャット（regions/AiChat.tsx の AiPanel。会話の状態は AiPanel の中の useAiChat）を入れた。道具の環境は
+ * 送るときに今の state と端末の証拠金の設定から作る（aiEnvFromState）。口は API のときは /api/ai、dev の合成の板は
+ * dev だけ /fixtures/ai（偽の SSE）。PC は作業台の列の入れ替え（ShellState.bench・トップバーの [AI]・キー 6）。
  */
 export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
   // 端末の設定（テーマ・証拠金。#131）は useAppController より先に（証拠金の項目を渡す）
@@ -184,6 +191,39 @@ export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
   // 閉じたタブの [元に戻す] は押した時点の state で判定する（トーストの undo は push した時点のクロージャ）
   const stateRef = useRef(state);
   stateRef.current = state;
+  // ---- AI（#135）。道具の環境は送るときに今の state・証拠金の設定から作る（参照の変わらない関数）
+  const marginRef = useRef(userPrefs.prefs.margin);
+  marginRef.current = userPrefs.prefs.margin;
+  const aiEnv = useCallback(() => aiEnvFromState(stateRef.current, marginRef.current), []);
+  const aiApi = useRef<AiPanelApi | null>(null);
+  const aiBase =
+    import.meta.env.DEV && state.sourceLabel !== API_LABEL ? '/fixtures/ai' : '/api/ai';
+  const onAiApply = useCallback(
+    (sc: AiApply) => {
+      const before = stateRef.current.scenario;
+      dispatch({
+        type: 'setScenario',
+        patch: { days: sc.days, dX: sc.dX, dSigma: sc.dSigma, skew: sc.skew, ivShift: 'absolute' },
+      });
+      push({
+        kind: 'ai-apply',
+        text: 'AI の道具のシナリオを入れた',
+        undo: () =>
+          dispatch({
+            type: 'setScenario',
+            patch: {
+              days: before.days,
+              dX: before.dX,
+              dSigma: before.dSigma,
+              skew: before.skew,
+              ivShift: before.ivShift,
+            },
+          }),
+      });
+    },
+    [dispatch, push],
+  );
+  const onAi = useCallback(() => send({ type: 'bench' }), []);
   const onCloseTab = useCallback(
     (id: number) => {
       const action = restoreTabAction(stateRef.current, id);
@@ -394,6 +434,7 @@ export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
             tabs: c.tabsView,
             legCount: c.curLegs.length,
             bookCount: c.bookCount,
+            aiDiagnoseBlocked: aiApi.current?.paletteReason ?? null,
           })
         : [],
     [
@@ -457,6 +498,11 @@ export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
         // パレットの finish がフォーカスを戻した後なので、カードの「開く前の要素」はパレットを開く前の要素
         openTerm(run.id);
         return;
+      case 'diagnose':
+        // AI のパネルを見せて（PC は作業台を AI に）[このポジを診断]
+        send({ type: 'open', panel: 'ai', tier });
+        aiApi.current?.diagnose();
+        return;
     }
   };
   // 保存一覧を開いている間はそのダイアログの中に描く（1 か所だけ = 読み上げも 1 回）
@@ -494,6 +540,8 @@ export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
         onExport={onExport}
         onImport={onImport}
         onClearLegs={onClearLegs}
+        aiOpen={benchView(shell) === 'ai'}
+        onAi={onAi}
       />
       <Shell
         tier={tier}
@@ -589,6 +637,20 @@ export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
           ) : (
             emptyMarket('スマイル', seg)
           )
+        }
+        ai={
+          <AiPanel
+            visible={aiVisible(shell, tier)}
+            base={aiBase}
+            env={aiEnv}
+            hasChain={chain !== null}
+            legCount={c.pnlBase?.legs.length ?? 0}
+            x0={c.positions?.ctx.x0 ?? Number.NaN}
+            disclaimerSeen={userPrefs.prefs.aiDisclaimerSeen === true}
+            onDisclaimerSeen={userPrefs.setAiDisclaimerSeen}
+            onApplyScenario={onAiApply}
+            apiRef={aiApi}
+          />
         }
       />
       <ShareConfirm

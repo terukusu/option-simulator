@@ -58,10 +58,13 @@ export interface TopBarProps {
   onExport: () => void;
   onImport: (file: File) => void;
   onClearLegs: () => void;
+  /** PC の [AI]（#135。作業台の列を AI のチャットと入れ替える。参照が変わらない）。aiOpen = 今 AI を出している */
+  aiOpen?: boolean;
+  onAi?: () => void;
 }
 
 /**
- * トップバー（docs/ui-redesign.md §2.1。#87）: ブランド / BOX タブ / 市場ピル / 警告のタグ / [最新] / テーマ / ⋯。
+ * トップバー（docs/ui-redesign.md §2.1。#87）: ブランド / BOX タブ / 市場ピル / 警告のタグ /（PC）[AI] / [最新] / テーマ / ⋯。
  * スマホはブランドとテーマのボタンを CSS で隠す（テーマは ⋯ にある）。縮むのは BOX タブの帯だけ（#87 (B)）。
  * ⋯ は 保存一覧（N）… / URL をコピー / 書き出し / 読み込み… / ファイルを開く… /（dev）合成の板 / 全クリア / 用語集… / 設定… /
  * テーマ（#87 (C)。行は ui/view/topMenu.ts）。ファイルを開く…・読み込み… は隠した file input をメニューの選択と
@@ -143,6 +146,18 @@ function TopBarView(p: TopBarProps) {
       />
       <MarketPill m={p.pill} tier={p.tier} noTag={p.tier === 'phone' && warn !== null} />
       {warn && <WarnTags m={warn} tier={p.tier} onClose={closeNote} />}
+      {p.tier === 'pc' && p.onAi && (
+        <button
+          type="button"
+          class="btn sm"
+          data-ai="top"
+          aria-pressed={p.aiOpen === true}
+          title="作業台を AI のチャットと入れ替える（6）"
+          onClick={p.onAi}
+        >
+          AI
+        </button>
+      )}
       <button
         type="button"
         class="btn sm"

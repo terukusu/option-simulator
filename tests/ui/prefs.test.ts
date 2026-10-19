@@ -324,3 +324,24 @@ describe('resolveTheme', () => {
     expect(resolveTheme('light', true)).toBe('light');
   });
 });
+
+describe('#135 AI の免責の文を見た（ai_disclaimer_seen）', () => {
+  it('無い・true でない → 未（キーを書かない）、true を往復、古い版 1 の保存を読める', () => {
+    const old = JSON.stringify({ schema_version: 1, theme: 'dark' });
+    const r = readPrefs(old);
+    expect(r.prefs.aiDisclaimerSeen).toBeUndefined();
+    expect(r.writable).toBe(true);
+    expect(serializePrefs(r.prefs)).not.toContain('ai_disclaimer_seen');
+    for (const v of ['yes', 1, null, false]) {
+      const x = readPrefs(
+        JSON.stringify({ schema_version: 1, theme: 'dark', ai_disclaimer_seen: v }),
+      );
+      expect(x.prefs.aiDisclaimerSeen).toBeUndefined();
+    }
+    const seen = serializePrefs({ ...r.prefs, aiDisclaimerSeen: true });
+    expect(JSON.parse(seen).ai_disclaimer_seen).toBe(true);
+    expect(JSON.parse(seen).schema_version).toBe(PREFS_SCHEMA_VERSION);
+    expect(readPrefs(seen).prefs.aiDisclaimerSeen).toBe(true);
+    expect(readPrefs(seen).prefs.theme).toBe('dark');
+  });
+});

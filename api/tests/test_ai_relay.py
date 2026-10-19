@@ -1,5 +1,6 @@
 """AI の中継のエンドポイント（#134 AC1〜AC4）。偽の送信先（FakeGateway）とメモリの計上。Anthropic は呼ばない。"""
 
+import copy
 import json
 import threading
 
@@ -443,3 +444,57 @@ def test_oauth_cut_midway_logs_zero_charge(capsys):
     assert events[-1] == ("error", {"code": "upstream_overloaded"})
     rec = logs(capsys, "ai_request")[0]
     assert rec["charged_usd"] == 0.0 and rec["reserved_usd"] == 0.0 and store.charged == {}
+
+
+# ---- #135 AC4: 会話の途中で文脈を更新しても、前の要求の本文の前置きはバイト単位で同じ（preserved thinking） ----
+
+def _upstream_bytes(params) -> tuple[bytes, bytes, list[bytes]]:
+    enc = lambda v: allowlist.canonical(v).encode("utf-8")  # noqa: E731
+    return enc(params["system"]), enc(params.get("tools")), [enc(m) for m in params["messages"]]
+
+
+def test_three_turns_with_context_update_keep_prefix_bytes():
+    from simulator_api.ai.tools import REGISTRY
+
+    script = [{"type": "thinking", "text": "見る"}, {"type": "text", "text": "下に弱い形です。"}]
+    gw = FakeGateway(script=script)
+    client, _, _, _ = ai_app(gateway=gw, registry=REGISTRY)
+    ctx = ai_context(with_precomputed=False)
+    body = ai_body([{"role": "user", "content": [{"type": "text", "text": relay.DIAGNOSE_TEXT}]}], context=ctx,
+                   kind="diagnose")
+    turns = [None, "日数を 7 日にした", "IV を上げたら？"]
+    for i, text in enumerate(turns):
+        if text is not None:
+            update = copy.deepcopy(ctx)
+            update["scenario"]["days"] = 5 + 2 * i
+            body["messages"].append({"role": "user", "content": [
+                {"type": "text", "text": text}, {"type": "context_update", "context": update}]})
+            body["kind"] = "chat"
+        done = dict(sse_events(post(client, body).get_data(as_text=True)))["done"]
+        body["messages"].append({"role": "assistant", "content": done["content"]})
+    assert gw.count() == 3
+    sent = [_upstream_bytes(p) for p in gw.calls]
+    for prev, cur in zip(sent, sent[1:], strict=False):
+        assert cur[0] == prev[0] and cur[1] == prev[1]  # system・tools
+        assert cur[2][:len(prev[2])] == prev[2]  # 前の messages はそのまま（更新は後ろに足される）
+    # 送ったのは text block（<context_update>）。前の要求の最後の user の後に AI の返答（thinking の署名つき）が続く
+    third = gw.calls[2]["messages"]
+    assert third[1]["content"] == gw.calls[1]["messages"][1]["content"]
+    assert third[4]["content"][1]["text"].startswith(allowlist.UPDATE_OPEN)
+    assert [b["type"] for b in third[1]["content"]] == ["thinking", "text"]
+    assert gw.calls[0]["tools"] == gw.calls[2]["tools"]
+
+
+def test_diagnose_kind_logged_and_tools_registered(capsys):
+    from simulator_api.ai.tools import REGISTRY
+
+    client, gw, _, _ = ai_app(registry=REGISTRY)
+    body = ai_body([{"role": "user", "content": [{"type": "text", "text": relay.DIAGNOSE_TEXT}]}],
+                   context=ai_context(with_precomputed=False), kind="diagnose")
+    res = post(client, body)
+    assert res.status_code == 200
+    res.get_data()
+    rec = logs(capsys, "ai_request")[0]
+    assert rec["kind"] == "diagnose" and rec.get("error") is None
+    assert [t["name"] for t in gw.calls[0]["tools"]] == sorted(REGISTRY)
+    assert relay.DIAGNOSE_TEXT in relay.SYSTEM_PROMPT

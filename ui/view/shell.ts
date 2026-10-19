@@ -6,7 +6,10 @@
 
 /** 幅の段階（ui/view/layout.ts の PHONE_QUERY・PC_QUERY） */
 export type Tier = 'phone' | 'tablet' | 'pc';
-export type PanelId = 'positions' | 'board' | 'scenario' | 'metrics' | 'smile';
+/** ai = AI のチャット（#135。スマホ・タブレットはドックの 1 枚、PC は作業台の列を入れ替える = ShellState.bench） */
+export type PanelId = 'positions' | 'board' | 'scenario' | 'metrics' | 'smile' | 'ai';
+/** PC の作業台の列（work = ポジション + 指標、ai = AI のチャット。#135） */
+export type BenchView = 'work' | 'ai';
 /** スマホのシート。hidden = 隠す（舞台が最大）/ peek = 覗く（42dvh）/ full = 全開（舞台はミニ 92px） */
 export type SheetStage = 'hidden' | 'peek' | 'full';
 /**
@@ -43,6 +46,8 @@ export interface ShellState {
   chart?: ChartMode;
   /** 指標 · テールの「追証マップ」の折りたたみが開いている（#152。無い = 閉。保存しない） */
   holdMap?: boolean;
+  /** PC の作業台の列（#135。無い = work。保存しない） */
+  bench?: BenchView;
 }
 
 export const INITIAL_SHELL: ShellState = { panel: 'positions', sheet: 'peek', market: 'board' };
@@ -61,7 +66,9 @@ export type ShellAction =
   | { type: 'market'; market: MarketView }
   | { type: 'chart'; chart: ChartMode }
   /** 追証マップの開閉（#152） */
-  | { type: 'holdMap'; open: boolean };
+  | { type: 'holdMap'; open: boolean }
+  /** PC の作業台の列（#135。bench が無ければ入れ替え） */
+  | { type: 'bench'; bench?: BenchView };
 
 /**
  * ドックのボタンの文字と読み上げの名前（#130。smile のパネルは IV 推移とスマイル。ラベルは「IV」）。アイコンは
@@ -73,10 +80,30 @@ export const DOCK_LABELS: Readonly<Record<PanelId, { text: string; name: string 
   scenario: { text: 'シナリオ', name: 'シナリオ' },
   metrics: { text: '指標', name: '指標' },
   smile: { text: 'IV', name: 'IV 推移 · スマイル' },
+  ai: { text: 'AI', name: 'AI に相談' },
 };
 
-const PHONE_DOCK: readonly PanelId[] = ['positions', 'board', 'scenario', 'metrics', 'smile'];
-const TABLET_DOCK: readonly PanelId[] = ['positions', 'board', 'metrics', 'smile'];
+const PHONE_DOCK: readonly PanelId[] = ['positions', 'board', 'scenario', 'metrics', 'smile', 'ai'];
+const TABLET_DOCK: readonly PanelId[] = ['positions', 'board', 'metrics', 'smile', 'ai'];
+
+/** PC の作業台の列（既定 work） */
+export function benchView(s: ShellState): BenchView {
+  return s.bench ?? 'work';
+}
+
+/**
+ * AI のパネルが見えているか（#135。見えている間だけ /api/ai/status を読む）: PC は作業台が ai、タブレットはパネルが ai、
+ * スマホはそれに加えてシートが hidden でない
+ */
+export function aiVisible(s: ShellState, tier: Tier): boolean {
+  if (tier === 'pc') return benchView(s) === 'ai';
+  if (visiblePanel(s, tier) !== 'ai') return false;
+  return tier === 'tablet' || s.sheet !== 'hidden';
+}
+
+/** PC でパネルを開くときの作業台（ai → ai、ポジション・指標 → work、それ以外はそのまま） */
+const benchFor = (panel: PanelId, cur: BenchView): BenchView =>
+  panel === 'ai' ? 'ai' : panel === 'positions' || panel === 'metrics' ? 'work' : cur;
 
 /**
  * スマイルのパネル（PC は市場の列の section.smile）に描くもの。PC は市場が iv のときだけ iv、PC 以外は市場が smile の
@@ -120,7 +147,7 @@ export function layoutTier(isPhone: boolean, isPc: boolean): Tier {
   return isPc ? 'pc' : 'tablet';
 }
 
-/** ドックのボタン（スマホ 5・タブレット 4 = シナリオは常設なので無い・PC はドック無し） */
+/** ドックのボタン（スマホ 6・タブレット 5 = シナリオは常設なので無い・PC はドック無し。#135 で AI を足した） */
 export function dockPanels(tier: Tier): readonly PanelId[] {
   if (tier === 'phone') return PHONE_DOCK;
   if (tier === 'tablet') return TABLET_DOCK;
@@ -157,6 +184,11 @@ export function shellReduce(s: ShellState, a: ShellAction): ShellState {
     case 'open': {
       const panel = forTier(a.panel, a.tier);
       const sheet = s.sheet === 'hidden' ? 'peek' : s.sheet;
+      if (a.tier === 'pc') {
+        // PC はドック・シートが無い: 作業台の列だけ（AI ⇄ ポジション・指標）
+        const bench = benchFor(a.panel, benchView(s));
+        return bench === benchView(s) ? s : { ...s, bench };
+      }
       return panel === s.panel && sheet === s.sheet ? s : { ...s, panel, sheet };
     }
     case 'grab': {
@@ -169,5 +201,10 @@ export function shellReduce(s: ShellState, a: ShellAction): ShellState {
       return a.chart === chartMode(s) ? s : { ...s, chart: a.chart };
     case 'holdMap':
       return a.open === (s.holdMap ?? false) ? s : { ...s, holdMap: a.open };
+    case 'bench': {
+      const cur = benchView(s);
+      const bench = a.bench ?? (cur === 'ai' ? 'work' : 'ai');
+      return bench === cur ? s : { ...s, bench };
+    }
   }
 }

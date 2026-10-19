@@ -19,7 +19,8 @@
     "ui:check": "node scripts/uiCheck.mjs",
     "readme:shots": "node scripts/readmeShots.mjs",
     "icons": "node scripts/icons.mjs",
-    "pwa:check": "node scripts/pwaCheck.mjs"
+    "pwa:check": "node scripts/pwaCheck.mjs",
+    "ai:eval": "node scripts/aiEval.mjs"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.14",

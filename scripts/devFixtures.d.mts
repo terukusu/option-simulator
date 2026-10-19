@@ -47,3 +47,25 @@ export function synthAtmDaily(now?: number): {
     l2: string | null;
   }[];
 };
+
+/** AI の中継の偽の状態（#135。/fixtures/ai/status） */
+export const SYNTH_AI_STATUS: {
+  schema_version: 1;
+  enabled: boolean;
+  model: string;
+  credential: string;
+  counted: boolean;
+  limit_usd: number;
+  remaining_usd: number;
+  resets_at: string;
+};
+/** 偽の SSE の事象の間隔（ms） */
+export const SYNTH_AI_STEP_MS: { thinking: number; writing: number; chunk: number };
+/** 偽の返答の組み立て（要求の本文 → 考え中・文・道具。純関数） */
+export function synthAiReply(body: unknown): {
+  thinking: string;
+  text: string;
+  stop: string | null;
+  cut?: boolean;
+  tool?: { id: string; name: string; input: Record<string, unknown> };
+};

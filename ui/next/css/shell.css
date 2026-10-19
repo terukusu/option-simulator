@@ -219,6 +219,23 @@ section.panel .board-wrap:focus-visible {
   .layout[data-market="iv"] section.smile {
     display: flex;
   }
+
+  /* AI（#135）: 作業台の列（ポジション + 指標）を入れ替える。舞台・市場の列はそのまま */
+  section.ai {
+    display: none;
+    grid-column: 3;
+    grid-row: 1 / -1;
+    border-left: 1px solid var(--line);
+  }
+
+  .layout[data-bench="ai"] section.positions,
+  .layout[data-bench="ai"] section.metrics {
+    display: none;
+  }
+
+  .layout[data-bench="ai"] section.ai {
+    display: flex;
+  }
 }
 
 /* ===== タブレット 720〜1199: 舞台 + シナリオ | ドック + パネル 1 枚 ===== */
@@ -273,7 +290,8 @@ section.panel .board-wrap:focus-visible {
   .layout[data-panel="positions"] section.positions,
   .layout[data-panel="board"] section.board,
   .layout[data-panel="metrics"] section.metrics,
-  .layout[data-panel="smile"] section.smile {
+  .layout[data-panel="smile"] section.smile,
+  .layout[data-panel="ai"] section.ai {
     display: flex;
   }
 }
@@ -321,6 +339,7 @@ section.panel .board-wrap:focus-visible {
   .layout[data-panel="board"] section.board,
   .layout[data-panel="metrics"] section.metrics,
   .layout[data-panel="smile"] section.smile,
+  .layout[data-panel="ai"] section.ai,
   .layout[data-panel="scenario"] section.scenario {
     display: flex;
   }

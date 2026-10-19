@@ -1,6 +1,6 @@
 /**
  * 画面の全体のキー（#89 段 A。docs/ui-redesign.md §4.6）。
- * 1〜5 = パネル・G = 描画域・T = テーマ・Ctrl / ⌘ + K = コマンドパレット（段 B）。
+ * 1〜6 = パネル（6 = AI。#135）・G = 描画域・T = テーマ・Ctrl / ⌘ + K = コマンドパレット（段 B）。
  * 純関数（Preact・DOM に依存しない）。document の keydown は ui/next/useGlobalKeys.ts だけが受ける。
  */
 import type { ThemePref } from '../prefs';
@@ -34,13 +34,14 @@ export type GlobalKey =
   | { kind: 'theme' }
   | { kind: 'palette' };
 
-/** 1〜5 → パネル（§4.6: 1 ポジ / 2 板 / 3 シナリオ / 4 指標 / 5 スマイル） */
+/** 1〜6 → パネル（§4.6: 1 ポジ / 2 板 / 3 シナリオ / 4 指標 / 5 スマイル / 6 AI） */
 export const PANEL_KEYS: Readonly<Record<string, PanelId>> = {
   '1': 'positions',
   '2': 'board',
   '3': 'scenario',
   '4': 'metrics',
   '5': 'smile',
+  '6': 'ai',
 };
 
 /** パネル → キー（段 B のパレットの行のキーの表示） */
@@ -50,6 +51,7 @@ export const PANEL_KEY: Readonly<Record<PanelId, string>> = {
   scenario: '3',
   metrics: '4',
   smile: '5',
+  ai: '6',
 };
 
 /**
@@ -62,6 +64,7 @@ export const PANEL_FOCUS_LABEL: Readonly<Record<PanelId, string>> = {
   scenario: 'シナリオの入力',
   metrics: '指標とテールの表',
   smile: 'スマイルの図',
+  ai: 'AI の会話',
 };
 
 /** 描画域にフォーカス・テーマ切替のキーの表示 */
@@ -104,13 +107,16 @@ export function globalKey(s: KeySummary): GlobalKey | null {
 
 /**
  * 1〜5 で送る画面の状態の action（§4.6 の表。openBoardActions と同じ形）。
- * スマホは全部 open、タブレットはシナリオ（常設）以外 open、PC は板 / スマイルだけ market。
+ * スマホは全部 open、タブレットはシナリオ（常設）以外 open、PC は板 / スマイルだけ market、AI は作業台の入れ替え
+ * （6 を押すたびに AI ⇄ ポジション・指標）、ポジション・指標は作業台を work に戻す（#135）。
  * どの幅でもこのあと画面がそのパネルのスクロールする枠（`.panel-body` / 板は `.board-wrap`）へフォーカスを移す。
  */
 export function panelKeyActions(panel: PanelId, tier: Tier): ShellAction[] {
   if (tier === 'phone') return [{ type: 'open', panel, tier }];
   if (tier === 'tablet') return panel === 'scenario' ? [] : [{ type: 'open', panel, tier }];
   if (panel === 'board' || panel === 'smile') return [{ type: 'market', market: panel }];
+  if (panel === 'ai') return [{ type: 'bench' }];
+  if (panel === 'positions' || panel === 'metrics') return [{ type: 'bench', bench: 'work' }];
   return [];
 }
 

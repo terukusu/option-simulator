@@ -121,7 +121,7 @@ describe('globalKey', () => {
   it('(h) 0・6・r・Escape・ArrowRight など他のキーは null', () => {
     for (const key of [
       '0',
-      '6',
+      '7',
       '9',
       'r',
       'R',
@@ -165,7 +165,7 @@ describe('editableTarget', () => {
 });
 
 describe('panelKeyActions', () => {
-  const PANELS: PanelId[] = ['positions', 'board', 'scenario', 'metrics', 'smile'];
+  const PANELS: PanelId[] = ['positions', 'board', 'scenario', 'metrics', 'smile', 'ai'];
   const open = (panel: PanelId, tier: Tier) => [{ type: 'open', panel, tier }];
   // Issue #89 の表（3 幅 × 5 キー）
   const table: [PanelId, Tier, unknown[]][] = [
@@ -179,17 +179,21 @@ describe('panelKeyActions', () => {
     ['scenario', 'tablet', []],
     ['metrics', 'tablet', open('metrics', 'tablet')],
     ['smile', 'tablet', open('smile', 'tablet')],
-    ['positions', 'pc', []],
+    ['positions', 'pc', [{ type: 'bench', bench: 'work' }]],
     ['board', 'pc', [{ type: 'market', market: 'board' }]],
     ['scenario', 'pc', []],
-    ['metrics', 'pc', []],
+    ['metrics', 'pc', [{ type: 'bench', bench: 'work' }]],
     ['smile', 'pc', [{ type: 'market', market: 'smile' }]],
+    // #135: AI はスマホ・タブレットは開く、PC は作業台の入れ替え
+    ['ai', 'phone', [{ type: 'open', panel: 'ai', tier: 'phone' }]],
+    ['ai', 'tablet', [{ type: 'open', panel: 'ai', tier: 'tablet' }]],
+    ['ai', 'pc', [{ type: 'bench' }]],
   ];
   it.each(table)('%s / %s', (panel, tier, want) => {
     expect(panelKeyActions(panel, tier)).toEqual(want);
   });
-  it('表は 15 マスすべて', () => {
-    expect(table).toHaveLength(15);
+  it('表は 18 マスすべて（#135 で AI）', () => {
+    expect(table).toHaveLength(18);
     for (const p of PANELS) expect(table.filter(([q]) => q === p)).toHaveLength(3);
   });
 
@@ -227,7 +231,7 @@ describe('toggledTheme と表示用の定数', () => {
   });
   it('PANEL_KEYS と PANEL_KEY は互いに逆', () => {
     for (const [k, p] of Object.entries(PANEL_KEYS)) expect(PANEL_KEY[p]).toBe(k);
-    expect(Object.keys(PANEL_KEYS)).toEqual(['1', '2', '3', '4', '5']);
+    expect(Object.keys(PANEL_KEYS)).toEqual(['1', '2', '3', '4', '5', '6']);
     expect(CHART_KEY).toBe('G');
     expect(THEME_KEY).toBe('T');
     expect(PALETTE_KBD.length).toBeGreaterThan(0);
@@ -236,12 +240,12 @@ describe('toggledTheme と表示用の定数', () => {
 
 /** #91 段 C AC-C7: 1〜5 の行き先の枠の読み上げの名前 */
 describe('PANEL_FOCUS_LABEL', () => {
-  it('5 つのパネルすべてに空でない名前があり、互いに違う', () => {
+  it('6 つのパネル（#135 で AI）すべてに空でない名前があり、互いに違う', () => {
     const keys = Object.keys(PANEL_FOCUS_LABEL).sort();
     expect(keys).toEqual(Object.keys(PANEL_KEY).sort());
-    expect(keys).toHaveLength(5);
+    expect(keys).toHaveLength(6);
     const labels = Object.values(PANEL_FOCUS_LABEL);
     for (const l of labels) expect(l.trim().length).toBeGreaterThan(0);
-    expect(new Set(labels).size).toBe(5);
+    expect(new Set(labels).size).toBe(6);
   });
 });

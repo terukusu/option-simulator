@@ -8,13 +8,13 @@ optionchan の BigQuery（データセット `optionchan_tokyo` のテーブル�
 | `GET /api/calendar` | 取引カレンダーの最新版 `{schema_version, source, version_at, covered_until, listed_until, days: [{date, is_trading_day, status, name}]}`（日付の昇順）。画面は本番で開いたときと [最新] で読む（取れなければ同梱の版。#39） |
 | `GET /api/atm_iv?tf=<1m\|1h\|1d>[&start=<ISO>&end=<ISO>]` | IV 推移（#79）: 表 `atm_cm_iv` の `iv30`（30 日固定の ATM IV、%）の足 `{schema_version, tf, start, end, last_at, bars: [{t, o, h, l, c}]}`。`start`・`end` は両方か無し（無ければ右端の 1 回分）、オフセット付きの ISO 8601 で UTC の 0 時ちょうど。1 回の最大は 1m 3 日・1h 100 日・1d 400 日。不正は 400、BigQuery の失敗・`DATA_SOURCE=file` は 503。仕様は `docs/design.md` 7.1・13.4 |
 | `GET /api/atm_daily` | 日次の値（#152）: 表 `atm_cm_iv` の JST の日付ごとの日中の終値（JST 9:00〜15:00 の最後の行）の `iv30` と 1 / 2 限月のフォワード・最終取引日 `{schema_version, start, end, days: [{d, t, iv, f1, l1, f2, l2}]}`。パラメータなし（知らないパラメータは無視）。確定した日だけ（`end` = JST の今日（8:00 以降）/ 前日、含まない）。`Cache-Control: private, max-age=3600`・ETag で 304。BigQuery の失敗・`DATA_SOURCE=file` は 503。2 営業日の組はブラウザ（`data/atmDaily.ts`）。仕様は `docs/design.md` 7.1・13.4 |
-| `POST /api/ai/messages` | AI の中継（#134）。本文 JSON `{schema_version: 1, kind: "chat", context, messages}` を許可リストで検査し、サーバーが固定する引数を付けて Anthropic に送り、SSE（`accepted` → `progress` / `thinking` / `text` / `tool_use` → `done` / `error`）で流す。1 日の上限（予約と精算）・同じオリジン・`Content-Type: application/json`・512 KiB・同時 2 本・1 分 10 回。下の「AI の中継」 |
+| `POST /api/ai/messages` | AI の中継（#134）。本文 JSON `{schema_version: 1, kind: "chat" | "diagnose", context, messages}` を許可リストで検査し、サーバーが固定する引数を付けて Anthropic に送り、SSE（`accepted` → `progress` / `thinking` / `text` / `tool_use` → `done` / `error`）で流す。1 日の上限（予約と精算）・同じオリジン・`Content-Type: application/json`・512 KiB・同時 2 本・1 分 10 回。下の「AI の中継」 |
 | `GET /api/ai/status` | AI が使えるか・モデル・資格情報の種類・数えるか・1 日の上限と残り・戻る時刻（`no-store`） |
 | `GET /healthz` | 設定の読み込みだけ（BigQuery・Anthropic・Firestore に触れない） |
 | `/`・`/assets/<path>` | `STATIC_DIR` があるときだけ、Vite のビルド成果物（`dist/`）を配る |
 | `/manifest.webmanifest`・`/favicon.svg`・`/apple-touch-icon.png`・`/icon-192.png`・`/icon-512.png` | `STATIC_DIR` があるときだけ、`dist/` 直下のこの 5 つの名前だけを配る（`no-cache`。名前の集合は `app.py` の `ROOT_FILES`。他の名前は 404。#90） |
 
-作り（`src/simulator_api/`）: `sources.py`（供給元の口 `DataSource` と `DATA_SOURCE` → 実装の表 `BUILDERS`）、`quotes.py`（中立の気配の一覧 → 板の JSON 版 1。純関数。#154）、`usable.py`（使える板の判定。純関数。定数は `settings.py` の上部）、`chain.py`（板の JSON の組み立て）、`calendar.py`（SQ 日の規則と `/api/calendar` の JSON）、`atm_iv.py`（IV 推移の要求の検査・足の束ね・JSON。純関数）、`atm_daily.py`（日次の値の確定した範囲・行の検査・JSON。純関数。#152）、`cache.py`（TTL・LRU・期限付きの LRU と single-flight）、`service.py`（BigQuery の読み方とキャッシュ、`file`・`quotes` の供給元）、`bq.py`（SQL の読み込みと実行）、`contract.py`（optionchan との契約 = 使う列と型）、`sql/*.sql`、`app.py`（Flask・セキュリティヘッダ）、`log.py`（JSON の構造化ログ）。AI の中継は `ai/`: `shape.py`（形の検査）・`tools.py`（道具の登録。#134 は空）・`allowlist.py`（要求の許可リストと送る本文の組み立て直し。純関数）・`budget.py`（料金表・見積もり・予約 / 精算・JST の日）・`firestore_store.py`（日の計上。REST）・`gateway.py`（SDK の薄い包みと偽の送信先）・`guard.py`（同じオリジン・同時の本数・回数）・`relay.py`（エンドポイントの本体・SSE・ログ）。
+作り（`src/simulator_api/`）: `sources.py`（供給元の口 `DataSource` と `DATA_SOURCE` → 実装の表 `BUILDERS`）、`quotes.py`（中立の気配の一覧 → 板の JSON 版 1。純関数。#154）、`usable.py`（使える板の判定。純関数。定数は `settings.py` の上部）、`chain.py`（板の JSON の組み立て）、`calendar.py`（SQ 日の規則と `/api/calendar` の JSON）、`atm_iv.py`（IV 推移の要求の検査・足の束ね・JSON。純関数）、`atm_daily.py`（日次の値の確定した範囲・行の検査・JSON。純関数。#152）、`cache.py`（TTL・LRU・期限付きの LRU と single-flight）、`service.py`（BigQuery の読み方とキャッシュ、`file`・`quotes` の供給元）、`bq.py`（SQL の読み込みと実行）、`contract.py`（optionchan との契約 = 使う列と型）、`sql/*.sql`、`app.py`（Flask・セキュリティヘッダ）、`log.py`（JSON の構造化ログ）。AI の中継は `ai/`: `shape.py`（形の検査）・`tools.py`（道具の登録。#135 で 6 本）・`allowlist.py`（要求の許可リストと送る本文の組み立て直し。純関数）・`budget.py`（料金表・見積もり・予約 / 精算・JST の日）・`firestore_store.py`（日の計上。REST）・`gateway.py`（SDK の薄い包みと偽の送信先）・`guard.py`（同じオリジン・同時の本数・回数）・`relay.py`（エンドポイントの本体・SSE・ログ）。
 
 ## 設定（環境変数）
 
@@ -165,6 +165,8 @@ gcloud logging read 'resource.type="cloud_run_revision" AND resource.labels.serv
 - **許可リスト**（`ai/allowlist.py`）: ブラウザから受けるのは `schema_version`・`kind`・`context`・`messages` だけ（`model`・`system`・`tools`・`max_tokens` などは 400）。`context` のキー・型・範囲・個数を検査し（自由な文字列は無い。板の行は `k`・`type`・`bid`・`ask`・`iv` だけで、JPX のグリーク・`bid_iv` / `ask_iv`・数量・建玉は 400）、`messages` は role の交互・block の型（user は `text`・`tool_result`、assistant は `text`・`thinking`・`redacted_thinking`・`tool_use`）・道具の名前と入出力の形（`ai/tools.py` の登録）を検査する。送る本文は検査済みの値から組み立て直す（`context` は最初の user の先頭の text block に `<context>…</context>` の決定的な JSON）
 - **1 日の上限**（`ai/budget.py`）: 予約 = 入力の見積もり（送る本文の UTF-8 のバイト数 + 2,000。トークン数の上界）× 5 分のキャッシュ書き込みの単価（入力の 1.25 倍）+ `max_tokens` × 出力の単価（µUSD の整数）。`計上額 + 予約額 ≤ 上限` のときだけ送り、終わったら `usage` × 料金表で精算、途中で切れたら予約額のまま。計上の場所が読めない・書けないときは 503 で送らない
 - **SSE**: `accepted`（検査と予約の直後、Anthropic を呼ぶ前）→ `progress`（`thinking` / `writing` / `tool`）・`thinking`・`text`・`tool_use` → `done`（`stop_reason`・assistant の `content`・`remaining_usd`）か `error`（`timeout`・`upstream_auth`・`upstream_rate_limited`・`upstream_overloaded`・`upstream_bad_request`・`upstream_unavailable`・`upstream_incomplete`・`bad_tool_input`）。締め切りは 50 秒
+- **道具**（`ai/tools.py`。#135）: `position_summary`・`tail_table`・`margin_summary`・`scenario_grid`・`smile_position`（入力なし。[このポジを診断] ではブラウザが事前計算して `context.precomputed`）と `evaluate_scenario`（`dx_pct` か `x`・`days`・`iv_shift_pt`・任意の `skew_pt`。範囲は画面のシナリオの欄と同じ）。中継は道具を実行せず、入力（`tool_use`）・結果（`tool_result`・`precomputed`）を形で検査する。計算はブラウザの `ui/view/aiTools.ts` で、生成した見本 `fixtures/synthetic/ai_tools.json` を `tests/test_ai_tools.py` が結果の形に通す（言語をまたぐ契約）
+- **会話の途中の文脈の更新**（#135）: 2 件目以降の user の発言に `{"type": "context_update", "context": {…}}` を 1 つ（`tool_result` の後ろ）。`context` と同じ形で検査し、`<context_update>…</context_update>` の text block にして同じ位置に置く。最初の `context` と前の messages は変えない（Opus 5.5 の preserved thinking・prompt caching の前置きを保つ）。`kind: "diagnose"` は [このポジを診断]（system prompt は 1 つ。`relay.DIAGNOSE_TEXT` が最初の発言）
 - テストは偽の送信先（`ai/gateway.py` の `FakeGateway`）と、本物の SDK に httpx2 の `MockTransport` を渡したもの（送られる見出し・本文を捕まえる。ネットワークに出ない）、偽の Firestore の session。Anthropic・GCP には触れない
 
 ### ログ
@@ -205,3 +207,19 @@ gcloud logging read 'resource.type="cloud_run_revision" AND resource.labels.serv
 ```
 
 `api_key` のときは `infra/README.md`「AI の費用の計上（Firestore）」の 4 で今日の計上が増えたことも確かめる。
+
+## AI の評価（#135）
+
+`npm run ai:eval`（`scripts/aiEval.mjs`）は、合成の板・合成のポジション 10 通り（`scripts/aiEvalCases.ts`）で、画面と同じコード（文脈と事前計算・会話の reducer・道具の往復）を通して中継に送り、[このポジを診断] の返答の弱点の数と数字の照合（`ui/view/aiNumbers.ts`）を出す。送り先は手元で起動した中継（`AI_EVAL_BASE`、既定 `http://127.0.0.1:8080`）で、本番の IAP は越えない。資格情報は中継の環境変数だけ（スクリプトは読まない・出さない）。
+
+```bash
+# 1) 中継を本物の資格情報で起動（値は表示しない。ログは fixtures/local/ に）
+cd api && AI_CREDENTIAL=<種類> <資格情報の環境変数>=… DATA_SOURCE=file CHAIN_FILE=../fixtures/synthetic/latest.json \
+  uv run --locked flask --app simulator_api.app run -p 8080 > ../fixtures/local/ai_eval/relay.log 2>&1 &
+# 2) 評価（10 通り + 追加の質問 2 件。--cases a,b・--repeat n・--no-followups）
+AI_EVAL_RELAY_LOG=fixtures/local/ai_eval/relay.log npm run ai:eval
+```
+
+- 費用の上限: 累計の台帳 `fixtures/local/ai_eval/ledger.json`（gitignore）で `AI_EVAL_LIMIT_USD`（既定 6.5）を超える前に止める。数える資格情報は今日の残りの差、数えない資格情報（`oauth_token`）は 0。`AI_CREDENTIAL=fake` は配線の確かめ用で台帳に入れない
+- 出力: 標準出力に要約（各組の弱点の数・各弱点の一致の数・不一致の一覧・`stop_reason`・最初の文字と完了の秒・費用）と、`AI_EVAL_RELAY_LOG` があれば `ai_request` のトークン量・概算費用・`dropped_blocks`・`first_text_ms` の中央値。返答の全文は `fixtures/local/ai_eval/<時刻>/` にだけ書く（コミットしない）
+- 合格: 全組で弱点 3 つ以上・各弱点に照合が一致した数字 1 つ以上・不一致 0（終了コード 0）

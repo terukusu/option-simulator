@@ -32,6 +32,7 @@ export const PANEL_FOCUS: Readonly<Record<PanelId, string>> = {
   scenario: 'main.layout > section.panel.scenario > .panel-body',
   metrics: 'main.layout > section.panel.metrics > .panel-body',
   smile: 'main.layout > section.panel.smile > .panel-body',
+  ai: 'main.layout > section.panel.ai > .panel-body',
 };
 
 /** 行き先を待つフレームの上限（板は初めて見せたとき幅を測ってから表を作るので 1 フレームでは無い） */

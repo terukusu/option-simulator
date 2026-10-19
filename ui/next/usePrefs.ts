@@ -33,5 +33,9 @@ export function usePrefs(initial: PrefsRead, storage: Storage | null) {
       commit({ ...ref.current, margin: { ...ref.current.margin, ...patch } }),
     [commit],
   );
-  return { prefs, setTheme, setMargin };
+  const setAiDisclaimerSeen = useCallback(
+    () => commit({ ...ref.current, aiDisclaimerSeen: true }),
+    [commit],
+  );
+  return { prefs, setTheme, setMargin, setAiDisclaimerSeen };
 }
