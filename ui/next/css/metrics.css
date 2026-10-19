@@ -326,16 +326,82 @@ table.tail.margin-tail td small.call {
 }
 
 .hm-plot {
+  position: relative;
   padding: 0 var(--sp-3);
   overflow: hidden;
 }
 
-.hm-plot.busy {
-  opacity: 0.5;
+/* 待ち（#174）: 描画域の枠の中央にスピナーと文字。触る操作は下のマップへ通す */
+.hm-wait {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-2);
+  padding: 0 var(--sp-3);
+  color: var(--ink-2);
+  font-size: var(--fs-xs);
+  pointer-events: none;
+}
+
+/* 前のマップの上（再計算・点の読み込み）は 250ms 後に出す（短い計算ではちらつかない。位置は動かないので reduced でも残す） */
+.hm-wait.late {
+  animation: hm-wait-late 1ms linear 250ms both;
+}
+
+.hm-wait-t {
+  min-width: 0;
+  padding: 2px var(--sp-2);
+  border-radius: 4px;
+  background: var(--s1);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.hm-spin {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  border: 2px solid var(--line-2);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: hm-spin 0.9s linear infinite;
+}
+
+@keyframes hm-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes hm-wait-late {
+  from {
+    opacity: 0;
+  }
+}
+
+/* prefers-reduced-motion（docs/ui-redesign.md §6）: 回さない（静的な輪） */
+@media (prefers-reduced-motion: reduce) {
+  .hm-spin {
+    animation: none;
+  }
+}
+
+.hm-svg .hm-frame {
+  fill: none;
+  stroke: var(--line);
+  stroke-width: 1;
 }
 
 .hm-wrap {
   touch-action: manipulation;
+}
+
+/* 待ちの間の前のマップ（#174: 枠の中のスピナー .hm-wait は薄くしない） */
+.hm-plot.busy .hm-wrap {
+  opacity: 0.5;
 }
 
 .hm-svg {

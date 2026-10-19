@@ -15,6 +15,7 @@ import {
   ZERO_SCENARIO,
 } from '../../model';
 import {
+  HOLD_MAP_COMPUTING,
   HOLD_MAP_EMPTY,
   HOLD_MAP_FAILED,
   HOLD_MAP_IDLE_READOUT,
@@ -31,10 +32,12 @@ import {
   holdMapPick,
   holdMapPlot,
   holdMapReadout,
+  holdMapReveal,
   holdMapRooms,
   holdMapStatusText,
   holdMapStep,
   holdMapSummary,
+  holdMapWait,
 } from '../../ui/view/holdMap';
 import { pnlDomains } from '../../ui/view/pnlChart';
 import { M1, M2, makeMarket, quoteOf } from '../support/market';
@@ -135,7 +138,6 @@ describe('B6 表示モデル', () => {
     const s = holdMapStatusText({
       noLegs: false,
       noCapital: true,
-      computing: false,
       movesStatus: 'idle',
       movesCount: 0,
     });
@@ -144,25 +146,18 @@ describe('B6 表示モデル', () => {
     expect(s.moves).toBeNull();
   });
 
-  it('足なし・過去の点の読み込み中 / 失敗（再試行）/ 0 件の文', () => {
+  it('足なし・過去の点の失敗（再試行）/ 0 件の文', () => {
     const empty = pnlDomains(board, [], ctx, DEFAULT_SETTINGS);
     expect(holdMapInput(empty, ZERO_SCENARIO, PARAMS, CAPITAL, [])).toBeNull();
     const st = (o: Partial<Parameters<typeof holdMapStatusText>[0]>) =>
       holdMapStatusText({
         noLegs: false,
         noCapital: false,
-        computing: false,
         movesStatus: 'ok',
         movesCount: 3,
         ...o,
       });
     expect(st({ noLegs: true }).main).toBe(HOLD_MAP_NO_LEGS);
-    expect(st({ movesStatus: 'loading' })).toEqual({
-      main: null,
-      moves: HOLD_MAP_LOADING,
-      retry: false,
-    });
-    expect(HOLD_MAP_LOADING).toBe('過去の値動きを読み込み中…');
     expect(st({ movesStatus: 'failed' })).toEqual({
       main: null,
       moves: HOLD_MAP_FAILED,
@@ -170,10 +165,16 @@ describe('B6 表示モデル', () => {
     });
     expect(HOLD_MAP_FAILED).toBe('過去の値動きを読めない');
     expect(st({ movesCount: 0 }).moves).toBe(HOLD_MAP_EMPTY);
-    expect(st({ computing: true }).main).toBe('計算中…');
     expect(st({})).toEqual({ main: null, moves: null, retry: false });
   });
 
+  it('holdMapStatusText: 読み込み中・計算中の文は状態の行に出さない（失敗・0 件・再試行だけ）', () => {
+    for (const movesStatus of ['idle', 'loading'] as const) {
+      expect(
+        holdMapStatusText({ noLegs: false, noCapital: false, movesStatus, movesCount: 0 }),
+      ).toEqual({ main: null, moves: null, retry: false });
+    }
+  });
   it('点を触った 1 行: 日付・原資産 ±%・IV a → b %・×r・±pt・余力', () => {
     const s = holdMapReadout({ kind: 'point', k: 0 }, RESULT, MOVES, 'thousand');
     expect(s).toMatch(
@@ -299,5 +300,50 @@ describe('B7 マップの入力は ΔX・Δσ・β で変わらない', () => {
     expect(key(sc, { base: baseOf([putSell(63000)]) })).not.toEqual(k0);
     expect(key(sc, { capital: CAPITAL + 1 })).not.toEqual(k0);
     expect(key(sc, { params: { ...PARAMS, range: 0.06 } })).not.toEqual(k0);
+  });
+});
+
+describe('#174 待ちの表示・開いたときのスクロール', () => {
+  const wait = (o: Partial<Parameters<typeof holdMapWait>[0]>) =>
+    holdMapWait({
+      noLegs: false,
+      noCapital: false,
+      computing: false,
+      movesStatus: 'ok',
+      ...o,
+    });
+
+  it('holdMapWait: 読み込み中（idle / loading）は HOLD_MAP_LOADING、計算中は HOLD_MAP_COMPUTING、終わったら null', () => {
+    expect(HOLD_MAP_LOADING).toBe('過去の値動きを読み込み中…');
+    expect(HOLD_MAP_COMPUTING).toBe('計算中…');
+    expect(wait({ movesStatus: 'idle' })).toBe(HOLD_MAP_LOADING);
+    expect(wait({ movesStatus: 'loading' })).toBe(HOLD_MAP_LOADING);
+    // 読み込み中は計算中より先（点が読めると軸が広がって作り直しうる）
+    expect(wait({ movesStatus: 'loading', computing: true })).toBe(HOLD_MAP_LOADING);
+    expect(wait({ computing: true })).toBe(HOLD_MAP_COMPUTING);
+    expect(wait({ movesStatus: 'failed', computing: true })).toBe(HOLD_MAP_COMPUTING);
+    expect(wait({})).toBeNull();
+    expect(wait({ movesStatus: 'failed' })).toBeNull();
+  });
+
+  it('holdMapWait: 足なし・資金なしは null', () => {
+    expect(wait({ noLegs: true, computing: true, movesStatus: 'loading' })).toBeNull();
+    expect(wait({ noCapital: true, computing: true, movesStatus: 'idle' })).toBeNull();
+  });
+
+  it('holdMapReveal: 枠の下にはみ出した分だけ下へ・描画域の上端を隠さない・見えていれば 0・reduced-motion は即時（auto）', () => {
+    // 枠 100〜500。描画域 520〜760 → はみ出し 260、描画域の上の余地 420 → 260（見出しが 486 なら 226 に残る）
+    expect(holdMapReveal(520, 760, 100, 500, false)).toEqual({ delta: 260, behavior: 'smooth' });
+    // 描画域が枠より高い: 描画域の上端を枠の上端まで（420）。それ以上は動かさない
+    expect(holdMapReveal(520, 1200, 100, 500, false).delta).toBe(420);
+    // 見えている（下端 ≤ 枠の下端）なら 0
+    expect(holdMapReveal(200, 480, 100, 500, false).delta).toBe(0);
+    expect(holdMapReveal(200, 500, 100, 500, false).delta).toBe(0);
+    // 描画域の上端が既に枠の上端より上でも負にしない
+    expect(holdMapReveal(50, 800, 100, 500, false).delta).toBe(0);
+    // reduced-motion は即時
+    expect(holdMapReveal(520, 760, 100, 500, true)).toEqual({ delta: 260, behavior: 'auto' });
+    // 有限でない値は動かさない
+    expect(holdMapReveal(Number.NaN, 800, 100, 500, false).delta).toBe(0);
   });
 });

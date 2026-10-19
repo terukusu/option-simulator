@@ -28,6 +28,7 @@ import {
   ZERO_SCENARIO,
 } from '../../model';
 import { fmtNum, fmtSigned } from './format';
+import { revealDelta } from './hint';
 import { MARGIN_LINE_SETTLE_MS } from './margin';
 import { AMOUNT_UNIT_LABEL, type AmountUnit, fmtAmount } from './metrics';
 import { clampDays, type PnlBase } from './pnlChart';
@@ -436,20 +437,54 @@ export function holdMapSelMark(
   return { kind: 'cell', x: r1(s.sx(u) - w / 2), y: r1(s.sy(c) - h / 2), w: r1(w), h: r1(h) };
 }
 
-/** 状態の文（マップの上に出す。無ければ null） */
+/**
+ * 状態の文（マップの上に出す。無ければ null）。読み込み中・計算中の文は出さない（#174。描画域の枠の中の holdMapWait）
+ */
 export function holdMapStatusText(o: {
   noLegs: boolean;
   noCapital: boolean;
-  computing: boolean;
   movesStatus: HoldMovesStatus;
   movesCount: number;
 }): { main: string | null; moves: string | null; retry: boolean } {
   if (o.noLegs) return { main: HOLD_MAP_NO_LEGS, moves: null, retry: false };
   if (o.noCapital) return { main: HOLD_MAP_NO_CAPITAL, moves: null, retry: false };
-  const main = o.computing ? HOLD_MAP_COMPUTING : null;
-  if (o.movesStatus === 'loading' || o.movesStatus === 'idle')
-    return { main, moves: HOLD_MAP_LOADING, retry: false };
-  if (o.movesStatus === 'failed') return { main, moves: HOLD_MAP_FAILED, retry: true };
-  if (o.movesCount === 0) return { main, moves: HOLD_MAP_EMPTY, retry: false };
-  return { main, moves: null, retry: false };
+  if (o.movesStatus === 'failed') return { main: null, moves: HOLD_MAP_FAILED, retry: true };
+  if (o.movesStatus === 'ok' && o.movesCount === 0)
+    return { main: null, moves: HOLD_MAP_EMPTY, retry: false };
+  return { main: null, moves: null, retry: false };
+}
+
+/**
+ * 待ちの文（#174。描画域の枠の中にスピナーと出す。待っていなければ null）: 過去の値動きの読み込み中（idle / loading。
+ * 点が読めると軸が広がって作り直しうるので計算中より先）は HOLD_MAP_LOADING、それ以外で計算中は HOLD_MAP_COMPUTING。
+ * 足なし・資金なしはマップを作らないので null
+ */
+export function holdMapWait(o: {
+  noLegs: boolean;
+  noCapital: boolean;
+  computing: boolean;
+  movesStatus: HoldMovesStatus;
+}): string | null {
+  if (o.noLegs || o.noCapital) return null;
+  if (o.movesStatus === 'idle' || o.movesStatus === 'loading') return HOLD_MAP_LOADING;
+  return o.computing ? HOLD_MAP_COMPUTING : null;
+}
+
+/**
+ * 開いたときのスクロール（#174）: パネルのスクロール枠（host）の中で、描画域（.hm-plot）の上端 〜 下端が見えるように
+ * 動かす量（scrollIntoView の block: 'nearest' 相当。下端のはみ出しだけ、描画域の上端を枠の上端より上に隠さない、負に
+ * ならない = ui/view/hint.ts の revealDelta）と動かし方（prefers-reduced-motion なら即時 auto、それ以外は smooth）。
+ * 見出しは描画域と一緒に枠に入るときは残り、入らない（スマホの peek）ときだけ上に送られる
+ */
+export function holdMapReveal(
+  plotTop: number,
+  plotBottom: number,
+  hostTop: number,
+  hostBottom: number,
+  reduced: boolean,
+): { delta: number; behavior: 'smooth' | 'auto' } {
+  return {
+    delta: revealDelta(plotTop, plotBottom, hostTop, hostBottom),
+    behavior: reduced ? 'auto' : 'smooth',
+  };
 }

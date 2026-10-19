@@ -54,6 +54,11 @@
 //                                          .lbl が「IV」・切れ / 折り返し 0・スマホでアイコンの svg 1 個）と初めて開いたときの中身
 //                                          （aria-label「IV 推移」・Seg の 1 つ目が押されている）。スマホ・タブレットのスマイルの検査は
 //                                          パネルの中で [スマイル] を選んでから（smileTab）
+//                                          持ちこたえマップ（#174）: 資金あり・売り 5 枚 × 360（指標 peek / full）・390・900・1440 ×
+//                                          ダーク / ライトで、見出しを枠の下端に置いて開くと描画域が .panel-body の中（見出しと
+//                                          一緒に入る幅では見出しも）、/fixtures/atm_daily を止めた間は枠（≥ 200px）の中にスピナー（reduce では
+//                                          animation none）と `過去の値動きを読み込み中…`（状態の行に無い・切れない）、読めたら消える、
+//                                          閉じても scrollTop を動かさない
 //   npm run ui:check -- --parts            部品の見本（?parts。dev だけ）
 //   npm run ui:check -- --flows            保存・共有・テーマ・キーボードの手順（#81 AC-11・AC-12）と入口の手順（#91: クエリなし・
 //                                          古い ?ui=next と旧画面を開いていた ui の値で同じ画面・部品の見本の ?parts・旧画面のときの
@@ -990,6 +995,11 @@ async function measureAll() {
     console.log(
       `追証の線の検査（#131）: ${marginLineStats.pass} / ${marginLineStats.total} 状態で pass`,
     );
+    // 持ちこたえマップを開いたときのスクロールと待ちのスピナー（#174 AC2・AC3）
+    await holdMapAll();
+    console.log(
+      `持ちこたえマップの検査（#174）: ${holdStats.pass} / ${holdStats.total} 状態で pass`,
+    );
     // 市場の追加の状態（1200 / 1280 / 1800・322 行の板・字幅 2 通り。#85）
     await marketSweep();
     console.log(
@@ -1455,6 +1465,176 @@ async function marginAll() {
 }
 const marginStats = { pass: 0, total: 0 };
 const marginLineStats = { pass: 0, total: 0 };
+const holdStats = { pass: 0, total: 0 };
+
+/** 過去の値動き（dev の /fixtures/atm_daily）を止める route。release() で通す（#174） */
+async function holdDailyGate(page) {
+  let release = () => {};
+  const gate = new Promise((r) => {
+    release = r;
+  });
+  await page.route('**/fixtures/atm_daily*', async (route) => {
+    await gate;
+    await route.continue();
+  });
+  return release;
+}
+
+/** 指標の .panel-body を一番下（閉じた見出し = 末尾が枠の下端）までスクロールする（#174） */
+const holdScrollBottom = (page) =>
+  page.evaluate(() => {
+    const host = document.querySelector('section.metrics .panel-body');
+    if (host) host.scrollTop = host.scrollHeight;
+    return host?.scrollTop ?? -1;
+  });
+
+/** 開いた後の見出し・描画域と枠の位置（#174 AC2 (a)） */
+const holdPlace = (page) =>
+  page.evaluate(() => {
+    const host = document.querySelector('section.metrics .panel-body');
+    const btn = document.querySelector('section.metrics .hm-toggle');
+    const plot = document.querySelector('section.metrics .hm-plot');
+    if (!host || !btn || !plot) return null;
+    const h = host.getBoundingClientRect();
+    const b = btn.getBoundingClientRect();
+    const p = plot.getBoundingClientRect();
+    return {
+      hostTop: h.top,
+      hostBottom: h.bottom,
+      btnTop: b.top,
+      plotTop: p.top,
+      plotBottom: p.bottom,
+      plotH: p.height,
+      scrollTop: host.scrollTop,
+      maxTop: host.scrollHeight - host.clientHeight,
+    };
+  });
+
+/**
+ * (a): 描画域が枠の中（±1px）。見出し 〜 描画域が枠の高さに入るなら見出しも枠の中（上に隠れない）。入らない（スマホの
+ * peek）ときは描画域を優先
+ */
+const holdPlaced = (r) => {
+  if (!r) return false;
+  const inPlot = r.plotBottom <= r.hostBottom + 1 && r.plotTop >= r.hostTop - 1;
+  const fits = r.plotBottom - r.btnTop <= r.hostBottom - r.hostTop;
+  return inPlot && (!fits || r.btnTop >= r.hostTop - 1);
+};
+
+/**
+ * 持ちこたえマップ（#174 AC2・AC3）: 資金あり・売り 5 枚 × 360（指標 peek / full）・390（peek）・900（ドック）・1440 ×
+ * ダーク / ライト。状態ごとに新しいコンテキスト（過去の値動きはセッションで 1 回だけ読むので）。指標の .panel-body を
+ * 一番下までスクロール（見出しが枠の下端）→ /fixtures/atm_daily を止めたまま見出しを押す →
+ * (a) rAF 2 回の後（既定の実行は reducedMotion reduce = 即時）に描画域が枠の中（見出しと一緒に入る幅では見出しも）
+ * (b) 枠（.hm-plot の高さ ≥ 200px）の中に .hm-wait（スピナー + `過去の値動きを読み込み中…`）、状態の行に同じ文字が無い、
+ *     .hm-spin の animation-name が none（AC3）、文字が切れない（scrollWidth ≤ clientWidth）、縦・横・折り返し（report）
+ * → 通す → .hm-wait が無くなりマスの path が出る → (c) 閉じても scrollTop は動かさない（中身が消えて最大値で切られる分だけ）
+ */
+async function holdMapAll() {
+  for (const [w, h] of SIZES) {
+    for (const theme of ['dark', 'light']) {
+      const states =
+        w <= PHONE_MAX ? (w < 380 ? ['peek', 'full'] : ['peek']) : w >= 1200 ? ['pc'] : ['dock'];
+      for (const st of states) {
+        const ctx = await newContext(
+          { width: w, height: h },
+          {
+            [WORKSPACE_KEY]: sellFive,
+            [PREFS_KEY]: prefsText(theme, { capital_yen: MARGIN_CAPITAL }),
+          },
+        );
+        const page = await ctx.newPage();
+        const release = await holdDailyGate(page);
+        await page.goto(pageUrl('next'));
+        await waitReady(page, 'next');
+        const lbl = `next ${theme} 持ちこたえマップ ${st} ${w}x${h}`;
+        let ok = true;
+        const ng = (why) => {
+          ok = false;
+          console.log(`${lbl}: ${why}  ← NG`);
+        };
+        if (st === 'peek' || st === 'full') {
+          if (!(await setShell(page, 'metrics', st))) ng('画面の状態を作れない');
+        } else if (st === 'dock') {
+          await page.click('.dock button[data-panel="metrics"]');
+          await page.waitForTimeout(150);
+        }
+        if (ok) {
+          await holdScrollBottom(page);
+          await page.waitForTimeout(50);
+          await page.click('section.metrics .hm-toggle');
+          // 部品は 2 フレーム後に測って動かす（reduce = 即時）。その後の 2 フレーム
+          await twoFrames(page);
+          await twoFrames(page);
+          const r = await holdPlace(page);
+          if (!holdPlaced(r)) ng(`開いた直後の位置 ${JSON.stringify(r)}`);
+          await page.waitForSelector('section.metrics .hm-wait', { timeout: 3000 }).catch(() => {});
+          const wv = await page.evaluate(() => {
+            const sec = document.querySelector('section.metrics');
+            const wt = sec?.querySelector('.hm-wait .hm-wait-t');
+            const spin = sec?.querySelector('.hm-wait .hm-spin');
+            return {
+              text: wt?.textContent ?? null,
+              cut: wt ? wt.scrollWidth > wt.clientWidth : true,
+              anim: spin ? getComputedStyle(spin).animationName : null,
+              status: sec?.querySelector('.hm-status')?.textContent ?? '',
+              plotH: sec?.querySelector('.hm-plot')?.getBoundingClientRect().height ?? 0,
+            };
+          });
+          if (wv.text !== '過去の値動きを読み込み中…') ng(`待ちの文 ${wv.text}`);
+          if (wv.cut) ng('待ちの文が切れる');
+          if (wv.anim !== 'none') ng(`reduced-motion でスピナーが回る（${wv.anim}）`);
+          if (wv.status.includes('読み込み中') || wv.status.includes('計算中'))
+            ng(`状態の行に待ちの文（${wv.status}）`);
+          if (!(wv.plotH >= 200)) ng(`枠の高さ ${wv.plotH}px`);
+          if (
+            !(await report(page, `${lbl} 読み込み中`, w, h, `next-${w}x${h}-${theme}-hold-${st}`))
+          )
+            ok = false;
+          release();
+          const done = await page
+            .waitForFunction(
+              () => {
+                const sec = document.querySelector('section.metrics');
+                return (
+                  !sec?.querySelector('.hm-wait') &&
+                  !!sec?.querySelector('.hm-svg .hm-ok, .hm-svg .hm-call')
+                );
+              },
+              undefined,
+              { timeout: 8000 },
+            )
+            .then(() => true)
+            .catch(() => false);
+          if (!done) ng('読めた後に待ちが消えない / マスが出ない');
+          const before = await holdPlace(page);
+          await page.click('section.metrics .hm-toggle');
+          await twoFrames(page);
+          await page.waitForTimeout(100);
+          const after = await page.evaluate(() => {
+            const host = document.querySelector('section.metrics .panel-body');
+            return host
+              ? { scrollTop: host.scrollTop, maxTop: host.scrollHeight - host.clientHeight }
+              : null;
+          });
+          const want =
+            before && after ? Math.min(before.scrollTop, Math.max(0, after.maxTop)) : null;
+          if (!after || want === null || Math.abs(after.scrollTop - want) > 1)
+            ng(
+              `閉じたときに動いた ${before?.scrollTop} → ${after?.scrollTop}（最大 ${after?.maxTop}）`,
+            );
+          console.log(
+            `${lbl}: 開いた直後 見出し ${r ? Math.round(r.btnTop - r.hostTop) : '?'}px・描画域の下端の余り ${r ? Math.round(r.hostBottom - r.plotBottom) : '?'}px・枠 ${Math.round(wv.plotH)}px・待ち「${wv.text}」・スピナー ${wv.anim} ${ok ? 'pass' : '← NG'}`,
+          );
+        }
+        holdStats.total++;
+        if (ok) holdStats.pass++;
+        else failed = true;
+        await ctx.close();
+      }
+    }
+  }
+}
 
 /**
  * 追証の線（#131 AC16・AC20 の画面側）: 全域まで縮小して、縦の破線 line.mcall が 1 本以上・札「追証」が同じ数で
@@ -2561,6 +2741,95 @@ async function runFlows() {
   await ivCrossFlows(pc);
   await ivCrossTouchFlow();
   for (const vp of [phone, { width: 900, height: 1100 }]) await ivDockFlows(vp);
+  // #174 持ちこたえマップの開閉の時間・開いたときの滑らかなスクロールとスピナー（AC4）
+  for (const vp of [pc, phone]) await holdToggleFlow(vp);
+}
+
+/**
+ * #174 AC4: 持ちこたえマップの見出しのクリックから rAF 2 回までの時間（開・閉 各 5 回の中央値 ≤ 100ms）。初めて開いたとき
+ * （/fixtures/atm_daily を止めた間）はスピナーが回り（animation-name hm-spin）、滑らかなスクロールが止まった後に描画域が
+ * 枠の中（AC2 (a)）。スマホは指標 peek
+ */
+async function holdToggleFlow(vp) {
+  const tag = `${vp.width}x${vp.height}`;
+  const ctx = await newContext(vp, {
+    [WORKSPACE_KEY]: sellFive,
+    [PREFS_KEY]: prefsText('dark', { capital_yen: MARGIN_CAPITAL }),
+  });
+  const page = await ctx.newPage();
+  const release = await holdDailyGate(page);
+  await page.goto(pageUrl('next'));
+  await waitReady(page, 'next');
+  if (vp.width <= PHONE_MAX)
+    check(`#174 ${tag} ドックで「指標」を開く（peek）`, await setShell(page, 'metrics', 'peek'));
+  await holdScrollBottom(page);
+  await page.waitForTimeout(50);
+  await page.click('section.metrics .hm-toggle');
+  await page.waitForSelector('section.metrics .hm-wait', { timeout: 3000 }).catch(() => {});
+  const anim = await page.evaluate(() => {
+    const spin = document.querySelector('section.metrics .hm-wait .hm-spin');
+    return spin ? getComputedStyle(spin).animationName : null;
+  });
+  check(`#174 ${tag} 読み込み中はスピナーが回る`, anim === 'hm-spin', `animation-name ${anim}`);
+  // 滑らかなスクロールが止まるまで（scrollTop が 3 フレーム変わらない）
+  await page.evaluate(
+    () =>
+      new Promise((res) => {
+        const host = document.querySelector('section.metrics .panel-body');
+        let last = -1;
+        let same = 0;
+        const t0 = performance.now();
+        const tick = () => {
+          const v = host?.scrollTop ?? 0;
+          same = v === last ? same + 1 : 0;
+          last = v;
+          if (same >= 3 || performance.now() - t0 > 2000) res(null);
+          else requestAnimationFrame(tick);
+        };
+        requestAnimationFrame(tick);
+      }),
+  );
+  const r = await holdPlace(page);
+  check(
+    `#174 ${tag} 開いたら（滑らかなスクロールの後）描画域が枠の中（入る幅では見出しも）`,
+    holdPlaced(r),
+    r
+      ? `見出し ${Math.round(r.btnTop - r.hostTop)}px・下端の余り ${Math.round(r.hostBottom - r.plotBottom)}px`
+      : 'なし',
+  );
+  release();
+  await page
+    .waitForFunction(() => !document.querySelector('section.metrics .hm-wait'), undefined, {
+      timeout: 8000,
+    })
+    .catch(() => {});
+  const times = { open: [], close: [] };
+  for (let i = 0; i < 10; i++) {
+    const t = await page.evaluate(
+      () =>
+        new Promise((res) => {
+          const b = document.querySelector('section.metrics .hm-toggle');
+          const t0 = performance.now();
+          b?.click();
+          requestAnimationFrame(() => requestAnimationFrame(() => res(performance.now() - t0)));
+        }),
+    );
+    // i = 0 は閉じる（開いている）。交互
+    (i % 2 === 0 ? times.close : times.open).push(t);
+    await page.waitForTimeout(400);
+  }
+  const median = (a) => {
+    const v = [...a].sort((x, y) => x - y);
+    return v[Math.floor(v.length / 2)] ?? Number.NaN;
+  };
+  const mo = median(times.open);
+  const mc = median(times.close);
+  check(
+    `#174 ${tag} 開閉のクリックから rAF 2 回まで（中央値 ≤ 100ms）`,
+    mo <= 100 && mc <= 100,
+    `開 ${mo.toFixed(1)}ms・閉 ${mc.toFixed(1)}ms（各 5 回）`,
+  );
+  await ctx.close();
 }
 
 // ---- 舞台の手順（#82）
