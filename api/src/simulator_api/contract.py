@@ -106,6 +106,15 @@ RELATIONS = {
         ),
         required=frozenset({"created_at"}),
     ),
+    # 先物推移（/api/future_bars、#190）。future_price と同じテーブル関数を範囲で読む（範囲の全スナップショット）。
+    # 足は sql/future_bars.sql が price_time で束ねる。contract_month は照合のログだけ（限月は取引カレンダーから求める）
+    "future_bars": Relation(
+        name="future_price_latest",
+        schema_file="tokyo/future_price.json",
+        columns=(("created_at", "TIMESTAMP"), ("price", "FLOAT"), ("price_time", "DATETIME"),
+                 ("contract_month", "DATE")),
+        required=frozenset({"created_at", "contract_month"}),
+    ),
 }
 
 # 集計して返すクエリの結果の列（名前 → (列, 型)。dry run の job.schema と比べる）。無いクエリは RELATIONS の columns
@@ -126,6 +135,15 @@ OUTPUTS: dict[str, tuple[tuple[str, str], ...]] = {
         ("m1_forward", "FLOAT"),
         ("m2_last_trading_day", "DATE"),
         ("m2_forward", "FLOAT"),
+    ),
+    "future_bars": (
+        ("started_at", "TIMESTAMP"),
+        ("open", "FLOAT"),
+        ("high", "FLOAT"),
+        ("low", "FLOAT"),
+        ("close", "FLOAT"),
+        ("last_at", "TIMESTAMP"),
+        ("contract_month", "DATE"),
     ),
 }
 

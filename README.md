@@ -71,14 +71,18 @@
   </tr>
 </table>
 
-### 市場: 板・スマイル・IV 推移
+### 市場: 板・スマイル・IV 推移・先物推移
 
-板の bid を押すと売り、ask を押すと買いの足が入ります。スマイルは OTM 側の bid / ask / mid の IV と、節点・補間・外挿の線（不安定な点は ×）。点を選ぶと、板と同じ規則で足を入れる操作行が出ます。IV 推移は ATM IV（30 日固定）のローソク足 / 線で、十字線・左へのパンで過去を追加読み込み、シナリオの水準の線。
+板の bid を押すと売り、ask を押すと買いの足が入ります。スマイルは OTM 側の bid / ask / mid の IV と、節点・補間・外挿の線（不安定な点は ×）。点を選ぶと、板と同じ規則で足を入れる操作行が出ます。IV 推移は ATM IV（30 日固定）のローソク足 / 線で、十字線・左へのパンで過去を追加読み込み、シナリオの水準の線。先物推移は日経225 先物（ラージ・期近）の値動きを同じ操作で見られます。期近をつないだ足（値は調整しない）で、限月が替わった所に縦の点線と限月の札が出ます。IV 推移と先物を切り替えても、足と見ていた期間はそのままです。
 
 <table>
   <tr>
     <td width="50%"><img src="docs/images/smile.webp" alt="ダーク。11 月限のスマイル。67,750 put を選んで売り 1,920 / 買い 1,935 のボタン"></td>
     <td width="50%"><img src="docs/images/iv-history.webp" alt="ダーク。ATM IV の 1 時間足のローソク足に十字線と札、上にシナリオの水準の破線"></td>
+  </tr>
+  <tr>
+    <td width="50%"><img src="docs/images/fut-history.webp" alt="ダーク。日経225 先物の日足のローソク足に十字線と札、限月が替わった所に縦の点線と 12月限 の札"></td>
+    <td width="50%"></td>
   </tr>
 </table>
 
@@ -123,7 +127,7 @@
 optionchan（毎分取り込んだ板 → BigQuery）
         │  読むだけ（書き込まない）
         ▼
-api/（Python 3.13・Flask）  /api/chain・/api/calendar・/api/atm_iv・/api/atm_daily
+api/（Python 3.13・Flask）  /api/chain・/api/calendar・/api/atm_iv・/api/atm_daily・/api/future_bars
         │  JSON              /api/ai/messages（SSE）──中継──▶ Anthropic Claude（AI を有効にしたときだけ）
         ▼
 ブラウザ（TypeScript + Preact）  model/ の純関数で Black-76・IV・F・スマイル・満期損益・シナリオ・グリーク・証拠金
@@ -144,7 +148,7 @@ api/（Python 3.13・Flask）  /api/chain・/api/calendar・/api/atm_iv・/api/a
 | `model/` | 価格モデル（Black-76・IV・F の推定・スマイルの補間 / 外挿・時間・満期損益・シナリオ・グリーク）。DOM・通信に依存しない純関数 |
 | `data/` | 板の JSON の型と検証、アダプタ、正規化、取引カレンダー |
 | `ui/` | 画面（Vite + Preact 10）。表示モデルは `ui/view/` の純関数 |
-| `api/` | 板・カレンダー・IV 推移を返す API（BigQuery を読むだけ）と AI の中継（`/api/ai/messages`） |
+| `api/` | 板・カレンダー・IV 推移・先物推移を返す API（BigQuery を読むだけ）と AI の中継（`/api/ai/messages`） |
 | `infra/` | Terraform（`bootstrap`・`prod`） |
 | `fixtures/synthetic/` | 合成の板（架空の値） |
 | `tests/` | vitest（文献値・性質テスト・合成板からの回復） |
@@ -269,7 +273,7 @@ GCP_PROJECT_ID=$P GCP_PROJECT_NUMBER=$(gcloud projects describe "$P" --format='v
 
 ## スクリーンショットの撮り直し
 
-この README の画像（`docs/images/*.webp`）は `scripts/readmeShots.mjs` で撮っています。Vite の dev サーバーを中で起こし、**合成の板**（`fixtures/synthetic/latest.json`）と dev サーバーの合成の応答（IV 推移・日次の値・AI の架空の返答。`scripts/devFixtures.mjs`）だけを使います。本番・API・BigQuery・Anthropic には触れません。足・シナリオ・資金（架空の値）は localStorage に入れて開きます。
+この README の画像（`docs/images/*.webp`）は `scripts/readmeShots.mjs` で撮っています。Vite の dev サーバーを中で起こし、**合成の板**（`fixtures/synthetic/latest.json`）と dev サーバーの合成の応答（IV 推移・先物推移・日次の値・AI の架空の返答。`scripts/devFixtures.mjs`）だけを使います。本番・API・BigQuery・Anthropic には触れません。足・シナリオ・資金（架空の値）は localStorage に入れて開きます。
 
 ```sh
 npx playwright install chromium        # 初回だけ

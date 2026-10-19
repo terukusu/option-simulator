@@ -57,7 +57,7 @@ const DOCK_IC: Record<PanelId, ComponentChildren> = {
  * 指標 · テール（見出し行 + .panel-body）は #86 の regions/Metrics.tsx を metrics で受ける。
  * 板・スマイル（見出し行 + .panel-body）は #85 の regions/Board.tsx・Smile.tsx を board / smile で受ける。
  * PC の見出しの市場の Seg（MARKET_VIEWS）はここで作って渡す（板・スマイルの見出し行の子。他の段階は null）。
- * スマホ・タブレットのスマイル（ドックの「IV」）のパネルには [IV 推移 | スマイル]（SMILE_VIEWS。#79・#130）を渡す
+ * スマホ・タブレットのスマイル（ドックの「IV」）のパネルには [IV 推移 | スマイル | 先物]（SMILE_VIEWS。#79・#130・#190）を渡す
  * （板は null のまま）。IV 推移は section.smile の領域に描く（中身は呼び出し側が smileView(state, tier) で選ぶ）。
  * 出し分けは .layout の data-panel・data-sheet・data-market と CSS（style 属性を使わない）。
  * #135 で AI のチャット（regions/AiChat.tsx）を ai で受ける: スマホ・タブレットはドックの 6 つ目 / 5 つ目のパネル、
@@ -113,7 +113,7 @@ export function Shell(p: {
         marketSeg
       ) : (
         <Seg
-          label="IV 推移 / スマイル"
+          label="IV 推移 / スマイル / 先物"
           value={smileValue}
           options={SMILE_VIEWS}
           onChange={(m) => send({ type: 'market', market: m })}
@@ -151,7 +151,9 @@ export function Shell(p: {
       </section>
       <section
         class="market panel side smile"
-        aria-label={smileValue === 'iv' ? 'IV 推移' : 'スマイル'}
+        aria-label={
+          smileValue === 'iv' ? 'IV 推移' : smileValue === 'fut' ? '先物推移' : 'スマイル'
+        }
       >
         {grabber('smile')}
         {p.smile(smileSeg)}

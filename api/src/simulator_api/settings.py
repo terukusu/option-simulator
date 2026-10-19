@@ -64,6 +64,11 @@ ATM_IV_CACHE_SIZE = 64  # キャッシュの件数（キー = (tf, start, end)�
 ATM_IV_MAX_AGE_SECONDS = 60  # Cache-Control（確定していない範囲）
 ATM_IV_SETTLED_MAX_AGE_SECONDS = 3600  # Cache-Control（確定した範囲）
 
+# ---- 先物推移（/api/future_bars。future_price_latest の現在値、#190。docs/design.md 7.1・7.3・13.4） ----
+# 要求・最大日数・既定の範囲・キャッシュ・Cache-Control は IV 推移（ATM_IV_*）と同じ。足は price_time で切るので、
+# created_at は足の上限よりこの分だけ先まで読む（UTC 0 時 = JST 9:00 の境で created_at が 1〜2 分遅れた行を落とさない）
+FUTURE_BARS_READ_AFTER_MINUTES = 10
+
 # ---- 日次の値（/api/atm_daily。表 atm_cm_iv の日中の終値の iv30・1 / 2 限月のフォワード、#152。docs/design.md 7.1・
 # 7.3・13.4） ----
 ATM_DAILY_CLOSE_WINDOW = (time(9, 0), time(15, 0))  # 日中の終値を取る窓（JST。両端含む。この中の最後の行）
@@ -77,7 +82,8 @@ ATM_DAILY_MAX_AGE_SECONDS = 3600  # Cache-Control
 # クエリごとの maximum_bytes_billed の上限（設定の MAX_BYTES_BILLED との小さい方。#79 の判断 6: 予期しない全期間・全列の
 # 読み込みの保険。atm_cm_iv は 2 列で全期間 ≈ 20 MiB、全列 ≈ 112 MiB。atm_cm_daily は 6 列で全期間 ≈ 62 MiB
 # （2026-10-19）、1 年で約 8 MiB 増える）
-QUERY_MAX_BYTES_BILLED: dict[str, int] = {"atm_cm_iv": 64 * MiB, "atm_cm_daily": 128 * MiB}
+# future_bars（#190）は future_price_latest の 4 列で全期間 ≈ 155 MiB、1d 400 日 + 読み足し ≈ 21 MiB（2026-10-19）
+QUERY_MAX_BYTES_BILLED: dict[str, int] = {"atm_cm_iv": 64 * MiB, "atm_cm_daily": 128 * MiB, "future_bars": 64 * MiB}
 
 # ---- 中立の気配の一覧（DATA_SOURCE=quotes。quotes.py・service.QuotesFileService。#154） ----
 QUOTES_MAX_FILE_BYTES = 16 * MiB  # QUOTES_FILE・CALENDAR_FILE の大きさの上限（超えたら読まずに 503）

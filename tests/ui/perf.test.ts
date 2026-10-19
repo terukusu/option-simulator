@@ -38,6 +38,7 @@ import { answerModel, markNumbers, parseAiText } from '../../ui/view/aiText';
 import { atmStrike, boardRows } from '../../ui/view/board';
 import { boardBadges, boardRowTexts } from '../../ui/view/boardPanel';
 import { bookListModel } from '../../ui/view/bookList';
+import { FUT_SERIES, futRollMarks } from '../../ui/view/futHistory';
 import { headerModel, keptBoardNote } from '../../ui/view/header';
 import { hedgeModel } from '../../ui/view/hedge';
 import { holdMapCalcOf, holdMapInput, holdMapPlot, holdMapRooms } from '../../ui/view/holdMap';
@@ -1504,6 +1505,38 @@ describe('性能（#79 IV 推移の 1 フレーム）', () => {
     expect(frame()).toBeGreaterThan(0);
     expectWithinBudget('#130 IV 推移の十字線', frame, { warmup: 10, runs: 30 });
   });
+
+  // #190 AC-7: 先物推移（同じ部品に円の書式と限月交代の印）。1 分足 1 万本の中ほどで限月交代（架空の値）
+  const rollAt = (bars[5000] as (typeof bars)[number]).t;
+  const futs = bars.map((b) => ({
+    t: b.t,
+    o: b.o * 1500,
+    h: b.h * 1500,
+    l: b.l * 1500,
+    c: b.c * 1500,
+    m: b.t < rollAt ? '2026-09' : '2026-12',
+  }));
+  const futSegments = lineSegments(futs, '1m', ntd);
+  for (const mode of ['candle', 'line'] as const) {
+    it(`#190: 先物推移のパンの 1 フレーム（1 分足 ${futs.length.toLocaleString('en-US')} 本・限月交代つき・${mode}）が ${BUDGET_MS} ms 以内`, () => {
+      expect(futSegments).toHaveLength(1); // 期近のつなぎ足（交代で切らない）
+      let tick = 0;
+      const frame = () => {
+        tick = (tick + 1) % 40;
+        const m = ivChartModel({
+          ...input(mode, tick),
+          bars: futs,
+          segments: futSegments,
+          series: FUT_SERIES,
+          now: { index: futs.length, iv: 30_000 },
+        });
+        const rolls = futRollMarks(futs, input(mode, tick).viewport, m.range);
+        return m.candles.length + m.line.length + rolls.length;
+      };
+      expect(frame()).toBeGreaterThan(1000);
+      expectWithinBudget(`#190 先物推移のパン（${mode}）`, frame, { warmup: 10, runs: 30 });
+    });
+  }
 });
 
 /**

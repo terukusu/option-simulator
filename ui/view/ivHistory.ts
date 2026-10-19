@@ -116,7 +116,7 @@ export function sessionMinutesBetween(
   return sum / 60;
 }
 
-/** 線を分けるか（a・b は隣り合う足） */
+/** 線を分けるか（a・b は隣り合う足。先物の限月交代では分けない = 期近のつなぎ足。#190） */
 function isGap(a: IvBar, b: IvBar, tf: IvTf, nonTradingDays: ReadonlySet<string>): boolean {
   if (tf === '1d') {
     for (let d = jstDayIndex(a.t) + 1, end = jstDayIndex(b.t); d < end; d++) {
@@ -150,18 +150,22 @@ export function lineSegments(
   return out;
 }
 
-/** 1 分足 → 5 分・15 分（UNIX 秒で切る。open / close = 最初 / 最後、high / low = 最大 / 最小） */
-export function resampleBars(bars: readonly IvBar[], seconds: number): IvBar[] {
-  const out: IvBar[] = [];
-  let cur: IvBar | null = null;
+/**
+ * 1 分足 → 5 分・15 分（UNIX 秒で切る。open / close = 最初 / 最後、high / low = 最大 / 最小）。他のキー（先物の限月 m）は
+ * 最後の足の値を運ぶ（限月交代は 17:00 = 5 分・15 分の区切りなので足の中で混ざらない）
+ */
+export function resampleBars<B extends IvBar>(bars: readonly B[], seconds: number): B[] {
+  const out: B[] = [];
+  let cur: B | null = null;
   for (const b of bars) {
     const t = Math.floor(b.t / seconds) * seconds;
     if (cur && cur.t === t) {
-      cur.h = Math.max(cur.h, b.h);
-      cur.l = Math.min(cur.l, b.l);
-      cur.c = b.c;
+      const o: number = cur.o;
+      const h = Math.max(cur.h, b.h);
+      const l = Math.min(cur.l, b.l);
+      Object.assign(cur, b, { t, o, h, l });
     } else {
-      cur = { t, o: b.o, h: b.h, l: b.l, c: b.c };
+      cur = { ...b, t };
       out.push(cur);
     }
   }
@@ -169,20 +173,20 @@ export function resampleBars(bars: readonly IvBar[], seconds: number): IvBar[] {
 }
 
 /** 読んだ足（ivSource の足）から表示する足を作る */
-export function barsForTf(bars: readonly IvBar[], tf: IvTf): readonly IvBar[] {
+export function barsForTf<B extends IvBar>(bars: readonly B[], tf: IvTf): readonly B[] {
   return tf === '5m' || tf === '15m' ? resampleBars(bars, IV_TF_SECONDS[tf]) : bars;
 }
 
 /** 時刻をキーにつなぐ（同じ t は新しい方 = next を使う）。どちらも t の昇順 */
-export function mergeBars(prev: readonly IvBar[], next: readonly IvBar[]): IvBar[] {
-  const out: IvBar[] = [];
+export function mergeBars<B extends IvBar>(prev: readonly B[], next: readonly B[]): B[] {
+  const out: B[] = [];
   let i = 0;
   let j = 0;
   while (i < prev.length || j < next.length) {
     const a = prev[i];
     const b = next[j];
     if (b === undefined || (a !== undefined && a.t < b.t)) {
-      out.push(a as IvBar);
+      out.push(a as B);
       i++;
     } else {
       if (a !== undefined && a.t === b.t) i++;
@@ -250,7 +254,8 @@ export function resolveIvViewport(
     const lo = lowerBound(bars, keep.from - sec + 1);
     const hi = lowerBound(bars, keep.to + 1) - 1;
     if (lo <= hi && lo < n && hi >= 0) {
-      const right = keep.right && hi === n - 1 ? full[1] : hi + 0.5;
+      // 右端が見えていたなら右端に付ける（IV 推移 ⇄ 先物の切替で、相手の最後の足が少し古くても最新まで見せる。#190）
+      const right = keep.right ? full[1] : hi + 0.5;
       return clampViewport([lo - 0.5, right], full, minWidth);
     }
   }
@@ -357,6 +362,15 @@ export function ivScenarioLevel(base: number | null, sc: Scenario, x0: number): 
 /** 描画域の余白（px。縦の目盛りは左） */
 export const IV_MARGIN = { left: 40, right: 10, top: 10, bottom: 22 } as const;
 
+/**
+ * 系列の書式（#190。同じ描画域で IV 推移と先物推移を描く）: 読み取り・縦軸の札の値の書式と、縦の目盛りの列の幅（左の
+ * 余白 px）。縦の目盛りのラベルは刻みの桁で決める（どちらも同じ）
+ */
+export interface IvSeries {
+  fmt: (v: number | null | undefined) => string;
+  marginLeft: number;
+}
+
 const pad2 = (n: number) => String(n).padStart(2, '0');
 
 /** JST の暦の値 */
@@ -381,6 +395,9 @@ export function ivTimeText(t: number, tf: IvTf): string {
 /** IV の値（pt。小数 2 桁） */
 export const fmtIvPt = (v: number | null | undefined): string => fmtNum(v, 2);
 
+/** IV 推移の系列（既定） */
+export const IV_SERIES: IvSeries = { fmt: fmtIvPt, marginLeft: IV_MARGIN.left };
+
 export interface IvReadout {
   time: string;
   o: string;
@@ -397,6 +414,7 @@ export function ivReadout(
   tf: IvTf,
   cursor: number | null,
   rightLoaded: boolean,
+  fmt: IvSeries['fmt'] = fmtIvPt,
 ): IvReadout {
   const n = bars.length;
   const i = cursor === null ? n - 1 : Math.min(Math.max(Math.round(cursor), 0), n - 1);
@@ -404,10 +422,10 @@ export function ivReadout(
   if (!b) return { time: DASH, o: DASH, h: DASH, l: DASH, c: DASH, progress: false };
   return {
     time: ivTimeText(b.t, tf),
-    o: fmtIvPt(b.o),
-    h: fmtIvPt(b.h),
-    l: fmtIvPt(b.l),
-    c: fmtIvPt(b.c),
+    o: fmt(b.o),
+    h: fmt(b.h),
+    l: fmt(b.l),
+    c: fmt(b.c),
     progress: rightLoaded && i === n - 1,
   };
 }
@@ -552,6 +570,8 @@ export interface IvChartInput {
   now?: { index: number; iv: number } | null;
   /** シナリオの水準（pt。無ければ null） */
   scenario?: number | null;
+  /** 系列の書式（無ければ IV_SERIES。縦の目盛りの列の幅に使う） */
+  series?: IvSeries;
 }
 
 export interface IvChartModel {
@@ -592,9 +612,10 @@ function lowHigh(bars: readonly IvBar[], i0: number, i1: number): Domain | null 
 export function ivChartModel(p: IvChartInput): IvChartModel {
   const { bars, viewport, width, height } = p;
   const n = bars.length;
-  const w = Math.max(width, IV_MARGIN.left + IV_MARGIN.right + 10);
+  const left = (p.series ?? IV_SERIES).marginLeft;
+  const w = Math.max(width, left + IV_MARGIN.right + 10);
   const h = Math.max(height, IV_MARGIN.top + IV_MARGIN.bottom + 10);
-  const range: Domain = [IV_MARGIN.left, w - IV_MARGIN.right];
+  const range: Domain = [left, w - IV_MARGIN.right];
   const sx = linear(viewport, range);
   // 中心が表示範囲に入る足（線は端の 1 本外まで描いて切る）
   const i0 = Math.max(0, Math.ceil(viewport[0]));
@@ -731,6 +752,8 @@ export interface IvCrosshairInput {
   y: number | null;
   /** ivChartModel の結果（同じ bars・viewport・幅・高さで作ったもの） */
   model: Pick<IvChartModel, 'empty' | 'width' | 'height' | 'range' | 'yDomain'>;
+  /** 縦軸の札の値の書式（無ければ IV の fmtIvPt） */
+  fmt?: IvSeries['fmt'];
 }
 
 /**
@@ -758,7 +781,7 @@ export function ivCrosshair(p: IvCrosshairInput): IvCrosshair | null {
   );
   const xText = ivTimeText(b.t, p.tf);
   const xw = r1(Math.min(labelPx(xText) + IV_TAG_PAD_X, width));
-  const yText = fmtIvPt(linear(yPx, model.yDomain)(y));
+  const yText = (p.fmt ?? fmtIvPt)(linear(yPx, model.yDomain)(y));
   const yw = r1(Math.min(labelPx(yText) + IV_TAG_PAD_Y, width));
   const yRight = range[0] - 1;
   return {

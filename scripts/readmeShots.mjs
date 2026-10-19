@@ -341,6 +341,24 @@ const shots = {
     await save('iv-history', await shotEl(page, 'section.smile'));
     await ctx.close();
   },
+  // 先物推移（日足のローソク足・限月交代の点線と札・十字線。#190）
+  async 'fut-history'() {
+    const { ctx, page } = await open({ ...PC_CROP, theme: 'dark' });
+    await page.click('section.board .panel-head .seg button:text-is("先物")');
+    await page.waitForSelector('section.smile .iv-wrap svg', { timeout: 15000 });
+    await page.click('section.smile .iv-tools button[aria-label="日足"]');
+    // 足の切替は見ていた時間（1 時間足の数日）を保つので、R で日足の初期表示（100 本 = 限月交代を含む）にする
+    await page.waitForTimeout(600);
+    await page.focus('section.smile .iv-wrap');
+    await page.keyboard.press('r');
+    await page.waitForSelector('section.smile .fut-roll', { state: 'attached', timeout: 15000 });
+    await page.waitForTimeout(600);
+    const b = await page.locator('section.smile .iv-wrap').boundingBox();
+    await page.mouse.move(b.x + b.width * 0.75, b.y + b.height * 0.45);
+    await page.waitForTimeout(300);
+    await save('fut-history', await shotEl(page, 'section.smile'));
+    await ctx.close();
+  },
   // コマンドパレット
   async palette() {
     const { ctx, page } = await open({ ...PC, theme: 'dark' });

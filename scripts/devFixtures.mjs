@@ -4,6 +4,8 @@
 // Node の型（@types/node）を入れていないので、型検査の対象外の .mjs に置く（型は devFixtures.d.mts）。
 // IV 推移（#79）の合成の応答も `/fixtures/atm_iv?tf=&start=&end=` で配る（`/api/atm_iv` と同じ形。架空の値。種つきの
 // 決まった関数なので、同じ要求には同じ応答）。Docker の context の許可リストの 1 本なので別ファイルにしない。
+// 先物推移（#190）の合成の応答も `/fixtures/future_bars?tf=&start=&end=` で配る（`/api/future_bars` と同じ形。架空の値。
+// 合成の板 latest の先物の値で終わる決まった関数。既定の 1 時間足の範囲に限月交代（取引最終日の 17:00）を 1 回含む）。
 // 日次の値（#152）の合成の応答も `/fixtures/atm_daily` で配る（`/api/atm_daily` と同じ形。架空の値。種つき）。
 // AI の中継（#135）の偽の応答も `/fixtures/ai/status`・`/fixtures/ai/messages`（偽の SSE。Anthropic を呼ばない）で配る。
 // 診断 = 考え中 → 文（事前計算の値を書き写す）、追加の質問 = tool_use（evaluate_scenario）→ 道具の結果を受けて文。
@@ -188,6 +190,116 @@ export function atmIvQuery(url) {
   const end = Math.min(end0, (Math.floor(SYNTH_IV_NOW / DAY) + 1) * DAY);
   if (start < IV_EPOCH || !(start < end) || end - start > IV_MAX_DAYS[tf] * DAY) return null;
   return { tf, range: { start, end } };
+}
+
+// ---- 先物推移の合成の応答（#190。架空の値）
+const FUTURE_BARS_PATH = '/fixtures/future_bars';
+/**
+ * 合成の板 latest の先物の値（「今」の値。架空）。初めて使うときに読む（import では読まない = イメージのビルドには
+ * fixtures/ が入らない。.dockerignore）
+ */
+let synthFutPrice = null;
+function futNowPrice() {
+  synthFutPrice ??= JSON.parse(readFileSync(join(syntheticDir, 'latest.json'), 'utf8')).future
+    .price;
+  return synthFutPrice;
+}
+/** 表の最後の行 = 今の 2 分前（先物は毎分取り込む想定） */
+export const SYNTH_FUT_LAST_AT = SYNTH_IV_NOW - 2 * 60;
+/** 限月交代の跳び（新しい限月 / 古い限月 − 1。架空） */
+export const SYNTH_FUT_ROLL_JUMP = 0.003;
+
+/** t（UNIX 秒）の限月（取引日以後に取引最終日がある最初の四半期限月。YYYY-MM） */
+const futContractMemo = new Map();
+function futContractOf(t) {
+  // 取引日の候補（JST + 7 時間の日付）ごとに 1 回だけ求める
+  const memoKey = Math.floor((t + JST + 7 * 3600) / DAY);
+  const hit = futContractMemo.get(memoKey);
+  if (hit) return hit;
+  const m = contractOfDay((tradingDayStart(t) + JST) / DAY);
+  futContractMemo.set(memoKey, m);
+  return m;
+}
+
+function contractOfDay(day) {
+  const y0 = new Date(day * DAY * 1000).getUTCFullYear();
+  for (let y = y0; y <= y0 + 1; y++) {
+    for (const m of [3, 6, 9, 12]) {
+      if (lastTradingDayOf(y, m) >= day) return `${y}-${String(m).padStart(2, '0')}`;
+    }
+  }
+  return `${y0 + 1}-03`;
+}
+
+/** その分の先物の値（円。今の限月の値で今の値に終わる。古い限月は SYNTH_FUT_ROLL_JUMP だけ低い） */
+function futAt(t, m, nowM) {
+  const tau = 2 * Math.PI;
+  const f = (x) =>
+    0.045 * Math.sin((tau * x) / (DAY * 41)) +
+    0.012 * Math.sin((tau * x) / (DAY * 3.7)) +
+    0.0012 * Math.sin((tau * x) / 2400);
+  const noise = 0.0006 * (hash01(Math.floor(t / 60) + 7) - 0.5);
+  const level = futNowPrice() * Math.exp(f(t) - f(SYNTH_IV_NOW) + noise);
+  const v = m === nowM ? level : level / (1 + SYNTH_FUT_ROLL_JUMP);
+  return Math.round(v / 5) * 5;
+}
+
+/**
+ * `/api/future_bars` と同じ形の合成の応答（架空の値）。足の作り・範囲・日足の規則は synthAtmIv と同じ（欠けは無い）。
+ * 各足に限月 m（日足はその取引日の限月）
+ */
+const futCache = new Map();
+export function synthFutureBars(tf, range = null, now = SYNTH_IV_NOW) {
+  const key = `${tf} ${range?.start} ${range?.end} ${now}`;
+  if (!futCache.has(key)) {
+    if (futCache.size > 32) futCache.clear();
+    futCache.set(key, buildSynthFutureBars(tf, range, now));
+  }
+  return futCache.get(key);
+}
+
+function buildSynthFutureBars(tf, range, now) {
+  const spec = IV_TF[tf];
+  if (!spec) return null;
+  const [step, chunk] = spec;
+  const end = range ? range.end : (Math.floor(now / DAY) + 1) * DAY;
+  const start = range ? range.start : end - chunk * DAY;
+  const readStart = tf === '1d' ? start - 10 * DAY : start;
+  const readEnd = Math.min(tf === '1d' ? end + DAY : end, SYNTH_FUT_LAST_AT + 1);
+  const nowM = futContractOf(SYNTH_IV_NOW);
+  const bars = [];
+  let lastAt = null;
+  let cur = null;
+  for (let t = Math.max(readStart, SYNTH_IV_FIRST); t < readEnd; t += 60) {
+    if (!inSession(t)) continue;
+    if (t >= start && t < end) lastAt = t;
+    const m = futContractOf(t);
+    const v = futAt(t, m, nowM);
+    const k = tf === '1d' ? tradingDayStart(t) : Math.floor(t / step) * step;
+    if (!cur || cur.key !== k) {
+      cur = { key: k, o: v, h: v, l: v, c: v, m };
+      bars.push(cur);
+      continue;
+    }
+    cur.h = Math.max(cur.h, v);
+    cur.l = Math.min(cur.l, v);
+    cur.c = v;
+  }
+  let out = bars;
+  if (tf === '1d') {
+    const first = tradingDayStart(readStart - 1);
+    out = out.filter((b) => b.key > first && b.key >= start && (end >= now || b.key < end));
+  } else {
+    out = out.filter((b) => b.key >= start && b.key < end);
+  }
+  return {
+    schema_version: 1,
+    tf,
+    start: jstIso(start),
+    end: jstIso(Math.min(end, Math.floor(now))),
+    last_at: lastAt === null ? null : jstIso(lastAt),
+    bars: out.map((b) => ({ t: jstIso(b.key), o: b.o, h: b.h, l: b.l, c: b.c, m: b.m })),
+  };
 }
 
 // ---- 日次の値の合成の応答（#152。架空の値）
@@ -462,9 +574,12 @@ export function serveSyntheticFixtures() {
           res.end(JSON.stringify(synthAtmDaily()));
           return;
         }
-        if (path === ATM_IV_PATH) {
+        if (path === ATM_IV_PATH || path === FUTURE_BARS_PATH) {
+          // 検査はサーバーと同じ（/api/future_bars は /api/atm_iv と同じ parse_request）
           const q = atmIvQuery(req.url ?? '');
-          const body = q && synthAtmIv(q.tf, q.range);
+          const body =
+            q &&
+            (path === ATM_IV_PATH ? synthAtmIv(q.tf, q.range) : synthFutureBars(q.tf, q.range));
           res.setHeader('Content-Type', 'application/json; charset=utf-8');
           res.setHeader('Cache-Control', 'no-store');
           if (!body) {

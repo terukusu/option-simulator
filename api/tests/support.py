@@ -103,6 +103,8 @@ class World:
         self.cm: list[tuple[datetime, float | None]] = []  # atm_cm_iv の (created_at, iv30)
         # atm_cm_iv の行（created_at・iv30・m1_last_trading_day・m1_forward・m2_last_trading_day・m2_forward。#152）
         self.cm_daily: list[dict] = []
+        # future_price_latest を範囲で読む行（created_at・price・price_time・contract_month。#190）
+        self.fut: list[dict] = []
 
     def add(self, at, options, future_price, spot_price=None, rows_option=800, finished_after=40):
         """rows_option は latest_runs の行数（判定用の小さな板でも既定は 800 行として扱う）"""
@@ -195,6 +197,8 @@ class FakeRunner:
             return cm_bars([p for p in w.cm if start <= p[0] < end], params["step"])
         if name == "atm_cm_daily":
             return cm_daily([r for r in w.cm_daily if start <= r["created_at"] < end])
+        if name == "future_bars":
+            return fut_bars([r for r in w.fut if start <= r["created_at"] < end], params["step"])
         if name == "latest_runs":
             rows = [dict(r) for r in w.runs if start <= r["snapshot_at"] < end]
             return sorted(rows, key=lambda r: r["snapshot_at"], reverse=True)
@@ -227,6 +231,35 @@ def cm_bars(points: list[tuple], step: int) -> list[dict]:
                      "high": max(vals) if vals else None, "low": min(vals) if vals else None,
                      "close": vals[-1] if vals else None, "last_at": max(at for at, _ in ps)})
     return rows
+
+
+def fut_row(created_at: datetime, price, traded: datetime | None = None, contract_month=date(2026, 12, 1)) -> dict:
+    """合成の future_price_latest の 1 行（#190。架空の値）。traded は約定の時刻（既定は created_at の分）。
+    price_time は JST の壁時計（DATETIME）"""
+    t = created_at if traded is None else traded
+    return {"created_at": created_at, "price": price, "price_time": wall_of(t.replace(second=0, microsecond=0)),
+            "contract_month": contract_month}
+
+
+def fut_bars(rows: list[dict], step: int) -> list[dict]:
+    """sql/future_bars.sql と同じ束ね方（偽の runner 用）: price > 0 かつ price_time が NULL でない行を
+    price_time（JST）の UNIX 秒で step 秒に切り、open / close = (traded_at, created_at) の順で最初 / 最後、
+    high / low = 最大 / 最小、last_at = created_at の最大、contract_month = 最大"""
+    groups: dict[int, list[tuple]] = {}
+    for r in rows:
+        if r["price"] is None or r["price"] <= 0 or r["price_time"] is None:
+            continue
+        traded = r["price_time"].replace(tzinfo=JST)
+        ts = int(traded.timestamp())
+        groups.setdefault(ts - ts % step, []).append((traded, r["created_at"], r))
+    out = []
+    for key in sorted(groups):
+        ps = sorted(groups[key], key=lambda p: (p[0], p[1]))
+        prices = [p[2]["price"] for p in ps]
+        out.append({"started_at": datetime.fromtimestamp(key, UTC), "open": prices[0], "high": max(prices),
+                    "low": min(prices), "close": prices[-1], "last_at": max(p[1] for p in ps),
+                    "contract_month": max(p[2]["contract_month"] for p in ps)})
+    return out
 
 
 def cm_daily_row(at: datetime, iv30=20.0, f1=30000.0, l1=date(2026, 11, 12), f2=30010.0,

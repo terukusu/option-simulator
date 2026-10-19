@@ -2,6 +2,7 @@
  * IV 推移（#79。docs/ui-redesign.md §4.7）。部品は ui/next/market/IvHistory.tsx・IvPlot.tsx。PC は市場の列の section.smile、
  * スマホ・タブレットはスマイルのパネルに描く（.panel-body.market-body はスクロールしない。market.css）。
  * 色はトークンだけ（ローソクの陽線 / 陰線 = --gain / --loss、線 = --accent、進行中の足 = 薄く）。
+ * 先物推移（#190。ui/next/market/FutHistory.tsx）も同じ部品・同じクラスで描き、限月交代の印（.fut-roll）だけを足す。
  */
 
 /* ===== 道具の行（足・ローソク / 線・最新化）。360px に 1 行で入るよう Seg の左右を詰める ===== */
@@ -67,7 +68,8 @@
   color: var(--ink-2);
 }
 
-.iv-readout > .tag {
+.iv-readout > .tag,
+.iv-readout > .contract {
   color: var(--ink-3);
   font-family: var(--font);
 }
@@ -178,6 +180,22 @@
   stroke-width: 1.25;
 }
 
+/* 限月交代（#190。先物推移。期近のつなぎ足）: 交代の足の左の縦の点線（いつも薄く）と新しい限月の札（混むときは線だけ） */
+.iv-wrap .fut-roll {
+  opacity: 0.55;
+  stroke: var(--ink-3);
+  stroke-dasharray: 2 3;
+}
+
+.iv-wrap .fut-roll-tag {
+  dominant-baseline: hanging;
+  fill: var(--ink-2);
+  font-size: var(--fs-xs);
+  paint-order: stroke;
+  stroke: var(--s1);
+  stroke-width: 3;
+}
+
 .iv-wrap .iv-cursor {
   stroke: var(--ink-3);
   stroke-dasharray: 2 3;
@@ -282,6 +300,32 @@
   }
 
   section.market .panel-head .seg.zoom > button {
+    padding: 0 5px;
+  }
+}
+
+/* 先物を足して市場の Seg が 4 つ（#190）: 1200〜1279px（列 360〜384px）ではさらに詰める（スマイルの見出しが切れないように） */
+@media (min-width: 1200px) and (max-width: 1279.98px) {
+  section.market .panel-head .seg > button,
+  section.market .panel-head .seg.zoom > button {
+    padding: 0 4px;
+  }
+}
+
+/*
+ * スマホ・タブレットの IV のパネルの見出しの Seg が 3 つ（[IV 推移 | スマイル | 先物]。#190）になったので、市場の列の狭い
+ * PC と同じく見出し行の Seg・拡大のボタンの左右を詰める（スマイルの見出し「スマイル」が 360px で切れないように）
+ */
+@media (max-width: 1199.98px) {
+  section.smile .panel-head {
+    gap: 6px;
+  }
+
+  section.smile .panel-head .seg > button {
+    padding: 0 6px;
+  }
+
+  section.smile .panel-head .seg.zoom > button {
     padding: 0 5px;
   }
 }

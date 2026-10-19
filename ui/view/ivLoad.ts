@@ -19,6 +19,9 @@
  * - 追加読み込みのきっかけは利用者の表示範囲の変化（パン・拡大縮小・足の切替・最初の表示）だけ。フックがそのたびに
  *   nudge を 1 進め、edge は同じ nudge では 1 回しか読まない（読み込みが終わって足が増えただけでは次を読まない =
  *   端に居続けても読み続けない）。例外は空の左の連鎖（IV_EMPTY_LIMIT 回まで）
+ * - 先物推移（#190）も同じ reducer を使う（足の型 B は総称。先物は限月 m を持つ FutBar）。IV 推移とは状態を別に持つ。
+ *   open の at（IV 推移 ⇄ 先物の切替で受け取った見ていた時間の範囲）が読み済みの外なら、setTf と同じくその時間の
+ *   1 回分を読む
  */
 
 import type { AtmIvData, AtmIvSource, IvBar } from '../../data';
@@ -48,9 +51,14 @@ export const IV_PROGRESS_SECONDS = 3 * 3600;
 const floorDay = (t: number) => Math.floor(t / DAY_S) * DAY_S;
 const ceilDay = (t: number) => Math.ceil(t / DAY_S) * DAY_S;
 
+/** 応答（検証済み。足の型 B は総称 = IV は IvBar、先物は FutBar） */
+export interface IvData<B extends IvBar = IvBar> extends Omit<AtmIvData, 'bars'> {
+  bars: B[];
+}
+
 /** 読み済みの足（時刻は UNIX 秒） */
-export interface IvEntry {
-  bars: IvBar[];
+export interface IvEntry<B extends IvBar = IvBar> {
+  bars: B[];
   /** 読み済みの範囲 [start, end)（隙間なし。離れた応答は置き換える） */
   start: number;
   /** 右端まで読んであれば、最後の右端の応答の end（= サーバーの now） */
@@ -82,7 +90,7 @@ export interface IvRequest {
   range?: IvRange;
 }
 
-export interface IvLoadState {
+export interface IvLoadState<B extends IvBar = IvBar> {
   tf: IvTf;
   /** 足を替えるたびに 1 進む（違う世代の応答は捨てる） */
   gen: number;
@@ -90,7 +98,7 @@ export interface IvLoadState {
   nextId: number;
   /** IV 推移が一度でも見えた */
   opened: boolean;
-  entries: Partial<Record<AtmIvSource, IvEntry>>;
+  entries: Partial<Record<AtmIvSource, IvEntry<B>>>;
   inflight: IvRequest | null;
   /** 失敗した要求（[再試行] で同じ足・同じ側・同じ範囲をもう 1 回） */
   error: { src: AtmIvSource; side: IvSide; range?: IvRange } | null;
@@ -112,28 +120,41 @@ export const INITIAL_IV_LOAD: IvLoadState = {
   edgeNudge: -1,
 };
 
-export type IvLoadAction =
-  | { type: 'open' }
+/** 見ていた時間の範囲（right = 右端の足が見えていた） */
+export type IvAt = { from: number; to: number; right: boolean } | null;
+
+export type IvLoadAction<B extends IvBar = IvBar> =
+  /** at = 別の見え方（IV 推移 ⇄ 先物）で見ていた時間の範囲（読み済みの外ならその 1 回分を読む） */
+  | { type: 'open'; at?: IvAt }
   | { type: 'refresh' }
   /** at = 替える前に見ていた時間の範囲（右端が見えていたら right） */
-  | { type: 'setTf'; tf: IvTf; at?: { from: number; to: number; right: boolean } | null }
+  | { type: 'setTf'; tf: IvTf; at?: IvAt }
   /** nudge = 利用者が表示範囲を変えた回数（フックが数える。同じ nudge では 1 回だけ読む） */
   | { type: 'edge'; left: boolean; right: boolean; nudge: number }
-  | { type: 'loaded'; id: number; data: AtmIvData }
+  | { type: 'loaded'; id: number; data: IvData<B> }
   | { type: 'failed'; id: number }
   | { type: 'retry' };
 
-export interface IvLoadResult {
-  state: IvLoadState;
+export interface IvLoadResult<B extends IvBar = IvBar> {
+  state: IvLoadState<B>;
   /** 出す要求（無ければ null） */
   request: IvRequest | null;
   /** 止める要求の id（無ければ null） */
   abort: number | null;
 }
 
-const none = (state: IvLoadState): IvLoadResult => ({ state, request: null, abort: null });
+const none = <B extends IvBar>(state: IvLoadState<B>): IvLoadResult<B> => ({
+  state,
+  request: null,
+  abort: null,
+});
 
-function issue(s: IvLoadState, src: AtmIvSource, side: IvSide, range?: IvRange): IvLoadResult {
+function issue<B extends IvBar>(
+  s: IvLoadState<B>,
+  src: AtmIvSource,
+  side: IvSide,
+  range?: IvRange,
+): IvLoadResult<B> {
   const request: IvRequest = range
     ? { id: s.nextId, src, side, gen: s.gen, range }
     : { id: s.nextId, src, side, gen: s.gen };
@@ -170,14 +191,14 @@ export function ivRangeAt(t: number, src: AtmIvSource): IvRange {
  * 応答を読み済みの足につなぐ。離れていれば置き換える。覚える範囲の上限を超えたら遠い側を捨てる。
  * 右端に届いたか = 範囲なしの要求か、サーバーが end を縮めた（応答の end < 要求の end）
  */
-export function mergeIvEntry(
-  prev: IvEntry | undefined,
-  data: AtmIvData,
+export function mergeIvEntry<B extends IvBar>(
+  prev: IvEntry<B> | undefined,
+  data: IvData<B>,
   req: Pick<IvRequest, 'src' | 'side' | 'range'>,
-): IvEntry {
+): IvEntry<B> {
   const reached = !req.range || data.end < req.range.end;
   const left = req.side === 'left';
-  let e: IvEntry;
+  let e: IvEntry<B>;
   if (!prev || data.start > prev.end || data.end < prev.start) {
     e = {
       bars: data.bars,
@@ -231,13 +252,26 @@ export function mergeIvEntry(
 /** 範囲 [from, to] が読み済みの範囲と重なるか */
 const overlaps = (e: IvEntry, from: number, to: number) => to >= e.start && from < e.end;
 
-export function ivLoadReduce(s: IvLoadState, a: IvLoadAction): IvLoadResult {
+/** 見ていた時間（at）が読み済みの中か（右端が見えていたなら、右端まで読んであるか）。at が無ければ読み済みがあるか */
+const covers = (e: IvEntry | undefined, at: IvAt): boolean =>
+  !!e && (!at || (at.right ? e.rightLoaded : overlaps(e, at.from, at.to)));
+
+/** 見ていた時間の 1 回分（右端が見えていた・無ければ右端の 1 回分） */
+function issueAt<B extends IvBar>(s: IvLoadState<B>, src: AtmIvSource, at: IvAt): IvLoadResult<B> {
+  return at && !at.right ? issue(s, src, 'jump', ivRangeAt(at.to, src)) : issue(s, src, 'right');
+}
+
+export function ivLoadReduce<B extends IvBar>(
+  s: IvLoadState<B>,
+  a: IvLoadAction<B>,
+): IvLoadResult<B> {
   switch (a.type) {
     case 'open': {
       const src = ivSource(s.tf);
       const opened = s.opened ? s : { ...s, opened: true };
-      if (opened.entries[src] || opened.inflight || opened.error) return none(opened);
-      return issue(opened, src, 'right');
+      if (opened.inflight || opened.error) return none(opened);
+      if (covers(opened.entries[src], a.at ?? null)) return none(opened);
+      return issueAt(opened, src, a.at ?? null);
     }
     case 'refresh': {
       if (!s.opened || s.inflight) return none(s);
@@ -247,7 +281,7 @@ export function ivLoadReduce(s: IvLoadState, a: IvLoadAction): IvLoadResult {
       if (a.tf === s.tf) return none(s);
       const src = ivSource(a.tf);
       const gen = s.gen + 1;
-      let next: IvLoadState = { ...s, tf: a.tf, gen, error: null };
+      let next: IvLoadState<B> = { ...s, tf: a.tf, gen, error: null };
       let abort: number | null = null;
       if (s.inflight) {
         if (s.inflight.src === src) next = { ...next, inflight: { ...s.inflight, gen } };
@@ -257,16 +291,10 @@ export function ivLoadReduce(s: IvLoadState, a: IvLoadAction): IvLoadResult {
         }
       }
       if (!next.opened || next.inflight) return { state: next, request: null, abort };
-      const e = next.entries[src];
       const at = a.at ?? null;
       // 見ていた時間が読み済みの外（右端が見えていたなら、右端まで読んでいない）なら、その時間の 1 回分
-      const inside = e && (!at || (at.right ? e.rightLoaded : overlaps(e, at.from, at.to)));
-      if (inside) return { state: next, request: null, abort };
-      const r =
-        at && !at.right
-          ? issue(next, src, 'jump', ivRangeAt(at.to, src))
-          : issue(next, src, 'right');
-      return { ...r, abort };
+      if (covers(next.entries[src], at)) return { state: next, request: null, abort };
+      return { ...issueAt(next, src, at), abort };
     }
     case 'edge': {
       if (!s.opened || s.inflight || s.error || a.nudge <= s.edgeNudge) return none(s);
@@ -300,7 +328,7 @@ export function ivLoadReduce(s: IvLoadState, a: IvLoadAction): IvLoadResult {
       }
       if (f.gen !== s.gen) return none({ ...s, inflight: null });
       const entry = mergeIvEntry(s.entries[f.src], a.data, f);
-      const next: IvLoadState = {
+      const next: IvLoadState<B> = {
         ...s,
         inflight: null,
         error: null,
@@ -339,8 +367,10 @@ export function ivInProgress(e: IvEntry | null): boolean {
 }
 
 /** 今の足の読み済み（無ければ null）・読み中の側・失敗の側 */
-export function ivLoadView(s: IvLoadState): {
-  entry: IvEntry | null;
+export function ivLoadView<B extends IvBar>(
+  s: IvLoadState<B>,
+): {
+  entry: IvEntry<B> | null;
   loading: boolean;
   /** 読み中の要求の側（今の足のとき。無ければ null） */
   pending: IvSide | null;

@@ -470,6 +470,91 @@ def test_atm_iv_file_source_is_503(tmp_path):
     assert client.get("/api/atm_iv?tf=5m").status_code == 400
 
 
+# ---- /api/future_bars（#190 AC-5） ----
+
+def fut_world():
+    from support import fut_row
+
+    w = World()
+    w.add_fixture(load_fixture("latest"))
+    t = jst(2026, 10, 13, 8, 45)
+    while t < jst(2026, 10, 13, 21, 0):
+        w.fut.append(fut_row(t, 30000.0 + t.minute))
+        t += timedelta(minutes=1)
+    return w
+
+
+def test_future_bars_ok_headers():
+    client, runner, _ = make(world=fut_world())
+    res = client.get("/api/future_bars?tf=1h")
+    assert res.status_code == 200
+    assert res.headers["Content-Type"] == "application/json; charset=utf-8"
+    assert res.headers["Cache-Control"] == "private, max-age=60"
+    assert "ETag" not in res.headers
+    assert_security_headers(res)
+    body = res.get_json()
+    assert set(body) == {"schema_version", "tf", "start", "end", "last_at", "bars"}
+    assert body["schema_version"] == 1 and body["tf"] == "1h" and body["bars"]
+    assert set(body["bars"][0]) == {"t", "o", "h", "l", "c", "m"}
+    assert sorted(runner.names()) == ["future_bars", "trading_calendar"]  # 板・IV は読まない
+    gz = client.get("/api/future_bars?tf=1h", headers={"Accept-Encoding": "gzip"})
+    assert gz.headers["Content-Encoding"] == "gzip" and json.loads(gzip.decompress(gz.data)) == body
+    assert runner.count("future_bars") == 1  # 2 回目はキャッシュ
+
+
+def test_future_bars_settled_cache_control():
+    client, _, _ = make(world=fut_world())
+    res = client.get("/api/future_bars?tf=1h&start=2026-09-01T00:00:00Z&end=2026-10-11T00:00:00Z")
+    assert res.status_code == 200 and res.headers["Cache-Control"] == "private, max-age=3600"
+
+
+@pytest.mark.parametrize("query", [
+    {"tf": "5m"},
+    {},
+    {"tf": "1h", "start": "2026-10-01T00:00:00Z"},
+    {"tf": "1h", "start": "2026-10-01T03:00:00Z", "end": "2026-10-02T00:00:00Z"},
+    {"tf": "1m", "start": "2026-09-01T00:00:00Z", "end": "2026-09-05T00:00:00Z"},
+])
+def test_future_bars_bad_request_logs_param_only(query, capsys):
+    client, runner, _ = make(world=fut_world())
+    probe = "<script>x</script>"
+    q = dict(query)
+    q["tf"] = q.get("tf", "") + ("" if q.get("tf") in ("1h", "1m") else probe)
+    res = client.get("/api/future_bars", query_string=q)
+    assert res.status_code == 400 and res.get_json() == {"error": "bad_request"}
+    assert res.headers["Cache-Control"] == "no-store"
+    assert b"script" not in res.data and b"2026" not in res.data
+    out = capsys.readouterr().out
+    assert "script" not in out and "2026-09" not in out and "2026-10" not in out
+    rec = json.loads(out.splitlines()[-1])
+    assert rec["event"] == "bad_request" and rec["endpoint"] == "future_bars"
+    assert set(rec) >= {"param"} and rec["param"] in ("tf", "start", "end", "range")
+    assert runner.calls == []
+
+
+def test_future_bars_runner_error_is_503_with_type_only(capsys):
+    secret = "projects/123456: bytesBilledLimitExceeded for user@example.com"
+    client, _, _ = make(world=fut_world(), errors={"future_bars": RuntimeError(secret)})
+    res = client.get("/api/future_bars?tf=1h")
+    assert res.status_code == 503 and res.get_json() == {"error": "unavailable"}
+    out = capsys.readouterr().out
+    assert "123456" not in out and "example.com" not in out
+    rec = [json.loads(line) for line in out.splitlines() if '"query_failed"' in line][-1]
+    assert rec["endpoint"] == "future_bars" and rec["error_type"] == "RuntimeError"
+
+
+@pytest.mark.parametrize("source", ["file", "quotes"])
+def test_future_bars_file_and_quotes_are_503(tmp_path, source):
+    f = tmp_path / "chain.json"
+    f.write_text(json.dumps(load_fixture("latest")), encoding="utf-8")
+    cfg = (st.Settings(data_source="file", chain_file=f) if source == "file" else
+           st.Settings(data_source="quotes", quotes_file=tmp_path / "q.json", calendar_file=tmp_path / "c.json"))
+    client = create_app(cfg=cfg).test_client()
+    res = client.get("/api/future_bars?tf=1h")
+    assert res.status_code == 503 and res.get_json() == {"error": "unavailable"}
+    assert client.get("/api/future_bars?tf=5m").status_code == 400
+
+
 # ---- /api/atm_daily（#152 A5） ----
 
 def daily_world():

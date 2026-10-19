@@ -7,6 +7,7 @@ import {
   IV_MIN_BARS,
   IV_PLOT_LABEL,
   type IvMode,
+  type IvSeries,
   type IvTf,
   ivChartModel,
   ivCrosshair,
@@ -41,6 +42,16 @@ export interface IvPlotProps {
   onViewport: (v: Domain | null) => void;
   onCursor: (i: number | null, y?: number | null) => void;
   onRetry: () => void;
+  /** 系列の書式（無ければ IV。先物推移は FUT_SERIES。#190） */
+  series?: IvSeries;
+  /** 描画域・svg の名前（無ければ IV 推移の名前） */
+  plotLabel?: string;
+  imgLabel?: string;
+  /**
+   * 限月交代の印（#190。描画域の横の画素範囲 range から x と札を作る。無ければ描かない）。縦の点線 .fut-roll（薄く）と
+   * 札 .fut-roll-tag（label が null なら線だけ）
+   */
+  rolls?: (range: Domain) => readonly { x: number; label: string | null }[];
 }
 
 /**
@@ -65,14 +76,38 @@ function IvPlotView(p: IvPlotProps) {
         rightLoaded: p.rightLoaded,
         now: p.now,
         scenario: p.scenario,
+        ...(p.series ? { series: p.series } : {}),
       }),
-    [bars, p.tf, p.mode, viewport, p.segments, width, height, p.rightLoaded, p.now, p.scenario],
+    [
+      bars,
+      p.tf,
+      p.mode,
+      viewport,
+      p.segments,
+      width,
+      height,
+      p.rightLoaded,
+      p.now,
+      p.scenario,
+      p.series,
+    ],
   );
   const { range } = model;
+  const { rolls } = p;
+  const rollMarks = useMemo(() => (rolls ? rolls(range) : []), [rolls, range]);
   // 十字線と軸の札はカーソルだけで作り直す（O(1)。上のモデルはカーソルに依存しない）
   const cross = useMemo(
-    () => ivCrosshair({ bars, tf: p.tf, viewport, cursor, y: cursorY, model }),
-    [bars, p.tf, viewport, cursor, cursorY, model],
+    () =>
+      ivCrosshair({
+        bars,
+        tf: p.tf,
+        viewport,
+        cursor,
+        y: cursorY,
+        model,
+        ...(p.series ? { fmt: p.series.fmt } : {}),
+      }),
+    [bars, p.tf, viewport, cursor, cursorY, model, p.series],
   );
   // 描画域の外（目盛りの余白）に線・足をはみ出させない
   const clipId = `iv-clip-${useId().replace(/[^\w-]/g, '')}`;
@@ -135,7 +170,7 @@ function IvPlotView(p: IvPlotProps) {
       ref={ref}
       tabIndex={n === 0 ? -1 : 0}
       role="application"
-      aria-label={IV_PLOT_LABEL}
+      aria-label={p.plotLabel ?? IV_PLOT_LABEL}
       onPointerDown={trackY}
       onPointerMove={(e) => {
         trackY(e);
@@ -154,7 +189,7 @@ function IvPlotView(p: IvPlotProps) {
           height={h}
           viewBox={`0 0 ${w} ${h}`}
           role="img"
-          aria-label="ATM IV（30 日固定）の推移（縦軸 IV %）"
+          aria-label={p.imgLabel ?? 'ATM IV（30 日固定）の推移（縦軸 IV %）'}
         >
           <g class="grid">
             {model.yTicks.map((t) => (
@@ -207,6 +242,16 @@ function IvPlotView(p: IvPlotProps) {
               </>
             )}
           </g>
+          {rollMarks.map((r) => (
+            <g key={`roll${r.x}`} class="fut-roll-mark">
+              <line class="fut-roll" x1={r.x} x2={r.x} y1={8} y2={h - 22} />
+              {r.label && (
+                <text class="fut-roll-tag" x={r.x + 3} y={12}>
+                  {r.label}
+                </text>
+              )}
+            </g>
+          ))}
           {model.scenarioY !== null && (
             <line
               class="iv-scenario"

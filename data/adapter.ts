@@ -9,7 +9,8 @@
  * - 手入力は板を読まない（legs.ts の manualOptionLeg / futureLeg）
  *
  * 取引カレンダーは板と別に同一オリジンの `/api/calendar` を読む（loadCalendarJson。7.5）。
- * IV 推移は IV 推移を開いたときだけ同一オリジンの `/api/atm_iv` を読む（loadAtmIv。7.1。#79）。
+ * IV 推移は IV 推移を開いたときだけ同一オリジンの `/api/atm_iv` を読む（loadAtmIv。7.1。#79）。先物推移も同じく
+ * 開いたときだけ `/api/future_bars`（loadFutureBars。#190）。
  * 日次の値は追証マップを開いたときだけ同一オリジンの `/api/atm_daily` を読む（loadAtmDaily。7.1。#152）。
  */
 
@@ -17,6 +18,7 @@ import { type AtmDailyData, validateAtmDailyJson } from './atmDaily';
 import { type AtmIvData, type AtmIvSource, atmIvUrl, validateAtmIvJson } from './atmIv';
 import { type CalendarJson, validateCalendarJson } from './calendar';
 import { type ChainJson, parseChainJson } from './chainJson';
+import { type FutureBarsData, futureBarsUrl, validateFutureBarsJson } from './futureBars';
 import { type Chain, type NormalizeOptions, normalizeChain } from './normalize';
 
 export type AdapterKind = 'file' | 'bigquery';
@@ -91,7 +93,7 @@ async function fetchText(
   label: string,
   base: Omit<FetchInit, 'signal'>,
   /** 何を読むか（エラーの文言の名詞） */
-  what: '板' | 'カレンダー' | 'IV 推移' | '過去の値動き' = '板',
+  what: '板' | 'カレンダー' | 'IV 推移' | '先物推移' | '過去の値動き' = '板',
 ): Promise<string> {
   const init: FetchInit = { ...base };
   if (opts.signal) init.signal = opts.signal;
@@ -232,6 +234,34 @@ export async function loadAtmIv(tf: AtmIvSource, opts: AtmIvLoadOptions = {}): P
   }
   const r = validateAtmIvJson(parsed, tf);
   if (!r.ok) throw new ChainLoadError('IV 推移の JSON が不正（api）', r.errors);
+  return r.value;
+}
+
+/**
+ * 先物推移（`/api/future_bars`。#190）を読んで検証する。作法・オプションは loadAtmIv と同じ（endpoint の既定は
+ * 同一オリジンの /api/future_bars。dev の合成の応答は /fixtures/future_bars）。
+ */
+export async function loadFutureBars(
+  tf: AtmIvSource,
+  opts: AtmIvLoadOptions = {},
+): Promise<FutureBarsData> {
+  const load: LoadOptions = opts.signal ? { signal: opts.signal } : {};
+  const text = await fetchText(
+    opts.fetch ?? defaultFetch,
+    futureBarsUrl(opts.endpoint ?? '/api/future_bars', tf, opts.range),
+    load,
+    'api',
+    { cache: 'no-cache', redirect: 'manual' },
+    '先物推移',
+  );
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    throw new ChainLoadError('先物推移の JSON が不正（api）', ['$: JSON として解析できない']);
+  }
+  const r = validateFutureBarsJson(parsed, tf);
+  if (!r.ok) throw new ChainLoadError('先物推移の JSON が不正（api）', r.errors);
   return r.value;
 }
 

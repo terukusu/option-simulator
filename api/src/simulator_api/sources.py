@@ -1,7 +1,8 @@
 """供給元の口（docs/data-sources.md「API の供給元の口」・docs/adr-0003-data-source-abstraction.md。#154）。
 
-画面が読む /api/chain・/api/calendar・/api/atm_iv・/api/atm_daily の中身を返すものを「供給元」（DataSource）とし、
-環境変数 DATA_SOURCE の値 → 実装の対応をこのファイルの BUILDERS 1 か所に置く。app.py はここで作った供給元を呼ぶだけ。
+画面が読む /api/chain・/api/calendar・/api/atm_iv・/api/atm_daily・/api/future_bars の中身を返すものを
+「供給元」（DataSource）とし、環境変数 DATA_SOURCE の値 → 実装の対応をこのファイルの BUILDERS 1 か所に置く。
+app.py はここで作った供給元を呼ぶだけ。
 
 - bigquery: optionchan の BigQuery（service.ChainService。読み方・キャッシュ・single-flight・MAX_BYTES_BILLED は
   そのまま）
@@ -18,6 +19,7 @@ from typing import Protocol
 
 from . import atm_iv, bq
 from . import settings as st
+from .atm_iv import AtmIvRequest
 from .service import ChainResult, ChainService, FileChainService, Payload, QuotesFileService
 
 
@@ -38,6 +40,10 @@ class DataSource(Protocol):
 
     def atm_daily(self) -> Payload:
         """/api/atm_daily（日次の値）"""
+        ...
+
+    def future_bars(self, req: AtmIvRequest) -> Payload:
+        """/api/future_bars（先物推移。#190）"""
         ...
 
 

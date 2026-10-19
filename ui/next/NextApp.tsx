@@ -10,7 +10,7 @@ import {
 } from '../components/useAppController';
 import { useAtmMoves } from '../components/useAtmMoves';
 import { useHoldMap } from '../components/useHoldMap';
-import { useIvHistory } from '../components/useIvHistory';
+import { useFutureBars, useIvHistory } from '../components/useIvHistory';
 import { useMediaQuery } from '../components/useMediaQuery';
 import { API_LABEL, loaderNote } from '../load';
 import { MAX_PINS } from '../pins';
@@ -21,6 +21,7 @@ import { aiEnvFromState } from '../view/aiContext';
 import { marketAddPlan, marketAddToast } from '../view/boardPanel';
 import { closedTabText, restoreTabError, type ShareResult, shareResultView } from '../view/boxTabs';
 import { fmtNum } from '../view/format';
+import { futNowValue } from '../view/futHistory';
 import { keptBoardNote } from '../view/header';
 import { ivNowValue } from '../view/ivHistory';
 import { PC_QUERY, PHONE_QUERY } from '../view/layout';
@@ -41,16 +42,19 @@ import {
   benchView,
   type ChartMode,
   chartMode,
+  futVisible,
   holdMapVisible,
   INITIAL_SHELL,
   ivVisible,
   layoutTier,
+  type ShellAction,
   shellReduce,
   smileView,
 } from '../view/shell';
 import { bookIoToast, overwrittenText, restoreEntryFailText } from '../view/topMenu';
 import { BookDialog } from './BookDialog';
 import type { MarketAdd } from './market/BoardMonth';
+import { FutHistory } from './market/FutHistory';
 import { IvHistory } from './market/IvHistory';
 import { PanelHead } from './PanelHead';
 import { Palette } from './parts/Palette';
@@ -100,6 +104,9 @@ import { useTheme } from './useTheme';
  * 保存しない）。見えたら（ivVisible）初めての 1 回だけ右端を読む。データ元が API のときは /api/atm_iv、dev の合成の板・
  * ファイルのときは dev だけ /fixtures/atm_iv（本番のビルドは常に /api/atm_iv）。トップバーの [最新] では読み直さない。
  * 段 C で左右の追加読み込み（useIvHistory）・「今」の 1 点（ivNowValue）・シナリオの水準（state.scenario と舞台の X₀）を足した。
+ * #190 で先物推移（market/FutHistory.tsx）を入れた。読み込みは常駐の useFutureBars（IV 推移と同じ規則・別の状態）で、
+ * 口は /api/future_bars（dev の合成の板・ファイルは dev だけ /fixtures/future_bars）。IV 推移 ⇄ 先物の切替（市場の Seg）
+ * では、離れる側の足と見ていた時間の範囲を入る側に渡す（shellSend）。
  * #152 で指標 · テールに追証マップ（regions/HoldMap.tsx）を入れた。開閉は ShellState.holdMap（保存しない）、過去の点は
  * 常駐の useAtmMoves（見えたら 1 回だけ /api/atm_daily を読む）、マスの計算は useHoldMap（止まってから列ごと）。
  * #135 で AI のチャット（regions/AiChat.tsx の AiPanel。会話の状態は AiPanel の中の useAiChat）を入れた。道具の環境は
@@ -117,12 +124,49 @@ export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
   const ivEndpoint =
     import.meta.env.DEV && state.sourceLabel !== API_LABEL ? '/fixtures/atm_iv' : '/api/atm_iv';
   const iv = useIvHistory(ivVisible(shell, tier), ivEndpoint);
+  const futEndpoint =
+    import.meta.env.DEV && state.sourceLabel !== API_LABEL
+      ? '/fixtures/future_bars'
+      : '/api/future_bars';
+  const fut = useFutureBars(futVisible(shell, tier), futEndpoint);
+  // IV 推移 ⇄ 先物の切替で足と見ていた時間の範囲を保つ（離れる側に読んだ足があるときだけ渡す）
+  const shellRef = useRef(shell);
+  shellRef.current = shell;
+  const histRef = useRef({ iv, fut });
+  histRef.current = { iv, fut };
+  const shellSend = useCallback(
+    (a: ShellAction) => {
+      if (a.type === 'market') {
+        const from = smileView(shellRef.current, tier);
+        const to = smileView({ ...shellRef.current, market: a.market }, tier);
+        const { iv: ivCtl, fut: futCtl } = histRef.current;
+        const pair =
+          from === 'iv' && to === 'fut'
+            ? ([ivCtl, futCtl] as const)
+            : from === 'fut' && to === 'iv'
+              ? ([futCtl, ivCtl] as const)
+              : null;
+        if (pair) {
+          const snap = pair[0].snapshot();
+          if (snap.keep) pair[1].adopt(snap.tf, snap.keep);
+        }
+      }
+      send(a);
+    },
+    [tier],
+  );
   // IV 推移の「今」の 1 点（#79 段 C）: 今の板の生の気配から optionchan と同じ定義の iv30（板・カレンダーが変わったときだけ）
   const boardJson = state.chain?.json ?? null;
   const { nonTradingDays } = state.calendar;
   const ivNow = useMemo(
     () => (boardJson ? ivNowValue(boardJson, nonTradingDays) : null),
     [boardJson, nonTradingDays],
+  );
+  // 先物推移の「今」の 1 点（#190）: 今の板の先物の値と、スナップショットの時刻から求めた限月
+  const sqHolidays = state.calendar.holidays;
+  const futNow = useMemo(
+    () => (boardJson ? futNowValue(boardJson, sqHolidays, nonTradingDays) : null),
+    [boardJson, sqHolidays, nonTradingDays],
   );
   // 追証マップ（#152）: 見えている間だけ計算し、初めて見えたときに過去の値（/api/atm_daily）を 1 回読む。
   // dev の合成の板・ファイルでは dev だけ /fixtures/atm_daily（本番のビルドは常に /api/atm_daily）
@@ -546,7 +590,7 @@ export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
       <Shell
         tier={tier}
         state={shell}
-        send={send}
+        send={shellSend}
         legCount={c.curLegs.length}
         stage={
           <Stage
@@ -603,7 +647,23 @@ export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
           )
         }
         smile={(seg) =>
-          smileView(shell, tier) === 'iv' ? (
+          smileView(shell, tier) === 'fut' ? (
+            <FutHistory
+              load={fut.load}
+              view={fut.view}
+              bars={fut.bars}
+              viewport={fut.viewport}
+              leftSlack={fut.leftSlack}
+              now={futNow}
+              nonTradingDays={nonTradingDays}
+              seg={seg}
+              onRefresh={fut.refresh}
+              onRetry={fut.retry}
+              onTf={fut.setTf}
+              onMode={fut.setMode}
+              onViewport={fut.setViewport}
+            />
+          ) : smileView(shell, tier) === 'iv' ? (
             <IvHistory
               load={iv.load}
               view={iv.view}
