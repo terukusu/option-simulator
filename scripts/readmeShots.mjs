@@ -1,6 +1,6 @@
 // README のスクリーンショット（`npm run readme:shots`。#160）。Chromium（Playwright）で画面を開き、docs/images/ に
 // WebP で書く。板は dev サーバーの合成の板（fixtures/synthetic/ の latest。Black-76 から作った架空の値）、IV 推移と
-// 持ちこたえマップの過去の点は dev サーバーの合成の応答（scripts/devFixtures.mjs）だけを使う。本番・API・BigQuery には
+// 追証マップの過去の点は dev サーバーの合成の応答（scripts/devFixtures.mjs）だけを使う。本番・API・BigQuery には
 // 触れない。資金（capital_yen）などの設定値も架空の値。
 //
 // 前提: `npm ci` の後に一度 `npx playwright install chromium`（scripts/uiCheck.mjs と同じ）。
@@ -22,7 +22,7 @@ const WORKSPACE_KEY = 'option-simulator.workspace';
 const PREFS_KEY = 'option-simulator.prefs';
 /** 資金（架空の値） */
 const CAPITAL = 30_000_000;
-/** 持ちこたえマップで追証の側が見える資金（架空の値） */
+/** 追証マップで追証の側が見える資金（架空の値） */
 const CAPITAL_TIGHT = 9_000_000;
 const WEBP_QUALITY = 0.86;
 
@@ -286,7 +286,7 @@ const shots = {
     await save('metrics', await shotEl(page, 'section.metrics'));
     await ctx.close();
   },
-  // 持ちこたえマップ（過去の点は dev の合成の日次データ）
+  // 追証マップ（過去の点は dev の合成の日次データ）
   async holdmap() {
     const { ctx, page } = await open({
       ...PC_CROP,

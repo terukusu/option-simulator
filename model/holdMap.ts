@@ -1,5 +1,5 @@
 /**
- * 持ちこたえマップ（原資産の変化 u × IV の倍率 c の各マスの余力。#152）。設計 docs/design.md 5.11。
+ * 追証マップ（原資産の変化 u × IV の倍率 c の各マスの余力。#152）。設計 docs/design.md 5.11。
  *
  * - マスの状態 S = (x = X₀(1 + u), シナリオ = 今の d・Δs・IV の動き方 + ΔX = uX₀・ivShift = relative・
  *   Δσ = (c − 1) × 100・β = 0)。relative の σ = σ_base(x_eff) × c + Δs の項 なので、足の IV がちょうど c 倍になる

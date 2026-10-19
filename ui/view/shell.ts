@@ -41,7 +41,7 @@ export interface ShellState {
   market: MarketView;
   /** 舞台のグラフの表示（#88。無い = line。読むのは chartMode） */
   chart?: ChartMode;
-  /** 指標 · テールの「持ちこたえマップ」の折りたたみが開いている（#152。無い = 閉。保存しない） */
+  /** 指標 · テールの「追証マップ」の折りたたみが開いている（#152。無い = 閉。保存しない） */
   holdMap?: boolean;
 }
 
@@ -60,7 +60,7 @@ export type ShellAction =
   | { type: 'grab'; dy: number }
   | { type: 'market'; market: MarketView }
   | { type: 'chart'; chart: ChartMode }
-  /** 持ちこたえマップの開閉（#152） */
+  /** 追証マップの開閉（#152） */
   | { type: 'holdMap'; open: boolean };
 
 /**
@@ -99,7 +99,7 @@ export function ivVisible(s: ShellState, tier: Tier): boolean {
 }
 
 /**
- * 持ちこたえマップが見えているか（#152。見えている間だけ計算し、初めて見えたときに過去の値を読む）: 開いていて、
+ * 追証マップが見えているか（#152。見えている間だけ計算し、初めて見えたときに過去の値を読む）: 開いていて、
  * 指標のパネルが見えている（PC は常に、タブレットはパネルが metrics、スマホはそれに加えてシートが hidden でない）
  */
 export function holdMapVisible(s: ShellState, tier: Tier): boolean {

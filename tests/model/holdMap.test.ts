@@ -1,5 +1,5 @@
 /**
- * 持ちこたえマップ（#152 段 B。設計 docs/design.md 5.11）の B1〜B5。
+ * 追証マップ（#152 段 B。設計 docs/design.md 5.11）の B1〜B5。
  * 板は合成（tests/support/market.ts。架空の値）。参照値はテストの中で marginAt + marginRoom を直接呼ぶ。
  */
 

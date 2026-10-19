@@ -1,6 +1,6 @@
 /**
  * 日次の値（optionchan の atm_cm_iv の日中の終値の iv30 と 1 / 2 限月のフォワード。#152）の `/api/atm_daily` の JSON の
- * 型と検証、2 営業日の動きの組（持ちこたえマップの過去の点）。設計 docs/design.md 7.1・13.4。読み込みは
+ * 型と検証、2 営業日の動きの組（追証マップの過去の点）。設計 docs/design.md 7.1・13.4。読み込みは
  * data/adapter.ts の loadAtmDaily。
  *
  * - 応答: `{ schema_version: 1, start, end, days: [{ d, t, iv, f1, l1, f2, l2 }] }`（d は JST の日付、t は日中の終値の

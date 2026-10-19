@@ -292,7 +292,7 @@ table.tail.margin-tail td small.call {
   border-top: 1px solid var(--line);
 }
 
-/* ===== 持ちこたえマップ（#152。部品は ui/next/regions/HoldMap.tsx。寸法は SVG の width / height 属性） ===== */
+/* ===== 追証マップ（#152。部品は ui/next/regions/HoldMap.tsx。寸法は SVG の width / height 属性） ===== */
 .hm {
   border-top: 1px solid var(--line);
 }

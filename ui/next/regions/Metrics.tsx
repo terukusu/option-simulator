@@ -30,7 +30,7 @@ interface Props {
   feePerLot: number;
   /** 証拠金の概算（useAppController の useMemo。#131。板が無ければ null） */
   margin: MarginView | null;
-  /** 持ちこたえマップ（#152。NextApp の useMemo） */
+  /** 追証マップ（#152。NextApp の useMemo） */
   hold: HoldBundle;
 }
 
@@ -107,7 +107,7 @@ function TailCell({ c }: { c: TailCellView }) {
 /**
  * 指標 · テール（docs/ui-redesign.md §2・§3・§5・§5.2・§9。#86）: 見出し行（単位の副題・ⓘ）→ タイル 6 枚 →
  * 「内訳」の折りたたみ（旧画面の指標の全項目。既定は閉・保存しない）→ テール表（損益のバー付き）→ テールの証拠金の表 →
- * 「持ちこたえマップ」の折りたたみ（#152。regions/HoldMap.tsx。既定は閉・開閉は ShellState）。
+ * 「追証マップ」の折りたたみ（#152。regions/HoldMap.tsx。既定は閉・開閉は ShellState）。
  * 表示モデルは ui/view/metricsPanel.ts。action は dispatch しない（単位・手数料の入力は #87 の設定）。
  */
 function MetricsView({ model, feePerLot, margin, hold }: Props) {

@@ -96,7 +96,7 @@ import { useTheme } from './useTheme';
  * 保存しない）。見えたら（ivVisible）初めての 1 回だけ右端を読む。データ元が API のときは /api/atm_iv、dev の合成の板・
  * ファイルのときは dev だけ /fixtures/atm_iv（本番のビルドは常に /api/atm_iv）。トップバーの [最新] では読み直さない。
  * 段 C で左右の追加読み込み（useIvHistory）・「今」の 1 点（ivNowValue）・シナリオの水準（state.scenario と舞台の X₀）を足した。
- * #152 で指標 · テールに持ちこたえマップ（regions/HoldMap.tsx）を入れた。開閉は ShellState.holdMap（保存しない）、過去の点は
+ * #152 で指標 · テールに追証マップ（regions/HoldMap.tsx）を入れた。開閉は ShellState.holdMap（保存しない）、過去の点は
  * 常駐の useAtmMoves（見えたら 1 回だけ /api/atm_daily を読む）、マスの計算は useHoldMap（止まってから列ごと）。
  */
 export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
@@ -117,7 +117,7 @@ export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
     () => (boardJson ? ivNowValue(boardJson, nonTradingDays) : null),
     [boardJson, nonTradingDays],
   );
-  // 持ちこたえマップ（#152）: 見えている間だけ計算し、初めて見えたときに過去の値（/api/atm_daily）を 1 回読む。
+  // 追証マップ（#152）: 見えている間だけ計算し、初めて見えたときに過去の値（/api/atm_daily）を 1 回読む。
   // dev の合成の板・ファイルでは dev だけ /fixtures/atm_daily（本番のビルドは常に /api/atm_daily）
   const holdOpen = shell.holdMap ?? false;
   const holdShown = holdMapVisible(shell, tier);

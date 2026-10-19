@@ -1,5 +1,5 @@
 /**
- * 持ちこたえマップ（#152。設計 docs/design.md 5.11）の画面側の計算の単位と表示モデル（純関数。Preact・DOM に依存しない）。
+ * 追証マップ（#152。設計 docs/design.md 5.11）の画面側の計算の単位と表示モデル（純関数。Preact・DOM に依存しない）。
  *
  * - 入力（holdMapInput）は 板の基礎（pnlBoard）・今のシナリオの d・Δs・IV の動き方・パラメータ・資金・休業日だけ
  *   （ΔX・Δσ・β・ivShift・パン・拡大では変わらない = 作り直さない。B7）
@@ -33,7 +33,7 @@ import { MARGIN_LINE_SETTLE_MS } from './margin';
 import { AMOUNT_UNIT_LABEL, type AmountUnit, fmtAmount } from './metrics';
 import { clampDays, type PnlBase } from './pnlChart';
 
-export const HOLD_MAP_TITLE = '持ちこたえマップ';
+export const HOLD_MAP_TITLE = '追証マップ';
 export const HOLD_MAP_NO_CAPITAL = '設定で資金を入れてください（⋯ > 設定…）';
 export const HOLD_MAP_NO_LEGS = '足を入れるとマップを作る';
 export const HOLD_MAP_COMPUTING = '計算中…';
@@ -42,9 +42,10 @@ export const HOLD_MAP_FAILED = '過去の値動きを読めない';
 export const HOLD_MAP_EMPTY = '過去の値動きが無い';
 export const HOLD_MAP_RETRY = '再試行';
 export const HOLD_MAP_IDLE_READOUT = '点かマスを触ると値を出す（矢印キーでマスを動かす）';
+/** 見出しの下の説明（#179: 何の図か・追証の側は概算で実際の判定は引けの清算値。過去の点の近似は holdMapNote） */
 export const HOLD_MAP_CAPTION =
-  '横 = 原資産の変化（今の X₀ に対する %）、縦 = IV の倍率（足ごとの IV に掛ける）。色 = 余力あり / 追証（余力 < 0）、線 = 境目、十字 = 今。β・Δσ は使わない';
-export const HOLD_MAP_PLOT_LABEL = '持ちこたえマップ（原資産の変化 × IV の倍率の余力）';
+  '原資産と IV が同時に動いたときの余力。横 = 原資産の変化（今の X₀ に対する %）、縦 = IV の倍率（足ごとの IV に掛ける）。色 = 余力あり / 追証（余力 < 0）、線 = 境目、十字 = 今。β・Δσ は使わない。追証の側（赤）は概算で、実際の追証は引けの清算値で判定（日中に入っても引けで戻れば追証にならない）';
+export const HOLD_MAP_PLOT_LABEL = '追証マップ（原資産と IV が同時に動いたときの余力）';
 
 /** 止まってから作るまでの時間（ms。追証の線の MARGIN_LINE_SETTLE_MS と同じ） */
 export const HOLD_MAP_SETTLE_MS = MARGIN_LINE_SETTLE_MS;

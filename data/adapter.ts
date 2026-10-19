@@ -10,7 +10,7 @@
  *
  * 取引カレンダーは板と別に同一オリジンの `/api/calendar` を読む（loadCalendarJson。7.5）。
  * IV 推移は IV 推移を開いたときだけ同一オリジンの `/api/atm_iv` を読む（loadAtmIv。7.1。#79）。
- * 日次の値は持ちこたえマップを開いたときだけ同一オリジンの `/api/atm_daily` を読む（loadAtmDaily。7.1。#152）。
+ * 日次の値は追証マップを開いたときだけ同一オリジンの `/api/atm_daily` を読む（loadAtmDaily。7.1。#152）。
  */
 
 import { type AtmDailyData, validateAtmDailyJson } from './atmDaily';
@@ -243,7 +243,7 @@ export interface AtmDailyLoadOptions {
 }
 
 /**
- * 日次の値（`/api/atm_daily`。#152。持ちこたえマップの過去の点）を読んで検証する。パラメータなし。fetch の作法は
+ * 日次の値（`/api/atm_daily`。#152。追証マップの過去の点）を読んで検証する。パラメータなし。fetch の作法は
  * `/api/calendar` と同じ（`cache: 'no-cache'`・`redirect: 'manual'` でログイン切れを検出）。失敗は ChainLoadError
  * （応答の本文は入れない）。AbortError はそのまま投げる。
  */

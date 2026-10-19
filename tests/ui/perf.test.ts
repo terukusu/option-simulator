@@ -1602,10 +1602,10 @@ describe('性能（#131 AC17: 証拠金と追証の線）', () => {
 });
 
 /**
- * #152 B8: 持ちこたえマップの 1 列（足 10 本・全足を評価する側・21 マス）。画面は列ごとに setTimeout(0) で回すので、
+ * #152 B8: 追証マップの 1 列（足 10 本・全足を評価する側・21 マス）。画面は列ごとに setTimeout(0) で回すので、
  * 1 列が 1 フレーム（16 ms）に収まること。マップ全体（26 列）は記録だけ。
  */
-describe('性能（#152 持ちこたえマップ）', () => {
+describe('性能（#152 追証マップ）', () => {
   const { ctx, rows } = makeMarket();
   const legs = preparePosition(PERF_LEGS, ctx);
   const board = {
@@ -1630,18 +1630,18 @@ describe('性能（#152 持ちこたえマップ）', () => {
   const axes = holdMapAxes([]);
   let col = 0;
 
-  it(`#152 持ちこたえマップの 1 列（21 マス）が ${BUDGET_MS} ms 以内（30 回の最小値）`, () => {
+  it(`#152 追証マップの 1 列（21 マス）が ${BUDGET_MS} ms 以内（30 回の最小値）`, () => {
     expect(axes.cs).toHaveLength(21);
     const one = () => {
       col = (col + 1) % axes.us.length;
       return holdMapColumn(calc, axes, col).length;
     };
     expect(one()).toBe(21);
-    expectWithinBudget('#152 持ちこたえマップの 1 列', one, { warmup: 10, runs: 30 });
+    expectWithinBudget('#152 追証マップの 1 列', one, { warmup: 10, runs: 30 });
   });
 
   it('マップ全体（26 列 × 21 行）と描画の表示モデル（記録のみ）', () => {
-    record('#152 持ちこたえマップ全体', () => holdMapRooms(input, axes).length, {
+    record('#152 追証マップ全体', () => holdMapRooms(input, axes).length, {
       warmup: 1,
       runs: RECORD_RUNS,
     });
@@ -1656,7 +1656,7 @@ describe('性能（#152 持ちこたえマップ）', () => {
       ivPt: 4 * Math.cos(k),
     }));
     record(
-      '#152 持ちこたえマップの描画（点 1,800）',
+      '#152 追証マップの描画（点 1,800）',
       () => holdMapPlot(result, moves, 400).cells.length,
       {
         warmup: 2,

@@ -476,6 +476,11 @@ describe('用語の行（#167 AC-5）', () => {
     expect(hit[0]?.id).toBe('term:iv');
     // 用語に当たらない語は 0 件（コマンドは出さない）
     expect(paletteFilter(items, '?急落')).toEqual([]);
+    // #179: 旧名でも追証マップに当たる。`?追証` の先頭（Enter で開く行）は今までどおり追証の線で、追証マップも並ぶ
+    expect(paletteFilter(items, '?持ちこたえ').map((r) => r.id)).toEqual(['term:hold-map']);
+    const call = paletteFilter(items, '?追証').map((r) => r.id);
+    expect(call[0]).toBe('term:margin-line');
+    expect(call).toContain('term:hold-map');
     expect(paletteFilter(items, '？ テーマ')).toEqual([]);
   });
 

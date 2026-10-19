@@ -271,7 +271,7 @@ describe('グラフの表示（#88 AC-5）', () => {
   });
 });
 
-describe('持ちこたえマップの開閉と見え方（#152）', () => {
+describe('追証マップの開閉と見え方（#152）', () => {
   it('既定は閉、holdMap の action で開閉、同じ値なら同じ参照、他の欄は変わらない', () => {
     const s0 = at({});
     expect(holdMapVisible(s0, 'pc')).toBe(false);

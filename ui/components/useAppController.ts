@@ -608,7 +608,7 @@ export function useAppController(boot: Boot = NO_BOOT, margin: MarginPrefs = DEF
         : null,
     [pnlBoard, lineScenario, marginParams, capital, holidays],
   );
-  // 持ちこたえマップの入力（#152）: 板の基礎・d・Δs・動き方・パラメータ・資金・休業日だけ（ΔX・Δσ・β・ivShift・パン・拡大で
+  // 追証マップの入力（#152）: 板の基礎・d・Δs・動き方・パラメータ・資金・休業日だけ（ΔX・Δσ・β・ivShift・パン・拡大で
   // 参照が変わらない）。マップは useHoldMap が止まってから列ごとに作る。資金が未設定・足なしなら null
   const holdScenario = useMemo(
     () => holdMapBaseScenario({ ...ZERO_SCENARIO, days, skew, ivDynamics }),
