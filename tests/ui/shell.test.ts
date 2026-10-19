@@ -4,6 +4,7 @@ import {
   chartMode,
   DOCK_LABELS,
   dockPanels,
+  holdMapVisible,
   INITIAL_SHELL,
   ivVisible,
   layoutTier,
@@ -267,5 +268,31 @@ describe('グラフの表示（#88 AC-5）', () => {
     // 変わった action は他の欄だけが変わる
     expect(after[0]).toEqual({ ...s, panel: 'board' });
     expect(after[5]).toEqual({ ...s, market: 'smile' });
+  });
+});
+
+describe('持ちこたえマップの開閉と見え方（#152）', () => {
+  it('既定は閉、holdMap の action で開閉、同じ値なら同じ参照、他の欄は変わらない', () => {
+    const s0 = at({});
+    expect(holdMapVisible(s0, 'pc')).toBe(false);
+    const s1 = shellReduce(s0, { type: 'holdMap', open: true });
+    expect(s1).toEqual({ ...s0, holdMap: true });
+    expect(shellReduce(s1, { type: 'holdMap', open: true })).toBe(s1);
+    expect(shellReduce(s0, { type: 'holdMap', open: false })).toBe(s0);
+    expect(shellReduce(s1, { type: 'holdMap', open: false })).toEqual({ ...s0, holdMap: false });
+    // パネルの切替で開閉は保つ
+    expect(shellReduce(s1, { type: 'dock', panel: 'board', tier: 'phone' }).holdMap).toBe(true);
+  });
+
+  it('見えている = 開いていて指標のパネルが見えている（PC は常に、タブレットは metrics、スマホはシートが hidden でない）', () => {
+    const open = (s: Partial<ShellState>) => at({ holdMap: true, ...s });
+    expect(holdMapVisible(open({ panel: 'positions' }), 'pc')).toBe(true);
+    expect(holdMapVisible(open({ panel: 'metrics' }), 'tablet')).toBe(true);
+    expect(holdMapVisible(open({ panel: 'board' }), 'tablet')).toBe(false);
+    expect(holdMapVisible(open({ panel: 'metrics', sheet: 'hidden' }), 'tablet')).toBe(true);
+    expect(holdMapVisible(open({ panel: 'metrics', sheet: 'peek' }), 'phone')).toBe(true);
+    expect(holdMapVisible(open({ panel: 'metrics', sheet: 'hidden' }), 'phone')).toBe(false);
+    expect(holdMapVisible(open({ panel: 'scenario' }), 'phone')).toBe(false);
+    expect(holdMapVisible(at({ panel: 'metrics', holdMap: false }), 'phone')).toBe(false);
   });
 });

@@ -41,6 +41,8 @@ export interface ShellState {
   market: MarketView;
   /** 舞台のグラフの表示（#88。無い = line。読むのは chartMode） */
   chart?: ChartMode;
+  /** 指標 · テールの「持ちこたえマップ」の折りたたみが開いている（#152。無い = 閉。保存しない） */
+  holdMap?: boolean;
 }
 
 export const INITIAL_SHELL: ShellState = { panel: 'positions', sheet: 'peek', market: 'board' };
@@ -57,7 +59,9 @@ export type ShellAction =
   /** つまみの縦の移動量（下向き正。離したときの値） */
   | { type: 'grab'; dy: number }
   | { type: 'market'; market: MarketView }
-  | { type: 'chart'; chart: ChartMode };
+  | { type: 'chart'; chart: ChartMode }
+  /** 持ちこたえマップの開閉（#152） */
+  | { type: 'holdMap'; open: boolean };
 
 /**
  * ドックのボタンの文字と読み上げの名前（#130。smile のパネルは IV 推移とスマイル。ラベルは「IV」）。アイコンは
@@ -91,6 +95,17 @@ export function ivVisible(s: ShellState, tier: Tier): boolean {
   if (smileView(s, tier) !== 'iv') return false;
   if (tier === 'pc') return true;
   if (visiblePanel(s, tier) !== 'smile') return false;
+  return tier === 'tablet' || s.sheet !== 'hidden';
+}
+
+/**
+ * 持ちこたえマップが見えているか（#152。見えている間だけ計算し、初めて見えたときに過去の値を読む）: 開いていて、
+ * 指標のパネルが見えている（PC は常に、タブレットはパネルが metrics、スマホはそれに加えてシートが hidden でない）
+ */
+export function holdMapVisible(s: ShellState, tier: Tier): boolean {
+  if (!s.holdMap) return false;
+  if (tier === 'pc') return true;
+  if (visiblePanel(s, tier) !== 'metrics') return false;
   return tier === 'tablet' || s.sheet !== 'hidden';
 }
 
@@ -152,5 +167,7 @@ export function shellReduce(s: ShellState, a: ShellAction): ShellState {
       return a.market === s.market ? s : { ...s, market: a.market };
     case 'chart':
       return a.chart === chartMode(s) ? s : { ...s, chart: a.chart };
+    case 'holdMap':
+      return a.open === (s.holdMap ?? false) ? s : { ...s, holdMap: a.open };
   }
 }

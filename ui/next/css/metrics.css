@@ -188,7 +188,8 @@ table.tail.margin-tail td small.call {
 }
 
 /* ===== 内訳（折りたたみ。既定は閉・保存しない） ===== */
-.mx-toggle {
+.mx-toggle,
+.hm-toggle {
   display: flex;
   align-items: center;
   gap: var(--sp-2);
@@ -206,16 +207,19 @@ table.tail.margin-tail td small.call {
   cursor: pointer;
 }
 
-.mx-toggle::before {
+.mx-toggle::before,
+.hm-toggle::before {
   content: "▸";
   color: var(--ink-3);
 }
 
-.mx-toggle[aria-expanded="true"]::before {
+.mx-toggle[aria-expanded="true"]::before,
+.hm-toggle[aria-expanded="true"]::before {
   content: "▾";
 }
 
-.mx-toggle:focus-visible {
+.mx-toggle:focus-visible,
+.hm-toggle:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: -2px;
 }
@@ -264,4 +268,108 @@ table.tail.margin-tail td small.call {
 
 .mx-body .sec-head {
   border-top: 1px solid var(--line);
+}
+
+/* ===== 持ちこたえマップ（#152。部品は ui/next/regions/HoldMap.tsx。寸法は SVG の width / height 属性） ===== */
+.hm {
+  border-top: 1px solid var(--line);
+}
+
+.hm-status,
+.hm-sum,
+.hm-readout {
+  padding: 4px var(--sp-3);
+  font-size: var(--fs-xs);
+}
+
+.hm-status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+  color: var(--ink-2);
+}
+
+.hm-sum {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.hm-readout {
+  min-height: 2.6em;
+  color: var(--ink-2);
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+.hm-plot {
+  padding: 0 var(--sp-3);
+  overflow: hidden;
+}
+
+.hm-plot.busy {
+  opacity: 0.5;
+}
+
+.hm-wrap {
+  touch-action: manipulation;
+}
+
+.hm-svg {
+  display: block;
+  max-width: 100%;
+}
+
+.hm-wrap:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.hm-svg .hm-ok {
+  fill: var(--gain-fill);
+}
+
+.hm-svg .hm-call {
+  fill: var(--loss-fill);
+}
+
+.hm-svg .hm-line {
+  fill: none;
+  stroke: var(--loss);
+  stroke-width: 1.5;
+}
+
+.hm-svg .hm-tick {
+  fill: var(--ink-3);
+  font-family: var(--mono);
+  font-size: 10px;
+}
+
+.hm-svg .hm-dot {
+  fill: var(--ink-2);
+}
+
+.hm-svg .hm-x {
+  fill: none;
+  stroke: var(--loss);
+  stroke-width: 1.2;
+}
+
+.hm-svg .hm-now {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 2;
+}
+
+.hm-svg .hm-dx {
+  stroke: var(--handle);
+  stroke-width: 1;
+  stroke-dasharray: 3 3;
+}
+
+.hm-svg .hm-sel {
+  fill: none;
+  stroke: var(--ink);
+  stroke-width: 1.5;
 }

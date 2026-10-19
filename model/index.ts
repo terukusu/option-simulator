@@ -4,6 +4,7 @@ export * from './black76';
 export * from './constantMaturity';
 export * from './forward';
 export * from './hedge';
+export * from './holdMap';
 export * from './iv';
 export * from './margin';
 export * from './normal';
