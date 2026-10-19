@@ -23,10 +23,10 @@ import { PanelHead } from '../PanelHead';
 
 /** 免責の文（端末で最初の 1 回だけ。AI の返答には書かせない。#135） */
 export const AI_DISCLAIMER =
-  'AI の説明は、この simulator の計算結果をもとにした検討材料です。投資の助言ではありません。売買の判断はご自身で行ってください。';
+  'AI の説明は、このシミュレーターの計算結果をもとにした検討材料です。投資の助言ではありません。売買の判断はご自身で行ってください。';
 export const AI_EMPTY_TEXT =
   '今のポジションの弱点を、AI が simulator の計算の数字で説明します。[このポジションを診断] を押すか、質問を入れてください。';
-const UNMATCHED_LABEL = '道具の値に無い数字';
+const UNMATCHED_LABEL = '計算結果に無い数字';
 
 export interface AiApply {
   days: number;
