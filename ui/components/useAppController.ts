@@ -78,6 +78,7 @@ import {
   marginNow,
   marginParamsOf,
   marginPoint,
+  marginPointAt,
   marginTail,
 } from '../view/margin';
 import { metricsModel } from '../view/metrics';
@@ -625,6 +626,7 @@ export function useAppController(boot: Boot = NO_BOOT, margin: MarginPrefs = DEF
             params: marginParams,
             now: marginNowCalc,
             point: marginPoint(pnlBase, state.scenario, marginParams, capital, holidays),
+            at: marginPointAt(pnlBase, state.scenario),
             tail: marginTailRows,
           }
         : null,

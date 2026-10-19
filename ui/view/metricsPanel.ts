@@ -16,7 +16,7 @@
 
 import { MARGIN_HORIZON_BUSINESS_DAYS, type MarginParams } from '../../model';
 import { DASH, fmtNum, fmtSigned } from './format';
-import type { MarginCalc, MarginView } from './margin';
+import type { MarginCalc, MarginPointAt, MarginView } from './margin';
 import {
   AMOUNT_UNIT_LABEL,
   type AmountUnit,
@@ -46,6 +46,11 @@ export interface MetricTile {
   key: TileKey;
   /** 見出し */
   k: string;
+  /**
+   * 見出しの横に小さく出す点の印（#164。必要証拠金・余力だけ `· d 7 日 · ΔX −4.4%` / `· 今`、他は空。
+   * 入らなければ省略記号 = 全文のシナリオ点の行で読む）
+   */
+  at: string;
   /** 値 */
   v: string;
   /** 値の横に小さく出す単位（— と ∞ には付けない。金額でなければ空） */
@@ -53,9 +58,18 @@ export interface MetricTile {
   /** 副題（1 行、入らなければ省略記号） */
   s: string;
   tone: Tone;
-  /** 全文（タップ / Enter / Space のポップオーバーの中身。1 行目は見出し + 値。必ず 1 行以上。#107） */
+  /**
+   * 全文（タップ / Enter / Space のポップオーバーの中身。1 行目は見出し + 値。必ず 1 行以上。#107）。
+   * FULL_MAX_ROWS 行以下（#161）
+   */
   full: FullRow[];
 }
+
+/**
+ * タイルの全文の行数の上限（#161）。360x780 の「指標」peek の .panel-body は 273px で、吹き出しは
+ * 1 行 ≈ 18.9px + 上下の余白 ≈ 22px → 13 行まで入る。余裕を 1 行とって 12
+ */
+export const FULL_MAX_ROWS = 12;
 
 export interface BreakdownRow {
   k: string;
@@ -135,7 +149,40 @@ export const ROOM_NO_CAPITAL_TEXT = '資金は ⋯ > 設定…';
 export const MARGIN_CALL_MARK = '追証';
 /** ⓘ の証拠金の文（方式・物差し・NOV・JSCC との違い・既定の決め方・未確認の形・Web 試算で確かめる。設計 5.10・#150） */
 export const MARGIN_HINT =
-  '必要証拠金は概算: 原資産 ±R・±R/2・0 × 足の今の IV の ×(1 + 上げ) / ×1 / ×(1 − 下げ) × 経過 0 / 2 営業日の格子で、損失の最悪値に掛け目を掛ける。証券会社の建てる前の必要委託証拠金と同じ物差しで、受け取るプレミアム（NOV）を含まない。JSCC の VaR 証拠金（過去の値動きとストレスシナリオ）の再現ではない。既定（R 5%・IV +50% / −25%・掛け目 100%）は 1 枚ずつの売りの 6 形の答え合わせ（0.98〜1.07 倍）で決めた。ストレス日・先物との組み合わせなどは未確認で、実額と違いうる。建てる前に JSCC の Web 試算か証券会社の額で確かめ、⋯ > 設定… の幅・掛け目で寄せる。余力 = 資金 − 支払 + 受取 − 手数料 + 先物の評価損益 − (必要証拠金 − NOV)。値はシナリオの点、副題は今。';
+  '必要証拠金は概算: 原資産 ±R・±R/2・0 × 足の今の IV の ×(1 + 上げ) / ×1 / ×(1 − 下げ) × 経過 0 / 2 営業日の格子で、損失の最悪値に掛け目を掛ける。証券会社の建てる前の必要委託証拠金と同じ物差しで、受け取るプレミアム（NOV）を含まない。JSCC の VaR 証拠金（過去の値動きとストレスシナリオ）の再現ではない。既定（R 5%・IV +50% / −25%・掛け目 100%）は 1 枚ずつの売りの 6 形の答え合わせ（0.98〜1.07 倍）で決めた。ストレス日・先物との組み合わせなどは未確認で、実額と違いうる。建てる前に JSCC の Web 試算か証券会社の額で確かめ、⋯ > 設定… の幅・掛け目で寄せる。余力 = 資金 − 支払 + 受取 − 手数料 + 先物の評価損益 − (必要証拠金 − NOV)。値はシナリオの点（見出しの横に d・ΔX・Δσ・Δs のうち 0 でないもの。全部 0 なら「今」）、副題は今。証券会社の額は前営業日の清算値で 1 日固定（場中に計算し直しても同じ額）、simulator は今の板で計算するので場中の値動きの分だけ違う。';
+
+/** 内訳・全文のシナリオ点の行の見出し（#164） */
+export const MARGIN_POINT_ROW_LABEL = 'シナリオ点';
+/** タイルの見出しの点の印: 4 つとも 0（今と同じ点。#164） */
+export const MARGIN_POINT_NOW_TEXT = '今';
+/** シナリオ点の行の値: 4 つとも 0（#164） */
+export const MARGIN_POINT_SAME_TEXT = '今と同じ';
+
+/** d の日数（小数 2 桁で丸めて末尾の 0 を落とす: 7 → `7`、1.5 → `1.5`、0.25 → `0.25`） */
+const fmtDays = (d: number) => fmtNum(d, 2).replace(/\.?0+$/, '');
+
+/**
+ * シナリオの点の部品（#164）: 0 でない d・ΔX・Δσ・Δs だけを順に。ΔX は % の小数 1 桁、% が 0 に丸まるなら円。
+ * 4 つとも 0 なら空（今と同じ点。marginNow の条件と同じ）
+ */
+export function marginPointParts(at: MarginPointAt): string[] {
+  const out: string[] = [];
+  if (at.days !== 0) out.push(`d ${fmtDays(at.days)} 日`);
+  if (at.dX !== 0) {
+    const pct = fmtSigned(at.dXPct, 1);
+    out.push(/^0(\.0+)?$/.test(pct) ? `ΔX ${fmtSigned(at.dX, 0)} 円` : `ΔX ${pct}%`);
+  }
+  if (at.dSigma !== 0)
+    out.push(`Δσ ${fmtSigned(at.dSigma, 1)}${at.dSigmaUnit === '%' ? '%' : ' pt'}`);
+  if (at.skew !== 0) out.push(`Δs ${fmtSigned(at.skew, 1)}`);
+  return out;
+}
+
+/** タイルの見出しの点の文字列（#164。4 つとも 0 なら「今」、他は ` · ` でつなぐ） */
+export function marginPointText(at: MarginPointAt): string {
+  const parts = marginPointParts(at);
+  return parts.length === 0 ? MARGIN_POINT_NOW_TEXT : parts.join(' · ');
+}
 
 /** 原資産の点の並び（旧 Metrics と同じ: 無ければ「なし」、` / ` 区切り） */
 export function fmtXs(xs: readonly number[]): string {
@@ -302,45 +349,105 @@ const marginOf = (c: MarginCalc | null) => (c ? c.result.margin : null);
 const roomOf = (c: MarginCalc | null) => (c ? c.room : null);
 const roomTone = (v: number | null): 'loss' | null => (v !== null && v < 0 ? 'loss' : null);
 
+/** 状態 1 つ（シナリオ点 / 今）の 4 行 */
+interface MarginStateRows {
+  margin: FullRow;
+  nov: FullRow;
+  requirement: FullRow;
+  room: FullRow;
+}
+
 /**
- * 証拠金の行（内訳の群・タイルの全文で共用）: シナリオ点と今の必要証拠金（k × PFE）・NOV・証拠金所要額・余力、
- * 倍数（今）、最悪の点（シナリオ点）、
+ * 証拠金の行の群（内訳の群・タイルの全文の材料。#164・#161）: シナリオ点（d・ΔX・Δσ・Δs。今と同じなら 1 行）、
+ * シナリオ点と今の必要証拠金（k × PFE）・NOV・証拠金所要額・余力、倍数（今）、最悪の点（シナリオ点）、
  * 前提（R・IV の幅・保有期間・掛け目・買いの OP）。資金が未設定なら余力・倍数は「—」。360px の内訳の 2 列で切れないよう
  * 見出し・値は短く、複数の値は行に分ける（続きの行の見出しは空）
  */
-function marginRows(mv: MarginView, u: AmountUnit): FullRow[] {
-  const A = (v: number | null) => amountText(v, u);
-  const rows: FullRow[] = [];
-  const state = (name: string, c: MarginCalc | null) => {
-    rows.push({ k: `必要証拠金（${name}）`, v: A(marginOf(c)) });
-    rows.push({ k: `NOV（${name}）`, v: amountText(c ? c.result.nov : null, u, true) });
-    rows.push({ k: `証拠金所要額（${name}）`, v: A(c ? c.result.requirement : null) });
-    rows.push({ k: `余力（${name}）`, v: A(roomOf(c)) });
-  };
-  state('シナリオ点', mv.point);
-  state('今', mv.now);
-  rows.push({ k: '倍数（今）', v: multipleText(mv.now?.multiple ?? null) });
-  const w = worstValues(mv.point, mv.params);
-  if (w !== null) rows.push(...w.map((v, i) => ({ k: i === 0 ? '最悪の点' : '', v })));
-  const p = mv.params;
-  rows.push({ k: '値動き幅 R', v: `±${fmtParam(Math.round(p.range * 1000) / 10)}%` });
-  rows.push({ k: 'IV の幅', v: ivRangeText(p) });
-  rows.push({ k: '保有期間', v: `${MARGIN_HORIZON_BUSINESS_DAYS} 営業日` });
-  rows.push({ k: '掛け目', v: `${fmtParam(Math.round(p.factor * 1000) / 10)}%` });
-  rows.push({
-    k: '買いの OP',
-    v: p.ignoreLongOptions ? MARGIN_LONG_ROW_TEXT.ignore : MARGIN_LONG_ROW_TEXT.offset,
-  });
-  return rows;
+interface MarginGroups {
+  point: FullRow[];
+  atPoint: MarginStateRows;
+  atNow: MarginStateRows;
+  multiple: FullRow;
+  worst: FullRow[];
+  params: FullRow[];
 }
 
-/** 必要証拠金・余力のタイル（#131。値 = シナリオの点、副題 = 今） */
+function marginGroups(mv: MarginView, u: AmountUnit): MarginGroups {
+  const A = (v: number | null) => amountText(v, u);
+  const state = (name: string, c: MarginCalc | null): MarginStateRows => ({
+    margin: { k: `必要証拠金（${name}）`, v: A(marginOf(c)) },
+    nov: { k: `NOV（${name}）`, v: amountText(c ? c.result.nov : null, u, true) },
+    requirement: { k: `証拠金所要額（${name}）`, v: A(c ? c.result.requirement : null) },
+    room: { k: `余力（${name}）`, v: A(roomOf(c)) },
+  });
+  const parts = marginPointParts(mv.at);
+  const point: FullRow[] =
+    parts.length === 0
+      ? [{ k: MARGIN_POINT_ROW_LABEL, v: MARGIN_POINT_SAME_TEXT }]
+      : parts.map((v, i) => ({ k: i === 0 ? MARGIN_POINT_ROW_LABEL : '', v }));
+  const w = worstValues(mv.point, mv.params);
+  const p = mv.params;
+  return {
+    point,
+    atPoint: state('シナリオ点', mv.point),
+    atNow: state('今', mv.now),
+    multiple: { k: '倍数（今）', v: multipleText(mv.now?.multiple ?? null) },
+    worst: w === null ? [] : w.map((v, i) => ({ k: i === 0 ? '最悪の点' : '', v })),
+    params: [
+      { k: '値動き幅 R', v: `±${fmtParam(Math.round(p.range * 1000) / 10)}%` },
+      { k: 'IV の幅', v: ivRangeText(p) },
+      { k: '保有期間', v: `${MARGIN_HORIZON_BUSINESS_DAYS} 営業日` },
+      { k: '掛け目', v: `${fmtParam(Math.round(p.factor * 1000) / 10)}%` },
+      {
+        k: '買いの OP',
+        v: p.ignoreLongOptions ? MARGIN_LONG_ROW_TEXT.ignore : MARGIN_LONG_ROW_TEXT.offset,
+      },
+    ],
+  };
+}
+
+const stateList = (s: MarginStateRows): FullRow[] => [s.margin, s.nov, s.requirement, s.room];
+
+/** 内訳の証拠金の群の行（全部。シナリオ点・シナリオ点 / 今 × 4・倍数・最悪の点・前提の順） */
+function marginRows(g: MarginGroups): FullRow[] {
+  return [
+    ...g.point,
+    ...stateList(g.atPoint),
+    ...stateList(g.atNow),
+    g.multiple,
+    ...g.worst,
+    ...g.params,
+  ];
+}
+
+/**
+ * 必要証拠金のタイルの全文の行（見出しの後。#161）: 値に関わる行だけ、内訳の群と同じ順
+ * （シナリオ点・NOV / 証拠金所要額（シナリオ点）・必要証拠金（今）・最悪の点。最大 10 行）
+ */
+const marginFullRows = (g: MarginGroups): FullRow[] => [
+  ...g.point,
+  g.atPoint.nov,
+  g.atPoint.requirement,
+  g.atNow.margin,
+  ...g.worst,
+];
+
+/** 余力のタイルの全文の行（見出しの後。#161）: シナリオ点・証拠金所要額（シナリオ点）・余力（今）・倍数（今）。最大 7 行 */
+const roomFullRows = (g: MarginGroups): FullRow[] => [
+  ...g.point,
+  g.atPoint.requirement,
+  g.atNow.room,
+  g.multiple,
+];
+
+/** 必要証拠金・余力のタイル（#131。値 = シナリオの点、副題 = 今、見出しの横に点の印 #164） */
 function marginTiles(mv: MarginView | null, u: AmountUnit): MetricTile[] {
   const ul = AMOUNT_UNIT_LABEL[u];
   if (!mv) {
     const none = (key: TileKey, k: string): MetricTile => ({
       key,
       k,
+      at: '',
       v: DASH,
       unit: '',
       s: '',
@@ -349,22 +456,25 @@ function marginTiles(mv: MarginView | null, u: AmountUnit): MetricTile[] {
     });
     return [none('margin', MARGIN_TILE_LABEL), none('room', ROOM_TILE_LABEL)];
   }
-  const rows = marginRows(mv, u);
+  const g = marginGroups(mv, u);
+  const at = `· ${marginPointText(mv.at)}`;
   const mV = fmtAmount(marginOf(mv.point), u);
   const marginTile: MetricTile = {
     key: 'margin',
     k: MARGIN_TILE_LABEL,
+    at,
     v: mV,
     unit: unitFor(mV, ul),
     s: `今 ${fmtAmount(marginOf(mv.now), u)}`,
     tone: null,
-    full: [{ k: MARGIN_TILE_LABEL, v: amountText(marginOf(mv.point), u) }, ...rows],
+    full: [{ k: MARGIN_TILE_LABEL, v: amountText(marginOf(mv.point), u) }, ...marginFullRows(g)],
   };
   const room = roomOf(mv.point);
   const rV = mv.capital === null ? DASH : fmtAmount(room, u);
   const roomTile: MetricTile = {
     key: 'room',
     k: ROOM_TILE_LABEL,
+    at,
     v: rV,
     unit: unitFor(rV, ul),
     s:
@@ -372,7 +482,10 @@ function marginTiles(mv: MarginView | null, u: AmountUnit): MetricTile[] {
         ? ROOM_NO_CAPITAL_TEXT
         : `今 ${fmtAmount(roomOf(mv.now), u)} · ${multipleText(mv.now?.multiple ?? null)}`,
     tone: roomTone(room),
-    full: [{ k: ROOM_TILE_LABEL, v: mv.capital === null ? DASH : amountText(room, u) }, ...rows],
+    full: [
+      { k: ROOM_TILE_LABEL, v: mv.capital === null ? DASH : amountText(room, u) },
+      ...roomFullRows(g),
+    ],
   };
   return [marginTile, roomTile];
 }
@@ -394,6 +507,7 @@ export function metricTiles(m: MetricsModel, margin: MarginView | null = null): 
   ): MetricTile => ({
     key,
     k,
+    at: '',
     v,
     unit: unitFor(v, ul),
     s,
@@ -440,6 +554,7 @@ export function metricTiles(m: MetricsModel, margin: MarginView | null = null): 
     {
       key: 'bep',
       k: '満期 BEP',
+      at: '',
       v: fmtXs(expiry.breakevens),
       unit: '',
       s: `指定日 ${fmtXs(m.dateBreakevens)}`,
@@ -460,6 +575,7 @@ export function metricTiles(m: MetricsModel, margin: MarginView | null = null): 
     {
       key: 'greeks',
       k: '合計グリーク',
+      at: '',
       v: `Δ ${fmtSigned(g.deltaLarge, 2)} (${fmtSigned(g.deltaMini, 1)})`,
       unit: '',
       s: `Θ ${fmtAmount(g.thetaPerDay, u, true)} · V ${fmtAmount(g.vegaPerPt, u, true)}`,
@@ -524,7 +640,7 @@ export function metricsBreakdown(
   // 9 証拠金（概算。#131）
   if (margin) {
     group(MARGIN_GROUP_LABEL);
-    add(marginRows(margin, u));
+    add(marginRows(marginGroups(margin, u)));
   }
   return rows;
 }

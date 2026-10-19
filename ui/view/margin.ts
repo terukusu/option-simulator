@@ -67,13 +67,47 @@ export interface MarginTailRow {
   calc: MarginCalc | null;
 }
 
+/**
+ * シナリオの点の印（#164）の数。d = clampDays、ΔX・Δσ・Δs は有限でなければ 0（marginPoint・metricsModel と同じ扱い）、
+ * dXPct = ΔX / X₀ × 100。「今」（marginNow）の条件 = 4 つとも 0
+ */
+export interface MarginPointAt {
+  days: number;
+  dX: number;
+  dXPct: number;
+  dSigma: number;
+  /** Δσ の単位（IV の動かし方が relative なら %、absolute なら pt） */
+  dSigmaUnit: 'pt' | '%';
+  skew: number;
+}
+
 /** 指標パネル（タイル・内訳・テールの証拠金の表）に渡す形 */
 export interface MarginView {
   capital: number | null;
   params: MarginParams;
   now: MarginCalc | null;
   point: MarginCalc | null;
+  /** シナリオの点の位置（タイルの見出しの印・内訳のシナリオ点の行。#164） */
+  at: MarginPointAt;
   tail: MarginTailRow[];
+}
+
+const finiteOr0 = (v: number) => (Number.isFinite(v) ? v : 0);
+
+/** シナリオの点の位置（#164。今 = 4 つとも 0） */
+export function marginPointAt(base: PnlBase, scenario: Scenario): MarginPointAt {
+  const days = finiteOr0(clampDays(scenario, base.maxDays).days);
+  const dX = finiteOr0(scenario.dX);
+  const x0 = base.ctx.x0;
+  const dXPct = Number.isFinite(x0) && x0 > 0 ? (dX / x0) * 100 : 0;
+  return {
+    days,
+    dX,
+    dXPct,
+    dSigma: finiteOr0(scenario.dSigma),
+    dSigmaUnit: scenario.ivShift === 'relative' ? '%' : 'pt',
+    skew: finiteOr0(scenario.skew),
+  };
 }
 
 const finite = (r: MarginResult) =>
