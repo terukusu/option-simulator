@@ -9,7 +9,8 @@ stream(params, cancel) は次の事象（dict）を順に返す:
 
 資格情報は中継が選んだ種類の 1 つだけを明示で渡す（SDK は明示の引数があると環境変数を読まない。キーとトークンが
 両方あると X-Api-Key と Authorization の両方を送る）。api_key → Anthropic(api_key=…)、
-oauth_token → Anthropic(auth_token=…, anthropic-beta)、
+oauth_token → Anthropic(auth_token=…, anthropic-beta)（中継の既定の組み立てでは使わない。oauth_token の送信先は
+agent_sdk.AgentSdkGateway = Claude Agent SDK 経由。#186）、
 wif → Anthropic(credentials=WorkloadIdentityCredentials(…))（#184。ID トークンはメタデータサーバーから。
 交換したトークンは SDK の TokenCache が持ち、期限の前に交換し直す。Bearer と anthropic-beta は SDK が付ける）。
 max_retries=0（途中まで流した後の再試行で二重に流さない・締め切りを読める）。
@@ -32,7 +33,8 @@ class UpstreamError(Exception):
 
 
 class _SdkLogBridge(logging.Handler):
-    """SDK（logger "anthropic" 以下）の WARNING 以上を、本文なしの構造化ログ ai_sdk_warning に置き換える。
+    """SDK（logger "anthropic"・"claude_agent_sdk" 以下）の WARNING 以上を、本文なしの構造化ログ ai_sdk_warning に
+    置き換える。
     SDK の文言は交換の失敗の本文（上流のメッセージ。assertion を含みうる）を含むので出さない。
     出すのは logger の名前・レベル・引数の中の例外の型名と状態だけ"""
 
@@ -55,11 +57,11 @@ class _SdkLogBridge(logging.Handler):
 _sdk_log_lock = threading.Lock()
 
 
-def quiet_sdk_logs() -> None:
-    """logger "anthropic" を親（root・Python の lastResort = stderr）に流さず、_SdkLogBridge だけに渡す
-    （何度呼んでもよい）。
+def quiet_sdk_logs(name: str = "anthropic") -> None:
+    """logger name（"anthropic"・"claude_agent_sdk"）を親（root・Python の lastResort = stderr）に流さず、
+    _SdkLogBridge だけに渡す（何度呼んでもよい）。
     例: TokenCache の期限前の交換が失敗すると、SDK は WARNING に交換の失敗の本文を書く"""
-    sdk = logging.getLogger("anthropic")
+    sdk = logging.getLogger(name)
     with _sdk_log_lock:
         if not any(isinstance(h, _SdkLogBridge) for h in sdk.handlers):
             sdk.addHandler(_SdkLogBridge(level=logging.WARNING))

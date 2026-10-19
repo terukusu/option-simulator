@@ -139,7 +139,9 @@ api/（Python 3.13・Flask）  /api/chain・/api/calendar・/api/atm_iv・/api/a
 - **データ元**: optionchan（[`docs/design.md`](docs/design.md) 7 章）形式の BigQuery の最新スナップショット、または JSON ファイル（`DATA_SOURCE=file`・画面のファイル選択）。手元では合成の板（`fixtures/synthetic/`）だけで GCP なしに動きます
 - **ほかの供給元**: 自分で契約した API から書き出した気配の一覧を読む口（`DATA_SOURCE=quotes`）。形・足し方・候補の比較は [`docs/data-sources.md`](docs/data-sources.md)
 - **汎用の作り**: 誰でも clone して自分の環境（自分の GCP プロジェクト・自分の optionchan）で使える作りです。プロジェクト ID・URL・アカウントなどの個人の値はコードに書かず、変数で受け取ります（[`CLAUDE.md`](CLAUDE.md) の「リポジトリに置くもの / 置かないもの」）
-- **AI の中継**: ブラウザの会話を `api/` の `/api/ai/messages`（SSE）が許可リストで検査して Claude へ渡します。AI が求めた計算（シナリオの評価など）はブラウザで行い、中継は計算しません。1 日の費用の上限は Firestore で数えます（API キー・WIF のとき）。資格情報は `AI_CREDENTIAL` で 1 つ選びます（Anthropic の WIF（鍵なし）、または Secret Manager に入れた API キー / OAuth トークン）。未設定なら AI は無効で、ほかの機能はそのまま使えます。手順は [`infra/README.md`](infra/README.md) の「AI の資格情報」「AI の費用の計上」と [`api/README.md`](api/README.md)
+- **AI の中継**: ブラウザの会話を `api/` の `/api/ai/messages`（SSE）が許可リストで検査して Claude へ渡します。AI が求めた計算（シナリオの評価など）はブラウザで行い、中継は計算しません。1 日の費用の上限は Firestore で数えます（API キー・WIF のとき）。資格情報は `AI_CREDENTIAL` で 1 つ選びます（Claude のサブスクリプションの OAuth トークンか API キー（どちらも Secret Manager に入れる）、または Anthropic の WIF（鍵なし））。OAuth トークンのときは、中継が Claude Agent SDK（Claude Code の CLI を中で動かす）を通して送り、費用は数えません。未設定なら AI は無効で、ほかの機能はそのまま使えます。
+  - **サブスクリプションの OAuth トークンを使う場合は、自分で規約を確かめてください**。Anthropic の文書は、Agent SDK を使って製品・サービスを作る開発者には API キーでの認証を求め、Free / Pro / Max プランの資格情報で利用者の代わりに要求を送ることを認めていません（原文と出典は [`docs/adr-0005-ai-oauth-via-agent-sdk.md`](docs/adr-0005-ai-oauth-via-agent-sdk.md) の「規約」）。使うかどうかはデプロイする人の自己責任です。迷うなら API キーか WIF を使ってください
+  - 手順は [`infra/README.md`](infra/README.md) の「AI の資格情報」「AI の費用の計上」と [`api/README.md`](api/README.md)
 - **本番の構成**: Cloud Run（IAP の後ろ）+ Terraform（[`infra/README.md`](infra/README.md)）。API は [`api/README.md`](api/README.md)
 - **設計**: [`docs/design.md`](docs/design.md)（価格モデル・データ・決定事項）
 

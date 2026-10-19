@@ -304,13 +304,17 @@ gcloud run services list --project="$P" --format='value(metadata.name,status.lat
 
 ## AI の資格情報（Secret Manager）
 
-AI アドバイザー（`docs/ai-advisor.md`）が Claude を呼ぶための資格情報（#133・#184、`docs/adr-0001-ai-credentials-secret-manager.md`）。API キー・サブスクリプションの OAuth トークン（`claude setup-token`）・Anthropic の WIF（鍵なし。下の「wif（Anthropic の WIF）」）に対応し、使うのはどれか 1 つだけ。1〜7 は Secret Manager を使う `api_key` / `oauth_token` の手順。
+AI アドバイザー（`docs/ai-advisor.md`）が Claude を呼ぶための資格情報（#133・#184・#186、`docs/adr-0001-ai-credentials-secret-manager.md`・`docs/adr-0005-ai-oauth-via-agent-sdk.md`）。サブスクリプションの OAuth トークン（`claude setup-token`。**最初の選択肢**）・Anthropic の WIF（鍵なし。下の「wif（Anthropic の WIF）」）・API キーに対応し、使うのはどれか 1 つだけ。1〜7 は Secret Manager を使う `oauth_token` / `api_key` の手順。
+
+- `oauth_token`: 中継は Claude Agent SDK（イメージに入っている Claude Code の CLI）を子プロセスで動かして送る（Messages API の直接呼び出しはこのトークンでは 429 になる。#186）。費用は数えない（Firestore を使わない）。**サブスクリプションの資格情報をこの用途に使ってよいかは、自分で規約を確かめる**（Anthropic の文書の原文と出典は ADR-0005 の「規約」。使うかはデプロイする人の自己責任。迷うなら `wif` か `api_key`）
+- `wif` / `api_key`: `anthropic` SDK で Messages API を直接呼ぶ。従量課金で、1 日の上限（既定 $3）を Firestore で数える（「AI の費用の計上」）
+- Terraform の変数 `ai_credential` の既定は `none` のまま（Secret に版が無いまま `oauth_token` にするとインスタンスが起動しないため）。種類は GitHub の repository variable `AI_CREDENTIAL` で選ぶ
 
 | 種類（`AI_CREDENTIAL`） | シークレット | Cloud Run の環境変数 |
 |---|---|---|
 | `none`（既定。未設定も同じ） | — | 何も足さない（AI は無効） |
+| `oauth_token` | `simulator-anthropic-oauth-token` | `AI_CREDENTIAL=oauth_token`、`ANTHROPIC_AUTH_TOKEN`（参照。中継が CLI の子に `CLAUDE_CODE_OAUTH_TOKEN` としてだけ渡す） |
 | `api_key` | `simulator-anthropic-api-key` | `AI_CREDENTIAL=api_key`、`ANTHROPIC_API_KEY`（参照） |
-| `oauth_token` | `simulator-anthropic-oauth-token` | `AI_CREDENTIAL=oauth_token`、`ANTHROPIC_AUTH_TOKEN`（参照） |
 | `wif`（#184） | —（使わない） | `AI_CREDENTIAL=wif`、`ANTHROPIC_FEDERATION_RULE_ID`・`ANTHROPIC_ORGANIZATION_ID`（必須）・`ANTHROPIC_SERVICE_ACCOUNT_ID`・`ANTHROPIC_WORKSPACE_ID`（任意。空なら載せない）を素の値で |
 
 - シークレットの入れ物 2 つ（東京だけに複製、`deletion_policy = "PREVENT"`）と、シークレット単位の `roles/secretmanager.secretAccessor`（`sa-simulator` だけ）は `infra/bootstrap/ai_credentials.tf`。apply SA・plan SA には Secret Manager の権限を付けない
@@ -345,7 +349,7 @@ read -rs V && printf '%s' "$V" | gcloud secrets versions add simulator-anthropic
 **3. 選んで deploy**（所有者）
 
 ```sh
-gh variable set AI_CREDENTIAL -R "$REPO" --body api_key      # または oauth_token
+gh variable set AI_CREDENTIAL -R "$REPO" --body oauth_token  # または api_key
 # 任意: 版を番号で固定する（下の「版の指定」）
 # gh variable set AI_SECRET_VERSION -R "$REPO" --body 1
 gh workflow run deploy.yml -R "$REPO" --ref main
@@ -371,7 +375,7 @@ curl -sf -H "Authorization: Bearer $(gcloud auth print-access-token)" \
            | map(select(.name | startswith("A")))'
 ```
 
-期待（`api_key` のとき）: `AI_CREDENTIAL` が `has_value: true`、`ANTHROPIC_API_KEY` が `ref: "simulator-anthropic-api-key"`・`has_value: false`、`ANTHROPIC_AUTH_TOKEN` は無い。デプロイ後のエラーログ 0 件は prod の「確認」と同じ。
+期待（`oauth_token` のとき）: `AI_CREDENTIAL` が `has_value: true`、`ANTHROPIC_AUTH_TOKEN` が `ref: "simulator-anthropic-oauth-token"`・`has_value: false`、`ANTHROPIC_API_KEY` は無い（`api_key` のときはその逆）。デプロイ後のエラーログ 0 件は prod の「確認」と同じ。`oauth_token` は続けて `api/README.md`「デプロイ後の確認」の `oauth_token` の項（診断・追加の質問・`spawn_ms`）を見る
 
 **5. 版の指定とローテーション**
 
@@ -386,6 +390,7 @@ curl -sf -H "Authorization: Bearer $(gcloud auth print-access-token)" \
 |---|---|
 | deploy 後に起動しない・AI を止めたい | `gh variable set AI_CREDENTIAL -R "$REPO" --body none`（または `gh variable delete AI_CREDENTIAL`）→ `gh workflow run deploy.yml` → 承認（環境変数が 3 つに戻る）。急ぐときは prod の「切り戻し・撤去」の `update-traffic` で旧リビジョンへ |
 | 鍵・トークンが漏れた | **最初に Anthropic 側で失効**（API キーは Claude Console で無効化。トークンは作り直す）→ `AI_CREDENTIAL=none` で deploy → `gcloud secrets versions disable` / `destroy`。順序を逆にする（版を先に無効にする）と、参照している simulator のインスタンスが起動しなくなる |
+| `oauth_token` で認証の失敗・429（`ai_request` の `error` が `upstream_auth` / `upstream_rate_limited`）・Agent SDK の送信路を止めたい（#186） | **`wif` に戻す**（数える送信路。イメージは両方の送信路を持つので deploy だけ）: `gh variable set AI_CREDENTIAL -R "$REPO" --body wif` → `gh workflow run deploy.yml -R "$REPO" --ref main` → plan の要約が update 1 なら承認 → `/api/ai/status` が `"credential":"wif","counted":true`。WIF の ID の variables は残したままでよい（下の「wif」）。`api_key` に戻すときは版が登録済みであること |
 | 付与の誤り | 修正の PR → 1 と同じ plan / apply。急ぐときは `gcloud secrets remove-iam-policy-binding`（あとで Terraform と揃える） |
 
 **7. 撤去**（この順で）

@@ -30,8 +30,8 @@ optionchan の BigQuery（データセット `optionchan_tokyo` のテーブル�
 | `QUOTES_FILE` | なし | `DATA_SOURCE=quotes` の気配の一覧（要求ごとに読む。書き換えれば [最新] で新しい板） |
 | `CALENDAR_FILE` | なし | `DATA_SOURCE=quotes` の取引カレンダー（`/api/calendar` と同じ形。同梱の `../data/calendar/calendar.json` を指せる） |
 | `STATIC_DIR` | なし | 静的ファイルのディレクトリ（`index.html`・`assets/`・直下の manifest とアイコン） |
-| `AI_CREDENTIAL` | `none`（未設定も同じ） | AI の資格情報の種類: `api_key` / `oauth_token` / `wif`（本番。Terraform の変数 `ai_credential`）/ `fake`（偽の送信先とメモリの計上。手元・テスト用。Anthropic を呼ばない）。不正な値は AI だけを無効にする |
-| `ANTHROPIC_API_KEY` / `ANTHROPIC_AUTH_TOKEN` | なし | 選んだ方だけ（本番は Secret Manager の参照）。両方ある・選んだ方が無いときは AI を無効にする（WARNING `ai_disabled`。値は出さない）。中継が読み、SDK には明示で片方だけを渡す。`wif` のときはどちらかがあれば AI を無効にする（`ai_credential_conflict`） |
+| `AI_CREDENTIAL` | `none`（未設定も同じ） | AI の資格情報の種類: `oauth_token`（本番の既定。Claude のサブスクリプションの OAuth トークンを Claude Agent SDK 経由で送る。数えない。規約は自分で確かめる = `docs/adr-0005-ai-oauth-via-agent-sdk.md`）/ `wif` / `api_key`（本番。Terraform の変数 `ai_credential`）/ `fake`（偽の送信先とメモリの計上。手元・テスト用。Anthropic を呼ばない）。不正な値は AI だけを無効にする |
+| `ANTHROPIC_API_KEY` / `ANTHROPIC_AUTH_TOKEN` | なし | 選んだ方だけ（本番は Secret Manager の参照）。両方ある・選んだ方が無いときは AI を無効にする（WARNING `ai_disabled`。値は出さない）。中継が読み、SDK には明示で片方だけを渡す（`oauth_token` は CLI の子プロセスに `CLAUDE_CODE_OAUTH_TOKEN` としてだけ渡し、子の `ANTHROPIC_AUTH_TOKEN`・`ANTHROPIC_API_KEY` は空で上書きする）。`wif` のときはどちらかがあれば AI を無効にする（`ai_credential_conflict`） |
 | `ANTHROPIC_FEDERATION_RULE_ID`・`ANTHROPIC_ORGANIZATION_ID` / `ANTHROPIC_SERVICE_ACCOUNT_ID`・`ANTHROPIC_WORKSPACE_ID` | なし | `wif`（Anthropic の WIF。#184）の ID。前 2 つは必須（無ければ `ai_credential_missing`）、後 2 つは任意。形（組織 ID は UUID、他は英数字・`_`・`-` の 128 文字まで）が違えば `ai_wif_invalid`。中継がメタデータサーバーから実行 SA の ID トークン（audience `https://api.anthropic.com`・`format=full`）を取り、SDK の `WorkloadIdentityCredentials` だけを渡す（Cloud Run の中でだけ動く）。値は秘密ではないが個人のものなのでログに出さない |
 | `AI_MODEL` | `claude-opus-5-5` | 料金表（`settings.AI_PRICES`）にあるモデルだけ |
 | `AI_DAILY_LIMIT_USD` | `3` | 1 日（JST）の上限（USD。0 < 値 ≤ 20、小数 2 桁まで） |
@@ -163,23 +163,26 @@ gcloud logging read 'resource.type="cloud_run_revision" AND resource.labels.serv
 
 ## AI の中継（#134）
 
-設計は `docs/design.md` 7.1・13.4「AI の中継」・14 章、`docs/ai-advisor.md` 論点 1・3・4・6〜8、計上の置き場所は `docs/adr-0004-ai-spend-counter-firestore.md`、資格情報は `docs/adr-0001-ai-credentials-secret-manager.md`。
+設計は `docs/design.md` 7.1・13.4「AI の中継」・14 章、`docs/ai-advisor.md` 論点 1・3・4・6〜8、計上の置き場所は `docs/adr-0004-ai-spend-counter-firestore.md`、資格情報は `docs/adr-0001-ai-credentials-secret-manager.md`、`oauth_token` の送信路は `docs/adr-0005-ai-oauth-via-agent-sdk.md`。
+
+- **送信先**（`AI_CREDENTIAL` で選ぶ）: `oauth_token` → `ai/agent_sdk.py` の `AgentSdkGateway`（`claude-agent-sdk` 0.2.160。wheel に同梱の Claude Code CLI 2.1.283 を要求ごとに子プロセスで起動する。#186）、`api_key`・`wif` → `ai/gateway.py` の `AnthropicGateway`（`anthropic` 1.8.0 で Messages API を直接）、`fake` → `FakeGateway`。どれも同じ事象（`thinking`・`text`・`tool_use`・`final`）を返すので、SSE の形は資格情報によらない
+- **`oauth_token` の送信路の決まり**（ADR-0005）: 道具 6 本は SDK MCP の道具（CLI では `mcp__sim__<名>`）として見せ、`PreToolUse` フックで実行せずに turn を終える（ブラウザが計算する）。組み込みの道具は 0 本（`tools=[]`）、設定・CLAUDE.md を読まない（`setting_sources=[]`）、`@<パス>` をファイルとして読ませない（`verbatim_prompts=True`）、再試行しない（`CLAUDE_CODE_MAX_RETRIES=0`）、出力の上限は `CLAUDE_CODE_MAX_OUTPUT_TOKENS=8000`、設定ディレクトリと cwd は要求ごとの一時ディレクトリ（`/tmp`。終わったら消す）、CLI の標準エラーは捨てる。会話の履歴は要求ごとにメモリ上の transcript にして渡す（最後の発言が道具の結果のときは、CLI がその末尾に固定の短い文を 1 つ足す）。中止・締め切り・切断で子を止める。イメージは `CLAUDE_AGENT_SDK_SKIP_VERSION_CHECK=1`（版は `uv.lock` で固定）。SDK の版を上げるときは `tests/test_ai_agent_sdk_cli.py` を必ず通し、ADR-0005 の版を直す
 
 - **許可リスト**（`ai/allowlist.py`）: ブラウザから受けるのは `schema_version`・`kind`・`context`・`messages` だけ（`model`・`system`・`tools`・`max_tokens` などは 400）。`context` のキー・型・範囲・個数を検査し（自由な文字列は無い。板の行は `k`・`type`・`bid`・`ask`・`iv` だけで、JPX のグリーク・`bid_iv` / `ask_iv`・数量・建玉は 400）、`messages` は role の交互・block の型（user は `text`・`tool_result`、assistant は `text`・`thinking`・`redacted_thinking`・`tool_use`）・道具の名前と入出力の形（`ai/tools.py` の登録）を検査する。送る本文は検査済みの値から組み立て直す（`context` は最初の user の先頭の text block に `<context>…</context>` の決定的な JSON）
 - **1 日の上限**（`ai/budget.py`）: 予約 = 入力の見積もり（送る本文の UTF-8 のバイト数 + 2,000。トークン数の上界）× 5 分のキャッシュ書き込みの単価（入力の 1.25 倍）+ `max_tokens` × 出力の単価（µUSD の整数）。`計上額 + 予約額 ≤ 上限` のときだけ送り、終わったら `usage` × 料金表で精算、途中で切れたら予約額のまま。計上の場所が読めない・書けないときは 503 で送らない
 - **SSE**: `accepted`（検査と予約の直後、Anthropic を呼ぶ前）→ `progress`（`thinking` / `writing` / `tool`）・`thinking`・`text`・`tool_use` → `done`（`stop_reason`・assistant の `content`・`remaining_usd`）か `error`（`timeout`・`upstream_auth`・`upstream_rate_limited`・`upstream_overloaded`・`upstream_bad_request`・`upstream_unavailable`・`upstream_incomplete`・`bad_tool_input`）。締め切りは 50 秒
 - **道具**（`ai/tools.py`。#135）: `position_summary`・`tail_table`・`margin_summary`・`scenario_grid`・`smile_position`（入力なし。[このポジションを診断] ではブラウザが事前計算して `context.precomputed`）と `evaluate_scenario`（`dx_pct` か `x`・`days`・`iv_shift_pt`・任意の `skew_pt`。範囲は画面のシナリオの欄と同じ）。中継は道具を実行せず、入力（`tool_use`）・結果（`tool_result`・`precomputed`）を形で検査する。計算はブラウザの `ui/view/aiTools.ts` で、生成した見本 `fixtures/synthetic/ai_tools.json` を `tests/test_ai_tools.py` が結果の形に通す（言語をまたぐ契約）
 - **会話の途中の文脈の更新**（#135）: 2 件目以降の user の発言に `{"type": "context_update", "context": {…}}` を 1 つ（`tool_result` の後ろ）。`context` と同じ形で検査し、`<context_update>…</context_update>` の text block にして同じ位置に置く。最初の `context` と前の messages は変えない（Opus 5.5 の preserved thinking・prompt caching の前置きを保つ）。`kind: "diagnose"` は [このポジションを診断]（system prompt は 1 つ。`relay.DIAGNOSE_TEXT` が最初の発言）
-- テストは偽の送信先（`ai/gateway.py` の `FakeGateway`）と、本物の SDK に httpx2 の `MockTransport` を渡したもの（送られる見出し・本文を捕まえる。ネットワークに出ない）、偽の Firestore の session。Anthropic・GCP には触れない
+- テストは偽の送信先（`ai/gateway.py` の `FakeGateway`）と、本物の SDK に httpx2 の `MockTransport` を渡したもの（送られる見出し・本文を捕まえる。ネットワークに出ない）、偽の Firestore の session。`oauth_token` の送信路は偽の `query`・偽の CLI（`tests/test_ai_agent_sdk.py`）と、同梱の本物の CLI を pytest の中の 127.0.0.1 の偽の Messages API（`tests/fake_messages_api.py`。ダミーのトークン）に向けた結合（`tests/test_ai_agent_sdk_cli.py`。同梱の CLI が無いプラットフォームでは skip）。Anthropic・GCP には触れない
 
 ### ログ
 
 | イベント | いつ | 項目 |
 |---|---|---|
-| `ai_request` | 1 要求 1 行（失敗も。失敗は WARNING） | `kind`・`model`・`credential`（種類だけ）・`n_messages`・`request_bytes`・`est_input_tokens`・`reserved_usd`・`accepted_ms`・`first_delta_ms`（最初の thinking / text）・`first_text_ms`（最初の text。K15 の「最初の文字」）・`total_ms`・`stop_reason`・`tools`（会話に出た道具の名前）・`input_tokens`・`cache_creation_input_tokens`・`cache_read_input_tokens`・`output_tokens`・`cost_usd_est`（料金表の概算。`oauth_token` も）・`charged_usd`（計上額。`oauth_token` は 0）・`price_checked`・`remaining_usd`・`error`・`error_type`（例外の型名）・`upstream_status` |
+| `ai_request` | 1 要求 1 行（失敗も。失敗は WARNING） | `kind`・`model`・`credential`（種類だけ）・`n_messages`・`request_bytes`・`est_input_tokens`・`reserved_usd`・`accepted_ms`・`first_delta_ms`（最初の thinking / text）・`first_text_ms`（最初の text。K15 の「最初の文字」）・`total_ms`・`stop_reason`・`tools`（会話に出た道具の名前）・`input_tokens`・`cache_creation_input_tokens`・`cache_read_input_tokens`・`output_tokens`・`cost_usd_est`（料金表の概算。`oauth_token` も）・`charged_usd`（計上額。`oauth_token` は 0）・`price_checked`・`remaining_usd`・`error`・`error_type`（例外の型名）・`upstream_status`・`spawn_ms`（`oauth_token` だけ。送信の開始 → CLI の最初の事象。子の起動・CLI の初期化・上流の応答の始まりを含む） |
 | `ai_rejected` | ストリームの前の拒否（400 / 403 / 413 / 415 / 429 / 503 `ai_disabled`） | `status`・`error`・`reason`・`path`（キーの道筋。知らないキーは `<unknown>`。値は出さない） |
 | `ai_disabled` | 起動時に設定が不正（WARNING） | `reason`（`ai_credential_conflict`・`ai_credential_missing`・`ai_wif_invalid` など） |
-| `ai_sdk_warning` | SDK（logger `anthropic`）の WARNING 以上。例: `wif` の期限の手前の交換し直しの失敗（古いトークンで続ける）（WARNING） | `logger`・`level`・`error_type`・`upstream_status`（SDK の文言は交換の失敗の本文を含むので出さない。SDK のログは stderr にも流さない） |
+| `ai_sdk_warning` | SDK（logger `anthropic`・`claude_agent_sdk`）の WARNING 以上。例: `wif` の期限の手前の交換し直しの失敗（古いトークンで続ける）（WARNING） | `logger`・`level`・`error_type`・`upstream_status`（SDK の文言は交換の失敗の本文を含むので出さない。SDK のログは stderr にも流さない） |
 | `ai_status_unavailable` / `ai_settle_failed` | 計上が読めない / 精算が書けない（WARNING） | `error_type` |
 
 出さないもの: 会話の本文・`context` の値・道具の入出力・鍵・SDK の例外の本文・IAP の見出し・WIF の ID トークン・交換したトークン・WIF の ID の値。
@@ -210,6 +213,14 @@ gcloud logging read 'resource.type="cloud_run_revision" AND resource.labels.serv
 ```
 
 `api_key` のときは `infra/README.md`「AI の費用の計上（Firestore）」の 4 で今日の計上が増えたことも確かめる。
+
+`oauth_token` のとき（#186 AC9〜AC12）: `/api/ai/status` が `"credential":"oauth_token","counted":false`。画面で [このポジションを診断] を 1 回、続けて道具を使う質問を 1 回押し、ログで `stop_reason` が `end_turn`（と `tool_use` の後の `end_turn`）・`error` が null・`spawn_ms` ≤ 10,000・`first_delta_ms` ≤ 30,000 を確かめる。`error` が `upstream_auth` / `upstream_rate_limited` なら `infra/README.md` の手順で `wif` に戻す:
+
+```sh
+gcloud logging read 'resource.type="cloud_run_revision" AND resource.labels.service_name="simulator" AND jsonPayload.event="ai_request" AND jsonPayload.credential="oauth_token"' \
+  --project="$P" --freshness=15m --format=json \
+  | jq -c '.[].jsonPayload | {kind, stop_reason, error, upstream_status, spawn_ms, first_delta_ms, first_text_ms, total_ms}'
+```
 
 ## AI の評価（#135）
 
