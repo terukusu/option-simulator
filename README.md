@@ -23,8 +23,9 @@
 - **証拠金の概算** — 必要証拠金・余力、損益グラフに **追証の線**、過去の 2 営業日の動きと重ねる **追証マップ**
 - **市場** — 板（bid で売り・ask で買い）、スマイル（bid / ask / mid の IV と補間・外挿）、ATM IV の推移（ローソク足・十字線）
 - **コマンドパレットと用語集** — `Ctrl + K` で何でも、先頭に `?` を付けて引くと用語の説明カード
+- **AI に相談** — [このポジションを診断] で弱点を数字つきで説明し、続けて質問できる。数字はこのシミュレーター自身の計算から取り、AI が使ったシナリオは [シナリオに適用] の 1 タップで損益グラフに入る
 - **どこでも** — PC の 3 列から、スマホのドックとシートまで。ダーク / ライト
-- **計算はすべてブラウザ** — サーバーは板の JSON を返すだけ
+- **計算はすべてブラウザ** — サーバーは板の JSON を返すのと、AI への中継だけ
 
 ## 機能ツアー
 
@@ -83,7 +84,18 @@
 
 ### AI に相談
 
-[このポジションを診断] で、今のポジションの弱点（どこで損が膨らむか・何に弱いか）を AI が数字つきで説明します。数字はこのシミュレーターの計算（指標・テール表・証拠金・シナリオの評価）から取り、AI には計算させません。続けて質問でき、AI が使ったシナリオは [シナリオに適用] で入れられます。管理者が AI を有効にしたときだけ使えます（1 日の費用の上限あり。投資の助言ではありません）。
+[このポジションを診断] で、今のポジションの弱点（どこで損が膨らむか・何に弱いか）を AI（Anthropic の Claude）が数字つきで説明します。数字はこのシミュレーターの計算（指標・テール表・証拠金・シナリオの評価と同じ計算）から取り、AI には計算させません。続けて「−6% で 3 日後、IV +5pt なら？」のように質問もできます。
+
+<p align="center"><img src="docs/images/ai.webp" alt="ダーク。PC の右の列に AI のパネル。診断の返答（弱点 3 つと確かめるとよいこと）、続けた質問へのシナリオの評価のカードと [シナリオに適用]" width="100%"></p>
+<p align="center"><sub>返答は合成の板で見せる例です（dev サーバーの架空の応答。数字は合成の板からの計算の値）。</sub></p>
+
+- **開き方** — スマホ・タブレットはドックの [AI]、PC はトップバーの [AI] かキー `6`（右の列のポジション・指標と入れ替わる）。コマンドパレットの「AI に相談」「このポジションを診断」からも
+- **数字の照合** — 返答の中の数字が計算の値と照合できないときは点線の下線が付く（その数字は計算の値ではない）
+- **[シナリオに適用]** — AI が計算させたシナリオ（日数・ΔX・IV・スキュー）はカードで見せ、1 タップでシナリオに入る。トーストの [元に戻す] で戻せる
+- **1 日の上限** — 見出しに今日の残り（例 `残り $2.40 / $3.00`）。使い切ると翌日まで送れない
+- **会話は残さない** — このタブの間だけ（再読み込みでは残り、タブを閉じると消える）。保存一覧・URL・書き出しには入らない
+
+管理者が AI を有効にしたときだけ使えます。返答は計算結果をもとにした検討材料で、投資の助言ではありません（売買の判断はご自身で）。
 
 ### コマンドパレットと用語集
 
@@ -98,7 +110,7 @@
 
 ### スマホ: ドックとシート
 
-舞台（損益グラフ）は常に上に。下のドック（ポジ / 板 / シナリオ / 指標 / IV）でパネルを選び、シートを peek / full / 隠すの 3 段階で。幅 360px でも横スクロールしません。
+舞台（損益グラフ）は常に上に。下のドック（ポジ / 板 / シナリオ / 指標 / IV / AI）でパネルを選び、シートを peek / full / 隠すの 3 段階で。幅 360px でも横スクロールしません。
 
 <p align="center"><img src="docs/images/phone-dark.webp" alt="スマホのダーク 3 台。ポジション、シナリオ、指標 · テールのシート"></p>
 <p align="center"><img src="docs/images/phone-light.webp" alt="スマホのライト 3 台。板、スマイル、IV 推移のシート"></p>
@@ -112,14 +124,18 @@ optionchan（毎分取り込んだ板 → BigQuery）
         │  読むだけ（書き込まない）
         ▼
 api/（Python 3.13・Flask）  /api/chain・/api/calendar・/api/atm_iv・/api/atm_daily
-        │  JSON
+        │  JSON              /api/ai/messages（SSE）──中継──▶ Anthropic Claude（AI を有効にしたときだけ）
         ▼
 ブラウザ（TypeScript + Preact）  model/ の純関数で Black-76・IV・F・スマイル・満期損益・シナリオ・グリーク・証拠金
+                                 AI が求めた計算（シナリオの評価・テール表など）もここで
 ```
+
+計算はすべてブラウザで行います。サーバーは板などの JSON を返すのと、AI への中継だけです。
 
 - **データ元**: optionchan（[`docs/design.md`](docs/design.md) 7 章）形式の BigQuery の最新スナップショット、または JSON ファイル（`DATA_SOURCE=file`・画面のファイル選択）。手元では合成の板（`fixtures/synthetic/`）だけで GCP なしに動きます
 - **ほかの供給元**: 自分で契約した API から書き出した気配の一覧を読む口（`DATA_SOURCE=quotes`）。形・足し方・候補の比較は [`docs/data-sources.md`](docs/data-sources.md)
 - **汎用の作り**: 誰でも clone して自分の環境（自分の GCP プロジェクト・自分の optionchan）で使える作りです。プロジェクト ID・URL・アカウントなどの個人の値はコードに書かず、変数で受け取ります（[`CLAUDE.md`](CLAUDE.md) の「リポジトリに置くもの / 置かないもの」）
+- **AI の中継**: ブラウザの会話を `api/` の `/api/ai/messages`（SSE）が許可リストで検査して Claude へ渡します。AI が求めた計算（シナリオの評価など）はブラウザで行い、中継は計算しません。1 日の費用の上限は Firestore で数えます（API キー・WIF のとき）。資格情報は `AI_CREDENTIAL` で 1 つ選びます（Anthropic の WIF（鍵なし）、または Secret Manager に入れた API キー / OAuth トークン）。未設定なら AI は無効で、ほかの機能はそのまま使えます。手順は [`infra/README.md`](infra/README.md) の「AI の資格情報」「AI の費用の計上」と [`api/README.md`](api/README.md)
 - **本番の構成**: Cloud Run（IAP の後ろ）+ Terraform（[`infra/README.md`](infra/README.md)）。API は [`api/README.md`](api/README.md)
 - **設計**: [`docs/design.md`](docs/design.md)（価格モデル・データ・決定事項）
 
@@ -128,7 +144,7 @@ api/（Python 3.13・Flask）  /api/chain・/api/calendar・/api/atm_iv・/api/a
 | `model/` | 価格モデル（Black-76・IV・F の推定・スマイルの補間 / 外挿・時間・満期損益・シナリオ・グリーク）。DOM・通信に依存しない純関数 |
 | `data/` | 板の JSON の型と検証、アダプタ、正規化、取引カレンダー |
 | `ui/` | 画面（Vite + Preact 10）。表示モデルは `ui/view/` の純関数 |
-| `api/` | 板とカレンダーを返す API（BigQuery を読むだけ） |
+| `api/` | 板・カレンダー・IV 推移を返す API（BigQuery を読むだけ）と AI の中継（`/api/ai/messages`） |
 | `infra/` | Terraform（`bootstrap`・`prod`） |
 | `fixtures/synthetic/` | 合成の板（架空の値） |
 | `tests/` | vitest（文献値・性質テスト・合成板からの回復） |
@@ -247,13 +263,13 @@ GCP_PROJECT_ID=$P GCP_PROJECT_NUMBER=$(gcloud projects describe "$P" --format='v
 <details>
 <summary>実装の経緯</summary>
 
-状態: 設計済み。縦切り 1（手元で損益が見える）を実装済み（価格モデル `model/`、データ `data/`、合成の固定の板、画面のヘッダ・板・スマイル・ポジション一覧・損益グラフ（拡大・パン）・シナリオのスライダー・指標・テール表）。縦切り 3 のデルタヘッジ（#19）・先物の basis 固定 / 減衰の切替（#25）を実装済み。縦切り 2 の API（`api/`。板 `/api/chain` とカレンダー `/api/calendar`。#33）を実装済み。インフラは `infra/bootstrap`（WIF・SA・state・Artifact Registry・IAP の閲覧許可。#35）と `infra/prod`（Cloud Run `simulator`（IAP）・イメージ（`Dockerfile`）・PR の plan と承認つきの deploy。#36）を実装済み。画面の既定を API にすること（#34）、閲覧者の追加と本番の受け入れ確認・個人の値の検査（CI）・クエリ量の監視の手順（#40。AC1 の読み込み時間は #95）を済ませた。
+状態: 設計済み。縦切り 1（手元で損益が見える）を実装済み（価格モデル `model/`、データ `data/`、合成の固定の板、画面のヘッダ・板・スマイル・ポジション一覧・損益グラフ（拡大・パン）・シナリオのスライダー・指標・テール表）。縦切り 3 のデルタヘッジ（#19）・先物の basis 固定 / 減衰の切替（#25）を実装済み。縦切り 2 の API（`api/`。板 `/api/chain` とカレンダー `/api/calendar`。#33）を実装済み。インフラは `infra/bootstrap`（WIF・SA・state・Artifact Registry・IAP の閲覧許可。#35）と `infra/prod`（Cloud Run `simulator`（IAP）・イメージ（`Dockerfile`）・PR の plan と承認つきの deploy。#36）を実装済み。画面の既定を API にすること（#34）、閲覧者の追加と本番の受け入れ確認・個人の値の検査（CI）・クエリ量の監視の手順（#40。AC1 の読み込み時間は #95）を済ませた。AI に相談は、資格情報の入れ物（#133）・中継と 1 日の上限（#134）・チャットと [このポジションを診断]（#135）を実装済み。
 
 </details>
 
 ## スクリーンショットの撮り直し
 
-この README の画像（`docs/images/*.webp`）は `scripts/readmeShots.mjs` で撮っています。Vite の dev サーバーを中で起こし、**合成の板**（`fixtures/synthetic/latest.json`）と dev サーバーの合成の応答（IV 推移・日次の値。`scripts/devFixtures.mjs`）だけを使います。本番・API・BigQuery には触れません。足・シナリオ・資金（架空の値）は localStorage に入れて開きます。
+この README の画像（`docs/images/*.webp`）は `scripts/readmeShots.mjs` で撮っています。Vite の dev サーバーを中で起こし、**合成の板**（`fixtures/synthetic/latest.json`）と dev サーバーの合成の応答（IV 推移・日次の値・AI の架空の返答。`scripts/devFixtures.mjs`）だけを使います。本番・API・BigQuery・Anthropic には触れません。足・シナリオ・資金（架空の値）は localStorage に入れて開きます。
 
 ```sh
 npx playwright install chromium        # 初回だけ
