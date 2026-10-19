@@ -294,6 +294,13 @@ const thousand = (v) =>
     ? `${v < 0 ? '−' : ''}${Math.round(Math.abs(v) / 1000).toLocaleString('en-US')} 千円`
     : '—';
 
+const yenX = (v) =>
+  typeof v === 'number'
+    ? `${v < 0 ? '−' : ''}${Math.abs(Math.round(v)).toLocaleString('en-US')} 円`
+    : '—';
+const pct = (v) =>
+  typeof v === 'number' ? `${v < 0 ? '−' : v > 0 ? '+' : ''}${Math.abs(v)}%` : '—';
+
 /** 偽の返答の組み立て（要求の本文 → 事象の列。純関数） */
 export function synthAiReply(body) {
   const msgs = Array.isArray(body?.messages) ? body.messages : [];
@@ -310,25 +317,32 @@ export function synthAiReply(body) {
     try {
       r = JSON.parse(result.content?.[0]?.text ?? '{}');
     } catch {}
-    const text = `その条件（${r?.scenario?.dx_pct ?? '—'}%・${r?.scenario?.days ?? '—'} 日・IV +${r?.scenario?.iv_shift_pt ?? '—'}pt）の損益は ${thousand(r?.pnl_yen)} です。満期なら ${thousand(r?.expiry_pnl_yen)} です。`;
+    const text = `その条件（${pct(r?.scenario?.dx_pct)}・${r?.scenario?.days ?? '—'} 日・IV +${r?.scenario?.iv_shift_pt ?? '—'}pt）の損益は ${thousand(r?.pnl_yen)} です。満期なら ${thousand(r?.expiry_pnl_yen)} です。`;
     return { thinking: '道具の結果を読む', text, stop: 'end_turn' };
   }
   if (body?.kind === 'diagnose') {
+    // 架空の文（合成の板からの事前計算の値だけを引く。README の画像にも使う）
     const s = pre.position_summary ?? {};
     const rows = pre.tail_table?.rows ?? [];
     const r10 = rows.find((x) => x?.shock_pct === -10) ?? rows[0] ?? {};
     const r20 = rows.find((x) => x?.shock_pct === -20) ?? rows[1] ?? {};
+    const bes = Array.isArray(s?.expiry?.breakevens_x) ? s.expiry.breakevens_x : [];
+    const sp = s?.scenario_point ?? {};
     const vega = s?.greeks_now?.vega_yen_per_pt;
     const theta = s?.greeks_now?.theta_yen_per_day;
+    const calls = pre.margin_summary?.call_levels_x ?? [];
     const text = [
       '## 弱点 1: 急落で損が膨らむ',
-      `−10% の SQ で ${thousand(r10.sq_pnl_yen)}、−20% では ${thousand(r20.sq_pnl_yen)} です。`,
+      `下の BEP は ${yenX(bes[0])} です。SQ で −10% なら ${thousand(r10.sq_pnl_yen)}、−20% なら ${thousand(r20.sq_pnl_yen)} と、下げるほど損が加速します。`,
       '## 弱点 2: IV の上昇に弱い',
-      `V は ${typeof vega === 'number' ? vega.toLocaleString('en-US') : '—'} 円 / pt です。`,
-      '## 弱点 3: 時間の経過',
-      `Θ は ${typeof theta === 'number' ? theta.toLocaleString('en-US') : '—'} 円 / 日です。`,
+      `V は ${thousand(vega)} / pt で、IV が上がるほど損が出ます。今のシナリオの点（${sp.days ?? '—'} 日後・ΔX ${pct(sp.dx_pct)}）では ${thousand(sp.pnl_yen)} で、下げと IV の上昇が重なると時間の利益を打ち消します。`,
+      calls.length > 0 ? '## 弱点 3: 追証の線までの距離' : '## 弱点 3: 時間の経過に頼る',
+      calls.length > 0
+        ? `余力（概算）が 0 になる原資産は ${calls.map(yenX).join('、')} です。下側の線を越えると、資金を足すか建玉を減らす必要があります。`
+        : `Θ は ${thousand(theta)} / 日の受け取りで、利益は時間の経過に頼っています。`,
       '## 確かめるとよいこと',
-      '- シナリオで ΔX を下げ、IV を上げて損益を見る',
+      '- 急落のプリセットで、追証の線との距離を見る',
+      '- 下側にプットの買いを足したヘッジ案をピンで重ねる',
     ].join('\n');
     return { thinking: '事前計算のテール表と格子を見る', text, stop: 'end_turn' };
   }

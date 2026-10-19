@@ -363,6 +363,26 @@ const shots = {
     await save('term-card', await page.screenshot());
     await ctx.close();
   },
+  // AI に相談: [このポジションを診断] の返答と、続けた質問のシナリオの評価のカード。返答は dev サーバーの偽の SSE
+  // （scripts/devFixtures.mjs の /fixtures/ai。Anthropic を呼ばない）で、数字は合成の板からの計算の値
+  async ai() {
+    const { ctx, page } = await open({ ...PC, theme: 'dark' });
+    if ((await page.getAttribute('.layout', 'data-bench')) !== 'ai') {
+      await page.click('.top button[data-ai="top"]');
+    }
+    await page.waitForSelector('section.ai .ai-foot', { state: 'visible', timeout: 5000 });
+    const close = page.locator('section.ai [data-ai="disclaimer"] button');
+    if (await close.count()) await close.click();
+    await page.click('section.ai button[data-ai="diagnose"]');
+    await page.waitForSelector('section.ai .ai-progress', { state: 'detached', timeout: 15000 });
+    await page.fill('section.ai .ai-input textarea', '−6% で 3 日後、IV +5pt ならどうなる？');
+    await page.press('section.ai .ai-input textarea', 'Enter');
+    await page.waitForSelector('section.ai .ai-progress', { state: 'detached', timeout: 15000 });
+    await page.waitForSelector('section.ai .ai-tool button[data-ai="apply"]', { timeout: 15000 });
+    await page.waitForTimeout(400);
+    await save('ai', await page.screenshot());
+    await ctx.close();
+  },
   // スマホ: ドックとシート（ダーク 3 台）
   async 'phone-dark'() {
     const pngs = [];
