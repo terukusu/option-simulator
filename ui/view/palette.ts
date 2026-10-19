@@ -15,6 +15,7 @@ import type { Action } from '../state';
 import { atmStrike } from './board';
 import { type MarketAddInput, marketAddLabel, marketAddPlan, monthSegOptions } from './boardPanel';
 import { addMenuModel } from './boxTabs';
+import { GLOSSARY, type TermId, termSearchText } from './glossary';
 import { CHART_KEY, type GlobalKey, type KeySummary, PANEL_KEY, THEME_KEY } from './keys';
 import { type PinMenuInput, pinMenuRows } from './pins';
 import { evalChips, presetChips, type ScenarioRegionInput } from './scenarioRegion';
@@ -32,7 +33,8 @@ export type PaletteGroup =
   | 'leg'
   | 'tab'
   | 'work'
-  | 'theme';
+  | 'theme'
+  | 'term';
 
 /** グループの並び（固定）と表示名 */
 export const PALETTE_GROUPS: readonly { group: PaletteGroup; name: string }[] = [
@@ -46,6 +48,7 @@ export const PALETTE_GROUPS: readonly { group: PaletteGroup; name: string }[] = 
   { group: 'tab', name: 'タブ' },
   { group: 'work', name: '作業' },
   { group: 'theme', name: 'テーマ' },
+  { group: 'term', name: '用語' },
 ];
 
 const GROUP_NAME: Readonly<Record<PaletteGroup, string>> = Object.fromEntries(
@@ -84,7 +87,9 @@ export type PaletteRun =
   | { kind: 'saveToBook' }
   | { kind: 'clear' }
   | { kind: 'settings' }
-  | { kind: 'theme'; theme: ThemePref };
+  | { kind: 'theme'; theme: ThemePref }
+  /** 用語の説明カードを開く（#167） */
+  | { kind: 'term'; id: TermId };
 
 export interface PaletteItem {
   /** 一意（グループ + 規則のキー。利用者の文字を含まない） */
@@ -99,6 +104,8 @@ export interface PaletteItem {
   kbd?: string;
   /** 選択中（ピンの線の 期中 / 満期。舞台の ⋯ の radio と同じ） */
   checked?: boolean;
+  /** 検索だけに使う文字（表示しない。用語の読み・別名。#167）。行の区切りは改行 */
+  keywords?: string;
   run: PaletteRun | null;
 }
 
@@ -320,8 +327,16 @@ export function paletteItems(input: PaletteInput): PaletteItem[] {
   for (const t of THEMES) {
     out.push(item('theme', t.theme, t.label, { kind: 'theme', theme: t.theme }));
   }
+  // 用語（#167。並びの最後。見出し・読み・別名で当たる）
+  out.push(...TERM_ITEMS);
   return out;
 }
+
+/** 用語の行（静的なので 1 回だけ作る） */
+const TERM_ITEMS: readonly PaletteItem[] = GLOSSARY.map((t) => ({
+  ...item('term', t.id, t.title, { kind: 'term', id: t.id }),
+  keywords: termSearchText(t),
+}));
 
 /** 表示中の限月の ATM（板の [ATM] と同じ atmStrike。板・限月が無ければ null） */
 export function paletteAtmK(
@@ -335,22 +350,55 @@ export function paletteAtmK(
 
 // ---------------------------------------------------------------- 検索
 
-/** 検索の正規化: NFKC → 小文字 → `,` `，` を消す → `−`（U+2212）を `-` に */
+/**
+ * 検索の正規化: NFKC → 小文字 → カタカナ（ァ〜ヶ）をひらがなへ → `,` `，` を消す → `−`（U+2212）を `-` に。
+ * ひらがな化（#167）は問い合わせと行の両方にかかるので、カタカナ / ひらがな / 半角カナを同一視する
+ */
 export function paletteNorm(s: string): string {
-  return s.normalize('NFKC').toLowerCase().replace(/[,，]/g, '').replace(/−/g, '-');
+  return s
+    .normalize('NFKC')
+    .toLowerCase()
+    .replace(/[\u30a1-\u30f6]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0x60))
+    .replace(/[,，]/g, '')
+    .replace(/−/g, '-');
+}
+
+/** ギリシャ文字の読み（#167。小文字化の後の字。δ = でるた・σ = しぐま・γ = がんま・θ = しーた・β = べーた） */
+const GREEK_READING: Readonly<Record<string, string>> = {
+  δ: 'でるた',
+  σ: 'しぐま',
+  γ: 'がんま',
+  θ: 'しーた',
+  β: 'べーた',
+};
+
+/** 正規化した文字列のギリシャ文字を読みに展開する（問い合わせと行の両方にかけるので「デルタσ」も「Δσ」に当たる） */
+function greekRead(s: string): string {
+  return s.replace(/[δσγθβ]/g, (c) => GREEK_READING[c] ?? c);
+}
+
+/** 行の検索対象（グループ名 + ラベル、keywords があれば改行の後に。空白を消し、行の区切りの改行は残す） */
+function hayOf(it: PaletteItem): string {
+  const s = GROUP_NAME[it.group] + it.label + (it.keywords === undefined ? '' : `\n${it.keywords}`);
+  return greekRead(paletteNorm(s).replace(/[^\S\n]+/g, ''));
 }
 
 /**
- * 問い合わせを空白で区切った語が **すべて**「グループ名 + ラベル」（正規化して空白を消したもの）に部分一致する行を、
- * 元の並びのまま返す（得点付けしない。includes だけで、問い合わせから正規表現を作らない）。語が 0 個なら全件。
+ * 問い合わせを空白で区切った語が **すべて**「グループ名 + ラベル（+ keywords）」（正規化して空白を消したもの）に
+ * 部分一致する行を、元の並びのまま返す（得点付けしない。includes だけで、問い合わせから正規表現を作らない）。
+ * 語が 0 個なら全件。問い合わせの先頭が `?`（全角 `？` も NFKC で `?`）なら、`?` を外して用語の行だけを対象にする（#167）
  */
 export function paletteFilter(items: readonly PaletteItem[], query: string): PaletteItem[] {
-  const words = paletteNorm(query)
+  let q = paletteNorm(query).trimStart();
+  const termOnly = q.startsWith('?');
+  if (termOnly) q = q.slice(1);
+  const pool = termOnly ? items.filter((it) => it.group === 'term') : items;
+  const words = greekRead(q)
     .split(/\s+/)
     .filter((w) => w !== '');
-  if (words.length === 0) return items.slice();
-  return items.filter((it) => {
-    const hay = paletteNorm(GROUP_NAME[it.group] + it.label).replace(/\s+/g, '');
+  if (words.length === 0) return pool.slice();
+  return pool.filter((it) => {
+    const hay = hayOf(it);
     return words.every((w) => hay.includes(w));
   });
 }

@@ -18,6 +18,7 @@ export type TopMenuKey =
   | 'file'
   | `fixture:${string}`
   | 'clear'
+  | 'glossary'
   | 'settings'
   | `theme:${ThemePref}`;
 
@@ -57,7 +58,8 @@ function bookBlocked(state: BookRead['kind']): string | null {
 
 /**
  * ⋯ の行: 保存一覧（N）… / URL をコピー / 書き出し / 読み込み… /（区切り）ファイルを開く… /（dev）合成の板 /
- * （区切り）全クリア /（区切り）設定… /（区切り）テーマ 3 つ（radio）。
+ * （区切り）全クリア /（区切り）用語集… / 設定… /（区切り）テーマ 3 つ（radio）。用語集…（#167）は用語だけのパレットを開く
+ * （スマホ・タブレットのパレットの入口）。
  * 押せない: 書き出し = 保存一覧が読めて項目がある（ok）でない、読み込み… = 読めない・新しい版（旧 Book と同じ）、
  * 全クリア = 足 0 本、URL をコピー = shareItemState のまま。
  */
@@ -93,7 +95,8 @@ export function topMenuModel(i: TopMenuInput): MenuRow<TopMenuKey>[] {
     i.legCount > 0
       ? { key: 'clear', label: '全クリア', sep: true }
       : { key: 'clear', label: '全クリア', sep: true, disabled: true, title: CLEAR_NO_LEGS_TEXT },
-    { key: 'settings', label: '設定…', sep: true },
+    { key: 'glossary', label: '用語集…', sep: true },
+    { key: 'settings', label: '設定…' },
     ...THEMES.map(
       (t, n): MenuRow<TopMenuKey> => ({
         key: `theme:${t.theme}`,

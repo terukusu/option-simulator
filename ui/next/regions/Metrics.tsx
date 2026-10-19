@@ -1,6 +1,7 @@
 import { Fragment } from 'preact';
 import { useId, useState } from 'preact/hooks';
 import { pure } from '../../components/pure';
+import { HINT_TERMS, type TermId, termById } from '../../view/glossary';
 import { PANEL_FOCUS_LABEL } from '../../view/keys';
 import type { MarginView } from '../../view/margin';
 import type { MetricsModel } from '../../view/metrics';
@@ -18,6 +19,8 @@ import {
 import { PanelHead } from '../PanelHead';
 import { FullText } from '../parts/FullText';
 import { Popover } from '../parts/Popover';
+import { TermLinks } from '../parts/TermLinks';
+import { openTerm } from '../parts/termCard';
 import { type HoldBundle, HoldMap } from './HoldMap';
 
 interface Props {
@@ -62,6 +65,21 @@ function Tile({ t }: { t: MetricTile }) {
   );
 }
 
+/** 内訳の見出しのボタン（#167。押すと用語の説明カード。文字・大きさは今の見出しのまま） */
+function KvTerm({ k, term }: { k: string; term: TermId }) {
+  return (
+    <button
+      type="button"
+      class="kv-term"
+      aria-haspopup="dialog"
+      aria-label={`${k}（用語: ${termById(term)?.title ?? k}）`}
+      onClick={() => openTerm(term)}
+    >
+      {k}
+    </button>
+  );
+}
+
 /** テール表のセル: 損益の大きさのバー（SVG の rect の width 属性。style を使わない）+ 損益と倍率 */
 function TailCell({ c }: { c: TailCellView }) {
   return (
@@ -103,6 +121,7 @@ function MetricsView({ model, feePerLot, margin, hold }: Props) {
           <p>{UNIT_HINT}</p>
           <p>{TAIL_HINT}</p>
           <p>{MARGIN_HINT}</p>
+          <TermLinks ids={HINT_TERMS.metrics} />
         </Popover>
       </PanelHead>
       {/* biome-ignore lint/a11y/useSemanticElements: 1〜5 の行き先のスクロールする枠に名前を付ける（fieldset にしない） */}
@@ -142,7 +161,9 @@ function MetricsView({ model, feePerLot, margin, hold }: Props) {
                         <div class="grp">{r.k}</div>
                       ) : (
                         <>
-                          <div class="k">{r.k}</div>
+                          <div class="k">
+                            {r.term === undefined ? r.k : <KvTerm k={r.k} term={r.term} />}
+                          </div>
                           <div class="v">{r.v}</div>
                         </>
                       )}

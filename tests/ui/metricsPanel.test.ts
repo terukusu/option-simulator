@@ -400,10 +400,13 @@ describe('内訳（#86 AC-3: 旧 Metrics と同じ順・同じ値）', () => {
       r('損益', A(m.scenarioPoint.pnl, true)),
       r('BEP', fmtXs(m.dateBreakevens)),
       r('合計グリーク（シナリオ点）', '', true),
-      r('Δ', `${fmtSigned(g.deltaLarge, 3)} 枚（ミニ ${fmtSigned(g.deltaMini, 2)}）`),
-      r('Γ', `${fmtSigned(g.gammaPer100, 4)} / 100 円`),
-      r('Θ', `${A(g.thetaPerDay, true)} / 日`),
-      r('V', `${A(g.vegaPerPt, true)} / pt`),
+      {
+        ...r('Δ', `${fmtSigned(g.deltaLarge, 3)} 枚（ミニ ${fmtSigned(g.deltaMini, 2)}）`),
+        term: 'delta',
+      },
+      { ...r('Γ', `${fmtSigned(g.gammaPer100, 4)} / 100 円`), term: 'gamma' },
+      { ...r('Θ', `${A(g.thetaPerDay, true)} / 日`), term: 'theta' },
+      { ...r('V', `${A(g.vegaPerPt, true)} / pt`), term: 'vega' },
       r('受取 / 支払', `${A(p.received)} / ${A(p.paid)}`),
       r('差引', A(p.net, true)),
       r('OP の手数料込み', A(p.netAfterFees, true)),
@@ -680,8 +683,12 @@ describe('全文（#107 AC-1）', () => {
     ]);
     // 合計グリークの 4 行は内訳の行と同じ（見出しも値も）
     const bd = metricsBreakdown(m);
+    // （#167: 内訳の行には用語の id が付く）
     for (const r of tile(tiles, 'greeks').full) {
-      expect(bd).toContainEqual({ ...r, group: false });
+      expect(bd.map((b) => ({ k: b.k, v: b.v, group: b.group }))).toContainEqual({
+        ...r,
+        group: false,
+      });
     }
   });
 
@@ -798,4 +805,38 @@ describe('副題の短縮（#107 AC-2）', () => {
     expect(widthUnits('ＡＢ')).toBe(4);
     expect(widthUnits('Θ −1')).toBe(4);
   });
+});
+
+describe('内訳の用語（#167 AC-6）', () => {
+  const TERMED: Record<string, string> = {
+    Δ: 'delta',
+    Γ: 'gamma',
+    Θ: 'theta',
+    V: 'vega',
+    '必要証拠金（シナリオ点）': 'margin',
+    '必要証拠金（今）': 'margin',
+    'NOV（シナリオ点）': 'nov',
+    'NOV（今）': 'nov',
+    '証拠金所要額（シナリオ点）': 'requirement',
+    '証拠金所要額（今）': 'requirement',
+    '余力（シナリオ点）': 'room',
+    '余力（今）': 'room',
+  };
+  for (const [name, s] of [
+    ['ストラングル売り', strangle],
+    ['支払超', debitPut],
+    ['買い 2 本', buy2],
+  ] as const) {
+    it(`${name}: Δ・Γ・Θ・V と証拠金の 4 種（シナリオ点・今）の行だけに用語の id`, () => {
+      const bd = metricsBreakdown(metricsOf(s), marginOf(s));
+      const termed = bd.filter((r) => r.term !== undefined);
+      expect(termed.length).toBe(12);
+      for (const r of bd) {
+        if (r.group) expect(r.term, r.k).toBeUndefined();
+        else expect(r.term, r.k).toBe(TERMED[r.k]);
+      }
+      // 証拠金なしならグリークの 4 行だけ
+      expect(metricsBreakdown(metricsOf(s)).filter((r) => r.term !== undefined).length).toBe(4);
+    });
+  }
 });

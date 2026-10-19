@@ -16,6 +16,7 @@
 
 import { MARGIN_HORIZON_BUSINESS_DAYS, type MarginParams } from '../../model';
 import { DASH, fmtNum, fmtSigned } from './format';
+import type { TermId } from './glossary';
 import type { MarginCalc, MarginPointAt, MarginView } from './margin';
 import {
   AMOUNT_UNIT_LABEL,
@@ -76,6 +77,11 @@ export interface BreakdownRow {
   v: string;
   /** 見出しだけの行（全幅） */
   group: boolean;
+  /**
+   * 見出しを押すと開く用語の説明カード（#167。Δ・Γ・Θ・V と証拠金の群の必要証拠金・NOV・証拠金所要額・余力の行だけ。
+   * 無ければ押せない今の行のまま）
+   */
+  term?: TermId;
 }
 
 export interface TailBar {
@@ -408,17 +414,10 @@ function marginGroups(mv: MarginView, u: AmountUnit): MarginGroups {
 
 const stateList = (s: MarginStateRows): FullRow[] => [s.margin, s.nov, s.requirement, s.room];
 
-/** 内訳の証拠金の群の行（全部。シナリオ点・シナリオ点 / 今 × 4・倍数・最悪の点・前提の順） */
-function marginRows(g: MarginGroups): FullRow[] {
-  return [
-    ...g.point,
-    ...stateList(g.atPoint),
-    ...stateList(g.atNow),
-    g.multiple,
-    ...g.worst,
-    ...g.params,
-  ];
-}
+/** 合計グリークの 4 行（greekRows の順）の用語（#167） */
+const GREEK_TERMS: readonly TermId[] = ['delta', 'gamma', 'theta', 'vega'];
+/** 状態 1 つの 4 行（stateList の順）の用語（#167） */
+const STATE_TERMS: readonly TermId[] = ['margin', 'nov', 'requirement', 'room'];
 
 /**
  * 必要証拠金のタイルの全文の行（見出しの後。#161）: 値に関わる行だけ、内訳の群と同じ順
@@ -604,6 +603,15 @@ export function metricsBreakdown(
   const add = (rs: readonly FullRow[]) => {
     for (const r of rs) row(r.k, r.v);
   };
+  // 用語の付いた行（#167。rs と terms は同じ順）
+  const addTerms = (rs: readonly FullRow[], terms: readonly TermId[]) => {
+    rs.forEach((r, i) => {
+      const term = terms[i];
+      rows.push(
+        term === undefined ? { k: r.k, v: r.v, group: false } : { ...r, group: false, term },
+      );
+    });
+  };
   const xsRows = (k: string, xs: readonly number[]) => add(xsFullRows(k, xs));
 
   // 1 満期 最大利益（+∞ なら反対側を併記）
@@ -620,7 +628,7 @@ export function metricsBreakdown(
   xsRows('BEP', m.dateBreakevens);
   // 5 合計グリーク（シナリオ点）
   group('合計グリーク（シナリオ点）');
-  add(greekRows(m));
+  addTerms(greekRows(m), GREEK_TERMS);
   // 6 受取 / 支払
   row('受取 / 支払', `${A(premium.received)} / ${A(premium.paid)}`);
   row('差引', A(premium.net, true));
@@ -640,7 +648,12 @@ export function metricsBreakdown(
   // 9 証拠金（概算。#131）
   if (margin) {
     group(MARGIN_GROUP_LABEL);
-    add(marginRows(marginGroups(margin, u)));
+    // シナリオ点・シナリオ点 / 今 × 4・倍数・最悪の点・前提の順。状態の 4 行だけ用語を付ける（#167）
+    const g = marginGroups(margin, u);
+    add(g.point);
+    addTerms(stateList(g.atPoint), STATE_TERMS);
+    addTerms(stateList(g.atNow), STATE_TERMS);
+    add([g.multiple, ...g.worst, ...g.params]);
   }
   return rows;
 }

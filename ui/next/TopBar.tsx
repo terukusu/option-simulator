@@ -53,6 +53,8 @@ export interface TopBarProps {
   /** タブのメニューの 保存一覧に保存…（名前の欄にフォーカスして開く） */
   onSaveToBook: () => void;
   onOpenSettings: () => void;
+  /** ⋯ の用語集…（#167。用語だけのパレットを開く。参照が変わらない） */
+  onOpenGlossary: () => void;
   onExport: () => void;
   onImport: (file: File) => void;
   onClearLegs: () => void;
@@ -61,7 +63,7 @@ export interface TopBarProps {
 /**
  * トップバー（docs/ui-redesign.md §2.1。#87）: ブランド / BOX タブ / 市場ピル / 警告のタグ / [最新] / テーマ / ⋯。
  * スマホはブランドとテーマのボタンを CSS で隠す（テーマは ⋯ にある）。縮むのは BOX タブの帯だけ（#87 (B)）。
- * ⋯ は 保存一覧（N）… / URL をコピー / 書き出し / 読み込み… / ファイルを開く… /（dev）合成の板 / 全クリア / 設定… /
+ * ⋯ は 保存一覧（N）… / URL をコピー / 書き出し / 読み込み… / ファイルを開く… /（dev）合成の板 / 全クリア / 用語集… / 設定… /
  * テーマ（#87 (C)。行は ui/view/topMenu.ts）。ファイルを開く…・読み込み… は隠した file input をメニューの選択と
  * 同じイベントの中で click()。
  * pure: 入力は NextApp の useMemo と参照の変わらない関数だけ（シナリオの操作で描き直さない）。
@@ -115,6 +117,7 @@ function TopBarView(p: TopBarProps) {
       else if (k === 'file') fileRef.current?.click();
       else if (k === 'clear') p.onClearLegs();
       else if (k === 'settings') p.onOpenSettings();
+      else if (k === 'glossary') p.onOpenGlossary();
       else if (k.startsWith('fixture:')) p.onFixture(k.slice('fixture:'.length));
       else if (k.startsWith('theme:')) p.onTheme(k.slice('theme:'.length) as ThemePref);
     },

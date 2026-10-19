@@ -2,6 +2,7 @@ import type { Scenario } from '../../../model';
 import { MAX_PINS, type PinLineMode } from '../../pins';
 import type { Action } from '../../state';
 import { fmtNum } from '../../view/format';
+import { HINT_TERMS } from '../../view/glossary';
 import { PIN_MARK, type PinTarget, pinMenuRows } from '../../view/pins';
 import type { PnlChartModel, PnlYSettings } from '../../view/pnlChart';
 import type { SurfaceLegend } from '../../view/pnlSurface';
@@ -9,6 +10,7 @@ import { CHART_MODES, type ChartMode } from '../../view/shell';
 import { Menu, type MenuItem } from '../parts/Menu';
 import { Popover } from '../parts/Popover';
 import { Seg } from '../parts/Seg';
+import { TermLinks } from '../parts/TermLinks';
 import { YAxisFields } from '../parts/YAxisFields';
 
 const fmtDays = (v: number) => String(Math.round(v * 100) / 100);
@@ -201,6 +203,7 @@ export function StageHead(p: {
               </p>
             </>
           )}
+          <TermLinks ids={HINT_TERMS.stage} />
         </Popover>
       </div>
     </div>

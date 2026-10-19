@@ -37,11 +37,24 @@ describe('topMenuModel', () => {
       ['読み込み…', false],
       ['ファイルを開く…', true],
       ['全クリア', true],
-      ['設定…', true],
+      ['用語集…', true],
+      ['設定…', false],
       ['端末に合わせる', true],
       ['ダーク', false],
       ['ライト', false],
     ]);
+  });
+
+  it('#167: 用語集… は設定… の直前（全クリアと区切る）で、いつも押せる（足 0 本・保存一覧が読めなくても）', () => {
+    for (const i of [
+      base,
+      { ...base, legCount: 0, bookState: 'invalid' as const, bookCount: null },
+    ]) {
+      const rows = topMenuModel(i);
+      const at = rows.findIndex((r) => r.key === 'glossary');
+      expect(rows[at + 1]?.key).toBe('settings');
+      expect(rows[at]).toEqual({ key: 'glossary', label: '用語集…', sep: true });
+    }
   });
 
   it('dev: 合成の板 3 つはファイルを開く… の直後（区切りなし）、今の板に checked', () => {
@@ -60,6 +73,7 @@ describe('topMenuModel', () => {
       'fixture:night_early',
       'fixture:pre_open',
       'clear',
+      'glossary',
       'settings',
       'theme:auto',
       'theme:dark',
