@@ -33,6 +33,8 @@ import {
 } from '../../ui/view/margin';
 import { fmtAmount, type MetricsModel, metricsModel } from '../../ui/view/metrics';
 import {
+  amountText,
+  ivScaleText,
   MARGIN_CALL_MARK,
   MARGIN_GROUP_LABEL,
   MARGIN_HINT,
@@ -147,11 +149,11 @@ describe('計算の単位（ui/view/margin.ts）', () => {
         capitalYen: 1,
         factorPct: 150,
         rangePct: 10.5,
-        ivUpPt: 12,
-        ivDownPt: 0,
+        ivUpPct: 12,
+        ivDownPct: 0,
         ignoreLongOptions: false,
       }),
-    ).toEqual({ range: 0.105, ivUpPt: 12, ivDownPt: 0, factor: 1.5, ignoreLongOptions: false });
+    ).toEqual({ range: 0.105, ivUp: 0.12, ivDown: 0, factor: 1.5, ignoreLongOptions: false });
     expect(capitalOf(DEFAULT_MARGIN_PREFS)).toBeNull();
     expect(capitalOf(withCapital(0))).toBeNull();
     expect(capitalOf(withCapital(Number.NaN))).toBeNull();
@@ -205,9 +207,11 @@ describe('計算の単位（ui/view/margin.ts）', () => {
       expect(r.calc?.room).toBeNull();
       expect(r.calc?.multiple).toBeNull();
     }
-    // 下落ほど put 売りの必要証拠金は増える
-    const ms = rows.map((r) => r.calc?.result.margin ?? Number.NaN);
-    for (let i = 1; i < ms.length; i++) expect(ms[i]).toBeGreaterThan(ms[i - 1] as number);
+    // 下落ほど put 売りの証拠金所要額は増える（#150: 必要証拠金 = k × PFE は深い ITM で R × X に近づき
+    // X とともに小さくなりうるので、単調なのは NOV を含む所要額）。必要証拠金はどの行も > 0
+    const reqs = rows.map((r) => r.calc?.result.requirement ?? Number.NaN);
+    for (let i = 1; i < reqs.length; i++) expect(reqs[i]).toBeGreaterThan(reqs[i - 1] as number);
+    for (const r of rows) expect(r.calc?.result.margin).toBeGreaterThan(0);
   });
 
   it('原資産が有限でない・0 以下なら null（表示は —。レビュー段 A 指摘 1）', () => {
@@ -255,8 +259,10 @@ describe('タイル（#131 AC14）', () => {
     expect(MARGIN_TAIL_TITLE).toContain('概算');
     expect(MARGIN_HINT).toContain('概算');
     expect(MARGIN_HINT).toContain('JSCC');
-    expect(MARGIN_HINT).toContain('仮置き');
-    expect(MARGIN_HINT).toContain('深い OTM');
+    expect(MARGIN_HINT).toContain('NOV');
+    expect(MARGIN_HINT).toContain('答え合わせ');
+    expect(MARGIN_HINT).toContain('未確認');
+    expect(MARGIN_HINT).not.toContain('仮置き');
   });
 
   it('資金あり: 値 = シナリオの点、副題 = 今の余力 · 倍数。余力 ≥ 0 は無色（利益の色にしない）', () => {
@@ -268,6 +274,9 @@ describe('タイル（#131 AC14）', () => {
     if (!now || !point || now.room === null || point.room === null) throw new Error('値が無い');
     const tiles = metricTiles(m, mv);
     const tm = tile(tiles, 'margin');
+    // #150: タイルの値 = シナリオ点の必要証拠金 = k × PFE（NOV を含まない）
+    expect(point.result.margin).toBeCloseTo(mv.params.factor * point.result.pfe, 6);
+    expect(point.result.requirement).toBeCloseTo(point.result.margin - point.result.nov, 6);
     expect(tm.v).toBe(fmtAmount(point.result.margin, u));
     expect(tm.unit).toBe('千円');
     expect(tm.s).toBe(`今 ${fmtAmount(now.result.margin, u)}`);
@@ -283,18 +292,22 @@ describe('タイル（#131 AC14）', () => {
     expect(tm.full[0]).toEqual({ k: MARGIN_TILE_LABEL, v: `${tm.v} 千円` });
     expect(tr.full[0]).toEqual({ k: ROOM_TILE_LABEL, v: `${tr.v} 千円` });
     expect(tm.full.slice(-5)).toEqual([
-      { k: '値動き幅 R', v: '±8%' },
-      { k: 'IV の幅', v: '+8 / −4pt' },
+      { k: '値動き幅 R', v: '±5%' },
+      { k: 'IV の幅', v: '×1.5 / ×0.75' },
       { k: '保有期間', v: '2 営業日' },
-      { k: '掛け目', v: '120%' },
+      { k: '掛け目', v: '100%' },
       { k: '買いの OP', v: '減らさない' },
     ]);
     expect(marginParamsText(mv.params)).toBe(
-      'R ±8% · IV +8 / −4pt · 2 営業日 · 掛け目 120% · 買い OP 除く',
+      'R ±5% · IV ×1.5 / ×0.75 · 2 営業日 · 掛け目 100% · 買い OP 除く',
     );
-    // 最悪の点（PFE > 0 の put 売り）
+    // 最悪の点（PFE > 0 の put 売り）: 下落・IV ×1.5
     expect(point.result.pfe).toBeGreaterThan(0);
-    expect(tm.full.some((r) => r.k === '最悪の点')).toBe(true);
+    const wi = tm.full.findIndex((r) => r.k === '最悪の点');
+    expect(wi).toBeGreaterThan(0);
+    expect(tm.full[wi]?.v).toBe('X −5.0%');
+    expect(tm.full[wi + 1]).toEqual({ k: '', v: 'IV ×1.5' });
+    expect(tm.full[wi + 2]?.v).toMatch(/^経過 \+\d+ 日$/);
   });
 
   it('余力 < 0: 値は − 付き、tone loss（警告の色）', () => {
@@ -338,13 +351,14 @@ describe('タイル（#131 AC14）', () => {
     expect(mv.point?.result.margin).toBeCloseTo(5 * one, 3);
   });
 
-  it('買いだけ: 必要証拠金 0（PFE ≤ NOV）、余力 = 資金 − 支払 − 手数料、倍数は有限、最悪の点の行は出さない（M = 0）', () => {
+  it('買いだけ（既定 = 買いの OP で減らさない）: 必要証拠金・所要額 0、余力 = 資金 − 支払 − 手数料、倍数は有限、最悪の点の行は出さない（M = 0）', () => {
     const m = metricsOf(buyOnly);
     const capital = 3_000_000;
     const mv = viewOf(buyOnly, withCapital(capital));
     const p = mv.point;
     if (!p || p.room === null) throw new Error('値が無い');
     expect(p.result.margin).toBe(0);
+    expect(p.result.requirement).toBe(0);
     expect(p.result.pfe).toBeLessThanOrEqual(p.result.nov);
     const prem = m.premium;
     expect(prem.fees).toBeGreaterThan(0);
@@ -378,12 +392,21 @@ describe('タイル（#131 AC14）', () => {
     expect(
       marginParamsText({
         range: 0.105,
-        ivUpPt: 12.5,
-        ivDownPt: 0,
+        ivUp: 0.125,
+        ivDown: 0,
         factor: 1.5,
         ignoreLongOptions: false,
       }),
-    ).toBe('R ±10.5% · IV +12.5 / −0pt · 2 営業日 · 掛け目 150%');
+    ).toBe('R ±10.5% · IV ×1.125 / ×1 · 2 営業日 · 掛け目 150%');
+    // #150: 倍率の文字列（小数 3 桁で丸めて末尾の 0 を落とす）
+    expect(ivScaleText(1.5)).toBe('×1.5');
+    expect(ivScaleText(0.75)).toBe('×0.75');
+    expect(ivScaleText(1)).toBe('×1');
+    expect(ivScaleText(1 - 0.9)).toBe('×0.1');
+    expect(ivScaleText(1.33333)).toBe('×1.333');
+    expect(
+      marginParamsText({ range: 0.05, ivUp: 0, ivDown: 0, factor: 1, ignoreLongOptions: true }),
+    ).toBe('R ±5% · IV ×1 / ×1 · 2 営業日 · 掛け目 100% · 買い OP 除く');
   });
 });
 
@@ -397,8 +420,22 @@ describe('内訳とテールの証拠金の表（#131 AC14）', () => {
     const rows = bd.slice(gi + 1).map((r) => ({ k: r.k, v: r.v }));
     const tm = tile(metricTiles(m, mv), 'margin');
     expect(rows).toEqual(tm.full.slice(1));
-    expect(rows.map((r) => r.k)).toContain('PFE（今）');
-    expect(rows.map((r) => r.k)).toContain('NOV（シナリオ点）');
+    // #150: 必要証拠金・NOV・証拠金所要額・余力 × シナリオ点 / 今（PFE の行は出さない）
+    expect(rows.map((r) => r.k).slice(0, 9)).toEqual([
+      '必要証拠金（シナリオ点）',
+      'NOV（シナリオ点）',
+      '証拠金所要額（シナリオ点）',
+      '余力（シナリオ点）',
+      '必要証拠金（今）',
+      'NOV（今）',
+      '証拠金所要額（今）',
+      '余力（今）',
+      '倍数（今）',
+    ]);
+    expect(rows.map((r) => r.k)).not.toContain('PFE（今）');
+    const pt = mv.point?.result;
+    if (!pt) throw new Error('値が無い');
+    expect(rows[2]?.v).toBe(amountText(pt.requirement, m.unit));
     expect(metricsBreakdown(m).some((r) => r.k === MARGIN_GROUP_LABEL)).toBe(false);
   });
 
@@ -427,7 +464,7 @@ describe('内訳とテールの証拠金の表（#131 AC14）', () => {
     // パネル全体: 表と注記
     const view = metricsPanel(m, 0, mv);
     expect(view.marginTail).toEqual(rows);
-    expect(view.marginTailCaption).toContain('R ±8%');
+    expect(view.marginTailCaption).toContain('R ±5% · IV ×1.5 / ×0.75');
     expect(view.marginTailCaption).not.toContain('設定…');
   });
 
@@ -709,6 +746,6 @@ describe('#149 買いの OP の設定', () => {
     // テールの注記: オンは末尾に印、オフは #131 の文のまま
     expect(metricsPanel(m, 0, vOn).marginTailCaption).toContain('· 買い OP 除く');
     expect(metricsPanel(m, 0, vOff).marginTailCaption).not.toContain('買い OP');
-    expect(marginParamsText(vOff.params)).toBe('R ±8% · IV +8 / −4pt · 2 営業日 · 掛け目 120%');
+    expect(marginParamsText(vOff.params)).toBe('R ±5% · IV ×1.5 / ×0.75 · 2 営業日 · 掛け目 100%');
   });
 });

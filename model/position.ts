@@ -353,20 +353,74 @@ export function legValue(
       : xPrime * (1 + (p.F / ctx.x0 - 1) * factor);
   }
   const Fp = settings.basisMode === 'yen' ? xPrime + p.basis : (xPrime * p.F) / ctx.x0;
+  // σ が効くのは T > tMin だけ（それ以外は本源的価値）
+  const sigma =
+    T > settings.tMin
+      ? sigmaAt(
+          (p.option as NonNullable<PreparedLeg['option']>).sigmaBase,
+          leg.strike,
+          p.F,
+          Fp,
+          ctx.x0,
+          xPrime,
+          scenario,
+          settings.sigmaMin,
+        )
+      : settings.sigmaMin;
+  return optionValueAt(leg, Fp, T, ctx, settings, sigma);
+}
+
+/**
+ * 生きている OP の足（F 有限・T > 0）の評価 IV（sigmaAt。β・Δσ・Δs・動き方・スマイル込み）。
+ * 先物・F が決まらない足・T ≤ 0 は null。証拠金の格子が状態 S の σ を 1 回求めるのに使う（#150）。
+ */
+export function legSigma(
+  p: PreparedLeg,
+  xPrime: number,
+  scenario: Scenario,
+  ctx: MarketContext,
+  settings: ModelSettings = DEFAULT_SETTINGS,
+): number | null {
+  const leg = p.leg;
+  if (leg.kind !== 'option' || !Number.isFinite(p.F)) return null;
+  if (p.T0 - scenario.days / 365 <= 0) return null;
+  const opt = p.option as NonNullable<PreparedLeg['option']>;
+  const Fp = settings.basisMode === 'yen' ? xPrime + p.basis : (xPrime * p.F) / ctx.x0;
+  return sigmaAt(opt.sigmaBase, leg.strike, p.F, Fp, ctx.x0, xPrime, scenario, settings.sigmaMin);
+}
+
+/**
+ * σ を外から渡す legValue（F'・満期 T ≤ 0 の本源的価値・T ≤ tMin の割引本源的価値の規則は legValue と
+ * 同じ。σ が効くのは T > tMin の OP だけ）。先物・F が決まらない足は sigma を無視して legValue と同じ。
+ * legValue(p, …) = legValueAtSigma(p, …, legSigma(p, …))。#150
+ */
+export function legValueAtSigma(
+  p: PreparedLeg,
+  xPrime: number,
+  scenario: Scenario,
+  ctx: MarketContext,
+  settings: ModelSettings,
+  sigma: number,
+): number {
+  if (p.leg.kind !== 'option' || !Number.isFinite(p.F)) {
+    return legValue(p, xPrime, scenario, ctx, settings);
+  }
+  const Fp = settings.basisMode === 'yen' ? xPrime + p.basis : (xPrime * p.F) / ctx.x0;
+  return optionValueAt(p.leg, Fp, p.T0 - scenario.days / 365, ctx, settings, sigma);
+}
+
+/** OP の足の評価価格（F' は足の原資産）。T ≤ 0 は本源的価値、T ≤ tMin は割引本源的価値、それ以外は Black-76。 */
+function optionValueAt(
+  leg: OptionLeg,
+  Fp: number,
+  T: number,
+  ctx: MarketContext,
+  settings: ModelSettings,
+  sigma: number,
+): number {
   if (T <= 0)
     return leg.type === 'call' ? Math.max(Fp - leg.strike, 0) : Math.max(leg.strike - Fp, 0);
   if (T <= settings.tMin) return discountedIntrinsic(leg.type, Fp, leg.strike, T, ctx.r);
-  const opt = p.option as NonNullable<PreparedLeg['option']>;
-  const sigma = sigmaAt(
-    opt.sigmaBase,
-    leg.strike,
-    p.F,
-    Fp,
-    ctx.x0,
-    xPrime,
-    scenario,
-    settings.sigmaMin,
-  );
   return black76Price(leg.type, Fp, leg.strike, T, sigma, ctx.r);
 }
 

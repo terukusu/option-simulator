@@ -133,9 +133,9 @@ export const MARGIN_TAIL_TITLE = '証拠金（概算。指定日 + シナリオ�
 export const ROOM_NO_CAPITAL_TEXT = '資金は ⋯ > 設定…';
 /** 余力 < 0 の行の印 */
 export const MARGIN_CALL_MARK = '追証';
-/** ⓘ の証拠金の文（方式・JSCC との違い・既定は仮置き・深い OTM の売り・Web 試算で確かめる。設計 5.10） */
+/** ⓘ の証拠金の文（方式・物差し・NOV・JSCC との違い・既定の決め方・未確認の形・Web 試算で確かめる。設計 5.10・#150） */
 export const MARGIN_HINT =
-  '証拠金は概算: 原資産 ±R・±R/2・0 × IV の上げ / 0 / 下げ × 経過 0 / 2 営業日の格子で、損失の最悪値から OP の評価額を引き、掛け目を掛ける。JSCC の VaR 証拠金（過去の値動きとストレスシナリオ）の再現ではない。既定（R 8%・IV +8 / −4pt・掛け目 120%）は仮置きで、深い OTM の売り（±R の外の行使価格）では実額より小さく出うる。建てる前に JSCC の Web 試算か証券会社の額で確かめ、⋯ > 設定… の幅・掛け目で寄せる。余力 = 資金 − 支払 + 受取 − 手数料 + 先物の評価損益 − 必要証拠金。値はシナリオの点、副題は今。';
+  '必要証拠金は概算: 原資産 ±R・±R/2・0 × 足の今の IV の ×(1 + 上げ) / ×1 / ×(1 − 下げ) × 経過 0 / 2 営業日の格子で、損失の最悪値に掛け目を掛ける。証券会社の建てる前の必要委託証拠金と同じ物差しで、受け取るプレミアム（NOV）を含まない。JSCC の VaR 証拠金（過去の値動きとストレスシナリオ）の再現ではない。既定（R 5%・IV +50% / −25%・掛け目 100%）は 1 枚ずつの売りの 6 形の答え合わせ（0.98〜1.07 倍）で決めた。ストレス日・先物との組み合わせなどは未確認で、実額と違いうる。建てる前に JSCC の Web 試算か証券会社の額で確かめ、⋯ > 設定… の幅・掛け目で寄せる。余力 = 資金 − 支払 + 受取 − 手数料 + 先物の評価損益 − (必要証拠金 − NOV)。値はシナリオの点、副題は今。';
 
 /** 原資産の点の並び（旧 Metrics と同じ: 無ければ「なし」、` / ` 区切り） */
 export function fmtXs(xs: readonly number[]): string {
@@ -260,15 +260,24 @@ export const MARGIN_IGNORE_LONG_MARK = ' · 買い OP 除く';
 /** 内訳の前提の「買いの OP」の行の値（#149） */
 export const MARGIN_LONG_ROW_TEXT = { ignore: '減らさない', offset: '相殺する' } as const;
 
+/** IV の倍率の文字列（`×` + 小数 3 桁で丸めて末尾の 0 を落とす。1.5 → `×1.5`、0.75 → `×0.75`、1 → `×1`。#150） */
+export function ivScaleText(c: number): string {
+  return `×${String(Math.round(c * 1000) / 1000)}`;
+}
+
+/** IV の幅の文字列（`×1.5 / ×0.75`） */
+const ivRangeText = (p: MarginParams) =>
+  `${ivScaleText(1 + p.ivUp)} / ${ivScaleText(1 - p.ivDown)}`;
+
 /**
- * 証拠金の前提（`R ±8% · IV +8 / −4pt · 2 営業日 · 掛け目 120%`。買いの OP で減らさないなら末尾に
+ * 証拠金の前提（`R ±5% · IV ×1.5 / ×0.75 · 2 営業日 · 掛け目 100%`。買いの OP で減らさないなら末尾に
  * ` · 買い OP 除く`）
  */
 export function marginParamsText(p: MarginParams): string {
   const r = fmtParam(Math.round(p.range * 1000) / 10);
   const k = fmtParam(Math.round(p.factor * 1000) / 10);
   const long = p.ignoreLongOptions ? MARGIN_IGNORE_LONG_MARK : '';
-  return `R ±${r}% · IV +${fmtParam(p.ivUpPt)} / −${fmtParam(p.ivDownPt)}pt · ${MARGIN_HORIZON_BUSINESS_DAYS} 営業日 · 掛け目 ${k}%${long}`;
+  return `R ±${r}% · IV ${ivRangeText(p)} · ${MARGIN_HORIZON_BUSINESS_DAYS} 営業日 · 掛け目 ${k}%${long}`;
 }
 
 /** 建てられる倍数の文字列（Infinity = 上限なし、資金なし = —） */
@@ -279,14 +288,14 @@ export function multipleText(m: number | null): string {
 }
 
 /**
- * 格子の最悪の点（X の % · IV の pt · 経過の日）。必要証拠金 > 0（PFE > NOV ≥ … で PFE > 0）のときだけ
+ * 格子の最悪の点（X の % · IV の倍率 · 経過の日）。PFE > 0 かつ必要証拠金 > 0 のときだけ
  * （買いだけなど M = 0 のときは最悪の点が額に効かないので出さない。段 A のレビューの指摘 5）
  */
 function worstValues(c: MarginCalc | null, p: MarginParams): string[] | null {
   const w = c?.result.worst;
   if (!c || !w || !(c.result.pfe > 0) || !(c.result.margin > 0)) return null;
   const pct = fmtSigned(Math.round(w.priceStep * p.range * 1000) / 10, 1);
-  return [`X ${pct}%`, `IV ${fmtSigned(w.ivPt)}pt`, `経過 +${fmtNum(w.days)} 日`];
+  return [`X ${pct}%`, `IV ${ivScaleText(w.ivScale)}`, `経過 +${fmtNum(w.days)} 日`];
 }
 
 const marginOf = (c: MarginCalc | null) => (c ? c.result.margin : null);
@@ -294,7 +303,8 @@ const roomOf = (c: MarginCalc | null) => (c ? c.room : null);
 const roomTone = (v: number | null): 'loss' | null => (v !== null && v < 0 ? 'loss' : null);
 
 /**
- * 証拠金の行（内訳の群・タイルの全文で共用）: シナリオ点と今の M・PFE・NOV・余力、倍数（今）、最悪の点（シナリオ点）、
+ * 証拠金の行（内訳の群・タイルの全文で共用）: シナリオ点と今の必要証拠金（k × PFE）・NOV・証拠金所要額・余力、
+ * 倍数（今）、最悪の点（シナリオ点）、
  * 前提（R・IV の幅・保有期間・掛け目・買いの OP）。資金が未設定なら余力・倍数は「—」。360px の内訳の 2 列で切れないよう
  * 見出し・値は短く、複数の値は行に分ける（続きの行の見出しは空）
  */
@@ -303,8 +313,8 @@ function marginRows(mv: MarginView, u: AmountUnit): FullRow[] {
   const rows: FullRow[] = [];
   const state = (name: string, c: MarginCalc | null) => {
     rows.push({ k: `必要証拠金（${name}）`, v: A(marginOf(c)) });
-    rows.push({ k: `PFE（${name}）`, v: A(c ? c.result.pfe : null) });
     rows.push({ k: `NOV（${name}）`, v: amountText(c ? c.result.nov : null, u, true) });
+    rows.push({ k: `証拠金所要額（${name}）`, v: A(c ? c.result.requirement : null) });
     rows.push({ k: `余力（${name}）`, v: A(roomOf(c)) });
   };
   state('シナリオ点', mv.point);
@@ -314,7 +324,7 @@ function marginRows(mv: MarginView, u: AmountUnit): FullRow[] {
   if (w !== null) rows.push(...w.map((v, i) => ({ k: i === 0 ? '最悪の点' : '', v })));
   const p = mv.params;
   rows.push({ k: '値動き幅 R', v: `±${fmtParam(Math.round(p.range * 1000) / 10)}%` });
-  rows.push({ k: 'IV の幅', v: `+${fmtParam(p.ivUpPt)} / −${fmtParam(p.ivDownPt)}pt` });
+  rows.push({ k: 'IV の幅', v: ivRangeText(p) });
   rows.push({ k: '保有期間', v: `${MARGIN_HORIZON_BUSINESS_DAYS} 営業日` });
   rows.push({ k: '掛け目', v: `${fmtParam(Math.round(p.factor * 1000) / 10)}%` });
   rows.push({

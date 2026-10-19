@@ -2154,12 +2154,13 @@ async function runFlows() {
     try {
       pv = JSON.parse(prefs ?? 'null');
     } catch {}
-    // #131: 証拠金のキー（margin_*。資金は未設定なので capital_yen は無い）も同じキーに書く
+    // #131: 証拠金のキー（margin_*。資金は未設定なので capital_yen は無い）も同じキーに書く（#150 のキー・既定）
     check(
       'AC-11(c) option-simulator.prefs が版 1・theme light（証拠金の既定のキーつき、資金なし）',
       pv?.schema_version === 1 &&
         pv?.theme === 'light' &&
-        pv?.margin_factor_pct === 120 &&
+        pv?.margin_k_pct === 100 &&
+        !('margin_factor_pct' in (pv ?? {})) &&
         !('capital_yen' in (pv ?? {})),
       String(prefs),
     );

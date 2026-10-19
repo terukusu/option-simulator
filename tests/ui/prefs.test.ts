@@ -16,7 +16,7 @@ const M0 = DEFAULT_MARGIN_PREFS;
 const DEF = { theme: 'auto', margin: M0 };
 /** 証拠金の既定のキー（書き出しの末尾） */
 const M0_JSON =
-  '"margin_factor_pct":120,"margin_range_pct":8,"margin_iv_up_pt":8,"margin_iv_down_pt":4,"margin_ignore_long_options":true';
+  '"margin_k_pct":100,"margin_r_pct":5,"margin_iv_up_pct":50,"margin_iv_down_pct":25,"margin_ignore_long_options":true';
 
 describe('readPrefs', () => {
   it('キーと版', () => {
@@ -25,10 +25,10 @@ describe('readPrefs', () => {
     expect(DEFAULT_PREFS).toEqual(DEF);
     expect(M0).toEqual({
       capitalYen: null,
-      factorPct: 120,
-      rangePct: 8,
-      ivUpPt: 8,
-      ivDownPt: 4,
+      factorPct: 100,
+      rangePct: 5,
+      ivUpPct: 50,
+      ivDownPct: 25,
       ignoreLongOptions: true,
     });
   });
@@ -92,21 +92,21 @@ describe('証拠金の設定（#131 AC15）', () => {
     capitalYen: 12_345_678,
     factorPct: 150,
     rangePct: 10.5,
-    ivUpPt: 12,
-    ivDownPt: 0,
+    ivUpPct: 37.5,
+    ivDownPct: 0,
     ignoreLongOptions: false,
   };
 
-  it('往復: 書き出し → 読み取りで同じ値（JSON のキーは capital_yen・margin_*）', () => {
+  it('往復: 書き出し → 読み取りで同じ値（JSON のキーは capital_yen・margin_*。#150 のキー）', () => {
     const text = serializePrefs({ theme: 'dark', margin: custom });
     expect(JSON.parse(text)).toEqual({
       schema_version: 1,
       theme: 'dark',
       capital_yen: 12_345_678,
-      margin_factor_pct: 150,
-      margin_range_pct: 10.5,
-      margin_iv_up_pt: 12,
-      margin_iv_down_pt: 0,
+      margin_k_pct: 150,
+      margin_r_pct: 10.5,
+      margin_iv_up_pct: 37.5,
+      margin_iv_down_pct: 0,
       margin_ignore_long_options: false,
     });
     expect(readPrefs(text)).toEqual({ prefs: { theme: 'dark', margin: custom }, writable: true });
@@ -115,8 +115,8 @@ describe('証拠金の設定（#131 AC15）', () => {
       capitalYen: 1e12,
       factorPct: 50,
       rangePct: 30,
-      ivUpPt: 50,
-      ivDownPt: 30,
+      ivUpPct: 200,
+      ivDownPct: 90,
       ignoreLongOptions: true,
     };
     expect(readPrefs(serializePrefs({ theme: 'auto', margin: ends })).prefs.margin).toEqual(ends);
@@ -124,8 +124,8 @@ describe('証拠金の設定（#131 AC15）', () => {
       capitalYen: 1,
       factorPct: 300,
       rangePct: 1,
-      ivUpPt: 0,
-      ivDownPt: 0,
+      ivUpPct: 0,
+      ivDownPct: 0,
       ignoreLongOptions: false,
     };
     expect(readPrefs(serializePrefs({ theme: 'auto', margin: lows })).prefs.margin).toEqual(lows);
@@ -153,25 +153,25 @@ describe('証拠金の設定（#131 AC15）', () => {
       ['capital_yen', 1e12 + 1],
       ['capital_yen', '12345678'],
       ['capital_yen', null],
-      ['margin_factor_pct', 49],
-      ['margin_factor_pct', 301],
-      ['margin_factor_pct', '120'],
-      ['margin_range_pct', 0],
-      ['margin_range_pct', -8],
-      ['margin_range_pct', 31],
-      ['margin_iv_up_pt', -1],
-      ['margin_iv_up_pt', 51],
-      ['margin_iv_up_pt', true],
-      ['margin_iv_down_pt', -0.5],
-      ['margin_iv_down_pt', 31],
-      ['margin_iv_down_pt', [4]],
+      ['margin_k_pct', 49],
+      ['margin_k_pct', 301],
+      ['margin_k_pct', '120'],
+      ['margin_r_pct', 0],
+      ['margin_r_pct', -8],
+      ['margin_r_pct', 31],
+      ['margin_iv_up_pct', -1],
+      ['margin_iv_up_pct', 201],
+      ['margin_iv_up_pct', true],
+      ['margin_iv_down_pct', -0.5],
+      ['margin_iv_down_pct', 91],
+      ['margin_iv_down_pct', [4]],
     ];
     const keyOf: Record<string, keyof MarginPrefs> = {
       capital_yen: 'capitalYen',
-      margin_factor_pct: 'factorPct',
-      margin_range_pct: 'rangePct',
-      margin_iv_up_pt: 'ivUpPt',
-      margin_iv_down_pt: 'ivDownPt',
+      margin_k_pct: 'factorPct',
+      margin_r_pct: 'rangePct',
+      margin_iv_up_pct: 'ivUpPct',
+      margin_iv_down_pct: 'ivDownPct',
     };
     const good = JSON.parse(serializePrefs({ theme: 'dark', margin: custom }));
     for (const [k, v] of bad) {
@@ -189,8 +189,8 @@ describe('証拠金の設定（#131 AC15）', () => {
         capitalYen: Number.NaN,
         factorPct: Number.NaN,
         rangePct: Infinity,
-        ivUpPt: -1,
-        ivDownPt: 99,
+        ivUpPct: -1,
+        ivDownPct: 99,
         ignoreLongOptions: 'false' as unknown as boolean,
       },
     });
@@ -212,8 +212,8 @@ describe('#149 買いの OP の設定', () => {
       capitalYen: 5_000_000,
       factorPct: 150,
       rangePct: 10,
-      ivUpPt: 12,
-      ivDownPt: 2,
+      ivUpPct: 12,
+      ivDownPct: 2,
       ignoreLongOptions: false,
     };
     const good = JSON.parse(serializePrefs({ theme: 'dark', margin: custom }));
@@ -244,6 +244,73 @@ describe('#149 買いの OP の設定', () => {
     expect(
       JSON.parse(serializePrefs({ theme: 'auto', margin: broken })).margin_ignore_long_options,
     ).toBe(true);
+  });
+});
+
+describe('#150 IV の幅は比率のキー、古い pt のキーは読まない、版は 1', () => {
+  // #149 までのキー（掛け目・R・IV の pt）だけの保存。資金・買いの OP のキーは今のまま
+  const OLD =
+    '{"schema_version":1,"theme":"auto","margin_factor_pct":150,"margin_range_pct":10,"margin_iv_up_pt":12,"margin_iv_down_pt":2,"capital_yen":5000000,"margin_ignore_long_options":false}';
+
+  it('#150 古いキーは読まない: 掛け目・R・IV は新しい既定、資金・買いの OP は残る', () => {
+    const r = readPrefs(OLD);
+    expect(r.writable).toBe(true);
+    expect(r.prefs).toEqual({
+      theme: 'auto',
+      margin: { ...M0, capitalYen: 5_000_000, ignoreLongOptions: false },
+    });
+    expect(r.prefs.margin).toMatchObject({
+      factorPct: 100,
+      rangePct: 5,
+      ivUpPct: 50,
+      ivDownPct: 25,
+    });
+  });
+
+  it('#150 書き出しに古いキーは無く、新しいキーを書く。版は 1', () => {
+    const text = serializePrefs(readPrefs(OLD).prefs);
+    for (const old of [
+      'margin_factor_pct',
+      'margin_range_pct',
+      'margin_iv_up_pt',
+      'margin_iv_down_pt',
+    ]) {
+      expect(text).not.toContain(old);
+    }
+    const o = JSON.parse(text);
+    expect(o.schema_version).toBe(1);
+    expect(o).toMatchObject({
+      margin_k_pct: 100,
+      margin_r_pct: 5,
+      margin_iv_up_pct: 50,
+      margin_iv_down_pct: 25,
+      capital_yen: 5_000_000,
+      margin_ignore_long_options: false,
+    });
+  });
+
+  it('#150 新しいキーの往復と範囲（IV の上げ 0〜200%・下げ 0〜90%。小数可、外はその項目だけ既定）', () => {
+    for (const [up, down] of [
+      [0, 0],
+      [200, 90],
+      [12.5, 33.3],
+    ] as const) {
+      const margin: MarginPrefs = { ...M0, ivUpPct: up, ivDownPct: down };
+      expect(readPrefs(serializePrefs({ theme: 'dark', margin })).prefs.margin).toEqual(margin);
+    }
+    const base = JSON.parse(
+      serializePrefs({ theme: 'dark', margin: { ...M0, ivUpPct: 80, ivDownPct: 40 } }),
+    );
+    for (const [k, v] of [
+      ['margin_iv_up_pct', 201],
+      ['margin_iv_up_pct', -1],
+      ['margin_iv_down_pct', 91],
+      ['margin_iv_down_pct', -0.1],
+    ] as const) {
+      const m = readPrefs(JSON.stringify({ ...base, [k]: v })).prefs.margin;
+      if (k === 'margin_iv_up_pct') expect(m, `${k}=${v}`).toEqual({ ...M0, ivDownPct: 40 });
+      else expect(m, `${k}=${v}`).toEqual({ ...M0, ivUpPct: 80 });
+    }
   });
 });
 
