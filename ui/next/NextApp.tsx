@@ -8,6 +8,8 @@ import {
   type OverwriteSnap,
   useAppController,
 } from '../components/useAppController';
+import { useAtmMoves } from '../components/useAtmMoves';
+import { useHoldMap } from '../components/useHoldMap';
 import { useIvHistory } from '../components/useIvHistory';
 import { useMediaQuery } from '../components/useMediaQuery';
 import { API_LABEL, loaderNote } from '../load';
@@ -36,6 +38,7 @@ import type { DXUnit } from '../view/scenario';
 import {
   type ChartMode,
   chartMode,
+  holdMapVisible,
   INITIAL_SHELL,
   ivVisible,
   layoutTier,
@@ -50,6 +53,7 @@ import { PanelHead } from './PanelHead';
 import { Palette } from './parts/Palette';
 import { Toasts, useToasts } from './parts/Toast';
 import { Board } from './regions/Board';
+import type { HoldBundle } from './regions/HoldMap';
 import { Metrics } from './regions/Metrics';
 import { Positions } from './regions/Positions';
 import { Scenario, scenarioInputOf } from './regions/Scenario';
@@ -90,6 +94,8 @@ import { useTheme } from './useTheme';
  * 保存しない）。見えたら（ivVisible）初めての 1 回だけ右端を読む。データ元が API のときは /api/atm_iv、dev の合成の板・
  * ファイルのときは dev だけ /fixtures/atm_iv（本番のビルドは常に /api/atm_iv）。トップバーの [最新] では読み直さない。
  * 段 C で左右の追加読み込み（useIvHistory）・「今」の 1 点（ivNowValue）・シナリオの水準（state.scenario と舞台の X₀）を足した。
+ * #152 で指標 · テールに持ちこたえマップ（regions/HoldMap.tsx）を入れた。開閉は ShellState.holdMap（保存しない）、過去の点は
+ * 常駐の useAtmMoves（見えたら 1 回だけ /api/atm_daily を読む）、マスの計算は useHoldMap（止まってから列ごと）。
  */
 export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
   // 端末の設定（テーマ・証拠金。#131）は useAppController より先に（証拠金の項目を渡す）
@@ -108,6 +114,36 @@ export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
   const ivNow = useMemo(
     () => (boardJson ? ivNowValue(boardJson, nonTradingDays) : null),
     [boardJson, nonTradingDays],
+  );
+  // 持ちこたえマップ（#152）: 見えている間だけ計算し、初めて見えたときに過去の値（/api/atm_daily）を 1 回読む。
+  // dev の合成の板・ファイルでは dev だけ /fixtures/atm_daily（本番のビルドは常に /api/atm_daily）
+  const holdOpen = shell.holdMap ?? false;
+  const holdShown = holdMapVisible(shell, tier);
+  const { holdMapInput } = c;
+  const dailyEndpoint =
+    import.meta.env.DEV && state.sourceLabel !== API_LABEL
+      ? '/fixtures/atm_daily'
+      : '/api/atm_daily';
+  const atmMoves = useAtmMoves(holdShown && holdMapInput !== null, dailyEndpoint, nonTradingDays);
+  const holdCtl = useHoldMap(holdMapInput, atmMoves.moves, holdShown);
+  const onHoldToggle = useCallback(() => send({ type: 'holdMap', open: !holdOpen }), [holdOpen]);
+  const holdX0 = c.positions?.ctx.x0 ?? Number.NaN;
+  const holdDXRatio = holdX0 > 0 ? state.scenario.dX / holdX0 : 0;
+  const holdNoLegs = c.curLegs.length === 0;
+  const holdNoCapital = (c.marginView?.capital ?? null) === null;
+  const holdDays = c.metrics.days;
+  const hold = useMemo<HoldBundle>(
+    () => ({
+      open: holdOpen,
+      onToggle: onHoldToggle,
+      noLegs: holdNoLegs,
+      noCapital: holdNoCapital,
+      map: holdCtl,
+      moves: atmMoves,
+      dXRatio: holdDXRatio,
+      days: holdDays,
+    }),
+    [holdOpen, onHoldToggle, holdNoLegs, holdNoCapital, holdCtl, atmMoves, holdDXRatio, holdDays],
   );
   // 全体のキー 1〜5・G・T・Ctrl / ⌘ + K（#89。パレットの行の実行も同じ ctx）
   const [paletteOpen, setPaletteOpen] = useState(false);
@@ -480,7 +516,14 @@ export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
             onClear={onClearLegs}
           />
         }
-        metrics={<Metrics model={c.metrics} feePerLot={state.feePerLot} margin={c.marginView} />}
+        metrics={
+          <Metrics
+            model={c.metrics}
+            feePerLot={state.feePerLot}
+            margin={c.marginView}
+            hold={hold}
+          />
+        }
         board={(seg) =>
           chain && c.header ? (
             <Board

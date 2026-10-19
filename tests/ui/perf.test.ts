@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { boardOptionLeg, normalizeChain } from '../../data';
-import { DEFAULT_MARGIN_PARAMS, DEFAULT_SETTINGS } from '../../model';
+import { DEFAULT_MARGIN_PARAMS, DEFAULT_SETTINGS, holdMapAxes, holdMapColumn } from '../../model';
 import { preparePosition } from '../../model/position';
 import { ZERO_SCENARIO } from '../../model/scenario';
 import { buildWideChainJson } from '../../scripts/synthBoard';
@@ -29,6 +29,7 @@ import { boardBadges, boardRowTexts } from '../../ui/view/boardPanel';
 import { bookListModel } from '../../ui/view/bookList';
 import { headerModel, keptBoardNote } from '../../ui/view/header';
 import { hedgeModel } from '../../ui/view/hedge';
+import { holdMapCalcOf, holdMapInput, holdMapPlot, holdMapRooms } from '../../ui/view/holdMap';
 import {
   ivChartModel,
   ivCrosshair,
@@ -1595,5 +1596,70 @@ describe('性能（#131 AC17: 証拠金と追証の線）', () => {
       runs: 30,
       before: nextSettle,
     });
+  });
+});
+
+/**
+ * #152 B8: 持ちこたえマップの 1 列（足 10 本・全足を評価する側・21 マス）。画面は列ごとに setTimeout(0) で回すので、
+ * 1 列が 1 フレーム（16 ms）に収まること。マップ全体（26 列）は記録だけ。
+ */
+describe('性能（#152 持ちこたえマップ）', () => {
+  const { ctx, rows } = makeMarket();
+  const legs = preparePosition(PERF_LEGS, ctx);
+  const board = {
+    months: [
+      { F: M1.F, rows: rows[M1.id] ?? [] },
+      { F: M2.F, rows: rows[M2.id] ?? [] },
+    ],
+  };
+  const built = pnlDomains(board, legs, ctx);
+  if (!built) throw new Error('損益グラフの基礎が作れない');
+  // 全足を評価する重い側（買いの OP でも相殺する。#149 の設定をオフ）
+  const params = { ...DEFAULT_MARGIN_PARAMS, ignoreLongOptions: false };
+  const input = holdMapInput(
+    built,
+    { ...ZERO_SCENARIO, days: 5 },
+    params,
+    15_000_000,
+    CALENDAR.holidays,
+  );
+  if (!input) throw new Error('マップの入力が作れない');
+  const calc = holdMapCalcOf(input);
+  const axes = holdMapAxes([]);
+  let col = 0;
+
+  it(`#152 持ちこたえマップの 1 列（21 マス）が ${BUDGET_MS} ms 以内（30 回の最小値）`, () => {
+    expect(axes.cs).toHaveLength(21);
+    const one = () => {
+      col = (col + 1) % axes.us.length;
+      return holdMapColumn(calc, axes, col).length;
+    };
+    expect(one()).toBe(21);
+    expectWithinBudget('#152 持ちこたえマップの 1 列', one, { warmup: 10, runs: 30 });
+  });
+
+  it('マップ全体（26 列 × 21 行）と描画の表示モデル（記録のみ）', () => {
+    record('#152 持ちこたえマップ全体', () => holdMapRooms(input, axes).length, {
+      warmup: 1,
+      runs: RECORD_RUNS,
+    });
+    const result = { input, axes, rooms: holdMapRooms(input, axes) };
+    const moves = Array.from({ length: 1800 }, (_, k) => ({
+      d0: '2031-01-01',
+      d1: '2031-01-03',
+      dx: Math.sin(k) * 0.05,
+      iv0: 20,
+      iv1: 20 * (1 + Math.cos(k) * 0.2),
+      ivRatio: 1 + Math.cos(k) * 0.2,
+      ivPt: 4 * Math.cos(k),
+    }));
+    record(
+      '#152 持ちこたえマップの描画（点 1,800）',
+      () => holdMapPlot(result, moves, 400).cells.length,
+      {
+        warmup: 2,
+        runs: RECORD_RUNS,
+      },
+    );
   });
 });
