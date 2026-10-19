@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { boardOptionLeg, normalizeChain } from '../../data';
+import type { AiMessage } from '../../data/aiStream';
 import { DEFAULT_MARGIN_PARAMS, DEFAULT_SETTINGS, holdMapAxes, holdMapColumn } from '../../model';
 import { preparePosition } from '../../model/position';
 import { ZERO_SCENARIO } from '../../model/scenario';
@@ -25,8 +26,15 @@ import {
   type State,
   type UiLeg,
 } from '../../ui/state';
+import {
+  type AiChatState,
+  aiChatReduce,
+  chatItems,
+  INITIAL_AI_CHAT,
+  numberSources,
+} from '../../ui/view/aiChat';
 import { aiEnvFromState, buildAiContext } from '../../ui/view/aiContext';
-import { markNumbers, parseAiText } from '../../ui/view/aiText';
+import { answerModel, markNumbers, parseAiText } from '../../ui/view/aiText';
 import { atmStrike, boardRows } from '../../ui/view/board';
 import { boardBadges, boardRowTexts } from '../../ui/view/boardPanel';
 import { bookListModel } from '../../ui/view/bookList';
@@ -1706,6 +1714,57 @@ describe('性能（#135 AI の事前計算と返答の描き直し）', () => {
       runs: 10,
     });
     expect(r.min).toBeLessThan(300);
+  });
+
+  it(`返答 10 件の会話の流れの 1 フレーム（表示の項目 + 流れている返答の木と照合）が ${BUDGET_MS} ms 以内（30 回の最小値）`, () => {
+    const ctx = buildAiContext(e);
+    const para =
+      '−10% の SQ で −1,234 千円、IV が +5pt なら −617 千円。Δ は −0.45 枚（ミニ −4.5 枚）です。';
+    const reply = Array.from(
+      { length: 5 },
+      (_, i) => `## 弱点 ${i + 1}: 見出し\n${para}\n${para}\n${para}`,
+    ).join('\n');
+    const messages: AiMessage[] = [];
+    for (let i = 0; i < 10; i++) {
+      messages.push({ role: 'user', content: [{ type: 'text', text: `質問 ${i}` }] });
+      messages.push({ role: 'assistant', content: [{ type: 'text', text: reply }] });
+    }
+    let chat: AiChatState = { ...INITIAL_AI_CHAT, context: ctx, lastKey: 'k', messages };
+    chat = aiChatReduce(chat, { type: 'begin', kind: 'chat', text: '続けて', now: 0 });
+    chat = aiChatReduce(chat, { type: 'send', context: ctx, key: 'k' });
+    const sources = numberSources(chat);
+    // 終わった返答の木と印は画面が (text, sources) で memo する（1 回だけ作る）
+    const done = new Map<string, unknown>();
+    const memo = (text: string) => {
+      if (!done.has(text)) done.set(text, answerModel(text, sources));
+      return done.get(text);
+    };
+    for (const it of chatItems(chat)) if (it.kind === 'answer') memo(it.text);
+    let live = '';
+    expectWithinBudget(
+      '#135 返答 10 件の会話の流れの 1 フレーム',
+      () => {
+        live += `${para}\n`;
+        chat = aiChatReduce(chat, { type: 'event', event: { type: 'text', text: `${para}\n` } });
+        let n = 0;
+        for (const it of chatItems(chat)) {
+          if (it.kind !== 'answer') continue;
+          n += it.live ? answerModel(it.text, sources).length : memo(it.text) ? 1 : 0;
+        }
+        return n + live.length;
+      },
+      { warmup: 5, runs: 30 },
+    );
+    // memo しない場合（全部の返答を毎フレーム作り直す）は記録だけ
+    record(
+      '#135 返答 10 件を毎フレーム作り直した場合（記録のみ）',
+      () =>
+        chatItems(chat).reduce(
+          (n, it) => n + (it.kind === 'answer' ? answerModel(it.text, sources).length : 0),
+          0,
+        ),
+      { warmup: 2, runs: RECORD_RUNS },
+    );
   });
 
   it(`返答の文（約 1,200 字）の木と数字の照合が ${BUDGET_MS} ms 以内（30 回の最小値）`, () => {

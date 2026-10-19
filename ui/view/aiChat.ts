@@ -142,8 +142,9 @@ function onEvent(s: AiChatState, ev: AiEvent): AiChatState {
       const wantsTools =
         ev.stop_reason === 'tool_use' && content.some((b) => b.type === 'tool_use');
       if (wantsTools && t.rounds > MAX_TOOL_ROUNDS) {
-        // 上限の知らせの後も道具を求めた: その返答は履歴に入れずに終える（会話の形を保つ）
-        return { ...s, remainingUsd, turn: null, failed: null, stop: 'tool_limit' };
+        // 上限の知らせの後も道具を求めた: その発言の履歴を戻して終える（最後が tool_result の user のまま残すと、
+        // 次の発言で user が続き中継が 400 にする）。途中の文と理由（tool_limit）は失敗と同じく残す（[もう一度]）
+        return fail({ ...s, remainingUsd }, 'tool_limit', remainingUsd);
       }
       if (content.length === 0) return fail({ ...s, remainingUsd }, 'empty');
       const messages: AiMessage[] = [...s.messages, { role: 'assistant', content }];
@@ -383,6 +384,8 @@ export function aiErrorText(code: string, remainingUsd: number | null = null): s
       return 'AI は無効です（管理者の設定）';
     case 'aborted':
       return '中止しました';
+    case 'no_board':
+      return '板がありません（板を読んでから送ってください）';
     case 'bad_request':
       return '送る内容が受け付けられませんでした（形の検査）';
     case 'too_large':
@@ -420,7 +423,15 @@ export function aiErrorText(code: string, remainingUsd: number | null = null): s
 export type ChatItem =
   | { kind: 'user'; text: string; updated: boolean; key: string }
   | { kind: 'thinking'; text: string; key: string; live: boolean }
-  | { kind: 'answer'; text: string; key: string; live: boolean; failed: string | null }
+  | {
+      kind: 'answer';
+      text: string;
+      key: string;
+      live: boolean;
+      failed: string | null;
+      /** 失敗のときの今日の残り（429 budget_exceeded の残りつきの文言。無ければ null） */
+      remainingUsd?: number | null;
+    }
   | {
       kind: 'tool';
       key: string;
@@ -502,6 +513,7 @@ export function chatItems(s: AiChatState): ChatItem[] {
       key: 'failed-text',
       live: false,
       failed: f.code,
+      remainingUsd: f.remainingUsd,
     });
   }
   return out;

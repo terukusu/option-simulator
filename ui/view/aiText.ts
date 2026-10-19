@@ -89,3 +89,23 @@ export function markNumbers(text: string, sources: readonly unknown[]): MarkedTe
   if (at < text.length) out.push({ text: text.slice(at), unmatched: false });
   return out;
 }
+
+export type MarkedInline = { bold: boolean; parts: MarkedText[] };
+export type MarkedBlock =
+  | { kind: 'h'; level: 2 | 3; inl: MarkedInline[] }
+  | { kind: 'p'; inl: MarkedInline[] }
+  | { kind: 'ul' | 'ol'; items: MarkedInline[][] };
+
+/**
+ * 返答の木 + 照合の印（画面が描く形）。画面は返答ごとに (text, sources) で memo する = 流れの間に作り直すのは
+ * 流れている返答だけ（終わった返答は text も sources も変わらない）
+ */
+export function answerModel(text: string, sources: readonly unknown[]): MarkedBlock[] {
+  const mark = (xs: Inline[]): MarkedInline[] =>
+    xs.map((x) => ({ bold: x.bold, parts: markNumbers(x.text, sources) }));
+  return parseAiText(text).map((b): MarkedBlock => {
+    if (b.kind === 'h') return { kind: 'h', level: b.level, inl: mark(b.inl) };
+    if (b.kind === 'p') return { kind: 'p', inl: mark(b.inl) };
+    return { kind: b.kind, items: b.items.map(mark) };
+  });
+}

@@ -71,8 +71,19 @@ export function classOfKey(key: string): ValueClass {
   return 'other';
 }
 
-/** 照合の値（数値の葉）を集める。配列の要素は親のキーの単位 */
+/** 照合の値の写し（同じ sources の配列なら歩き直さない。流れの文の描き直しで毎フレーム呼ばれる） */
+const valuesCache = new WeakMap<readonly unknown[], SourceValue[]>();
+
+/** 照合の値（数値の葉）を集める。配列の要素は親のキーの単位。同じ配列なら前の結果を返す（中身は変えない前提） */
 export function collectValues(sources: readonly unknown[]): SourceValue[] {
+  const hit = valuesCache.get(sources);
+  if (hit) return hit;
+  const values = walkValues(sources);
+  valuesCache.set(sources, values);
+  return values;
+}
+
+function walkValues(sources: readonly unknown[]): SourceValue[] {
   const out: SourceValue[] = [];
   const walk = (v: unknown, key: string) => {
     if (typeof v === 'number') {

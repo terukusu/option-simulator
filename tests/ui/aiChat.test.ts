@@ -10,6 +10,7 @@ import {
   type AiChatState,
   type AiGate,
   aiChatReduce,
+  aiErrorText,
   atLimit,
   chatItems,
   DIAGNOSE_TEXT,
@@ -181,16 +182,25 @@ describe('aiChatReduce', () => {
       { type: 'text', text: TOOL_LIMIT_NOTE },
     ]);
     s = aiChatReduce(s, { type: 'toolResults', blocks: last });
-    const before = s.messages.length;
-    // それでも道具を求めたら履歴に入れずに終える
-    s = aiChatReduce(s, toolDone('t10'));
-    expect(s.turn).toBeNull();
-    expect(s.stop).toBe('tool_limit');
-    expect(s.messages).toHaveLength(before);
-    expect(s.messages.at(-1)?.role).toBe('user');
     // 道具のカードは結果と組になる
     const cards = chatItems(s).filter((i) => i.kind === 'tool');
     expect(cards[0]).toMatchObject({ name: 'evaluate_scenario', result: { pnl_yen: -2119796 } });
+    // それでも道具を求めたら、その発言の履歴を戻して終える（最後は assistant = 交互の形）
+    s = aiChatReduce(s, toolDone('t10'));
+    expect(s.turn).toBeNull();
+    expect(s.failed).toMatchObject({ code: 'tool_limit', userText: '−6% なら？' });
+    expect(s.messages).toEqual(first.messages);
+    expect(s.messages.at(-1)?.role).toBe('assistant');
+    expect(chatItems(s).at(-1)).toMatchObject({ kind: 'answer', failed: 'tool_limit' });
+    // 次の発言の要求は user / assistant の交互（中継の順序の検査を通る形）
+    const next = run(
+      s,
+      { type: 'begin', kind: 'chat', text: '続けて', now: 4000 },
+      { type: 'send', context: CTX(0), key: 'k0' },
+    );
+    const roles = requestOf(next)?.messages.map((m) => m.role) ?? [];
+    expect(roles).toEqual(['user', 'assistant', 'user']);
+    expect(roles.every((r, i) => r === (i % 2 === 0 ? 'user' : 'assistant'))).toBe(true);
   });
 
   it('失敗・終端なし・中止: その発言の履歴を戻し、途中の文と理由を残す', () => {
@@ -218,6 +228,11 @@ describe('aiChatReduce', () => {
     // 事前の失敗（429 の残りつき）
     const r = aiChatReduce(mid, { type: 'fail', code: 'budget_exceeded', remainingUsd: 0.05 });
     expect(r.failed?.remainingUsd).toBe(0.05);
+    // 表示の項目まで残りが届き、文言に残りの額が出る（AC8）
+    const row = chatItems(r).at(-1);
+    expect(row).toMatchObject({ kind: 'answer', failed: 'budget_exceeded', remainingUsd: 0.05 });
+    if (row?.kind !== 'answer' || row.failed === null) throw new Error('失敗の行が無い');
+    expect(aiErrorText(row.failed, row.remainingUsd ?? null)).toContain('残り $0.05');
   });
 
   it('stop_reason の refusal / max_tokens は知らせとして残す', () => {

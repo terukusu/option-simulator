@@ -16,7 +16,7 @@ import {
   remainingText,
   sendBlocked,
 } from '../../view/aiChat';
-import { type Inline, markNumbers, parseAiText } from '../../view/aiText';
+import { answerModel, type MarkedInline } from '../../view/aiText';
 import { type AiToolEnv, scenarioOfResult, toolCard } from '../../view/aiTools';
 import { PANEL_FOCUS_LABEL } from '../../view/keys';
 import { PanelHead } from '../PanelHead';
@@ -292,7 +292,7 @@ function ChatRow(p: {
           {it.text !== '' && <AnswerText text={it.text} sources={p.sources} />}
           {it.failed !== null && (
             <p class="ai-error" data-ai="error" data-code={it.failed}>
-              {aiErrorText(it.failed)}
+              {aiErrorText(it.failed, it.remainingUsd ?? null)}
               {it.failed !== 'session_expired' && (
                 <button type="button" class="btn sm" disabled={!p.canRetry} onClick={p.onRetry}>
                   もう一度
@@ -325,11 +325,15 @@ function ChatRow(p: {
   }
 }
 
+/**
+ * 返答の文（木 + 照合の印）。(text, sources) で memo する = 流れの間にフレームごとに作り直すのは流れている返答だけ
+ * （終わった返答の text と、会話の sources（messages が変わったときだけ作る）は変わらない）
+ */
 function AnswerText(p: { text: string; sources: readonly unknown[] }) {
-  const blocks = useMemo(() => parseAiText(p.text), [p.text]);
-  const inl = (xs: Inline[]): ComponentChildren =>
+  const blocks = useMemo(() => answerModel(p.text, p.sources), [p.text, p.sources]);
+  const inl = (xs: MarkedInline[]): ComponentChildren =>
     xs.map((x, i) => {
-      const parts = markNumbers(x.text, p.sources).map((m, j) =>
+      const parts = x.parts.map((m, j) =>
         m.unmatched ? (
           <span key={j} class="ai-unmatched" title={UNMATCHED_LABEL}>
             {m.text}
@@ -350,21 +354,10 @@ function AnswerText(p: { text: string; sources: readonly unknown[] }) {
           case 'p':
             return <p key={i}>{inl(b.inl)}</p>;
           case 'ul':
-            return (
-              <ul key={i}>
-                {b.items.map((x, j) => (
-                  <li key={j}>{inl(x)}</li>
-                ))}
-              </ul>
-            );
-          case 'ol':
-            return (
-              <ol key={i}>
-                {b.items.map((x, j) => (
-                  <li key={j}>{inl(x)}</li>
-                ))}
-              </ol>
-            );
+          case 'ol': {
+            const items = b.items.map((x, j) => <li key={j}>{inl(x)}</li>);
+            return b.kind === 'ul' ? <ul key={i}>{items}</ul> : <ol key={i}>{items}</ol>;
+          }
         }
         return null;
       })}
