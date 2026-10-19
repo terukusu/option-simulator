@@ -51,7 +51,9 @@ import type { MarketAdd } from './market/BoardMonth';
 import { IvHistory } from './market/IvHistory';
 import { PanelHead } from './PanelHead';
 import { Palette } from './parts/Palette';
+import { TermCard } from './parts/TermCard';
 import { Toasts, useToasts } from './parts/Toast';
+import { openTerm } from './parts/termCard';
 import { Board } from './regions/Board';
 import type { HoldBundle } from './regions/HoldMap';
 import { Metrics } from './regions/Metrics';
@@ -146,9 +148,12 @@ export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
     [holdOpen, onHoldToggle, holdNoLegs, holdNoCapital, holdCtl, atmMoves, holdDXRatio, holdDays],
   );
   // 全体のキー 1〜5・G・T・Ctrl / ⌘ + K（#89。パレットの行の実行も同じ ctx）
-  const [paletteOpen, setPaletteOpen] = useState(false);
-  const onPalette = useCallback(() => setPaletteOpen(true), []);
-  const closePalette = useCallback(() => setPaletteOpen(false), []);
+  // paletteQuery = 開いたときの問い合わせ（null = 閉。Ctrl / ⌘ + K は空、⋯ > 用語集… は `?` = 用語だけ。#167）
+  const [paletteQuery, setPaletteQuery] = useState<string | null>(null);
+  const paletteOpen = paletteQuery !== null;
+  const onPalette = useCallback(() => setPaletteQuery(''), []);
+  const onOpenGlossary = useCallback(() => setPaletteQuery('?'), []);
+  const closePalette = useCallback(() => setPaletteQuery(null), []);
   const keyCtx: GlobalKeysCtx = {
     tier,
     send,
@@ -448,6 +453,10 @@ export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
       case 'theme':
         theme.choose(run.theme);
         return;
+      case 'term':
+        // パレットの finish がフォーカスを戻した後なので、カードの「開く前の要素」はパレットを開く前の要素
+        openTerm(run.id);
+        return;
     }
   };
   // 保存一覧を開いている間はそのダイアログの中に描く（1 か所だけ = 読み上げも 1 回）
@@ -481,6 +490,7 @@ export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
         onOpenBook={onOpenBook}
         onSaveToBook={onSaveToBook}
         onOpenSettings={onOpenSettings}
+        onOpenGlossary={onOpenGlossary}
         onExport={onExport}
         onImport={onImport}
         onClearLegs={onClearLegs}
@@ -641,7 +651,14 @@ export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
         focusName={bookFocusName}
       />
       {!c.bookOpen && toastList}
-      <Palette open={paletteOpen} items={items} onClose={closePalette} onRun={runPalette} />
+      <Palette
+        open={paletteOpen}
+        items={items}
+        onClose={closePalette}
+        onRun={runPalette}
+        initialQuery={paletteQuery ?? ''}
+      />
+      <TermCard />
     </div>
   );
 }

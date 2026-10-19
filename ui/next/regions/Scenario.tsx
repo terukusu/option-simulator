@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'preact/hooks';
 import type { IvDynamics } from '../../../model';
 import type { AppController } from '../../components/useAppController';
+import { HINT_TERMS } from '../../view/glossary';
 import { PANEL_FOCUS_LABEL } from '../../view/keys';
 import { revealViewport } from '../../view/pnlChart';
 import { type DXUnit, fromDisplay } from '../../view/scenario';
@@ -26,6 +27,7 @@ import { Chip, ChipRow } from '../parts/Chip';
 import { Popover } from '../parts/Popover';
 import { Seg } from '../parts/Seg';
 import { Stepper } from '../parts/Stepper';
+import { TermLinks } from '../parts/TermLinks';
 
 const DYNAMICS = [
   { value: 'sticky_strike', text: 'sticky strike' },
@@ -144,6 +146,7 @@ export function Scenario(p: { c: AppController; dXUnit: DXUnit; onDXUnit: (u: DX
             先物 basis: 先物の足をその SQ より前に評価するとき F = X' + basis。減衰は先物の SQ で 0
             へ線形。
           </p>
+          <TermLinks ids={HINT_TERMS.scenario} />
         </Popover>
       </PanelHead>
       {/* biome-ignore lint/a11y/useSemanticElements: 1〜5 の行き先のスクロールする枠に名前を付ける（fieldset にしない） */}

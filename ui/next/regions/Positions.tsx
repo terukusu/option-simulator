@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/ho
 import type { AppController } from '../../components/useAppController';
 import { type LegPatch, type Parsed, parseEntry, parseIvPct, parseQty } from '../../state';
 import { fmtNum } from '../../view/format';
+import { HINT_TERMS } from '../../view/glossary';
 import type { HedgeAt } from '../../view/hedge';
 import { PANEL_FOCUS_LABEL } from '../../view/keys';
 import { type PositionRow, SIDE_LABEL, toggledSide } from '../../view/position';
@@ -31,6 +32,7 @@ import { Menu, type MenuItem } from '../parts/Menu';
 import { Popover } from '../parts/Popover';
 import { Seg } from '../parts/Seg';
 import { Stepper } from '../parts/Stepper';
+import { TermLinks } from '../parts/TermLinks';
 import { HedgeDialog } from './HedgeDialog';
 import { LegDialog } from './LegDialog';
 
@@ -145,6 +147,7 @@ export function Positions(p: Props) {
             IV・グリーク・状態（Θ・V は指標の単位）。スプレッドコスト = 建値と足を入れたときの板の
             mid の差 × 枚数 × 乗数（不利な側が +。mid の無い足は —）。
           </p>
+          <TermLinks ids={HINT_TERMS.positions} />
         </Popover>
         <Menu label="ポジションの操作" button="⋯" items={items} />
       </PanelHead>

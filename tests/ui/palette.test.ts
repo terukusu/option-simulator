@@ -6,6 +6,7 @@ import { type Action, initialState, MAX_TABS, reduce, type State } from '../../u
 import { atmStrike } from '../../ui/view/board';
 import { marketAddLabel, marketAddPlan, monthSegOptions } from '../../ui/view/boardPanel';
 import { fmtNum } from '../../ui/view/format';
+import { GLOSSARY } from '../../ui/view/glossary';
 import {
   PALETTE_GROUPS,
   PALETTE_LIMIT,
@@ -407,6 +408,112 @@ describe('paletteFilter（AC-B3）', () => {
     expect(paletteNorm('Ａｂ６４，０００,1')).toBe('ab640001');
     expect(paletteNorm('−10%')).toBe('-10%');
     expect(paletteNorm('（11月限）')).toBe('(11月限)');
+  });
+});
+
+describe('用語の行（#167 AC-5）', () => {
+  const items = paletteItems(inputOf(twoLegs));
+  const terms = items.filter((r) => r.group === 'term');
+  const ids = (q: string) => paletteFilter(items, q).map((r) => r.id);
+
+  it('(a) 用語の行は 24 行・グループは並びの最後・行の順は GLOSSARY と同じ', () => {
+    expect(PALETTE_GROUPS.at(-1)).toEqual({ group: 'term', name: '用語' });
+    expect(terms.length).toBe(24);
+    expect(terms.map((r) => r.label)).toEqual(GLOSSARY.map((t) => t.title));
+    expect(items.slice(-24)).toEqual(terms);
+    // 足 0 本・板なしでも 24 行
+    expect(
+      paletteItems(inputOf(loaded, { chain: null, atmK: null })).filter((r) => r.group === 'term')
+        .length,
+    ).toBe(24);
+    for (const r of terms) {
+      expect(r.disabled).toBe(false);
+      expect(r.keywords?.length ?? 0).toBeGreaterThan(0);
+    }
+  });
+
+  it('(b) 記号・読み・カナ・英語・半角カナで当たる', () => {
+    const cases: [string, string][] = [
+      ['σ', 'term:iv'],
+      ['シグマ', 'term:iv'],
+      ['しぐま', 'term:iv'],
+      ['sigma', 'term:iv'],
+      ['ｼｸﾞﾏ', 'term:iv'],
+      ['Δs', 'term:skew'],
+      ['デルタs', 'term:skew'],
+      ['でるたS', 'term:skew'],
+      ['スキュー', 'term:skew'],
+      ['skew', 'term:skew'],
+      ['Δσ', 'term:iv-shift'],
+      ['デルタσ', 'term:iv-shift'],
+      ['デルタシグマ', 'term:iv-shift'],
+      ['追証', 'term:margin-line'],
+      ['ベガ', 'term:vega'],
+      ['ガンマ', 'term:gamma'],
+      ['Γ', 'term:gamma'],
+      ['シータ', 'term:theta'],
+      ['θ', 'term:theta'],
+      ['ベータ', 'term:beta'],
+      ['β', 'term:beta'],
+      ['ヒストリカル', 'term:hv'],
+      ['span', 'term:var-span'],
+    ];
+    for (const [q, id] of cases) expect(ids(q), q).toContain(id);
+    // Δs と Δσ は取り違えない
+    expect(ids('Δs')).not.toContain('term:iv-shift');
+    expect(ids('デルタσ')).not.toContain('term:skew');
+  });
+
+  it('(c) ? / ？ で始まる問い合わせは用語の行だけ（? だけなら 24 行）', () => {
+    expect(paletteFilter(items, '?')).toEqual(terms);
+    expect(paletteFilter(items, '？')).toEqual(terms);
+    expect(paletteFilter(items, ' ? ')).toEqual(terms);
+    const hit = paletteFilter(items, '?シグマ');
+    expect(hit.length).toBeGreaterThan(0);
+    expect(hit.every((r) => r.group === 'term')).toBe(true);
+    expect(hit.map((r) => r.id)).toContain('term:iv');
+    // AC-10: `?シグマ` の先頭（Enter で開く行）は IV
+    expect(hit[0]?.id).toBe('term:iv');
+    // 用語に当たらない語は 0 件（コマンドは出さない）
+    expect(paletteFilter(items, '?急落')).toEqual([]);
+    expect(paletteFilter(items, '？ テーマ')).toEqual([]);
+  });
+
+  it('(d) 既存のコマンドの問い合わせの結果が変わらない（用語の行を足しても）', () => {
+    const cmds = items.filter((r) => r.group !== 'term');
+    for (const q of [
+      '急落',
+      'テーマ ダーク',
+      'テーマ',
+      'ATM',
+      '-10%',
+      '−10%',
+      '64',
+      '売 p 64000',
+      '.*',
+    ]) {
+      expect(paletteFilter(items, q), q).toEqual(paletteFilter(cmds, q));
+    }
+    expect(paletteFilter(items, '急落').length).toBe(1);
+    expect(paletteFilter(items, 'ATM').map((r) => r.label)).toEqual(['ATM へ']);
+    // 足 0 本の「全クリア」は押せない 1 行だけ（ui:check の #89 AC-B5(b)。「クリア」だけだと用語の JSCC にも当たる）
+    const empty = paletteFilter(paletteItems(inputOf(loaded)), '全クリア');
+    expect(empty.map((r) => [r.id, r.disabled])).toEqual([['work:clear', true]]);
+    expect(ids('クリア')).toContain('term:jscc');
+  });
+
+  it('(e) 用語の行の実行は {kind: term, id}、id は term:<用語の id>', () => {
+    for (const [i, r] of terms.entries()) {
+      const t = GLOSSARY[i];
+      expect(r.id).toBe(`term:${t?.id}`);
+      expect(r.run).toEqual({ kind: 'term', id: t?.id });
+    }
+  });
+
+  it('paletteNorm: カタカナをひらがなに（半角カナも NFKC の後に）', () => {
+    expect(paletteNorm('シグマ')).toBe('しぐま');
+    expect(paletteNorm('ｼｸﾞﾏ')).toBe('しぐま');
+    expect(paletteNorm('ヴァ・ー')).toBe('ゔぁ・ー');
   });
 });
 

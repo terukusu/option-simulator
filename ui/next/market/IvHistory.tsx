@@ -5,6 +5,7 @@ import type { Scenario } from '../../../model';
 import type { Domain } from '../../chart/scale';
 import { pure } from '../../components/pure';
 import type { IvView } from '../../components/useIvHistory';
+import { HINT_TERMS } from '../../view/glossary';
 import {
   fmtIvPt,
   IV_FOCUS_LABEL,
@@ -24,6 +25,7 @@ import { type IvLoadState, ivInProgress, ivLoadView } from '../../view/ivLoad';
 import { PanelHead } from '../PanelHead';
 import { Popover } from '../parts/Popover';
 import { Seg } from '../parts/Seg';
+import { TermLinks } from '../parts/TermLinks';
 import { IvPlot } from './IvPlot';
 
 export interface IvHistoryProps {
@@ -103,6 +105,7 @@ function IvHistoryView(p: IvHistoryProps) {
         <Popover label="IV 推移の操作" button="ⓘ">
           <p>{IV_HINT}</p>
           <p>{IV_NOTE}</p>
+          <TermLinks ids={HINT_TERMS.ivHistory} />
         </Popover>
       </PanelHead>
       {/* biome-ignore lint/a11y/useSemanticElements: 1〜5 の行き先のスクロールする枠に名前を付ける（fieldset にしない） */}

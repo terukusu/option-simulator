@@ -1012,6 +1012,11 @@ async function measureAll() {
     console.log(
       `コマンドパレットの検査（#89）: ${paletteStats.pass} / ${paletteStats.total} 状態で pass`,
     );
+    // 用語の説明カード（#167 AC-9）
+    await termCardSweep();
+    console.log(
+      `説明カードの検査（#167）: ${termCardStats.pass} / ${termCardStats.total} 状態で pass`,
+    );
     // IV 推移（#79 段 B AC-13）
     await ivSweep();
     console.log(`IV 推移の検査（#79）: ${ivStats.pass} / ${ivStats.total} 状態で pass`);
@@ -1866,6 +1871,133 @@ async function paletteSweep() {
       else {
         failed = true;
         if (out) console.log(`${label} ${w}x${h}: ${out}  ← NG`);
+      }
+      await ctx.close();
+    }
+  }
+}
+
+const TERM_CARD = 'dialog.term-card[open]';
+const termCardStats = { total: 0, pass: 0 };
+
+/**
+ * 説明カード 1 状態の検査（#167 AC-9）: カードが開いて見出しが want、箱が窓の中・中で横にはみ出さない、ページの縦・横 0px
+ * （report）、カードの見出しと用語のボタン（.term-link）が切れていない（scrollWidth ≤ clientWidth）
+ */
+async function termCardCheck(page, label, w, h, shotName, want) {
+  const opened = await page
+    .waitForSelector(`${TERM_CARD} .tc-head h2`, { timeout: 2000 })
+    .then(() => true)
+    .catch(() => false);
+  await page.waitForTimeout(100);
+  const ok = await report(page, label, w, h, shotName);
+  let out = '';
+  if (!opened) out = 'カードが開かない';
+  else {
+    const title = (await page.textContent(`${TERM_CARD} .tc-head h2`)) ?? '';
+    const box = await inWindow(page, `${TERM_CARD} .tc-box`);
+    const body = await inWindow(page, `${TERM_CARD} .tc-body`);
+    const cut = await page.evaluate((sel) => {
+      const bad = [];
+      for (const el of document.querySelectorAll(`${sel} .tc-head h2, ${sel} .term-link`)) {
+        if (el.getClientRects().length === 0) continue;
+        if (el.scrollWidth > el.clientWidth + 0.5) bad.push(el.textContent);
+      }
+      const d = document.querySelector(sel);
+      if (d && d.scrollWidth > d.clientWidth + 0.5) bad.push('dialog の横スクロール');
+      return bad;
+    }, TERM_CARD);
+    const focus = await page.evaluate(
+      (sel) => document.querySelector(sel)?.contains(document.activeElement) === true,
+      TERM_CARD,
+    );
+    out = [
+      title === want ? '' : `見出し「${title}」≠「${want}」`,
+      box,
+      body,
+      cut.length ? `切れ ${cut.join('・')}` : '',
+      focus ? '' : 'フォーカスがカードの外',
+    ]
+      .filter(Boolean)
+      .join(' / ');
+  }
+  termCardStats.total++;
+  if (ok && out === '') termCardStats.pass++;
+  else {
+    failed = true;
+    if (out) console.log(`${label} ${w}x${h}: ${out}  ← NG`);
+  }
+}
+
+/** Esc で閉じて、カードが消えるのを待つ（閉じなければ NG） */
+async function closeTermCard(page, label) {
+  await page.keyboard.press('Escape');
+  const closed = await page
+    .waitForSelector(TERM_CARD, { state: 'detached', timeout: 2000 })
+    .then(() => true)
+    .catch(() => false);
+  if (!closed) {
+    failed = true;
+    console.log(`${label}: Esc でカードが閉じない  ← NG`);
+  }
+}
+
+/**
+ * 説明カード（#167 AC-9）: 360 / 390 / 900 / 1440 × ダーク / ライト で、(1) パレットの `?追証` → Enter（スマホは ⋯ >
+ * 用語集… から）で追証の線、(2) その関連する用語の先頭へ移る、(3) シナリオの ⓘ の「用語: Δs」でスキュー Δs
+ */
+async function termCardSweep() {
+  for (const [w, h] of SIZES) {
+    for (const theme of ['dark', 'light']) {
+      const phone = w <= PHONE_MAX;
+      const ctx = await newContext(
+        { width: w, height: h },
+        { [WORKSPACE_KEY]: twoLegs, [PREFS_KEY]: prefsText(theme) },
+      );
+      const page = await ctx.newPage();
+      await page.goto(pageUrl('next'));
+      await waitReady(page, 'next');
+      const tag = `next ${theme} 説明カード`;
+      const name = `next-${w}x${h}-${theme}-term`;
+      // (1) パレット（スマホ・タブレットの入口は ⋯ > 用語集…。PC は Ctrl + K で `?` を打つ）
+      if (phone) {
+        await page.click('button[aria-label="メニュー"]');
+        await page.click('header.top > .menu-wrap [role="menuitem"]:has-text("用語集…")');
+        await page.waitForSelector(`${PALETTE} input`, { timeout: 2000 }).catch(() => {});
+        const q = await page.inputValue(`${PALETTE} input`).catch(() => '');
+        if (q !== '?') {
+          failed = true;
+          console.log(`${tag} ${w}x${h}: 用語集… の問い合わせ「${q}」≠「?」  ← NG`);
+        }
+        await page.keyboard.type('追証');
+      } else {
+        await openPalette(page);
+        await page.keyboard.type('?追証');
+      }
+      await page.waitForTimeout(100);
+      await page.keyboard.press('Enter');
+      await termCardCheck(page, `${tag} パレット`, w, h, `${name}-palette`, '追証の線');
+      // (2) 関連する用語の先頭（余力（概算））へ。中身が替わり、フォーカスはカードの中
+      await page.click(`${TERM_CARD} .tc-related .term-link >> nth=0`).catch(() => {});
+      await termCardCheck(page, `${tag} 関連する用語`, w, h, `${name}-related`, '余力（概算）');
+      await closeTermCard(page, `${tag} ${w}x${h}`);
+      // (3) シナリオの ⓘ の「用語: Δs」
+      if (phone) await setShell(page, 'scenario', 'full');
+      await page.click('section.scenario .panel-head .hintbtn');
+      await page
+        .click('section.scenario .term-links .term-link[aria-label="用語: スキュー Δs"]')
+        .catch(() => {});
+      await termCardCheck(page, `${tag} ⓘ`, w, h, `${name}-hint`, 'スキュー Δs');
+      await closeTermCard(page, `${tag} ${w}x${h}`);
+      // 閉じたらフォーカスは ⓘ（閉じたポップオーバーの中のボタンから戻す先）
+      const back = await page.evaluate(
+        () =>
+          document.activeElement?.classList.contains('hintbtn') === true &&
+          document.activeElement.closest('section.scenario') !== null,
+      );
+      if (!back) {
+        failed = true;
+        console.log(`${tag} ${w}x${h}: 閉じた後のフォーカスがシナリオの ⓘ でない  ← NG`);
       }
       await ctx.close();
     }
@@ -7430,7 +7562,8 @@ async function paletteFlows(vp) {
   }
   await ctx.close();
 
-  // (b) 足 0 本の作業で クリア: 押せない行だけ = aria-activedescendant なし、Enter で何も起きない
+  // (b) 足 0 本の作業で 全クリア: 押せない行だけ = aria-activedescendant なし、Enter で何も起きない
+  // （#167: 「クリア」だけでは用語の JSCC（日本証券クリアリング機構）にも当たるので「全クリア」で引く）
   {
     const c2 = await newContext(vp, {});
     const p2 = await c2.newPage();
@@ -7441,7 +7574,7 @@ async function paletteFlows(vp) {
       .waitForSelector(PAL_INPUT, { timeout: 2000 })
       .then(() => true)
       .catch(() => false);
-    await p2.keyboard.type('クリア');
+    await p2.keyboard.type('全クリア');
     await p2.waitForTimeout(120);
     const a = await p2.getAttribute(PAL_INPUT, 'aria-activedescendant');
     const opts = await p2.evaluate(
@@ -7453,7 +7586,7 @@ async function paletteFlows(vp) {
     const still = (await p2.$(PALETTE)) !== null;
     const toasts = await p2.evaluate(() => document.querySelectorAll('.toast:not(.note)').length);
     check(
-      `#89 AC-B5(b) ${tag} 足 0 本で クリア → 全クリアが押せず aria-activedescendant なし・Enter で何も起きない（開いたまま）`,
+      `#89 AC-B5(b) ${tag} 足 0 本で 全クリア → 全クリアが押せず aria-activedescendant なし・Enter で何も起きない（開いたまま）`,
       opened && a === null && opts.length === 1 && opts[0] === 'true' && still && toasts === 0,
       `${a}・${JSON.stringify(opts)}・開いたまま ${still}・トースト ${toasts}`,
     );
