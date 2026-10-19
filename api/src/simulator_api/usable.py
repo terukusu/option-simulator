@@ -90,8 +90,9 @@ def future_ok(price) -> bool:
 
 
 def board_ok(option_rows: Iterable[dict], future_price) -> bool:
-    """1 限月（last_trading_day の最小）の 0.95F ≤ K ≤ 1.05F の行（call・put を別に数える）のうち、
-    bid と ask が両方 NULL でない行の割合が FILL_RATIO 以上（分母 0 は不採用）"""
+    """1 限月（last_trading_day の最小）の 0.95F ≤ K ≤ 1.05F で K が FILL_STRIKE_STEP（500 円）の倍数の行
+    （call・put を別に数える）のうち、bid と ask が両方 NULL でない行の割合が FILL_RATIO 以上（分母 0 は不採用）。
+    キリのいい行使価格だけを数えるのは、深夜の薄い夜は細かい刻みから気配が消えるため（#196）"""
     if not future_ok(future_price):
         return False
     rows = [r for r in option_rows if r.get("type") in (1, 2) and r.get("last_trading_day") is not None]
@@ -101,7 +102,8 @@ def board_ok(option_rows: Iterable[dict], future_price) -> bool:
     lo, hi = (1 - st.BAND) * future_price, (1 + st.BAND) * future_price
     n = both = 0
     for r in rows:
-        if r["last_trading_day"] == m1 and lo <= r["target_price"] <= hi:
+        k = r["target_price"]
+        if r["last_trading_day"] == m1 and lo <= k <= hi and k % st.FILL_STRIKE_STEP == 0:
             n += 1
             if r.get("bid") is not None and r.get("ask") is not None:
                 both += 1

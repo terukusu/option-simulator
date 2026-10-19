@@ -65,27 +65,87 @@ def test_session_key_night_spans_midnight():
 
 # ---- 板の判定（1 限月の先物 ±5% の両側気配）----
 
-def test_board_ok_75_percent_exactly():
-    at = jst(2026, 10, 13, 21, 0)
-    assert usable.board_ok(synth_board(at, band_rows=100, quoted=75), 30000.0)
-    assert not usable.board_ok(synth_board(at, band_rows=100, quoted=74), 30000.0)
-    assert usable.board_ok(synth_board(at, band_rows=4, quoted=3), 30000.0)
-    assert not usable.board_ok(synth_board(at, band_rows=4, quoted=2), 30000.0)
-    assert usable.board_ok(synth_board(at, band_rows=8, quoted=6), 30000.0)
-    assert not usable.board_ok(synth_board(at, band_rows=8, quoted=5), 30000.0)
+def _round_rows(rows, future):
+    """1 限月・帯の中・500 円の倍数の行（判定が数える行）"""
+    m1 = min(r["last_trading_day"] for r in rows)
+    return [r for r in rows if r["last_trading_day"] == m1 and 0.95 * future <= r["target_price"] <= 1.05 * future
+            and r["target_price"] % 500 == 0]
 
 
-def test_board_ok_75_percent_real_shape():
-    # #99: 102 行中 81 行（79.4%）は採用。境目は 77 行（77×4=308 ≥ 306）/ 76 行（304 < 306）
+def test_board_ok_threshold_on_round_strikes():
+    # 下限 3/5。F = 30000 は 500 円の倍数が 7 行使価格（14 行）: 9 行（63%）採用 / 8 行（57%）不採用
     at = jst(2026, 10, 13, 21, 0)
-    assert usable.board_ok(synth_board(at, band_rows=102, quoted=81), 30000.0)
-    assert usable.board_ok(synth_board(at, band_rows=102, quoted=77), 30000.0)
-    assert not usable.board_ok(synth_board(at, band_rows=102, quoted=76), 30000.0)
+    assert len(_round_rows(synth_board(at), 30000.0)) == 14
+    assert usable.board_ok(synth_board(at, quoted=9), 30000.0)
+    assert not usable.board_ok(synth_board(at, quoted=8), 30000.0)
+    # F = 64840（実の板の大きさ）は 13 行使価格（26 行）: 16 行（16×5=80 ≥ 78）採用 / 15 行（75 < 78）不採用
+    assert len(_round_rows(synth_board(at, future=64840.0), 64840.0)) == 26
+    assert usable.board_ok(synth_board(at, future=64840.0, quoted=16), 64840.0)
+    assert not usable.board_ok(synth_board(at, future=64840.0, quoted=15), 64840.0)
+    # 4 行なら 3 行採用 / 2 行不採用（ちょうど 1/2 = call だけ・put だけの板は通さない）
+    m1 = date(2026, 11, 12)
+    sides = ((1, 29500, True), (2, 29500, True), (1, 30000, True), (2, 30000, False))
+    four = [option_row(at, typ, k, m1, bid=1 if q else None, ask=2 if q else None) for typ, k, q in sides]
+    assert usable.board_ok(four, 30000.0)
+    calls_only = [dict(r, bid=1, ask=2) if r["type"] == 1 else dict(r, bid=None, ask=None) for r in four]
+    assert not usable.board_ok(calls_only, 30000.0)
+
+
+def test_board_ok_thin_night_round_strikes_only():
+    # #196: 深夜の薄い板（2026-10-20 01:10 の形を模した架空の値）。125 円刻みだけの行は気配なし、250 円刻み
+    # （500 でない）は半分、500 円刻みは 26 行中 25 行。全行では 38/104（37%）で旧の判定（75%）なら不採用、
+    # 500 円刻みでは採用
+    at = jst(2026, 10, 20, 1, 10)
+    future = 64840.0
+    m1 = date(2026, 11, 12)
+    rows = []
+    i250 = i500 = 0
+    k = 61625
+    while k <= 1.05 * future:
+        for typ in (1, 2):
+            if k % 500 == 0:
+                q = i500 != 0  # 1 行だけ欠ける
+                i500 += 1
+            elif k % 250 == 0:
+                q = i250 % 2 == 0
+                i250 += 1
+            else:
+                q = False
+            rows.append(option_row(at, typ, k, m1, bid=10 if q else None, ask=15 if q else None))
+        k += 125
+    band = [r for r in rows if 0.95 * future <= r["target_price"] <= 1.05 * future]
+    both = sum(r["bid"] is not None for r in band)
+    assert (len(band), both) == (104, 38)
+    assert both * 4 < len(band) * 3  # 旧の判定（全行・75%）なら不採用
+    assert usable.board_ok(rows, future)
+    # 500 円刻みからも気配が抜けていく: 26 行中 19 行（73%。10-20 未明の最も薄い形）は採用、14 行（54%）は不採用
+    round_ids = [id(r) for r in _round_rows(rows, future)]
+
+    def drop(n):  # 500 円刻みの行のうち先頭（気配の無い 1 行の後）から n 行の気配を消す
+        ids = set(round_ids[1:1 + n])
+        return [dict(r, bid=None, ask=None) if id(r) in ids else r for r in rows]
+
+    def round_both(rs):
+        return sum(r["bid"] is not None for r in _round_rows(rs, future))
+
+    assert (round_both(drop(6)), round_both(drop(11))) == (19, 14)
+    assert usable.board_ok(drop(6), future)
+    assert not usable.board_ok(drop(11), future)
+
+
+def test_board_ok_counts_only_round_strikes():
+    # 500 円の倍数でない行は数えない（気配が全部あっても、全部無くても判定は変わらない）
+    at = jst(2026, 10, 13, 21, 0)
+    assert usable.board_ok(synth_board(at, fine_quoted=False), 30000.0)
+    assert not usable.board_ok(synth_board(at, quoted=0, fine_quoted=True), 30000.0)
+    # 帯に 500 円の倍数の行が無い（分母 0）は不採用
+    m1 = date(2026, 11, 12)
+    assert not usable.board_ok([option_row(at, 1, 30125, m1, bid=1, ask=2)], 30000.0)
 
 
 def test_board_ok_counts_only_first_month_within_band():
     at = jst(2026, 10, 13, 21, 0)
-    rows = synth_board(at, band_rows=10, quoted=10)
+    rows = synth_board(at)
     # 帯の外・2 限月に気配が無くても採用（数えない）
     assert usable.board_ok(rows, 30000.0)
     # 帯の端（0.95F・1.05F）は含む
@@ -181,7 +241,7 @@ def day_close_world(latest_hm):
     t = jst(2026, 10, 13, 15, 41)
     end = jst(2026, 10, 13, h, m_end)
     while t <= end:
-        w.add(t, synth_board(t, quoted=10), 30000.0)
+        w.add(t, synth_board(t, quoted=1), 30000.0)
         t += timedelta(minutes=1)
     return w
 
@@ -250,7 +310,7 @@ def test_morning_pre_open_across_utc_date():
     night = jst(2026, 10, 14, 5, 55)
     w.add(night, synth_board(night), 30000.0)
     pre = jst(2026, 10, 14, 8, 40)
-    w.add(pre, synth_board(pre, quoted=20), 30000.0, rows_option=1000)
+    w.add(pre, synth_board(pre, quoted=5), 30000.0, rows_option=1000)
     svc, _, _ = service(w, pre + timedelta(minutes=15))
     res = svc.chain()
     assert (res.snapshot_at, res.reason) == (night, "pre_open")
@@ -268,10 +328,10 @@ def test_unusable_latest_in_session_goes_older_as_latest():
     # 窓の中で最新が使えない（まれ）→ 古い方へ。同じ立会の板なら latest
     at = jst(2026, 10, 13, 21, 31)
     w = World()
-    for back, quoted in ((2, 100), (1, 50)):
+    for back, quoted in ((2, None), (1, 5)):
         t = at - timedelta(minutes=back)
         w.add(t, synth_board(t, quoted=quoted), 30000.0)
-    w.add(at, synth_board(at, quoted=10), 30000.0)
+    w.add(at, synth_board(at, quoted=1), 30000.0)
     svc, runner, _ = service(w, at + timedelta(minutes=15))
     res = svc.chain()
     assert (res.snapshot_at, res.reason) == (at - timedelta(minutes=2), "latest")
@@ -286,7 +346,7 @@ def test_three_reads_then_503():
     w.add(t, synth_board(t), 30000.0)
     for back in (2, 1, 0):
         t = at - timedelta(minutes=back)
-        w.add(t, synth_board(t, quoted=10), 30000.0)
+        w.add(t, synth_board(t, quoted=1), 30000.0)
     svc, runner, _ = service(w, at + timedelta(minutes=15))
     with pytest.raises(Unavailable):
         svc.chain()

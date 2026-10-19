@@ -87,7 +87,7 @@ def test_unusable_board_is_cached_too():
     w = World()
     prev = at - timedelta(minutes=1)
     w.add(prev, synth_board(prev), 30000.0)
-    w.add(at, synth_board(at, quoted=10), 30000.0)
+    w.add(at, synth_board(at, quoted=1), 30000.0)
     clock = Clock(at + timedelta(minutes=15))
     runner = FakeRunner(w)
     svc = ChainService(runner, clock, monotonic=clock.monotonic)
@@ -177,7 +177,7 @@ def test_request_budget_stops_reading():
     w = World()
     for back in (2, 1, 0):
         t = at - timedelta(minutes=back)
-        w.add(t, synth_board(t, quoted=10 if back < 2 else 100), 30000.0)
+        w.add(t, synth_board(t, quoted=1 if back < 2 else None), 30000.0)
     clock = Clock(at + timedelta(minutes=15))
     runner = SlowRunner(w, clock, 9)
     svc = ChainService(runner, clock, monotonic=clock.monotonic)
@@ -295,7 +295,7 @@ def test_job_counts_unchanged_by_parallel_loads():
     # (d) 先物は使えるが板が不採用の候補: その候補の現物が 1 本増える（板は今と同じ）
     w = World()
     w.add(prev, synth_board(prev), 30000.0, 30100.0)
-    w.add(at, synth_board(at, quoted=10), 30000.0, 30100.0)
+    w.add(at, synth_board(at, quoted=1), 30000.0, 30100.0)
     clock = Clock(at + timedelta(minutes=15))
     runner = FakeRunner(w)
     assert ChainService(runner, clock, monotonic=clock.monotonic).chain().snapshot_at == prev
