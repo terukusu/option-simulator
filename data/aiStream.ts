@@ -99,7 +99,7 @@ export interface AiStatus {
   schema_version: number;
   enabled: boolean;
   model: string | null;
-  credential: 'api_key' | 'oauth_token' | 'fake' | null;
+  credential: 'api_key' | 'oauth_token' | 'wif' | 'fake' | null;
   counted: boolean;
   limit_usd: number | null;
   remaining_usd: number | null;
