@@ -77,8 +77,8 @@ const PANEL_ORDER: readonly PanelId[] = [
   'smile',
   'ai',
 ];
-/** [このポジを診断] の行の名前（#135） */
-export const DIAGNOSE_LABEL = 'このポジを診断';
+/** [このポジションを診断] の行の名前（#135） */
+export const DIAGNOSE_LABEL = 'このポジションを診断';
 
 /** 行の実行の記述（データ。NextApp の runPalette が振り分ける） */
 export type PaletteRun =
@@ -100,7 +100,7 @@ export type PaletteRun =
   | { kind: 'theme'; theme: ThemePref }
   /** 用語の説明カードを開く（#167） */
   | { kind: 'term'; id: TermId }
-  /** AI のパネルを開いて [このポジを診断]（#135） */
+  /** AI のパネルを開いて [このポジションを診断]（#135） */
   | { kind: 'diagnose' };
 
 export interface PaletteItem {
@@ -140,7 +140,7 @@ export interface PaletteInput {
   /** 保存一覧の件数（読めない・新しい版なら null） */
   bookCount: number | null;
   /**
-   * [このポジを診断] が押せない理由（#135。ui/view/aiChat.ts の diagnoseBlocked。null = 押せる。省略 = 行を出さない）
+   * [このポジションを診断] が押せない理由（#135。ui/view/aiChat.ts の diagnoseBlocked。null = 押せる。省略 = 行を出さない）
    */
   aiDiagnoseBlocked?: string | null;
 }

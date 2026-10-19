@@ -126,7 +126,7 @@
 //                                          （トップバーの [AI] で作業台を入れ替え）× ダーク / ライトで縦・横・折り返し・舞台の読み取り、
 //                                          ドック 6 つ（タブレット 5 つ）の文字が切れない、押す前に残り（$）が見出しに見えて切れない、
 //                                          免責の文は初めてだけ（閉じて開き直すと出ない）、偽の SSE の診断の返答を出した状態も測る
-//                                          #135 AC6（--flows）: 390×844 と 1440×900 で [このポジを診断] → 進み具合が出るまで < 1,000 ms・
+//                                          #135 AC6（--flows）: 390×844 と 1440×900 で [このポジションを診断] → 進み具合が出るまで < 1,000 ms・
 //                                          考え中 → 書いています → 完了の順・中止で止まる・終端なし（「切断」）で incomplete・追加の質問の
 //                                          道具のカードと [シナリオに適用] → [元に戻す]・再読み込みで会話が残る（sessionStorage）
 //   --ai                                   #135 の項目だけ（既定の検査・--flows とも。手元の確かめ用）
@@ -9072,7 +9072,7 @@ async function openAi(page, w, sheet = 'peek') {
 }
 
 /**
- * AI のパネルの中（#135 AC7）: 見出しの残り（$ を含む・切れない・窓の中）、[このポジを診断]・入力欄・送信が窓の中、
+ * AI のパネルの中（#135 AC7）: 見出しの残り（$ を含む・切れない・窓の中）、[このポジションを診断]・入力欄・送信が窓の中、
  * 見出し・ボタン・進み具合の行が切れていない、.panel-body が横にはみ出していない、ドックの 6 つ（5 つ）のラベルが切れない
  */
 async function aiCheck(page, label, w) {
@@ -9119,7 +9119,7 @@ async function aiCheck(page, label, w) {
   const bad = [];
   if (!r.remaining.includes('$')) bad.push(`残りの表示「${r.remaining}」`);
   if (!r.remainingOk) bad.push('残りが切れている / 窓の外');
-  if (!r.diagnose) bad.push('[このポジを診断] が窓の外');
+  if (!r.diagnose) bad.push('[このポジションを診断] が窓の外');
   if (!r.input || !r.send) bad.push('入力欄・送信が窓の外');
   if (r.cuts.length) bad.push(`切れ ${r.cuts.join('、')}`);
   if (r.bodyOver) bad.push('.panel-body が横にはみ出す');
@@ -9247,7 +9247,7 @@ async function aiFlows(vp) {
       }),
   );
   check(
-    `${tag} [このポジを診断] → 進み具合が出るまで < 1,000 ms`,
+    `${tag} [このポジションを診断] → 進み具合が出るまで < 1,000 ms`,
     seq.shownMs !== null && seq.shownMs < 1000,
     `${Math.round(seq.shownMs ?? -1)} ms`,
   );

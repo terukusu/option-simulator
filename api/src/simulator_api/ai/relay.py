@@ -34,7 +34,7 @@ SSE_TYPE = "text/event-stream; charset=utf-8"
 
 # system prompt（#135。docs/design.md 14 章）。サーバーの定数で、ブラウザからは受けない。kind（chat / diagnose）で
 # 分けない（1 つの前置きを prompt caching で共有する）。診断の指示は「最初の発言が決まった文のとき」の節に置く
-# 画面の [このポジを診断] の最初の発言（ui/view/aiChat.ts と同じ文）
+# 画面の [このポジションを診断] の最初の発言（ui/view/aiChat.ts と同じ文）
 DIAGNOSE_TEXT = "このポジションを診断してください。"
 SYSTEM_PROMPT = f"""あなたは日経225オプションの損益シミュレーターに付いた相談役です。\
 利用者はポジションを建てる前に、損益の形・弱点・\
