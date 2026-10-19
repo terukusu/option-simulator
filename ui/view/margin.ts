@@ -33,12 +33,12 @@ import type { MarginPrefs } from '../prefs';
 import { clampDays, type PnlBase } from './pnlChart';
 import { DX_ABS_MAX, DX_INPUT_MAX_RATIO, DX_INPUT_MIN_RATIO } from './scenario';
 
-/** 端末の設定（% と pt）→ model の単位（小数・倍率） */
+/** 端末の設定（%）→ model の単位（小数・倍率） */
 export function marginParamsOf(m: MarginPrefs): MarginParams {
   return {
     range: m.rangePct / 100,
-    ivUpPt: m.ivUpPt,
-    ivDownPt: m.ivDownPt,
+    ivUp: m.ivUpPct / 100,
+    ivDown: m.ivDownPct / 100,
     factor: m.factorPct / 100,
     ignoreLongOptions: m.ignoreLongOptions,
   };
@@ -80,6 +80,7 @@ const finite = (r: MarginResult) =>
   Number.isFinite(r.pfe) &&
   Number.isFinite(r.nov) &&
   Number.isFinite(r.margin) &&
+  Number.isFinite(r.requirement) &&
   Number.isFinite(r.futuresPnl) &&
   Number.isFinite(r.settledCash);
 

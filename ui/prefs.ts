@@ -10,6 +10,11 @@
  * 「新しい版 → 書かない」になりテーマを保存できなくなるため。資金は端末にだけ置く（作業の保存・保存一覧・
  * 書き出し・URL 共有には載せない）。
  * #149 で「買いの OP で証拠金を減らさない」（boolean。既定 true）を足した。版は 1 のまま（無い・boolean でない → 既定）。
+ * #150 で IV の幅を pt から比率（%）にし、既定を見直した（R 5%・IV +50% / −25%・掛け目 100%）。掛け目・R・IV の
+ * キーを新しくし（margin_k_pct・margin_r_pct・margin_iv_up_pct・margin_iv_down_pct）、古いキー
+ * （margin_factor_pct・margin_range_pct・margin_iv_up_pt・margin_iv_down_pt）は読まない・書かない。
+ * 書き出しは触っていない項目も既定値で書くので、古い値が利用者の選んだ値か旧既定かを区別できず、読むと新しい
+ * 既定が効かないため。資金・買いの OP のキーは今のまま。版は 1 のまま。
  */
 
 export const PREFS_KEY = 'option-simulator.prefs';
@@ -19,18 +24,18 @@ export const PREFS_SCHEMA_VERSION = 1;
 export type ThemePref = 'auto' | 'dark' | 'light';
 export const THEME_PREFS: readonly ThemePref[] = ['auto', 'dark', 'light'];
 
-/** 証拠金の概算の設定（#131。設計 5.10）。値は画面の単位（% と pt）。model の単位への変換は ui/view/margin.ts */
+/** 証拠金の概算の設定（#131・#150。設計 5.10）。値は画面の単位（%）。model の単位への変換は ui/view/margin.ts */
 export interface MarginPrefs {
   /** 資金（円の整数）。null = 未設定（0 も未設定と同じ） */
   capitalYen: number | null;
-  /** 掛け目（%。120 = 1.2 倍） */
+  /** 掛け目（%。100 = 1 倍） */
   factorPct: number;
   /** 原資産の値動き幅 R（%） */
   rangePct: number;
-  /** IV の上げ幅（pt） */
-  ivUpPt: number;
-  /** IV の下げ幅（pt） */
-  ivDownPt: number;
+  /** IV の上げ（%。50 = 状態 S の IV の ×1.5） */
+  ivUpPct: number;
+  /** IV の下げ（%。25 = 状態 S の IV の ×0.75） */
+  ivDownPct: number;
   /** 買いの OP で証拠金を減らさない（true = 売りの OP と先物だけで計算。#149） */
   ignoreLongOptions: boolean;
 }
@@ -43,30 +48,30 @@ export const MARGIN_PREF_RANGE: Record<MarginPrefKey, { min: number; max: number
   capitalYen: { min: 0, max: 1e12 },
   factorPct: { min: 50, max: 300 },
   rangePct: { min: 1, max: 30 },
-  ivUpPt: { min: 0, max: 50 },
-  ivDownPt: { min: 0, max: 30 },
+  ivUpPct: { min: 0, max: 200 },
+  ivDownPct: { min: 0, max: 90 },
 };
 
-/** 既定（仮置き。model/margin.ts の DEFAULT_MARGIN_PARAMS と同じ値。資金は未設定） */
+/** 既定（6 点の答え合わせで決めた。model/margin.ts の DEFAULT_MARGIN_PARAMS と同じ値。資金は未設定。#150） */
 export const DEFAULT_MARGIN_PREFS: MarginPrefs = {
   capitalYen: null,
-  factorPct: 120,
-  rangePct: 8,
-  ivUpPt: 8,
-  ivDownPt: 4,
+  factorPct: 100,
+  rangePct: 5,
+  ivUpPct: 50,
+  ivDownPct: 25,
   ignoreLongOptions: true,
 };
 
 /** 買いの OP の設定の JSON のキー（#149） */
 const IGNORE_LONG_JSON_KEY = 'margin_ignore_long_options';
 
-/** JSON のキー（項目ごと） */
+/** JSON のキー（項目ごと。掛け目・R・IV は #150 で新しくした） */
 const MARGIN_JSON_KEY: Record<MarginPrefKey, string> = {
   capitalYen: 'capital_yen',
-  factorPct: 'margin_factor_pct',
-  rangePct: 'margin_range_pct',
-  ivUpPt: 'margin_iv_up_pt',
-  ivDownPt: 'margin_iv_down_pt',
+  factorPct: 'margin_k_pct',
+  rangePct: 'margin_r_pct',
+  ivUpPct: 'margin_iv_up_pct',
+  ivDownPct: 'margin_iv_down_pct',
 };
 
 export interface Prefs {
@@ -91,7 +96,7 @@ function readMargin(o: Record<string, unknown>): MarginPrefs {
   const m: MarginPrefs = { ...DEFAULT_MARGIN_PREFS };
   const cap = o[MARGIN_JSON_KEY.capitalYen];
   m.capitalYen = isMarginPrefValue('capitalYen', cap) && cap > 0 ? cap : null;
-  for (const key of ['factorPct', 'rangePct', 'ivUpPt', 'ivDownPt'] as const) {
+  for (const key of ['factorPct', 'rangePct', 'ivUpPct', 'ivDownPct'] as const) {
     const v = o[MARGIN_JSON_KEY[key]];
     if (isMarginPrefValue(key, v)) m[key] = v;
   }
@@ -135,7 +140,7 @@ export function serializePrefs(p: Prefs): string {
   if (isMarginPrefValue('capitalYen', m.capitalYen) && m.capitalYen > 0) {
     out[MARGIN_JSON_KEY.capitalYen] = m.capitalYen;
   }
-  for (const key of ['factorPct', 'rangePct', 'ivUpPt', 'ivDownPt'] as const) {
+  for (const key of ['factorPct', 'rangePct', 'ivUpPct', 'ivDownPct'] as const) {
     out[MARGIN_JSON_KEY[key]] = isMarginPrefValue(key, m[key]) ? m[key] : DEFAULT_MARGIN_PREFS[key];
   }
   out[IGNORE_LONG_JSON_KEY] =

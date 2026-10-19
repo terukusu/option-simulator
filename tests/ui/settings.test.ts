@@ -138,20 +138,20 @@ describe('feeField（parseFee と同じ文・結果）', () => {
 
 /** #131 AC15: 証拠金（概算）の欄の判定（入力ごと。範囲は ui/prefs.ts と同じ） */
 describe('証拠金の欄（#131）', () => {
-  it('欄の並びと見出し（単位つき）', () => {
+  it('欄の並びと見出し（単位つき。IV の上げ / 下げは % = #150）', () => {
     expect(MARGIN_FIELDS.map((f) => f.key)).toEqual([
       'capitalYen',
       'factorPct',
       'rangePct',
-      'ivUpPt',
-      'ivDownPt',
+      'ivUpPct',
+      'ivDownPct',
     ]);
     expect(MARGIN_FIELDS.map((f) => f.label)).toEqual([
       '資金（円）',
       '掛け目（%）',
       '値動き幅 R（%）',
-      'IV の上げ幅（pt）',
-      'IV の下げ幅（pt）',
+      'IV の上げ（%）',
+      'IV の下げ（%）',
     ]);
   });
 
@@ -169,12 +169,12 @@ describe('証拠金の欄（#131）', () => {
     }
   });
 
-  it('掛け目・R・IV の幅: 範囲の両端は通る、外・空欄・文字はエラー文', () => {
+  it('掛け目・R・IV の上げ / 下げ（%。#150）: 範囲の両端は通る、外・空欄・文字はエラー文', () => {
     const cases = [
       ['factorPct', '50', '300', ['49', '301', '']],
       ['rangePct', '1', '30', ['0.5', '31', '-8']],
-      ['ivUpPt', '0', '50', ['-1', '51', 'x']],
-      ['ivDownPt', '0', '30', ['-0.5', '31', '']],
+      ['ivUpPct', '0', '200', ['-1', '201', 'x']],
+      ['ivDownPct', '0', '90', ['-0.5', '91', '']],
     ] as const;
     for (const [key, lo, hi, bad] of cases) {
       expect(marginField(key, lo)).toEqual({ ok: true, value: Number(lo) });
@@ -187,6 +187,9 @@ describe('証拠金の欄（#131）', () => {
       }
     }
     expect(marginField('rangePct', '8.5')).toEqual({ ok: true, value: 8.5 });
+    expect(marginField('ivUpPct', '37.5')).toEqual({ ok: true, value: 37.5 });
+    expect(MARGIN_FIELD_ERROR.ivUpPct).toBe('IV の上げは 0〜200%');
+    expect(MARGIN_FIELD_ERROR.ivDownPct).toBe('IV の下げは 0〜90%');
   });
 
   it('欄の文字列・[既定に戻す] は幅と掛け目だけ（資金は戻さない）・注記', () => {
@@ -194,20 +197,25 @@ describe('証拠金の欄（#131）', () => {
     expect(marginFieldText('capitalYen', { ...DEFAULT_MARGIN_PREFS, capitalYen: 5_000_000 })).toBe(
       '5000000',
     );
-    expect(marginFieldText('factorPct', DEFAULT_MARGIN_PREFS)).toBe('120');
+    expect(marginFieldText('factorPct', DEFAULT_MARGIN_PREFS)).toBe('100');
+    expect(marginFieldText('ivUpPct', DEFAULT_MARGIN_PREFS)).toBe('50');
+    expect(marginFieldText('ivDownPct', DEFAULT_MARGIN_PREFS)).toBe('25');
+    // #150 の既定（R 5%・IV +50% / −25%・掛け目 100%）
     expect(MARGIN_RESET).toEqual({
-      factorPct: 120,
-      rangePct: 8,
-      ivUpPt: 8,
-      ivDownPt: 4,
+      factorPct: 100,
+      rangePct: 5,
+      ivUpPct: 50,
+      ivDownPct: 25,
       ignoreLongOptions: true,
     });
     expect('capitalYen' in MARGIN_RESET).toBe(false);
     const notes = MARGIN_SETTINGS_NOTES.join(' ');
     expect(notes).toContain('概算');
-    expect(notes).toContain('仮置き');
-    expect(notes).toContain('深い OTM');
+    expect(notes).toContain('NOV');
+    expect(notes).toContain('答え合わせ');
+    expect(notes).toContain('未確認');
     expect(notes).toContain('JSCC');
+    expect(notes).not.toContain('仮置き');
   });
 });
 

@@ -105,13 +105,13 @@ export function feeField(text: string): { value: number | null; error: string | 
   return r.ok ? { value: r.value, error: null } : { value: null, error: r.message };
 }
 
-/** 証拠金の欄の並び・見出し（#131。設計 5.10。値は % / pt / 円） */
+/** 証拠金の欄の並び・見出し（#131・#150。設計 5.10。値は % / 円） */
 export const MARGIN_FIELDS: readonly { key: MarginPrefKey; label: string }[] = [
   { key: 'capitalYen', label: '資金（円）' },
   { key: 'factorPct', label: '掛け目（%）' },
   { key: 'rangePct', label: '値動き幅 R（%）' },
-  { key: 'ivUpPt', label: 'IV の上げ幅（pt）' },
-  { key: 'ivDownPt', label: 'IV の下げ幅（pt）' },
+  { key: 'ivUpPct', label: 'IV の上げ（%）' },
+  { key: 'ivDownPct', label: 'IV の下げ（%）' },
 ];
 
 /** 欄ごとのエラー文（範囲は ui/prefs.ts の MARGIN_PREF_RANGE と同じ） */
@@ -119,16 +119,17 @@ export const MARGIN_FIELD_ERROR: Record<MarginPrefKey, string> = {
   capitalYen: '資金は 0〜1,000,000,000,000 円の整数（空欄 = 未設定）',
   factorPct: '掛け目は 50〜300%',
   rangePct: '値動き幅 R は 1〜30%',
-  ivUpPt: 'IV の上げ幅は 0〜50pt',
-  ivDownPt: 'IV の下げ幅は 0〜30pt',
+  ivUpPct: 'IV の上げは 0〜200%',
+  ivDownPct: 'IV の下げは 0〜90%',
 };
 
-/** 証拠金の節の注記（仮置き・深い OTM の売り・JSCC の Web 試算で確かめる。設計 5.10） */
+/** 証拠金の節の注記（定義・答え合わせ・未確認の形・JSCC の Web 試算で確かめる。設計 5.10・#150） */
 export const MARGIN_SETTINGS_NOTES: readonly string[] = [
-  '証拠金は概算（原資産 ±R × IV の上げ / 下げ × 2 営業日の格子の最悪値 × 掛け目）。JSCC の VaR 証拠金の再現ではない',
-  '既定（R 8%・IV +8 / −4pt・掛け目 120%）は仮置き。深い OTM の売りでは実額より小さく出うる',
+  '必要証拠金は概算（原資産 ±R × IV の倍率（足の今の IV の ×(1 + 上げ) / ×(1 − 下げ)）× 2 営業日の格子の最悪の損失 × 掛け目）。証券会社の建てる前の必要委託証拠金と同じ物差しで、受け取るプレミアム（NOV）を含まない。JSCC の VaR 証拠金の再現ではない',
+  '余力 = 資金 − 支払 + 受取 − 手数料 + 先物の評価損益 − (必要証拠金 − NOV)',
+  '既定（R 5%・IV +50% / −25%・掛け目 100%）は 1 枚ずつの売りの 6 形（put 3 形・call・ストラングル・期先）の答え合わせ（証券会社の額との比 0.98〜1.07）で決めた。ストレス日・先物との組み合わせなどは未確認で、実額と違いうる',
   'JSCC の Web 試算か証券会社の額で確かめ、幅・掛け目で寄せる。資金はこの端末にだけ保存（保存一覧・共有の URL に載せない）',
-  '買いの OP: 減らさない（既定）= 売りの OP と先物だけで計算（証券会社の扱いに合わせる。買いの支払は余力から引く）。相殺する = 全足（JSCC の形）。売りどうしの相殺の扱いは未確認',
+  '買いの OP: 減らさない（既定）= 売りの OP と先物だけで計算（証券会社の扱いに合わせる。買いの支払は余力から引く）。相殺する = 全足（JSCC の形）。売りどうしはポジション全体の格子で相殺する',
 ];
 
 /** 買いの OP の 2 択の値（ignore = 減らさない、offset = 相殺する。#149） */
@@ -151,8 +152,8 @@ export function marginLongPatch(v: MarginLongValue): Partial<MarginPrefs> {
 export const MARGIN_RESET: Partial<MarginPrefs> = {
   factorPct: DEFAULT_MARGIN_PREFS.factorPct,
   rangePct: DEFAULT_MARGIN_PREFS.rangePct,
-  ivUpPt: DEFAULT_MARGIN_PREFS.ivUpPt,
-  ivDownPt: DEFAULT_MARGIN_PREFS.ivDownPt,
+  ivUpPct: DEFAULT_MARGIN_PREFS.ivUpPct,
+  ivDownPct: DEFAULT_MARGIN_PREFS.ivDownPct,
   ignoreLongOptions: DEFAULT_MARGIN_PREFS.ignoreLongOptions,
 };
 
