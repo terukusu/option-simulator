@@ -41,16 +41,67 @@ variable "simulator_image" {
   }
 }
 
-# AI の資格情報の種類（#133、docs/adr-0001-ai-credentials-secret-manager.md）。CI は vars.AI_CREDENTIAL を TF_VAR_ai_credential で渡す（未設定は none）。
-# none: 何も載せない（AI は無効）。api_key: ANTHROPIC_API_KEY、oauth_token: ANTHROPIC_AUTH_TOKEN を Secret Manager の参照で載せる（同時には載せない）
+# AI の資格情報の種類（#133・#184、docs/adr-0001-ai-credentials-secret-manager.md）。CI は vars.AI_CREDENTIAL を TF_VAR_ai_credential で渡す（未設定は none）。
+# none: 何も載せない（AI は無効）。api_key: ANTHROPIC_API_KEY、oauth_token: ANTHROPIC_AUTH_TOKEN を Secret Manager の参照で載せる（同時には載せない）。
+# wif: Anthropic の WIF（鍵なし）。下の anthropic_* を素の環境変数で載せ、Secret Manager は使わない
 variable "ai_credential" {
-  description = "AI の資格情報の種類（none | api_key | oauth_token）"
+  description = "AI の資格情報の種類（none | api_key | oauth_token | wif）"
   type        = string
   default     = "none"
 
   validation {
-    condition     = contains(["none", "api_key", "oauth_token"], var.ai_credential)
-    error_message = "ai_credential は none・api_key・oauth_token のどれか。"
+    condition     = contains(["none", "api_key", "oauth_token", "wif"], var.ai_credential)
+    error_message = "ai_credential は none・api_key・oauth_token・wif のどれか。"
+  }
+}
+
+# Anthropic の WIF の ID（#184。Claude Console の Workload identity で作ったもの）。秘密ではないが利用者個人の値なので、
+# リポジトリ・tfvars に書かず GitHub の repository variables（ANTHROPIC_*）→ TF_VAR_anthropic_* で渡す。未設定は ""。
+# ai_credential = "wif" のときだけ環境変数に載せる（ルール ID と組織 ID は必須、サービスアカウント ID・ワークスペース ID は任意 = 空なら載せない）。
+# 形の検査も wif のときだけ（wif 以外では使わないので、残した variables の形で plan を落とさない）。
+# 検査に落ちると Terraform はエラーに値を表示するので、error_message に値を入れず、CI は値を ::add-mask:: と MASK_SED で伏せる
+
+variable "anthropic_federation_rule_id" {
+  description = "Anthropic の federation rule の ID（ai_credential = wif のとき必須）"
+  type        = string
+  default     = ""
+
+  validation {
+    condition     = var.ai_credential != "wif" || can(regex("^[A-Za-z0-9_-]{1,128}$", var.anthropic_federation_rule_id))
+    error_message = "anthropic_federation_rule_id は英数字・_・- の 1〜128 文字（ai_credential = wif のとき必須）。"
+  }
+}
+
+variable "anthropic_organization_id" {
+  description = "Anthropic の組織の ID（UUID。ai_credential = wif のとき必須）"
+  type        = string
+  default     = ""
+
+  validation {
+    condition     = var.ai_credential != "wif" || can(regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$", var.anthropic_organization_id))
+    error_message = "anthropic_organization_id は UUID（ai_credential = wif のとき必須）。"
+  }
+}
+
+variable "anthropic_service_account_id" {
+  description = "Anthropic のサービスアカウントの ID（任意）"
+  type        = string
+  default     = ""
+
+  validation {
+    condition     = var.ai_credential != "wif" || var.anthropic_service_account_id == "" || can(regex("^[A-Za-z0-9_-]{1,128}$", var.anthropic_service_account_id))
+    error_message = "anthropic_service_account_id は英数字・_・- の 1〜128 文字か空（ai_credential = wif のとき）。"
+  }
+}
+
+variable "anthropic_workspace_id" {
+  description = "Anthropic のワークスペースの ID（任意。default も可）"
+  type        = string
+  default     = ""
+
+  validation {
+    condition     = var.ai_credential != "wif" || var.anthropic_workspace_id == "" || can(regex("^[A-Za-z0-9_-]{1,128}$", var.anthropic_workspace_id))
+    error_message = "anthropic_workspace_id は英数字・_・- の 1〜128 文字か空（ai_credential = wif のとき）。"
   }
 }
 

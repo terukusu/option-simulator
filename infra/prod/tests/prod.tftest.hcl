@@ -287,3 +287,137 @@ run "accept_ai_secret_version_number" {
     ai_secret_version = "3"
   }
 }
+
+# Anthropic の WIF（#184）: AI_CREDENTIAL=wif と空でない ID だけを素の値で載せる。Secret Manager の参照は 0 件。値は架空
+run "ai_wif" {
+  command = apply
+  variables {
+    ai_credential                = "wif"
+    anthropic_federation_rule_id = "fdrl_0example0rule"
+    anthropic_organization_id    = "00000000-0000-4000-8000-000000000000"
+    anthropic_service_account_id = "svac_0example0account"
+    anthropic_workspace_id       = "wrkspc_0example0workspace"
+  }
+  assert {
+    condition     = join(",", sort([for e in google_cloud_run_v2_service.simulator.template[0].containers[0].env : e.name])) == "AI_CREDENTIAL,ANTHROPIC_FEDERATION_RULE_ID,ANTHROPIC_ORGANIZATION_ID,ANTHROPIC_SERVICE_ACCOUNT_ID,ANTHROPIC_WORKSPACE_ID,BQ_DATASET,BQ_LOCATION,GCP_PROJECT"
+    error_message = "wif のときは AI_CREDENTIAL と WIF の ID 4 つを足す（ANTHROPIC_API_KEY・ANTHROPIC_AUTH_TOKEN は載せない）"
+  }
+  assert {
+    condition     = one([for e in google_cloud_run_v2_service.simulator.template[0].containers[0].env : e.value if e.name == "AI_CREDENTIAL"]) == "wif"
+    error_message = "AI_CREDENTIAL は wif"
+  }
+  assert {
+    condition     = one([for e in google_cloud_run_v2_service.simulator.template[0].containers[0].env : e.value if e.name == "ANTHROPIC_ORGANIZATION_ID"]) == "00000000-0000-4000-8000-000000000000"
+    error_message = "ANTHROPIC_ORGANIZATION_ID は var.anthropic_organization_id"
+  }
+  assert {
+    condition     = length([for e in google_cloud_run_v2_service.simulator.template[0].containers[0].env : e.name if length(e.value_source) > 0]) == 0
+    error_message = "wif は Secret Manager の参照を載せない"
+  }
+}
+
+# 任意の ID（サービスアカウント・ワークスペース）が空なら載せない
+run "ai_wif_required_only" {
+  command = apply
+  variables {
+    ai_credential                = "wif"
+    anthropic_federation_rule_id = "fdrl_0example0rule"
+    anthropic_organization_id    = "00000000-0000-4000-8000-000000000000"
+  }
+  assert {
+    condition     = join(",", sort([for e in google_cloud_run_v2_service.simulator.template[0].containers[0].env : e.name])) == "AI_CREDENTIAL,ANTHROPIC_FEDERATION_RULE_ID,ANTHROPIC_ORGANIZATION_ID,BQ_DATASET,BQ_LOCATION,GCP_PROJECT"
+    error_message = "空の任意の ID は載せない"
+  }
+}
+
+# wif でない種類のときは、ID が渡されていても載せない（GitHub variables を残したまま api_key / oauth_token に切り替えられる）
+run "ai_api_key_ignores_wif_ids" {
+  command = apply
+  variables {
+    ai_credential                = "api_key"
+    anthropic_federation_rule_id = "fdrl_0example0rule"
+    anthropic_organization_id    = "00000000-0000-4000-8000-000000000000"
+    anthropic_workspace_id       = "wrkspc_0example0workspace"
+  }
+  assert {
+    condition     = join(",", sort([for e in google_cloud_run_v2_service.simulator.template[0].containers[0].env : e.name])) == "AI_CREDENTIAL,ANTHROPIC_API_KEY,BQ_DATASET,BQ_LOCATION,GCP_PROJECT"
+    error_message = "api_key のときは WIF の ID を載せない"
+  }
+}
+
+run "ai_none_ignores_wif_ids" {
+  command = apply
+  variables {
+    anthropic_federation_rule_id = "fdrl_0example0rule"
+    anthropic_organization_id    = "00000000-0000-4000-8000-000000000000"
+  }
+  assert {
+    condition     = join(",", sort([for e in google_cloud_run_v2_service.simulator.template[0].containers[0].env : e.name])) == "BQ_DATASET,BQ_LOCATION,GCP_PROJECT"
+    error_message = "none のときは何も足さない"
+  }
+}
+
+# wif でルール ID・組織 ID が空、形が不正なら plan が失敗する
+run "reject_wif_without_rule" {
+  command = plan
+  variables {
+    ai_credential             = "wif"
+    anthropic_organization_id = "00000000-0000-4000-8000-000000000000"
+  }
+  expect_failures = [var.anthropic_federation_rule_id]
+}
+
+run "reject_wif_without_org" {
+  command = plan
+  variables {
+    ai_credential                = "wif"
+    anthropic_federation_rule_id = "fdrl_0example0rule"
+  }
+  expect_failures = [var.anthropic_organization_id]
+}
+
+run "reject_wif_org_not_uuid" {
+  command = plan
+  variables {
+    ai_credential                = "wif"
+    anthropic_federation_rule_id = "fdrl_0example0rule"
+    anthropic_organization_id    = "org-example"
+  }
+  expect_failures = [var.anthropic_organization_id]
+}
+
+run "reject_wif_rule_shape" {
+  command = plan
+  variables {
+    ai_credential                = "wif"
+    anthropic_federation_rule_id = "fdrl example"
+    anthropic_organization_id    = "00000000-0000-4000-8000-000000000000"
+  }
+  expect_failures = [var.anthropic_federation_rule_id]
+}
+
+run "reject_wif_workspace_shape" {
+  command = plan
+  variables {
+    ai_credential                = "wif"
+    anthropic_federation_rule_id = "fdrl_0example0rule"
+    anthropic_organization_id    = "00000000-0000-4000-8000-000000000000"
+    anthropic_workspace_id       = "wrkspc/../x"
+  }
+  expect_failures = [var.anthropic_workspace_id]
+}
+
+# wif でないときは ID の形を検査しない（使わない値で plan を落とさない。値は環境変数にも載らない）
+run "ai_api_key_skips_wif_id_shape" {
+  command = apply
+  variables {
+    ai_credential                = "api_key"
+    anthropic_federation_rule_id = "fdrl example"
+    anthropic_organization_id    = "org-example"
+    anthropic_workspace_id       = "wrkspc/../x"
+  }
+  assert {
+    condition     = length([for e in google_cloud_run_v2_service.simulator.template[0].containers[0].env : e.name if startswith(e.name, "ANTHROPIC_") && e.name != "ANTHROPIC_API_KEY"]) == 0
+    error_message = "api_key のときは WIF の ID を検査も載せもしない"
+  }
+}

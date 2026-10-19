@@ -85,7 +85,7 @@ def _ai_relay(ai_cfg: st.AiSettings, gateway, store, registry, clock, monotonic)
             if ai_cfg.credential == "fake":
                 gateway = ai_gw.FakeGateway()
             else:
-                gateway = ai_gw.AnthropicGateway(ai_cfg.credential, ai_cfg.secret)
+                gateway = ai_gw.AnthropicGateway(ai_cfg.credential, ai_cfg.secret, wif=ai_cfg.wif)
                 gateway.start_warm()  # SDK の import は重い（起動プローブ・/healthz を待たせない）
         if store is None and ai_cfg.budget_store == "memory":
             store = ai_budget.MemoryStore()

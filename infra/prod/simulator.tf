@@ -20,6 +20,17 @@ locals {
     oauth_token = "ANTHROPIC_AUTH_TOKEN"
   }
   ai_credentials = var.ai_credential == "none" ? [] : [var.ai_credential]
+  # Secret Manager の参照を載せるのは api_key / oauth_token だけ（wif は鍵を持たない）
+  ai_secret_credentials = contains(["api_key", "oauth_token"], var.ai_credential) ? [var.ai_credential] : []
+  # wif のときだけ素の環境変数で載せる ID（空は載せない）。名前は中継（api/src/simulator_api/settings.py）が読むもの
+  ai_wif_env = var.ai_credential != "wif" ? {} : {
+    for k, v in {
+      ANTHROPIC_FEDERATION_RULE_ID = var.anthropic_federation_rule_id
+      ANTHROPIC_ORGANIZATION_ID    = var.anthropic_organization_id
+      ANTHROPIC_SERVICE_ACCOUNT_ID = var.anthropic_service_account_id
+      ANTHROPIC_WORKSPACE_ID       = var.anthropic_workspace_id
+    } : k => v if v != ""
+  }
 }
 
 # IAP のサービスエージェント（service-<番号>@gcp-sa-iap）。番号はコードに書かず data source から組み立てる
@@ -81,7 +92,7 @@ resource "google_cloud_run_v2_service" "simulator" {
       }
 
       # AI の資格情報（var.ai_credential が none のときは何も足さない）。AI_CREDENTIAL は中継が種類を知るための素の値（秘匿でない）。
-      # 資格情報そのものは Secret Manager の参照だけで、値は設定・state・plan に入らない。参照はインスタンスの起動時に解決され、
+      # api_key / oauth_token の資格情報そのものは Secret Manager の参照だけで、値は設定・state・plan に入らない（wif は下）。参照はインスタンスの起動時に解決され、
       # 版が無い・無効だとインスタンスが起動しない（simulator 全体が開けない）ので、値を登録してから AI_CREDENTIAL を設定する。
       # 切り戻しは none でデプロイしてから版を無効にする（infra/README.md「AI の資格情報（Secret Manager）」）
       dynamic "env" {
@@ -92,7 +103,7 @@ resource "google_cloud_run_v2_service" "simulator" {
         }
       }
       dynamic "env" {
-        for_each = local.ai_credentials
+        for_each = local.ai_secret_credentials
         content {
           name = local.ai_env_name[env.value]
           value_source {
@@ -101,6 +112,14 @@ resource "google_cloud_run_v2_service" "simulator" {
               version = var.ai_secret_version
             }
           }
+        }
+      }
+      # wif（#184）: Anthropic の WIF の ID（秘密ではない）。ID トークンは中継がメタデータサーバーから取る（IAM の付与は要らない）
+      dynamic "env" {
+        for_each = local.ai_wif_env
+        content {
+          name  = env.key
+          value = env.value
         }
       }
 

@@ -121,7 +121,22 @@ AI_FIRESTORE_COLLECTION = "ai_spend"
 AI_FIRESTORE_TIMEOUT_SECONDS = 5.0
 AI_FIRESTORE_RETRIES = 3  # 前提条件の失敗（他のインスタンスと競合）の読み直し
 AI_OAUTH_BETA = "oauth-2025-04-20"  # OAuth のトークンで /v1/messages を呼ぶときの anthropic-beta
-AI_CREDENTIALS = ("api_key", "oauth_token", "fake")  # fake は手元とテスト用の偽の送信先（Terraform の変数は通さない）
+# fake は手元とテスト用の偽の送信先（Terraform の変数は通さない）
+AI_CREDENTIALS = ("api_key", "oauth_token", "wif", "fake")
+# Anthropic の WIF（#184。ADR-0001 の追補）: Cloud Run のメタデータサーバーから実行 SA の Google の ID トークンを取り、
+# SDK の WorkloadIdentityCredentials が Anthropic の短命トークンに交換する。format=full は email の claim を入れる
+# （federation rule は sub と email の両方を固定する）
+AI_WIF_AUDIENCE = "https://api.anthropic.com"
+AI_IDENTITY_TOKEN_URL = ("http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/identity"
+                         f"?audience={AI_WIF_AUDIENCE}&format=full")  # 公式の手順と同じ形
+AI_IDENTITY_TOKEN_TIMEOUT_SECONDS = 3.0
+AI_IDENTITY_TOKEN_MAX_BYTES = 16 * 1024
+# 交換（POST /v1/oauth/token）のタイムアウト（SDK の既定は 30 秒）。401 は SDK が 1 回だけ交換し直すので、最悪でも
+# 2 × (ID トークン 3 秒 + 交換 10 秒) = 26 秒で、締め切り AI_DEADLINE_SECONDS（50 秒）の中に収まる
+AI_TOKEN_EXCHANGE_TIMEOUT_SECONDS = 10.0
+# WIF の ID の形（値は秘密ではないが利用者個人のもの。リポジトリ・ログに書かない）。組織 ID は UUID、他は英数字・_・-
+_AI_WIF_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
+_AI_ORG_ID_RE = re.compile(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
 AI_BUDGET_STORES = ("firestore", "memory")
 _AI_LIMIT_RE = re.compile(r"^[0-9]{1,2}(?:\.[0-9]{1,2})?$")
 
@@ -190,6 +205,17 @@ def from_env(env=None) -> Settings:
 
 
 @dataclass(frozen=True)
+class WifIds:
+    """Anthropic の WIF の ID（ANTHROPIC_FEDERATION_RULE_ID・ANTHROPIC_ORGANIZATION_ID は必須、
+    ANTHROPIC_SERVICE_ACCOUNT_ID・ANTHROPIC_WORKSPACE_ID は任意 = SDK と同じ）。個人の値なので repr に出さない"""
+
+    federation_rule_id: str = field(repr=False)
+    organization_id: str = field(repr=False)
+    service_account_id: str | None = field(default=None, repr=False)
+    workspace_id: str | None = field(default=None, repr=False)
+
+
+@dataclass(frozen=True)
 class AiSettings:
     """AI の中継の設定。credential が None なら AI は無効（disabled は理由の列挙。値は持たない）。
     secret は repr に出さない（ログ・例外に鍵を出さない）"""
@@ -202,6 +228,7 @@ class AiSettings:
     deadline_seconds: float = AI_DEADLINE_SECONDS
     disabled: str | None = "not_configured"
     secret: str | None = field(default=None, repr=False)
+    wif: WifIds | None = field(default=None, repr=False)  # credential が wif のときだけ
 
     @property
     def enabled(self) -> bool:
@@ -222,9 +249,10 @@ def _ai_disabled(reason: str, warn: bool) -> AiSettings:
 
 
 def ai_from_env(env=None) -> AiSettings:
-    """AI_CREDENTIAL（none / 未設定は無効）・ANTHROPIC_API_KEY / ANTHROPIC_AUTH_TOKEN・AI_MODEL・AI_DAILY_LIMIT_USD・
-    AI_BUDGET_STORE・GCP_PROJECT から。設定が不正なときは AI だけを無効にする（simulator 全体は起動する）。
-    SDK に環境変数を読ませず、選んだ片方だけを中継が渡す（ADR-0001）"""
+    """AI_CREDENTIAL（none / 未設定は無効）・ANTHROPIC_API_KEY / ANTHROPIC_AUTH_TOKEN・WIF の ID（wif のとき）・
+    AI_MODEL・AI_DAILY_LIMIT_USD・AI_BUDGET_STORE・GCP_PROJECT から。設定が不正なときは AI だけを無効にする
+    （simulator 全体は起動する）。
+    SDK に環境変数を読ませず、選んだ種類の資格情報だけを中継が渡す（ADR-0001）"""
     env = os.environ if env is None else env
     credential = (env.get("AI_CREDENTIAL") or "none").strip()
     if credential == "none":
@@ -233,7 +261,23 @@ def ai_from_env(env=None) -> AiSettings:
         return _ai_disabled("ai_credential_invalid", True)
     key, token = env.get("ANTHROPIC_API_KEY") or None, env.get("ANTHROPIC_AUTH_TOKEN") or None
     secret = None
-    if credential != "fake":
+    wif: WifIds | None = None
+    if credential == "wif":
+        if key is not None or token is not None:
+            # 鍵なしで動かすつもりの所に長命の鍵が残っている（取り違えの元）。無効にして気づかせる
+            return _ai_disabled("ai_credential_conflict", True)
+        ids = {name: (env.get(name) or "").strip() or None for name in (
+            "ANTHROPIC_FEDERATION_RULE_ID", "ANTHROPIC_ORGANIZATION_ID", "ANTHROPIC_SERVICE_ACCOUNT_ID",
+            "ANTHROPIC_WORKSPACE_ID")}
+        rule, org = ids["ANTHROPIC_FEDERATION_RULE_ID"], ids["ANTHROPIC_ORGANIZATION_ID"]
+        sa, ws = ids["ANTHROPIC_SERVICE_ACCOUNT_ID"], ids["ANTHROPIC_WORKSPACE_ID"]
+        if rule is None or org is None:
+            return _ai_disabled("ai_credential_missing", True)
+        if (not _AI_ORG_ID_RE.match(org)
+                or any(v is not None and not _AI_WIF_ID_RE.match(v) for v in (rule, sa, ws))):
+            return _ai_disabled("ai_wif_invalid", True)
+        wif = WifIds(federation_rule_id=rule, organization_id=org, service_account_id=sa, workspace_id=ws)
+    elif credential != "fake":
         if key is not None and token is not None:
             # 両方あると SDK は X-Api-Key と Authorization の両方を送る（API は拒否する）。取り違えを避けて無効に
             return _ai_disabled("ai_credential_conflict", True)
@@ -262,10 +306,10 @@ def ai_from_env(env=None) -> AiSettings:
             project = env.get("GCP_PROJECT", "")
             if not _PROJECT_RE.match(project):
                 return _ai_disabled("ai_budget_project_missing", True)
-        elif credential == "api_key":
+        elif credential in ("api_key", "wif"):
             from .log import log
 
             # インスタンスごとのメモリ = 冷えるたびに 0 に戻る（手元の確認用）
             log("WARNING", "ai_budget_memory")
     return AiSettings(credential=credential, model=model, daily_limit_micro_usd=limit, budget_store=store,
-                      project=project, disabled=None, secret=secret)
+                      project=project, disabled=None, secret=secret, wif=wif)

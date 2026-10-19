@@ -30,12 +30,23 @@ env:
   TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
   GCP_SA_TF_PLAN: ${{ vars.GCP_SA_TF_PLAN }}
   TF_VAR_project_id: ${{ vars.GCP_PROJECT_ID }}
-  # AI の資格情報の種類（none | api_key | oauth_token）と版。秘匿値ではない（値は Secret Manager。infra/README.md「AI の資格情報（Secret Manager）」）。
+  # AI の資格情報の種類（none | api_key | oauth_token | wif）と版。秘匿値ではない（値は Secret Manager。infra/README.md「AI の資格情報（Secret Manager）」）。
   # 未設定なら none（AI は無効・環境変数を足さない）と latest
   TF_VAR_ai_credential: ${{ vars.AI_CREDENTIAL || 'none' }}
   TF_VAR_ai_secret_version: ${{ vars.AI_SECRET_VERSION || 'latest' }}
-  # 失敗時のログ末尾に使うマスク: 9 桁以上の数字（プロジェクト番号等）と、SA 以外のメールアドレス
+  # Anthropic の WIF（#184。AI_CREDENTIAL=wif のときだけ使う）の ID。秘密ではないが個人の値（echo しない。plan は要約だけを出す）。
+  # 未設定は空（infra/README.md「AI の資格情報」の wif）
+  TF_VAR_anthropic_federation_rule_id: ${{ vars.ANTHROPIC_FEDERATION_RULE_ID }}
+  TF_VAR_anthropic_organization_id: ${{ vars.ANTHROPIC_ORGANIZATION_ID }}
+  TF_VAR_anthropic_service_account_id: ${{ vars.ANTHROPIC_SERVICE_ACCOUNT_ID }}
+  TF_VAR_anthropic_workspace_id: ${{ vars.ANTHROPIC_WORKSPACE_ID }}
+  # 失敗時のログ末尾に使うマスク: Anthropic の WIF の ID（Terraform の変数の検査のエラーの「var.anthropic_* is "…"」・
+  # UUID・fdrl_ などの接頭辞の ID。値そのものは mask-wif-ids.sh の ::add-mask:: でも伏せる）、9 桁以上の数字
+  # （プロジェクト番号等）と、SA 以外のメールアドレス。ci.yml と deploy.yml で同じ（mask-wif-ids.test.sh が確かめる）
   MASK_SED: >-
+    s/(var\.anthropic_[a-z_]+ is )"([^"\\]|\\.)*"/\1"<masked>"/g;
+    s/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/<uuid>/g;
+    s/(fdrl|fdis|svac|wrkspc)_[A-Za-z0-9_-]+/<id>/g;
     s/[0-9]{9,}/<num>/g;
     s/@([A-Za-z0-9-]+)\.iam\.gserviceaccount\.com/__SA__\1__/g;
     s/[A-Za-z0-9._%+-]+@([A-Za-z0-9-]+\.)+[A-Za-z]{2,}/<email>/g;
@@ -83,6 +94,10 @@ jobs:
         if: steps.vars.outputs.enabled == 'true'
         with:
           persist-credentials: false
+      # Anthropic の WIF の ID を以降のログで伏せる（#184。Terraform の検査のエラーは値を表示する）
+      - name: WIF の ID をログで伏せる
+        if: steps.vars.outputs.enabled == 'true'
+        run: .github/scripts/mask-wif-ids.sh
       - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
         if: steps.vars.outputs.enabled == 'true'
         with:
@@ -151,6 +166,9 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      # Anthropic の WIF の ID を以降のログで伏せる（#184。Terraform の検査のエラーは値を表示する）
+      - name: WIF の ID をログで伏せる
+        run: .github/scripts/mask-wif-ids.sh
 
       # ビルドは GCP の認証より前に行う（依存の取得中に資格情報ファイルが無いように）。検査は ci.yml の check と同じ
       - name: イメージのビルドと検査（未作成のときだけ）

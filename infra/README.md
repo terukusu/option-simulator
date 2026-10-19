@@ -258,7 +258,7 @@ L=asia-northeast1
 eval "$(GCP_PROJECT_ID=$P .github/scripts/image.sh simulator resolve | grep '^image=')"
 TF_VAR_project_id=$P TF_VAR_simulator_image=$image $TF -chdir=infra/prod plan -lock=false -input=false -detailed-exitcode > /dev/null; echo $?
 # 構成（v2 API）: true、INGRESS_TRAFFIC_ALL、false、sa-simulator、0、2、true、[GCP_PROJECT,BQ_DATASET,BQ_LOCATION]
-# （AI_CREDENTIAL を設定したら envs に AI_CREDENTIAL と ANTHROPIC_API_KEY / ANTHROPIC_AUTH_TOKEN の片方が足される）
+# （AI_CREDENTIAL を設定したら envs に AI_CREDENTIAL と ANTHROPIC_API_KEY / ANTHROPIC_AUTH_TOKEN の片方、wif なら ANTHROPIC_* の ID が足される）
 curl -sf -H "Authorization: Bearer $(gcloud auth print-access-token)" \
   "https://run.googleapis.com/v2/projects/$P/locations/$L/services/simulator" \
   | jq -c '{iap: .iapEnabled, ingress, invoker_check_disabled: (.invokerIamDisabled // false), sa: (.template.serviceAccount | split("@")[0]),
@@ -304,13 +304,14 @@ gcloud run services list --project="$P" --format='value(metadata.name,status.lat
 
 ## AI の資格情報（Secret Manager）
 
-AI アドバイザー（`docs/ai-advisor.md`）が Claude を呼ぶための資格情報（#133、`docs/adr-0001-ai-credentials-secret-manager.md`）。API キーとサブスクリプションの OAuth トークン（`claude setup-token`）の両方に対応し、使うのはどちらか片方だけ。
+AI アドバイザー（`docs/ai-advisor.md`）が Claude を呼ぶための資格情報（#133・#184、`docs/adr-0001-ai-credentials-secret-manager.md`）。API キー・サブスクリプションの OAuth トークン（`claude setup-token`）・Anthropic の WIF（鍵なし。下の「wif（Anthropic の WIF）」）に対応し、使うのはどれか 1 つだけ。1〜7 は Secret Manager を使う `api_key` / `oauth_token` の手順。
 
 | 種類（`AI_CREDENTIAL`） | シークレット | Cloud Run の環境変数 |
 |---|---|---|
 | `none`（既定。未設定も同じ） | — | 何も足さない（AI は無効） |
 | `api_key` | `simulator-anthropic-api-key` | `AI_CREDENTIAL=api_key`、`ANTHROPIC_API_KEY`（参照） |
 | `oauth_token` | `simulator-anthropic-oauth-token` | `AI_CREDENTIAL=oauth_token`、`ANTHROPIC_AUTH_TOKEN`（参照） |
+| `wif`（#184） | —（使わない） | `AI_CREDENTIAL=wif`、`ANTHROPIC_FEDERATION_RULE_ID`・`ANTHROPIC_ORGANIZATION_ID`（必須）・`ANTHROPIC_SERVICE_ACCOUNT_ID`・`ANTHROPIC_WORKSPACE_ID`（任意。空なら載せない）を素の値で |
 
 - シークレットの入れ物 2 つ（東京だけに複製、`deletion_policy = "PREVENT"`）と、シークレット単位の `roles/secretmanager.secretAccessor`（`sa-simulator` だけ）は `infra/bootstrap/ai_credentials.tf`。apply SA・plan SA には Secret Manager の権限を付けない
 - **値（版）は Terraform に入れない**（state・plan・Cloud Run の設定に値が載らない）。所有者が標準入力から登録する
@@ -393,6 +394,57 @@ curl -sf -H "Authorization: Bearer $(gcloud auth print-access-token)" \
 2. 管理から外す（シークレットは `PREVENT` なので Terraform では消さない）: `$TF -chdir=infra/bootstrap state rm 'google_secret_manager_secret_iam_member.simulator_ai'` と `$TF -chdir=infra/bootstrap state rm 'google_secret_manager_secret.ai'`
 3. `ai_credentials.tf` を消す PR をマージし、所有者が plan → apply する。要約は `google_project_service.secretmanager` の delete 1 だけ（`ABANDON`・`disable_on_destroy = false` なので管理から外れるだけで API は止まらない）。他に差分が出たら apply しない
 4. `gcloud secrets delete <シークレット> --project "$P"`（付与はシークレットと一緒に消える）。API を止めるなら `gcloud services disable secretmanager.googleapis.com`
+
+### wif（Anthropic の WIF。鍵なし）
+
+Cloud Run の実行 SA（`sa-simulator`）の Google の ID トークン（メタデータサーバーから、audience `https://api.anthropic.com`・`format=full` = `email` の claim を含む）を、中継が SDK の `WorkloadIdentityCredentials` で Anthropic の短命トークンに交換する（#184。公式の手順は Claude のドキュメントの「Use WIF with Google Cloud」）。長命の鍵が無いので、登録・ローテーション・Secret Manager の版の管理が要らない。費用は API の従量課金で、計上（予約・精算・Firestore）は `api_key` と同じ（「AI の費用の計上（Firestore）」の bootstrap が要る）。GCP 側の IAM の付与・API の有効化は要らない（実行 SA は自分の ID トークンをメタデータサーバーから取れる）。
+
+**1. Claude Console**（所有者。Anthropic の組織の admin）: Workload identity の「Connect workload」で Google Cloud のタイルを選び、ウィザードで次を作る。
+
+- issuer: `https://accounts.google.com`（discovery）
+- Anthropic のサービスアカウント（simulator 専用。ワークスペースも simulator 専用に分けると月の上限が効く）
+- federation rule: audience `https://api.anthropic.com`、claims の `sub` = `sa-simulator` の数値の unique ID と `email` = `sa-simulator` のメールの **両方を完全一致**（`subject_prefix` やワイルドカードは使わない。任意の Google の SA に一致してしまう）
+
+```sh
+# unique ID（数値。表示はするが記録・コミットしない）
+gcloud iam service-accounts describe "sa-simulator@$P.iam.gserviceaccount.com" --project "$P" --format='value(uniqueId)'
+```
+
+**2. 変数の登録と deploy**（所有者。値は Console の ID。秘密ではないが個人の値なのでリポジトリ・Issue に書かない）
+
+```sh
+gh variable set ANTHROPIC_FEDERATION_RULE_ID -R "$REPO" --body '<federation rule の ID>'
+gh variable set ANTHROPIC_ORGANIZATION_ID -R "$REPO" --body '<組織の UUID>'
+gh variable set ANTHROPIC_SERVICE_ACCOUNT_ID -R "$REPO" --body '<サービスアカウントの ID>'   # 任意
+gh variable set ANTHROPIC_WORKSPACE_ID -R "$REPO" --body '<ワークスペースの ID>'           # 任意（ルールが複数のワークスペースを持つときは必須）
+gh variable set AI_CREDENTIAL -R "$REPO" --body wif
+gh workflow run deploy.yml -R "$REPO" --ref main
+```
+
+`plan` job の要約が **update 1**（`google_cloud_run_v2_service.simulator`）、他 0 なら `apply` job を承認する。`AI_CREDENTIAL=wif` でルール ID・組織 ID が空、または形が違うと plan が失敗する（動いているリビジョンはそのまま）。`ANTHROPIC_*` の variables は `AI_CREDENTIAL` が `wif` のときだけ環境変数に載り、形の検査も `wif` のときだけなので、残したまま `api_key` / `oauth_token` に切り替えてよい。Terraform は変数の検査に落ちるとエラーに値を表示するので、CI の terraform の job は最初に `.github/scripts/mask-wif-ids.sh`（`::add-mask::`）で ID を伏せ、失敗時のログ末尾の `MASK_SED` も `var.anthropic_* is "…"`・UUID・`fdrl_` などの形を伏せる（`.github/scripts/mask-wif-ids.test.sh`）。
+
+**3. 確認**（ID の値は表示しない）
+
+```sh
+L=asia-northeast1
+# 環境変数の名前と、Secret の参照が無いこと（AI_CREDENTIAL と ANTHROPIC_* が has_value: true、ref: null）
+curl -sf -H "Authorization: Bearer $(gcloud auth print-access-token)" \
+  "https://run.googleapis.com/v2/projects/$P/locations/$L/services/simulator" \
+  | jq -c '[.template.containers[0].env[] | {name, ref: (.valueSource.secretKeyRef.secret // null), has_value: (.value != null)}] | map(select(.name | startswith("A")))'
+# 1 回の要求のあと（ブラウザで AI を使う）: ai_request の error が null、ai_disabled が無い
+gcloud logging read 'resource.type="cloud_run_revision" AND resource.labels.service_name="simulator" AND (jsonPayload.event="ai_request" OR jsonPayload.event="ai_disabled")' \
+  --project "$P" --freshness=30m --format='value(jsonPayload.event,jsonPayload.credential,jsonPayload.error,jsonPayload.error_type,jsonPayload.reason)'
+```
+
+期待: ブラウザ（IAP のログイン済み）で `/api/ai/status` が `"credential":"wif"`・`"counted":true`。`ai_request` が `wif` で `error` が空。`upstream_auth` で `error_type` が `WorkloadIdentityError` ならルールの不一致（Console の Workload identity の認証の履歴に理由が出る。多いのは `email` の claim の欠落と `sub` の取り違え）、`IdentityTokenError` ならメタデータサーバーから ID トークンが取れていない。`ai_disabled` の `reason` が `ai_credential_conflict` なら `ANTHROPIC_API_KEY` / `ANTHROPIC_AUTH_TOKEN` が残っている、`ai_credential_missing` / `ai_wif_invalid` なら ID が無い・形が違う。
+
+**4. 切り戻し**
+
+| 状況 | 手段 |
+|---|---|
+| 交換が通らない・AI を止めたい | `gh variable set AI_CREDENTIAL -R "$REPO" --body none`（または前の `api_key` / `oauth_token`。版が登録済みであること）→ `gh workflow run deploy.yml` → 承認。wif は起動時に何も解決しないので、ID の誤りで simulator 全体が起動しなくなることはない（AI だけが失敗する） |
+| SA・ルールを止めたい | Claude Console で federation rule を無効化・削除する（交換したトークンはルールの `token_lifetime_seconds` で切れる）→ `AI_CREDENTIAL=none` で deploy |
+| 撤去 | `AI_CREDENTIAL=none` で deploy → `gh variable delete ANTHROPIC_FEDERATION_RULE_ID`（他の 3 つも）→ Console でルール・サービスアカウントを削除 |
 
 **注意**: サブスクリプションの OAuth トークンをこのアプリから使ってよいかは Anthropic の規約（Claude Code の Legal and compliance の「Authentication and credential use」）を利用者が確かめる。製品・サービスとして提供する場合は API キーを使う。
 

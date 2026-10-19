@@ -302,6 +302,13 @@ def synth_board(at: datetime, future=30000.0, band_rows=100, quoted=100, ltd=dat
 
 FAKE_KEY = "sk-ant-api03-" + "Zq7XyW3vU9tS1rQ5pO8nM2lK6jH4gF0eD9cB3aZ1yX5wV7uT"  # 鍵の形の架空の値（漏れの検査用）
 FAKE_TOKEN = "sk-ant-oat01-" + "Hj2Kl4Mn6Pq8Rs0Tu2Vw4Xy6Za8Bc0De2Fg4Hi6Jk8Lm0No"  # トークンの形の架空の値
+# WIF（#184）の架空の値: Google の ID トークン（JWT の形）・交換で返るトークン・ID
+FAKE_ID_TOKEN = "eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJmYWtlIn0.ZmFrZS1zaWduYXR1cmUtZm9yLXRlc3Rz"
+FAKE_EXCHANGED = "sk-ant-oat01-" + "Wf3Xg5Yh7Zi9Aj1Bk3Cl5Dm7En9Fo1Gp3Hq5Ir7Js9Kt1Lu"
+FAKE_WIF_ENV = {"ANTHROPIC_FEDERATION_RULE_ID": "fdrl_0example0rule",
+                "ANTHROPIC_ORGANIZATION_ID": "00000000-0000-4000-8000-000000000000",
+                "ANTHROPIC_SERVICE_ACCOUNT_ID": "svac_0example0account",
+                "ANTHROPIC_WORKSPACE_ID": "wrkspc_0example0workspace"}
 
 
 def ai_registry():
@@ -391,8 +398,13 @@ def ai_settings(credential="fake", limit_micro=3_000_000, deadline=50.0, secret=
     store = None if credential == "oauth_token" else "memory"
     if secret is None:
         secret = {"api_key": FAKE_KEY, "oauth_token": FAKE_TOKEN}.get(credential)
+    wif = None
+    if credential == "wif":
+        e = FAKE_WIF_ENV
+        wif = st.WifIds(e["ANTHROPIC_FEDERATION_RULE_ID"], e["ANTHROPIC_ORGANIZATION_ID"],
+                        e["ANTHROPIC_SERVICE_ACCOUNT_ID"], e["ANTHROPIC_WORKSPACE_ID"])
     return st.AiSettings(credential=credential, daily_limit_micro_usd=limit_micro, budget_store=store,
-                         deadline_seconds=deadline, disabled=None, secret=secret)
+                         deadline_seconds=deadline, disabled=None, secret=secret, wif=wif)
 
 
 def ai_app(gateway=None, store=None, ai_cfg=None, registry=None, clock=None, **kw):

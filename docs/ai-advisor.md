@@ -120,6 +120,8 @@ EPIC #141 の (b)。Issue と #120 の当初の方針は「Secret Manager に置
 
 #133 で A の形（`infra/bootstrap` に API・シークレット 2 つ・付与、`infra/prod` の変数 `ai_credential` で片方だけを環境変数の参照に）にした。背景は [ADR-0001](adr-0001-ai-credentials-secret-manager.md)、手順は `infra/README.md`「AI の資格情報（Secret Manager）」。
 
+**追記（#184、2026-10-19、オーナー）**: 案 C（Anthropic の WIF）も足す（「WIF は採らない」を改める）。`AI_CREDENTIAL=wif` で、Secret Manager を使わず ID を素の環境変数（GitHub の repository variables から）で渡す。SDK 1.8.0 に `WorkloadIdentityCredentials` があり（F15 の懸念は解消）、ID トークンはメタデータサーバーから `format=full` で取る（`fetch_id_token` ではなく直接 1 回の GET）。費用は `api_key` と同じく実額で数える。ADR-0001 の追補。
+
 ### 論点 3: 費用の 1 日上限・使うモデル・上限を実装する場所
 - 判断者: オーナー
 

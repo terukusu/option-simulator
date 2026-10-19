@@ -29,11 +29,12 @@ optionchan の BigQuery（データセット `optionchan_tokyo` のテーブル�
 | `QUOTES_FILE` | なし | `DATA_SOURCE=quotes` の気配の一覧（要求ごとに読む。書き換えれば [最新] で新しい板） |
 | `CALENDAR_FILE` | なし | `DATA_SOURCE=quotes` の取引カレンダー（`/api/calendar` と同じ形。同梱の `../data/calendar/calendar.json` を指せる） |
 | `STATIC_DIR` | なし | 静的ファイルのディレクトリ（`index.html`・`assets/`・直下の manifest とアイコン） |
-| `AI_CREDENTIAL` | `none`（未設定も同じ） | AI の資格情報の種類: `api_key` / `oauth_token`（本番。Terraform の変数 `ai_credential`）/ `fake`（偽の送信先とメモリの計上。手元・テスト用。Anthropic を呼ばない）。不正な値は AI だけを無効にする |
-| `ANTHROPIC_API_KEY` / `ANTHROPIC_AUTH_TOKEN` | なし | 選んだ方だけ（本番は Secret Manager の参照）。両方ある・選んだ方が無いときは AI を無効にする（WARNING `ai_disabled`。値は出さない）。中継が読み、SDK には明示で片方だけを渡す |
+| `AI_CREDENTIAL` | `none`（未設定も同じ） | AI の資格情報の種類: `api_key` / `oauth_token` / `wif`（本番。Terraform の変数 `ai_credential`）/ `fake`（偽の送信先とメモリの計上。手元・テスト用。Anthropic を呼ばない）。不正な値は AI だけを無効にする |
+| `ANTHROPIC_API_KEY` / `ANTHROPIC_AUTH_TOKEN` | なし | 選んだ方だけ（本番は Secret Manager の参照）。両方ある・選んだ方が無いときは AI を無効にする（WARNING `ai_disabled`。値は出さない）。中継が読み、SDK には明示で片方だけを渡す。`wif` のときはどちらかがあれば AI を無効にする（`ai_credential_conflict`） |
+| `ANTHROPIC_FEDERATION_RULE_ID`・`ANTHROPIC_ORGANIZATION_ID` / `ANTHROPIC_SERVICE_ACCOUNT_ID`・`ANTHROPIC_WORKSPACE_ID` | なし | `wif`（Anthropic の WIF。#184）の ID。前 2 つは必須（無ければ `ai_credential_missing`）、後 2 つは任意。形（組織 ID は UUID、他は英数字・`_`・`-` の 128 文字まで）が違えば `ai_wif_invalid`。中継がメタデータサーバーから実行 SA の ID トークン（audience `https://api.anthropic.com`・`format=full`）を取り、SDK の `WorkloadIdentityCredentials` だけを渡す（Cloud Run の中でだけ動く）。値は秘密ではないが個人のものなのでログに出さない |
 | `AI_MODEL` | `claude-opus-5-5` | 料金表（`settings.AI_PRICES`）にあるモデルだけ |
 | `AI_DAILY_LIMIT_USD` | `3` | 1 日（JST）の上限（USD。0 < 値 ≤ 20、小数 2 桁まで） |
-| `AI_BUDGET_STORE` | `firestore`（`fake` は `memory`） | 日の計上の置き場所。`firestore` は名前つき DB `simulator-ai`（`GCP_PROJECT` が要る）、`memory` はインスタンスのメモリ（冷えると 0 に戻る。`api_key` で使うと WARNING `ai_budget_memory`）。`oauth_token` は数えない |
+| `AI_BUDGET_STORE` | `firestore`（`fake` は `memory`） | 日の計上の置き場所。`firestore` は名前つき DB `simulator-ai`（`GCP_PROJECT` が要る）、`memory` はインスタンスのメモリ（冷えると 0 に戻る。`api_key` / `wif` で使うと WARNING `ai_budget_memory`）。`oauth_token` は数えない（`wif` は `api_key` と同じく実額で数える） |
 
 実値（プロジェクト ID など）はリポジトリに書かない。
 
@@ -172,10 +173,13 @@ gcloud logging read 'resource.type="cloud_run_revision" AND resource.labels.serv
 |---|---|---|
 | `ai_request` | 1 要求 1 行（失敗も。失敗は WARNING） | `kind`・`model`・`credential`（種類だけ）・`n_messages`・`request_bytes`・`est_input_tokens`・`reserved_usd`・`accepted_ms`・`first_delta_ms`（最初の thinking / text）・`first_text_ms`（最初の text。K15 の「最初の文字」）・`total_ms`・`stop_reason`・`tools`（会話に出た道具の名前）・`input_tokens`・`cache_creation_input_tokens`・`cache_read_input_tokens`・`output_tokens`・`cost_usd_est`（料金表の概算。`oauth_token` も）・`charged_usd`（計上額。`oauth_token` は 0）・`price_checked`・`remaining_usd`・`error`・`error_type`（例外の型名）・`upstream_status` |
 | `ai_rejected` | ストリームの前の拒否（400 / 403 / 413 / 415 / 429 / 503 `ai_disabled`） | `status`・`error`・`reason`・`path`（キーの道筋。知らないキーは `<unknown>`。値は出さない） |
-| `ai_disabled` | 起動時に設定が不正（WARNING） | `reason`（`ai_credential_conflict`・`ai_credential_missing` など） |
+| `ai_disabled` | 起動時に設定が不正（WARNING） | `reason`（`ai_credential_conflict`・`ai_credential_missing`・`ai_wif_invalid` など） |
+| `ai_sdk_warning` | SDK（logger `anthropic`）の WARNING 以上。例: `wif` の期限の手前の交換し直しの失敗（古いトークンで続ける）（WARNING） | `logger`・`level`・`error_type`・`upstream_status`（SDK の文言は交換の失敗の本文を含むので出さない。SDK のログは stderr にも流さない） |
 | `ai_status_unavailable` / `ai_settle_failed` | 計上が読めない / 精算が書けない（WARNING） | `error_type` |
 
-出さないもの: 会話の本文・`context` の値・道具の入出力・鍵・SDK の例外の本文・IAP の見出し。
+出さないもの: 会話の本文・`context` の値・道具の入出力・鍵・SDK の例外の本文・IAP の見出し・WIF の ID トークン・交換したトークン・WIF の ID の値。
+
+`wif` の失敗: 交換（`POST /v1/oauth/token`）の 401 / 403 は `upstream_auth`（`error_type` `WorkloadIdentityError`。401 は SDK が 1 回だけ交換し直す。多くはルールの不一致）、ID トークンが取れないときも `upstream_auth`（`error_type` `IdentityTokenError`）、交換のその他の失敗は `upstream_unavailable`。交換のタイムアウトは `settings.AI_TOKEN_EXCHANGE_TIMEOUT_SECONDS`（10 秒。SDK の既定 30 秒では 401 の交換し直しを含めて締め切り 50 秒を越えうる）。ID トークンは交換のたびに取り直す（キャッシュしない）。
 
 24 時間の `first_text_ms` の p50（終了条件 6。押すボタンができる #135 の後に判定する）:
 

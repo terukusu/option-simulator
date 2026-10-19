@@ -1,6 +1,6 @@
 # ADR-0001: AI の資格情報は Secret Manager に置き、入れ物と読み取りの付与は bootstrap で作る
 
-- 状態: 採択
+- 状態: 採択（2026-10-19 に追補: Anthropic の WIF を 3 つ目の種類として足した。末尾の「追補（#184）」）
 - 日付: 2026-10-19
 - 関連: #133・#134・EPIC #141、`docs/ai-advisor.md` 論点 2・3、`docs/design.md` 8.3・14 章・付録 B・13.1 K15、`infra/README.md`「AI の資格情報（Secret Manager）」
 
@@ -50,3 +50,16 @@ AI アドバイザー（EPIC #141）の中継（#134）は Cloud Run `simulator`
 - 中継（#134）の渡し方: 環境変数は中継が読み、SDK には選んだ片方だけを明示で渡す（`api_key` → `Anthropic(api_key=…)`、`oauth_token` → `Anthropic(auth_token=…, default_headers={"anthropic-beta": "oauth-2025-04-20"})`。明示の引数があると SDK は環境変数を読まない）。`ANTHROPIC_API_KEY` と `ANTHROPIC_AUTH_TOKEN` が両方ある・選んだ方が無いときは AI を無効にする（WARNING。値は出さない）。pytest で送られる見出しを確かめる
 - Messages API をサブスクリプション（Max プラン）の OAuth トークンで呼んで Opus を使えることは、オーナーが確認した（2026-10-19）
 - 未確認: トークンの失効の方法（#134 では確かめていない）
+
+## 追補（#184、2026-10-19）: Anthropic の WIF（`wif`）を足す
+
+当初は案 C（Anthropic の WIF）を K15 で不採用にしたが、オーナーが Claude Console の Workload identity で Google Cloud のルール（`sub` = `sa-simulator` の数値の unique ID と `email` を完全一致、audience `https://api.anthropic.com`）を作り、3 つ目の種類として足すと決めた（2026-10-19）。不採用の理由だった「OAuth トークンに使えない」は、種類を選べるようにしたので当たらない（Max プランの OAuth トークンは `oauth_token` のまま）。
+
+- 種類: `AI_CREDENTIAL` は `none` / `api_key` / `oauth_token` / `wif`（`infra/prod` の変数 `ai_credential`）
+- **Secret Manager は使わない**。Anthropic の WIF の ID（`ANTHROPIC_FEDERATION_RULE_ID`・`ANTHROPIC_ORGANIZATION_ID` は必須、`ANTHROPIC_SERVICE_ACCOUNT_ID`・`ANTHROPIC_WORKSPACE_ID` は任意）は秘密ではないが利用者個人の値なので、リポジトリに書かず GitHub の repository variables → `deploy.yml` / `ci.yml` の `TF_VAR_anthropic_*` → `infra/prod` の変数 → Cloud Run の素の環境変数で渡す。`wif` のときだけ載せ、`wif` のときは Secret の参照を載せない（Terraform のテストで確かめる）
+- 中継: Cloud Run のメタデータサーバーから実行 SA の ID トークン（audience `https://api.anthropic.com`・`format=full` = `email` の claim を含む）を取り、SDK 1.8.0 の `WorkloadIdentityCredentials` に渡して `Anthropic(credentials=…)` だけで作る（`api_key` / `auth_token` を渡さない。交換したトークンは SDK の TokenCache が持つ）。`wif` で `ANTHROPIC_API_KEY` / `ANTHROPIC_AUTH_TOKEN` が環境変数にあれば AI を無効にする（`ai_credential_conflict`）
+- 費用: API の従量課金なので `api_key` と同じく実額で数える（予約・精算・Firestore）。数えないのは `oauth_token` だけ
+- GCP 側の IAM の付与・API の有効化は要らない（実行 SA は自分の ID トークンを取れる）。起動時に解決するものが無いので、ID の誤りで simulator 全体が起動しなくなることはない（AI だけが失敗する）
+- 良い点: 長命の鍵が無い（漏れ・ローテーションが無い）。トークンはルールの有効期間（分単位）で切れる
+- 悪い点: 所有者が Console のウィザードを回す必要がある。ルールの `sub` と `email` を両方固定しないと、任意の Google の SA に一致しうる（手順は `infra/README.md`「AI の資格情報」の wif）
+
