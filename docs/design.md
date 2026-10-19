@@ -170,9 +170,9 @@ JPX の商品一覧（2026-10-13）にある日経225の商品は、先物 3 つ
 | `future_price_latest` | `price`, `price_time`, `contract_month` | 先物（スナップショット 1 回に 1 行。ラージの直近四半期限月） |
 | `spot_price_latest` | `price`, `price_time` | 日経平均 |
 | `trading_calendar_latest`（ビュー） | `version_at`, `calendar_date`, `is_trading_day`, `status`, `name`, `covered_until`, `listed_until` | 取引カレンダーの最新版（版の全行）。SQ 日・取引最終日の休業日には **全行**（`is_trading_day` を問わない）+ 土日を使う（7.5） |
-| `atm_cm_iv`（表。#79） | `created_at`, `iv30` | 30 日固定の ATM IV（%。optionchan の `sql/cm/atm_cm.sql` が取り込み 1 回ごとに作る。毎時 45 分に直近 2 時間、JST 7 時台に前日 07:00〜当日 07:00 を作り直す）。月パーティション（`created_at`）で **`requirePartitionFilter` が無い**ので、SQL の静的検査（`api/tests/test_atm_iv.py`）で `created_at >= @start_at AND created_at < @end_at` を必須にし、ジョブの `maximum_bytes_billed` を 64 MiB に下げる（7.3）。`method`・限月ごとの列は読まない |
+| `atm_cm_iv`（表。#79） | `created_at`, `iv30` | 30 日固定の ATM IV（%。optionchan の `sql/cm/atm_cm.sql` が取り込み 1 回ごとに作る。毎時 45 分に直近 2 時間、JST 7 時台に前日 07:00〜当日 07:00 を作り直す）。月パーティション（`created_at`）で **`requirePartitionFilter` が無い**ので、SQL の静的検査（`api/tests/test_atm_iv.py`）で `created_at >= @start_at AND created_at < @end_at` を必須にし、ジョブの `maximum_bytes_billed` を 64 MiB に下げる（7.3）。`method`・限月ごとの列は読まない。日次の値の `/api/atm_daily`（#152）は同じ表から `m1_last_trading_day`・`m1_forward`・`m2_last_trading_day`・`m2_forward` も読む（`contract.RELATIONS["atm_cm_daily"]`。静的検査は `api/tests/test_atm_daily.py`、上限 128 MiB）。`method`・`*_days`・`*_iv` は読まない |
 
-- 列の型・意味は optionchan の `schema/tokyo/*.json` と `schema/cm/atm_cm_iv.json`。API が使う列・型・非 NULL の前提は `api/src/simulator_api/contract.py` に 1 か所で宣言し（SQL は宣言した列だけを明示。`SELECT *` を使わない）、CI の job `check` で **固定したコミット**（`api/contract/optionchan_commit.txt`）の JSON と照合する（`schema/` を sparse checkout し、`contract.py` の `schema_file` は `schema/` からの相対パス `tokyo/…`・`cm/…`。集計して返す `atm_cm_iv` の結果の列は `contract.OUTPUTS`）。optionchan のリポジトリ名はリポジトリ変数 `OPTIONCHAN_REPO` で渡し、未設定の fork・clone では notice を出してスキップする。SQL は dry run（課金 0。`OPTIONCHAN_BQ_TEST=1` のときだけ手元で）で見積もりと結果の列・型を検査する（AC25）
+- 列の型・意味は optionchan の `schema/tokyo/*.json` と `schema/cm/atm_cm_iv.json`。API が使う列・型・非 NULL の前提は `api/src/simulator_api/contract.py` に 1 か所で宣言し（SQL は宣言した列だけを明示。`SELECT *` を使わない）、CI の job `check` で **固定したコミット**（`api/contract/optionchan_commit.txt`）の JSON と照合する（`schema/` を sparse checkout し、`contract.py` の `schema_file` は `schema/` からの相対パス `tokyo/…`・`cm/…`。集計して返す `atm_cm_iv`・`atm_cm_daily` の結果の列は `contract.OUTPUTS`）。optionchan のリポジトリ名はリポジトリ変数 `OPTIONCHAN_REPO` で渡し、未設定の fork・clone では notice を出してスキップする。SQL は dry run（課金 0。`OPTIONCHAN_BQ_TEST=1` のときだけ手元で）で見積もりと結果の列・型を検査する（AC25）
 - optionchan への依頼（R1・R2・R7）は 13.3。読み取り権限の付与は simulator の bootstrap で済む（R0）
 
 ### 4.2 限月と先物の限月
@@ -596,6 +596,7 @@ JSCC の証拠金（2023-11 から VaR 方式。指数先物・OP は HS-VaR）�
 | `GET /api/chain?at=<ISO 時刻>` | **後段**（#33 では 400 `{"error":"bad_request"}`。入力値は応答・ログに出さない）。案: `at` 以前で最新の使えるスナップショット（14 日以内）を `latest_runs` で `snapshot_at` に解決してから 1 秒の窓で読む。使う画面（過去時点の閲覧・「清算値」モード）が MVP に無く、異なる `at` ごとに約 150 MiB を読むので、連打制限（1 クライアント 10 回 / 分。キーは IAP のユーザー ID ヘッダのハッシュをメモリ内にだけ持つ）だけでは費用を抑えきれない。上限の設計と一緒に入れる |
 | `GET /api/calendar` | 取引カレンダーの最新版（`trading_calendar_latest`。7.5）。`{schema_version: 1, source: "bigquery", version_at, covered_until, listed_until, days: [{date, is_trading_day, status, name}]}`（版の全行、日付の昇順。`version_at` は +09:00）。板とは別のエンドポイント（更新頻度が違い、板の無い限月・手入力の足・`file` アダプタでも使うため。板の JSON 版 1 の形を変えない）。`Cache-Control: private, max-age=3600`、`ETag` = `version_at`。ブラウザは本番で開いたときと [最新] で読む（型・検証・同梱の版へのフォールバックは 7.5。#39） |
 | `GET /api/atm_iv?tf=<1m\|1h\|1d>[&start=<ISO>&end=<ISO>]` | IV 推移（#79）: 表 `atm_cm_iv` の `iv30`（30 日固定の ATM IV、%）の足。`tf` は完全一致（5m・15m は画面が 1m から束ねる）。`start`・`end` は両方か無し。ISO 8601 の **オフセット付き**（`Z` か `±HH:MM`、秒まで）で **UTC の 0 時ちょうど**（キャッシュのキーと BigQuery の結果キャッシュを効かせる）。両方無ければ右端（最新）の 1 回分 = `end` = 明日の UTC の 0 時、`start` = `end` − 既定の日数（1m 3 日・1h 60 日・1d 365 日）。`end` は明日の UTC の 0 時に縮め（端末の時計の進みで 400 にしない）、縮めた後の `end − start` が 1 回の最大（1m 3 日・1h 100 日・1d 400 日）以下、`2010-01-01T00:00:00Z ≤ start < end`。応答 `{schema_version: 1, tf, start, end, last_at, bars: [{t, o, h, l, c}]}`（時刻は +09:00。`start`・`end` は実際に読んだ範囲で `end` は `min(end, now)`、`last_at` は範囲の中の最後の行の `created_at`（`iv30` が NULL の行も含む。無ければ null）、`bars` は `t` の昇順・重複なし、`t` は足の始まり（1m・1h は UNIX 秒で切った時刻、1d はその取引日の 00:00 JST）、値は %、`iv30` が全部 NULL の足は返さない）。日足は 1 時間足を取引日に束ねる（取引日 = JST + 7 時間の日付から土日・`is_trading_day = false` の日を飛ばした最初の日。optionchan のビューアーと同じ。祝日取引の実施日は取引日、読んだ範囲の先頭の取引日は出さない）。不正は 400 `{"error":"bad_request"}`（値は応答・ログに出さない。ログはパラメータ名だけ）、BigQuery の失敗・上限超過・`DATA_SOURCE=file` は 503 `{"error":"unavailable"}`。`Cache-Control: private, max-age=3600`（確定した範囲 = `end ≤ now − 48 時間`）/ `private, max-age=60`（それ以外）、ETag なし、gzip。画面は IV 推移を開いたとき・最新化ボタン（右端。範囲なし）と、左右へパンしたときの追加読み込み（範囲つき。#79 段 C）でだけ読む |
+| `GET /api/atm_daily` | 日次の値（#152。持ちこたえマップの過去の点。画面は段 B）: 表 `atm_cm_iv` の **JST の日付ごとの日中の終値** = JST 9:00〜15:00（両端含む）の行のうち `iv30`・`m1_forward`・`m1_last_trading_day` が NULL でない最後の行。パラメータなし（知らないパラメータは無視。値は読まない）。範囲は **確定した日だけ** = `[2010-01-01, end)`、`end` = JST の今日（JST 8:00 以降）/ 前日（8:00 前）（表は毎時 45 分に直近 2 時間、JST 7 時台に前日 07:00〜当日 07:00 を作り直す = 8:00 には前日の日中が確定。今日の日中は翌朝 8:00 まで入らない）。応答 `{schema_version: 1, start: "2010-01-01", end: "<YYYY-MM-DD（含まない）>", days: [{d, t, iv, f1, l1, f2, l2}]}`（`d` は JST の日付で昇順・重複なし、`t` は終値の行の時刻（+09:00）、`iv` は %（`iv30`）、`f1`・`l1` は 1 限月のフォワードと最終取引日、`f2`・`l2` は 2 限月（片方でも NULL / 有限でない / 正でなければ両方 null）。`iv`・`f1` が有限で正でない行は返さない。値は丸めない）。2 営業日の組はブラウザ（`data/atmDaily.ts` の `atmMoves`）。400 は無い。BigQuery の失敗・上限超過・`DATA_SOURCE=file` は 503 `{"error":"unavailable"}`。`Cache-Control: private, max-age=3600`、`ETag: "atm-daily-<end>-<日数>"`（`If-None-Match` で 304）、gzip。画面は自動で読まない（持ちこたえマップを初めて開いたときに 1 回 / セッション、失敗したら [再試行] だけ。[最新] でも読み直さない） |
 | `GET /healthz` | 設定の読み込みだけ（BigQuery に触れない） |
 
 JSON（版 1。縦切り 1b で確定。型は `data/chainTypes.ts`、検証は `data/chainJson.ts`）:
@@ -655,12 +656,14 @@ F の推定・補間・ATM の判定はブラウザ（`model/`）。`sq_date`・
 | `future_price_latest` + `spot_price_latest` 1 秒 | 約 230〜300 KB |
 | `trading_calendar_latest`（7 列） | 約 12〜31 KB |
 | `atm_cm_iv`（2 列。#79。2026-10-18 の dry run） | 1m 3 日 約 0.17 MiB、1h 60 日 約 0.67 MiB・100 日 約 0.95 MiB、1d 400 日 + 読み足し 11 日 約 3.4 MiB（全期間でも約 20 MiB、全列なら約 112 MiB）。実課金はキャッシュが効かない 1 回 = 最小課金 10 MiB |
+| `atm_cm_daily`（6 列・全期間。#152。2026-10-19 の dry run） | 約 61.9 MiB（64,892,544 bytes）。直近 1 年だけなら約 9.6 MiB、1 年で約 8 MiB 増える。1 回 ≈ 0.0004 USD |
 
 - 1 回 ≒ 152 MiB ≒ 0.0009 USD（東京のオンデマンド $6.25 / TiB）。BigQuery の結果キャッシュは立会中（テーブルが毎分更新）は効かない
 - 抑制: (1) サーバーのキャッシュキーは **`snapshot_at`**（実装は `(snapshot_at, finished_at)`。再処理で書き直されたら取り直す。`latest_runs` だけを TTL 10 秒で引き、変わったときだけ板を取る。使えない板も「不採用」として覚える）。(2) **single-flight**（同時リクエストを 1 本にまとめる。`latest_runs`・板・カレンダー）。(3) `MAX_BYTES_BILLED` **512 MiB**（既定かつ上限。超える値は起動時にエラー）。全ジョブにパラメータ化（`ScalarQueryParameter`）と `maximum_bytes_billed`。(4) ブラウザは自動ポーリングしない（手動の [最新] だけ）。(5) `?at=` は後段（7.1。#33 では 400）。(6) `Cache-Control: private, max-age=60`、`ETag` = `"<snapshot_at>-<finished_at>-<reason>-<カレンダーの版>"`（UTC の秒）、`If-None-Match` で 304、gzip
 - optionchan のプロジェクトは **1 日 32 GiB のクエリ量上限**（runbook「コスト」）。1 回 150 MB なら 1 日 200 回で上限。手動操作だけなら 1 日 20〜50 回。監視は BigQuery の監査ログ（Cloud Logging の `jobChange`）を simulator の SA で絞った日ごとの集計（D8。手順は `api/README.md`「クエリ量の監視」。`INFORMATION_SCHEMA.JOBS_BY_PROJECT` は最小のスキャンが 512 MiB を超えるので使わない）
 - 待ちの短縮（#95）: カレンダー（キャッシュが新しくないときだけ）は `latest_runs` と、現物は板と同時に読む（先物 → 板の順序は変えない）。ジョブ数・スキャン量は並列にしても同じで、増えるのは **板が不採用の候補の現物 1 本**（最小課金 10 MiB）だけ。実行は `query_and_wait`（jobs.query。ジョブは今どおり作るので監査ログの監視は変わらない）。`bq_job` のログは処理バイト数だけを持ち、課金量は監査ログで見る
 - IV 推移（`/api/atm_iv`。#79）の抑制: (7) このクエリだけ `maximum_bytes_billed` を **`min(MAX_BYTES_BILLED, 64 MiB)`**（`settings.QUERY_MAX_BYTES_BILLED`。予期しない全期間・全列の読み込みの保険。D8 は (a) のまま）、(8) サーバーのキャッシュ（キー = `(tf, start, end)`、確定した範囲（`end ≤ now − 48 時間` = 表の作り直しの外）は 24 時間・それ以外は 300 秒、64 件）+ single-flight、(9) 右端の `end` を UTC の 0 時にそろえ SQL に `CURRENT_TIMESTAMP()` を使わないので、表が変わる（毎時 45 分）までは BigQuery の結果キャッシュで課金 0（2026-10-18 に実測: 同じ SQL・パラメータの 2 回目は cacheHit・課金 0）、(10) 1 日の回数の制限は付けない（オーナー決定）。ブラウザは自動で読まない（IV 推移を開いたときと最新化ボタンだけ）。最悪のケース（1h を 400 日まで + 1d を 2010 年まで左へ読む）でも 1 セッション約 24 ジョブ ≈ 240 MiB（キャッシュが効かないとき）で、32 GiB / 日の 1% 未満
+- 日次の値（`/api/atm_daily`。#152）の抑制: (11) このクエリだけ `maximum_bytes_billed` を **`min(MAX_BYTES_BILLED, 128 MiB)`**（`settings.QUERY_MAX_BYTES_BILLED["atm_cm_daily"]`。今 約 61.9 MiB で約 8 年の余裕）、サーバーのキャッシュ（キー = 範囲の終わりの日 `end`、24 時間、2 件）+ single-flight（インスタンスごと 1 日 1 回 + コールドスタートの回数。1 日 10 回でも約 0.6 GiB = 32 GiB / 日の 2% 未満）。BigQuery の結果キャッシュは表が毎時変わるので当てにしない。ブラウザは自動で読まない（持ちこたえマップを初めて開いたときに 1 回 / セッション）。削る案（2 限月の最終取引日を読まない 5 列 ≈ 52 MiB）は、限月が 2 つ進む欠けを誤って組むので採らない
 - 後段の候補（費用をさらに下げる）: optionchan の ingest が最新板の JSON を GCS に書く / 最新だけの小さい表を持つ（R4）
 - 採らない案: 生 HTML（GCS）を直接解析（optionchan の内部形式に結合する）
 
@@ -1023,6 +1026,13 @@ F の推定・補間・ATM の判定はブラウザ（`model/`）。`sq_date`・
   - 1m・1h の束ねは SQL（UNIX 秒で切る。`TIMESTAMP_SECONDS(UNIX_SECONDS(created_at) − MOD(UNIX_SECONDS(created_at), @step))`）、`iv30` が全部 NULL の足は `last_at`（NULL の行も含めた最大）を取ってから Python が捨てる（ビューアーの `drop_empty`）
   - キャッシュ: 確定 = `end ≤ now − 48 時間`（表は毎時 45 分に直近 2 時間、JST 7 時台に前日 07:00〜当日 07:00 を作り直す = 48 時間より古い行は変わらない）。確定 24 時間・それ以外 300 秒、64 件（`ExpiringLRUCache`）、single-flight、例外はキャッシュしない。`Cache-Control` は確定 3600 秒 / それ以外 60 秒
   - ログ: `atm_iv_served`（`tf`・`days`・`bars`・`cache` = hit / miss・`elapsed_ms`）と既存の `bq_job`。範囲・IV の値は出さない。400 は `bad_request` と `param`（`tf` / `start` / `end` / `range`）だけ
+- 持ちこたえマップの API（**決定（2026-10-19、#152 段 A）**。定数は `api/src/simulator_api/settings.py` の「日次の値」の 1 か所、純関数は `atm_daily.py`、ブラウザの組は `data/atmDaily.ts`）
+  - 新しいエンドポイント `/api/atm_daily`（`/api/atm_iv` は拡張しない。読む列・束ね方（日中の終値。atm_iv の 1d は夜間込みの取引日の OHLC）・範囲（全期間・パラメータなし）・キャッシュの単位が違い、atm_iv の契約を崩さないため）
+  - 日中の終値の窓 `ATM_DAILY_CLOSE_WINDOW` = JST 9:00〜15:00（両端含む）。SQL が `DATE(created_at, 'Asia/Tokyo')` で束ねて最後の行（`ARRAY_AGG(STRUCT(...) ORDER BY created_at DESC LIMIT 1)`）。`iv30`・`m1_forward`・`m1_last_trading_day` が NULL の行は窓の中の候補から外す
+  - 確定した範囲の終わり `settled_end(now)`: JST の今日（`ATM_DAILY_SETTLED_AT` = 8:00 以降）/ 前日。キャッシュ `ATM_DAILY_TTL_SECONDS` = 86,400 秒・`ATM_DAILY_CACHE_SIZE` = 2（`ExpiringLRUCache`、キー = 範囲の終わり）、single-flight、例外はキャッシュしない。`Cache-Control` は `ATM_DAILY_MAX_AGE_SECONDS` = 3600 秒
+  - ログ: `atm_daily_served`（`end`・`days`（件数）・`cache` = hit / miss・`elapsed_ms`）と既存の `bq_job`。IV・フォワードの値は出さない
+  - 2 営業日の組（ブラウザ）: d₀ が取引日（土日でなく取引カレンダーの `nonTradingDays` に無い。`holidays` = 版の全行は祝日取引の実施日も含むので使わない。カレンダーが壊れて空なら土日だけ）、d₁ = d₀ の `MARGIN_HORIZON_BUSINESS_DAYS`（= 2。証拠金の保有期間と同じ）営業日後の行があるときだけ。原資産は同じ限月のフォワードどうし: `l1(d₁) = l1(d₀)` なら `f1(d₀)`、`l1(d₁) = l2(d₀)` なら `f2(d₀)`、どちらでもなければ組まない。`dx = f1(d₁) / f₀ − 1`、`ivRatio = iv(d₁) / iv(d₀)`、`ivPt = iv(d₁) − iv(d₀)`
+  - dev: `/fixtures/atm_daily`（`scripts/devFixtures.mjs` の `synthAtmDaily`。種つきの架空の値。取引日だけ・毎月の限月の切り替え・下げで IV が上がる架空の反応）
 - IV 推移の画面（**決定（2026-10-18、#79 段 B）**。定数は `ui/view/ivHistory.ts` の上部の 1 か所、読み込みの規則は `ui/view/ivLoad.ts`。操作は docs/ui-redesign.md §4.7）
   - 遅延ロード: 起動時は `/api/atm_iv` を読まない。IV 推移が初めて見えたとき（PC は市場が IV 推移、スマホ・タブレットはスマイルのパネルで IV 推移。スマホはシートが hidden でない）に今の足の右端の 1 回分を 1 本。パネルを閉じて開き直しても読み直さない（状態は画面のルートに常駐し保存しない = アプリを開くたびに最新）。最新化ボタン ⟳ で右端をもう 1 本（サーバーのキャッシュを通る）。**トップバーの [最新] では読み直さない**（表は毎時しか変わらない。表より新しい分は段 C の「今」の 1 点）
   - 足は 1 分・5 分・15 分・1 時間（既定）・日足。**5 分・15 分は 1 分の読み込みから画面で束ねる**（UNIX 秒で切る。切替で読み直さない）。足を替えたら別の足を読む要求は止め、世代の違う応答は捨てる。見ていた時間の範囲を保つ（段 B は範囲の外なら初期表示。段 C で範囲の外ならその時間の 1 回分を読む = 下の段 C）
@@ -1129,6 +1139,13 @@ optionchan-gcp の bootstrap / prod を写すだけでは足りないもの。
 | テスト | `terraform test`（`infra/bootstrap/tests/`・`infra/prod/tests/`、モックのプロバイダ。資格情報なしで CI の `check` job で回る）: bootstrap は公開の拒否、WIF の条件、apply SA の subject、データセットの付与の型と role。prod は IAP 有効・`ingress`・IAM の検査が有効、`run.invoker` が IAP のサービスエージェント 1 件だけ、イメージが digest か `src-<20hex>` のタグ参照だけ、8.3 の値（AC11） |
 
 ## 変更履歴
+
+### 2026-10-19 持ちこたえマップ (A) 日次の値の API（#152 段 A）
+
+- 7.1: `GET /api/atm_daily`（表 `atm_cm_iv` の JST の日付ごとの日中の終値の `iv30` と 1 / 2 限月のフォワード・最終取引日。確定した日だけ・パラメータなし・`Cache-Control: private, max-age=3600`・ETag / 304・503）を足した
+- 4.1: `atm_cm_iv` の読む列に `/api/atm_daily` の 4 列（`m1_last_trading_day`・`m1_forward`・`m2_last_trading_day`・`m2_forward`）を足した（`contract.RELATIONS["atm_cm_daily"]`。固定コミットは変えない）
+- 7.3: スキャン量の表に `atm_cm_daily`（約 61.9 MiB、2026-10-19）、抑制に (11)（128 MiB の上限・範囲の終わりごとのキャッシュ 24 時間 + single-flight・自動で読まない）
+- 13.4: 持ちこたえマップの API の決定（定数の場所・窓・確定の時刻・キャッシュ・ログ・ブラウザの 2 営業日の組・dev の合成の応答）。画面（持ちこたえマップ）は段 B
 
 ### 2026-10-19 証拠金の概算: 買いの OP で減らさない（#149）
 

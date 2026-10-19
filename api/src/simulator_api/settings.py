@@ -64,9 +64,20 @@ ATM_IV_CACHE_SIZE = 64  # キャッシュの件数（キー = (tf, start, end)�
 ATM_IV_MAX_AGE_SECONDS = 60  # Cache-Control（確定していない範囲）
 ATM_IV_SETTLED_MAX_AGE_SECONDS = 3600  # Cache-Control（確定した範囲）
 
+# ---- 日次の値（/api/atm_daily。表 atm_cm_iv の日中の終値の iv30・1 / 2 限月のフォワード、#152。docs/design.md 7.1・
+# 7.3・13.4） ----
+ATM_DAILY_CLOSE_WINDOW = (time(9, 0), time(15, 0))  # 日中の終値を取る窓（JST。両端含む。この中の最後の行）
+# 範囲の終わり（その日を含まない）が JST の今日になる時刻。表は毎時 45 分に直近 2 時間、JST 7 時台に前日 07:00〜当日
+# 07:00 を作り直すので、8:00 には前日の日中が確定している（8:00 前は前日を含めない）
+ATM_DAILY_SETTLED_AT = time(8, 0)
+ATM_DAILY_TTL_SECONDS = 86400  # サーバーのキャッシュ（中身は確定した日だけ。キー = 範囲の終わり）
+ATM_DAILY_CACHE_SIZE = 2  # キャッシュの件数（範囲の終わりが変わる境で新旧 2 件）
+ATM_DAILY_MAX_AGE_SECONDS = 3600  # Cache-Control
+
 # クエリごとの maximum_bytes_billed の上限（設定の MAX_BYTES_BILLED との小さい方。#79 の判断 6: 予期しない全期間・全列の
-# 読み込みの保険。atm_cm_iv は 2 列で全期間 ≈ 20 MiB、全列 ≈ 112 MiB）
-QUERY_MAX_BYTES_BILLED: dict[str, int] = {"atm_cm_iv": 64 * MiB}
+# 読み込みの保険。atm_cm_iv は 2 列で全期間 ≈ 20 MiB、全列 ≈ 112 MiB。atm_cm_daily は 6 列で全期間 ≈ 62 MiB
+# （2026-10-19）、1 年で約 8 MiB 増える）
+QUERY_MAX_BYTES_BILLED: dict[str, int] = {"atm_cm_iv": 64 * MiB, "atm_cm_daily": 128 * MiB}
 
 DATA_SOURCES = ("bigquery", "file")
 

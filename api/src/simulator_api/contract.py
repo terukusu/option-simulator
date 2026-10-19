@@ -5,7 +5,7 @@
   schema/tokyo/*.json・schema/cm/atm_cm_iv.json と。CI はリポジトリ変数 OPTIONCHAN_REPO があるときだけ）と
   tests/test_sql_bq.py（OPTIONCHAN_BQ_TEST=1 のときの dry run の結果の列）
 - sql/<query>.sql はここに宣言した列だけを、この順で SELECT する（SELECT * を使わない。test_contract が検査）。
-  集計して返すクエリ（atm_cm_iv）は、結果の列を OUTPUTS に別に宣言する（dry run の列の比較に使う）
+  集計して返すクエリ（atm_cm_iv・atm_cm_daily）は、結果の列を OUTPUTS に別に宣言する（dry run の列の比較に使う）
 - 型の名前は BigQuery の schema JSON の表記（INTEGER / FLOAT / BOOLEAN / ...）
 """
 
@@ -91,6 +91,21 @@ RELATIONS = {
         columns=(("created_at", "TIMESTAMP"), ("iv30", "FLOAT")),
         required=frozenset({"created_at"}),
     ),
+    # 日次の値（/api/atm_daily、#152）。同じ表 atm_cm_iv から日中の終値の iv30 と 1 / 2 限月のフォワード・最終取引日を
+    # 読む（method・*_days・*_iv は読まない）。created_at の半開区間の絞りは tests/test_atm_daily.py の静的検査で守る
+    "atm_cm_daily": Relation(
+        name="atm_cm_iv",
+        schema_file="cm/atm_cm_iv.json",
+        columns=(
+            ("created_at", "TIMESTAMP"),
+            ("iv30", "FLOAT"),
+            ("m1_last_trading_day", "DATE"),
+            ("m1_forward", "FLOAT"),
+            ("m2_last_trading_day", "DATE"),
+            ("m2_forward", "FLOAT"),
+        ),
+        required=frozenset({"created_at"}),
+    ),
 }
 
 # 集計して返すクエリの結果の列（名前 → (列, 型)。dry run の job.schema と比べる）。無いクエリは RELATIONS の columns
@@ -102,6 +117,15 @@ OUTPUTS: dict[str, tuple[tuple[str, str], ...]] = {
         ("low", "FLOAT"),
         ("close", "FLOAT"),
         ("last_at", "TIMESTAMP"),
+    ),
+    "atm_cm_daily": (
+        ("day", "DATE"),
+        ("close_at", "TIMESTAMP"),
+        ("iv30", "FLOAT"),
+        ("m1_last_trading_day", "DATE"),
+        ("m1_forward", "FLOAT"),
+        ("m2_last_trading_day", "DATE"),
+        ("m2_forward", "FLOAT"),
     ),
 }
 

@@ -3,6 +3,8 @@
 - GET /api/chain: 使える最新の板（7.2）を JSON 版 1 で（data/chainTypes.ts）。?at= は後段（#33 では 400）
 - GET /api/calendar: 取引カレンダーの最新版（trading_calendar_latest）
 - GET /api/atm_iv?tf=<1m|1h|1d>[&start=&end=]: IV 推移（表 atm_cm_iv の iv30 の足。atm_iv.py。#79）
+- GET /api/atm_daily: 日次の値（表 atm_cm_iv の日中の終値の iv30・1 / 2 限月のフォワード。確定した日だけ。atm_daily.py。
+  #152）。パラメータは読まない
 - GET /healthz: 設定の読み込みだけ（BigQuery に触れない）
 - 静的ファイル: 環境変数 STATIC_DIR があるときだけ / と /assets/<path>（Vite のビルド成果物 = dist/）と、
   dist/ 直下の決まった名前（ROOT_FILES。manifest とアイコン。#90）
@@ -133,6 +135,11 @@ def create_app(runner=None, clock=None, monotonic=None, cfg: st.Settings | None 
             return _error(400, "bad_request")
         max_age = st.ATM_IV_SETTLED_MAX_AGE_SECONDS if atm_iv.is_settled(req, now) else st.ATM_IV_MAX_AGE_SECONDS
         return serve("atm_iv", lambda: service.atm_iv(req), f"private, max-age={max_age}")
+
+    @app.get("/api/atm_daily")
+    def api_atm_daily():
+        # パラメータは読まない（知らないパラメータは無視。キャッシュのキーを増やさない）
+        return serve("atm_daily", service.atm_daily, f"private, max-age={st.ATM_DAILY_MAX_AGE_SECONDS}")
 
     if cfg.static_dir is not None:
         static_dir = cfg.static_dir.resolve()

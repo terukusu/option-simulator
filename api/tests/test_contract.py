@@ -53,6 +53,7 @@ def test_schema_files_are_relative_to_schema_dir():
     for rel in contract.RELATIONS.values():
         assert re.fullmatch(r"(tokyo|cm)/\w+\.json", rel.schema_file), rel.name
     assert contract.RELATIONS["atm_cm_iv"].schema_file == "cm/atm_cm_iv.json"
+    assert contract.RELATIONS["atm_cm_daily"].schema_file == "cm/atm_cm_iv.json"
 
 
 def test_outputs_are_declared_queries():
@@ -60,6 +61,9 @@ def test_outputs_are_declared_queries():
     assert contract.output_columns("latest_runs") == contract.RELATIONS["latest_runs"].columns
     assert [c for c, _ in contract.output_columns("atm_cm_iv")] == ["started_at", "open", "high", "low", "close",
                                                                     "last_at"]
+    assert [c for c, _ in contract.output_columns("atm_cm_daily")] == [
+        "day", "close_at", "iv30", "m1_last_trading_day", "m1_forward", "m2_last_trading_day", "m2_forward"]
+    assert contract.RELATIONS["atm_cm_daily"].name == "atm_cm_iv"
 
 
 def test_pinned_commit_format():

@@ -31,3 +31,19 @@ export function synthAtmIv(
 export function atmIvQuery(
   url: string,
 ): { tf: string; range: { start: number; end: number } | null } | null;
+
+/** `/api/atm_daily` と同じ形の合成の応答（#152。架空の値。now の既定は SYNTH_IV_NOW） */
+export function synthAtmDaily(now?: number): {
+  schema_version: 1;
+  start: string;
+  end: string;
+  days: {
+    d: string;
+    t: string;
+    iv: number;
+    f1: number;
+    l1: string;
+    f2: number | null;
+    l2: string | null;
+  }[];
+};

@@ -7,7 +7,7 @@
 import json
 import threading
 from collections import defaultdict
-from datetime import UTC, date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, time, timedelta, timezone
 
 from conftest import REPO_ROOT
 
@@ -101,6 +101,8 @@ class World:
         self.spots: dict[datetime, list[dict]] = {}
         self.calendar: list[dict] = calendar_rows()
         self.cm: list[tuple[datetime, float | None]] = []  # atm_cm_iv の (created_at, iv30)
+        # atm_cm_iv の行（created_at・iv30・m1_last_trading_day・m1_forward・m2_last_trading_day・m2_forward。#152）
+        self.cm_daily: list[dict] = []
 
     def add(self, at, options, future_price, spot_price=None, rows_option=800, finished_after=40):
         """rows_option は latest_runs の行数（判定用の小さな板でも既定は 800 行として扱う）"""
@@ -191,6 +193,8 @@ class FakeRunner:
         start, end = params["start_at"], params["end_at"]
         if name == "atm_cm_iv":
             return cm_bars([p for p in w.cm if start <= p[0] < end], params["step"])
+        if name == "atm_cm_daily":
+            return cm_daily([r for r in w.cm_daily if start <= r["created_at"] < end])
         if name == "latest_runs":
             rows = [dict(r) for r in w.runs if start <= r["snapshot_at"] < end]
             return sorted(rows, key=lambda r: r["snapshot_at"], reverse=True)
@@ -223,6 +227,31 @@ def cm_bars(points: list[tuple], step: int) -> list[dict]:
                      "high": max(vals) if vals else None, "low": min(vals) if vals else None,
                      "close": vals[-1] if vals else None, "last_at": max(at for at, _ in ps)})
     return rows
+
+
+def cm_daily_row(at: datetime, iv30=20.0, f1=30000.0, l1=date(2026, 11, 12), f2=30010.0,
+                 l2=date(2026, 12, 10)) -> dict:
+    """合成の atm_cm_iv の 1 行（#152。架空の値）"""
+    return {"created_at": at, "iv30": iv30, "m1_last_trading_day": l1, "m1_forward": f1, "m2_last_trading_day": l2,
+            "m2_forward": f2}
+
+
+def cm_daily(rows: list[dict]) -> list[dict]:
+    """sql/atm_cm_daily.sql と同じ束ね方（偽の runner 用）: JST 9:00〜15:00（両端含む）の行のうち iv30・m1_forward・
+    m1_last_trading_day が NULL でない最後の行を JST の日付ごとに。day の昇順"""
+    lo, hi = time(9, 0), time(15, 0)
+    last: dict[date, dict] = {}
+    for r in sorted(rows, key=lambda r: r["created_at"]):
+        local = r["created_at"].astimezone(JST)
+        if not lo <= local.time() <= hi:
+            continue
+        if r["iv30"] is None or r["m1_forward"] is None or r["m1_last_trading_day"] is None:
+            continue
+        last[local.date()] = r
+    return [{"day": d, "close_at": r["created_at"], "iv30": r["iv30"],
+             "m1_last_trading_day": r["m1_last_trading_day"], "m1_forward": r["m1_forward"],
+             "m2_last_trading_day": r["m2_last_trading_day"], "m2_forward": r["m2_forward"]}
+            for d, r in sorted(last.items())]
 
 
 class Clock:

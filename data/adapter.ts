@@ -10,8 +10,10 @@
  *
  * 取引カレンダーは板と別に同一オリジンの `/api/calendar` を読む（loadCalendarJson。7.5）。
  * IV 推移は IV 推移を開いたときだけ同一オリジンの `/api/atm_iv` を読む（loadAtmIv。7.1。#79）。
+ * 日次の値は持ちこたえマップを開いたときだけ同一オリジンの `/api/atm_daily` を読む（loadAtmDaily。7.1。#152）。
  */
 
+import { type AtmDailyData, validateAtmDailyJson } from './atmDaily';
 import { type AtmIvData, type AtmIvSource, atmIvUrl, validateAtmIvJson } from './atmIv';
 import { type CalendarJson, validateCalendarJson } from './calendar';
 import { type ChainJson, parseChainJson } from './chainJson';
@@ -89,7 +91,7 @@ async function fetchText(
   label: string,
   base: Omit<FetchInit, 'signal'>,
   /** 何を読むか（エラーの文言の名詞） */
-  what: '板' | 'カレンダー' | 'IV 推移' = '板',
+  what: '板' | 'カレンダー' | 'IV 推移' | '過去の値動き' = '板',
 ): Promise<string> {
   const init: FetchInit = { ...base };
   if (opts.signal) init.signal = opts.signal;
@@ -230,6 +232,39 @@ export async function loadAtmIv(tf: AtmIvSource, opts: AtmIvLoadOptions = {}): P
   }
   const r = validateAtmIvJson(parsed, tf);
   if (!r.ok) throw new ChainLoadError('IV 推移の JSON が不正（api）', r.errors);
+  return r.value;
+}
+
+export interface AtmDailyLoadOptions {
+  /** API の URL（既定は同一オリジンの /api/atm_daily。dev の合成の応答は /fixtures/atm_daily） */
+  endpoint?: string;
+  fetch?: FetchLike;
+  signal?: AbortSignal;
+}
+
+/**
+ * 日次の値（`/api/atm_daily`。#152。持ちこたえマップの過去の点）を読んで検証する。パラメータなし。fetch の作法は
+ * `/api/calendar` と同じ（`cache: 'no-cache'`・`redirect: 'manual'` でログイン切れを検出）。失敗は ChainLoadError
+ * （応答の本文は入れない）。AbortError はそのまま投げる。
+ */
+export async function loadAtmDaily(opts: AtmDailyLoadOptions = {}): Promise<AtmDailyData> {
+  const load: LoadOptions = opts.signal ? { signal: opts.signal } : {};
+  const text = await fetchText(
+    opts.fetch ?? defaultFetch,
+    opts.endpoint ?? '/api/atm_daily',
+    load,
+    'api',
+    { cache: 'no-cache', redirect: 'manual' },
+    '過去の値動き',
+  );
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    throw new ChainLoadError('過去の値動きの JSON が不正（api）', ['$: JSON として解析できない']);
+  }
+  const r = validateAtmDailyJson(parsed);
+  if (!r.ok) throw new ChainLoadError('過去の値動きの JSON が不正（api）', r.errors);
   return r.value;
 }
 

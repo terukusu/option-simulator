@@ -257,3 +257,24 @@ def test_atm_cm_iv_job_has_64mib_cap():
     # 設定の上限のほうが小さければ設定の値
     small = bq.BigQueryRunner(st.Settings(project="example-project", maximum_bytes_billed=1048576), client=client)
     assert small.job_config("atm_cm_iv", {}).maximum_bytes_billed == 1048576
+
+
+def test_atm_cm_daily_job_has_128mib_cap():
+    # #152 A6: atm_cm_daily は min(MAX_BYTES_BILLED, 128 MiB)。パラメータは TIMESTAMP の start_at・end_at だけ
+    from google.cloud import bigquery
+
+    from simulator_api import atm_daily
+
+    client = FakeClient()
+    runner = bq.BigQueryRunner(CFG, client=client)
+    start, end = atm_daily.read_window(date(2026, 10, 14))
+    runner("atm_cm_daily", {"start_at": start, "end_at": end})
+    cfg = client.queries[0]["job_config"]
+    assert cfg.maximum_bytes_billed == 128 * 1024**2 == st.QUERY_MAX_BYTES_BILLED["atm_cm_daily"]
+    assert all(isinstance(p, bigquery.ScalarQueryParameter) for p in cfg.query_parameters)
+    params = {p.name: (p.type_, p.value) for p in cfg.query_parameters}
+    assert params == {"start_at": ("TIMESTAMP", start), "end_at": ("TIMESTAMP", end)}
+    sql = "\n".join(line for line in client.queries[0]["sql"].splitlines() if not line.lstrip().startswith("--"))
+    assert "`example-project.example_dataset.atm_cm_iv`" in sql and "2026" not in sql and "2010" not in sql
+    small = bq.BigQueryRunner(st.Settings(project="example-project", maximum_bytes_billed=1048576), client=client)
+    assert small.job_config("atm_cm_daily", {}).maximum_bytes_billed == 1048576

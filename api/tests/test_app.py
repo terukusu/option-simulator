@@ -468,3 +468,73 @@ def test_atm_iv_file_source_is_503(tmp_path):
     client = create_app(cfg=st.Settings(data_source="file", chain_file=f)).test_client()
     assert client.get("/api/atm_iv?tf=1h").status_code == 503
     assert client.get("/api/atm_iv?tf=5m").status_code == 400
+
+
+# ---- /api/atm_daily（#152 A5） ----
+
+def daily_world():
+    from support import cm_daily_row
+
+    w = World()
+    w.add_fixture(load_fixture("latest"))
+    for d in (9, 12, 13):
+        w.cm_daily.append(cm_daily_row(jst(2026, 10, d, 14, 59), iv30=20.0 + d / 10, f1=30000.0 + d))
+    return w
+
+
+def test_atm_daily_ok_headers():
+    client, runner, _ = make(world=daily_world())  # 今 = 10/13 21:46 JST → 範囲の終わり 10/13（10/12 まで）
+    res = client.get("/api/atm_daily")
+    assert res.status_code == 200
+    assert res.headers["Content-Type"] == "application/json; charset=utf-8"
+    assert res.headers["Cache-Control"] == "private, max-age=3600"
+    assert res.headers["ETag"] == '"atm-daily-2026-10-13-2"'
+    assert res.headers["Vary"] == "Accept-Encoding"
+    assert_security_headers(res)
+    body = res.get_json()
+    assert set(body) == {"schema_version", "start", "end", "days"}
+    assert body["schema_version"] == 1 and body["end"] == "2026-10-13"
+    assert [d["d"] for d in body["days"]] == ["2026-10-09", "2026-10-12"]
+    assert runner.names() == ["atm_cm_daily"]  # 板・カレンダーは読まない
+    gz = client.get("/api/atm_daily", headers={"Accept-Encoding": "gzip"})
+    assert gz.headers["Content-Encoding"] == "gzip" and json.loads(gzip.decompress(gz.data)) == body
+    assert runner.names() == ["atm_cm_daily"]  # 2 回目はキャッシュ
+
+
+def test_atm_daily_etag_304():
+    client, _, _ = make(world=daily_world())
+    etag = client.get("/api/atm_daily").headers["ETag"]
+    res = client.get("/api/atm_daily", headers={"If-None-Match": etag})
+    assert res.status_code == 304 and res.data == b""
+    assert res.headers["ETag"] == etag and res.headers["Cache-Control"] == "private, max-age=3600"
+    assert client.get("/api/atm_daily", headers={"If-None-Match": '"atm-daily-2026-10-12-1"'}).status_code == 200
+
+
+def test_atm_daily_unknown_params_ignored(capsys):
+    client, runner, _ = make(world=daily_world())
+    a = client.get("/api/atm_daily")
+    b = client.get("/api/atm_daily?start=2009-01-01&at=x&foo=<script>")
+    assert b.status_code == 200 and b.data == a.data
+    assert runner.count("atm_cm_daily") == 1  # キャッシュのキーはパラメータで増えない
+    assert "script" not in capsys.readouterr().out
+
+
+def test_atm_daily_runner_error_is_503_with_type_only(capsys):
+    secret = "projects/123456: bytesBilledLimitExceeded for user@example.com"
+    client, _, _ = make(world=daily_world(), errors={"atm_cm_daily": RuntimeError(secret)})
+    res = client.get("/api/atm_daily")
+    assert res.status_code == 503 and res.get_json() == {"error": "unavailable"}
+    assert res.headers["Cache-Control"] == "no-store"
+    assert b"123456" not in res.data and b"bytesBilled" not in res.data
+    out = capsys.readouterr().out
+    assert "123456" not in out and "example.com" not in out and "bytesBilled" not in out
+    rec = [json.loads(line) for line in out.splitlines() if '"query_failed"' in line][-1]
+    assert rec["endpoint"] == "atm_daily" and rec["error_type"] == "RuntimeError"
+
+
+def test_atm_daily_file_source_is_503(tmp_path):
+    f = tmp_path / "chain.json"
+    f.write_text(json.dumps(load_fixture("latest")), encoding="utf-8")
+    client = create_app(cfg=st.Settings(data_source="file", chain_file=f)).test_client()
+    res = client.get("/api/atm_daily")
+    assert res.status_code == 503 and res.get_json() == {"error": "unavailable"}
