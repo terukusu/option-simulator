@@ -156,6 +156,14 @@ function forwardText(month: ChainMonth): string {
   return Number.isFinite(u) ? `${fmtNum(month.F, 0)} ±${fmtNum(u, 0)}` : fmtNum(month.F, 0);
 }
 
+/** カレンダーの出どころ: API の版（optionchan = source bigquery か無し / それ以外の供給元）か同梱の版（#154） */
+export function calendarOriginLabel(calendar: Calendar): string {
+  if (calendar.origin !== 'api') return '同梱の版';
+  return calendar.source === undefined || calendar.source === 'bigquery'
+    ? 'optionchan の版'
+    : 'API の版';
+}
+
 /** 前提に出す取引カレンダーの文（API の版 / 同梱の版 / 読めない）と、期限切れの警告。設計 7.5。 */
 export function calendarAssumption(
   calendar: Calendar,
@@ -168,11 +176,17 @@ export function calendarAssumption(
     };
   }
   return {
-    text: `取引カレンダー: ${calendar.origin === 'api' ? 'optionchan の版' : '同梱の版'}（${calendar.versionOn}）・確定 ${calendar.coveredUntil} まで`,
+    text: `取引カレンダー: ${calendarOriginLabel(calendar)}（${calendar.versionOn}）・確定 ${calendar.coveredUntil} まで`,
     warning: isCalendarExpired(calendar, evalTime)
       ? `カレンダー期限切れ（評価時刻が ${calendar.coveredUntil} より後。休業日が漏れている可能性）`
       : null,
   };
+}
+
+/** 板の遅れの表示（0 分 = 遅れのない供給元。docs/data-sources.md。#154） */
+export function delayText(minutes: number): string {
+  if (!Number.isFinite(minutes)) return DASH;
+  return minutes === 0 ? '遅れなし' : `約 ${minutes} 分遅れ`;
 }
 
 export function headerModel(
@@ -184,7 +198,7 @@ export function headerModel(
   const cal = calendarAssumption(calendar, chain.evalTime);
   return {
     snapshot: fmtDateTime(chain.snapshotAt),
-    delay: Number.isFinite(chain.delayedMinutes) ? `約 ${chain.delayedMinutes} 分遅れ` : DASH,
+    delay: delayText(chain.delayedMinutes),
     reason: REASON_LABEL[chain.reason] ?? chain.reason,
     reasonNote: reasonNote(chain),
     source: chain.source,

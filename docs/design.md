@@ -159,6 +159,8 @@ JPX の商品一覧（2026-10-13）にある日経225の商品は、先物 3 つ
 
 コード（`apps/ingest` のパーサー・`snapshot.py`・`calendar.py`）、スキーマ（`schema/tokyo/*.json`）、BigQuery の直近データ（2026-10-13、読み取りのみ。件数・割合だけ）から確認した。根拠の表は付録 A。
 
+この章は既定の供給元 optionchan の実態。供給元は差し替えられる（API の `DATA_SOURCE`。7.4「API の供給元」）。他の候補（証券会社の API・J-Quants）の比較、供給元に依らない板の契約（必須 / 欠けうる）、中立の気配の一覧は `docs/data-sources.md`、決定の経緯は `docs/adr-0003-data-source-abstraction.md`（#154）。
+
 ### 4.1 契約（依存するインターフェース）
 
 データセット `optionchan_tokyo`（東京）。読むのは **テーブル関数 4 本とビュー `trading_calendar_latest`、表 `atm_cm_iv`**（IV 推移。#79 で追加）だけ（板・先物・現物の生テーブルは読まない）。テーブル関数の引数はすべて `(start_at TIMESTAMP, end_at TIMESTAMP)` の半開区間 `[start_at, end_at)`。`atm_cm_iv` はテーブル関数が無いので表を直接読む（#79 の判断 2 = (a)。optionchan が提示したのも表）。
@@ -647,8 +649,8 @@ JSCC の証拠金（2023-11 から VaR 方式。指数先物・OP は HS-VaR）�
 | `GET /api/chain` | 使える最新スナップショット（7.2）の 2 限月分の板・先物・現物・時刻・`reason` を 1 つの JSON で。約 1,100 行、gzip で数十 KB |
 | `GET /api/chain?at=<ISO 時刻>` | **後段**（#33 では 400 `{"error":"bad_request"}`。入力値は応答・ログに出さない）。案: `at` 以前で最新の使えるスナップショット（14 日以内）を `latest_runs` で `snapshot_at` に解決してから 1 秒の窓で読む。使う画面（過去時点の閲覧・「清算値」モード）が MVP に無く、異なる `at` ごとに約 150 MiB を読むので、連打制限（1 クライアント 10 回 / 分。キーは IAP のユーザー ID ヘッダのハッシュをメモリ内にだけ持つ）だけでは費用を抑えきれない。上限の設計と一緒に入れる |
 | `GET /api/calendar` | 取引カレンダーの最新版（`trading_calendar_latest`。7.5）。`{schema_version: 1, source: "bigquery", version_at, covered_until, listed_until, days: [{date, is_trading_day, status, name}]}`（版の全行、日付の昇順。`version_at` は +09:00）。板とは別のエンドポイント（更新頻度が違い、板の無い限月・手入力の足・`file` アダプタでも使うため。板の JSON 版 1 の形を変えない）。`Cache-Control: private, max-age=3600`、`ETag` = `version_at`。ブラウザは本番で開いたときと [最新] で読む（型・検証・同梱の版へのフォールバックは 7.5。#39） |
-| `GET /api/atm_iv?tf=<1m\|1h\|1d>[&start=<ISO>&end=<ISO>]` | IV 推移（#79）: 表 `atm_cm_iv` の `iv30`（30 日固定の ATM IV、%）の足。`tf` は完全一致（5m・15m は画面が 1m から束ねる）。`start`・`end` は両方か無し。ISO 8601 の **オフセット付き**（`Z` か `±HH:MM`、秒まで）で **UTC の 0 時ちょうど**（キャッシュのキーと BigQuery の結果キャッシュを効かせる）。両方無ければ右端（最新）の 1 回分 = `end` = 明日の UTC の 0 時、`start` = `end` − 既定の日数（1m 3 日・1h 60 日・1d 365 日）。`end` は明日の UTC の 0 時に縮め（端末の時計の進みで 400 にしない）、縮めた後の `end − start` が 1 回の最大（1m 3 日・1h 100 日・1d 400 日）以下、`2010-01-01T00:00:00Z ≤ start < end`。応答 `{schema_version: 1, tf, start, end, last_at, bars: [{t, o, h, l, c}]}`（時刻は +09:00。`start`・`end` は実際に読んだ範囲で `end` は `min(end, now)`、`last_at` は範囲の中の最後の行の `created_at`（`iv30` が NULL の行も含む。無ければ null）、`bars` は `t` の昇順・重複なし、`t` は足の始まり（1m・1h は UNIX 秒で切った時刻、1d はその取引日の 00:00 JST）、値は %、`iv30` が全部 NULL の足は返さない）。日足は 1 時間足を取引日に束ねる（取引日 = JST + 7 時間の日付から土日・`is_trading_day = false` の日を飛ばした最初の日。optionchan のビューアーと同じ。祝日取引の実施日は取引日、読んだ範囲の先頭の取引日は出さない）。不正は 400 `{"error":"bad_request"}`（値は応答・ログに出さない。ログはパラメータ名だけ）、BigQuery の失敗・上限超過・`DATA_SOURCE=file` は 503 `{"error":"unavailable"}`。`Cache-Control: private, max-age=3600`（確定した範囲 = `end ≤ now − 48 時間`）/ `private, max-age=60`（それ以外）、ETag なし、gzip。画面は IV 推移を開いたとき・最新化ボタン（右端。範囲なし）と、左右へパンしたときの追加読み込み（範囲つき。#79 段 C）でだけ読む |
-| `GET /api/atm_daily` | 日次の値（#152。追証マップの過去の点。画面は段 B）: 表 `atm_cm_iv` の **JST の日付ごとの日中の終値** = JST 9:00〜15:00（両端含む）の行のうち `iv30`・`m1_forward`・`m1_last_trading_day` が NULL でない最後の行。パラメータなし（知らないパラメータは無視。値は読まない）。範囲は **確定した日だけ** = `[2010-01-01, end)`、`end` = JST の今日（JST 8:00 以降）/ 前日（8:00 前）（表は毎時 45 分に直近 2 時間、JST 7 時台に前日 07:00〜当日 07:00 を作り直す = 8:00 には前日の日中が確定。今日の日中は翌朝 8:00 まで入らない）。応答 `{schema_version: 1, start: "2010-01-01", end: "<YYYY-MM-DD（含まない）>", days: [{d, t, iv, f1, l1, f2, l2}]}`（`d` は JST の日付で昇順・重複なし、`t` は終値の行の時刻（+09:00）、`iv` は %（`iv30`）、`f1`・`l1` は 1 限月のフォワードと最終取引日、`f2`・`l2` は 2 限月（片方でも NULL / 有限でない / 正でなければ両方 null）。`iv`・`f1` が有限で正でない行は返さない。値は丸めない）。2 営業日の組はブラウザ（`data/atmDaily.ts` の `atmMoves`）。400 は無い。BigQuery の失敗・上限超過・`DATA_SOURCE=file` は 503 `{"error":"unavailable"}`。`Cache-Control: private, max-age=3600`、`ETag: "atm-daily-<end>-<日数>"`（`If-None-Match` で 304）、gzip。画面は自動で読まない（追証マップを初めて開いたときに 1 回 / セッション、失敗したら [再試行] だけ。[最新] でも読み直さない） |
+| `GET /api/atm_iv?tf=<1m\|1h\|1d>[&start=<ISO>&end=<ISO>]` | IV 推移（#79）: 表 `atm_cm_iv` の `iv30`（30 日固定の ATM IV、%）の足。`tf` は完全一致（5m・15m は画面が 1m から束ねる）。`start`・`end` は両方か無し。ISO 8601 の **オフセット付き**（`Z` か `±HH:MM`、秒まで）で **UTC の 0 時ちょうど**（キャッシュのキーと BigQuery の結果キャッシュを効かせる）。両方無ければ右端（最新）の 1 回分 = `end` = 明日の UTC の 0 時、`start` = `end` − 既定の日数（1m 3 日・1h 60 日・1d 365 日）。`end` は明日の UTC の 0 時に縮め（端末の時計の進みで 400 にしない）、縮めた後の `end − start` が 1 回の最大（1m 3 日・1h 100 日・1d 400 日）以下、`2010-01-01T00:00:00Z ≤ start < end`。応答 `{schema_version: 1, tf, start, end, last_at, bars: [{t, o, h, l, c}]}`（時刻は +09:00。`start`・`end` は実際に読んだ範囲で `end` は `min(end, now)`、`last_at` は範囲の中の最後の行の `created_at`（`iv30` が NULL の行も含む。無ければ null）、`bars` は `t` の昇順・重複なし、`t` は足の始まり（1m・1h は UNIX 秒で切った時刻、1d はその取引日の 00:00 JST）、値は %、`iv30` が全部 NULL の足は返さない）。日足は 1 時間足を取引日に束ねる（取引日 = JST + 7 時間の日付から土日・`is_trading_day = false` の日を飛ばした最初の日。optionchan のビューアーと同じ。祝日取引の実施日は取引日、読んだ範囲の先頭の取引日は出さない）。不正は 400 `{"error":"bad_request"}`（値は応答・ログに出さない。ログはパラメータ名だけ）、BigQuery の失敗・上限超過・`DATA_SOURCE=file` / `quotes` は 503 `{"error":"unavailable"}`。`Cache-Control: private, max-age=3600`（確定した範囲 = `end ≤ now − 48 時間`）/ `private, max-age=60`（それ以外）、ETag なし、gzip。画面は IV 推移を開いたとき・最新化ボタン（右端。範囲なし）と、左右へパンしたときの追加読み込み（範囲つき。#79 段 C）でだけ読む |
+| `GET /api/atm_daily` | 日次の値（#152。追証マップの過去の点。画面は段 B）: 表 `atm_cm_iv` の **JST の日付ごとの日中の終値** = JST 9:00〜15:00（両端含む）の行のうち `iv30`・`m1_forward`・`m1_last_trading_day` が NULL でない最後の行。パラメータなし（知らないパラメータは無視。値は読まない）。範囲は **確定した日だけ** = `[2010-01-01, end)`、`end` = JST の今日（JST 8:00 以降）/ 前日（8:00 前）（表は毎時 45 分に直近 2 時間、JST 7 時台に前日 07:00〜当日 07:00 を作り直す = 8:00 には前日の日中が確定。今日の日中は翌朝 8:00 まで入らない）。応答 `{schema_version: 1, start: "2010-01-01", end: "<YYYY-MM-DD（含まない）>", days: [{d, t, iv, f1, l1, f2, l2}]}`（`d` は JST の日付で昇順・重複なし、`t` は終値の行の時刻（+09:00）、`iv` は %（`iv30`）、`f1`・`l1` は 1 限月のフォワードと最終取引日、`f2`・`l2` は 2 限月（片方でも NULL / 有限でない / 正でなければ両方 null）。`iv`・`f1` が有限で正でない行は返さない。値は丸めない）。2 営業日の組はブラウザ（`data/atmDaily.ts` の `atmMoves`）。400 は無い。BigQuery の失敗・上限超過・`DATA_SOURCE=file` / `quotes` は 503 `{"error":"unavailable"}`。`Cache-Control: private, max-age=3600`、`ETag: "atm-daily-<end>-<日数>"`（`If-None-Match` で 304）、gzip。画面は自動で読まない（追証マップを初めて開いたときに 1 回 / セッション、失敗したら [再試行] だけ。[最新] でも読み直さない） |
 | `GET /healthz` | 設定の読み込みだけ（BigQuery に触れない） |
 
 JSON（版 1。縦切り 1b で確定。型は `data/chainTypes.ts`、検証は `data/chainJson.ts`）:
@@ -665,7 +667,7 @@ JSON（版 1。縦切り 1b で確定。型は `data/chainTypes.ts`、検証は 
                          put: {...} }] }] }
 ```
 
-F の推定・補間・ATM の判定はブラウザ（`model/`）。`sq_date`・`last_trading_day` はサーバーがカレンダー（7.5）から入れる。案から決めたこと:
+F の推定・補間・ATM の判定はブラウザ（`model/`）。`sq_date`・`last_trading_day` はサーバーがカレンダー（7.5）から入れる。供給元に依らない契約（項目ごとの必須 / 欠けうると、欠けたときの画面）は `docs/data-sources.md` 2 章（#154）。案から決めたこと:
 
 - **版** `schema_version`（整数。形を変えたら上げる。未対応の版は拒否）。データ元の表示用に任意の `source`
 - **時刻**は ISO 8601 の **オフセット付き**（`2026-10-13T21:31:00+09:00`）。optionchan の DATETIME（JST の壁時計）はサーバーが +09:00 を付ける。オフセットの無い時刻は拒否（解釈が端末のタイムゾーンに依存するため）。日付は `YYYY-MM-DD`、限月は `YYYY-MM`
@@ -727,6 +729,16 @@ F の推定・補間・ATM の判定はブラウザ（`model/`）。`sq_date`・
 | `bigquery` | **本番の既定**（#34）/ 実データでの確認 | Cloud Run は SA、ローカルは ADC（`gcloud auth application-default login`） |
 | 手入力 | 板が無くても検討できる | ブラウザ内 |
 
+**API の供給元（#154・ADR-0003）**: 上の表はブラウザ側のアダプタ。API（`/api/chain`・`/api/calendar`・`/api/atm_iv`・`/api/atm_daily`）の中身を返す供給元は `api/src/simulator_api/sources.py` の `DataSource`（Protocol）で、環境変数 `DATA_SOURCE` の値 → 実装の表（`BUILDERS`）は 1 か所:
+
+| `DATA_SOURCE` | 実装 | 内容 |
+|---|---|---|
+| `bigquery`（既定） | `service.ChainService` | optionchan の BigQuery（7.2・7.3。#154 で読み方・キャッシュ・single-flight・`MAX_BYTES_BILLED` は変えていない） |
+| `file` | `service.FileChainService` | `CHAIN_FILE` の板の JSON 版 1 をそのまま。カレンダー・IV 推移・日次の値は 503 |
+| `quotes` | `service.QuotesFileService`（`quotes.py`） | `QUOTES_FILE` の **中立の気配の一覧**（利用者が自分の API から書き出す）と `CALENDAR_FILE`（`/api/calendar` と同じ形）から板を組み立てる。限月の日付はカレンダーの規則、reason は `snapshot_at` の時刻（7.2 の窓）、使える板の判定は `usable.board_ok`。`/api/calendar` は `CALENDAR_FILE` を `source: "file"` で、IV 推移・日次の値は 503 |
+
+板の JSON は版 1 のまま。画面は欠けうる項目に耐える: 板全体で気配の IV（`bid_iv`・`ask_iv`）が無ければ「JPX の IV 欠損」の印を出さず、板の IV 列は気配の価格から Black-76（限月の F・T・r）で求める（`data/normalize.ts` の `SideInfo.bidIv`・`askIv`、`Chain.quoteIvProvided`）。`delayed_minutes = 0` は「遅れなし」。形・足し方は `docs/data-sources.md`。
+
 テスト用の板: **合成データ**（Black-76 から生成した板、または実データから絞って丸めた少数行）をリポジトリに置く。実データの dump は `fixtures/local/`（gitignore）にだけ置き、件数だけ Issue に記録する（JPX 由来のデータを公開リポジトリに置かない。8.1 の D 案を退けた理由と同じ）。dump コマンドは「コミットしない」と表示する。
 
 アダプタのインターフェース（`data/adapter.ts`）: `loadChain(opts?: { at?, signal? }): Promise<ChainJson>` は **検証済みの JSON** を返し、壊れていれば `ChainLoadError`（応答の本文はメッセージに入れない）。正規化（`normalizeChain(json, { r, evalTime })`）は別にし、金利・評価時刻を変えても読み直さない。`bigquery` のブラウザ側は同一オリジンの `/api/chain`（`?at=`）を読むだけ。手入力は板を読まず、`data/legs.ts` の `manualOptionLeg`（商品・限月・K・建値・IV。SQ 日は取引カレンダー（7.5）の休業日で求め、F は先物価格 = basis 0 か指定値、印 `no_board`）と `futureLeg` で足と市場を作る。取引カレンダーは `loadCalendarJson(opts?: { endpoint?, fetch?, signal? }): Promise<CalendarJson>`（既定 `/api/calendar`。`fetch` の作法と `ChainLoadError` の種別は `/api/chain` と同じ。JSON として読めない・検証に落ちれば `invalid` + 明細。7.5）。
@@ -757,7 +769,7 @@ F の推定・補間・ATM の判定はブラウザ（`model/`）。`sq_date`・
 - **検証**（`data/calendar.ts` の `validateCalendarJson`・`buildCalendar(json, origin)`。純関数・例外なし）: ルートがオブジェクト、`schema_version` = 1、`version_at` は ISO 8601 の日時（オフセットつき）、`covered_until`・`listed_until` は実在の `YYYY-MM-DD`、`days` は配列で各行の `date` が実在の日付で厳密に昇順（重複なし）・`is_trading_day` が boolean・`status` が空でない文字列（`confirmed` / `planned` 以外も通す）・`name` が文字列。`source` と余分なキーは見ない。`days` が空でもよい。明細は最大 50 件
 - **休業日** = 版の全行の日付（`is_trading_day` を問わない。土日は `model/time.ts` が常に休業日扱い。規則は 5.2）。**確定の最終日** = `covered_until`（板の無い限月の第 2 金曜がこれより後なら「休業日未確定」。5.2）、**掲載の最終日** = `listed_until`（これより後の月は土日だけで求まる）
 - **同梱の版**（`data/calendar/calendar.json`。`/api/calendar` と同じ形の JSON 1 つ。`ui/calendar.ts` がバンドルに入れる）: 初期状態のカレンダー。API から一度も取れていないとき（dev の合成の板・ファイル選択・`DATA_SOURCE=file` の Flask の 503・通信の失敗・ログイン切れ）に使い、取れた後の失敗はメモリ内の API の版のまま。壊れていれば（API・同梱とも）休業日なし（土日だけ）・期限切れ扱い。同梱の版は自動更新しない。作り直すときは BigQuery を読める手元で `/api/calendar` の応答をそのまま書き、`npm test`（検証・全月の SQ の検査・合成の板の日付との一致）を通して PR（手順は README の「取引カレンダー」）。clone した人は BigQuery 無しでも同梱の版で動く
-- **画面**: ヘッダの前提に、API の版なら「取引カレンダー: optionchan の版（<版の日付>）・確定 <covered_until> まで」、同梱の版なら「取引カレンダー: 同梱の版（<版の日付>）・確定 <covered_until> まで」（版の日付 = `version_at` の JST の日付）。評価時刻（JST の日付）が `covered_until` より後なら「カレンダー期限切れ（評価時刻が <covered_until> より後。休業日が漏れている可能性）」を警告色で、読めなければ「取引カレンダー: 読めない（SQ 日は土日だけで計算）」と「カレンダー期限切れ（カレンダーを読めない）」。`name`・`status` は画面に出さない
+- **画面**: ヘッダの前提に、API の版なら「取引カレンダー: optionchan の版（<版の日付>）・確定 <covered_until> まで」（`source` が `bigquery` 以外の API の版 = 供給元 `quotes` などは「API の版」。#154）、同梱の版なら「取引カレンダー: 同梱の版（<版の日付>）・確定 <covered_until> まで」（版の日付 = `version_at` の JST の日付）。評価時刻（JST の日付）が `covered_until` より後なら「カレンダー期限切れ（評価時刻が <covered_until> より後。休業日が漏れている可能性）」を警告色で、読めなければ「取引カレンダー: 読めない（SQ 日は土日だけで計算）」と「カレンダー期限切れ（カレンダーを読めない）」。`name`・`status` は画面に出さない
 - **将来の候補**（後段）: カレンダーの localStorage への保存（最後に取れた版）、`?at=` のカレンダー、optionchan 側が JPX から自動取り込み（R3）
 
 ## 8. 置き場所（Q1。比較と推奨）
@@ -789,7 +801,7 @@ F の推定・補間・ATM の判定はブラウザ（`model/`）。`sq_date`・
 | IaC の置き場所 | このリポジトリ（`infra/bootstrap` を所有者が apply、`infra/prod` を CI が apply）。必要なものの一覧・名前は付録 B、手順は `infra/README.md` | optionchan-gcp 側の変更を不要にする |
 | API の言語 | Python（Flask / gunicorn）。ビューアーの `bq.py` / `settings.py` / テスト / Dockerfile を写す | BigQuery の読み方・セキュリティヘッダ・テストの流儀が揃う。API は薄い |
 | 静的ファイル | Vite のビルド成果物を Flask から配る（環境変数 `STATIC_DIR` のディレクトリの `/`（`index.html`、`no-cache`）と `/assets/<path>`（`immutable`）と、`/` 直下の決まった 5 つの名前（`/manifest.webmanifest`・`/favicon.svg`・`/apple-touch-icon.png`・`/icon-192.png`・`/icon-512.png`。`no-cache`、Content-Type は名前ごとに固定、名前の集合は `app.py` の定数 1 か所で変数を含む経路を作らない。#90）。未設定なら 404）。イメージへの同梱はリポジトリ直下の `Dockerfile` の Node ステージ（`npm ci --ignore-scripts` → `npm run build` の `dist/` を `/app/static` に置き、`STATIC_DIR` はイメージの環境変数。#36）。CDN なし。ローカルは Vite の `server.proxy` で `/api` → `127.0.0.1:8080` の Flask（同一オリジン維持） | CSP `script-src 'self'` |
-| 設定 | `GCP_PROJECT`（`bigquery` のとき必須）、`BQ_DATASET`（既定 `optionchan_tokyo`）、`BQ_LOCATION`（既定 `asia-northeast1`）、`MAX_BYTES_BILLED`（既定かつ上限 512 MiB）、`DATA_SOURCE`（`bigquery` / `file`。`file` は `CHAIN_FILE` の JSON をそのまま `/api/chain` で返し、`/api/calendar` は 503。GCP なしの起動確認・clone した人向け）、`CHAIN_FILE`、`STATIC_DIR`。詳細は `api/README.md`。AI の資格情報（#133）は `AI_CREDENTIAL`（`api_key` / `oauth_token`。未設定は AI 無効）と、`ANTHROPIC_API_KEY` か `ANTHROPIC_AUTH_TOKEN` の片方（Secret Manager の参照。Terraform の変数 `ai_credential` で選ぶ。[ADR-0001](adr-0001-ai-credentials-secret-manager.md)） | ビューアーと同じ名前 |
+| 設定 | `GCP_PROJECT`（`bigquery` のとき必須）、`BQ_DATASET`（既定 `optionchan_tokyo`）、`BQ_LOCATION`（既定 `asia-northeast1`）、`MAX_BYTES_BILLED`（既定かつ上限 512 MiB）、`DATA_SOURCE`（`bigquery` / `file` / `quotes`。`file` は `CHAIN_FILE` の JSON をそのまま `/api/chain` で返し、`/api/calendar` は 503。GCP なしの起動確認・clone した人向け。`quotes` は `QUOTES_FILE` の中立の気配の一覧と `CALENDAR_FILE`（`/api/calendar` と同じ形）から板を組み立てる。7.4「API の供給元」・`docs/data-sources.md`。#154）、`CHAIN_FILE`、`QUOTES_FILE`、`CALENDAR_FILE`、`STATIC_DIR`。詳細は `api/README.md`。AI の資格情報（#133）は `AI_CREDENTIAL`（`api_key` / `oauth_token`。未設定は AI 無効）と、`ANTHROPIC_API_KEY` か `ANTHROPIC_AUTH_TOKEN` の片方（Secret Manager の参照。Terraform の変数 `ai_credential` で選ぶ。[ADR-0001](adr-0001-ai-credentials-secret-manager.md)） | ビューアーと同じ名前 |
 | Cloud Run | ビューアーと同じ（第 1 世代、CPU 1・512Mi・リクエスト中だけ CPU、0〜2 インスタンス、60 秒、digest 指定、同時実行 8、起動プローブ `/healthz`）。gunicorn は 1 ワーカー・8 スレッド（API のキャッシュと single-flight をインスタンス内で共有する。13.4）。`infra/prod/simulator.tf`。検証は apply 後に本番の URL で行い（`infra/README.md`「prod（Cloud Run simulator）」の確認）、戻すときは revert の PR → deploy、急ぐときは `gcloud run services update-traffic` で旧リビジョンへ（#36。リビジョンタグでの事前検証はしない） | 実績のある値。リビジョンタグはビューアーも使っておらず、初回は戻す先の旧リビジョンも利用者もいない。タグを入れると Terraform の `traffic` と deploy の 2 段階化が要る |
 | IAP の権限 | `httpsResourceAccessor`（閲覧者）は **bootstrap（所有者 apply、`local.auto.tfvars`）** に置く。付与には `roles/iap.admin` が要り、apply SA には渡さない | optionchan と同じ |
 
@@ -1197,6 +1209,12 @@ optionchan-gcp の bootstrap / prod を写すだけでは足りないもの。
 | テスト | `terraform test`（`infra/bootstrap/tests/`・`infra/prod/tests/`、モックのプロバイダ。資格情報なしで CI の `check` job で回る）: bootstrap は公開の拒否、WIF の条件、apply SA の subject、データセットの付与の型と role。prod は IAP 有効・`ingress`・IAM の検査が有効、`run.invoker` が IAP のサービスエージェント 1 件だけ、イメージが digest か `src-<20hex>` のタグ参照だけ、8.3 の値（AC11） |
 
 ## 変更履歴
+
+### 2026-10-19 データの供給元の抽象化（#154）
+
+- 4 章の冒頭・7.1（`/api/atm_iv`・`/api/atm_daily` は `quotes` でも 503）・7.4・7.5 の画面・8.3 の設定（`DATA_SOURCE` に `quotes`、`QUOTES_FILE`・`CALENDAR_FILE`）: 供給元は API の `DATA_SOURCE` で差し替えられる（`bigquery` = optionchan（既定。挙動は変えない）/ `file` / `quotes` = 中立の気配の一覧 + 取引カレンダーのファイル）。供給元の口は `api/src/simulator_api/sources.py`、中立の形 → 板は `quotes.py`
+- 板の JSON は版 1 のまま、項目を必須 / 欠けうるに分けて契約にした（`docs/data-sources.md` 2 章・`data/chainTypes.ts`）。画面: 板全体で気配の IV が無ければ IV 欠損の印を出さず板の IV 列は気配から求める、遅れ 0 分は「遅れなし」、optionchan 以外の API のカレンダーは「API の版」
+- 候補（kabu ステーション API・立花 e 支店 API・J-Quants ほか）の比較は `docs/data-sources.md` 1 章、決定は `docs/adr-0003-data-source-abstraction.md`。13.1 K5・K8 は変えない（既定は optionchan）。kabu の利用条件（第三者のプログラムの利用・加工の禁止）の解釈はオーナー判断（#154）
 
 ### 2026-10-19 持ちこたえマップを追証マップに改名（#179）
 

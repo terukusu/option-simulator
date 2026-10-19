@@ -6,8 +6,11 @@
   （model/time.ts の sqDate / lastTradingDay と同じ規則）
 - /api/calendar の JSON: {schema_version: 1, source, version_at, covered_until, listed_until,
   days: [{date, is_trading_day, status, name}]}（日付の昇順。ブラウザ側の型・検証は #39）
+- from_json: 同じ形の JSON（同梱の data/calendar/calendar.json など）→ Calendar（DATA_SOURCE=quotes の CALENDAR_FILE。
+  #154）。検証は data/calendar.ts の validateCalendarJson と同じ規則。失敗は ValueError（値は入れない）
 """
 
+import re
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 
@@ -49,6 +52,54 @@ def from_rows(rows: list[dict]) -> Calendar:
                     days=days)
 
 
+_ISO_INSTANT = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d{1,9})?)?(Z|[+-]\d{2}:\d{2})$")
+_ISO_DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+
+def _date(v, path: str) -> date:
+    if not isinstance(v, str) or not _ISO_DATE.match(v):
+        raise ValueError(f"{path}: YYYY-MM-DD の日付でない")
+    try:
+        return date.fromisoformat(v)
+    except ValueError:
+        raise ValueError(f"{path}: 存在しない日付") from None
+
+
+def from_json(obj) -> Calendar:
+    """/api/calendar と同じ形の JSON → Calendar（days は日付の厳密な昇順。source と余分なキーは見ない）"""
+    if not isinstance(obj, dict):
+        raise ValueError("$: オブジェクトでない")
+    if obj.get("schema_version") != SCHEMA_VERSION or isinstance(obj.get("schema_version"), bool):
+        raise ValueError("$.schema_version: 未対応の版")
+    v = obj.get("version_at")
+    if not isinstance(v, str) or not _ISO_INSTANT.match(v):
+        raise ValueError("$.version_at: ISO 8601（オフセット付き）の時刻でない")
+    version_at = datetime.fromisoformat(v.replace("Z", "+00:00"))
+    covered = _date(obj.get("covered_until"), "$.covered_until")
+    listed = _date(obj.get("listed_until"), "$.listed_until")
+    raw = obj.get("days")
+    if not isinstance(raw, list):
+        raise ValueError("$.days: 配列でない")
+    days = []
+    prev = None
+    for i, d in enumerate(raw):
+        p = f"$.days[{i}]"
+        if not isinstance(d, dict):
+            raise ValueError(f"{p}: オブジェクトでない")
+        cd = _date(d.get("date"), f"{p}.date")
+        if prev is not None and cd <= prev:
+            raise ValueError(f"{p}.date: 昇順でない")
+        prev = cd
+        if not isinstance(d.get("is_trading_day"), bool):
+            raise ValueError(f"{p}.is_trading_day: 真偽値でない")
+        if not isinstance(d.get("status"), str) or not d["status"]:
+            raise ValueError(f"{p}.status: 空でない文字列でない")
+        if not isinstance(d.get("name"), str):
+            raise ValueError(f"{p}.name: 文字列でない")
+        days.append(CalendarDay(date=cd, is_trading_day=d["is_trading_day"], status=d["status"], name=d["name"]))
+    return Calendar(version_at=version_at, covered_until=covered, listed_until=listed, days=tuple(days))
+
+
 def is_business_day(d: date, holidays: frozenset[date]) -> bool:
     return d.weekday() < 5 and d not in holidays
 
@@ -80,10 +131,10 @@ def jst_iso(at: datetime) -> str:
     return at.astimezone(JST).strftime("%Y-%m-%dT%H:%M:%S+09:00")
 
 
-def calendar_json(cal: Calendar) -> dict:
+def calendar_json(cal: Calendar, source: str = "bigquery") -> dict:
     return {
         "schema_version": SCHEMA_VERSION,
-        "source": "bigquery",
+        "source": source,
         "version_at": jst_iso(cal.version_at),
         "covered_until": cal.covered_until.isoformat(),
         "listed_until": cal.listed_until.isoformat(),

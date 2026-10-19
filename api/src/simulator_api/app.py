@@ -8,6 +8,7 @@
 - GET /healthz: 設定の読み込みだけ（BigQuery に触れない）
 - 静的ファイル: 環境変数 STATIC_DIR があるときだけ / と /assets/<path>（Vite のビルド成果物 = dist/）と、
   dist/ 直下の決まった名前（ROOT_FILES。manifest とアイコン。#90）
+- 中身は供給元（sources.py の DataSource。DATA_SOURCE = bigquery / file / quotes）が返す
 - 認証はアプリでは行わない（Cloud Run の IAP）。IAP のヘッダは読まない・ログに出さない
 """
 
@@ -16,10 +17,10 @@ from datetime import UTC, datetime
 
 from flask import Flask, Response, request, send_from_directory
 
-from . import atm_iv, bq
+from . import atm_iv, sources
 from . import settings as st
 from .log import log
-from .service import ChainService, FileChainService, Unavailable
+from .service import Unavailable
 
 JSON_TYPE = "application/json; charset=utf-8"
 # すべての応答に付けるセキュリティヘッダ（optionchan のビューアー + manifest-src 'self'。#90）。スクリプト・スタイル・
@@ -79,13 +80,8 @@ def create_app(runner=None, clock=None, monotonic=None, cfg: st.Settings | None 
     if cfg is None:
         cfg = st.from_env()
     clock = clock or _now
-    if cfg.data_source == "file":
-        service = FileChainService(cfg.chain_file)
-    else:
-        if runner is None:
-            runner = bq.BigQueryRunner(cfg)
-            runner.start_warm()  # import・Client・トークンをバックグラウンドで（起動プローブ・/ を待たせない）
-        service = ChainService(runner, clock, monotonic or time.monotonic)
+    # 供給元（DATA_SOURCE → 実装の表は sources.py。#154）
+    service = sources.build(cfg, runner, clock, monotonic or time.monotonic)
 
     @app.after_request
     def security_headers(res):

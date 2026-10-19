@@ -8,6 +8,8 @@
   同じ (限月, K, type) の重複は最初の 1 行（件数だけログ）
 - 先物の last_trading_day・sq_date はカレンダーから。現物が無ければ {price: null, price_time: null}
 - オプションの全キー（quotation・quotation_date・is_atm を含む）を常に出す
+- 供給元に依らない: 行は optionchan の option_price の列名の dict（quotes.py は中立の気配の一覧をこの形にして
+  から渡す）。source は板の JSON の表示用の値（既定 bigquery。#154）
 """
 
 from dataclasses import dataclass
@@ -83,7 +85,7 @@ def parse_board(option_rows: list[dict]) -> tuple[Month, ...]:
 
 
 def chain_json(snapshot_at: datetime, reason: str, months: tuple[Month, ...], future: dict, spot: dict | None,
-               cal: Calendar) -> dict:
+               cal: Calendar, *, source: str = "bigquery", delayed_minutes: int | float = st.DELAYED_MINUTES) -> dict:
     holidays = cal.holidays
     out_months = []
     for m in months:
@@ -98,9 +100,9 @@ def chain_json(snapshot_at: datetime, reason: str, months: tuple[Month, ...], fu
     return {
         "schema_version": SCHEMA_VERSION,
         "snapshot_at": instant(snapshot_at),
-        "delayed_minutes": st.DELAYED_MINUTES,
+        "delayed_minutes": delayed_minutes,
         "reason": reason,
-        "source": "bigquery",
+        "source": source,
         "spot": {"price": spot.get("price") if spot else None,
                  "price_time": instant(spot.get("price_time")) if spot else None},
         "future": {"price": future.get("price"), "price_time": instant(future.get("price_time")),

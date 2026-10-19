@@ -1,6 +1,6 @@
 # api（板・カレンダー・IV 推移の JSON を返す Flask）
 
-optionchan の BigQuery（データセット `optionchan_tokyo` のテーブル関数 4 本とビュー `trading_calendar_latest`、表 `atm_cm_iv`）を **読むだけ** の API。計算（F・補間・ATM）はブラウザの `model/` で行う。設計は `docs/design.md` の 7.1〜7.3・7.5・8.3。
+optionchan の BigQuery（データセット `optionchan_tokyo` のテーブル関数 4 本とビュー `trading_calendar_latest`、表 `atm_cm_iv`）を **読むだけ** の API。計算（F・補間・ATM）はブラウザの `model/` で行う。設計は `docs/design.md` の 7.1〜7.3・7.5・8.3。供給元は `DATA_SOURCE` で差し替えられる（下の設定。供給元の口・板の契約・中立の気配の一覧は `docs/data-sources.md`。#154）。
 
 | エンドポイント | 内容 |
 |---|---|
@@ -12,18 +12,20 @@ optionchan の BigQuery（データセット `optionchan_tokyo` のテーブル�
 | `/`・`/assets/<path>` | `STATIC_DIR` があるときだけ、Vite のビルド成果物（`dist/`）を配る |
 | `/manifest.webmanifest`・`/favicon.svg`・`/apple-touch-icon.png`・`/icon-192.png`・`/icon-512.png` | `STATIC_DIR` があるときだけ、`dist/` 直下のこの 5 つの名前だけを配る（`no-cache`。名前の集合は `app.py` の `ROOT_FILES`。他の名前は 404。#90） |
 
-作り（`src/simulator_api/`）: `usable.py`（使える板の判定。純関数。定数は `settings.py` の上部）、`chain.py`（板の JSON の組み立て）、`calendar.py`（SQ 日の規則と `/api/calendar` の JSON）、`atm_iv.py`（IV 推移の要求の検査・足の束ね・JSON。純関数）、`atm_daily.py`（日次の値の確定した範囲・行の検査・JSON。純関数。#152）、`cache.py`（TTL・LRU・期限付きの LRU と single-flight）、`service.py`（BigQuery の読み方とキャッシュ）、`bq.py`（SQL の読み込みと実行）、`contract.py`（optionchan との契約 = 使う列と型）、`sql/*.sql`、`app.py`（Flask・セキュリティヘッダ）、`log.py`（JSON の構造化ログ）。
+作り（`src/simulator_api/`）: `sources.py`（供給元の口 `DataSource` と `DATA_SOURCE` → 実装の表 `BUILDERS`）、`quotes.py`（中立の気配の一覧 → 板の JSON 版 1。純関数。#154）、`usable.py`（使える板の判定。純関数。定数は `settings.py` の上部）、`chain.py`（板の JSON の組み立て）、`calendar.py`（SQ 日の規則と `/api/calendar` の JSON）、`atm_iv.py`（IV 推移の要求の検査・足の束ね・JSON。純関数）、`atm_daily.py`（日次の値の確定した範囲・行の検査・JSON。純関数。#152）、`cache.py`（TTL・LRU・期限付きの LRU と single-flight）、`service.py`（BigQuery の読み方とキャッシュ、`file`・`quotes` の供給元）、`bq.py`（SQL の読み込みと実行）、`contract.py`（optionchan との契約 = 使う列と型）、`sql/*.sql`、`app.py`（Flask・セキュリティヘッダ）、`log.py`（JSON の構造化ログ）。
 
 ## 設定（環境変数）
 
 | 名前 | 既定 | 意味 |
 |---|---|---|
-| `DATA_SOURCE` | `bigquery` | `bigquery` か `file`（`file` は `CHAIN_FILE` の JSON をそのまま `/api/chain` で返す。GCP なしで動かす用。`/api/calendar` は 503 で、画面は同梱の取引カレンダーを使う） |
+| `DATA_SOURCE` | `bigquery` | `bigquery` / `file` / `quotes`。`file` は `CHAIN_FILE` の JSON をそのまま `/api/chain` で返す（GCP なしで動かす用。`/api/calendar` は 503 で、画面は同梱の取引カレンダーを使う）。`quotes` は `QUOTES_FILE` の中立の気配の一覧と `CALENDAR_FILE` から板を組み立てる（`/api/calendar` は `CALENDAR_FILE`。`/api/atm_iv`・`/api/atm_daily` は 503。形は `docs/data-sources.md` 4 章） |
 | `GCP_PROJECT` | なし（`bigquery` のとき必須） | BigQuery のプロジェクト ID |
 | `BQ_DATASET` | `optionchan_tokyo` | データセット |
 | `BQ_LOCATION` | `asia-northeast1` | ロケーション |
 | `MAX_BYTES_BILLED` | `536870912` | 1 ジョブのクエリ量の上限（バイト。1〜512 MiB。超える値は起動時にエラー）。`atm_cm_iv` のジョブはこれと 64 MiB、`atm_cm_daily` のジョブはこれと 128 MiB の小さい方（`settings.QUERY_MAX_BYTES_BILLED`） |
 | `CHAIN_FILE` | なし | `DATA_SOURCE=file` の板の JSON |
+| `QUOTES_FILE` | なし | `DATA_SOURCE=quotes` の気配の一覧（要求ごとに読む。書き換えれば [最新] で新しい板） |
+| `CALENDAR_FILE` | なし | `DATA_SOURCE=quotes` の取引カレンダー（`/api/calendar` と同じ形。同梱の `../data/calendar/calendar.json` を指せる） |
 | `STATIC_DIR` | なし | 静的ファイルのディレクトリ（`index.html`・`assets/`・直下の manifest とアイコン） |
 
 実値（プロジェクト ID など）はリポジトリに書かない。
@@ -37,6 +39,8 @@ uv sync --locked --python 3.13      # uv は 0.12.19（CI と同じ）
 GCP_PROJECT=<PROJECT_ID> uv run --locked flask --app simulator_api.app run -p 8080
 # GCP なし
 DATA_SOURCE=file CHAIN_FILE=../fixtures/synthetic/latest.json uv run --locked flask --app simulator_api.app run -p 8080
+# 自分の API から書き出した気配の一覧（docs/data-sources.md 4 章の形）
+DATA_SOURCE=quotes QUOTES_FILE=<気配の一覧の JSON> CALENDAR_FILE=../data/calendar/calendar.json uv run --locked flask --app simulator_api.app run -p 8080
 ```
 
 画面は別の端末で `npm run dev`（Vite の `server.proxy` が `/api` を `127.0.0.1:8080` に渡す。同一オリジン）。本番は gunicorn（`simulator_api.app:app`、1 ワーカー・8 スレッド）。イメージはリポジトリ直下の `Dockerfile`（画面の `dist/` を同梱し `STATIC_DIR=/app/static`）、検査は `.github/scripts/image-check.sh`、Cloud Run の設定（環境変数 `GCP_PROJECT`・`BQ_DATASET`・`BQ_LOCATION`）は `infra/prod/simulator.tf`、手順は `infra/README.md`「prod（Cloud Run simulator）」。
@@ -49,6 +53,7 @@ uv run --locked ruff check
 uv run --locked pytest -q
 ```
 
+- 供給元の口は `tests/test_sources.py`、中立の気配の一覧は `tests/test_quotes.py`（合成の板から作った一覧 → 板が元と一致・形の規則・不正入力・`DATA_SOURCE=quotes` の応答。実際の API は呼ばない）
 - BigQuery は偽の runner（`tests/support.py` の `FakeRunner`）。板は合成（`fixtures/synthetic/*.json` から作る round-trip と、判定用の小さな合成の板）
 - 契約（AC25）: `OPTIONCHAN_SCHEMA_DIR=<optionchan の固定コミットの checkout>/schema uv run --locked pytest -q -rs tests/test_contract.py`（`schema/tokyo` と `schema/cm` を使う。`contract.py` の `schema_file` は `schema/` からの相対パス）。固定コミットは `contract/optionchan_commit.txt`（40 桁の SHA）。CI はリポジトリ変数 `OPTIONCHAN_REPO`（`<OWNER>/<REPO>`）があるときだけその SHA を sparse checkout して照合する（未設定なら notice を出してスキップ）
 - SQL の dry run（課金 0。CI では動かさない）: `OPTIONCHAN_BQ_TEST=1 OPTIONCHAN_BQ_PROJECT=<PROJECT_ID> uv run --locked pytest -q -s tests/test_sql_bq.py`（ADC。見積もりが 512 MiB 以下（`atm_cm_iv` は足ごとの最大の範囲で 64 MiB 以下、`atm_cm_daily` は全期間で 128 MiB 以下。2026-10-19 に約 61.9 MiB）で、結果の列・型が `contract.py`（集計するクエリは `OUTPUTS`）と一致）。ADC が無い手元では、`sql/*.sql` の `${project}`・`${dataset}` を埋めて `bq query --use_legacy_sql=false --dry_run --format=json --parameter=...` に標準入力で渡すと、`statistics.query.totalBytesProcessed` と `schema` で同じことを確かめられる

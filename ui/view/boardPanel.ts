@@ -179,7 +179,7 @@ function sideText(k: string, type: OptionType, c: BoardSideCell): BoardSideText 
   return {
     bid,
     ask,
-    // JPX の IV（%）は fmtIvPct（= 1 桁）と同じ
+    // 気配の IV（%。持たない供給元の板では気配から求めた値）は fmtIvPct（= 1 桁）と同じ
     iv: `${fmtNumFast(c.bidIv, 1)}/${fmtNumFast(c.askIv, 1)}`,
     delta: fmtNumFast(c.delta, 2),
     bidLabel,

@@ -114,6 +114,7 @@ api/（Python 3.13・Flask）  /api/chain・/api/calendar・/api/atm_iv・/api/a
 ```
 
 - **データ元**: optionchan（[`docs/design.md`](docs/design.md) 7 章）形式の BigQuery の最新スナップショット、または JSON ファイル（`DATA_SOURCE=file`・画面のファイル選択）。手元では合成の板（`fixtures/synthetic/`）だけで GCP なしに動きます
+- **ほかの供給元**: 自分で契約した API から書き出した気配の一覧を読む口（`DATA_SOURCE=quotes`）。形・足し方・候補の比較は [`docs/data-sources.md`](docs/data-sources.md)
 - **汎用の作り**: 誰でも clone して自分の環境（自分の GCP プロジェクト・自分の optionchan）で使える作りです。プロジェクト ID・URL・アカウントなどの個人の値はコードに書かず、変数で受け取ります（[`CLAUDE.md`](CLAUDE.md) の「リポジトリに置くもの / 置かないもの」）
 - **本番の構成**: Cloud Run（IAP の後ろ）+ Terraform（[`infra/README.md`](infra/README.md)）。API は [`api/README.md`](api/README.md)
 - **設計**: [`docs/design.md`](docs/design.md)（価格モデル・データ・決定事項）

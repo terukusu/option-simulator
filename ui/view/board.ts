@@ -14,7 +14,7 @@ import { type AtmBasis, black76Greeks, type OptionType, type SmileMark } from '.
 export interface BoardSideCell {
   bid: number | null;
   ask: number | null;
-  /** JPX の bid / ask の IV（%） */
+  /** bid / ask の IV（%。板の気配の IV。持たない供給元の板では気配の価格から求めた値。data/normalize.ts の SideInfo） */
   bidIv: number | null;
   askIv: number | null;
   /** スマイルの IV での Black-76 の Δ（スマイルが無ければ null） */
@@ -22,7 +22,7 @@ export interface BoardSideCell {
   quote: QuoteState;
   /** 両側気配が無い（bid / ask の操作では既定の手入力値で足を入れる） */
   noQuote: boolean;
-  /** 気配はあるのに JPX の IV が両方無い */
+  /** 気配はあるのに JPX の IV が両方無い（板が気配の IV を持たない供給元なら付けない） */
   jpxIvMissing: boolean;
 }
 
@@ -71,8 +71,8 @@ export function boardRows(chain: Chain, month: ChainMonth): BoardRow[] {
       return {
         bid: s?.bid ?? null,
         ask: s?.ask ?? null,
-        bidIv: s?.bid_iv ?? null,
-        askIv: s?.ask_iv ?? null,
+        bidIv: si.bidIv,
+        askIv: si.askIv,
         delta: delta(chain, month, info.k, type, info.smileIv),
         quote: si.quote,
         noQuote: si.quote !== 'two_sided',
