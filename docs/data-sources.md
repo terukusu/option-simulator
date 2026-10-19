@@ -88,7 +88,7 @@
 - 必須: `quotes_version`（1）・`snapshot_at`（オフセット付き）・`delayed_minutes`（≥ 0）・`future.contract_month`・`options`（1 件以上、最大 10,000 件）と各行の `contract_month`・`type`（`call` / `put`）・`k`（整数円）・`bid`・`ask`（キーは必須、値は null 可）
 - 任意（省略 = null）: `source`（英数字と `_ . -` の 40 文字まで。既定 `quotes`）、`future.price`・`price_time`、`spot`、各行の `bid_iv`・`ask_iv`・`price`・`price_time`・`iv`・`volume`・`positions`・`delta`〜`vega`・`quotation`・`quotation_date`・`is_atm`（意味・単位は板の JSON 版 1 と同じ。IV は %、グリークは原資産 1 単位あたり）。知らないキーは無視
 - サーバーが入れるもの: 限月・先物の `last_trading_day`・`sq_date`（カレンダーの規則。第 2 金曜、休業日なら前へ）、行の並び（行使価格の昇順。同じ (限月, K, 種別) は最初の 1 件）、`reason`（`snapshot_at` が 45 分以内かつ連続売買の窓なら `latest`、それ以外は寄り前 / 引け後 / `closed`。7.2 と同じ窓）
-- 使える板の判定は optionchan と同じ（`usable.board_ok`: 先物の価格があり、1 限月の先物 ±5% の両側気配が 75% 以上）。満たさなければ 503。**ATM の近くの行使価格を必ず含める**（kabu の 50 銘柄の上限のような制約があるときも、ATM ±5% を先に）
+- 使える板の判定は optionchan と同じ（`usable.board_ok`: 先物の価格があり、1 限月の先物 ±5% の 500 円の倍数の行使価格で両側気配が 60% 以上。docs/design.md 7.2）。満たさなければ 503。**ATM の近くの行使価格を必ず含める**（kabu の 50 銘柄の上限のような制約があるときも、ATM ±5% を先に）
 - 形の誤りは 503（ログ `quotes_file_invalid` に JSON の位置だけ。値は出さない）。`snapshot_at` が今から 5 分より先（未来）も形の誤り（時計・オフセットの誤り）。`QUOTES_FILE`・`CALENDAR_FILE` が 16 MiB を超えたら読まずに 503（ログ `file_too_large`）。`/api/calendar` は `CALENDAR_FILE` を `source: "file"` で返す。`/api/atm_iv`・`/api/atm_daily`・`/api/future_bars` は 503
 
 ## 5. 新しい供給元の足し方

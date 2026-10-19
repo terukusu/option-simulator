@@ -305,24 +305,29 @@ class Clock:
         self.mono += seconds
 
 
-def synth_board(at: datetime, future=30000.0, band_rows=100, quoted=100, ltd=date(2026, 11, 12),
+def synth_board(at: datetime, future=30000.0, quoted=None, fine_quoted=True, ltd=date(2026, 11, 12),
                 ltd2=date(2026, 12, 10)) -> list[dict]:
-    """判定用の小さな合成の板。1 限月の先物 ±5% に call・put 合わせて band_rows 行（うち quoted 行に両側気配）、
-    帯の外と 2 限月は気配なし（割合に入らないことの確認用）"""
-    assert band_rows % 2 == 0
-    n = band_rows // 2
-    step = int(future * 0.09 / n) // 5 * 5 or 5
-    k0 = int(future * 0.955) // 5 * 5
-    strikes = [k0 + step * i for i in range(n)]
-    assert all(0.95 * future <= k <= 1.05 * future for k in strikes)
+    """判定用の小さな合成の板。1 限月の先物 ±5% に 125 円刻みの行使価格（call・put）。判定が数える 500 円の倍数の
+    行（帯の端から call → put の順）のうち先頭 quoted 行（None = 全部）に両側気配、500 円の倍数でない行は
+    fine_quoted なら両側気配・そうでなければ気配なし（#196 の深夜の薄い板の形）。帯の外と 2 限月は気配なし
+    （割合に入らないことの確認用）。F = 30000 なら帯に 25 行使価格、うち 500 円の倍数は 7（14 行）"""
+    lo, hi = 0.95 * future, 1.05 * future
+    k = -(-int(lo) // 125) * 125
+    strikes = []
+    while k <= hi:
+        strikes.append(k)
+        k += 125
     rows = []
     i = 0
     for k in strikes:
         for typ in (1, 2):
-            both = i < quoted
+            if k % 500 == 0:
+                both = quoted is None or i < quoted
+                i += 1
+            else:
+                both = fine_quoted
             rows.append(option_row(at, typ, k, ltd, bid=100 if both else None, ask=110 if both else 120))
-            i += 1
-    for k in (int(future * 0.5) // 5 * 5, int(future * 1.5) // 5 * 5):
+    for k in (int(future * 0.5) // 500 * 500, int(future * 1.5) // 500 * 500):
         for typ in (1, 2):
             rows.append(option_row(at, typ, k, ltd))
     for k in strikes[:4]:
