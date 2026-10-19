@@ -13,22 +13,25 @@ export type BenchView = 'work' | 'ai';
 /** スマホのシート。hidden = 隠す（舞台が最大）/ peek = 覗く（42dvh）/ full = 全開（舞台はミニ 92px） */
 export type SheetStage = 'hidden' | 'peek' | 'full';
 /**
- * 市場の見え方の一覧（PC の見出しの Seg。#85。#79 で IV 推移を 1 行足した）。IV 推移は PC では市場の列の
- * section.smile の領域に描く（板と同じく市場の列を入れ替える）。
+ * 市場の見え方の一覧（PC の見出しの Seg。#85。#79 で IV 推移、#190 で先物推移を足した）。IV 推移・先物推移は PC では
+ * 市場の列の section.smile の領域に描く（板と同じく市場の列を入れ替える）。
  */
 export const MARKET_VIEWS = [
   { value: 'board', text: '板' },
   { value: 'smile', text: 'スマイル' },
   { value: 'iv', text: 'IV 推移' },
+  { value: 'fut', text: '先物' },
 ] as const;
 export type MarketView = (typeof MARKET_VIEWS)[number]['value'];
 /**
  * スマホ・タブレットのスマイル（ドックの「IV」）のパネルの見出しの Seg（#79。オーナー判断 4: ドックを増やさず、パネルの
- * 中で切り替える。#130 で IV 推移を左に）。送るのは同じ { type: 'market' }（PC 以外では board は「IV 推移」と同じ = 既定）
+ * 中で切り替える。#130 で IV 推移を左に。#190 で先物推移を右端に）。送るのは同じ { type: 'market' }（PC 以外では board は
+ * 「IV 推移」と同じ = 既定）
  */
 export const SMILE_VIEWS = [
   { value: 'iv', text: 'IV 推移' },
   { value: 'smile', text: 'スマイル' },
+  { value: 'fut', text: '先物' },
 ] as const;
 export type SmileView = (typeof SMILE_VIEWS)[number]['value'];
 /** 舞台のグラフの表示（凡例行の [線 | 面]。#88） */
@@ -106,12 +109,21 @@ const benchFor = (panel: PanelId, cur: BenchView): BenchView =>
   panel === 'ai' ? 'ai' : panel === 'positions' || panel === 'metrics' ? 'work' : cur;
 
 /**
- * スマイルのパネル（PC は市場の列の section.smile）に描くもの。PC は市場が iv のときだけ iv、PC 以外は市場が smile の
- * ときだけ smile（既定の board は IV 推移。#130）
+ * スマイルのパネル（PC は市場の列の section.smile）に描くもの。PC は市場が iv / fut のときだけそれ、PC 以外は市場が
+ * smile / fut のときだけそれ（既定の board は IV 推移。#130・#190）
  */
 export function smileView(s: ShellState, tier: Tier): SmileView {
+  if (s.market === 'fut') return 'fut';
   if (tier === 'pc') return s.market === 'iv' ? 'iv' : 'smile';
   return s.market === 'smile' ? 'smile' : 'iv';
+}
+
+/** スマイルのパネルの view が見えているか（PC は常に、タブレットはパネルがスマイル、スマホはそれに加えてシート） */
+function smileShown(s: ShellState, tier: Tier, view: SmileView): boolean {
+  if (smileView(s, tier) !== view) return false;
+  if (tier === 'pc') return true;
+  if (visiblePanel(s, tier) !== 'smile') return false;
+  return tier === 'tablet' || s.sheet !== 'hidden';
 }
 
 /**
@@ -119,10 +131,12 @@ export function smileView(s: ShellState, tier: Tier): SmileView {
  * smileView が iv（既定）、スマホはそれに加えてシートが hidden でない
  */
 export function ivVisible(s: ShellState, tier: Tier): boolean {
-  if (smileView(s, tier) !== 'iv') return false;
-  if (tier === 'pc') return true;
-  if (visiblePanel(s, tier) !== 'smile') return false;
-  return tier === 'tablet' || s.sheet !== 'hidden';
+  return smileShown(s, tier, 'iv');
+}
+
+/** 先物推移が見えているか（#190。条件は ivVisible と同じで smileView が fut） */
+export function futVisible(s: ShellState, tier: Tier): boolean {
+  return smileShown(s, tier, 'fut');
 }
 
 /**

@@ -27,7 +27,26 @@ export function synthAtmIv(
   bars: { t: string; o: number; h: number; l: number; c: number }[];
 } | null;
 
-/** `/fixtures/atm_iv?tf=&start=&end=` の検査（サーバーの parse_request と同じ。形が違えば null = 400） */
+/** 先物推移の合成の応答の表の最後の行（UNIX 秒。#190） */
+export const SYNTH_FUT_LAST_AT: number;
+/** 合成の限月交代の跳び（新しい限月 / 古い限月 − 1） */
+export const SYNTH_FUT_ROLL_JUMP: number;
+
+/** `/api/future_bars` と同じ形の合成の応答（#190。架空の値。tf が 1m・1h・1d 以外なら null） */
+export function synthFutureBars(
+  tf: string,
+  range?: { start: number; end: number } | null,
+  now?: number,
+): {
+  schema_version: 1;
+  tf: string;
+  start: string;
+  end: string;
+  last_at: string | null;
+  bars: { t: string; o: number; h: number; l: number; c: number; m: string }[];
+} | null;
+
+/** `/fixtures/atm_iv?tf=&start=&end=`（`/fixtures/future_bars` も同じ）の検査（サーバーの parse_request と同じ。形が違えば null = 400） */
 export function atmIvQuery(
   url: string,
 ): { tf: string; range: { start: number; end: number } | null } | null;

@@ -5,10 +5,11 @@ CI では動かさない（BigQuery の認証が要る）。手元で（ADC。gc
 データセットは OPTIONCHAN_BQ_DATASET（既定 optionchan_tokyo）、ロケーションは OPTIONCHAN_BQ_LOCATION。
 
 - 実際の runner と同じ SQL・パラメータの型で dry_run=True・use_query_cache=False のジョブを作る
-- 見積もり（total_bytes_processed）が 512 MiB 以下（atm_cm_iv は 64 MiB 以下、atm_cm_daily は 128 MiB 以下。
-  値は -s で表示。PR に記録する）
+- 見積もり（total_bytes_processed）が 512 MiB 以下（atm_cm_iv・future_bars は 64 MiB 以下、atm_cm_daily は
+  128 MiB 以下。値は -s で表示。PR に記録する）
 - 結果の列名・型が contract.py の宣言（集計するクエリは OUTPUTS）と一致（dry run の job.schema）
-- atm_cm_iv（#79 AC6）は足ごとの最大の範囲（1m 3 日・1h 100 日・1d 400 日 + 読み足しの 11 日）でも見る
+- atm_cm_iv（#79 AC6）・future_bars（#190 AC-3）は足ごとの最大の範囲（1m 3 日・1h 100 日・1d 400 日 + 読み足しの
+  11 日）でも見る
 """
 
 import os
@@ -16,7 +17,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from simulator_api import atm_daily, atm_iv, bq, contract
+from simulator_api import atm_daily, atm_iv, bq, contract, future_bars
 from simulator_api import settings as st
 
 PROJECT = os.environ.get("OPTIONCHAN_BQ_PROJECT", "")
@@ -42,6 +43,8 @@ def params(name, now):
         return {}
     if name == "atm_cm_iv":
         return atm_iv_params("1h", now)
+    if name == "future_bars":  # 1d の最大（400 日 + 読み足し。#190 AC-3）
+        return future_bars_params("1d", now)
     if name == "atm_cm_daily":  # 全期間（#152。確定した範囲の終わりまで）
         start_at, end_at = atm_daily.read_window(atm_daily.settled_end(now))
         return {"start_at": start_at, "end_at": end_at}
@@ -59,6 +62,14 @@ def atm_iv_params(tf, now):
     end = atm_iv.right_edge(now)
     req = atm_iv.AtmIvRequest(tf, end - timedelta(days=max_days), end)
     start_at, end_at, step = atm_iv.read_window(req, now)
+    return {"start_at": start_at, "end_at": end_at, "step": step}
+
+
+def future_bars_params(tf, now):
+    _, max_days, _ = st.ATM_IV_TIMEFRAMES[tf]
+    end = atm_iv.right_edge(now)
+    req = atm_iv.AtmIvRequest(tf, end - timedelta(days=max_days), end)
+    start_at, end_at, step, _ = future_bars.read_window(req, now)
     return {"start_at": start_at, "end_at": end_at, "step": step}
 
 
@@ -96,3 +107,12 @@ def test_atm_cm_iv_max_range_dry_run(runner, tf, record_property):
 
 def test_atm_cm_daily_cap_is_128mib(runner):
     assert runner.maximum_bytes_billed("atm_cm_daily") == 128 * MiB
+
+
+@pytest.mark.parametrize("tf", tuple(st.ATM_IV_TIMEFRAMES))
+def test_future_bars_max_range_dry_run(runner, tf, record_property):
+    now = datetime.now(UTC).replace(microsecond=0)
+    p = future_bars_params(tf, now)
+    days = (p["end_at"] - p["start_at"]).days
+    dry_run(runner, "future_bars", p, f"future_bars {tf} {days} 日", record_property)
+    assert runner.maximum_bytes_billed("future_bars") == 64 * MiB

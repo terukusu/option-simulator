@@ -7,10 +7,19 @@
  * - トップバーの [最新] では読み直さない（最新化ボタンだけ。docs/ui-redesign.md §4.7）
  * - 追加読み込み（段 C）: 見えている間、表示範囲・足が変わってから IV_EDGE_DEBOUNCE_MS 後に edge（端から IV_EDGE_BARS 本
  *   未満か）を送る。読み込みの後は ivFollowViewport で見ている時刻を保つ（右端に付いていれば右端に付いていく）
+ * - 先物推移（#190）も同じフック（useBarHistory。足の型と読み込みの関数だけが違う。状態は IV 推移と別）。IV 推移 ⇄ 先物
+ *   の切替では、離れる側の snapshot()（足と見ていた時間の範囲）を入る側の adopt に渡す（open は控えの範囲を読む）
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'preact/hooks';
-import { type IvBar, loadAtmIv } from '../../data';
+import {
+  type AtmIvLoadOptions,
+  type AtmIvSource,
+  type FutBar,
+  type IvBar,
+  loadAtmIv,
+  loadFutureBars,
+} from '../../data';
 import type { Domain } from '../chart/scale';
 import {
   barsForTf,
@@ -29,6 +38,7 @@ import {
   INITIAL_IV_LOAD,
   IV_EDGE_BARS,
   IV_EDGE_DEBOUNCE_MS,
+  type IvData,
   type IvLoadAction,
   type IvLoadState,
   type IvRequest,
@@ -43,11 +53,11 @@ export interface IvView {
   keep: IvKeep | null;
 }
 
-export interface IvHistoryCtl {
-  load: IvLoadState;
+export interface IvHistoryCtl<B extends IvBar = IvBar> {
+  load: IvLoadState<B>;
   view: IvView;
   /** 今の足の表示する足（5 分・15 分は 1 分から束ねる） */
-  bars: readonly IvBar[];
+  bars: readonly B[];
   /** 表示範囲（resolveIvViewport の結果） */
   viewport: Domain;
   /** 左の余白（本。左に読む余地があれば IV_LEFT_SLACK） */
@@ -57,28 +67,54 @@ export interface IvHistoryCtl {
   setTf: (tf: IvTf) => void;
   setMode: (mode: IvMode) => void;
   setViewport: (v: Domain | null) => void;
+  /** 今の足と見ている時間の範囲（IV 推移 ⇄ 先物の切替で相手に渡す。足が無ければ控えのまま） */
+  snapshot: () => { tf: IvTf; keep: IvKeep | null };
+  /** 相手の足と見ていた時間の範囲を受け取る（表示範囲は控えから作り直す。見えたときの open が控えの範囲を読む） */
+  adopt: (tf: IvTf, keep: IvKeep | null) => void;
 }
+
+/** 読み込みの関数（loadAtmIv・loadFutureBars） */
+export type BarLoader<B extends IvBar> = (
+  tf: AtmIvSource,
+  opts: AtmIvLoadOptions,
+) => Promise<IvData<B>>;
 
 const INITIAL_VIEW: IvView = { mode: IV_DEFAULT_MODE, viewport: null, keep: null };
 
-const EMPTY: readonly IvBar[] = [];
+const EMPTY: readonly never[] = [];
 
 /** 今の足の表示する足（5 分・15 分は 1 分から束ねる） */
-function shownBars(s: IvLoadState, tf: IvTf): readonly IvBar[] {
+function shownBars<B extends IvBar>(s: IvLoadState<B>, tf: IvTf): readonly B[] {
   const e = s.entries[ivSource(tf)];
   return e ? barsForTf(e.bars, tf) : EMPTY;
 }
 
-const slackOf = (s: IvLoadState) => {
+const slackOf = <B extends IvBar>(s: IvLoadState<B>) => {
   const e = s.entries[ivSource(s.tf)];
   return e && !e.leftDone ? IV_LEFT_SLACK : 0;
 };
 
 /**
- * endpoint は同一オリジンの相対 URL（本番は /api/atm_iv。dev の合成の板・ファイルでは /fixtures/atm_iv）。
+ * IV 推移。endpoint は同一オリジンの相対 URL（本番は /api/atm_iv。dev の合成の板・ファイルでは /fixtures/atm_iv）。
  */
-export function useIvHistory(active: boolean, endpoint: string): IvHistoryCtl {
-  const [load, setLoad] = useState<IvLoadState>(INITIAL_IV_LOAD);
+export function useIvHistory(active: boolean, endpoint: string): IvHistoryCtl<IvBar> {
+  return useBarHistory<IvBar>(active, endpoint, loadAtmIv);
+}
+
+/**
+ * 先物推移（#190）。endpoint は本番は /api/future_bars、dev の合成の板・ファイルでは /fixtures/future_bars。
+ */
+export function useFutureBars(active: boolean, endpoint: string): IvHistoryCtl<FutBar> {
+  return useBarHistory<FutBar>(active, endpoint, loadFutureBars);
+}
+
+/** 読み込みと見え方の状態（足の型 B と読み込みの関数 loader だけが系列ごとに違う） */
+export function useBarHistory<B extends IvBar>(
+  active: boolean,
+  endpoint: string,
+  loader: BarLoader<B>,
+): IvHistoryCtl<B> {
+  const [load, setLoad] = useState<IvLoadState<B>>(INITIAL_IV_LOAD as IvLoadState<B>);
   const [view, setView] = useState<IvView>(INITIAL_VIEW);
   const loadRef = useRef(load);
   // 表示の状態は ref が正（読み込みの応答の中で読み書きする）。setView は描き直しのため
@@ -89,7 +125,10 @@ export function useIvHistory(active: boolean, endpoint: string): IvHistoryCtl {
   // 利用者が表示範囲を変えた回数（パン・拡大縮小・足の切替）。追加読み込みのきっかけはこれと最初の表示だけ
   const [nudge, setNudge] = useState(0);
 
-  const run = useCallback((a: IvLoadAction) => {
+  const loaderRef = useRef(loader);
+  loaderRef.current = loader;
+
+  const run = useCallback((a: IvLoadAction<B>) => {
     const prev = loadRef.current;
     const r = ivLoadReduce(prev, a);
     if (r.state === prev && !r.request && r.abort === null) return;
@@ -122,25 +161,28 @@ export function useIvHistory(active: boolean, endpoint: string): IvHistoryCtl {
   function start(req: IvRequest) {
     const ac = new AbortController();
     ctrl.current = { id: req.id, ac };
-    loadAtmIv(req.src, {
-      endpoint: endpointRef.current,
-      signal: ac.signal,
-      ...(req.range ? { range: req.range } : {}),
-    }).then(
-      (data) => {
-        if (ctrl.current?.id === req.id) ctrl.current = null;
-        run({ type: 'loaded', id: req.id, data });
-      },
-      (e: unknown) => {
-        if (ctrl.current?.id === req.id) ctrl.current = null;
-        if (e instanceof Error && e.name === 'AbortError') return;
-        run({ type: 'failed', id: req.id });
-      },
-    );
+    loaderRef
+      .current(req.src, {
+        endpoint: endpointRef.current,
+        signal: ac.signal,
+        ...(req.range ? { range: req.range } : {}),
+      })
+      .then(
+        (data) => {
+          if (ctrl.current?.id === req.id) ctrl.current = null;
+          run({ type: 'loaded', id: req.id, data });
+        },
+        (e: unknown) => {
+          if (ctrl.current?.id === req.id) ctrl.current = null;
+          if (e instanceof Error && e.name === 'AbortError') return;
+          run({ type: 'failed', id: req.id });
+        },
+      );
   }
 
   useEffect(() => {
-    if (active) run({ type: 'open' });
+    // 控え（足の切替・IV 推移 ⇄ 先物の切替の前に見ていた時間の範囲）があれば、読み済みの外ならその 1 回分を読む
+    if (active) run({ type: 'open', at: viewRef.current.keep });
   }, [active, run]);
   useEffect(
     () => () => {
@@ -152,24 +194,28 @@ export function useIvHistory(active: boolean, endpoint: string): IvHistoryCtl {
 
   const refresh = useCallback(() => run({ type: 'refresh' }), [run]);
   const retry = useCallback(() => run({ type: 'retry' }), [run]);
+  const snapshot = useCallback(() => {
+    const s = loadRef.current;
+    const v = viewRef.current;
+    const bars = shownBars(s, s.tf);
+    const keep =
+      bars.length > 0
+        ? ivKeepOf(bars, resolveIvViewport(bars, s.tf, v.viewport, v.keep, slackOf(s)))
+        : v.keep;
+    return { tf: s.tf, keep };
+  }, []);
   const setTf = useCallback(
     (tf: IvTf) => {
-      const s = loadRef.current;
-      if (tf === s.tf) return;
+      if (tf === loadRef.current.tf) return;
       // 見ていた時間の範囲を控えてから替える（表示範囲は控えから作り直す）
-      const v = viewRef.current;
-      const bars = shownBars(s, s.tf);
-      const keep =
-        bars.length > 0
-          ? ivKeepOf(bars, resolveIvViewport(bars, s.tf, v.viewport, v.keep, slackOf(s)))
-          : v.keep;
-      const next = { ...v, viewport: null, keep };
+      const { keep } = snapshot();
+      const next = { ...viewRef.current, viewport: null, keep };
       viewRef.current = next;
       setView(next);
       setNudge((k) => k + 1);
       run({ type: 'setTf', tf, at: keep });
     },
-    [run],
+    [run, snapshot],
   );
   const setMode = useCallback((mode: IvMode) => {
     viewRef.current = { ...viewRef.current, mode };
@@ -181,6 +227,16 @@ export function useIvHistory(active: boolean, endpoint: string): IvHistoryCtl {
     setView(viewRef.current);
     setNudge((k) => k + 1);
   }, []);
+
+  const adopt = useCallback(
+    (tf: IvTf, keep: IvKeep | null) => {
+      viewRef.current = { ...viewRef.current, viewport: null, keep };
+      setView(viewRef.current);
+      setNudge((k) => k + 1);
+      if (tf !== loadRef.current.tf) run({ type: 'setTf', tf, at: keep });
+    },
+    [run],
+  );
 
   const tf = load.tf;
   const entry = load.entries[ivSource(tf)];
@@ -204,5 +260,18 @@ export function useIvHistory(active: boolean, endpoint: string): IvHistoryCtl {
     return () => clearTimeout(timer);
   }, [active, hasEntry, tf, nudge, run]);
 
-  return { load, view, bars, viewport, leftSlack, refresh, retry, setTf, setMode, setViewport };
+  return {
+    load,
+    view,
+    bars,
+    viewport,
+    leftSlack,
+    refresh,
+    retry,
+    setTf,
+    setMode,
+    setViewport,
+    snapshot,
+    adopt,
+  };
 }

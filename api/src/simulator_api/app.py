@@ -5,6 +5,8 @@
 - GET /api/atm_iv?tf=<1m|1h|1d>[&start=&end=]: IV 推移（表 atm_cm_iv の iv30 の足。atm_iv.py。#79）
 - GET /api/atm_daily: 日次の値（表 atm_cm_iv の日中の終値の iv30・1 / 2 限月のフォワード。確定した日だけ。atm_daily.py。
   #152）。パラメータは読まない
+- GET /api/future_bars?tf=<1m|1h|1d>[&start=&end=]: 先物推移（future_price_latest の現在値の足と限月。future_bars.py。
+  要求・Cache-Control は /api/atm_iv と同じ。#190）
 - POST /api/ai/messages: AI の中継（SSE。許可リスト・費用の 1 日上限・同じオリジン。ai/relay.py。#134）
 - GET /api/ai/status: AI が使えるか・1 日の上限と残り（ai/relay.py。#134）
 - GET /healthz: 設定の読み込みだけ（BigQuery・Anthropic・Firestore に触れない）
@@ -159,6 +161,17 @@ def create_app(runner=None, clock=None, monotonic=None, cfg: st.Settings | None 
             return _error(400, "bad_request")
         max_age = st.ATM_IV_SETTLED_MAX_AGE_SECONDS if atm_iv.is_settled(req, now) else st.ATM_IV_MAX_AGE_SECONDS
         return serve("atm_iv", lambda: service.atm_iv(req), f"private, max-age={max_age}")
+
+    @app.get("/api/future_bars")
+    def api_future_bars():
+        now = clock()
+        try:
+            req = atm_iv.parse_request(request.args, now)  # /api/atm_iv と同じ規則
+        except atm_iv.BadRequest as e:
+            log("INFO", "bad_request", endpoint="future_bars", param=e.param)
+            return _error(400, "bad_request")
+        max_age = st.ATM_IV_SETTLED_MAX_AGE_SECONDS if atm_iv.is_settled(req, now) else st.ATM_IV_MAX_AGE_SECONDS
+        return serve("future_bars", lambda: service.future_bars(req), f"private, max-age={max_age}")
 
     @app.get("/api/atm_daily")
     def api_atm_daily():

@@ -122,6 +122,12 @@
 //                                          タッチ（CDP）の長押し 500ms → 横・縦に動かす → 離す → タップで消える・ページとシートが動かない）
 //                                          とドックの IV の既定と保持（390×844・900×1100: 起動 0 回 → IV で IV 推移・1 回 → [スマイル] →
 //                                          別のパネル → IV でスマイルのまま・タブレットのキー 5）
+//                                          先物推移（#190 AC-9）: 4 幅 × ダーク / ライトで先物を開いた状態（PC は市場の Seg、スマホ・
+//                                          タブレットは IV のパネルの [IV 推移 | スマイル | 先物]、スマホは peek / hidden / full）の縦・横・
+//                                          折り返しと IV 推移と同じ部品の検査（シナリオの水準は無い）・十字線の札（円の整数）。
+//                                          --flows: future_bars への要求 = 起動 0 → IV 推移を開いて 0（atm_iv 1）→ 先物 1（atm_iv
+//                                          増えない）→ 閉じて開き直し 1 → ⟳ 2 → [最新] で増えない、日足で限月交代の印 ≥ 1・線は交代でもつながる（つなぎ足）・読み取りに
+//                                          限月、先物で日足 → IV 推移も日足（足を保つ）。390×844 と 1440×900
 //                                          AI のチャット（#135 AC7）: 360 / 390（AI のシート peek / full）・900（ドックの AI）・1440
 //                                          （トップバーの [AI] で作業台を入れ替え）× ダーク / ライトで縦・横・折り返し・舞台の読み取り、
 //                                          ドック 6 つ（タブレット 5 つ）の文字が切れない、押す前に残り（$）が見出しに見えて切れない、
@@ -1041,6 +1047,9 @@ async function measureAll() {
       `IV 推移の十字線と札の検査（#130）: ${ivCrossStats.pass} / ${ivCrossStats.total} 状態で pass`,
     );
     console.log(`ドックの IV の検査（#130）: ${dockStats.pass} / ${dockStats.total} で pass`);
+    // 先物推移（#190 AC-9）
+    await futSweep();
+    console.log(`先物推移の検査（#190）: ${futStats.pass} / ${futStats.total} 状態で pass`);
     // AI のチャット（#135 AC7）
     await aiSweep();
   }
@@ -2292,38 +2301,45 @@ async function ivCheck(page, label, want = {}) {
       now: sec.querySelectorAll('.iv-now').length,
       scenario: sec.querySelectorAll('.iv-scenario').length,
       svg: !!sec.querySelector('.iv-wrap svg'),
+      name: (sec.querySelector('.panel-head > h2')?.textContent ?? '').trim(),
     };
   });
-  ivStats.total++;
+  const stats = want.fut ? futStats : ivStats;
+  stats.total++;
   if (!r) {
     failed = true;
-    console.log(`${label}: IV 推移が見えない  ← NG`);
+    console.log(`${label}: ${want.fut ? '先物推移' : 'IV 推移'}が見えない  ← NG`);
     return false;
   }
   const bad = [...r.bad];
   if (!r.svg) bad.push('描画域に svg が無い');
   if (r.progress !== 1) bad.push(`進行中の足 ${r.progress} 個（1 のはず）`);
   // 段 C: 合成の表の最後の行（板の 50 分前）より新しい板 = 「今」の印 1 個、twoLegs のシナリオ（ΔX −400・Δσ +2）= 水準の線 1 本
+  // #190 先物推移: 「今」の印 1 個（表の最後の行 = 板の 2 分前・同じ限月）、シナリオの水準は無い
   if (r.now !== 1) bad.push(`「今」の印 ${r.now} 個（1 のはず）`);
-  if (r.scenario !== 1) bad.push(`シナリオの水準 ${r.scenario} 本（1 のはず）`);
+  const wantScenario = want.fut ? 0 : 1;
+  if (r.scenario !== wantScenario)
+    bad.push(`シナリオの水準 ${r.scenario} 本（${wantScenario} のはず）`);
+  if (want.fut && r.name !== '先物推移') bad.push(`見出し「${r.name}」`);
   if (want.minHeight && r.height < want.minHeight)
     bad.push(`描画域の高さ ${r.height}px（${want.minHeight}px 以上のはず）`);
   const ok = r.n > 0 && bad.length === 0;
-  if (ok) ivStats.pass++;
+  if (ok) stats.pass++;
   else failed = true;
   console.log(
-    `${label}: IV 推移 高さ ${r.height}px・${r.n} 個 ${ok ? 'pass' : `${bad.join('・')}  ← NG`}`,
+    `${label}: ${want.fut ? '先物推移' : 'IV 推移'} 高さ ${r.height}px・${r.n} 個 ${ok ? 'pass' : `${bad.join('・')}  ← NG`}`,
   );
   return ok;
 }
 
 const ivCrossStats = { pass: 0, total: 0 };
+const futStats = { pass: 0, total: 0 };
 
 /**
  * 十字線と軸の札（#130 AC-5）: 描画域にフォーカスして , （カーソルの足 = 最新の 1 本前）→ 十字線 2 本・札 2 個・札の矩形が
  * svg の内側・横の札 = 読み取りの時刻・縦の札 = 横線の高さの IV（キーだけのときは足の終値の高さ。小数 2 桁）
  */
-async function ivCrossCheck(page, label) {
+async function ivCrossCheck(page, label, fut = false) {
   await page.focus('section.smile .iv-wrap');
   await page.keyboard.press(',');
   await page.waitForTimeout(80);
@@ -2334,7 +2350,7 @@ async function ivCrossCheck(page, label) {
     st.tags.length === 2 &&
     st.tags.every((t) => t.inside) &&
     st.xTag === st.time &&
-    ivYTagOk(st);
+    (fut ? futYTagOk(st) : ivYTagOk(st));
   if (ok) ivCrossStats.pass++;
   else failed = true;
   console.log(
@@ -2375,6 +2391,70 @@ async function ivSweep() {
       await report(page, `${tag} 線`, w, h, `${name}-line`);
       await ivCheck(page, `${tag} 線 ${w}x${h}`, {});
       await ivCrossCheck(page, `${tag} 線 ${w}x${h}`);
+      await ctx.close();
+    }
+  }
+}
+
+// ---- 先物推移（#190 AC-9）
+/** 先物推移を開く（PC は市場の Seg、それ以外は IV のパネルの [IV 推移 | スマイル | 先物]。スマホはシートも作る） */
+async function openFut(page, w, sheet = 'peek') {
+  if (w >= 1200) {
+    await page.click('section.market:visible .panel-head .seg button:text-is("先物")');
+  } else {
+    if (w <= PHONE_MAX) await setShell(page, 'smile', sheet === 'hidden' ? 'peek' : sheet);
+    else await page.click('.dock button[data-panel="smile"]');
+    await page.waitForTimeout(120);
+    const seg = page.locator('section.smile .panel-head .seg button:text-is("先物")');
+    if ((await seg.getAttribute('aria-pressed')) !== 'true') await seg.click();
+    if (w <= PHONE_MAX && sheet === 'hidden') await setShell(page, 'smile', 'hidden');
+  }
+  await page.waitForSelector('section.smile .iv-wrap svg', { timeout: 10000 }).catch(() => null);
+  await page.waitForTimeout(150);
+}
+
+/** 縦軸の札の文字が横線の高さの値（円の整数・桁区切り。目盛りの 2 点から逆に読んだ値と 1 円以内） */
+function futYTagOk(st) {
+  if (!st || st.hy === null || st.yTag === null || st.ticks.length < 2) return false;
+  const num = (t) => Number(t.replace('−', '-').replace(/,/g, ''));
+  const [y0, l0] = st.ticks[0];
+  const [y1, l1] = st.ticks[st.ticks.length - 1];
+  if (!(Math.abs(y1 - y0) > 0)) return false;
+  const v = num(l0) + ((st.hy - y0) * (num(l1) - num(l0))) / (y1 - y0);
+  return /^\d{1,3}(,\d{3})*$/.test(st.yTag) && Math.abs(num(st.yTag) - v) <= 1;
+}
+
+/** 4 幅 × ダーク / ライトで先物推移を開いた状態（スマホはシート 3 段階）。線のモードも測る */
+async function futSweep() {
+  for (const [w, h] of SIZES) {
+    for (const theme of ['dark', 'light']) {
+      const ctx = await newContext(
+        { width: w, height: h },
+        { [WORKSPACE_KEY]: twoLegs, [PREFS_KEY]: prefsText(theme) },
+      );
+      const page = await ctx.newPage();
+      await page.goto(pageUrl('next'));
+      await waitReady(page, 'next');
+      const tag = `next ${theme} 先物推移`;
+      const name = `next-${w}x${h}-${theme}-fut`;
+      const sheets = w <= PHONE_MAX ? ['peek', 'full', 'hidden'] : [null];
+      for (const sheet of sheets) {
+        await openFut(page, w, sheet ?? 'peek');
+        const lbl = `${tag}${sheet ? ` ${sheet}` : ''}`;
+        await report(page, lbl, w, h, `${name}${sheet ? `-${sheet}` : ''}`);
+        if (sheet !== 'hidden') {
+          await ivCheck(page, `${lbl} ${w}x${h}`, {
+            fut: true,
+            minHeight: w <= PHONE_MAX && sheet === 'peek' ? 80 : 160,
+          });
+          await ivCrossCheck(page, `${lbl} ${w}x${h}`, true);
+        }
+      }
+      if (w <= PHONE_MAX) await openFut(page, w, 'peek');
+      await page.click('section.smile .iv-tools button:has-text("線")');
+      await page.waitForTimeout(150);
+      await report(page, `${tag} 線`, w, h, `${name}-line`);
+      await ivCheck(page, `${tag} 線 ${w}x${h}`, { fut: true });
       await ctx.close();
     }
   }
@@ -2750,6 +2830,8 @@ async function runFlows() {
   await ivCrossFlows(pc);
   await ivCrossTouchFlow();
   for (const vp of [phone, { width: 900, height: 1100 }]) await ivDockFlows(vp);
+  // #190 先物推移の遅延ロード・IV 推移と要求が混ざらない・限月交代の印・切替で足を保つ（AC-9）
+  for (const vp of [phone, pc]) await futFlows(vp);
   // #174 追証マップの開閉の時間・開いたときの滑らかなスクロールとスピナー（AC4）
   for (const vp of [pc, phone]) await holdToggleFlow(vp);
   // #135 AI のチャットの進み具合・中止・終端なし・道具のカード・会話の保存（AC6）
@@ -8538,6 +8620,158 @@ async function ivFlows(vp) {
     );
     await ctx2.close();
   }
+}
+
+// ---- 先物推移の手順（#190 AC-9）
+async function futFlows(vp) {
+  const tag = `${vp.width}x${vp.height}`;
+  const isPc = vp.width >= 1200;
+  const ctx = await newContext(vp, { [WORKSPACE_KEY]: twoLegs });
+  const latestText = readFileSync(join(root, FIXTURE_PATH), 'utf8');
+  await ctx.route('**/api/chain**', (route) =>
+    route.fulfill({ status: 200, contentType: 'application/json', body: latestText }),
+  );
+  await ctx.route('**/api/calendar**', (route) =>
+    route.fulfill({ status: 500, contentType: 'text/plain', body: 'x' }),
+  );
+  const page = await ctx.newPage();
+  const fut = [];
+  const iv = [];
+  page.on('request', (r) => {
+    const u = new URL(r.url());
+    if (u.pathname.endsWith('/future_bars')) fut.push(u.search);
+    if (u.pathname.endsWith('/atm_iv')) iv.push(u.search);
+  });
+  await page.goto(pageUrl('next'));
+  await waitReady(page, 'next');
+  await page.waitForTimeout(1500);
+  check(
+    `#190 AC-9 ${tag} 起動して 1.5 秒: future_bars・atm_iv への要求が 0 回`,
+    fut.length === 0 && iv.length === 0,
+    `先物 ${fut.length}・IV ${iv.length}`,
+  );
+  const seg = (text) =>
+    isPc
+      ? page.click(`section.market:visible .panel-head .seg button:text-is("${text}")`)
+      : page.click(`section.smile .panel-head .seg button:text-is("${text}")`);
+  const ready = () =>
+    page
+      .waitForFunction(
+        () =>
+          !!document.querySelector('section.smile .iv-wrap svg') &&
+          !document.querySelector('section.smile .iv-loading') &&
+          document.querySelector('section.smile .iv-refresh')?.disabled === false,
+        undefined,
+        { timeout: 10000 },
+      )
+      .then(() => true)
+      .catch(() => false);
+  if (!isPc) await setShell(page, 'smile', 'peek');
+  await seg('IV 推移');
+  await ready();
+  await page.waitForTimeout(400);
+  check(
+    `#190 AC-9 ${tag} IV 推移を開くと atm_iv 1 回・future_bars 0 回`,
+    iv.length === 1 && fut.length === 0,
+    `IV ${iv.join(' ')}・先物 ${fut.length}`,
+  );
+  await seg('先物');
+  const shown = await ready();
+  await page.waitForTimeout(400);
+  const head = await page.textContent('section.smile .panel-head > h2').catch(() => null);
+  check(
+    `#190 AC-9 ${tag} 先物を開くと future_bars 1 回（右端 = tf=1h）・atm_iv は増えない・見出し「先物推移」`,
+    shown && fut.length === 1 && fut[0] === '?tf=1h' && iv.length === 1 && head === '先物推移',
+    `先物 ${fut.join(' ')}・IV ${iv.length}・見出し ${head}`,
+  );
+  const now = await page.locator('section.smile .iv-now').count();
+  check(`#190 ${tag} 「今」の印 1 個（新しい板・同じ限月）`, now === 1, `${now} 個`);
+
+  // 閉じて開き直す（PC: 板 → 先物、スマホ: スマイル → 別のパネル → 先物）
+  await seg(isPc ? '板' : 'スマイル');
+  await page.waitForTimeout(200);
+  if (!isPc) {
+    await setShell(page, 'positions', 'peek');
+    await setShell(page, 'smile', 'peek');
+  }
+  await seg('先物');
+  await ready();
+  await page.waitForTimeout(500);
+  check(
+    `#190 AC-9 ${tag} 閉じて開き直しても再要求しない（1 回のまま）`,
+    fut.length === 1,
+    `${fut.length} 回`,
+  );
+  await page.click('section.smile .iv-refresh');
+  const refreshed = await ready();
+  check(
+    `#190 AC-9 ${tag} ⟳ で右端の 1 回（2 回）`,
+    refreshed && fut.length === 2 && fut[1] === '?tf=1h',
+    fut.join(' '),
+  );
+
+  // 日足: 合成の応答の限月交代（9 月限 → 12 月限）の印と札・読み取りの限月
+  await page.click('section.smile .iv-tools button[aria-label="日足"]');
+  await ready();
+  // 足の切替は見ていた時間（1 時間足の数日）を保つので、R で初期表示（日足 100 本）に戻して交代の日を入れる
+  await page.focus('section.smile .iv-wrap');
+  await page.keyboard.press('r');
+  await page.waitForTimeout(300);
+  const roll = await page.evaluate(() => {
+    const sec = document.querySelector('section.smile');
+    return {
+      lines: sec?.querySelectorAll('.fut-roll').length ?? 0,
+      tags: [...(sec?.querySelectorAll('.fut-roll-tag') ?? [])].map((t) => t.textContent ?? ''),
+      contract: (sec?.querySelector('.iv-readout .contract')?.textContent ?? '').trim(),
+    };
+  });
+  check(
+    `#190 AC-9 ${tag} 日足で限月交代の縦の点線 ≥ 1・札「12月限」・読み取りに限月`,
+    roll.lines >= 1 && roll.tags.includes('12月限') && roll.contract === '12月限',
+    `点線 ${roll.lines}・札 ${roll.tags.join(' ')}・読み取り ${roll.contract}`,
+  );
+  // 線のモード: 期近のつなぎ足 = 交代でも線を切らない（日足の初期表示の 100 本は欠けが無いので M は 1 回）
+  await page.click('section.smile .iv-tools button:has-text("線")');
+  await page.waitForTimeout(200);
+  const ms = await page.evaluate(
+    () =>
+      (document.querySelector('section.smile .iv-line')?.getAttribute('d') ?? '').match(/M/g)
+        ?.length ?? 0,
+  );
+  check(
+    `#190 ${tag} 日足の線は限月交代でもつながる（期近のつなぎ足。M 1 回）`,
+    ms === 1,
+    `M ${ms} 回`,
+  );
+  await page.click('section.smile .iv-tools button:has-text("ローソク")');
+  if (shotsDir) await page.screenshot({ path: join(shotsDir, `flows-fut-${tag}.png`) });
+
+  // 切替で足を保つ: 先物の日足 → IV 推移も日足（IV の日足の 1 回分を読む）
+  await seg('IV 推移');
+  await ready();
+  await page.waitForTimeout(400);
+  const ivTf = await page
+    .getAttribute('section.smile .iv-tools button[aria-label="日足"]', 'aria-pressed')
+    .catch(() => null);
+  check(
+    `#190 AC-9 ${tag} 先物 → IV 推移の切替で足（日足）を保つ・IV は日足の 1 回分だけ読む`,
+    ivTf === 'true' && iv.length === 2 && iv[1] === '?tf=1d',
+    `日足 ${ivTf}・IV ${iv.join(' ')}`,
+  );
+
+  // トップバーの [最新] では先物を読み直さない（最後に。[最新] の後は板の出どころが API になる）
+  await seg('先物');
+  await ready();
+  const before = fut.length;
+  await page.click('header.top > button.btn');
+  await page.waitForSelector('.pill[data-state="ready"]', { timeout: 10000 }).catch(() => {});
+  await page.waitForTimeout(800);
+  check(
+    `#190 AC-9 ${tag} トップバーの [最新] では読み直さない（future_bars・atm_iv の回数が同じ）`,
+    fut.length === before && iv.length === 2,
+    `先物 ${before} → ${fut.length}・IV ${iv.length}`,
+  );
+  await ctx.close();
 }
 
 // ---- IV 推移の十字線と軸の札（#130 AC-7）。縦線は足に吸着、横線は指 / マウスの高さ（オーナーの決定 2026-10-18）

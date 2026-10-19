@@ -572,9 +572,12 @@ export function termSearchText(t: GlossaryTerm): string {
   return [t.title, t.reading, ...t.aliases].join('\n');
 }
 
-/** ⓘ の吹き出しの末尾の「用語:」に並べる用語（5 か所） */
+/** ⓘ の吹き出しの末尾の「用語:」に並べる用語（6 か所。#190 で先物推移） */
 export const HINT_TERMS: Readonly<
-  Record<'scenario' | 'positions' | 'metrics' | 'stage' | 'ivHistory', readonly TermId[]>
+  Record<
+    'scenario' | 'positions' | 'metrics' | 'stage' | 'ivHistory' | 'futHistory',
+    readonly TermId[]
+  >
 > = {
   scenario: ['dx', 'iv-shift', 'skew', 'beta', 'sticky', 'basis'],
   positions: ['greeks', 'delta', 'theta', 'vega', 'iv'],
@@ -591,6 +594,7 @@ export const HINT_TERMS: Readonly<
   ],
   stage: ['iv-shift', 'skew', 'beta', 'sticky', 'margin-line'],
   ivHistory: ['iv30', 'iv', 'hv', 'beta'],
+  futHistory: ['forward', 'basis', 'hv'],
 };
 
 // ---------------------------------------------------------------- 説明カードの表示モデル

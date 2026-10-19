@@ -6,6 +6,7 @@ import {
   chartMode,
   DOCK_LABELS,
   dockPanels,
+  futVisible,
   holdMapVisible,
   INITIAL_SHELL,
   ivVisible,
@@ -92,11 +93,12 @@ describe('shellReduce', () => {
     );
   });
 
-  it('市場の見え方の一覧は 1 か所（#85。#79 で IV 推移を 1 行足した）', () => {
+  it('市場の見え方の一覧は 1 か所（#85。#79 で IV 推移、#190 で先物を足した）', () => {
     expect(MARKET_VIEWS.map((v) => [v.value, v.text])).toEqual([
       ['board', '板'],
       ['smile', 'スマイル'],
       ['iv', 'IV 推移'],
+      ['fut', '先物'],
     ]);
     expect(shellReduce(at({}), { type: 'market', market: 'iv' })).toEqual(at({ market: 'iv' }));
   });
@@ -105,6 +107,7 @@ describe('shellReduce', () => {
     expect(SMILE_VIEWS.map((v) => [v.value, v.text])).toEqual([
       ['iv', 'IV 推移'],
       ['smile', 'スマイル'],
+      ['fut', '先物'],
     ]);
     for (const tier of ['phone', 'tablet'] as const) {
       expect(smileView(INITIAL_SHELL, tier)).toBe('iv');
@@ -168,6 +171,23 @@ describe('shellReduce', () => {
     expect(ivVisible(iv({ panel: 'board' }), 'tablet')).toBe(false);
     expect(ivVisible(iv({ panel: 'positions' }), 'phone')).toBe(false);
     expect(ivVisible(at({ panel: 'positions' }), 'tablet')).toBe(false);
+  });
+
+  it('#190: 先物推移が見えているか（条件は IV 推移と同じで市場が fut。IV 推移とは同時に見えない）', () => {
+    const fut = (s: Partial<ShellState>) => at({ market: 'fut', ...s });
+    for (const tier of ['phone', 'tablet', 'pc'] as const) {
+      expect(smileView(fut({}), tier)).toBe('fut');
+    }
+    expect(futVisible(fut({}), 'pc')).toBe(true);
+    expect(ivVisible(fut({}), 'pc')).toBe(false);
+    expect(futVisible(at({ market: 'iv' }), 'pc')).toBe(false);
+    expect(futVisible(fut({ panel: 'smile' }), 'tablet')).toBe(true);
+    expect(ivVisible(fut({ panel: 'smile' }), 'tablet')).toBe(false);
+    expect(futVisible(fut({ panel: 'smile' }), 'phone')).toBe(true);
+    expect(futVisible(fut({ panel: 'smile', sheet: 'hidden' }), 'phone')).toBe(false);
+    expect(futVisible(fut({ panel: 'board' }), 'tablet')).toBe(false);
+    // 既定（board）では見えない
+    expect(futVisible(at({ panel: 'smile' }), 'phone')).toBe(false);
   });
 
   it('タブレットで scenario は選べない（positions に読み替える）', () => {

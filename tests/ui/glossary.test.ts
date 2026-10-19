@@ -278,9 +278,9 @@ describe('説明カードの表示モデル（#167 AC-7）', () => {
     expect(termById('__proto__')).toBeNull();
   });
 
-  it('ⓘ の 5 か所の用語の並びの id がすべて存在し、重複しない', () => {
+  it('ⓘ の 6 か所の用語の並びの id がすべて存在し、重複しない', () => {
     expect(Object.keys(HINT_TERMS).sort()).toEqual(
-      ['ivHistory', 'metrics', 'positions', 'scenario', 'stage'].sort(),
+      ['futHistory', 'ivHistory', 'metrics', 'positions', 'scenario', 'stage'].sort(),
     );
     for (const [k, ids] of Object.entries(HINT_TERMS)) {
       expect(ids.length, k).toBeGreaterThan(0);

@@ -5,6 +5,7 @@ export * from './atmDaily';
 export * from './atmIv';
 export * from './calendar';
 export * from './chainJson';
+export * from './futureBars';
 export * from './jpxGreeks';
 export * from './legs';
 export * from './normalize';

@@ -54,13 +54,13 @@
 
 テスト: `tests/data/quotesOnly.test.ts`（欠けうる項目をすべて null にした合成の板で、検証・F の回復・スマイル・印・板の IV 列・足の評価）。
 
-取引カレンダー（`/api/calendar`）は板とは別のエンドポイント。供給元が返せなければ 503 で、画面は同梱の版（`data/calendar/calendar.json`）を使う。`source` が `bigquery` 以外の API の版は、ヘッダの前提に「API の版」と出す。IV 推移（`/api/atm_iv`）と日次の値（`/api/atm_daily`）は optionchan の表だけから作っており、他の供給元では 503（IV 推移・追証マップの過去の点は「読めない」）。
+取引カレンダー（`/api/calendar`）は板とは別のエンドポイント。供給元が返せなければ 503 で、画面は同梱の版（`data/calendar/calendar.json`）を使う。`source` が `bigquery` 以外の API の版は、ヘッダの前提に「API の版」と出す。IV 推移（`/api/atm_iv`）・日次の値（`/api/atm_daily`）・先物推移（`/api/future_bars`。#190）は optionchan の表だけから作っており、他の供給元では 503（IV 推移・追証マップの過去の点・先物推移は「読めない」）。
 
 ## 3. API の供給元の口
 
 `api/src/simulator_api/sources.py`:
 
-- `DataSource`（Protocol）: `chain()`（`/api/chain`）・`calendar()`（`/api/calendar`）・`atm_iv(req)`・`atm_daily()`。失敗は `service.Unavailable`（503 `{"error":"unavailable"}`。理由の符号だけをログに）か任意の例外（503・ログは型だけ）
+- `DataSource`（Protocol）: `chain()`（`/api/chain`）・`calendar()`（`/api/calendar`）・`atm_iv(req)`・`atm_daily()`・`future_bars(req)`（#190）。失敗は `service.Unavailable`（503 `{"error":"unavailable"}`。理由の符号だけをログに）か任意の例外（503・ログは型だけ）
 - `BUILDERS`: 環境変数 `DATA_SOURCE` の値 → 実装（`bigquery` = `ChainService`、`file` = `FileChainService`、`quotes` = `QuotesFileService`）。キーは `settings.DATA_SOURCES` と同じ（`api/tests/test_sources.py`）。未知の値は起動時にエラー
 - `bigquery` の読み方・クエリ・キャッシュ・single-flight・`MAX_BYTES_BILLED` は #154 で変えていない（`docs/design.md` 7.2・7.3）
 
@@ -89,7 +89,7 @@
 - 任意（省略 = null）: `source`（英数字と `_ . -` の 40 文字まで。既定 `quotes`）、`future.price`・`price_time`、`spot`、各行の `bid_iv`・`ask_iv`・`price`・`price_time`・`iv`・`volume`・`positions`・`delta`〜`vega`・`quotation`・`quotation_date`・`is_atm`（意味・単位は板の JSON 版 1 と同じ。IV は %、グリークは原資産 1 単位あたり）。知らないキーは無視
 - サーバーが入れるもの: 限月・先物の `last_trading_day`・`sq_date`（カレンダーの規則。第 2 金曜、休業日なら前へ）、行の並び（行使価格の昇順。同じ (限月, K, 種別) は最初の 1 件）、`reason`（`snapshot_at` が 45 分以内かつ連続売買の窓なら `latest`、それ以外は寄り前 / 引け後 / `closed`。7.2 と同じ窓）
 - 使える板の判定は optionchan と同じ（`usable.board_ok`: 先物の価格があり、1 限月の先物 ±5% の両側気配が 75% 以上）。満たさなければ 503。**ATM の近くの行使価格を必ず含める**（kabu の 50 銘柄の上限のような制約があるときも、ATM ±5% を先に）
-- 形の誤りは 503（ログ `quotes_file_invalid` に JSON の位置だけ。値は出さない）。`snapshot_at` が今から 5 分より先（未来）も形の誤り（時計・オフセットの誤り）。`QUOTES_FILE`・`CALENDAR_FILE` が 16 MiB を超えたら読まずに 503（ログ `file_too_large`）。`/api/calendar` は `CALENDAR_FILE` を `source: "file"` で返す。`/api/atm_iv`・`/api/atm_daily` は 503
+- 形の誤りは 503（ログ `quotes_file_invalid` に JSON の位置だけ。値は出さない）。`snapshot_at` が今から 5 分より先（未来）も形の誤り（時計・オフセットの誤り）。`QUOTES_FILE`・`CALENDAR_FILE` が 16 MiB を超えたら読まずに 503（ログ `file_too_large`）。`/api/calendar` は `CALENDAR_FILE` を `source: "file"` で返す。`/api/atm_iv`・`/api/atm_daily`・`/api/future_bars` は 503
 
 ## 5. 新しい供給元の足し方
 

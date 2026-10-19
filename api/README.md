@@ -7,6 +7,7 @@ optionchan の BigQuery（データセット `optionchan_tokyo` のテーブル�
 | `GET /api/chain` | 使える最新の板（7.2）を JSON 版 1（`data/chainTypes.ts`）で。`reason` = `latest` / `pre_open` / `after_close` / `closed`。`?at=` は後段（400） |
 | `GET /api/calendar` | 取引カレンダーの最新版 `{schema_version, source, version_at, covered_until, listed_until, days: [{date, is_trading_day, status, name}]}`（日付の昇順）。画面は本番で開いたときと [最新] で読む（取れなければ同梱の版。#39） |
 | `GET /api/atm_iv?tf=<1m\|1h\|1d>[&start=<ISO>&end=<ISO>]` | IV 推移（#79）: 表 `atm_cm_iv` の `iv30`（30 日固定の ATM IV、%）の足 `{schema_version, tf, start, end, last_at, bars: [{t, o, h, l, c}]}`。`start`・`end` は両方か無し（無ければ右端の 1 回分）、オフセット付きの ISO 8601 で UTC の 0 時ちょうど。1 回の最大は 1m 3 日・1h 100 日・1d 400 日。不正は 400、BigQuery の失敗・`DATA_SOURCE=file` は 503。仕様は `docs/design.md` 7.1・13.4 |
+| `GET /api/future_bars?tf=<1m\|1h\|1d>[&start=<ISO>&end=<ISO>]` | 先物推移（#190）: テーブル関数 `future_price_latest` の現在値（ラージ・期近。15 分遅れ）の足 `{schema_version, tf, start, end, last_at, bars: [{t, o, h, l, c, m}]}`（値は円、`m` は限月 `YYYY-MM` = 取引カレンダーから求めた期近）。パラメータ・最大日数・400 / 503・`Cache-Control` は `/api/atm_iv` と同じ。足は `price_time`（約定の分）で切り、`created_at` は範囲の終わりより 10 分先まで読む。`DATA_SOURCE=file` / `quotes` は 503。仕様は `docs/design.md` 7.1・13.4 |
 | `GET /api/atm_daily` | 日次の値（#152）: 表 `atm_cm_iv` の JST の日付ごとの日中の終値（JST 9:00〜15:00 の最後の行）の `iv30` と 1 / 2 限月のフォワード・最終取引日 `{schema_version, start, end, days: [{d, t, iv, f1, l1, f2, l2}]}`。パラメータなし（知らないパラメータは無視）。確定した日だけ（`end` = JST の今日（8:00 以降）/ 前日、含まない）。`Cache-Control: private, max-age=3600`・ETag で 304。BigQuery の失敗・`DATA_SOURCE=file` は 503。2 営業日の組はブラウザ（`data/atmDaily.ts`）。仕様は `docs/design.md` 7.1・13.4 |
 | `POST /api/ai/messages` | AI の中継（#134）。本文 JSON `{schema_version: 1, kind: "chat" | "diagnose", context, messages}` を許可リストで検査し、サーバーが固定する引数を付けて Anthropic に送り、SSE（`accepted` → `progress` / `thinking` / `text` / `tool_use` → `done` / `error`）で流す。1 日の上限（予約と精算）・同じオリジン・`Content-Type: application/json`・512 KiB・同時 2 本・1 分 10 回。下の「AI の中継」 |
 | `GET /api/ai/status` | AI が使えるか・モデル・資格情報の種類・数えるか・1 日の上限と残り・戻る時刻（`no-store`） |
@@ -14,13 +15,13 @@ optionchan の BigQuery（データセット `optionchan_tokyo` のテーブル�
 | `/`・`/assets/<path>` | `STATIC_DIR` があるときだけ、Vite のビルド成果物（`dist/`）を配る |
 | `/manifest.webmanifest`・`/favicon.svg`・`/apple-touch-icon.png`・`/icon-192.png`・`/icon-512.png` | `STATIC_DIR` があるときだけ、`dist/` 直下のこの 5 つの名前だけを配る（`no-cache`。名前の集合は `app.py` の `ROOT_FILES`。他の名前は 404。#90） |
 
-作り（`src/simulator_api/`）: `sources.py`（供給元の口 `DataSource` と `DATA_SOURCE` → 実装の表 `BUILDERS`）、`quotes.py`（中立の気配の一覧 → 板の JSON 版 1。純関数。#154）、`usable.py`（使える板の判定。純関数。定数は `settings.py` の上部）、`chain.py`（板の JSON の組み立て）、`calendar.py`（SQ 日の規則と `/api/calendar` の JSON）、`atm_iv.py`（IV 推移の要求の検査・足の束ね・JSON。純関数）、`atm_daily.py`（日次の値の確定した範囲・行の検査・JSON。純関数。#152）、`cache.py`（TTL・LRU・期限付きの LRU と single-flight）、`service.py`（BigQuery の読み方とキャッシュ、`file`・`quotes` の供給元）、`bq.py`（SQL の読み込みと実行）、`contract.py`（optionchan との契約 = 使う列と型）、`sql/*.sql`、`app.py`（Flask・セキュリティヘッダ）、`log.py`（JSON の構造化ログ）。AI の中継は `ai/`: `shape.py`（形の検査）・`tools.py`（道具の登録。#135 で 6 本）・`allowlist.py`（要求の許可リストと送る本文の組み立て直し。純関数）・`budget.py`（料金表・見積もり・予約 / 精算・JST の日）・`firestore_store.py`（日の計上。REST）・`gateway.py`（SDK の薄い包みと偽の送信先）・`guard.py`（同じオリジン・同時の本数・回数）・`relay.py`（エンドポイントの本体・SSE・ログ）。
+作り（`src/simulator_api/`）: `sources.py`（供給元の口 `DataSource` と `DATA_SOURCE` → 実装の表 `BUILDERS`）、`quotes.py`（中立の気配の一覧 → 板の JSON 版 1。純関数。#154）、`usable.py`（使える板の判定。純関数。定数は `settings.py` の上部）、`chain.py`（板の JSON の組み立て）、`calendar.py`（SQ 日の規則と `/api/calendar` の JSON）、`atm_iv.py`（IV 推移の要求の検査・足の束ね・JSON。純関数）、`atm_daily.py`（日次の値の確定した範囲・行の検査・JSON。純関数。#152）、`future_bars.py`（先物推移の読む窓・足・限月・JSON。純関数。#190）、`cache.py`（TTL・LRU・期限付きの LRU と single-flight）、`service.py`（BigQuery の読み方とキャッシュ、`file`・`quotes` の供給元）、`bq.py`（SQL の読み込みと実行）、`contract.py`（optionchan との契約 = 使う列と型）、`sql/*.sql`、`app.py`（Flask・セキュリティヘッダ）、`log.py`（JSON の構造化ログ）。AI の中継は `ai/`: `shape.py`（形の検査）・`tools.py`（道具の登録。#135 で 6 本）・`allowlist.py`（要求の許可リストと送る本文の組み立て直し。純関数）・`budget.py`（料金表・見積もり・予約 / 精算・JST の日）・`firestore_store.py`（日の計上。REST）・`gateway.py`（SDK の薄い包みと偽の送信先）・`guard.py`（同じオリジン・同時の本数・回数）・`relay.py`（エンドポイントの本体・SSE・ログ）。
 
 ## 設定（環境変数）
 
 | 名前 | 既定 | 意味 |
 |---|---|---|
-| `DATA_SOURCE` | `bigquery` | `bigquery` / `file` / `quotes`。`file` は `CHAIN_FILE` の JSON をそのまま `/api/chain` で返す（GCP なしで動かす用。`/api/calendar` は 503 で、画面は同梱の取引カレンダーを使う）。`quotes` は `QUOTES_FILE` の中立の気配の一覧と `CALENDAR_FILE` から板を組み立てる（`/api/calendar` は `CALENDAR_FILE`。`/api/atm_iv`・`/api/atm_daily` は 503。形は `docs/data-sources.md` 4 章） |
+| `DATA_SOURCE` | `bigquery` | `bigquery` / `file` / `quotes`。`file` は `CHAIN_FILE` の JSON をそのまま `/api/chain` で返す（GCP なしで動かす用。`/api/calendar` は 503 で、画面は同梱の取引カレンダーを使う）。`quotes` は `QUOTES_FILE` の中立の気配の一覧と `CALENDAR_FILE` から板を組み立てる（`/api/calendar` は `CALENDAR_FILE`。`/api/atm_iv`・`/api/atm_daily`・`/api/future_bars` は 503。形は `docs/data-sources.md` 4 章） |
 | `GCP_PROJECT` | なし（`bigquery` のとき必須） | BigQuery のプロジェクト ID |
 | `BQ_DATASET` | `optionchan_tokyo` | データセット |
 | `BQ_LOCATION` | `asia-northeast1` | ロケーション |
@@ -74,7 +75,7 @@ uv run --locked pytest -q
 - 供給元の口は `tests/test_sources.py`、中立の気配の一覧は `tests/test_quotes.py`（合成の板から作った一覧 → 板が元と一致・形の規則・不正入力・`DATA_SOURCE=quotes` の応答。実際の API は呼ばない）
 - BigQuery は偽の runner（`tests/support.py` の `FakeRunner`）。板は合成（`fixtures/synthetic/*.json` から作る round-trip と、判定用の小さな合成の板）
 - 契約（AC25）: `OPTIONCHAN_SCHEMA_DIR=<optionchan の固定コミットの checkout>/schema uv run --locked pytest -q -rs tests/test_contract.py`（`schema/tokyo` と `schema/cm` を使う。`contract.py` の `schema_file` は `schema/` からの相対パス）。固定コミットは `contract/optionchan_commit.txt`（40 桁の SHA）。CI はリポジトリ変数 `OPTIONCHAN_REPO`（`<OWNER>/<REPO>`）があるときだけその SHA を sparse checkout して照合する（未設定なら notice を出してスキップ）
-- SQL の dry run（課金 0。CI では動かさない）: `OPTIONCHAN_BQ_TEST=1 OPTIONCHAN_BQ_PROJECT=<PROJECT_ID> uv run --locked pytest -q -s tests/test_sql_bq.py`（ADC。見積もりが 512 MiB 以下（`atm_cm_iv` は足ごとの最大の範囲で 64 MiB 以下、`atm_cm_daily` は全期間で 128 MiB 以下。2026-10-19 に約 61.9 MiB）で、結果の列・型が `contract.py`（集計するクエリは `OUTPUTS`）と一致）。ADC が無い手元では、`sql/*.sql` の `${project}`・`${dataset}` を埋めて `bq query --use_legacy_sql=false --dry_run --format=json --parameter=...` に標準入力で渡すと、`statistics.query.totalBytesProcessed` と `schema` で同じことを確かめられる
+- SQL の dry run（課金 0。CI では動かさない）: `OPTIONCHAN_BQ_TEST=1 OPTIONCHAN_BQ_PROJECT=<PROJECT_ID> uv run --locked pytest -q -s tests/test_sql_bq.py`（ADC。見積もりが 512 MiB 以下（`atm_cm_iv`・`future_bars` は足ごとの最大の範囲で 64 MiB 以下、`atm_cm_daily` は全期間で 128 MiB 以下。2026-10-19 に約 61.9 MiB）で、結果の列・型が `contract.py`（集計するクエリは `OUTPUTS`）と一致）。ADC が無い手元では、`sql/*.sql` の `${project}`・`${dataset}` を埋めて `bq query --use_legacy_sql=false --dry_run --format=json --parameter=...` に標準入力で渡すと、`statistics.query.totalBytesProcessed` と `schema` で同じことを確かめられる
 
 ### 固定コミットの更新
 
@@ -120,6 +121,8 @@ gcloud logging read "protoPayload.serviceName=\"bigquery.googleapis.com\" AND pr
 ```
 
 IV 推移（`/api/atm_iv`。#79）のジョブだけを見るときは、`jq` の最初の `map(...)` の前に `map(select(.protoPayload.metadata.jobChange.job.jobConfig.queryConfig.query // "" | test("atm_cm_iv")))` を挟む（エラーの内訳は `.protoPayload.metadata.jobChange.job.jobStatus.errorResult.reason`。`bytesBilledLimitExceeded` が 64 MiB の上限）。目安は 1 ジョブの最大が 64 MiB 以下（通常は最小課金の 10 MiB。表が変わるまでの同じ要求は結果キャッシュで 0）。
+
+先物推移（`/api/future_bars`。#190）のジョブは `test("traded_at")` で絞る（板の `/api/chain` も `future_price_latest` を読むが、`price_time` を `traded_at` にして束ねるのは先物推移だけ）。目安は 1 ジョブ最小課金の 20 MiB（テーブル関数の中で表 2 本）・最大 64 MiB の上限の下（1d 400 日 + 読み足しで約 22 MiB）。アプリのログでは `jsonPayload.event = "future_bars_served"`（`tf`・`days`・`bars`・`cache`・`contract_mismatch` = 生の `contract_month` と求めた限月が違う足の数）と `bq_job` の `name = "future_bars"`。
 
 `atm_cm_iv` の文字列は IV 推移と日次の値（`/api/atm_daily`。#152）の 2 つのクエリに当たるので、分けるときは `m1_forward` を含むか否かで絞る: IV 推移は `test("atm_cm_iv") and (test("m1_forward") | not)`、日次の値は `test("m1_forward")`。日次の値の目安は 1 ジョブ 約 62 MiB（全期間。1 年で約 8 MiB 増える）で 128 MiB の上限（`bytesBilledLimitExceeded`）の下、回数はインスタンスごと 1 日 1 回 + コールドスタートの回数（範囲の終わりごとのキャッシュ）。アプリのログでは `jsonPayload.event = "atm_daily_served"`（`end`・`days`・`cache`）と `bq_job` の `name = "atm_cm_daily"`（`total_bytes_processed`）。
 
