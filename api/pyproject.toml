@@ -8,6 +8,8 @@ dependencies = [
     "flask>=3.1,<3.2",
     "gunicorn>=26,<27",
     "google-cloud-bigquery>=3.45,<4",
+    # AI の中継（#134、docs/ai-advisor.md 論点 7 = A）。exclude-newer の範囲で固定（1.9.0 は範囲の外）
+    "anthropic==1.8.0",
 ]
 
 [dependency-groups]

@@ -5,7 +5,9 @@
 - GET /api/atm_iv?tf=<1m|1h|1d>[&start=&end=]: IV 推移（表 atm_cm_iv の iv30 の足。atm_iv.py。#79）
 - GET /api/atm_daily: 日次の値（表 atm_cm_iv の日中の終値の iv30・1 / 2 限月のフォワード。確定した日だけ。atm_daily.py。
   #152）。パラメータは読まない
-- GET /healthz: 設定の読み込みだけ（BigQuery に触れない）
+- POST /api/ai/messages: AI の中継（SSE。許可リスト・費用の 1 日上限・同じオリジン。ai/relay.py。#134）
+- GET /api/ai/status: AI が使えるか・1 日の上限と残り（ai/relay.py。#134）
+- GET /healthz: 設定の読み込みだけ（BigQuery・Anthropic・Firestore に触れない）
 - 静的ファイル: 環境変数 STATIC_DIR があるときだけ / と /assets/<path>（Vite のビルド成果物 = dist/）と、
   dist/ 直下の決まった名前（ROOT_FILES。manifest とアイコン。#90）
 - 中身は供給元（sources.py の DataSource。DATA_SOURCE = bigquery / file / quotes）が返す
@@ -19,6 +21,10 @@ from flask import Flask, Response, request, send_from_directory
 
 from . import atm_iv, sources
 from . import settings as st
+from .ai import budget as ai_budget
+from .ai import gateway as ai_gw
+from .ai import tools as ai_tools
+from .ai.relay import AiRelay
 from .log import log
 from .service import Unavailable
 
@@ -73,15 +79,37 @@ def _payload_response(payload, cache_control: str) -> Response:
     return res
 
 
-def create_app(runner=None, clock=None, monotonic=None, cfg: st.Settings | None = None) -> Flask:
+def _ai_relay(ai_cfg: st.AiSettings, gateway, store, registry, clock, monotonic) -> AiRelay:
+    if ai_cfg.enabled:
+        if gateway is None:
+            if ai_cfg.credential == "fake":
+                gateway = ai_gw.FakeGateway()
+            else:
+                gateway = ai_gw.AnthropicGateway(ai_cfg.credential, ai_cfg.secret)
+                gateway.start_warm()  # SDK の import は重い（起動プローブ・/healthz を待たせない）
+        if store is None and ai_cfg.budget_store == "memory":
+            store = ai_budget.MemoryStore()
+        elif store is None and ai_cfg.budget_store == "firestore":
+            from .ai.firestore_store import FirestoreStore
+
+            store = FirestoreStore(ai_cfg.project)
+    return AiRelay(ai_cfg, gateway, store, ai_tools.REGISTRY if registry is None else registry, clock, monotonic)
+
+
+def create_app(runner=None, clock=None, monotonic=None, cfg: st.Settings | None = None,
+               ai_cfg: st.AiSettings | None = None, ai_gateway=None, ai_store=None, ai_registry=None) -> Flask:
     """runner: (name, params) -> rows（省略時は設定の BigQuery）。clock: 現在時刻、monotonic: 単調時計（テスト用）。
-    cfg: 設定（省略時は環境変数）"""
+    cfg: 設定（省略時は環境変数）。ai_cfg: AI の設定（省略時は環境変数）。ai_gateway: 送信先、
+    ai_store: 日の計上の置き場所、ai_registry: 道具の登録（テスト用。省略時は設定から）"""
     app = Flask(__name__, static_folder=None)
     if cfg is None:
         cfg = st.from_env()
+    if ai_cfg is None:
+        ai_cfg = st.ai_from_env()
     clock = clock or _now
     # 供給元（DATA_SOURCE → 実装の表は sources.py。#154）
     service = sources.build(cfg, runner, clock, monotonic or time.monotonic)
+    relay = _ai_relay(ai_cfg, ai_gateway, ai_store, ai_registry, clock, monotonic or time.monotonic)
 
     @app.after_request
     def security_headers(res):
@@ -136,6 +164,14 @@ def create_app(runner=None, clock=None, monotonic=None, cfg: st.Settings | None 
     def api_atm_daily():
         # パラメータは読まない（知らないパラメータは無視。キャッシュのキーを増やさない）
         return serve("atm_daily", service.atm_daily, f"private, max-age={st.ATM_DAILY_MAX_AGE_SECONDS}")
+
+    @app.get("/api/ai/status")
+    def api_ai_status():
+        return relay.status()
+
+    @app.post("/api/ai/messages")
+    def api_ai_messages():
+        return relay.messages(request)
 
     if cfg.static_dir is not None:
         static_dir = cfg.static_dir.resolve()

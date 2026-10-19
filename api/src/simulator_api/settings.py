@@ -1,4 +1,4 @@
-"""API の設定（環境変数）と、判定・キャッシュの定数（docs/design.md 7.2・7.3・8.3・13.4）。
+"""API の設定（環境変数）と、判定・キャッシュ・AI の中継の定数（docs/design.md 7.2・7.3・8.3・13.4）。
 
 プロジェクト ID は必須（既定値なし。リポジトリに利用者個人の設定を入れないため）。
 データセット・ロケーション・上限は汎用の既定値を持つ。
@@ -6,7 +6,7 @@
 
 import os
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import time
 from pathlib import Path
 
@@ -83,6 +83,48 @@ QUERY_MAX_BYTES_BILLED: dict[str, int] = {"atm_cm_iv": 64 * MiB, "atm_cm_daily":
 QUOTES_MAX_FILE_BYTES = 16 * MiB  # QUOTES_FILE・CALENDAR_FILE の大きさの上限（超えたら読まずに 503）
 QUOTES_MAX_FUTURE_SECONDS = 300  # snapshot_at が今からこれより先（未来）なら不正（時計・タイムゾーンの誤り）
 
+# ---- AI の中継（/api/ai/messages・/api/ai/status、#134。docs/design.md 8.3・13.4、ai-advisor.md 論点 3・4・6〜8） ----
+# 料金表（USD / 100 万トークン を µUSD / 100 万トークン の整数で）。出典（確認日 AI_PRICE_CHECKED）:
+# https://platform.claude.com/docs/en/about-claude/pricing 。読み取りは入力の 0.05 倍。
+# 料金が変わったらこの表と確認日を直す PR を出す（自動ではない）
+AI_PRICE_CHECKED = "2026-10-19"
+AI_PRICES: dict[str, dict[str, int]] = {
+    "claude-opus-5-5": {
+        "input": 4_000_000,
+        "cache_write_5m": 5_000_000,
+        "cache_write_1h": 8_000_000,
+        "cache_read": 200_000,
+        "output": 20_000_000,
+    },
+}
+AI_MODEL_DEFAULT = "claude-opus-5-5"  # AI_MODEL で上書きできるのは料金表にあるモデルだけ
+AI_DAILY_LIMIT_USD_DEFAULT = 3  # 1 日（JST）の上限（K15）。AI_DAILY_LIMIT_USD で上書き（0 < 値 ≤ 最大）
+AI_DAILY_LIMIT_USD_MAX = 20
+AI_MAX_TOKENS = 8000  # 出力の上限（thinking を含む）。予約額の出力側。#135 が測って直す
+AI_EFFORT = "medium"  # output_config.effort。#135 が測って決める
+# 1 要求の締め切り（_start の頭 = 予約の前から数える）。超えたら error: timeout で閉じる。
+# 締め切りの直前に final が来ると精算（Firestore の書き込み、最大 AI_FIRESTORE_TIMEOUT_SECONDS = 5 秒）が
+# その後に走るので、最悪 50 + 5 = 55 秒で Cloud Run の 60 秒の内側に収まる
+AI_DEADLINE_SECONDS = 50
+AI_CONNECT_TIMEOUT_SECONDS = 5.0  # Anthropic への接続
+AI_READ_TIMEOUT_SECONDS = 30.0  # Anthropic の応答の読み取りの間隔（ストリームは ping が来るので途切れない）
+AI_MAX_BODY_BYTES = 512 * 1024  # 要求の本文の上限（413）
+AI_MAX_CONCURRENT = 2  # インスタンスごとに同時に流す本数（gunicorn の 8 スレッドのうち 6 本は /api/chain などに残す）
+AI_RATE_PER_MINUTE = 10  # インスタンスごとの 1 分の回数
+# 入力トークンの見積もり = 送る本文（system・tools・messages）の UTF-8 のバイト数 + AI_INPUT_OVERHEAD_TOKENS。
+# バイト単位の BPE のトークンは 1 つ 1 バイト以上なので、トークン数 ≤ バイト数（数字・記号の多い JSON でも過小にならない
+# 上界。ASCII 1 字 = 1、日本語 1 字 = 3）。OVERHEAD は本文に見えない分（message の区切り・道具を使うときの system prompt
+# など。数百トークン）の余裕
+AI_INPUT_OVERHEAD_TOKENS = 2000
+AI_FIRESTORE_DATABASE = "simulator-ai"  # 日の計上の置き場所（Firestore の名前つき DB。infra/bootstrap/ai_budget.tf）
+AI_FIRESTORE_COLLECTION = "ai_spend"
+AI_FIRESTORE_TIMEOUT_SECONDS = 5.0
+AI_FIRESTORE_RETRIES = 3  # 前提条件の失敗（他のインスタンスと競合）の読み直し
+AI_OAUTH_BETA = "oauth-2025-04-20"  # OAuth のトークンで /v1/messages を呼ぶときの anthropic-beta
+AI_CREDENTIALS = ("api_key", "oauth_token", "fake")  # fake は手元とテスト用の偽の送信先（Terraform の変数は通さない）
+AI_BUDGET_STORES = ("firestore", "memory")
+_AI_LIMIT_RE = re.compile(r"^[0-9]{1,2}(?:\.[0-9]{1,2})?$")
+
 # 供給元（DATA_SOURCE の値）。値 → 実装の表は sources.py の BUILDERS（docs/data-sources.md「API の供給元の口」。#154）
 DATA_SOURCES = ("bigquery", "file", "quotes")
 
@@ -145,3 +187,85 @@ def from_env(env=None) -> Settings:
     if env.get("STATIC_DIR"):
         kwargs["static_dir"] = Path(env["STATIC_DIR"])
     return Settings(**kwargs)
+
+
+@dataclass(frozen=True)
+class AiSettings:
+    """AI の中継の設定。credential が None なら AI は無効（disabled は理由の列挙。値は持たない）。
+    secret は repr に出さない（ログ・例外に鍵を出さない）"""
+
+    credential: str | None = None
+    model: str = AI_MODEL_DEFAULT
+    daily_limit_micro_usd: int = AI_DAILY_LIMIT_USD_DEFAULT * 1_000_000
+    budget_store: str | None = None  # firestore / memory。oauth_token は数えないので None
+    project: str = ""
+    deadline_seconds: float = AI_DEADLINE_SECONDS
+    disabled: str | None = "not_configured"
+    secret: str | None = field(default=None, repr=False)
+
+    @property
+    def enabled(self) -> bool:
+        return self.credential is not None
+
+    @property
+    def counted(self) -> bool:
+        return self.budget_store is not None
+
+
+def _ai_disabled(reason: str, warn: bool) -> AiSettings:
+    if warn:
+        from .log import log
+
+        # 値は出さない（どの設定が駄目かの列挙だけ）
+        log("WARNING", "ai_disabled", reason=reason)
+    return AiSettings(disabled=reason)
+
+
+def ai_from_env(env=None) -> AiSettings:
+    """AI_CREDENTIAL（none / 未設定は無効）・ANTHROPIC_API_KEY / ANTHROPIC_AUTH_TOKEN・AI_MODEL・AI_DAILY_LIMIT_USD・
+    AI_BUDGET_STORE・GCP_PROJECT から。設定が不正なときは AI だけを無効にする（simulator 全体は起動する）。
+    SDK に環境変数を読ませず、選んだ片方だけを中継が渡す（ADR-0001）"""
+    env = os.environ if env is None else env
+    credential = (env.get("AI_CREDENTIAL") or "none").strip()
+    if credential == "none":
+        return AiSettings()
+    if credential not in AI_CREDENTIALS:
+        return _ai_disabled("ai_credential_invalid", True)
+    key, token = env.get("ANTHROPIC_API_KEY") or None, env.get("ANTHROPIC_AUTH_TOKEN") or None
+    secret = None
+    if credential != "fake":
+        if key is not None and token is not None:
+            # 両方あると SDK は X-Api-Key と Authorization の両方を送る（API は拒否する）。取り違えを避けて無効に
+            return _ai_disabled("ai_credential_conflict", True)
+        secret = key if credential == "api_key" else token
+        if secret is None:
+            return _ai_disabled("ai_credential_missing", True)
+    model = (env.get("AI_MODEL") or AI_MODEL_DEFAULT).strip()
+    if model not in AI_PRICES:
+        return _ai_disabled("ai_model_unpriced", True)
+    limit = AI_DAILY_LIMIT_USD_DEFAULT * 1_000_000
+    if env.get("AI_DAILY_LIMIT_USD"):
+        raw = env["AI_DAILY_LIMIT_USD"].strip()
+        if not _AI_LIMIT_RE.match(raw):
+            return _ai_disabled("ai_daily_limit_invalid", True)
+        whole, _, frac = raw.partition(".")
+        limit = int(whole) * 1_000_000 + int((frac + "00")[:2]) * 10_000
+        if not 0 < limit <= AI_DAILY_LIMIT_USD_MAX * 1_000_000:
+            return _ai_disabled("ai_daily_limit_invalid", True)
+    store: str | None = None
+    project = ""
+    if credential != "oauth_token":
+        store = (env.get("AI_BUDGET_STORE") or ("memory" if credential == "fake" else "firestore")).strip()
+        if store not in AI_BUDGET_STORES:
+            return _ai_disabled("ai_budget_store_invalid", True)
+        if store == "firestore":
+            project = env.get("GCP_PROJECT", "")
+            if not _PROJECT_RE.match(project):
+                return _ai_disabled("ai_budget_project_missing", True)
+        elif credential == "api_key":
+            from .log import log
+
+            # インスタンスごとのメモリ = 冷えるたびに 0 に戻る（手元の確認用）
+            log("WARNING", "ai_budget_memory")
+    return AiSettings(credential=credential, model=model, daily_limit_micro_usd=limit, budget_store=store,
+                      project=project, disabled=None, secret=secret)
