@@ -5,7 +5,8 @@ runner: (name, params) -> 行（dict）のリスト。name は sql/<name>.sql、
 - latest_runs: TTL RUNS_TTL_SECONDS + single-flight
 - 板: キー = (snapshot_at, finished_at)（再処理で書き直されたら取り直す）、値 = 判定の結果（使えない板も
   「不採用」として持つ）と限月ごとの行。LRU BOARD_CACHE_SIZE 件 + single-flight。応答の JSON（と gzip）は
-  (reason, カレンダーの版) ごとに 1 回だけ作る → 同じ snapshot_at の 2 回目は latest_runs だけ
+  (reason, カレンダーの版) ごとに 1 回だけ作る → 同じ snapshot_at の 2 回目は latest_runs だけ。先物の限月はそのとき
+  snapshot_at と取引カレンダーから求める（future_bars.board_future。生の値と違えばログ future_contract_mismatch。#192）
 - カレンダー: TTL CALENDAR_TTL_SECONDS + single-flight。読めなければ古い版（WARNING）、一度も読めていなければ失敗
 - 1 リクエストの BigQuery 待ちの合計が REQUEST_BUDGET_SECONDS を超えたら次のクエリを出さずに Unavailable
 - 候補の評価: 先物（安い）を先に読み、価格が NULL / 0 以下なら板も現物も読まない。先物が使えたら板と現物を同時に
@@ -92,7 +93,11 @@ class _Board:
         key = (reason, cal.version_at)
         with self.lock:
             if key not in self.rendered:
-                obj = chain.chain_json(self.snapshot_at, reason, self.months, self.future, self.spot, cal)
+                # 先物の限月は生の contract_month（1 年先になる行がある）ではなく取引カレンダーから（#192）
+                future, mismatch = future_bars.board_future(self.future, self.snapshot_at, cal)
+                if mismatch:
+                    log("INFO", "future_contract_mismatch")
+                obj = chain.chain_json(self.snapshot_at, reason, self.months, future, self.spot, cal)
                 body, gz = _encode(obj)
                 etag = (f'"{int(self.snapshot_at.timestamp())}-{int(self.finished_at.timestamp())}-{reason}-'
                         f'{int(cal.version_at.timestamp())}"')

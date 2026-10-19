@@ -11,7 +11,8 @@
 - 限月 m（YYYY-MM）: 足の取引日（atm_iv.trading_day）以後に取引最終日がある最初の四半期限月（3・6・9・12 月。
   取引最終日は calendar.last_trading_day = SQ の規則の休業日は版の全行）。交代は取引最終日の夜間の始まり
   （17:00 = 取引日の境）なので、1m・1h・1d のどの足も 2 限月にまたがらない。生の contract_month（SQ のある月の
-  1 日〜取引最終日に 1 年先になる行がある）は使わず、食い違った足の数をログに出すだけ
+  1 日〜取引最終日に 1 年先になる行がある）は使わず、食い違った足の数をログに出すだけ。同じ規則（contract_at）で
+  /api/chain の板の先物の限月も求める（board_future。#192）
 - JSON: {schema_version: 1, tf, start, end, last_at, bars: [{t, o, h, l, c, m}]}。時刻は +09:00、値は円（丸めない）
 """
 
@@ -68,14 +69,31 @@ def month_label(ym: tuple[int, int]) -> str:
     return f"{ym[0]:04d}-{ym[1]:02d}"
 
 
+def contract_at(t: datetime, non_trading: frozenset[date], sq_holidays: frozenset[date]) -> tuple[int, int]:
+    """時刻 t（aware）の期近の四半期限月 (年, 月): t が属する取引日（atm_iv.trading_day。17:00 からは次の取引日）
+    以後に取引最終日がある最初の限月。先物推移の足と板の先物（#192）で共用。non_trading は is_trading_day = false の日
+    （atm_iv.non_trading_days）、sq_holidays は SQ の規則の休業日（Calendar.holidays）"""
+    return front_contract(atm_iv.trading_day(t, non_trading), sq_holidays)
+
+
+def board_future(future: dict, snapshot_at: datetime, cal: cal_mod.Calendar) -> tuple[dict, bool]:
+    """板の先物の行（future_price_latest）→ (contract_month を snapshot_at の期近の限月（月の 1 日）に置き換えた新しい
+    dict, 生の contract_month と違ったか)。生の値は SQ のある月の 1 日〜取引最終日に 1 年先になる（#192。4.2）"""
+    y, m = contract_at(snapshot_at, atm_iv.non_trading_days(cal), cal.holidays)
+    derived = date(y, m, 1)
+    raw = future.get("contract_month")
+    mismatch = isinstance(raw, date) and (raw.year, raw.month) != (y, m)
+    return {**future, "contract_month": derived}, mismatch
+
+
 def with_contracts(bars: list[dict], non_trading: frozenset[date], sq_holidays: frozenset[date],
                    daily: bool = False) -> list[dict]:
     """足に限月 m を付ける（新しい dict）。daily は started_at が取引日の 00:00 JST の足（日足）"""
     out = []
     for b in bars:
-        day = b["started_at"].astimezone(atm_iv.JST).date() if daily else atm_iv.trading_day(b["started_at"],
-                                                                                            non_trading)
-        out.append({**b, "m": month_label(front_contract(day, sq_holidays))})
+        ym = (front_contract(b["started_at"].astimezone(atm_iv.JST).date(), sq_holidays) if daily
+              else contract_at(b["started_at"], non_trading, sq_holidays))
+        out.append({**b, "m": month_label(ym)})
     return out
 
 

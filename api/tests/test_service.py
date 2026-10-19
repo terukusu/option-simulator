@@ -2,10 +2,10 @@
 
 import json
 import threading
-from datetime import timedelta
+from datetime import date, timedelta
 
 import pytest
-from support import Clock, FakeRunner, World, jst, load_fixture, synth_board
+from support import Clock, FakeRunner, World, jst, load_fixture, synth_board, wall_of
 
 from simulator_api.service import ChainService, Unavailable
 
@@ -58,6 +58,27 @@ def test_roundtrip_fixture(name, reason):
     text = res.json_bytes.decode()
     assert "Z\"" not in text and "+00:00" not in text
     assert text.count("+09:00") >= 3
+
+
+@pytest.mark.parametrize("snap,raw,want", [
+    (jst(2026, 12, 1, 10, 0), date(2027, 12, 1), ("2026-12", "2026-12-10", "2026-12-11")),  # SQ のある月の 1 日
+    (jst(2026, 12, 10, 15, 30), date(2027, 12, 1), ("2026-12", "2026-12-10", "2026-12-11")),  # 取引最終日の日中
+    (jst(2026, 12, 10, 17, 1), date(2027, 3, 1), ("2027-03", "2027-03-11", "2027-03-12")),  # 17:00 の後（年の境）
+    (jst(2026, 10, 20, 21, 30), date(2026, 12, 1), ("2026-12", "2026-12-10", "2026-12-11")),  # 四半期の途中
+])
+def test_future_contract_month_from_calendar_not_raw(snap, raw, want, capsys):
+    # #192: 生の contract_month が 1 年先でも、板の JSON の先物の限月・取引最終日・SQ 日は snapshot_at の期近の限月
+    w = World()
+    w.add(snap, synth_board(snap, ltd=date(2026, 12, 10), ltd2=date(2027, 3, 11)),
+          {"price": 30000.0, "price_time": wall_of(snap), "contract_month": raw})
+    clock = Clock(snap + timedelta(minutes=15))
+    got = json.loads(ChainService(FakeRunner(w), clock, monotonic=clock.monotonic).chain().json_bytes)
+    f = got["future"]
+    assert (f["contract_month"], f["last_trading_day"], f["sq_date"]) == want
+    assert set(f) == {"price", "price_time", "contract_month", "last_trading_day", "sq_date"}  # 形は不変
+    out = capsys.readouterr().out
+    assert ('"event": "future_contract_mismatch"' in out) == (f"{raw.year:04d}-{raw.month:02d}" != want[0])
+    assert "2027-12" not in out
 
 
 def test_second_request_reads_only_latest_runs():
