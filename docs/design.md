@@ -1083,7 +1083,7 @@ F の推定・補間・ATM の判定はブラウザ（`model/`）。`sq_date`・
   - dev: `/fixtures/atm_daily`（`scripts/devFixtures.mjs` の `synthAtmDaily`。種つきの架空の値。取引日だけ・毎月の限月の切り替え・下げで IV が上がる架空の反応）
 - 持ちこたえマップの画面（**決定（2026-10-19、#152 段 B）**。軸の定数は `model/holdMap.ts`、画面の定数・文は `ui/view/holdMap.ts` の上部、計算の時機は `ui/components/useHoldMap.ts`、過去の点の読み込みは `ui/components/useAtmMoves.ts`。式は 5.11）
   - 置き場所: 指標 · テールの末尾（テールの証拠金の表の後）の折りたたみ「持ちこたえマップ」。既定は閉。開閉は `ShellState.holdMap`（セッション中だけ・保存しない）。見えている = 開いていて指標のパネルが見えている（`holdMapVisible`。PC は常に、タブレットはパネルが指標、スマホはそれに加えてシートが hidden でない）
-  - 読み込み: 見えていて資金・足があるとき、初めての 1 回だけ `/api/atm_daily`（dev の合成の板・ファイルでは `/fixtures/atm_daily`）。失敗は `過去の値動きを読めない` + [再試行]（マップは点なしで出す）、読み込み中 `過去の値動きを読み込み中…`、0 件 `過去の値動きが無い`。[最新] でも読み直さない
+  - 読み込み: 見えていて資金・足があるとき、初めての 1 回だけ `/api/atm_daily`（dev の合成の板・ファイルでは `/fixtures/atm_daily`）。失敗は `過去の値動きを読めない` + [再試行]（マップは点なしで出す）、0 件 `過去の値動きが無い`（この 2 つは描画域の上の状態の行）。待ちの間（#174）は描画域の大きさの枠（初めては空の枠、再計算は前のマップを薄くした上に 250ms 後）の中にスピナーと文字（読み込み中 `過去の値動きを読み込み中…`、それ以外で計算中 `計算中…`。`holdMapWait`）。開いたとき描画域がパネルの枠に入るよう枠の scrollTop だけを動かす（`holdMapReveal`。はみ出した分だけ・描画域の上端を隠さない。prefers-reduced-motion なら即時。閉じるときは動かさない）。[最新] でも読み直さない
   - 描画: 自前の SVG。マス = クラスごとに 1 本の path（`hm-ok` = `--gain-fill` / `hm-call` = `--loss-fill`）、境目 = `--loss` の 1.5px、過去の点 = 余力ありは丸（`--ink-2`）、追証の側は ×（`--loss`。色だけに頼らない）、今 = 十字（`--accent`）、シナリオの ΔX = 縦の破線（`--handle`）。目盛りは横 10% 刻み・縦 ×0.5 刻み（ラベルの間 44px / 22px 以上、横 7 本・縦 6 本まで。広がったら刻みを粗く）。高さ = clamp(幅 × 0.72, 200, 300) px、幅 = パネルの中身（SVG の width・height 属性。style を使わない）
   - 触る: 描画域のクリック / タップで 14px 以内の最も近い点、無ければそのマス。下の 1 行（`aria-live="polite"`）に、点は `d₀ → d₁ · 原資産 ±x.x% · IV a → b%（×r.rr · ±p.ppt）· 余力 … · 追証 / 余力あり`、マスは `原資産 ±u% · IV ×c · 余力 …`。描画域（`role="application"`・`tabIndex=0`）の矢印キーでマスを 1 つずつ（端で止まる）、Esc で外す。拡大・パンはしない（`useChartGestures` は使わない = ホイール・スワイプでパネルがスクロールする）
   - 資金が未設定 `設定で資金を入れてください（⋯ > 設定…）`（マスを作らない・過去の点を読まない）、足なしは指標のパネルの空の状態
@@ -1195,6 +1195,11 @@ optionchan-gcp の bootstrap / prod を写すだけでは足りないもの。
 | テスト | `terraform test`（`infra/bootstrap/tests/`・`infra/prod/tests/`、モックのプロバイダ。資格情報なしで CI の `check` job で回る）: bootstrap は公開の拒否、WIF の条件、apply SA の subject、データセットの付与の型と role。prod は IAP 有効・`ingress`・IAM の検査が有効、`run.invoker` が IAP のサービスエージェント 1 件だけ、イメージが digest か `src-<20hex>` のタグ参照だけ、8.3 の値（AC11） |
 
 ## 変更履歴
+
+### 2026-10-19 持ちこたえマップを開いたときのスクロールと待ちのスピナー（#174）
+
+- 13.4 の持ちこたえマップの画面の「読み込み」: 読み込み中・計算中の文を状態の行から描画域の枠の中（スピナーと一緒）へ移し、開いたときに中身がパネルの枠に入るようスクロールする旨を足した。決定（読む時機 = 初めて見えたときに 1 回 / セッション、7.3 (11)）は変えない
+- 実装は `ui/view/holdMap.ts`（`holdMapWait`・`holdMapReveal`・`holdMapStatusText`）・`ui/next/regions/HoldMap.tsx`・`ui/next/css/metrics.css`。検査は `scripts/uiCheck.mjs`（既定の `holdMapAll`、`--flows` の `#174 …`）
 
 ### 2026-10-19 ADR-0002（証拠金の近似の方式）
 

@@ -1,9 +1,8 @@
-import { useId, useMemo, useState } from 'preact/hooks';
+import { useId, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks';
 import type { AtmMovesCtl } from '../../components/useAtmMoves';
 import type { HoldMapCtl } from '../../components/useHoldMap';
 import {
   HOLD_MAP_CAPTION,
-  HOLD_MAP_COMPUTING,
   HOLD_MAP_PLOT_LABEL,
   HOLD_MAP_RETRY,
   HOLD_MAP_TITLE,
@@ -15,10 +14,12 @@ import {
   holdMapPick,
   holdMapPlot,
   holdMapReadout,
+  holdMapReveal,
   holdMapSelMark,
   holdMapStatusText,
   holdMapStep,
   holdMapSummary,
+  holdMapWait,
 } from '../../view/holdMap';
 import type { AmountUnit } from '../../view/metrics';
 import { useSize } from '../useSize';
@@ -37,15 +38,20 @@ export interface HoldBundle {
   days: number;
 }
 
-/** 描画域（開いて資金・足があるときだけ。幅は useSize） */
+/**
+ * 描画域（開いて資金・足があるときだけ。幅は useSize）。待ち（wait。#174）の間は枠の中にスピナーと文字を重ねる:
+ * 初めては空の枠（高さを取っておく）、前のマップがあれば薄くした上に少し遅れて（.late = CSS で 250ms 後。ちらつかない）
+ */
 function HoldMapPlotView({
   result,
   hold,
   unit,
+  wait,
 }: {
   result: HoldMapResult | null;
   hold: HoldBundle;
   unit: AmountUnit;
+  wait: string | null;
 }) {
   const { ref, width } = useSize(320, 0);
   const moves = hold.moves.moves;
@@ -59,6 +65,12 @@ function HoldMapPlotView({
   const mark = plot && axes ? holdMapSelMark(sel, plot, axes) : null;
   const readout = holdMapReadout(sel, result, moves, unit);
   const showMoves = hold.moves.status === 'ok' && moves.length > 0;
+  // 遅らせる（.late）かは待ちが始まったときに前のマップがあったかで決め、待ちの間は変えない（初回の読み込み中に
+  // 点なしのマップが出ても .late が付いて 250ms 消えない）
+  const lateRef = useRef<boolean | null>(null);
+  if (wait === null) lateRef.current = null;
+  else if (lateRef.current === null) lateRef.current = plot !== null;
+  const late = lateRef.current === true;
   const onClick = (e: MouseEvent) => {
     if (!plot || !axes) return;
     const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
@@ -83,14 +95,14 @@ function HoldMapPlotView({
   return (
     <>
       {plot && showMoves && <p class="hm-sum">{holdMapSummary(plot.count)}</p>}
-      <div class={hold.map.computing && plot ? 'hm-plot busy' : 'hm-plot'}>
+      <div class={wait && plot ? 'hm-plot busy' : 'hm-plot'}>
         <div
           ref={ref}
           class="hm-wrap"
           role="application"
           tabIndex={plot ? 0 : -1}
           aria-label={HOLD_MAP_PLOT_LABEL}
-          aria-busy={hold.map.computing}
+          aria-busy={wait !== null}
           onClick={onClick}
           onKeyDown={onKeyDown}
         >
@@ -152,14 +164,24 @@ function HoldMapPlotView({
                 ))}
             </svg>
           ) : (
-            // 初めての計算の間（前のマップが無い）。高さを取っておく
+            // 初めての計算の間（前のマップが無い）。描画域の大きさの枠を先に出す（文字・スピナーは .hm-wait）
             <svg class="hm-svg" width={Math.max(width, 0)} height={h} aria-hidden="true">
-              <text class="hm-tick" x={Math.max(width, 0) / 2} y={h / 2} text-anchor="middle">
-                {HOLD_MAP_COMPUTING}
-              </text>
+              <rect
+                class="hm-frame"
+                x={0.5}
+                y={0.5}
+                width={Math.max(width - 1, 0)}
+                height={Math.max(h - 1, 0)}
+              />
             </svg>
           )}
         </div>
+        {wait && (
+          <div class={late ? 'hm-wait late' : 'hm-wait'} role="status">
+            <span class="hm-spin" aria-hidden="true" />
+            <span class="hm-wait-t">{wait}</span>
+          </div>
+        )}
       </div>
       <p class="hm-readout" aria-live="polite">
         {readout}
@@ -179,11 +201,44 @@ export function HoldMap({ hold, unit }: { hold: HoldBundle; unit: AmountUnit }) 
   const status = holdMapStatusText({
     noLegs: hold.noLegs,
     noCapital: hold.noCapital,
-    computing: hold.map.computing && hold.map.result !== null,
     movesStatus: hold.moves.status,
     movesCount: hold.moves.moves.length,
   });
+  const wait = holdMapWait({
+    noLegs: hold.noLegs,
+    noCapital: hold.noCapital,
+    computing: hold.map.computing,
+    movesStatus: hold.moves.status,
+  });
   const blocked = hold.noLegs || hold.noCapital;
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const wasOpen = useRef(hold.open);
+  // 開いたとき（前の描画で閉 → 今開。マウント時の開では動かさない）だけ、描画域がパネルのスクロール枠に入るよう
+  // 枠の scrollTop だけを動かす（#174。scrollIntoView は祖先・ページまで動かしうるので使わない）。閉じるときは動かさない。
+  // 測るのは 2 フレーム後（描画域の高さが useSize の測った幅で決まった後。初めの描画は仮の幅 320px の高さ）
+  useLayoutEffect(() => {
+    const opened = hold.open && !wasOpen.current;
+    wasOpen.current = hold.open;
+    if (!opened) return;
+    let frame = requestAnimationFrame(() => {
+      frame = requestAnimationFrame(reveal);
+    });
+    function reveal() {
+      const body = bodyRef.current;
+      const host = body?.closest('.panel-body');
+      // 資金なし・足なしは描画域が無いので中身（.hm）の全体
+      const target = body?.querySelector('.hm-plot') ?? body;
+      if (!target || !(host instanceof HTMLElement)) return;
+      const oy = getComputedStyle(host).overflowY;
+      if (oy !== 'auto' && oy !== 'scroll') return;
+      const h = host.getBoundingClientRect();
+      const reduced = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
+      const t = target.getBoundingClientRect();
+      const { delta, behavior } = holdMapReveal(t.top, t.bottom, h.top, h.bottom, reduced);
+      if (delta > 0) host.scrollTo({ top: host.scrollTop + delta, behavior });
+    }
+    return () => cancelAnimationFrame(frame);
+  }, [hold.open]);
   return (
     <>
       <button
@@ -196,7 +251,7 @@ export function HoldMap({ hold, unit }: { hold: HoldBundle; unit: AmountUnit }) 
         <span>{HOLD_MAP_TITLE}</span>
       </button>
       {hold.open && (
-        <div id={id} class="hm">
+        <div id={id} ref={bodyRef} class="hm">
           <p class="mx-note">{HOLD_MAP_CAPTION}</p>
           {blocked ? (
             <p class="hm-status">{status.main}</p>
@@ -212,7 +267,7 @@ export function HoldMap({ hold, unit }: { hold: HoldBundle; unit: AmountUnit }) 
                   )}
                 </p>
               )}
-              <HoldMapPlotView result={hold.map.result} hold={hold} unit={unit} />
+              <HoldMapPlotView result={hold.map.result} hold={hold} unit={unit} wait={wait} />
             </>
           )}
         </div>
