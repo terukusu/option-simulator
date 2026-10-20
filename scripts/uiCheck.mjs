@@ -2795,6 +2795,11 @@ async function runFlows() {
   // #207 先物推移の段の高さ・最大化・段の十字線（タッチ。マウスは既定の実行の futSweep）。後ろの手順の既知の止まり
   // （#87 の TimeoutError など）に隠れないよう先に回す
   await futPaneTouchFlow();
+  for (const vp of [
+    { width: 360, height: 780 },
+    { width: 390, height: 844 },
+  ])
+    await futPanePeekTouchFlow(vp);
 
   // (a) 開いただけでは作業の保存を書き換えない・ドックのバッジ
   {
@@ -9404,6 +9409,72 @@ async function futPaneTouchFlow() {
   );
   if (shotsDir) await page.screenshot({ path: join(shotsDir, `flows-fut-panes-${tag}.png`) });
   await ctx.close();
+}
+
+/**
+ * #207 再レビュー B2（--flows）: 縦に狭い覗く（段を縮めて描いている）でも境目のドラッグが指に 1:1。
+ * (A) 覚えた RSI 120px・RSI だけの段（覗くでは縮めて描く）で境目 0 を指で 20px 下へ → RSI −20・価格 +20
+ * (B) 段 3 つ（360 は 34px × 2 で SO を隠す・390 は 30px 前後 × 3）で境目 1 を 20px 下へ → RSI +・MACD −（下限 28px で
+ *     止まるまで 1:1）・ほかの段と価格は同じ
+ * どちらも動かしている間と離した後（保存の値で描き直し）が同じ高さ
+ */
+async function futPanePeekTouchFlow(vp) {
+  const tag = `${vp.width}x${vp.height} touch peek`;
+  for (const mode of ['A', 'B']) {
+    const prefs = mode === 'A' ? { [PREFS_KEY]: prefsText('dark', { fut_pane_h_rsi: 120 }) } : {};
+    const ctx = await touchContext({ [WORKSPACE_KEY]: twoLegs, ...prefs }, vp);
+    const page = await ctx.newPage();
+    await page.goto(pageUrl('next'));
+    await waitReady(page, 'next');
+    await page.tap('.dock button[data-panel="smile"]');
+    await page.waitForTimeout(300);
+    await page.tap('section.smile .panel-head .seg button:text-is("先物")');
+    await page.waitForSelector('section.smile .iv-wrap svg', { timeout: 10000 }).catch(() => null);
+    for (const t of mode === 'A' ? ['RSI'] : ['RSI', 'MACD', 'SO']) {
+      await page.tap(`section.smile .iv-legend .ind-toggles button:text-is("${t}")`);
+    }
+    if ((await page.getAttribute('.layout', 'data-sheet')) !== 'peek') await page.tap('.grabber');
+    await settleMotion(page);
+    await page.waitForTimeout(300);
+    const cdp = await ctx.newCDPSession(page);
+    const touch = (type, touchPoints) =>
+      cdp.send('Input.dispatchTouchEvent', { type, touchPoints });
+    const st0 = await paneState(page);
+    const border = mode === 'A' ? 0 : 1;
+    const midX = Math.round(st0.paneX + st0.paneW * 0.6);
+    const y0 = Math.round(st0.paneTop[border] + 2);
+    await touch('touchStart', [{ x: midX, y: y0, id: 0 }]);
+    let during = null;
+    for (let i = 1; i <= 5; i++) {
+      await touch('touchMove', [{ x: midX, y: y0 + i * 4, id: 0 }]);
+      await page.waitForTimeout(40);
+      if (i === 5) during = await paneState(page);
+    }
+    await touch('touchEnd', []);
+    await page.waitForTimeout(300);
+    const st1 = await paneState(page);
+    const h = st0.paneH;
+    const want = mode === 'A' ? 20 : Math.min(20, (h[1] ?? 0) - 28);
+    const follows = (st) => {
+      if (!st || st.paneH.length !== h.length) return false;
+      const d0 = st.paneH[0] - h[0];
+      if (mode === 'A')
+        return Math.abs(d0 + want) <= 1 && Math.abs(st.wrapH - st0.wrapH - want) <= 1;
+      return (
+        Math.abs(d0 - want) <= 1 &&
+        Math.abs(h[1] - st.paneH[1] - want) <= 1 &&
+        st.paneH.slice(2).every((x, i) => x === h[i + 2]) &&
+        st.wrapH === st0.wrapH
+      );
+    };
+    const constrained = mode === 'A' ? h[0] < 120 : st0.stackH < 80 + h.length * 56;
+    check(
+      `#207 B2 ${tag} ${mode === 'A' ? '(A) 覚えた RSI 120px を縮めて描く覗くで境目 0 を指で 20px 下へ → RSI −20・価格 +20' : `(B) 段 ${h.length} つを縮めて描く覗くで境目 1 を指で 20px 下へ → RSI +${want}・MACD −${want}（下限 28px まで）・ほかの段と価格は同じ`}（指に 1:1）、離した後も同じ高さ`,
+      constrained && follows(during) && follows(st1),
+      `枠 ${st0.stackH}px・${h.join('/')}（価格 ${st0.wrapH}）→ 動かしている間 ${during?.paneH.join('/')}（価格 ${during?.wrapH}）→ 離した後 ${st1.paneH.join('/')}（価格 ${st1.wrapH}）・保存 ${st1.keys.map((k) => `${k}=${st1.prefs[k]}`).join(',')}`,
+    );
+    await ctx.close();
+  }
 }
 
 /** 390×844 のタッチ（CDP）: 長押し 500ms で十字線・札、横に動かすと時刻が変わる、離してタップで消える。ページ・シートは動かない */

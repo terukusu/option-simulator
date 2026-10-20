@@ -28,6 +28,7 @@ import {
 import { HINT_TERMS } from '../../view/glossary';
 import {
   futPaneLayout,
+  futPaneSave,
   IND_KINDS,
   IND_PANE_H,
   type IndKind,
@@ -162,7 +163,7 @@ function FutHistoryView(p: FutHistoryProps) {
   useEffect(() => {
     if (maxKind !== null && !p.indKinds.includes(maxKind)) setMaxKind(null);
   }, [maxKind, p.indKinds]);
-  // ドラッグ中は動かした段だけを覚えた高さに重ねる（触っていない段は覚えた高さのまま）
+  // ドラッグ中は描いていた全部の段の高さ + 境目の両側の変化（futPaneDrag）を重ねる = 縮め直さないので指に 1:1
   const heights = useMemo(() => (dragH ? { ...p.paneH, ...dragH } : p.paneH), [dragH, p.paneH]);
   const layout = useMemo(
     () => futPaneLayout({ stackH, kinds: p.indKinds, heights, max }),
@@ -170,12 +171,13 @@ function FutHistoryView(p: FutHistoryProps) {
   );
   const { onPaneH } = p;
   const onMax = useCallback((k: IndKind) => setMaxKind((m) => (m === k ? null : k)), []);
+  // 離したとき: 描いていた高さ（shown）から、動かした段だけの保存の値を作る（描き直しても同じ高さ = futPaneSave）
   const onPaneCommit = useCallback(
-    (h: IndPaneHeights) => {
+    (shown: IndPaneHeights, border: number) => {
       setDragH(null);
-      onPaneH(h);
+      onPaneH(futPaneSave({ stackH, kinds: p.indKinds, stored: p.paneH, shown, border }));
     },
-    [onPaneH],
+    [onPaneH, stackH, p.indKinds, p.paneH],
   );
   const onPaneReset = useCallback(() => {
     setDragH(null);

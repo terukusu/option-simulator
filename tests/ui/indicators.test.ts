@@ -7,10 +7,12 @@ import {
   futPaneAt,
   futPaneDrag,
   futPaneLayout,
+  futPaneSave,
   futSplitAt,
   IND_KINDS,
   IND_PANE_H,
   IND_PANE_MIN_H,
+  type IndPaneHeights,
   indCrosshair,
   indKindLabel,
   indPaneModel,
@@ -216,35 +218,98 @@ describe('#207 価格と段の配置（futPaneLayout）', () => {
 
 describe('#207 境目のドラッグ（futPaneDrag）', () => {
   const start = futPaneLayout({ stackH: 400, kinds: ['rsi', 'macd', 'stoch'], max: null });
-  it('境目 0（価格 | 1 段目）: 上へ動かすと 1 段目が高くなり、価格の下限 80px で止まる。返すのは 1 段目だけ', () => {
-    expect(futPaneDrag(start, 0, -40, 400)).toEqual({ rsi: 96 });
+  it('境目 0（価格 | 1 段目）: 上へ動かすと 1 段目が高くなり、価格の下限 80px で止まる', () => {
+    expect(futPaneDrag(start, 0, -40, 400)).toEqual({ rsi: 96, macd: 56, stoch: 56 });
     expect(futPaneDrag(start, 0, -1000, 400).rsi).toBe(400 - FUT_PRICE_MIN_H - 2 * 56);
     expect(futPaneDrag(start, 0, 1000, 400).rsi).toBe(IND_PANE_MIN_H);
   });
-  it('境目 i（段 i−1 | 段 i）: 2 段の和を保ち、どちらも 28px で止まる。返すのは両側の 2 段だけ', () => {
-    expect(futPaneDrag(start, 1, 20, 400)).toEqual({ rsi: 76, macd: 36 });
-    expect(futPaneDrag(start, 2, -100, 400)).toEqual({ macd: 28, stoch: 84 });
-    expect(futPaneDrag(start, 1, 100, 400)).toEqual({ rsi: 84, macd: 28 });
-  });
-  it('縦に狭くて縮めて描いているとき、触っていない段の縮んだ高さを返さない（覚えた高さのまま）', () => {
-    const kinds = ['rsi', 'macd', 'stoch'] as const;
-    const heights = { rsi: 120, macd: 120, stoch: 120 };
-    const shrunk = futPaneLayout({ stackH: 260, kinds, heights, max: null });
-    expect(shrunk.panes.map((s) => s.h)).toEqual([60, 60, 60]);
-    const patch = futPaneDrag(shrunk, 2, 10, 260);
-    expect(Object.keys(patch)).toEqual(['macd', 'stoch']);
-    // 広い枠では、触っていない RSI は覚えた 120px のまま
-    const wide = futPaneLayout({
-      stackH: 900,
-      kinds,
-      heights: { ...heights, ...patch },
-      max: null,
-    });
-    expect(wide.panes[0]?.h).toBe(120);
+  it('境目 i（段 i−1 | 段 i）: 2 段の和を保ち、どちらも 28px で止まる', () => {
+    expect(futPaneDrag(start, 1, 20, 400)).toEqual({ rsi: 76, macd: 36, stoch: 56 });
+    expect(futPaneDrag(start, 2, -100, 400)).toEqual({ rsi: 56, macd: 28, stoch: 84 });
+    expect(futPaneDrag(start, 1, 100, 400)).toEqual({ rsi: 84, macd: 28, stoch: 56 });
   });
   it('移動量は整数に丸める・NaN は 0', () => {
     expect(futPaneDrag(start, 1, 3.6, 400).rsi).toBe(60);
     expect(futPaneDrag(start, 1, Number.NaN, 400).rsi).toBe(56);
+  });
+});
+
+/**
+ * #207 再レビュー B2: 縦に狭くて縮めて描いているとき（枠 200・240、段 3 つ）も、ドラッグ中の配置は押したときに描いて
+ * いた高さ + 境目の両側の変化 = 指に 1:1（触っていない段は変わらない。価格の下限 80px で止まる）。離したときの保存の値
+ * （futPaneSave）で描き直すと、離したときに描いていた高さと同じ
+ */
+describe('#207 縮めて描いているときのドラッグ（1:1）と保存の値の描き直し', () => {
+  const kinds = ['rsi', 'macd', 'stoch'] as const;
+  const live = (stackH: number, stored: IndPaneHeights | undefined, border: number, dy: number) => {
+    const before = futPaneLayout({ stackH, kinds, heights: stored, max: null });
+    const shown = futPaneDrag(before, border, dy, stackH);
+    const during = futPaneLayout({ stackH, kinds, heights: { ...stored, ...shown }, max: null });
+    return { before, shown, during };
+  };
+  for (const stackH of [200, 240]) {
+    for (const stored of [undefined, { rsi: 120, macd: 70 }] as const) {
+      for (const [border, dy] of [
+        [0, 10],
+        [0, -10],
+        [1, 10],
+        [1, -10],
+      ] as const) {
+        it(`枠 ${stackH}・覚えた高さ ${stored ? 'あり' : 'なし'}・境目 ${border} を ${dy > 0 ? '+' : ''}${dy}`, () => {
+          const { before, shown, during } = live(stackH, stored, border, dy);
+          const h0 = before.panes.map((s) => s.h);
+          const h1 = during.panes.map((s) => s.h);
+          expect(during.panes.map((s) => s.kind)).toEqual(before.panes.map((s) => s.kind));
+          if (border === 0) {
+            // 1 段目が −dy（上へ = 高く）。価格の下限 80px で止まる。触っていない段は同じ
+            const room = before.priceH - FUT_PRICE_MIN_H;
+            const want =
+              dy > 0 ? -Math.min(dy, (h0[0] ?? 0) - IND_PANE_MIN_H) : Math.min(-dy, room);
+            expect((h1[0] ?? 0) - (h0[0] ?? 0)).toBe(want || 0);
+            expect(during.priceH - before.priceH).toBe(-want || 0);
+            expect(h1.slice(1)).toEqual(h0.slice(1));
+          } else {
+            // 段の下限 28px で止まる（覚えた高さ ありの枠 200 は MACD が 37px なので +10 は +9 で止まる）
+            const m = Math.min(
+              Math.max(dy, IND_PANE_MIN_H - (h0[0] ?? 0)),
+              (h0[1] ?? 0) - IND_PANE_MIN_H,
+            );
+            expect((h1[0] ?? 0) - (h0[0] ?? 0)).toBe(m);
+            expect((h1[1] ?? 0) - (h0[1] ?? 0)).toBe(-m || 0);
+            expect(h1[2]).toBe(h0[2]);
+            expect(during.priceH).toBe(before.priceH);
+          }
+          // 保存の値で描き直すと、離したときに描いていた高さと同じ
+          const patch = futPaneSave({ stackH, kinds, stored, shown, border });
+          const after = futPaneLayout({
+            stackH,
+            kinds,
+            heights: { ...stored, ...patch },
+            max: null,
+          });
+          expect(after.panes.map((s) => s.h)).toEqual(h1);
+          expect(after.priceH).toBe(during.priceH);
+          // 境目 1 は動かした 2 段だけを書く（触っていない SO の覚えた高さは変えない）
+          if (border === 1) expect(Object.keys(patch).sort()).toEqual(['macd', 'rsi']);
+          if (!stored)
+            expect(
+              Math.abs((h1[border === 0 ? 0 : 1] ?? 0) - (h0[border === 0 ? 0 : 1] ?? 0)),
+            ).toBe(border === 0 && dy < 0 ? 0 : 10);
+        });
+      }
+    }
+  }
+  it('枠が十分なとき（400）は動かした段だけを、描いた高さそのままで書く', () => {
+    const before = futPaneLayout({ stackH: 400, kinds, max: null });
+    const shown = futPaneDrag(before, 0, -20, 400);
+    expect(futPaneSave({ stackH: 400, kinds, stored: undefined, shown, border: 0 })).toEqual({
+      rsi: 76,
+    });
+    const s1 = futPaneDrag(before, 2, 10, 400);
+    expect(futPaneSave({ stackH: 400, kinds, stored: undefined, shown: s1, border: 2 })).toEqual({
+      macd: 66,
+      stoch: 46,
+    });
   });
 });
 

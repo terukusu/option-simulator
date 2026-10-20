@@ -416,17 +416,31 @@ export function futPaneLayout(p: {
     return isIndPaneH(v) ? v : IND_PANE_H;
   });
   const sum = want.reduce((a, b) => a + b, 0);
-  const f = sum > avail ? Math.max(avail, 0) / sum : 1;
-  // 縮めるときは下限を守ったうえで残りを比で分ける（和が avail を超えない）
-  const spare = Math.max(avail - kinds.length * IND_PANE_MIN_H, 0);
-  const over = want.reduce((a, w) => a + Math.max(w - IND_PANE_MIN_H, 0), 0);
+  // 縮めるときは下限を守ったうえで、残り（spare）を下限を超える分の比で分ける。端数は最大剰余で配る = 段の和は
+  // ちょうど avail（縮めた後の和が枠 − 価格の下限に一致 = 保存の値の逆算 futPaneSave が成り立つ）
+  const hs = want.slice();
+  if (sum > avail) {
+    const spare = Math.max(avail - kinds.length * IND_PANE_MIN_H, 0);
+    const extra = want.map((w) => Math.max(w - IND_PANE_MIN_H, 0));
+    const over = extra.reduce((a, b) => a + b, 0) || 1;
+    const share = extra.map((e) => (e * spare) / over);
+    const base = share.map((v) => Math.floor(v));
+    let left = spare - base.reduce((a, b) => a + b, 0);
+    const order = share
+      .map((v, i) => ({ i, r: v - Math.floor(v) }))
+      .sort((x, y) => y.r - x.r || x.i - y.i);
+    for (const { i } of order) {
+      if (left <= 0) break;
+      base[i] = (base[i] as number) + 1;
+      left--;
+    }
+    base.forEach((b, i) => {
+      hs[i] = IND_PANE_MIN_H + b;
+    });
+  }
   let top = 0;
   const panes = kinds.map((kind, i) => {
-    const w = want[i] as number;
-    const h =
-      f < 1
-        ? IND_PANE_MIN_H + Math.floor((Math.max(w - IND_PANE_MIN_H, 0) * spare) / (over || 1))
-        : w;
+    const h = hs[i] as number;
     const slot = { kind, h, top };
     top += h;
     return slot;
@@ -442,9 +456,9 @@ export function futPaneLayout(p: {
 /**
  * 境目のドラッグ（#207）。border 0 = 価格 | 1 段目（1 段目 = 開始の高さ − dy、価格は残り）、border i = 段 i−1 | 段 i
  * （段 i−1 に dy を足して段 i から引く = 2 段の和を保つ）。下限（価格 FUT_PRICE_MIN_H・段 IND_PANE_MIN_H）で止める。
- * start は押したときの配置（描いている高さ）。返すのは **動かした境目の両側の段だけ**（整数 px。境目 0 は 1 段目だけ）:
- * 縦に狭くて縮めて描いているとき、触っていない段の縮んだ高さを覚えた高さにしない（覚えた高さのまま、描くときに
- * futPaneLayout が枠に合わせる）
+ * start は押したときに **描いていた** 配置（縮めて描いていればその高さ）。返すのは描いている段すべての高さ（整数 px）で、
+ * ドラッグ中の配置はこれをそのまま描く（和は枠 − 価格の下限以下 = futPaneLayout が縮め直さない = 指に 1:1 でつく）。
+ * 保存する値は futPaneSave（動かした段だけ）
  */
 export function futPaneDrag(
   start: FutPaneLayout,
@@ -466,12 +480,82 @@ export function futPaneDrag(
     hs[border] = b - m;
   }
   const out: IndPaneHeights = {};
-  const touched = border === 0 ? [0] : [border - 1, border];
-  for (const i of touched) {
-    const s = start.panes[i];
-    if (s) out[s.kind] = Math.min(hs[i] as number, IND_PANE_MAX_H);
-  }
+  start.panes.forEach((s, i) => {
+    out[s.kind] = Math.min(hs[i] as number, IND_PANE_MAX_H);
+  });
   return out;
+}
+
+/**
+ * 境目を離したときに保存する高さ（#207）。shown = 離したときに描いていた高さ（futPaneDrag の結果）。**動かした境目の
+ * 両側の段だけ**（境目 0 は 1 段目だけ）を書き、その値は「覚えた高さ + この値で futPaneLayout を描き直すと shown と同じ
+ * 高さになる」整数（縮めて描いているときは縮める前の高さ = 逆算した値。枠が十分なら shown そのもの）。動かした段だけでは
+ * 再現できないとき（縮めて描いている間に境目 0 を動かし、価格の分が変わった = 触っていない段の縮み方も変わる）は、
+ * 描いている段すべての shown を書く（描き直しても高さが跳ばない方を取る）
+ */
+export function futPaneSave(p: {
+  stackH: number;
+  kinds: readonly IndKind[];
+  stored: IndPaneHeights | null | undefined;
+  shown: IndPaneHeights;
+  border: number;
+}): IndPaneHeights {
+  const base = futPaneLayout({ stackH: p.stackH, kinds: p.kinds, heights: p.shown, max: null });
+  const drawn = base.panes;
+  const target = drawn.map((s) => p.shown[s.kind] ?? s.h);
+  const moved = (p.border === 0 ? [0] : [p.border - 1, p.border]).filter((i) => i < drawn.length);
+  const kindsOf = (is: number[]) => is.map((i) => (drawn[i] as FutPaneSlot).kind);
+  const same = (h: IndPaneHeights) => {
+    const l = futPaneLayout({
+      stackH: p.stackH,
+      kinds: p.kinds,
+      heights: { ...p.stored, ...h },
+      max: null,
+    });
+    return l.panes.length === drawn.length && l.panes.every((s, i) => s.h === target[i]);
+  };
+  const all = (): IndPaneHeights => {
+    const out: IndPaneHeights = {};
+    drawn.forEach((s, i) => {
+      out[s.kind] = target[i] as number;
+    });
+    return out;
+  };
+  if (moved.length === 0) return all();
+  // 推定: 触っていない段の覚えた高さ（無ければ既定）のまま、縮めの比 spare / over を逆にする
+  const avail = Math.max(Math.floor(p.stackH) - FUT_PRICE_MIN_H, 0);
+  const want = (k: IndKind) => {
+    const v = p.stored?.[k];
+    return isIndPaneH(v) ? v : IND_PANE_H;
+  };
+  const fixedA = drawn.reduce(
+    (a, s, i) => (moved.includes(i) ? a : a + Math.max(want(s.kind) - IND_PANE_MIN_H, 0)),
+    0,
+  );
+  const spare = avail - drawn.length * IND_PANE_MIN_H;
+  const tMoved = moved.reduce((a, i) => a + (target[i] as number) - IND_PANE_MIN_H, 0);
+  const est = (i: number) => {
+    const t = (target[i] as number) - IND_PANE_MIN_H;
+    const rest = spare - tMoved;
+    return rest > 0 && fixedA > 0 ? IND_PANE_MIN_H + (t * fixedA) / rest : (target[i] as number);
+  };
+  const ks = kindsOf(moved);
+  const cands = (i: number) => {
+    const out = new Set<number>([target[i] as number]);
+    const e = Math.round(est(i));
+    for (let d = -4; d <= 4; d++) out.add(e + d);
+    return [...out].filter((v) => isIndPaneH(v));
+  };
+  const c0 = cands(moved[0] as number);
+  const c1 = moved.length > 1 ? cands(moved[1] as number) : [null];
+  for (const a of c0) {
+    for (const b of c1) {
+      const h: IndPaneHeights = { [ks[0] as IndKind]: a };
+      if (b !== null) h[ks[1] as IndKind] = b;
+      if (same(h)) return h;
+    }
+  }
+  return all();
 }
 
 /** 段の枠の座標 y にある段（無ければ null） */

@@ -64,8 +64,8 @@ export interface IndicatorPanesProps {
   onMax: (kind: IndKind) => void;
   /** 境目のドラッグ中の高さ（1 フレーム 1 回。null = 押す前に戻す） */
   onPaneLive: (h: IndPaneHeights | null) => void;
-  /** 境目を離した・キーで変えた高さ（保存する） */
-  onPaneCommit: (h: IndPaneHeights) => void;
+  /** 境目を離した・キーで変えたときに描いていた高さと境目（保存の値は FutHistory が futPaneSave で作る） */
+  onPaneCommit: (shown: IndPaneHeights, border: number) => void;
   /** 境目のダブルタップ / ダブルクリック・Enter（既定の高さに戻す） */
   onPaneReset: () => void;
 }
@@ -275,7 +275,7 @@ function IndicatorPanesView(p: IndicatorPanesProps) {
         start = null;
         if (res.reset) o.onPaneReset();
         else if (res.cancel) o.onPaneLive(null);
-        else if (h) o.onPaneCommit(h);
+        else if (h) o.onPaneCommit(h, border);
         return;
       }
       if (res.dy === undefined) return;
@@ -378,7 +378,7 @@ function IndicatorPanesView(p: IndicatorPanesProps) {
     if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
     e.preventDefault();
     const step = (e.shiftKey ? 4 : 1) * SPLIT_KEY_PX;
-    p.onPaneCommit(futPaneDrag(layout, b, e.key === 'ArrowUp' ? -step : step, p.stackH));
+    p.onPaneCommit(futPaneDrag(layout, b, e.key === 'ArrowUp' ? -step : step, p.stackH), b);
   };
 
   const note = indHiddenNote(layout.hidden);
