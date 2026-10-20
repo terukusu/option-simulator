@@ -9,7 +9,7 @@
  *   （ui/view/aiNumbers.ts）。評価できない値（非有限）は null
  * - 単位はキーの名前（`*_yen` 円、`x`・`k`・`*_x` 原資産・行使価格、`*_pct` %、`*_pt` pt、`delta_*` 枚、`*days*` 日、
  *   `*ratio` 倍）
- * - 失敗は `{ error: '<列挙>' }`（no_legs・bad_input・out_of_range・unknown_tool・no_data・not_on_board）。中継へは tool_result の is_error
+ * - 失敗は `{ error: '<列挙>' }`（no_legs・bad_input・out_of_range・unknown_tool・no_data・not_on_board・no_candidate）。中継へは tool_result の is_error
  * - technicals（#200）は足が無くても使える（先物の足。ui/view/aiTechnicals.ts）。事前計算には入れない
  */
 
@@ -50,7 +50,14 @@ export interface AiToolEnv {
 
 export type ToolResult = Record<string, unknown>;
 export type ToolError = {
-  error: 'no_legs' | 'bad_input' | 'out_of_range' | 'unknown_tool' | 'no_data' | 'not_on_board';
+  error:
+    | 'no_legs'
+    | 'bad_input'
+    | 'out_of_range'
+    | 'unknown_tool'
+    | 'no_data'
+    | 'not_on_board'
+    | 'no_candidate';
 };
 
 /** 道具の名前（名前の順。中継の tools.py と同じ集合） */
@@ -466,6 +473,7 @@ const pctText = (v: unknown, signed = true) => {
 /** 提案のツールの失敗の理由（カードの 1 行） */
 export const PROPOSE_ERROR_TEXT: Record<string, string> = {
   not_on_board: '板に無い限月・行使価格',
+  no_candidate: '条件に合う行使価格が板に無い',
   bad_input: '足の指定の形が違う',
   no_legs: '足がありません',
   no_data: '板・足を読めない',

@@ -332,3 +332,61 @@ describe('カードと反映（AC4）', () => {
     expect(st.legs).toHaveLength(4);
   });
 });
+
+describe('k を省いて simulator が選ぶ（1 回の往復で提案まで）', () => {
+  it('max_loss_floor_yen: strike_scan の best_k と同じ K、後の最大損失は下限以上', () => {
+    const env = envOf('put_ratio');
+    const scan = run(env, 'strike_scan', {
+      type: 'P',
+      side: 'buy',
+      max_loss_floor_yen: -1_000_000,
+    });
+    const r = run(env, 'propose_position', {
+      target: 'current',
+      changes: [{ action: 'add', type: 'P', side: 'buy', max_loss_floor_yen: -1_000_000 }],
+    });
+    expect(r.diff[0]).toMatchObject({ k: scan.best_k, picked_by: 'floor', expiry: scan.expiry });
+    expect(r.after.max_loss_yen).toBeGreaterThanOrEqual(-1_000_000);
+    expect(proposalCard({ target: 'current' }, r)?.lines[0]?.text).toContain(
+      '最大損失の下限から選んだ K',
+    );
+    // 満たす行が無ければ no_candidate、k と一緒・両方の指定は bad_input
+    const bad = (c: Record<string, unknown>) =>
+      runTool(
+        'propose_position',
+        { target: 'current', changes: [{ action: 'add', type: 'P', side: 'buy', ...c }] },
+        env,
+      );
+    expect(bad({ max_loss_floor_yen: -1 })).toEqual({ error: 'no_candidate' });
+    expect(bad({ max_loss_floor_yen: -1_000_000, k: 59500 })).toEqual({ error: 'bad_input' });
+    expect(bad({ max_loss_floor_yen: -1_000_000, abs_delta: 0.1 })).toEqual({ error: 'bad_input' });
+    expect(bad({ abs_delta: 0.9 })).toEqual({ error: 'bad_input' });
+  });
+
+  it('candidate: structure_candidates の同じ |Δ| の候補と同じ足', () => {
+    const env = envOf('strangle_sell');
+    const c = run(env, 'structure_candidates', { structure: 'iron_condor' }).candidates.find(
+      (x: { target_abs_delta: number }) => x.target_abs_delta === 0.15,
+    );
+    const r = run(env, 'propose_position', {
+      target: 'new_tab',
+      candidate: { structure: 'iron_condor', abs_delta: 0.15 },
+    });
+    expect(r.diff.map((d: Record<string, unknown>) => d.k)).toEqual(
+      c.legs.map((l: { k: number }) => l.k),
+    );
+    expect(r.after).toEqual(c.summary);
+  });
+
+  it('反映: 押した時点の板で選び直した足がカードと違えば changed', () => {
+    const env = envOf('put_ratio');
+    const input = {
+      target: 'current',
+      changes: [{ action: 'add', type: 'P', side: 'buy', max_loss_floor_yen: -1_000_000 }],
+    };
+    const r = run(env, 'propose_position', input);
+    expect('error' in proposalApply(env, input, r)).toBe(false);
+    const forged = { ...r, diff: [{ ...r.diff[0], k: r.diff[0].k - 250 }] };
+    expect(proposalApply(env, input, forged)).toEqual({ error: 'changed' });
+  });
+});

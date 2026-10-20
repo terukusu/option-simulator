@@ -125,6 +125,22 @@ export function buildAiToolsFixture(latest: ChainJson): string {
       { target: 'current', changes: [{ action: 'add', product: 'fut_mini', side: 'buy', qty: 1 }] },
     ],
     ['strangle_sell', { target: 'new_tab', legs: newTabLegs }],
+    // k を省いて simulator に選ばせる（1 回の往復で提案まで）
+    [
+      'put_ratio',
+      {
+        target: 'current',
+        changes: [{ action: 'add', type: 'P', side: 'buy', max_loss_floor_yen: -1_000_000 }],
+      },
+    ],
+    [
+      'iron_condor',
+      { target: 'current', changes: [{ action: 'add', type: 'P', side: 'buy', abs_delta: 0.05 }] },
+    ],
+    [
+      'strangle_sell',
+      { target: 'new_tab', candidate: { structure: 'iron_condor', abs_delta: 0.15 } },
+    ],
   ];
   const proposeErrors: [string, Record<string, unknown>][] = [
     [
@@ -136,6 +152,17 @@ export function buildAiToolsFixture(latest: ChainJson): string {
     ],
     ['put_ratio', { target: 'current', changes: [{ action: 'remove', leg_no: 9 }] }],
     ['put_ratio', { target: 'new_tab', changes: [{ action: 'remove', leg_no: 1 }] }],
+    [
+      'put_ratio',
+      {
+        target: 'current',
+        changes: [{ action: 'add', type: 'P', side: 'buy', max_loss_floor_yen: -1 }],
+      },
+    ],
+    [
+      'strangle_sell',
+      { target: 'new_tab', legs: newTabLegs, candidate: { structure: 'short_put' } },
+    ],
   ];
   const propose = {
     scan: [

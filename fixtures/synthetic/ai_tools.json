@@ -7299,6 +7299,287 @@
       ]
      }
     }
+   },
+   {
+    "case": "put_ratio",
+    "input": {
+     "target": "current",
+     "changes": [
+      {
+       "action": "add",
+       "type": "P",
+       "side": "buy",
+       "max_loss_floor_yen": -1000000
+      }
+     ]
+    },
+    "result": {
+     "target": "current",
+     "diff": [
+      {
+       "change": "add",
+       "leg_no": null,
+       "product": "op",
+       "type": "P",
+       "expiry": "2026-11",
+       "k": 59500,
+       "side": "buy",
+       "qty": 1,
+       "entry_yen": 315,
+       "quoted": true,
+       "picked_by": "floor"
+      }
+     ],
+     "legs_before": [
+      {
+       "product": "op",
+       "type": "P",
+       "expiry": "2026-11",
+       "k": 66000,
+       "side": "buy",
+       "qty": 1
+      },
+      {
+       "product": "op",
+       "type": "P",
+       "expiry": "2026-11",
+       "k": 63000,
+       "side": "sell",
+       "qty": 1
+      },
+      {
+       "product": "op",
+       "type": "P",
+       "expiry": "2026-11",
+       "k": 63000,
+       "side": "sell",
+       "qty": 1
+      }
+     ],
+     "before": {
+      "n_legs": 3,
+      "premium_net_yen": -30000,
+      "max_profit_yen": 2970000,
+      "max_profit_unbounded": false,
+      "max_loss_yen": -60030000,
+      "max_loss_x": 0,
+      "max_loss_unbounded": false,
+      "margin_yen": 4034661,
+      "room_yen": 2685339,
+      "multiple": 1,
+      "delta_large": 0.02,
+      "delta_mini": 0.24,
+      "theta_yen_per_day": 19967,
+      "vega_yen_per_pt": -32579,
+      "call_levels_x": [
+       65548
+      ]
+     },
+     "after": {
+      "n_legs": 4,
+      "premium_net_yen": -345000,
+      "max_profit_yen": 2655000,
+      "max_profit_unbounded": false,
+      "max_loss_yen": -845000,
+      "max_loss_x": 0,
+      "max_loss_unbounded": false,
+      "margin_yen": 4034661,
+      "room_yen": 2370339,
+      "multiple": 1,
+      "delta_large": -0.07,
+      "delta_mini": -0.69,
+      "theta_yen_per_day": 974,
+      "vega_yen_per_pt": -28,
+      "call_levels_x": [
+       65798
+      ]
+     }
+    }
+   },
+   {
+    "case": "iron_condor",
+    "input": {
+     "target": "current",
+     "changes": [
+      {
+       "action": "add",
+       "type": "P",
+       "side": "buy",
+       "abs_delta": 0.05
+      }
+     ]
+    },
+    "result": {
+     "target": "current",
+     "diff": [
+      {
+       "change": "add",
+       "leg_no": null,
+       "product": "op",
+       "type": "P",
+       "expiry": "2026-11",
+       "k": 56500,
+       "side": "buy",
+       "qty": 1,
+       "entry_yen": 169,
+       "quoted": true,
+       "picked_by": "delta"
+      }
+     ],
+     "legs_before": [
+      {
+       "product": "op",
+       "type": "P",
+       "expiry": "2026-11",
+       "k": 63000,
+       "side": "buy",
+       "qty": 1
+      },
+      {
+       "product": "op",
+       "type": "P",
+       "expiry": "2026-11",
+       "k": 65000,
+       "side": "sell",
+       "qty": 1
+      },
+      {
+       "product": "op",
+       "type": "C",
+       "expiry": "2026-11",
+       "k": 71000,
+       "side": "sell",
+       "qty": 1
+      },
+      {
+       "product": "op",
+       "type": "C",
+       "expiry": "2026-11",
+       "k": 73000,
+       "side": "buy",
+       "qty": 1
+      }
+     ],
+     "before": {
+      "n_legs": 4,
+      "premium_net_yen": 690000,
+      "max_profit_yen": 690000,
+      "max_profit_unbounded": false,
+      "max_loss_yen": -1310000,
+      "max_loss_x": 0,
+      "max_loss_unbounded": false,
+      "margin_yen": 2334873,
+      "room_yen": -334873,
+      "multiple": 0,
+      "delta_large": -0.01,
+      "delta_mini": -0.13,
+      "theta_yen_per_day": 9991,
+      "vega_yen_per_pt": -30963,
+      "call_levels_x": []
+     },
+     "after": {
+      "n_legs": 5,
+      "premium_net_yen": 521000,
+      "max_profit_yen": 55021000,
+      "max_profit_unbounded": false,
+      "max_loss_yen": -1479000,
+      "max_loss_x": 56500,
+      "max_loss_unbounded": false,
+      "margin_yen": 2334873,
+      "room_yen": -503873,
+      "multiple": 0,
+      "delta_large": -0.06,
+      "delta_mini": -0.63,
+      "theta_yen_per_day": -3128,
+      "vega_yen_per_pt": -10832,
+      "call_levels_x": []
+     }
+    }
+   },
+   {
+    "case": "strangle_sell",
+    "input": {
+     "target": "new_tab",
+     "candidate": {
+      "structure": "iron_condor",
+      "abs_delta": 0.15
+     }
+    },
+    "result": {
+     "target": "new_tab",
+     "diff": [
+      {
+       "change": "add",
+       "leg_no": null,
+       "product": "op",
+       "type": "P",
+       "expiry": "2026-11",
+       "k": 60000,
+       "side": "buy",
+       "qty": 1,
+       "entry_yen": 350,
+       "quoted": true
+      },
+      {
+       "change": "add",
+       "leg_no": null,
+       "product": "op",
+       "type": "P",
+       "expiry": "2026-11",
+       "k": 61875,
+       "side": "sell",
+       "qty": 1,
+       "entry_yen": 490,
+       "quoted": true
+      },
+      {
+       "change": "add",
+       "leg_no": null,
+       "product": "op",
+       "type": "C",
+       "expiry": "2026-11",
+       "k": 73000,
+       "side": "sell",
+       "qty": 1,
+       "entry_yen": 340,
+       "quoted": true
+      },
+      {
+       "change": "add",
+       "leg_no": null,
+       "product": "op",
+       "type": "C",
+       "expiry": "2026-11",
+       "k": 75250,
+       "side": "buy",
+       "qty": 1,
+       "entry_yen": 155,
+       "quoted": true
+      }
+     ],
+     "legs_before": [],
+     "before": null,
+     "after": {
+      "n_legs": 4,
+      "premium_net_yen": 325000,
+      "max_profit_yen": 325000,
+      "max_profit_unbounded": false,
+      "max_loss_yen": -1925000,
+      "max_loss_x": 75250,
+      "max_loss_unbounded": false,
+      "margin_yen": 2016128,
+      "room_yen": 5478872,
+      "multiple": 3,
+      "delta_large": -0.03,
+      "delta_mini": -0.28,
+      "theta_yen_per_day": 9680,
+      "vega_yen_per_pt": -27459,
+      "call_levels_x": [
+       58873,
+       77452
+      ]
+     }
+    }
    }
   ],
   "proposal_errors": [
@@ -7345,6 +7626,53 @@
        "leg_no": 1
       }
      ]
+    },
+    "result": {
+     "error": "bad_input"
+    }
+   },
+   {
+    "case": "put_ratio",
+    "input": {
+     "target": "current",
+     "changes": [
+      {
+       "action": "add",
+       "type": "P",
+       "side": "buy",
+       "max_loss_floor_yen": -1
+      }
+     ]
+    },
+    "result": {
+     "error": "no_candidate"
+    }
+   },
+   {
+    "case": "strangle_sell",
+    "input": {
+     "target": "new_tab",
+     "legs": [
+      {
+       "product": "op",
+       "type": "P",
+       "expiry": "2026-11",
+       "k": 60000,
+       "side": "sell",
+       "qty": 1
+      },
+      {
+       "product": "op",
+       "type": "C",
+       "expiry": "2026-11",
+       "k": 74250,
+       "side": "sell",
+       "qty": 1
+      }
+     ],
+     "candidate": {
+      "structure": "short_put"
+     }
     },
     "result": {
      "error": "bad_input"

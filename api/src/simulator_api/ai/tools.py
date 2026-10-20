@@ -276,13 +276,19 @@ CANDIDATES = Obj({
 })
 
 LEG_IN = {"product": PRODUCT, "type": OPT_TYPE, "expiry": MONTH, "k": STRIKE, "side": SIDE, "qty": QTY}
+FLOOR = Num(-1e12, 0)
+ABS_DELTA = Num(0.01, 0.6)
 CHANGE = Obj({"action": Enum(("add", "remove", "set_qty", "move_strike")), "leg_no": Num(1, MAX_LEGS, integer=True),
-              **LEG_IN}, frozenset({"leg_no", *LEG_IN}))
+              **LEG_IN, "max_loss_floor_yen": FLOOR, "abs_delta": ABS_DELTA},
+             frozenset({"leg_no", *LEG_IN, "max_loss_floor_yen", "abs_delta"}))
+CANDIDATE_IN = Obj({"structure": Enum(STRUCTURES), "abs_delta": ABS_DELTA, "expiry": MONTH, "qty": QTY,
+                    "wing_pct": Num(1, 10)}, frozenset({"abs_delta", "expiry", "qty", "wing_pct"}))
 PROPOSE_INPUT = Obj({
     "target": Enum(("current", "new_tab")),
     "changes": Arr(CHANGE, MAX_CHANGES, min_len=1),
     "legs": Arr(Obj(LEG_IN, frozenset({"product", "type", "expiry", "k", "qty"})), MAX_LEGS, min_len=1),
-}, frozenset({"changes", "legs"}))
+    "candidate": CANDIDATE_IN,
+}, frozenset({"changes", "legs", "candidate"}))
 _LEG_IN_SCHEMA = {
     "product": {"enum": ["op", "fut_large", "fut_mini", "fut_micro"],
                 "description": "op（既定）か先物（板の先物の限月）"},
@@ -300,19 +306,40 @@ PROPOSE_INPUT_SCHEMA = {
                    "description": "current = 今のタブへの差分（changes）、new_tab = 新しいタブに足の丸ごと（legs）"},
         "changes": {
             "type": "array", "minItems": 1, "maxItems": MAX_CHANGES,
-            "description": "target=current のとき。add（足を足す: product・type・expiry・k・side・qty）・"
+            "description": "target=current のとき。add（足を足す: product・type・expiry・k・side・qty。OP の k を"
+                           "省いて max_loss_floor_yen か abs_delta を渡すと simulator が板から行使価格を選ぶ）・"
                            "remove（leg_no）・set_qty（leg_no・qty）・move_strike（leg_no・k）。"
-                           "leg_no は position_summary.legs の leg_no",
+                           "leg_no は position_summary.legs の leg_no"
+                           "（無ければ <context> の position.legs の順に 1 から）",
             "items": {"type": "object", "additionalProperties": False, "required": ["action"],
-                      "properties": {"action": {"enum": ["add", "remove", "set_qty", "move_strike"]},
-                                     "leg_no": {"type": "integer", "minimum": 1, "maximum": MAX_LEGS},
-                                     **_LEG_IN_SCHEMA}},
+                      "properties": {
+                          "action": {"enum": ["add", "remove", "set_qty", "move_strike"]},
+                          "leg_no": {"type": "integer", "minimum": 1, "maximum": MAX_LEGS},
+                          **_LEG_IN_SCHEMA,
+                          "max_loss_floor_yen": {
+                              "type": "number", "maximum": 0,
+                              "description": "add で k を省くとき: 足した後の満期の最大損失の下限（円・負）。"
+                                             "満たす中で受払が最も有利な行使価格（strike_scan の best_k）"},
+                          "abs_delta": {"type": "number", "minimum": 0.01, "maximum": 0.6,
+                                        "description": "add で k を省くとき: OTM 側で |Δ| が最も近い行使価格"}}},
         },
         "legs": {
             "type": "array", "minItems": 1, "maxItems": MAX_LEGS,
-            "description": "target=new_tab のとき。新しいタブの足（structure_candidates の候補の legs を写す）",
+            "description": "target=new_tab のとき（candidate と片方だけ）。新しいタブの足"
+                           "（structure_candidates の候補の legs を写す）",
             "items": {"type": "object", "additionalProperties": False, "required": ["side"],
                       "properties": _LEG_IN_SCHEMA},
+        },
+        "candidate": {
+            "type": "object", "additionalProperties": False, "required": ["structure"],
+            "description": "target=new_tab のとき（legs と片方だけ）。型と短い足の |Δ| を渡すと simulator が"
+                           "structure_candidates と同じ規則で板から足を作る",
+            "properties": {"structure": {"enum": list(STRUCTURES)},
+                           "abs_delta": {"type": "number", "minimum": 0.01, "maximum": 0.6,
+                                         "description": "短い足の |Δ|（省略 = 0.15。short_straddle は無視）"},
+                           "expiry": {"type": "string", "pattern": r"^\d{4}-\d{2}$"},
+                           "qty": {"type": "integer", "minimum": 1, "maximum": 100000},
+                           "wing_pct": {"type": "number", "minimum": 1, "maximum": 10}},
         },
     },
     "required": ["target"],
@@ -322,8 +349,8 @@ PROPOSE_POSITION = Obj({
     "target": Enum(("current", "new_tab")),
     "diff": Arr(Obj({"change": Enum(("add", "remove", "qty", "strike")),
                      "leg_no": Num(1, MAX_LEGS, integer=True, nullable=True), **LEG_ID, "entry_yen": ENTRY,
-                     "quoted": Bool(), "from_qty": QTY, "from_k": LEVEL},
-                    LEG_OPTIONAL | {"from_qty", "from_k"}), MAX_LEGS, min_len=1),
+                     "quoted": Bool(), "from_qty": QTY, "from_k": LEVEL, "picked_by": Enum(("floor", "delta"))},
+                    LEG_OPTIONAL | {"from_qty", "from_k", "picked_by"}), MAX_LEGS, min_len=1),
     "legs_before": Arr(Obj(LEG_ID, LEG_OPTIONAL), MAX_LEGS),
     "before": Nullable(SUMMARY),
     "after": SUMMARY,
@@ -387,7 +414,9 @@ REGISTRY: Registry = {t.name: t for t in (
           "行使価格は自分で選ばず、ここの候補から選ぶ", CANDIDATES, CANDIDATES_INPUT, CANDIDATES_INPUT_SCHEMA),
     _spec("propose_position",
           "ポジションの提案を画面のカードにする（#139）。target=current は今のタブへの差分（changes）、new_tab は"
-          "新しいタブの足（legs）。足は strike_scan・structure_candidates・position_summary の結果の値だけを写す。"
+          "新しいタブの足（legs か candidate）。行使価格は自分で決めない: 結果の値を写すか、k を省いて"
+          " max_loss_floor_yen / abs_delta / candidate で simulator に板から選ばせる。"
+          "候補のツールと同じ返答で並べて呼んでよい（1 回の往復で済む）。"
           "画面が今の板で検査（板に無い限月・行使価格は error）し、差分（diff）と前 → 後の要約（満期の最大損失・"
           "必要証拠金・Δ・追証の水準など。before / after）を返す。利用者はカードのボタンで反映し、元に戻せる",
           PROPOSE_POSITION, PROPOSE_INPUT, PROPOSE_INPUT_SCHEMA),

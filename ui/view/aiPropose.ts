@@ -227,7 +227,84 @@ export interface ProposalPlan {
   after: PnlBase;
 }
 
-const CHANGE_KEYS = ['action', 'leg_no', 'product', 'type', 'expiry', 'k', 'side', 'qty'] as const;
+const CHANGE_KEYS = [
+  'action',
+  'leg_no',
+  'product',
+  'type',
+  'expiry',
+  'k',
+  'side',
+  'qty',
+  'max_loss_floor_yen',
+  'abs_delta',
+] as const;
+const CANDIDATE_IN_KEYS = ['structure', 'abs_delta', 'expiry', 'qty', 'wing_pct'];
+/** abs_delta の範囲（k を省いて |Δ| で選ばせるとき） */
+export const ABS_DELTA_RANGE = [0.01, 0.6] as const;
+const isAbsDelta = (v: unknown): v is number =>
+  isNum(v) && v >= ABS_DELTA_RANGE[0] && v <= ABS_DELTA_RANGE[1];
+
+/**
+ * add の k を省いたときに simulator が選ぶ（#139。1 回の往復で提案まで進めるため）: max_loss_floor_yen = strike_scan の
+ * best_k（下限を満たす中で受払が最も有利）、abs_delta = OTM 側で |Δ| が最も近い両気配の行。選んだ入力（k 入り）か
+ * 理由を返す
+ */
+function pickStrike(
+  env: AiToolEnv,
+  c: Record<string, unknown>,
+): { input: Record<string, unknown>; by: 'floor' | 'delta' | null } | Err {
+  const { action: _a, max_loss_floor_yen: floor, abs_delta: delta, ...rest } = c;
+  if (floor === undefined && delta === undefined) return { input: rest, by: null };
+  if (rest.k !== undefined || (floor !== undefined && delta !== undefined)) return 'bad_input';
+  if ((rest.product ?? 'op') !== 'op') return 'bad_input';
+  const type = optType(rest.type);
+  if (!type || !isSide(rest.side)) return 'bad_input';
+  const m = monthFor(env, rest.expiry);
+  if (typeof m === 'string') return m;
+  let k: number | null;
+  if (floor !== undefined) {
+    const r = strikeScan(env, {
+      type: rest.type,
+      side: rest.side,
+      expiry: m.id,
+      ...(rest.qty !== undefined && { qty: rest.qty }),
+      max_loss_floor_yen: floor,
+    });
+    if ('error' in r) return r.error;
+    k = r.best_k;
+  } else {
+    if (!isAbsDelta(delta)) return 'bad_input';
+    k = strikeByDelta(env.chain, m, type, delta);
+  }
+  if (k === null) return 'no_candidate';
+  return { input: { ...rest, expiry: m.id, k }, by: floor !== undefined ? 'floor' : 'delta' };
+}
+
+/** new_tab の candidate（型・|Δ|）→ 足の入力（structure_candidates と同じ作り） */
+function candidateLegs(env: AiToolEnv, o: unknown): Record<string, unknown>[] | Err {
+  if (!isObj(o) || unknownKeys(o, CANDIDATE_IN_KEYS)) return 'bad_input';
+  const s = o.structure;
+  if (typeof s !== 'string' || !(STRUCTURES as readonly string[]).includes(s)) return 'bad_input';
+  const delta = o.abs_delta ?? 0.15;
+  const qty = o.qty ?? 1;
+  const wing = o.wing_pct ?? WING_PCT_DEFAULT;
+  if (!isAbsDelta(delta) || !isInt(qty, 1, QTY_MAX)) return 'bad_input';
+  if (!isNum(wing) || wing < WING_PCT_RANGE[0] || wing > WING_PCT_RANGE[1]) return 'bad_input';
+  const m = monthFor(env, o.expiry);
+  if (typeof m === 'string') return m;
+  const atmK = m.atm[env.atmBasis].pick?.k ?? null;
+  const spec = structureLegs(env.chain, atmK, m, s as Structure, delta, wing);
+  if (!spec) return 'no_candidate';
+  return spec.map((x) => ({
+    product: 'op',
+    type: x.type === 'put' ? 'P' : 'C',
+    expiry: m.id,
+    k: x.k,
+    side: x.side,
+    qty: x.mul * qty,
+  }));
+}
 
 function diffOf(change: string, ui: UiLeg, legNo: number | null, extra: ToolResult = {}) {
   return {
@@ -250,11 +327,18 @@ export function planProposal(
 ): ProposalPlan | ToolError {
   const draft = env.draft;
   if (!draft) return err('no_data');
-  if (unknownKeys(input, ['target', 'changes', 'legs'])) return err('bad_input');
+  if (unknownKeys(input, ['target', 'changes', 'legs', 'candidate'])) return err('bad_input');
   const target = input.target;
   if (target === 'new_tab') {
-    if (input.changes !== undefined || !Array.isArray(input.legs)) return err('bad_input');
-    const raw = input.legs;
+    if (input.changes !== undefined) return err('bad_input');
+    if ((input.legs === undefined) === (input.candidate === undefined)) return err('bad_input');
+    let raw: unknown[];
+    if (input.candidate !== undefined) {
+      const c = candidateLegs(env, input.candidate);
+      if (typeof c === 'string') return err(c);
+      raw = c;
+    } else if (Array.isArray(input.legs)) raw = input.legs;
+    else return err('bad_input');
     if (raw.length < 1 || raw.length > PROPOSE_MAX_LEGS) return err('bad_input');
     const legs: UiLeg[] = [];
     const diff: ToolResult[] = [];
@@ -274,7 +358,9 @@ export function planProposal(
     return { target, legs, diff, legsBefore: [], before: null, after: ev.base };
   }
   if (target !== 'current') return err('bad_input');
-  if (input.legs !== undefined || !Array.isArray(input.changes)) return err('bad_input');
+  if (input.legs !== undefined || input.candidate !== undefined || !Array.isArray(input.changes)) {
+    return err('bad_input');
+  }
   const changes = input.changes;
   if (changes.length < 1 || changes.length > PROPOSE_MAX_CHANGES) return err('bad_input');
   const { legs: evLegs, ev: evBefore } = evaluableLegs(draft);
@@ -287,18 +373,20 @@ export function planProposal(
     const action = c.action;
     if (action === 'add') {
       if (c.leg_no !== undefined) return err('bad_input');
-      const { action: _a, ...rest } = c;
-      const spec = parseLegInput(rest);
+      const picked = pickStrike(env, c);
+      if (typeof picked === 'string') return err(picked);
+      const spec = parseLegInput(picked.input);
       if (typeof spec === 'string') return err(spec);
       const ui = buildLeg(env, spec, id++);
       if (typeof ui === 'string') return err(ui);
       adds.push(ui);
-      diff.push(diffOf('add', ui, null));
+      diff.push(diffOf('add', ui, null, picked.by ? { picked_by: picked.by } : {}));
       continue;
     }
     if (action !== 'remove' && action !== 'set_qty' && action !== 'move_strike') {
       return err('bad_input');
     }
+    if (c.max_loss_floor_yen !== undefined || c.abs_delta !== undefined) return err('bad_input');
     if (!isInt(c.leg_no, 1, evLegs.length))
       return err(evLegs.length === 0 ? 'no_legs' : 'bad_input');
     const i = c.leg_no - 1;
@@ -709,6 +797,11 @@ function money(v: unknown, signed = true): string {
 }
 
 const SIDE_TEXT: Record<string, string> = { buy: '買', sell: '売' };
+/** 建値（整数は小数を付けない） */
+const entryText = (v: unknown) => {
+  const n = num(v);
+  return fmtNum(n, n !== null && !Number.isInteger(n) ? 1 : 0);
+};
 const FUT_TEXT: Record<string, string> = {
   fut_large: 'ラージ先物',
   fut_mini: 'ミニ先物',
@@ -773,10 +866,17 @@ export function proposalCard(input: Record<string, unknown>, result: unknown): P
       case 'strike':
         return {
           mark: '±',
-          text: `${at}K ${fmtNum(num(d.from_k))} → ${fmtNum(num(d.k))}（${legText(d)} · 建値 ${fmtNum(num(d.entry_yen), 1)}）${q}`,
+          text: `${at}K ${fmtNum(num(d.from_k))} → ${fmtNum(num(d.k))}（${legText(d)} · 建値 ${entryText(d.entry_yen)}）${q}`,
         };
-      default:
-        return { mark: '+', text: `${legText(d)} · 建値 ${fmtNum(num(d.entry_yen), 1)}${q}` };
+      default: {
+        const by =
+          d.picked_by === 'floor'
+            ? ' · 最大損失の下限から選んだ K'
+            : d.picked_by === 'delta'
+              ? ' · |Δ| から選んだ K'
+              : '';
+        return { mark: '+', text: `${legText(d)} · 建値 ${entryText(d.entry_yen)}${q}${by}` };
+      }
     }
   });
   const before = isObj(result.before) ? result.before : null;
@@ -799,6 +899,23 @@ export function proposalCard(input: Record<string, unknown>, result: unknown): P
 
 // ---------------------------------------------------------------- 反映（[今のタブに適用] / [新しいタブに入れる]）
 
+/** 差分の同一性（変更の種類・番号・足の名札・前の値。建値・気配は見ない） */
+function diffKey(diff: readonly unknown[]): string {
+  const keys = [
+    'change',
+    'leg_no',
+    'product',
+    'type',
+    'expiry',
+    'k',
+    'side',
+    'qty',
+    'from_qty',
+    'from_k',
+  ];
+  return JSON.stringify(diff.map((d) => keys.map((k) => (isObj(d) ? (d[k] ?? null) : null))));
+}
+
 export type ProposalApply =
   | { target: ProposeTarget; legs: UiLeg[] }
   /** changed = 提案の後に作業中のタブの足が変わった。invalid = 今の板で作れない（板の読み直し・ツールの結果の形） */
@@ -817,12 +934,16 @@ export function proposalApply(
   if (input.target === 'current' && !sameLegsBefore(env, result)) return { error: 'changed' };
   const plan = planProposal(env, input);
   if ('error' in plan) return { error: 'invalid' };
+  // k を省いた提案は押した時点の板で選び直す: カードの足と違えば反映しない（板が読み直された）
+  if (!Array.isArray(result.diff) || diffKey(plan.diff) !== diffKey(result.diff)) {
+    return { error: 'changed' };
+  }
   return { target: plan.target, legs: plan.legs };
 }
 
 /** 反映できないときのトーストの文 */
 export const PROPOSAL_APPLY_ERROR: Record<'changed' | 'invalid', string> = {
-  changed: 'ポジションが提案の後に変わったので反映しません。もう一度 AI に頼んでください',
+  changed: 'ポジションか板が提案の後に変わったので反映しません。もう一度 AI に頼んでください',
   invalid: '今の板では提案の足を作れません（板が変わった可能性）。もう一度 AI に頼んでください',
 };
 
