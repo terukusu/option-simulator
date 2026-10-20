@@ -9,6 +9,7 @@
 // 日次の値（#152）の合成の応答も `/fixtures/atm_daily` で配る（`/api/atm_daily` と同じ形。架空の値。種つき）。
 // AI の中継（#135）の偽の応答も `/fixtures/ai/status`・`/fixtures/ai/messages`（偽の SSE。Anthropic を呼ばない）で配る。
 // 診断 = 考え中 → 文（事前計算の値を書き写す）、追加の質問 = tool_use（evaluate_scenario）→ 道具の結果を受けて文。
+// 「ヘッジ」を含む質問はツール propose_position（#139）→ 提案のカード。
 // 質問に「切断」を含むと done の無いまま終える（画面の incomplete の確認用）。遅れつき（進み具合の表示の確認用）。
 
 import { readFileSync } from 'node:fs';
@@ -436,6 +437,11 @@ export function synthAiReply(body) {
       const text = `${f.tf ?? '—'} の RSI は ${f.rsi?.rsi ?? '—'} です。同じ状態の後の ${f.horizon_bars ?? '—'} 本先は中央値 ${br.median_pct ?? '—'}%（件数 ${br.n ?? '—'}${br.insufficient ? '・サンプル不足' : ''}）で、予想ではなく材料です。`;
       return { thinking: '道具の結果を読む', text, stop: 'end_turn' };
     }
+    if (r?.after && Array.isArray(r?.diff)) {
+      // propose_position（#139）の結果: 後の満期の最大損失と必要証拠金だけを引く（架空の値）
+      const text = `カードの案を入れると、満期の最大損失は ${thousand(r.after.max_loss_yen)}、必要証拠金は ${thousand(r.after.margin_yen)} です。検討の材料にしてください。`;
+      return { thinking: 'ツールの結果を読む', text, stop: 'end_turn' };
+    }
     const text = `その条件（${pct(r?.scenario?.dx_pct)}・${r?.scenario?.days ?? '—'} 日・IV +${r?.scenario?.iv_shift_pt ?? '—'}pt）の損益は ${thousand(r?.pnl_yen)} です。満期なら ${thousand(r?.expiry_pnl_yen)} です。`;
     return { thinking: '道具の結果を読む', text, stop: 'end_turn' };
   }
@@ -464,6 +470,22 @@ export function synthAiReply(body) {
       '- 下側にプットの買いを足したヘッジ案をピンで重ねる',
     ].join('\n');
     return { thinking: '事前計算のテール表と格子を見る', text, stop: 'end_turn' };
+  }
+  if (userText.includes('ヘッジ')) {
+    // ポジションの提案（#139）: 行使価格は simulator に選ばせる（|Δ| 0.05 の put の買いを今のタブに足す）
+    return {
+      thinking: 'ヘッジの足を探す',
+      text: '',
+      stop: 'tool_use',
+      tool: {
+        id: `toolu_dev_${msgs.length}`,
+        name: 'propose_position',
+        input: {
+          target: 'current',
+          changes: [{ action: 'add', type: 'P', side: 'buy', abs_delta: 0.05 }],
+        },
+      },
+    };
   }
   if (userText.includes('RSI')) {
     return {

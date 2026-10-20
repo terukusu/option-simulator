@@ -139,7 +139,8 @@
 //                                          免責の文は初めてだけ（閉じて開き直すと出ない）、偽の SSE の診断の返答を出した状態も測る
 //                                          #135 AC6（--flows）: 390×844 と 1440×900 で [このポジションを診断] → 進み具合が出るまで < 1,000 ms・
 //                                          考え中 → 書いています → 完了の順・中止で止まる・終端なし（「切断」）で incomplete・追加の質問の
-//                                          道具のカードと [シナリオに適用] → [元に戻す]・再読み込みで会話が残る（sessionStorage）
+//                                          道具のカードと [シナリオに適用] → [元に戻す]・提案のカードと [今のタブに適用] →
+//                                          [元に戻す]（#139）・再読み込みで会話が残る（sessionStorage）
 //   --ai                                   #135 の項目だけ（既定の検査・--flows とも。手元の確かめ用）
 //   --url <base>                           dev サーバーを起こさず、その URL を使う（例 http://127.0.0.1:5173/?parts）
 //   --dom <file>                           body の下の要素の tag.class の並びを書き出す（DOM の変化の比較用）
@@ -9625,6 +9626,40 @@ async function aiFlows(vp) {
       `${tag} [元に戻す] でシナリオが戻る`,
       undo !== null && sc2?.days === sc0?.days && sc2?.dSigma === sc0?.dSigma,
     );
+  }
+  // (d2) ポジションの提案（#139）: 提案のカード → [今のタブに適用] で足が 1 本増える → [元に戻す] で戻る
+  await page.fill('section.ai .ai-input textarea', 'ヘッジの足を足して');
+  await page.press('section.ai .ai-input textarea', 'Enter');
+  await page
+    .waitForSelector('section.ai .ai-progress', { state: 'detached', timeout: 15000 })
+    .catch(() => {});
+  const prop = await page.$(
+    'section.ai .ai-prop[data-ai-tool="propose_position"] button[data-ai="propose"]',
+  );
+  const propLines = await page.$$eval('section.ai .ai-prop .ai-prop-line', (xs) => xs.length);
+  check(
+    `${tag} 提案のカード（差分 ${propLines} 行）と [今のタブに適用]`,
+    prop !== null && propLines >= 1,
+  );
+  if (prop) {
+    const legsOf = async () => {
+      const ws = await page.evaluate(
+        (k) => JSON.parse(localStorage.getItem(k) ?? '{}'),
+        WORKSPACE_KEY,
+      );
+      const p = ws?.tabs?.[ws.active ?? 0]?.position ?? ws?.position ?? null;
+      return Array.isArray(p?.legs) ? p.legs.length : -1;
+    };
+    const n0 = await legsOf();
+    await prop.click();
+    await page.waitForTimeout(900);
+    const n1 = await legsOf();
+    check(`${tag} [今のタブに適用] で足が 1 本増える`, n1 === n0 + 1, `${n0} → ${n1}`);
+    const undo = await page.$('.toast button:has-text("元に戻す")');
+    if (undo) await undo.click();
+    await page.waitForTimeout(900);
+    const n2 = await legsOf();
+    check(`${tag} 提案の [元に戻す] で足が戻る`, undo !== null && n2 === n0, `${n1} → ${n2}`);
   }
   // (e) 再読み込みで会話が残る（sessionStorage の 1 キー）・保存一覧 / 作業の保存に AI のキーが無い
   const keys = await page.evaluate(() => ({
