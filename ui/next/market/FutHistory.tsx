@@ -32,6 +32,7 @@ import {
   IND_PANE_H,
   type IndKind,
   type IndPaneHeights,
+  indHiddenNote,
   indKindLabel,
 } from '../../view/indicators';
 import { IV_MODES, IV_TFS, type IvMode, type IvTf, lineSegments } from '../../view/ivHistory';
@@ -298,6 +299,11 @@ function FutHistoryView(p: FutHistoryProps) {
               {...(overlays ? { overlays } : {})}
               {...(ind && bars.length > 0 ? { height: layout.priceH } : {})}
             />
+          )}
+          {ind && bars.length > 0 && indHiddenNote(layout.hidden) && (
+            <p class="ind-hidden-note" role="status">
+              {indHiddenNote(layout.hidden)}
+            </p>
           )}
           {ind && bars.length > 0 && (
             <IndicatorPanes

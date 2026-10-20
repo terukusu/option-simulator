@@ -171,9 +171,29 @@ describe('#207 価格と段の配置（futPaneLayout）', () => {
     const l = futPaneLayout({ stackH: 200, kinds: ['rsi', 'macd', 'stoch'], max: null });
     expect(l.panes.map((s) => s.h)).toEqual([40, 40, 40]);
     expect(l.priceH).toBe(FUT_PRICE_MIN_H);
-    const tiny = futPaneLayout({ stackH: 100, kinds: ['rsi', 'macd', 'stoch'], max: null });
-    expect(tiny.panes.map((s) => s.h)).toEqual([IND_PANE_MIN_H, IND_PANE_MIN_H, IND_PANE_MIN_H]);
-    expect(tiny.priceH).toBe(FUT_PRICE_MIN_H);
+    expect(l.hidden).toEqual([]);
+  });
+  it('価格が先: 下限（価格 80px + 段 28px × 数）が入らなければ後ろの段から隠す。和は枠を超えない（#207 はみ出し）', () => {
+    const kinds = ['rsi', 'macd', 'stoch'] as const;
+    const fit3 = futPaneLayout({ stackH: 164, kinds, max: null });
+    expect(fit3.panes.map((s) => s.h)).toEqual([28, 28, 28]);
+    expect(fit3.priceH).toBe(80);
+    const two = futPaneLayout({ stackH: 150, kinds, max: null });
+    expect(two.panes.map((s) => s.kind)).toEqual(['rsi', 'macd']);
+    expect(two.hidden).toEqual(['stoch']);
+    expect(two.priceH + two.panes.reduce((a, s) => a + s.h, 0)).toBeLessThanOrEqual(150);
+    const tiny = futPaneLayout({ stackH: 100, kinds, max: null });
+    expect(tiny.panes).toEqual([]);
+    expect(tiny.hidden).toEqual(['rsi', 'macd', 'stoch']);
+    expect(tiny.priceH).toBe(100);
+    // 覚えた高さが大きくても和は枠の中（下限を守って残りを比で分ける）
+    for (const stackH of [130, 164, 200, 260, 333, 500]) {
+      const l = futPaneLayout({ stackH, kinds, heights: { rsi: 400, macd: 30 }, max: null });
+      const sum = l.panes.reduce((a, s) => a + s.h, 0);
+      expect(sum + l.priceH).toBeLessThanOrEqual(stackH);
+      expect(l.priceH).toBeGreaterThanOrEqual(FUT_PRICE_MIN_H);
+      expect(l.panes.every((s) => s.h >= IND_PANE_MIN_H)).toBe(true);
+    }
   });
   it('最大化: その段が枠の全部（価格 0・ほかの段なし）。出していない段の最大化は無視', () => {
     const l = futPaneLayout({
@@ -182,7 +202,12 @@ describe('#207 価格と段の配置（futPaneLayout）', () => {
       heights: { rsi: 90 },
       max: 'macd',
     });
-    expect(l).toEqual({ priceH: 0, panes: [{ kind: 'macd', h: 400, top: 0 }], max: 'macd' });
+    expect(l).toEqual({
+      priceH: 0,
+      panes: [{ kind: 'macd', h: 400, top: 0 }],
+      max: 'macd',
+      hidden: [],
+    });
     const none = futPaneLayout({ stackH: 400, kinds: ['rsi'], max: 'macd' });
     expect(none.max).toBeNull();
     expect(none.panes).toHaveLength(1);

@@ -424,22 +424,23 @@
   outline-offset: -2px;
 }
 
-/* 枠の下限 = 価格の下限 80px + 段の数 × 28px（#200 の下限と同じ。縦に狭いときは凡例が下へ押し出される） */
-.fut-stack:has(.ind-panes.n1) {
-  min-height: 108px;
-}
-
-.fut-stack:has(.ind-panes.n2) {
-  min-height: 136px;
-}
-
-.fut-stack:has(.ind-panes.n3) {
-  min-height: 164px;
-}
-
-/* 段があるときの価格の描画域の下限（スマホのシートの 覗く でも価格が潰れない。FUT_PRICE_MIN_H） */
-.market-body:has(.ind-panes) .iv-wrap {
-  min-height: 80px;
+/*
+ * 枠に下限は付けない（#207 はみ出し: 段を全部出しても価格と段の和は枠の高さまで）。価格の下限 80px と段の下限 28px は
+ * 配置（futPaneLayout）が守り、入らない段は後ろから隠して .ind-hidden-note で知らせる
+ */
+.ind-hidden-note {
+  position: absolute;
+  bottom: 24px;
+  left: 52px;
+  z-index: 3;
+  margin: 0;
+  padding: 1px 6px;
+  border-radius: var(--r-sm);
+  background: var(--s2);
+  color: var(--ink-3);
+  font-size: var(--fs-xs);
+  white-space: nowrap;
+  pointer-events: none;
 }
 
 /*

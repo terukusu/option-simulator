@@ -392,12 +392,16 @@ export interface FutPaneLayout {
   panes: FutPaneSlot[];
   /** 最大化している段（無ければ null） */
   max: IndKind | null;
+  /** 高さが足りないので隠した段（出している段の後ろから。最大化中は空） */
+  hidden: IndKind[];
 }
 
 /**
  * 価格と段の配置（#207）。stackH = 価格と段を包む枠（.fut-stack）の高さ。段は覚えた高さ（無ければ IND_PANE_H）で、
  * 段の和が「枠 − 価格の下限 FUT_PRICE_MIN_H」を超えたら比で縮める（段の下限 IND_PANE_MIN_H。#200 の縮み方と同じ）。
- * 価格は残り（下限 FUT_PRICE_MIN_H）。max が出している段なら、その段が枠の全部（価格・ほかの段は描かない）
+ * **価格が先**: 価格の下限と段の下限が枠に入らないときは、入る数だけ出し、後ろの段を隠す（hidden。0 段もありうる）=
+ * 価格と段の和は枠の高さを超えない（下端がはみ出さない）。価格は残り。max が出している段なら、その段が枠の全部
+ * （価格・ほかの段は描かない）
  */
 export function futPaneLayout(p: {
   stackH: number;
@@ -407,28 +411,37 @@ export function futPaneLayout(p: {
 }): FutPaneLayout {
   const stackH = Number.isFinite(p.stackH) ? Math.max(Math.floor(p.stackH), 0) : 0;
   if (p.max !== null && p.kinds.includes(p.max)) {
-    return {
-      priceH: 0,
-      panes: [{ kind: p.max, h: Math.max(stackH, IND_PANE_MIN_H), top: 0 }],
-      max: p.max,
-    };
+    return { priceH: 0, panes: [{ kind: p.max, h: stackH, top: 0 }], max: p.max, hidden: [] };
   }
-  const want = p.kinds.map((k) => {
+  const avail = stackH - FUT_PRICE_MIN_H;
+  const fit = Math.min(p.kinds.length, Math.max(Math.floor(avail / IND_PANE_MIN_H), 0));
+  const kinds = p.kinds.slice(0, fit);
+  const want = kinds.map((k) => {
     const v = p.heights?.[k];
     return isIndPaneH(v) ? v : IND_PANE_H;
   });
   const sum = want.reduce((a, b) => a + b, 0);
-  const avail = stackH - FUT_PRICE_MIN_H;
   const f = sum > avail ? Math.max(avail, 0) / sum : 1;
+  // 縮めるときは下限を守ったうえで残りを比で分ける（和が avail を超えない）
+  const spare = Math.max(avail - kinds.length * IND_PANE_MIN_H, 0);
+  const over = want.reduce((a, w) => a + Math.max(w - IND_PANE_MIN_H, 0), 0);
   let top = 0;
-  const panes = p.kinds.map((kind, i) => {
+  const panes = kinds.map((kind, i) => {
     const w = want[i] as number;
-    const h = f < 1 ? Math.max(IND_PANE_MIN_H, Math.floor(w * f)) : w;
+    const h =
+      f < 1
+        ? IND_PANE_MIN_H + Math.floor((Math.max(w - IND_PANE_MIN_H, 0) * spare) / (over || 1))
+        : w;
     const slot = { kind, h, top };
     top += h;
     return slot;
   });
-  return { priceH: Math.max(stackH - top, FUT_PRICE_MIN_H), panes, max: null };
+  return {
+    priceH: Math.max(stackH - top, 0),
+    panes,
+    max: null,
+    hidden: p.kinds.slice(fit),
+  };
 }
 
 /**
@@ -498,4 +511,11 @@ export function futSplitAt(layout: FutPaneLayout, y: number, coarse: boolean): n
     if (y >= s.top - above && y <= s.top + below) return i;
   }
   return null;
+}
+
+/** 高さが足りないので隠した段の知らせ（無ければ null。例「高さが足りないので SO を隠しています」） */
+export function indHiddenNote(hidden: readonly IndKind[]): string | null {
+  if (hidden.length === 0) return null;
+  const names = hidden.map((k) => IND_KINDS.find((x) => x.value === k)?.text ?? k).join('・');
+  return `高さが足りないので ${names} を隠しています`;
 }

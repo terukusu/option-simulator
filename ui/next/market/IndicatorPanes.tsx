@@ -1,6 +1,7 @@
 import { Fragment } from 'preact';
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import type { Indicators } from '../../../model';
+import { DOUBLE_TAP_PX, TAP_MAX_MS } from '../../chart/gesture';
 import type { Domain } from '../../chart/scale';
 import {
   initialSplit,
@@ -207,8 +208,13 @@ function IndicatorPanesView(p: IndicatorPanesProps) {
     scrub: { linePx: null },
     onScrub: (x) => p.onCursor(indexAt(x), at(ptr.current.y, ptr.current.touch)),
     onDouble: (_x, y) => {
-      // 境目の帯の上のダブルクリックは境目（既定の高さ）が扱う
+      // 境目の帯の上のダブルクリックは境目（既定の高さ）が扱う。既定に戻すと配置が変わるので、帯の判定だけでなく
+      // 直前（TAP_MAX_MS 以内）に境目を押したかでも除く
       if (futSplitAt(layout, y, false) !== null) return;
+      // 位置は画面の座標で比べる（既定に戻すと段の枠の上端が動く）
+      const sa = splitAt.current;
+      const cy = y + (ref.current?.getBoundingClientRect().top ?? 0);
+      if (performance.now() - sa.t < TAP_MAX_MS && Math.abs(cy - sa.y) <= DOUBLE_TAP_PX) return;
       const slot = futPaneAt(layout, y);
       if (slot) p.onMax(slot.kind);
     },
@@ -229,6 +235,8 @@ function IndicatorPanesView(p: IndicatorPanesProps) {
   // （Chrome のタッチの当たりの補正 = touch adjustment が、近くのフォーカスできる境目に段の上の押下を吸い寄せないように）で、
   // 当たり判定は段の枠の座標で futSplitAt が決める。押下は捕捉の段階で取り、useChartGestures に渡さない
   const [hot, setHot] = useState<number | null>(null);
+  /** 最後に境目を押した時刻（performance.now）と位置（画面の座標。境目のダブルクリックの dblclick を最大化にしない） */
+  const splitAt = useRef({ t: Number.NEGATIVE_INFINITY, y: 0 });
   const latest = useRef(p);
   latest.current = p;
   useEffect(() => {
@@ -297,6 +305,7 @@ function IndicatorPanesView(p: IndicatorPanesProps) {
       }
       start = latest.current.layout;
       border = b;
+      splitAt.current = { t: performance.now(), y: e.clientY };
       setHotOnce(b);
       apply(splitDown(s, sample(e), b));
     };
@@ -365,7 +374,7 @@ function IndicatorPanesView(p: IndicatorPanesProps) {
     <div
       class={`ind-panes n${kinds.length}${layout.max ? ' max' : ''}${hot !== null ? ' split-hot' : ''}`}
       ref={ref}
-      tabIndex={n === 0 ? -1 : 0}
+      tabIndex={n === 0 || layout.panes.length === 0 ? -1 : 0}
       role="application"
       aria-label="指標の段（矢印でパン・+ − で拡大・, . で足を読む・Enter で段を最大化 / 戻す）"
       onPointerDown={track}
