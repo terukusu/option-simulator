@@ -33,7 +33,7 @@ import {
   ivLoadReduce,
   mergeIvEntry,
 } from '../../ui/view/ivLoad';
-import { techLineWidths } from '../../ui/view/techLineWidth';
+import { TECH_LINE_PX, techLineWidthsOr } from '../../ui/view/techLineWidth';
 import { barsAt, everyStep, jst } from '../support/synthIv';
 
 /**
@@ -375,13 +375,12 @@ describe('EMA の 3 本（#206）', () => {
 });
 
 describe('#214 EMA の 3 本は同じ太さ', () => {
-  it('futEmaOverlays は 3 本に同じ width（設定の段ごとの EMA の太さ）を付ける', () => {
+  it('futEmaOverlays は 3 本に同じ width（設定の EMA の線の px）を付ける。既定は 1 px', () => {
     const e = emaSet(Array.from({ length: 100 }, (_, i) => 30000 + i * 10));
-    for (const w of ['thin', 'normal', 'thick'] as const) {
-      const px = techLineWidths(w).ema;
-      const o = futEmaOverlays(e, px);
-      expect(o.map((x) => x.width)).toEqual([px, px, px]);
+    for (const px of TECH_LINE_PX) {
+      expect(futEmaOverlays(e, px).map((x) => x.width)).toEqual([px, px, px]);
     }
-    expect(futEmaOverlays(e, techLineWidths(undefined).ema).map((x) => x.width)).toEqual([1, 1, 1]);
+    const def = techLineWidthsOr(undefined).ema;
+    expect(futEmaOverlays(e, def).map((x) => x.width)).toEqual([1, 1, 1]);
   });
 });

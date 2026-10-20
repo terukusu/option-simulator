@@ -1056,6 +1056,7 @@ async function measureAll() {
     // 先物推移（#190 AC-9）
     await futSweep();
     await futAllPanesSweep();
+    await futLineWidthCheck();
     console.log(`先物推移の検査（#190）: ${futStats.pass} / ${futStats.total} 状態で pass`);
     console.log(
       `先物推移の段の操作の検査（#207）: ${paneStats.pass} / ${paneStats.total} 状態で pass`,
@@ -2724,6 +2725,76 @@ async function futAllPanesSweep() {
       );
     }
     await ctx.close();
+  }
+}
+
+/**
+ * #214 テクニカルの線の太さ: EMA の 3 本と段の線（RSI・MACD・シグナル・%K・%D）の画面の太さ（CSS px）が設定の px と同じか。
+ * 画面の太さ = computed の stroke-width（non-scaling-stroke なら そのまま、無ければ × svg の画面の拡大率 getScreenCTM().a）。
+ * 既定（EMA 1・段 1.25）と設定した値（EMA 3・段 2）を 360×780（覗く）・1440×900 で測る。ヒストの棒は太さを持たない
+ */
+async function futLineWidthCheck() {
+  for (const [w, h] of [
+    [360, 780],
+    [1440, 900],
+  ]) {
+    for (const [want, extra] of [
+      [{ ema: 1, pane: 1.25 }, {}],
+      [
+        { ema: 3, pane: 2 },
+        { tech_ema_width_px: 3, tech_pane_width_px: 2 },
+      ],
+    ]) {
+      const ctx = await newContext(
+        { width: w, height: h },
+        { [WORKSPACE_KEY]: twoLegs, [PREFS_KEY]: prefsText('dark', extra) },
+      );
+      const page = await ctx.newPage();
+      await page.goto(pageUrl('next'));
+      await waitReady(page, 'next');
+      await openFut(page, w, 'peek');
+      for (const t of ['RSI', 'MACD', 'SO']) {
+        await page.click(`section.smile .iv-legend .ind-toggles button:text-is("${t}")`);
+      }
+      await page.waitForTimeout(250);
+      const r = await page.evaluate(() => {
+        const s = document.querySelector('section.smile');
+        const px = (el) => {
+          const cs = getComputedStyle(el);
+          const sw = Number.parseFloat(cs.strokeWidth);
+          const k = el.ownerSVGElement?.getScreenCTM()?.a ?? Number.NaN;
+          return {
+            screen: cs.vectorEffect === 'non-scaling-stroke' ? sw : sw * k,
+            k,
+            ve: cs.vectorEffect,
+          };
+        };
+        const ema = [...(s?.querySelectorAll('.ema-line') ?? [])].map(px);
+        const ind = [...(s?.querySelectorAll('.ind-pane .ind-line') ?? [])].map(px);
+        const hist = [...(s?.querySelectorAll('.ind-pane .ind-hist') ?? [])].map(
+          (e) => e.getAttribute('stroke-width') ?? '',
+        );
+        return { ema, ind, hist };
+      });
+      const bad = [];
+      const near = (a, b) => Math.abs(a - b) < 0.01;
+      if (r.ema.length !== 3 || !r.ema.every((x) => near(x.screen, want.ema)))
+        bad.push(`EMA ${r.ema.map((x) => x.screen).join('/')}`);
+      if (r.ind.length < 3 || !r.ind.every((x) => near(x.screen, want.pane)))
+        bad.push(`段 ${r.ind.map((x) => x.screen).join('/')}`);
+      if (r.hist.some((x) => x !== '')) bad.push(`ヒスト ${r.hist.join('/')}`);
+      if (![...r.ema, ...r.ind].every((x) => x.ve === 'non-scaling-stroke'))
+        bad.push('non-scaling-stroke なし');
+      futStats.total++;
+      const ok = bad.length === 0;
+      if (ok) futStats.pass++;
+      else failed = true;
+      const k = [...new Set([...r.ema, ...r.ind].map((x) => x.k))].join('/');
+      console.log(
+        `next dark 先物推移 線の太さ ${w}x${h}: #214 EMA ${want.ema}px ×${r.ema.length}・段 ${want.pane}px ×${r.ind.length}（svg の拡大率 ${k}） ${ok ? 'pass' : `${bad.join('・')}  ← NG`}`,
+      );
+      await ctx.close();
+    }
   }
 }
 

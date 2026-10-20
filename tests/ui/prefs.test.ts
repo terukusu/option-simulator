@@ -479,35 +479,63 @@ describe('#207 先物推移の指標の段の高さ（fut_pane_h_*）', () => {
   });
 });
 
-describe('#214 テクニカルの線の太さ（tech_line_width）', () => {
-  it('移行: キーの無い古い設定 → 持たない = 普通。書き出しにもキーが出ない', () => {
+describe('#214 テクニカルの線の太さ（tech_ema_width_px・tech_pane_width_px）', () => {
+  it('移行: キーの無い古い設定 → 持たない = 既定。書き出しにもキーが出ない', () => {
     const read = readPrefs(`{"schema_version":1,"theme":"dark",${M0_JSON},"tech_rsi":10}`);
     expect(read.writable).toBe(true);
-    expect(read.prefs.techLineWidth).toBeUndefined();
+    expect(read.prefs.techLineWidths).toBeUndefined();
     expect(techParamsOfPrefs(read.prefs).rsi).toBe(10);
-    expect(serializePrefs(read.prefs)).not.toContain('tech_line_width');
+    expect(serializePrefs(read.prefs)).not.toContain('width');
   });
-  it('往復: 細い / 太いは書いて読める。普通（既定）は書かない。版は 1 のまま', () => {
-    for (const w of ['thin', 'thick'] as const) {
-      const text = serializePrefs({ theme: 'auto', margin: M0, techLineWidth: w });
-      const o = JSON.parse(text);
-      expect(o.schema_version).toBe(PREFS_SCHEMA_VERSION);
-      expect(o.tech_line_width).toBe(w);
-      expect(readPrefs(text).prefs.techLineWidth).toBe(w);
-    }
-    const normal = serializePrefs({ theme: 'auto', margin: M0, techLineWidth: 'normal' });
-    expect(normal).not.toContain('tech_line_width');
-    expect(
-      readPrefs(`{"schema_version":1,"theme":"auto","tech_line_width":"normal"}`).prefs
-        .techLineWidth,
-    ).toBeUndefined();
+  it('往復: 既定と違う項目だけ px で書き、読むと同じ値。既定の項目は書かない。版は 1 のまま', () => {
+    const text = serializePrefs({
+      theme: 'auto',
+      margin: M0,
+      techLineWidths: { ema: 2, pane: 1.25 },
+    });
+    const o = JSON.parse(text);
+    expect(o.schema_version).toBe(PREFS_SCHEMA_VERSION);
+    expect(o.tech_ema_width_px).toBe(2);
+    expect('tech_pane_width_px' in o).toBe(false);
+    expect(readPrefs(text).prefs.techLineWidths).toEqual({ ema: 2 });
+    const both = serializePrefs({
+      theme: 'auto',
+      margin: M0,
+      techLineWidths: { ema: 1.5, pane: 3 },
+    });
+    expect(readPrefs(both).prefs.techLineWidths).toEqual({ ema: 1.5, pane: 3 });
+    const def = serializePrefs({
+      theme: 'auto',
+      margin: M0,
+      techLineWidths: { ema: 1, pane: 1.25 },
+    });
+    expect(def).not.toContain('width');
   });
-  it('不正（知らない文字・数・null）→ 普通。ほかの設定（期間・段の高さ・証拠金）は残る', () => {
-    for (const bad of ['"bold"', '1.5', 'null', '"THIN"']) {
+  it('作業中の版の段のキー（tech_line_width）は px に読み替え、書き出しは px のキーだけ', () => {
+    const thin = readPrefs(`{"schema_version":1,"theme":"auto","tech_line_width":"thin"}`).prefs;
+    expect(thin.techLineWidths).toEqual({ pane: 1 });
+    const thick = readPrefs(`{"schema_version":1,"theme":"auto","tech_line_width":"thick"}`).prefs;
+    expect(thick.techLineWidths).toEqual({ ema: 2, pane: 2 });
+    const out = JSON.parse(serializePrefs(thick));
+    expect(out.tech_ema_width_px).toBe(2);
+    expect(out.tech_pane_width_px).toBe(2);
+    expect('tech_line_width' in out).toBe(false);
+    const normal = readPrefs(
+      `{"schema_version":1,"theme":"auto","tech_line_width":"normal"}`,
+    ).prefs;
+    expect(normal.techLineWidths).toBeUndefined();
+    // px のキーがあれば段のキーは読まない
+    const mixed = readPrefs(
+      `{"schema_version":1,"theme":"auto","tech_line_width":"thick","tech_pane_width_px":3}`,
+    ).prefs;
+    expect(mixed.techLineWidths).toEqual({ pane: 3 });
+  });
+  it('不正（選択肢に無い数・文字・null）→ 項目ごとに既定。ほかの設定（期間・段の高さ・証拠金）は残る', () => {
+    for (const bad of ['0.75', '"2"', 'null', '4', '"thick"']) {
       const read = readPrefs(
-        `{"schema_version":1,"theme":"light","capital_yen":3000000,"tech_ema_mid":30,"fut_pane_h_rsi":90,"tech_line_width":${bad}}`,
+        `{"schema_version":1,"theme":"light","capital_yen":3000000,"tech_ema_mid":30,"fut_pane_h_rsi":90,"tech_ema_width_px":${bad},"tech_pane_width_px":2}`,
       );
-      expect(read.prefs.techLineWidth).toBeUndefined();
+      expect(read.prefs.techLineWidths).toEqual({ pane: 2 });
       expect(read.prefs.theme).toBe('light');
       expect(read.prefs.margin.capitalYen).toBe(3000000);
       expect(techParamsOfPrefs(read.prefs).emaMid).toBe(30);
@@ -516,8 +544,8 @@ describe('#214 テクニカルの線の太さ（tech_line_width）', () => {
     const out = serializePrefs({
       theme: 'dark',
       margin: M0,
-      techLineWidth: 'bold' as unknown as 'thin',
+      techLineWidths: { ema: 0.5, pane: 7 },
     });
-    expect(out).not.toContain('tech_line_width');
+    expect(out).not.toContain('width');
   });
 });

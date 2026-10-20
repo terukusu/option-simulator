@@ -26,9 +26,11 @@ import {
   techField,
 } from '../view/settings';
 import {
-  DEFAULT_TECH_LINE_WIDTH,
-  TECH_LINE_WIDTH_OPTIONS,
-  type TechLineWidth,
+  DEFAULT_TECH_LINE_WIDTHS,
+  TECH_LINE_FIELDS,
+  TECH_LINE_PX_OPTIONS,
+  type TechLineWidths,
+  techLinePxOf,
 } from '../view/techLineWidth';
 import { Dialog } from './parts/Dialog';
 import { Seg } from './parts/Seg';
@@ -58,9 +60,9 @@ export interface SettingsDialogProps {
   /** テクニカル指標の期間（端末の設定。先物推移の段と AI のツール technicals に同じ値。#205） */
   techParams: TechParams;
   onTechParams: (patch: Partial<TechParams>) => void;
-  /** テクニカルの線の太さ（端末の設定。EMA の 3 本と指標の段の線。#214） */
-  techLineWidth: TechLineWidth;
-  onTechLineWidth: (w: TechLineWidth) => void;
+  /** テクニカルの線の太さ（px。端末の設定。EMA の 3 本と指標の段の線。#214） */
+  techLineWidths: TechLineWidths;
+  onTechLineWidths: (patch: Partial<TechLineWidths>) => void;
 }
 
 /**
@@ -359,7 +361,7 @@ function SettingsBody(p: SettingsDialogProps) {
             class="btn sm"
             onClick={() => {
               p.onTechParams(TECH_RESET);
-              p.onTechLineWidth(DEFAULT_TECH_LINE_WIDTH);
+              p.onTechLineWidths(DEFAULT_TECH_LINE_WIDTHS);
               setTechGen((g) => g + 1);
             }}
           >
@@ -374,15 +376,29 @@ function SettingsBody(p: SettingsDialogProps) {
             key={`${f.key}-${techGen}`}
           />
         ))}
-        <div class="set-line">
-          <span class="set-k">線の太さ</span>
-          <Seg<TechLineWidth>
-            label="テクニカルの線の太さ"
-            value={p.techLineWidth}
-            options={TECH_LINE_WIDTH_OPTIONS}
-            onChange={p.onTechLineWidth}
-          />
-        </div>
+        {TECH_LINE_FIELDS.map((f) => (
+          <div class="set-line" key={f.key}>
+            <label class="set-k" for={`set-tech-lw-${f.key}`}>
+              {f.label}
+            </label>
+            <select
+              id={`set-tech-lw-${f.key}`}
+              class="set-input"
+              aria-label={f.aria}
+              value={String(p.techLineWidths[f.key])}
+              onChange={(e) => {
+                const px = techLinePxOf(e.currentTarget.value);
+                if (px !== null) p.onTechLineWidths({ [f.key]: px });
+              }}
+            >
+              {TECH_LINE_PX_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.text}
+                </option>
+              ))}
+            </select>
+          </div>
+        ))}
         {TECH_SETTINGS_NOTES.map((t) => (
           <p class="set-note" key={t}>
             {t}

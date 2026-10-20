@@ -1,38 +1,46 @@
 import { describe, expect, it } from 'vitest';
 import {
-  DEFAULT_TECH_LINE_WIDTH,
-  isTechLineWidth,
-  TECH_LINE_WIDTH_OPTIONS,
-  TECH_LINE_WIDTH_VALUES,
-  techLineWidths,
+  DEFAULT_TECH_LINE_WIDTHS,
+  isTechLinePx,
+  legacyStepWidths,
+  TECH_LINE_FIELDS,
+  TECH_LINE_PX,
+  TECH_LINE_PX_OPTIONS,
+  techLinePxOf,
+  techLineWidthsOr,
 } from '../../ui/view/techLineWidth';
 
-/** #214: 設定の線の太さ（細い / 普通 / 太い）→ EMA の 3 本と指標の段の線の stroke-width（px） */
-describe('techLineWidths', () => {
-  it('段 → 太さの表（普通 = 既定: EMA 1・段 1.25 = #200 の段の太さのまま）', () => {
-    expect(DEFAULT_TECH_LINE_WIDTH).toBe('normal');
-    expect(techLineWidths('thin')).toEqual({ ema: 0.75, pane: 1 });
-    expect(techLineWidths('normal')).toEqual({ ema: 1, pane: 1.25 });
-    expect(techLineWidths('thick')).toEqual({ ema: 1.5, pane: 1.75 });
+/** #214: 設定の線の太さ（px）→ EMA の 3 本と指標の段の線の stroke-width（CSS px） */
+describe('テクニカルの線の太さ（px）', () => {
+  it('選べる値は 1 / 1.5 / 2 / 3 px と段の既定 1.25 px。既定は EMA 1・段 1.25（今の見た目）', () => {
+    expect(TECH_LINE_PX).toEqual([1, 1.25, 1.5, 2, 3]);
+    expect(DEFAULT_TECH_LINE_WIDTHS).toEqual({ ema: 1, pane: 1.25 });
+    for (const px of Object.values(DEFAULT_TECH_LINE_WIDTHS)) expect(isTechLinePx(px)).toBe(true);
   });
-  it('細い < 普通 < 太い（EMA・段とも）。EMA は同じ段の段の線より細い', () => {
-    const ws = TECH_LINE_WIDTH_VALUES.map((w) => techLineWidths(w));
-    for (let i = 1; i < ws.length; i++) {
-      expect(ws[i]?.ema).toBeGreaterThan(ws[i - 1]?.ema ?? Number.POSITIVE_INFINITY);
-      expect(ws[i]?.pane).toBeGreaterThan(ws[i - 1]?.pane ?? Number.POSITIVE_INFINITY);
-    }
-    for (const w of ws) expect(w.ema).toBeLessThan(w.pane);
+  it('選択肢の文字は「1 px」の形、値は px の文字', () => {
+    expect(TECH_LINE_PX_OPTIONS.map((o) => o.text)).toEqual([
+      '1 px',
+      '1.25 px',
+      '1.5 px',
+      '2 px',
+      '3 px',
+    ]);
+    for (const o of TECH_LINE_PX_OPTIONS) expect(techLinePxOf(o.value)).toBe(Number(o.value));
+    expect(techLinePxOf('4')).toBeNull();
+    expect(techLinePxOf('')).toBeNull();
+    expect(TECH_LINE_FIELDS.map((f) => f.key)).toEqual(['ema', 'pane']);
   });
-  it('無い・不正 → 普通', () => {
-    expect(techLineWidths(undefined)).toEqual({ ema: 1, pane: 1.25 });
-    expect(techLineWidths('bold' as unknown as 'thin')).toEqual({ ema: 1, pane: 1.25 });
-    expect(isTechLineWidth('thin')).toBe(true);
-    expect(isTechLineWidth('normal')).toBe(true);
-    expect(isTechLineWidth(1)).toBe(false);
-    expect(isTechLineWidth(null)).toBe(false);
+  it('欠けた・不正な項目は既定で埋める', () => {
+    expect(techLineWidthsOr(undefined)).toEqual({ ema: 1, pane: 1.25 });
+    expect(techLineWidthsOr({ ema: 3 })).toEqual({ ema: 3, pane: 1.25 });
+    expect(techLineWidthsOr({ ema: 0.75, pane: 2 })).toEqual({ ema: 1, pane: 2 });
+    expect(techLineWidthsOr({ pane: Number.NaN })).toEqual({ ema: 1, pane: 1.25 });
   });
-  it('Seg の選択肢: 細い / 普通 / 太い の順で、値は表と同じ', () => {
-    expect(TECH_LINE_WIDTH_OPTIONS.map((o) => o.text)).toEqual(['細い', '普通', '太い']);
-    expect(TECH_LINE_WIDTH_OPTIONS.map((o) => o.value)).toEqual([...TECH_LINE_WIDTH_VALUES]);
+  it('作業中の版の段: 細い → 1、普通 → 既定、太い → 2（EMA・段とも）、ほか → null', () => {
+    expect(legacyStepWidths('thin')).toEqual({ ema: 1, pane: 1 });
+    expect(legacyStepWidths('normal')).toEqual(DEFAULT_TECH_LINE_WIDTHS);
+    expect(legacyStepWidths('thick')).toEqual({ ema: 2, pane: 2 });
+    expect(legacyStepWidths('bold')).toBeNull();
+    expect(legacyStepWidths(undefined)).toBeNull();
   });
 });

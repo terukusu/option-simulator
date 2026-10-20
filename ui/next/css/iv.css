@@ -119,13 +119,15 @@
 }
 
 /*
- * 線の太さは書かない: 3 本とも同じ太さを設定の値（#214。細い / 普通 / 太い）で SVG の stroke-width 属性に入れる
- * （CSS の stroke-width は表示属性より強いので、ここに書くと設定が効かない）。見分けは色と読み取りの名前
+ * 線の太さは書かない: 3 本とも同じ太さを設定の値（#214。px）で SVG の stroke-width 属性に入れる
+ * （CSS の stroke-width は表示属性より強いので、ここに書くと設定が効かない）。non-scaling-stroke = 拡大縮小に
+ * 関係なく画面の px。見分けは色と読み取りの名前
  */
 .iv-wrap .ema-line {
   fill: none;
   stroke-linejoin: round;
   pointer-events: none;
+  vector-effect: non-scaling-stroke;
 }
 
 @container (max-width: 419.98px) {
@@ -552,10 +554,11 @@
   text-anchor: end;
 }
 
-/* 線の太さは設定の値（#214）を stroke-width 属性で描く（ここに書くと属性より強くなり設定が効かない） */
+/* 線の太さは設定の値（#214。px）を stroke-width 属性で描く（ここに書くと属性より強くなり設定が効かない。non-scaling-stroke = 画面の px） */
 .ind-pane .ind-line {
   fill: none;
   stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
 }
 
 .ind-pane .ind-line.main {

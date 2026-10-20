@@ -12,7 +12,12 @@ import {
 } from '../prefs';
 import { writeKey } from '../storage';
 import type { IndPaneHeights } from '../view/indicators';
-import { DEFAULT_TECH_LINE_WIDTH, type TechLineWidth } from '../view/techLineWidth';
+import {
+  DEFAULT_TECH_LINE_WIDTHS,
+  TECH_LINE_FIELDS,
+  type TechLineWidths,
+  techLineWidthsOr,
+} from '../view/techLineWidth';
 
 /**
  * 端末の設定（option-simulator.prefs。ui/prefs.ts）の state（#131）。テーマ・証拠金・テクニカルの期間（#205）・線の太さ（#214）などを 1 つの値で持ち、
@@ -65,15 +70,23 @@ export function usePrefs(initial: PrefsRead, storage: Storage | null) {
     },
     [commit],
   );
-  // テクニカルの線の太さ（#214）: 普通 = 既定はキーを持たない（書かない）。同じ値なら書かない
-  const setTechLineWidth = useCallback(
-    (w: TechLineWidth) => {
-      const { techLineWidth: old, ...rest } = ref.current;
-      if ((old ?? DEFAULT_TECH_LINE_WIDTH) === w) return;
-      commit(w === DEFAULT_TECH_LINE_WIDTH ? rest : { ...rest, techLineWidth: w });
+  // テクニカルの線の太さ（#214。px）: 既定の項目は持たない（書かない）。同じ値なら書かない
+  const setTechLineWidths = useCallback(
+    (patch: Partial<TechLineWidths>) => {
+      const { techLineWidths: old, ...rest } = ref.current;
+      const cur = techLineWidthsOr(old);
+      const next = techLineWidthsOr({ ...cur, ...patch });
+      if (next.ema === cur.ema && next.pane === cur.pane) return;
+      const kept: Partial<TechLineWidths> = {};
+      for (const { key } of TECH_LINE_FIELDS) {
+        if (next[key] !== DEFAULT_TECH_LINE_WIDTHS[key]) kept[key] = next[key];
+      }
+      commit(Object.keys(kept).length > 0 ? { ...rest, techLineWidths: kept } : rest);
     },
     [commit],
   );
+  const storedLw = prefs.techLineWidths;
+  const techLineWidths = useMemo(() => techLineWidthsOr(storedLw), [storedLw]);
   // 段とツールに渡す期間（保存した組が変わったときだけ作り直す = 指標の再計算は期間が変わったときだけ）
   const stored = prefs.technicals;
   const technicals = useMemo(() => techParamsOr(stored), [stored]);
@@ -85,7 +98,7 @@ export function usePrefs(initial: PrefsRead, storage: Storage | null) {
     setAiDisclaimerSeen,
     setTechnicals,
     setFutPaneH,
-    techLineWidth: prefs.techLineWidth ?? DEFAULT_TECH_LINE_WIDTH,
-    setTechLineWidth,
+    techLineWidths,
+    setTechLineWidths,
   };
 }
