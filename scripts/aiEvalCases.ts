@@ -1,7 +1,7 @@
 /**
- * AI の評価と道具の見本に使う合成のポジション（#135 AC1。値はすべて架空）。合成の板 fixtures/synthetic/latest.json の
+ * AI の評価とツールの見本に使う合成のポジション（#135 AC1。値はすべて架空）。合成の板 fixtures/synthetic/latest.json の
  * 行使価格・気配から、画面の reducer（ui/state.ts の addBoardLeg・addFutureLeg・setScenario）で作る = 建値は板の気配
- * （買いは ask・売りは bid）。scripts/aiEval.mjs（本物の API の評価）と scripts/synthBoard.ts（道具の見本
+ * （買いは ask・売りは bid）。scripts/aiEval.mjs（本物の API の評価）と scripts/synthBoard.ts（ツールの見本
  * fixtures/synthetic/ai_tools.json）が使う。
  */
 

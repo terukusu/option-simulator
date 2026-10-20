@@ -55,7 +55,7 @@ USAGE = {"input_tokens": 1500, "cache_creation_input_tokens": 10, "cache_read_in
 
 
 def turn_events(tools=2, redacted=True) -> list:
-    """モデルの 1 turn（thinking → redacted_thinking → text → 道具）の StreamEvent と、CLI が足す AssistantMessage"""
+    """モデルの 1 turn（thinking → redacted_thinking → text → ツール）の StreamEvent と、CLI が足す AssistantMessage"""
     ev = [se({"type": "message_start", "message": {"usage": {"input_tokens": 1, "output_tokens": 1}}}),
           se({"type": "content_block_start", "index": 0,
               "content_block": {"type": "thinking", "thinking": "", "signature": ""}}),
@@ -171,7 +171,7 @@ def test_events_same_shape_and_order_as_anthropic_gateway():
         {"type": "tool_use", "id": "toolu_u0", "name": "evaluate_scenario", "input": {"days": 5, "iv_shift_pt": 0}},
         {"type": "tool_use", "id": "toolu_u1", "name": "evaluate_scenario", "input": {"days": 5, "iv_shift_pt": 1}},
     ]
-    assert gw.tool_calls == 0  # 道具の関数は呼ばれない
+    assert gw.tool_calls == 0  # ツールの関数は呼ばれない
     assert fq.closed
 
 
@@ -261,7 +261,7 @@ def test_sdk_tool_handler_does_not_compute():
 # ---- 履歴（S3）: transcript の項目から取り出した messages が build_params の messages と一致 ----
 
 def tool_result_text() -> str:
-    """道具の結果の見本（fixtures/synthetic/ai_tools.json の evaluate_scenario。合成の値）"""
+    """ツールの結果の見本（fixtures/synthetic/ai_tools.json の evaluate_scenario。合成の値）"""
     sample = json.loads((REPO_ROOT / "fixtures" / "synthetic" / "ai_tools.json").read_text(encoding="utf-8"))
     return json.dumps(sample["cases"][0]["evaluate"][0]["result"], ensure_ascii=False)
 

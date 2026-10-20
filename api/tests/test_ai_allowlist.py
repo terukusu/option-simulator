@@ -1,6 +1,6 @@
 """AI の中継の許可リスト（#134 AC1。docs/ai-advisor.md 論点 1・6）。正常形 1 本から 1 か所ずつ壊す表駆動。
 
-登録（道具）は引数にして使う: テスト専用の 2 本（support.ai_registry）と、本物の REGISTRY（#135 の 6 本 +
+登録（ツール）は引数にして使う: テスト専用の 2 本（support.ai_registry）と、本物の REGISTRY（#135 の 6 本 +
 #200 の technicals）。
 #135 AC4: 会話の途中の文脈の更新（context_update の block）は許可リストの形でだけ通り、送る本文では後ろに足される。
 """
@@ -43,7 +43,7 @@ def test_ok_tool_roundtrip():
 
 
 def test_ok_with_real_registry():
-    # 本物の登録: precomputed なしの文脈は通る。テスト用の道具の名前（greeks）は本物の登録に無い
+    # 本物の登録: precomputed なしの文脈は通る。テスト用のツールの名前（greeks）は本物の登録に無い
     parse(ai_body(context=ai_context(with_precomputed=False)), REGISTRY)
     assert bad(ai_body(), REGISTRY).path == "context.precomputed.<unknown>"
 
@@ -257,7 +257,7 @@ CASES = [
     ("too_many_expiries", lambda b: b["context"]["expiries"].extend(
         copy.deepcopy(b["context"]["expiries"][1]) for _ in range(5)), "context.expiries", "size"),
     ("user_text_long", _set(("messages", 0, "content", 0, "text"), "あ" * 4001), "messages[0].content[0].text", "size"),
-    # 会話: role・block の型・道具
+    # 会話: role・block の型・ツール
     ("role_system", _set(("messages", 0, "role"), "system"), "messages[0].role", "enum"),
     ("role_order", _set(("messages", 1, "role"), "user"), "messages[1].role", "order"),
     ("ends_with_assistant", lambda b: b["messages"].pop(), "messages", "order"),

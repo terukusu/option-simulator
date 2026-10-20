@@ -125,8 +125,8 @@ AI_MAX_CONCURRENT = 2  # インスタンスごとに同時に流す本数（guni
 AI_RATE_PER_MINUTE = 10  # インスタンスごとの 1 分の回数
 # 入力トークンの見積もり = 送る本文（system・tools・messages）の UTF-8 のバイト数 + AI_INPUT_OVERHEAD_TOKENS。
 # バイト単位の BPE のトークンは 1 つ 1 バイト以上なので、トークン数 ≤ バイト数（数字・記号の多い JSON でも過小にならない
-# 上界。ASCII 1 字 = 1、日本語 1 字 = 3）。OVERHEAD は本文に見えない分（message の区切り・道具を使うときの system prompt
-# など。数百トークン）の余裕
+# 上界。ASCII 1 字 = 1、日本語 1 字 = 3）。OVERHEAD は本文に見えない分（message の区切り・ツールを使うときの
+# system prompt など。数百トークン）の余裕
 AI_INPUT_OVERHEAD_TOKENS = 2000
 AI_FIRESTORE_DATABASE = "simulator-ai"  # 日の計上の置き場所（Firestore の名前つき DB。infra/bootstrap/ai_budget.tf）
 AI_FIRESTORE_COLLECTION = "ai_spend"

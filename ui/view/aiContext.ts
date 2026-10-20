@@ -3,11 +3,11 @@
  * の context_shape）の形。純関数（DOM・通信・時計に依存しない）。
  *
  * - 板: 限月ごとの F・ATM の行使価格と IV（%）・残存日数・スマイルの要約（log-moneyness m = ln(K/F) の 11 点の IV）。
- *   板の行（気配）は送らない（MVP。smile_position の道具で足りる。入力が 1/3 程度になり予約額・速さに効く）
+ *   板の行（気配）は送らない（MVP。smile_position のツールで足りる。入力が 1/3 程度になり予約額・速さに効く）
  * - 送らないもの: JPX のグリーク・bid_iv / ask_iv・数量・建玉・自由な文字列（タブ名など）
  * - ポジション: 評価できる足（PnlBase の足）だけ。シナリオ: 日数（最遠の SQ に収めた値）・IV の平行移動・ΔX・スキュー・β・
  *   IV の入れ方・横軸の初期範囲。資金: 端末の設定（未設定なら無し）
- * - precomputed: 道具 5 本の事前計算（ui/view/aiTools.ts）
+ * - precomputed: ツール 5 本の事前計算（ui/view/aiTools.ts）
  * - 指紋（contextKey）: 決定的な JSON（キーの順）。会話の途中で変わったら次の発言に context_update を足す（aiChat.ts）
  */
 
@@ -41,7 +41,7 @@ function sourceOf(s: string | null): AiContext['snapshot']['source'] {
 }
 
 /**
- * 画面の状態（ui/state.ts）と端末の証拠金の設定 → 道具の環境（板が無ければ null）。useAppController と同じ組み立て
+ * 画面の状態（ui/state.ts）と端末の証拠金の設定 → ツールの環境（板が無ければ null）。useAppController と同じ組み立て
  * （評価の設定・足の市場・損益グラフの基礎・シナリオ点で広げた全域）。画面（useAiChat）と評価用スクリプトが共用する
  */
 export function aiEnvFromState(state: State, margin: MarginPrefs): AiToolEnv | null {

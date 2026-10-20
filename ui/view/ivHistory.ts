@@ -33,7 +33,7 @@ import { DASH, fmtNum } from './format';
 export type IvTf = '1m' | '5m' | '15m' | '1h' | '4h' | '1d';
 export type IvMode = 'candle' | 'line';
 
-/** 足の切替（道具の行の Seg。文字は短く、aria-label に全文） */
+/** 足の切替（ツールの行の Seg。文字は短く、aria-label に全文） */
 export const IV_TFS: readonly { value: IvTf; text: string; label: string }[] = [
   { value: '1m', text: '1分', label: '1 分足' },
   { value: '5m', text: '5分', label: '5 分足' },

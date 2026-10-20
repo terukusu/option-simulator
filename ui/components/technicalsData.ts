@@ -1,11 +1,11 @@
 /**
- * AI の道具 technicals（#200）のデータの読み込み（DOM を持たない。fetch とブラウザの中の覚え）。
+ * AI のツール technicals（#200）のデータの読み込み（DOM を持たない。fetch とブラウザの中の覚え）。
  *
- * - 読むのは道具が呼ばれたとき（useAiChat が tool_use に technicals を見たとき）だけ。ポーリングしない
+ * - 読むのはツールが呼ばれたとき（useAiChat が tool_use に technicals を見たとき）だけ。ポーリングしない
  * - 既存の口 `/api/future_bars` を先物推移の画面と同じ範囲で読む = サーバーのキャッシュ（キー = (tf, start, end)）を共有:
  *   日足の右端の 1 回分（365 日）+ その左の 1 回分（365 日）= 約 2 年（週足の MACD の助走 34 本を超える）、1 時間足の
  *   右端の 1 回分（60 日）+ その左の 1 回分（60 日）= 約 120 日（4 時間足 約 400 本）。要求 4 本（右端 2 本 → 左 2 本）
- * - 口ごとに TECH_CACHE_MS（10 分）覚える（同じ会話で何度呼ばれても読み直さない）。右端が読めなければ失敗（道具は
+ * - 口ごとに TECH_CACHE_MS（10 分）覚える（同じ会話で何度呼ばれても読み直さない）。右端が読めなければ失敗（ツールは
  *   no_data）、左が読めなければ右端だけで返す。失敗は覚えない
  */
 
@@ -49,7 +49,7 @@ async function loadOne(
   }
 }
 
-/** 道具のデータ（日足・1 時間足）。now は覚えの期限の判定だけに使う */
+/** ツールのデータ（日足・1 時間足）。now は覚えの期限の判定だけに使う */
 export function loadTechnicalsData(
   endpoint: string,
   loader: Loader = loadFutureBars,

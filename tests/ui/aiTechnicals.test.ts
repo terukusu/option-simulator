@@ -1,5 +1,5 @@
 /**
- * #200 AC4: AI の道具 technicals（ui/view/aiTechnicals.ts）。合成の先物の足（scripts/synthFutBars.ts。架空の値）で、
+ * #200 AC4: AI のツール technicals（ui/view/aiTechnicals.ts）。合成の先物の足（scripts/synthFutBars.ts。架空の値）で、
  * 画面の段と同じ計算（model/technicals.ts の indicators）・基準率の規則・入力の検査・大きさを確かめる。
  */
 import { describe, expect, it } from 'vitest';

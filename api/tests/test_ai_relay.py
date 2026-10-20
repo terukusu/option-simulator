@@ -76,7 +76,7 @@ def test_upstream_body_only_allowlisted_keys(messages):
     res.get_data()
     assert gw.count() == 1
     params = gw.calls[0]
-    assert set(params) == relay.FIXED_KEYS  # 道具の登録があれば tools も
+    assert set(params) == relay.FIXED_KEYS  # ツールの登録があれば tools も
     assert params["model"] == "claude-opus-5-5" and params["max_tokens"] == st.AI_MAX_TOKENS
     assert params["system"] == relay.SYSTEM_PROMPT
     assert _keys(params, set()) - allowed_keys(REG) == set()

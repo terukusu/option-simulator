@@ -1,5 +1,5 @@
 /**
- * 道具の出力の見本 fixtures/synthetic/ai_tools.json（#135 AC3）。合成の板 latest と合成のポジション 4 つ
+ * ツールの出力の見本 fixtures/synthetic/ai_tools.json（#135 AC3）。合成の板 latest と合成のポジション 4 つ
  * （scripts/aiEvalCases.ts）で、画面と同じ組み立て（ui/view/aiContext.ts の aiEnvFromState・buildAiContext）の文脈
  * （事前計算 5 本を含む）と evaluate_scenario の結果・失敗を書く。中継の pytest（api/tests/test_ai_tools.py）が
  * 名前の集合・結果の形・文脈の形を tools.py / allowlist.py に通す = 言語をまたぐ契約。値はすべて架空。
@@ -33,7 +33,7 @@ const TECH_INPUTS: Record<string, unknown>[] = [
 const TECH_ERROR_INPUTS: Record<string, unknown>[] = [{ timeframes: ['1m'] }, { horizon_bars: 30 }];
 
 function fail(): never {
-  throw new Error('道具の環境を作れない');
+  throw new Error('ツールの環境を作れない');
 }
 
 export function buildAiToolsFixture(latest: ChainJson): string {
@@ -41,7 +41,7 @@ export function buildAiToolsFixture(latest: ChainJson): string {
     const c = AI_EVAL_CASES.find((x) => x.name === name);
     if (!c) throw new Error(`評価の組が無い: ${name}`);
     const env = aiEnvFromState(caseState(latest, c), caseMargin(c));
-    if (!env) throw new Error(`道具の環境を作れない: ${name}`);
+    if (!env) throw new Error(`ツールの環境を作れない: ${name}`);
     return {
       name,
       context: buildAiContext(env),

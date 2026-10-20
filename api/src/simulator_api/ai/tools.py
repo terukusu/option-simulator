@@ -1,8 +1,8 @@
-"""道具の登録（docs/ai-advisor.md 論点 5・6、docs/design.md 14 章）。名前 → 入力の形・結果の形・説明・Anthropic に渡す
+"""ツールの登録（docs/ai-advisor.md 論点 5・6、docs/design.md 14 章）。名前 → 入力の形・結果の形・説明・Anthropic に渡す
 input_schema。
 
-道具はブラウザの決定論的な計算（K15。ui/view/aiTools.ts）。中継は道具を実行しない。AI の tool_use の入力と、ブラウザが
-返す tool_result の結果・事前計算（context.precomputed）を、ここの形で検査する。
+ツールはブラウザの決定論的な計算（K15。ui/view/aiTools.ts）。中継はツールを実行しない。AI の tool_use の入力と、
+ブラウザが返す tool_result の結果・事前計算（context.precomputed）を、ここの形で検査する。
 
 結果の値の単位はキーの名前で決める（ui/view/aiNumbers.ts の照合も同じ規則）: `*_yen` は円（整数）、`x`・`k`・`forward`・
 `atm_k`・`*_x` は原資産・行使価格の水準（円）、`*_pct` は %（小数 1 桁）、`*_pt` は pt（小数 1 桁）、
@@ -391,11 +391,12 @@ REGISTRY: Registry = {t.name: t for t in (
           "任意のシナリオの点の評価（画面の損益グラフ・指標と同じ計算）。"
           "原資産（dx_pct か x）・経過日数・IV の平行移動・"
           "スキューを指定すると、その点の損益（指定日と満期。円）・合計グリーク・足ごとの損益と IV を返す。"
-          "<context> や他の道具に無い条件の数字が要るときに呼ぶ", EVALUATE_SCENARIO, EVAL_INPUT, EVAL_INPUT_SCHEMA),
+          "<context> や他のツールに無い条件の数字が要るときに呼ぶ", EVALUATE_SCENARIO, EVAL_INPUT, EVAL_INPUT_SCHEMA),
     _spec("technicals",
           "日経225 先物（ラージ・期近）の週足・日足・4 時間足のテクニカル指標（画面の先物推移の段と同じ計算）。"
           "RSI・MACD（円）・スロー・ストキャスティクスの今の値・直近 20 本・"
-          "期間は利用者の設定（params。既定 RSI 14・MACD 12/26/9・14/3/3。書くときは params の期間を添える）・"
+          "期間は利用者の設定（params。既定 RSI 14・MACD 12/26/9・ストキャスティクス 14/3/3。"
+          "書くときは params の期間を添える）・"
           "ゾーン（high / low / mid）と続いた本数・シグナル交差から何本目、"
           "base_rates = 今と同じ状態だった過去の足の horizon_bars 本先の騰落率の分布"
           "（件数 n・中央値・p10・p90 の %。all は条件なし）。insufficient は件数 20 未満。"

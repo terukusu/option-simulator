@@ -494,7 +494,7 @@ export function serializeChainJson(json: ChainJson): string {
 export function buildFixtureFiles(): Record<string, string> {
   const out: Record<string, string> = {};
   for (const spec of SPECS) out[`${spec.name}.json`] = serializeChainJson(buildChainJson(spec));
-  // 道具の出力の見本（#135。中継の pytest が結果の形に通す）
+  // ツールの出力の見本（#135。中継の pytest が結果の形に通す）
   const latest = SPECS.find((s) => s.name === 'latest') as ChainSpec;
   out['ai_tools.json'] = buildAiToolsFixture(JSON.parse(out[`${latest.name}.json`] as string));
   return out;

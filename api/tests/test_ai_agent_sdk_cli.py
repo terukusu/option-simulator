@@ -1,7 +1,7 @@
 """結合: 同梱の本物の Claude Code CLI を、pytest の中で立てた 127.0.0.1 の偽の Messages API に向ける（#186 AC2）。
 
 Anthropic は呼ばない（ANTHROPIC_BASE_URL は 127.0.0.1、トークンはダミー）。CLI の内部（transcript の形・
-CLAUDE_CODE_RESUME_*・道具の名前の付け方）に依存する作りを、SDK の版を上げたときにここで検出する（ADR-0005）。
+CLAUDE_CODE_RESUME_*・ツールの名前の付け方）に依存する作りを、SDK の版を上げたときにここで検出する（ADR-0005）。
 同梱の CLI が無い環境（wheel の無いプラットフォーム）では skip。
 """
 
@@ -103,7 +103,7 @@ def test_diagnose_roundtrip_through_real_cli(parent_creds):
         evs = sse_events(post(client, body).get_data(as_text=True))
         posts = api.posts()
     names = [e for e, _ in evs]
-    # 中継の事象の順: thinking → text → tool_use → done（道具は実行しない）
+    # 中継の事象の順: thinking → text → tool_use → done（ツールは実行しない）
     assert names == ["accepted", "progress", *["thinking"] * len(THINKING_PARTS), "progress", "text", "text", "text",
                      "progress", "tool_use", "tool_use", "done"]
     done = dict(evs)["done"]
@@ -112,7 +112,7 @@ def test_diagnose_roundtrip_through_real_cli(parent_creds):
     assert done["content"][0]["signature"] == SIG
     assert [b["name"] for b in done["content"][2:]] == ["evaluate_scenario", "evaluate_scenario"]
     assert gw.tool_calls == 0
-    assert len(posts) == 1  # 上流は 1 回（道具の往復を CLI がしない・再試行しない）
+    assert len(posts) == 1  # 上流は 1 回（ツールの往復を CLI がしない・再試行しない）
     req = posts[0]
     # 資格情報: Bearer は CLAUDE_CODE_OAUTH_TOKEN（長さがダミーと同じ）、x-api-key なし（親の値は渡らない）
     assert req["authorization"] == {"scheme": "Bearer", "len": len(DUMMY)}
@@ -124,7 +124,7 @@ def test_diagnose_roundtrip_through_real_cli(parent_creds):
     assert b["output_config"]["effort"] == "medium"
     # system: CLI が先頭に 2 block を足し、最後が我々の SYSTEM_PROMPT（バイト一致）
     assert b["system"][-1]["text"] == relay.SYSTEM_PROMPT and len(b["system"]) == 3
-    # 道具は我々の 7 本だけ（組み込みの道具は 0 本。#200 で technicals）
+    # ツールは我々の 7 本だけ（組み込みのツールは 0 本。#200 で technicals）
     assert sorted(t["name"] for t in b["tools"]) == sorted(agent_sdk.to_cli_name(n) for n in REGISTRY)
     # messages: role=system（CLI の環境）を除けば、最初の user（context + 診断の文）だけ
     assert strip(b["messages"]) == [{"role": "user", "content": [
@@ -150,7 +150,7 @@ def test_history_with_text_last_matches_build_params(parent_creds):
     evs, posts = _send(p)
     assert evs[-1]["type"] == "final" and evs[-1]["stop_reason"] == "end_turn"
     assert len(posts) == 1
-    # 署名つき thinking・redacted_thinking・tool_use・tool_result・context_update まで一致（道具の名前は CLI の名前）
+    # 署名つき thinking・redacted_thinking・tool_use・tool_result・context_update まで一致（ツールの名前は CLI の名前）
     assert strip(posts[0]["body"]["messages"]) == cli_named(p["messages"])
 
 

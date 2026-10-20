@@ -2,7 +2,7 @@
  * AI の返答の数字の照合（#135。EPIC #141 終了条件 2・docs/design.md 14 章）。純関数（DOM・通信に依存しない）。
  *
  * 返答の文字列から数値トークン（符号・桁区切り・小数・全角 + 直後の単位）を取り出し、その会話の context・
- * context_update・道具の結果（照合の値）と丸めの規則で照合する。画面は照合できない数字に印を付け
+ * context_update・ツールの結果（照合の値）と丸めの規則で照合する。画面は照合できない数字に印を付け
  * （ui/next/regions/AiChat.tsx）、評価用スクリプト（scripts/aiEval.mjs）は不一致を数える。
  *
  * - 照合の値の単位はキーの名前で決める（api/src/simulator_api/ai/tools.py の規則と同じ）: `yen` を含む → 金額、

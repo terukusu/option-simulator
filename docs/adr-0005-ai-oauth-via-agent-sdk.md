@@ -9,7 +9,7 @@
 
 - 観測（2026-10-19）: `claude setup-token` で作ったサブスクリプションの OAuth トークンを、`anthropic` SDK（1.8.0、`auth_token=`・`anthropic-beta: oauth-2025-04-20`）や curl で Messages API に直接渡すと HTTP 429 `rate_limit_error` になる（モデルによらない）。同じトークンを Claude Code CLI に `CLAUDE_CODE_OAUTH_TOKEN` として渡すと応答が返る。そのため本番は暫定で `AI_CREDENTIAL=wif`（従量課金）で動かしていた
 - オーナーの決定（2026-10-19）: OAuth トークンを使えるようにし、`wif` と切り替えられるようにする。既定は `oauth_token`（範囲は下の「決定」）
-- 制約: 道具の計算はブラウザ（`ui/view/aiTools.ts`）のまま。会話の UX（SSE の事象・道具の往復・thinking の要約・中止・締め切り）と、中継の残り（許可リスト・system prompt・道具の登録・締め切り 50 秒・同時 2 本・1 分 10 回・費用の計上・ログ）は変えない。会話の状態はブラウザが持つ（#135。中継は状態を持たない）
+- 制約: ツールの計算はブラウザ（`ui/view/aiTools.ts`）のまま。会話の UX（SSE の事象・ツールの往復・thinking の要約・中止・締め切り）と、中継の残り（許可リスト・system prompt・ツールの登録・締め切り 50 秒・同時 2 本・1 分 10 回・費用の計上・ログ）は変えない。会話の状態はブラウザが持つ（#135。中継は状態を持たない）
 
 ## 確かめたこと（spike。Anthropic は呼んでいない）
 
@@ -17,10 +17,10 @@ CLI の送信先を `ANTHROPIC_BASE_URL=http://127.0.0.1:<port>` の偽の Messa
 
 | 項目 | 確かめ方 | 結果 | 判定 |
 |---|---|---|---|
-| S1 | 道具 2 本を出す脚本で、in-process の SDK MCP 道具（6 本）+ `PreToolUse` フック（matcher なし）。候補（`defer`・`continue_: False` だけ・`deny` だけ・`can_use_tool` の `interrupt`）と比べた | フックが `deny` + `continue_: False` を返すと、上流への POST 1 回・道具の関数の呼び出し 0・`ResultMessage(subtype=success, stop_reason="tool_use")`。tool_use の id・name（`mcp__sim__<名>`）・input は `StreamEvent` で全部見える。`defer` は 2 本の turn で最後の 1 本しか返らない、`continue_: False` / `deny` だけは CLI が拒否の tool_result を足して上流を呼び直す、`interrupt` は `error_during_execution` で終わる | go（deny + `continue_: False`） |
+| S1 | ツール 2 本を出す脚本で、in-process の SDK MCP ツール（6 本）+ `PreToolUse` フック（matcher なし）。候補（`defer`・`continue_: False` だけ・`deny` だけ・`can_use_tool` の `interrupt`）と比べた | フックが `deny` + `continue_: False` を返すと、上流への POST 1 回・ツールの関数の呼び出し 0・`ResultMessage(subtype=success, stop_reason="tool_use")`。tool_use の id・name（`mcp__sim__<名>`）・input は `StreamEvent` で全部見える。`defer` は 2 本の turn で最後の 1 本しか返らない、`continue_: False` / `deny` だけは CLI が拒否の tool_result を足して上流を呼び直す、`interrupt` は `error_during_execution` で終わる | go（deny + `continue_: False`） |
 | S2 | `include_partial_messages=True` の `StreamEvent` の粒度と遅れ | thinking_delta・text_delta・input_json_delta・signature_delta が偽サーバーの送出と同じ粒度で 1 つずつ届く。偽サーバーの最初の delta から SDK で受けるまで約 2 ms。`AssistantMessage` は redacted_thinking を落とす（SDK の型に無い）ので、final の content は `StreamEvent` から組み立てる | go |
-| S3 | 署名つき thinking・redacted_thinking・tool_use・tool_result・`context_update` を含む履歴を、要求ごとのメモリ上の `SessionStore`（`load` が履歴から作った transcript の項目を返す）+ `resume=<新しい uuid>` で渡し、偽サーバーに届いた `messages` を `relay.build_params` の `messages` と比べた | 最後の user が text のとき: CLI が足す role=system の message と `cache_control` を除いて **完全一致**（thinking の `thinking`・`signature`、redacted_thinking の `data`、block の順序まで）。最後の user が tool_result のとき（`CLAUDE_CODE_RESUME_INTERRUPTED_TURN=1`・prompt なし）: 一致、**ただし最後の user の末尾に text block が 1 つ足される**（`CLAUDE_CODE_RESUME_PROMPT` の文。空にはできない）。system は `[課金の見出し, "You are a Claude agent, built on Anthropic's Claude Agent SDK.", 我々の SYSTEM_PROMPT（バイト一致）]` の 3 block。道具は我々の 6 本だけ（名前は `mcp__sim__<名>`、説明と JSON Schema は CLI が NFKC 正規化する） | partial → オーナー了承で go（下の「オーナーの確認」） |
-| S4 | `docker run --cpus 1 --memory 512m --network none`、python:3.13-slim・uid 10001・ホームなしで 10 回。query の開始 → 偽サーバーに POST が届くまで | **最大 1.161 s**（最小 0.843・中央 0.887）。最初の thinking delta まで最大 1.332 s。道具 2 本の turn の全体 2.76〜3.13 s（偽の遅延 0.05 s × 12 を含む）。締め切り 50 秒に対し十分 | go |
+| S3 | 署名つき thinking・redacted_thinking・tool_use・tool_result・`context_update` を含む履歴を、要求ごとのメモリ上の `SessionStore`（`load` が履歴から作った transcript の項目を返す）+ `resume=<新しい uuid>` で渡し、偽サーバーに届いた `messages` を `relay.build_params` の `messages` と比べた | 最後の user が text のとき: CLI が足す role=system の message と `cache_control` を除いて **完全一致**（thinking の `thinking`・`signature`、redacted_thinking の `data`、block の順序まで）。最後の user が tool_result のとき（`CLAUDE_CODE_RESUME_INTERRUPTED_TURN=1`・prompt なし）: 一致、**ただし最後の user の末尾に text block が 1 つ足される**（`CLAUDE_CODE_RESUME_PROMPT` の文。空にはできない）。system は `[課金の見出し, "You are a Claude agent, built on Anthropic's Claude Agent SDK.", 我々の SYSTEM_PROMPT（バイト一致）]` の 3 block。ツールは我々の 6 本だけ（名前は `mcp__sim__<名>`、説明と JSON Schema は CLI が NFKC 正規化する） | partial → オーナー了承で go（下の「オーナーの確認」） |
+| S4 | `docker run --cpus 1 --memory 512m --network none`、python:3.13-slim・uid 10001・ホームなしで 10 回。query の開始 → 偽サーバーに POST が届くまで | **最大 1.161 s**（最小 0.843・中央 0.887）。最初の thinking delta まで最大 1.332 s。ツール 2 本の turn の全体 2.76〜3.13 s（偽の遅延 0.05 s × 12 を含む）。締め切り 50 秒に対し十分 | go |
 | S5 | 偽の CLI（環境を記録して本物の CLI を起動する包み）と strace（connect・execve） | 親に `ANTHROPIC_AUTH_TOKEN`・`ANTHROPIC_API_KEY` があると CLI は両方を送り OAuth の beta も付かない（= 429 の経路）。SDK の `env` は親に **重ねる** だけで消せないので、空で上書きする → `Authorization: Bearer <CLAUDE_CODE_OAUTH_TOKEN>` だけ・x-api-key なし・`anthropic-beta` に `oauth-2025-04-20`。接続は 127.0.0.1（偽サーバー）だけ。`setting_sources=[]` で設定・CLAUDE.md を読まない | go（空の上書き） |
 | S6 | S4 と同じ条件で cgroup の `memory.peak` | 1 本 190 MB、**同時 2 本（1 プロセスの 2 スレッド）291 MB**（親の Python + SDK・偽サーバーを含む）。CLI の ru_maxrss は 1 本 243〜247 MB だが大半は同梱バイナリのファイル写像で共有される。見積もり 約 380 MB / 512 MiB | go（512Mi のまま） |
 
@@ -38,7 +38,7 @@ CLI の送信先を `ANTHROPIC_BASE_URL=http://127.0.0.1:<port>` の偽の Messa
 - CLI は wheel 同梱のものを使う（別に入れない）。版とハッシュは `uv.lock`（`--locked`）で固定する
 - 送信先は `AnthropicGateway` と同じ事象（`thinking`・`text`・`tool_use`・`final`）を返し、最初に `{"type": "meta", "spawn_ms"}` を 1 回返す（中継は `ai_request` に `spawn_ms` を載せるだけ。SSE には出さない）。SSE の形（`data/aiStream.ts` が受けるもの）は変えない
 - 固定する値:
-  - options: `tools=[]`（組み込みの道具 0 本）・`setting_sources=[]`・`strict_mcp_config=True`・`mcp_servers={"sim": <道具 6 本。関数は呼ばれない前提で、呼ばれたら計算せずに is_error>}`・`system_prompt=SYSTEM_PROMPT`（文字列。Claude Code の preset を使わない）・`model`・`thinking`・`effort`・`include_partial_messages=True`・**`verbatim_prompts=True`**・`max_turns=1`・`hooks={"PreToolUse": [deny + continue_ False]}`・`stderr` は捨てる・`cwd` は要求ごとの一時ディレクトリ
+  - options: `tools=[]`（組み込みのツール 0 本）・`setting_sources=[]`・`strict_mcp_config=True`・`mcp_servers={"sim": <ツール 6 本。関数は呼ばれない前提で、呼ばれたら計算せずに is_error>}`・`system_prompt=SYSTEM_PROMPT`（文字列。Claude Code の preset を使わない）・`model`・`thinking`・`effort`・`include_partial_messages=True`・**`verbatim_prompts=True`**・`max_turns=1`・`hooks={"PreToolUse": [deny + continue_ False]}`・`stderr` は捨てる・`cwd` は要求ごとの一時ディレクトリ
   - 子の環境（親に重なる）: `CLAUDE_CODE_OAUTH_TOKEN=<秘密>`、**`ANTHROPIC_AUTH_TOKEN=""`・`ANTHROPIC_API_KEY=""`**、**`CLAUDE_CONFIG_DIR=<要求ごとの一時ディレクトリ>`**（履歴のある turn = resume では SDK が `claude-resume-*` の一時ディレクトリに差し替え、終わったら SDK が消す）、`CLAUDE_CODE_DISABLE_AUTO_MEMORY=1`、`CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1`（と `DISABLE_AUTOUPDATER`・`DISABLE_TELEMETRY`・`DISABLE_ERROR_REPORTING`）、**`CLAUDE_CODE_MAX_RETRIES=0`**、**`CLAUDE_CODE_MAX_OUTPUT_TOKENS=<AI_MAX_TOKENS = 8000>`**、`CLAUDE_CODE_RESUME_INTERRUPTED_TURN`（tool_result の turn だけ `1`）・`CLAUDE_CODE_RESUME_PROMPT="Continue from the tool results."`
   - イメージ: `CLAUDE_AGENT_SDK_SKIP_VERSION_CHECK=1`（要求ごとの `claude -v` の子を省く。版は `uv.lock` で固定済み）
 - 履歴（S3）: 最後の user が text なら、それより前を transcript の項目にし、最後の user は stream-json の prompt で渡す。最後の user が tool_result なら、全部を transcript に入れ、prompt は空にして CLI に turn を続けさせる。transcript の項目は 1 message = 1 項目（`parentUuid` で鎖）、tool_use の name は `mcp__sim__<名>` に付け直し、出力の tool_use は登録の名前に戻す
@@ -73,7 +73,7 @@ Anthropic の文書には次の記述がある（確認日 2026-10-19。原文�
 |---|---|---|
 | A. Agent SDK（同梱の CLI）を送信路にする（採択） | サブスクリプションのトークンで動く。会話の UX・中継の残りを変えない | 依存とイメージが大きくなる（+14 個、イメージ 約 202 → 452 MB）。CLI の内部の形・未文書の環境変数に依存する。CLI が system・messages に本文を足す。要求ごとに子プロセス（約 1 秒・約 100〜250 MB） |
 | B. `anthropic` SDK の直接呼び出しのまま | 依存が増えない | サブスクリプションのトークンでは 429（観測）で動かない |
-| C. 事前計算だけをプロンプトに入れ、道具の往復をしない | CLI の道具の扱いに依存しない | #135 の追加の質問（tool_use の往復）が変わる。S1 が go なので採らない |
+| C. 事前計算だけをプロンプトに入れ、ツールの往復をしない | CLI のツールの扱いに依存しない | #135 の追加の質問（tool_use の往復）が変わる。S1 が go なので採らない |
 | D. 会話の履歴を Firestore に置いて CLI の session で続ける | transcript を毎回作らない | #135 の「会話の状態はブラウザが持つ」を変える。オーナー決定 3 で採らない |
 | E. 履歴を文章に平らにして thinking を送り返さない | transcript の形に依存しない | #135 AC4（thinking のバイト一致）を変える。オーナー決定 3 で採らない |
 
@@ -83,8 +83,8 @@ Anthropic の文書には次の記述がある（確認日 2026-10-19。原文�
 - 悪い点:
   - イメージが約 2.2 倍（202 MB → 452,204,381 バイト）。冷えた起動・Artifact Registry の容量が増える
   - 要求ごとに CLI の子プロセスを起動する（偽サーバーで約 0.7〜1 秒、最初の要求は import を含めて約 2.8 秒）。`ai_request` の `spawn_ms` で本番の値を見る
-  - SDK を上げるたびに transcript の形・`CLAUDE_CODE_RESUME_*`・道具の名前・system の block の数が変わりうる。上げる PR では `tests/test_ai_agent_sdk_cli.py` を必ず通し、この ADR の版を直す
-  - 本物のサブスクリプションのトークンで、CLI 経由の任意の system prompt・道具 6 本が受け付けられるかは手元で確かめられない（デプロイ後に診断・追加の質問で確かめ、認証の失敗・429 なら `wif` に戻す）
+  - SDK を上げるたびに transcript の形・`CLAUDE_CODE_RESUME_*`・ツールの名前・system の block の数が変わりうる。上げる PR では `tests/test_ai_agent_sdk_cli.py` を必ず通し、この ADR の版を直す
+  - 本物のサブスクリプションのトークンで、CLI 経由の任意の system prompt・ツール 6 本が受け付けられるかは手元で確かめられない（デプロイ後に診断・追加の質問で確かめ、認証の失敗・429 なら `wif` に戻す）
   - 同梱の CLI は Anthropic の規約の下で配布される（`claude-agent-sdk` 自体は MIT）
 - 戻し方: GitHub の repository variable `AI_CREDENTIAL` を `wif`（または `api_key`）に戻して deploy する（`infra/README.md`）。コードを戻すときは PR の revert（依存の削除でイメージも戻る）
 
