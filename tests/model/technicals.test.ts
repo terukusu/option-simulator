@@ -15,8 +15,11 @@ import {
   BASE_RATE_MIN_N,
   barsInZone,
   baseRate,
+  DEFAULT_TECH_PARAMS,
   ema,
   indicators,
+  isTechParams,
+  isTechParamValue,
   macd,
   quantile,
   rsi,
@@ -250,5 +253,43 @@ describe('基準率', () => {
     // 最後の足（確定前）は使わない: lastUsable = 3 → j + 1 ≤ 3
     const r = baseRate(c, 1, 3, () => true);
     expect(r.n).toBe(3);
+  });
+});
+
+describe('期間（#205）', () => {
+  const bars = Array.from({ length: 120 }, (_, i) => {
+    const c = 30000 + 200 * Math.sin(i / 5) + 3 * i;
+    return { h: c + 30, l: c - 30, c };
+  });
+  it('indicators は渡した期間で計算し、params に写す。既定は DEFAULT_TECH_PARAMS', () => {
+    const p = {
+      rsi: 9,
+      macdFast: 8,
+      macdSlow: 21,
+      macdSignal: 5,
+      stochK: 9,
+      stochSmooth: 1,
+      stochD: 4,
+    };
+    const ind = indicators(bars, p);
+    const closes = bars.map((b) => b.c);
+    expect(ind.params).toEqual(p);
+    expect(ind.rsi).toEqual(rsi(closes, 9));
+    expect(ind.macd).toEqual(macd(closes, 8, 21, 5));
+    expect(ind.stoch).toEqual(stochastic(bars, 9, 1, 4));
+    expect(indicators(bars).params).toEqual(DEFAULT_TECH_PARAMS);
+    // 最初の値の位置が期間で動く（RSI(9) は index 9 から）
+    expect(ind.rsi[8]).toBeNull();
+    expect(ind.rsi[9]).not.toBeNull();
+  });
+  it('isTechParams: 範囲内の整数で MACD は短期 < 長期', () => {
+    expect(isTechParams(DEFAULT_TECH_PARAMS)).toBe(true);
+    expect(isTechParams({ ...DEFAULT_TECH_PARAMS, macdFast: 26 })).toBe(false);
+    expect(isTechParams({ ...DEFAULT_TECH_PARAMS, rsi: 101 })).toBe(false);
+    expect(isTechParams({ ...DEFAULT_TECH_PARAMS, stochD: 0 })).toBe(false);
+    expect(isTechParams({ ...DEFAULT_TECH_PARAMS, rsi: 9.5 })).toBe(false);
+    expect(isTechParams(null)).toBe(false);
+    expect(isTechParamValue('stochSmooth', 1)).toBe(true);
+    expect(isTechParamValue('rsi', 1)).toBe(false);
   });
 });

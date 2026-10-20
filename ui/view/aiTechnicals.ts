@@ -1,6 +1,7 @@
 /**
  * AI の道具 `technicals`（#200。docs/design.md 13.4・14 章）: 先物（ラージ・期近）の週足・日足・4 時間足のテクニカル
- * 指標（RSI 14・MACD 12・26・9・スロー・ストキャスティクス 14・3・3）の今の値・直近の推移・状態・過去の基準率を返す。
+ * 指標（RSI・MACD・スロー・ストキャスティクス。期間は設定の値 = 先物推移の段と同じ。既定 14 / 12・26・9 / 14・3・3。
+ * #205）の今の値・直近の推移・状態・過去の基準率を返す。
  * 純関数（DOM・通信・時計に依存しない）。指標・束ね・基準率は model/（先物推移の段と同じ計算）。
  *
  * - データ: 先物の日足と 1 時間足（ui/components/technicalsData.ts が /api/future_bars から読んで渡す）。週足は日足、
@@ -12,29 +13,27 @@
  *   insufficient = true（AI は「サンプル不足」と書く）
  * - 値の丸め: RSI・SO は小数 1 桁、MACD は円の整数、% は小数 1 桁（tools.py の規則）。キーの単位は aiNumbers の規則
  *   （`*_yen` 円、`*_pct` %、`close_x` 原資産の水準）
+ * - 期間（#205）: データに載った params（NextApp が端末の設定の値を入れる = 段と同じ値）。無い・不正 → 既定。出力の
+ *   params は実際に使った期間（AI が「RSI（9）」のように書ける）。基準率の状態もこの期間の指標で決める
  */
 
 import type { FutBar } from '../../data';
 import {
   barsInZone,
   baseRate,
+  DEFAULT_TECH_PARAMS,
   type Indicators,
   indicators,
-  MACD_FAST,
-  MACD_SIGNAL,
-  MACD_SLOW,
+  isTechParams,
   RSI_HIGH,
   RSI_LOW,
-  RSI_PERIOD,
   resample4h,
   resampleWeekly,
   type Series,
-  STOCH_D,
   STOCH_HIGH,
-  STOCH_K,
   STOCH_LOW,
-  STOCH_SMOOTH,
   sinceCross,
+  type TechParams,
   zoneOf,
 } from '../../model';
 
@@ -42,6 +41,14 @@ import {
 export interface TechnicalsData {
   daily: readonly FutBar[];
   hourly: readonly FutBar[];
+  /** 指標の期間（#205。端末の設定 = 先物推移の段と同じ値。無い・不正 → 既定） */
+  params?: TechParams;
+}
+
+/** ツールが使う期間（データの params。無い・不正 → 既定） */
+export function techParamsOf(data: TechnicalsData | null): TechParams {
+  const p = data?.params;
+  return isTechParams(p) ? p : { ...DEFAULT_TECH_PARAMS };
 }
 
 export const TECH_TFS = ['weekly', 'daily', '4h'] as const;
@@ -108,7 +115,8 @@ export function techFrame(
   tf: TechTf,
   kinds: readonly TechIndicator[],
   horizon: number,
-  ind: Indicators = indicators(bars),
+  params: TechParams = DEFAULT_TECH_PARAMS,
+  ind: Indicators = indicators(bars, params),
 ): R {
   const n = bars.length;
   const last = n - 1;
@@ -233,16 +241,17 @@ export function technicalsTool(
   // 並びは TECH_TFS・TECH_INDICATORS の順（重複は 1 つ）
   const tfs = TECH_TFS.filter((t) => tfIn.includes(t));
   const kinds = TECH_INDICATORS.filter((k) => indIn.includes(k));
+  const p = techParamsOf(data);
   return {
     params: {
-      rsi: RSI_PERIOD,
-      macd: [MACD_FAST, MACD_SLOW, MACD_SIGNAL],
-      stoch: [STOCH_K, STOCH_SMOOTH, STOCH_D],
+      rsi: p.rsi,
+      macd: [p.macdFast, p.macdSlow, p.macdSignal],
+      stoch: [p.stochK, p.stochSmooth, p.stochD],
       rsi_zones: [RSI_LOW, RSI_HIGH],
       stoch_zones: [STOCH_LOW, STOCH_HIGH],
     },
     frames: tfs.map((tf) =>
-      techFrame(techBars(data, tf), tf, kinds, (h as number | undefined) ?? TECH_HORIZON[tf]),
+      techFrame(techBars(data, tf), tf, kinds, (h as number | undefined) ?? TECH_HORIZON[tf], p),
     ),
   };
 }

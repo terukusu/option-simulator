@@ -247,7 +247,13 @@ export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
   marginRef.current = userPrefs.prefs.margin;
   const aiEnv = useCallback(() => aiEnvFromState(stateRef.current, marginRef.current), []);
   // technicals の道具（#200）: 先物推移と同じ口から日足・1 時間足を読む（呼ばれたときだけ・10 分覚える）
-  const aiTech = useCallback(() => loadTechnicalsData(futEndpoint), [futEndpoint]);
+  // 期間（#205）は送るときの端末の設定 = 先物推移の段と同じ値をデータに載せる（中継のスキーマは変えない）
+  const techRef = useRef(userPrefs.technicals);
+  techRef.current = userPrefs.technicals;
+  const aiTech = useCallback(
+    () => loadTechnicalsData(futEndpoint).then((d) => ({ ...d, params: techRef.current })),
+    [futEndpoint],
+  );
   const aiApi = useRef<AiPanelApi | null>(null);
   const aiBase =
     import.meta.env.DEV && state.sourceLabel !== API_LABEL ? '/fixtures/ai' : '/api/ai';
@@ -673,6 +679,7 @@ export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
               onViewport={fut.setViewport}
               indKinds={indKinds}
               onIndToggle={onIndToggle}
+              techParams={userPrefs.technicals}
             />
           ) : smileView(shell, tier) === 'iv' ? (
             <IvHistory
@@ -758,6 +765,8 @@ export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
         onTheme={theme.choose}
         margin={userPrefs.prefs.margin}
         onMargin={userPrefs.setMargin}
+        techParams={userPrefs.technicals}
+        onTechParams={userPrefs.setTechnicals}
       />
       <BookDialog
         open={c.bookOpen}

@@ -1,9 +1,10 @@
 /** #200: 先物推移の指標の段の表示モデル（ui/view/indicators.ts）。値は架空 */
 import { describe, expect, it } from 'vitest';
-import { indicators } from '../../model';
+import { DEFAULT_TECH_PARAMS, indicators } from '../../model';
 import {
   IND_KINDS,
   IND_PANE_H,
+  indKindLabel,
   indPaneModel,
   indReadout,
   toggleInd,
@@ -18,13 +19,14 @@ const ind = indicators(bars);
 const base = { ind, n: bars.length, viewport: [20.5, 79.5] as [number, number], width: 360 };
 
 describe('段の切替', () => {
-  it('RSI・MACD・SO（aria-label にパラメータ）', () => {
+  it('RSI・MACD・SO（aria-label に期間）', () => {
     expect(IND_KINDS.map((k) => [k.value, k.text])).toEqual([
       ['rsi', 'RSI'],
       ['macd', 'MACD'],
       ['stoch', 'SO'],
     ]);
-    expect(IND_KINDS[2]?.label).toContain('14・3・3');
+    expect(indKindLabel('stoch', DEFAULT_TECH_PARAMS)).toBe('ストキャスティクス（14・3・3）の段');
+    expect(indKindLabel('rsi', { ...DEFAULT_TECH_PARAMS, rsi: 9 })).toBe('RSI（9）の段');
   });
   it('反転しても並びは IND_KINDS の順', () => {
     expect(toggleInd([], 'stoch')).toEqual(['stoch']);
@@ -119,5 +121,19 @@ describe('段の読み取り（カーソルの足、無ければ最新の足）'
     expect(indReadout(ind, 'macd', bars.length, base.viewport, range, 5).cursorX).toBeNull();
     // 計算に足りない足は —
     expect(indReadout(ind, 'macd', bars.length, base.viewport, range, 5).values[0]?.v).toBe('—');
+  });
+});
+
+describe('期間（#205）', () => {
+  it('見出し・svg の名前は計算に使った期間（ind.params）', () => {
+    const p = { ...DEFAULT_TECH_PARAMS, rsi: 9, macdFast: 5, macdSlow: 35, macdSignal: 5 };
+    const ind9 = indicators(bars, p);
+    const rsiM = indPaneModel({ ...base, ind: ind9, kind: 'rsi', marginLeft: 50 });
+    expect(rsiM.title).toBe('RSI（9）');
+    expect(rsiM.imgLabel).toContain('RSI（9）の推移');
+    const macdM = indPaneModel({ ...base, ind: ind9, kind: 'macd', marginLeft: 50 });
+    expect(macdM.title).toBe('MACD（5・35・5）');
+    const def = indPaneModel({ ...base, kind: 'stoch', marginLeft: 50 });
+    expect(def.title).toBe('SO（14・3・3）');
   });
 });

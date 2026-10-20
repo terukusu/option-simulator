@@ -1,7 +1,7 @@
 import type { ComponentChildren } from 'preact';
 import { useCallback, useMemo, useState } from 'preact/hooks';
 import type { FutBar } from '../../../data';
-import { type Indicators, indicators } from '../../../model';
+import { type Indicators, indicators, type TechParams } from '../../../model';
 import type { Domain } from '../../chart/scale';
 import { pure } from '../../components/pure';
 import type { IvView } from '../../components/useIvHistory';
@@ -21,7 +21,7 @@ import {
   futRollMarks,
 } from '../../view/futHistory';
 import { HINT_TERMS } from '../../view/glossary';
-import { IND_KINDS, type IndKind } from '../../view/indicators';
+import { IND_KINDS, type IndKind, indKindLabel } from '../../view/indicators';
 import { IV_MODES, IV_TFS, type IvMode, type IvTf, lineSegments } from '../../view/ivHistory';
 import { type IvLoadState, ivInProgress, ivLoadView } from '../../view/ivLoad';
 import { PanelHead } from '../PanelHead';
@@ -53,6 +53,8 @@ export interface FutHistoryProps {
   /** 指標の段（#200。出す段。IND_KINDS の順。空 = 出さない） */
   indKinds: readonly IndKind[];
   onIndToggle: (kind: IndKind) => void;
+  /** 指標の期間（#205。端末の設定。AI のツール technicals と同じ値） */
+  techParams: TechParams;
 }
 
 const NO_IND: Indicators | null = null;
@@ -61,7 +63,8 @@ const NO_IND: Indicators | null = null;
  * 先物推移（#190。docs/ui-redesign.md §4.8）: IV 推移（IvHistory.tsx）と同じ並び = 見出し行（タイトル・Seg・ⓘ）→ 道具の
  * 行（足・ローソク / 線・最新化 ⟳）→ 読み取りの 1 行（始 / 高 / 安 / 終 = 円と限月）→ 描画域（IvPlot に円の書式と限月
  * 交代の印を渡す）→ 指標の段（#200。IndicatorPanes。凡例の行のトグルで出す）→ 凡例。シナリオの水準は無い。状態は
- * NextApp の useFutureBars（パネルを閉じても残る）。指標は段を 1 つでも出すときだけ足の並びごとに 1 回計算する。
+ * NextApp の useFutureBars（パネルを閉じても残る）。指標は段を 1 つでも出すときだけ足の並び・期間（#205）ごとに 1 回
+ * 計算する。
  */
 function FutHistoryView(p: FutHistoryProps) {
   const { load, view } = p;
@@ -93,7 +96,11 @@ function FutHistoryView(p: FutHistoryProps) {
     [bars, viewport],
   );
   const showInd = p.indKinds.length > 0;
-  const ind = useMemo(() => (showInd ? indicators(bars) : NO_IND), [showInd, bars]);
+  const { techParams } = p;
+  const ind = useMemo(
+    () => (showInd ? indicators(bars, techParams) : NO_IND),
+    [showInd, bars, techParams],
+  );
   const rightLoaded = ivInProgress(entry);
   const ro = futReadout(bars, tf, cursor, rightLoaded);
   const status = !entry
@@ -203,7 +210,7 @@ function FutHistoryView(p: FutHistoryProps) {
               <Chip
                 key={k.value}
                 text={k.text}
-                label={k.label}
+                label={indKindLabel(k.value, techParams)}
                 pressed={p.indKinds.includes(k.value)}
                 onClick={() => p.onIndToggle(k.value)}
               />

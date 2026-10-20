@@ -17,7 +17,20 @@
  * 既定が効かないため。資金・買いの OP のキーは今のまま。版は 1 のまま。
  * #135 で「AI の免責の文を見た」（ai_disclaimer_seen。boolean。既定 false。true のときだけ書く）を足した。版は 1 のまま
  * （無い・boolean でない → false。古い画面はこのキーを読まずに書き直すので消えるが、免責の文がもう 1 回出るだけ）。
+ * #205 でテクニカル指標の期間（RSI・MACD・ストキャスティクス。model の TechParams）を足した。版は 1 のまま。キーは
+ * tech_rsi・tech_macd_fast・tech_macd_slow・tech_macd_signal・tech_stoch_k・tech_stoch_slowing・tech_stoch_d で、既定と
+ * 違う項目だけ書く（既定を書き込んで固めない = 既定を見直したら効く）。無い・不正 → 既定（項目ごと）、MACD の短期 ≥ 長期
+ * → MACD の 3 つを既定。古い画面はこのキーを読まずに書き直すので消える（期間が既定に戻るだけ）。
  */
+
+import {
+  DEFAULT_TECH_PARAMS,
+  isTechParams,
+  isTechParamValue,
+  TECH_PARAM_KEYS,
+  type TechParamKey,
+  type TechParams,
+} from '../model';
 
 export const PREFS_KEY = 'option-simulator.prefs';
 export const PREFS_SCHEMA_VERSION = 1;
@@ -76,9 +89,22 @@ const MARGIN_JSON_KEY: Record<MarginPrefKey, string> = {
   ivDownPct: 'margin_iv_down_pct',
 };
 
+/** テクニカル指標の期間の JSON のキー（#205） */
+const TECH_JSON_KEY: Record<TechParamKey, string> = {
+  rsi: 'tech_rsi',
+  macdFast: 'tech_macd_fast',
+  macdSlow: 'tech_macd_slow',
+  macdSignal: 'tech_macd_signal',
+  stochK: 'tech_stoch_k',
+  stochSmooth: 'tech_stoch_slowing',
+  stochD: 'tech_stoch_d',
+};
+
 export interface Prefs {
   theme: ThemePref;
   margin: MarginPrefs;
+  /** テクニカル指標の期間（#205。先物推移の段と AI のツール technicals の両方に使う。無い = 既定。techParamsOfPrefs） */
+  technicals?: TechParams;
   /** AI のパネルの免責の文を閉じた（端末で 1 回だけ出す。#135。無い = false） */
   aiDisclaimerSeen?: boolean;
 }
@@ -89,6 +115,31 @@ const AI_DISCLAIMER_JSON_KEY = 'ai_disclaimer_seen';
 export const DEFAULT_PREFS: Prefs = { theme: 'auto', margin: { ...DEFAULT_MARGIN_PREFS } };
 
 const defaultPrefs = (): Prefs => ({ theme: 'auto', margin: { ...DEFAULT_MARGIN_PREFS } });
+
+/** 設定のテクニカルの期間（無い・不正 → 既定） */
+export function techParamsOfPrefs(p: Prefs): TechParams {
+  return techParamsOr(p.technicals);
+}
+
+/** 期間の組（無い・不正 → 既定） */
+export function techParamsOr(t: TechParams | undefined): TechParams {
+  return isTechParams(t) ? t : { ...DEFAULT_TECH_PARAMS };
+}
+
+/** 保存したテクニカルの期間を読む（項目ごとに: 無い・不正 → 既定。MACD の短期 ≥ 長期 → MACD の 3 つを既定） */
+export function readTechParams(o: Record<string, unknown>): TechParams {
+  const t: TechParams = { ...DEFAULT_TECH_PARAMS };
+  for (const key of TECH_PARAM_KEYS) {
+    const v = o[TECH_JSON_KEY[key]];
+    if (isTechParamValue(key, v)) t[key] = v;
+  }
+  if (t.macdFast >= t.macdSlow) {
+    t.macdFast = DEFAULT_TECH_PARAMS.macdFast;
+    t.macdSlow = DEFAULT_TECH_PARAMS.macdSlow;
+    t.macdSignal = DEFAULT_TECH_PARAMS.macdSignal;
+  }
+  return t;
+}
 
 /** 証拠金の項目の値が範囲内か（資金は整数。NaN・∞・数でない値は不可） */
 export function isMarginPrefValue(key: MarginPrefKey, v: unknown): v is number {
@@ -138,6 +189,8 @@ export function readPrefs(text: string | null): PrefsRead {
   if (version > PREFS_SCHEMA_VERSION) return { prefs: defaultPrefs(), writable: false };
   if (!isThemePref(o.theme)) return fallback;
   const prefs: Prefs = { theme: o.theme, margin: readMargin(o) };
+  // テクニカルの期間（#205）: キーが 1 つも無い（#205 より前の保存・既定のまま）→ 持たない = 既定
+  if (TECH_PARAM_KEYS.some((k) => TECH_JSON_KEY[k] in o)) prefs.technicals = readTechParams(o);
   if (o[AI_DISCLAIMER_JSON_KEY] === true) prefs.aiDisclaimerSeen = true;
   return { prefs, writable: true };
 }
@@ -157,6 +210,13 @@ export function serializePrefs(p: Prefs): string {
       ? m.ignoreLongOptions
       : DEFAULT_MARGIN_PREFS.ignoreLongOptions;
   if (p.aiDisclaimerSeen === true) out[AI_DISCLAIMER_JSON_KEY] = true;
+  // テクニカルの期間は既定と違う項目だけ（組が不正なら書かない = 既定）
+  const t = p.technicals;
+  if (isTechParams(t)) {
+    for (const key of TECH_PARAM_KEYS) {
+      if (t[key] !== DEFAULT_TECH_PARAMS[key]) out[TECH_JSON_KEY[key]] = t[key];
+    }
+  }
   return JSON.stringify(out);
 }
 

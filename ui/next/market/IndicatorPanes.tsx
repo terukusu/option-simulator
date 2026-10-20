@@ -3,7 +3,6 @@ import type { Indicators } from '../../../model';
 import type { Domain } from '../../chart/scale';
 import { pure } from '../../components/pure';
 import {
-  IND_IMG_LABEL,
   IND_PANE_H,
   type IndKind,
   type IndPaneModel,
@@ -15,7 +14,7 @@ import {
 import { useSize } from '../useSize';
 
 export interface IndicatorPanesProps {
-  /** 足の並び全体の指標（model の indicators。FutHistory が足ごとに 1 回計算する） */
+  /** 足の並び全体の指標（model の indicators。FutHistory が足・期間ごとに 1 回計算する。期間は ind.params） */
   ind: Indicators;
   n: number;
   kinds: readonly IndKind[];
@@ -34,7 +33,7 @@ function Pane({ m, ro }: { m: IndPaneModel; ro: IndReadout }) {
       height={h}
       viewBox={`0 0 ${w} ${h}`}
       role="img"
-      aria-label={IND_IMG_LABEL[m.kind]}
+      aria-label={m.imgLabel}
     >
       <line class="ind-sep" x1={0} x2={w} y1={0.5} y2={0.5} />
       {m.guides.map((g) => (

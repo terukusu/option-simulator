@@ -1,6 +1,6 @@
 import type { MutableRef } from 'preact/hooks';
 import { useEffect, useMemo, useState } from 'preact/hooks';
-import type { AtmBasis } from '../../model';
+import type { AtmBasis, TechParamKey, TechParams } from '../../model';
 import type { Domain } from '../chart/scale';
 import type { MarginPrefKey, MarginPrefs, ThemePref } from '../prefs';
 import type { Action, MetricsUnitSetting } from '../state';
@@ -20,6 +20,10 @@ import {
   marginLongPatch,
   marginLongValue,
   settingsModel,
+  TECH_FIELDS,
+  TECH_RESET,
+  TECH_SETTINGS_NOTES,
+  techField,
 } from '../view/settings';
 import { Dialog } from './parts/Dialog';
 import { Seg } from './parts/Seg';
@@ -46,11 +50,14 @@ export interface SettingsDialogProps {
   /** 証拠金（概算）の設定（端末の設定。#131） */
   margin: MarginPrefs;
   onMargin: (patch: Partial<MarginPrefs>) => void;
+  /** テクニカル指標の期間（端末の設定。先物推移の段と AI のツール technicals に同じ値。#205） */
+  techParams: TechParams;
+  onTechParams: (patch: Partial<TechParams>) => void;
 }
 
 /**
  * 設定のダイアログ（#87 (C)。docs/ui-redesign.md §3・§11-9）: ATM の基準・金額の単位・手数料・損益グラフの縦軸・
- * 先物の basis・ΔX の単位・テーマ・証拠金（概算。#131）・前提（読み取り専用）。変えたらすぐ state / prefs に入る（[保存] なし）。
+ * 先物の basis・ΔX の単位・テーマ・証拠金（概算。#131）・テクニカル指標（#205）・前提（読み取り専用）。変えたらすぐ state / prefs に入る（[保存] なし）。
  * 値と選べない理由は ui/view/settings.ts、縦軸の欄は舞台の ⋯ と同じ YAxisFields。開いている間だけ描く。
  */
 export function SettingsDialog(p: SettingsDialogProps) {
@@ -118,6 +125,72 @@ function MarginField({
   );
 }
 
+/**
+ * テクニカル指標の 1 欄（証拠金の欄と同じ規則: 入力ごとに検証、通って値が変わったら入れる。外で値が変わったら欄を戻す）。
+ * MACD の短期 < 長期は今の相手の値で判定する（#205）
+ */
+function TechField({
+  field,
+  params,
+  onTechParams,
+}: {
+  field: { key: TechParamKey; label: string };
+  params: TechParams;
+  onTechParams: (patch: Partial<TechParams>) => void;
+}) {
+  const { key, label } = field;
+  const value = params[key];
+  const [text, setText] = useState(() => String(value));
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    const r = techField(key, text, params);
+    if (!r.ok || r.value !== value) {
+      setText(String(value));
+      setError(null);
+    }
+  }, [value]);
+  // MACD の相手が変わって短期 < 長期になったら、エラーのままの欄の値を入れる
+  const { macdFast, macdSlow } = params;
+  useEffect(() => {
+    if (error === null) return;
+    const r = techField(key, text, params);
+    if (!r.ok) return;
+    setError(null);
+    if (r.value !== value) onTechParams({ [key]: r.value });
+  }, [macdFast, macdSlow]);
+  const onInput = (t: string) => {
+    setText(t);
+    const r = techField(key, t, params);
+    setError(r.ok ? null : r.error);
+    if (r.ok && r.value !== value) onTechParams({ [key]: r.value });
+  };
+  const id = `set-tech-${key}`;
+  return (
+    <>
+      <div class="set-line">
+        <label class="set-k" for={id}>
+          {label}
+        </label>
+        <input
+          id={id}
+          class="set-input"
+          type="text"
+          inputMode="numeric"
+          size={6}
+          value={text}
+          aria-invalid={error !== null}
+          onInput={(e) => onInput(e.currentTarget.value)}
+        />
+      </div>
+      {error !== null && (
+        <p class="field-error" role="alert">
+          {error}
+        </p>
+      )}
+    </>
+  );
+}
+
 function SettingsBody(p: SettingsDialogProps) {
   const { dispatch, feePerLot, yNow } = p;
   const v = useMemo(
@@ -144,6 +217,8 @@ function SettingsBody(p: SettingsDialogProps) {
       setFeeError(null);
     }
   }, [feePerLot]);
+  // [既定に戻す] で欄を作り直す（エラーのまま値が既定と同じ欄の文字も戻す）
+  const [techGen, setTechGen] = useState(0);
   const onFee = (t: string) => {
     setFeeText(t);
     const r = feeField(t);
@@ -263,6 +338,34 @@ function SettingsBody(p: SettingsDialogProps) {
           />
         </div>
         {MARGIN_SETTINGS_NOTES.map((t) => (
+          <p class="set-note" key={t}>
+            {t}
+          </p>
+        ))}
+      </div>
+      <div class="set-row set-tech">
+        <div class="set-line">
+          <span class="set-k">テクニカル指標</span>
+          <button
+            type="button"
+            class="btn sm"
+            onClick={() => {
+              p.onTechParams(TECH_RESET);
+              setTechGen((g) => g + 1);
+            }}
+          >
+            既定に戻す
+          </button>
+        </div>
+        {TECH_FIELDS.map((f) => (
+          <TechField
+            field={f}
+            params={p.techParams}
+            onTechParams={p.onTechParams}
+            key={`${f.key}-${techGen}`}
+          />
+        ))}
+        {TECH_SETTINGS_NOTES.map((t) => (
           <p class="set-note" key={t}>
             {t}
           </p>

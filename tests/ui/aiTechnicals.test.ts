@@ -3,7 +3,7 @@
  * 画面の段と同じ計算（model/technicals.ts の indicators）・基準率の規則・入力の検査・大きさを確かめる。
  */
 import { describe, expect, it } from 'vitest';
-import { indicators, resample4h, resampleWeekly } from '../../model';
+import { DEFAULT_TECH_PARAMS, indicators, resample4h, resampleWeekly } from '../../model';
 import { synthTechnicalsData } from '../../scripts/synthFutBars';
 import {
   TECH_HORIZON,
@@ -11,8 +11,10 @@ import {
   techBars,
   techFrame,
   technicalsTool,
+  techParamsOf,
 } from '../../ui/view/aiTechnicals';
 import { runTool } from '../../ui/view/aiTools';
+import { indPaneModel } from '../../ui/view/indicators';
 
 const data = synthTechnicalsData();
 // biome-ignore lint/suspicious/noExplicitAny: 結果の JSON を添字で読む（形は pytest が tools.py の形で検査する）
@@ -194,5 +196,60 @@ describe('dev の偽の AI（scripts/devFixtures.mjs。Anthropic を呼ばない
     });
     expect(reply.text).toContain(`件数 ${result.frames[0].base_rates.rsi.n}`);
     expect(reply.text).toContain('予想ではなく材料');
+  });
+});
+
+describe('期間（#205）: 段とツールが同じ期間を使う', () => {
+  const p = {
+    rsi: 9,
+    macdFast: 8,
+    macdSlow: 21,
+    macdSignal: 5,
+    stochK: 9,
+    stochSmooth: 2,
+    stochD: 4,
+  };
+  it('データの params で計算し、出力の params はその期間。値は段（indicators と indPaneModel）と同じ', () => {
+    // biome-ignore lint/suspicious/noExplicitAny: 結果の JSON を添字で読む
+    const r: any = technicalsTool({ ...data, params: p }, { timeframes: ['daily'] });
+    expect(r.params).toEqual({
+      rsi: 9,
+      macd: [8, 21, 5],
+      stoch: [9, 2, 4],
+      rsi_zones: [30, 70],
+      stoch_zones: [20, 80],
+    });
+    const ind = indicators(data.daily, p);
+    const last = data.daily.length - 1;
+    const f = r.frames[0];
+    expect(f.rsi.rsi).toBe(Math.round((ind.rsi[last] as number) * 10) / 10);
+    expect(f.macd.hist_yen).toBe(Math.round(ind.macd.hist[last] as number));
+    expect(f.stoch.stoch_k).toBe(Math.round((ind.stoch.k[last] as number) * 10) / 10);
+    // 既定の期間とは値が違う（期間が効いている）
+    const d = run({ timeframes: ['daily'] }).frames[0];
+    expect(f.rsi.recent).not.toEqual(d.rsi.recent);
+    // 段の見出しも同じ期間
+    const pane = indPaneModel({
+      ind,
+      kind: 'rsi',
+      n: data.daily.length,
+      viewport: [0, last],
+      width: 360,
+      marginLeft: 50,
+    });
+    expect(pane.title).toBe(`RSI（${r.params.rsi}）`);
+  });
+  it('基準率もその期間の状態で数える（techFrame に同じ期間を渡したのと同じ）', () => {
+    // biome-ignore lint/suspicious/noExplicitAny: 結果の JSON を添字で読む
+    const r: any = technicalsTool({ ...data, params: p }, { timeframes: ['daily'] });
+    // biome-ignore lint/suspicious/noExplicitAny: 結果の JSON を添字で読む
+    const f: any = techFrame(data.daily, 'daily', ['rsi', 'macd', 'stoch'], TECH_HORIZON.daily, p);
+    expect(r.frames[0].base_rates).toEqual(f.base_rates);
+  });
+  it('params が無い・不正（短期 ≥ 長期・範囲外）→ 既定', () => {
+    expect(techParamsOf(null)).toEqual(DEFAULT_TECH_PARAMS);
+    expect(techParamsOf({ ...data, params: { ...p, macdFast: 30 } })).toEqual(DEFAULT_TECH_PARAMS);
+    expect(techParamsOf({ ...data, params: { ...p, rsi: 101 } })).toEqual(DEFAULT_TECH_PARAMS);
+    expect(techParamsOf({ ...data, params: p })).toEqual(p);
   });
 });
