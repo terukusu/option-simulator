@@ -15,6 +15,7 @@
  * - 面モード（#88 段 B）: surface を渡すと 1 本目の押下ですぐ面の点をつかむ。onSurfaceStart（同期。最初の onSurface
  *   より前）→ onSurface(x, y)（1 フレーム 1 回）→ onSurfaceEnd（同期。最後の位置は次のフレームで流す）。2 本目の指・
  *   cancel は未反映の位置を捨てて onSurfaceCancel。リセット（ダブルタップ・dblclick・R）の前に未反映の位置を流す
+ * - 十字線（#201）: cross を渡すと交点の ±grabPx の押下ですぐつかみ、onCross(x, y)（1 フレーム 1 回）に位置を渡す
  *
  * 規則はすべて純関数（ui/chart/scale.ts・ui/chart/gesture.ts）。ここはイベントを受けて渡すだけ。
  * move・wheel の反映は requestAnimationFrame で 1 フレーム 1 回にまとめる。最新の props は ref で持ち、
@@ -82,6 +83,10 @@ export interface ChartGestureOptions {
   onSurface?: (x: number, y: number) => void;
   onSurfaceEnd?: () => void;
   onSurfaceCancel?: () => void;
+  /** 十字線の交点（#201。gesture.ts の GestureCtx.cross。タッチで置いた十字線のときだけ渡す） */
+  cross?: GestureCtx['cross'];
+  /** つかんでいる十字線の交点の位置（要素の座標の画素。1 フレーム 1 回） */
+  onCross?: (x: number, y: number) => void;
 }
 
 export function useChartGestures(ref: RefObject<HTMLElement>, opts: ChartGestureOptions): void {
@@ -100,6 +105,8 @@ export function useChartGestures(ref: RefObject<HTMLElement>, opts: ChartGesture
     let pendingMarker: { id: number; x: number } | null = null;
     /** まだ反映していない、面の点の位置 */
     let pendingSurface: { x: number; y: number } | null = null;
+    /** まだ反映していない、十字線の交点の位置 */
+    let pendingCross: { x: number; y: number } | null = null;
     let frame = 0;
     /** 長押しのタイマー */
     let longTimer = 0;
@@ -115,6 +122,7 @@ export function useChartGestures(ref: RefObject<HTMLElement>, opts: ChartGesture
         ...(o.scrub ? { scrub: o.scrub } : {}),
         ...(o.markers ? { markers: o.markers } : {}),
         ...(o.surface ? { surface: o.surface } : {}),
+        ...(o.cross ? { cross: o.cross } : {}),
       };
     };
     const flush = () => {
@@ -123,14 +131,17 @@ export function useChartGestures(ref: RefObject<HTMLElement>, opts: ChartGesture
       const sx = pendingScrub;
       const mk = pendingMarker;
       const sf = pendingSurface;
+      const cr = pendingCross;
       pending = null;
       pendingScrub = null;
       pendingMarker = null;
       pendingSurface = null;
+      pendingCross = null;
       if (v) optsRef.current.onViewport(v);
       if (sx !== null) optsRef.current.onScrub?.(sx);
       if (mk) optsRef.current.onMarkerDrag?.(mk.id, mk.x);
       if (sf) optsRef.current.onSurface?.(sf.x, sf.y);
+      if (cr) optsRef.current.onCross?.(cr.x, cr.y);
     };
     const schedule = (v: Domain) => {
       pending = v;
@@ -148,6 +159,10 @@ export function useChartGestures(ref: RefObject<HTMLElement>, opts: ChartGesture
       pendingSurface = pt;
       if (!frame) frame = requestAnimationFrame(flush);
     };
+    const scheduleCross = (pt: { x: number; y: number }) => {
+      pendingCross = pt;
+      if (!frame) frame = requestAnimationFrame(flush);
+    };
     const clearLong = () => {
       if (longTimer) clearTimeout(longTimer);
       longTimer = 0;
@@ -157,6 +172,7 @@ export function useChartGestures(ref: RefObject<HTMLElement>, opts: ChartGesture
       frame = 0;
       pending = null;
       pendingScrub = null;
+      pendingCross = null;
       // 面の点はリセットの前に流す（位置は今の表示範囲で読む）
       const sf = pendingSurface;
       pendingSurface = null;
@@ -180,6 +196,7 @@ export function useChartGestures(ref: RefObject<HTMLElement>, opts: ChartGesture
       if (res.reset) reset();
       else if (res.viewport) schedule(res.viewport);
       if (res.scrub) scheduleScrub(res.scrub.x);
+      if (res.cross) scheduleCross(res.cross);
       if (res.tap) optsRef.current.onTap?.(res.tap.x, res.tap.y);
       if (res.markerDrag) scheduleMarker(res.markerDrag);
       // 離す・取り消しの後に前のフレームの位置を流さない
@@ -226,7 +243,8 @@ export function useChartGestures(ref: RefObject<HTMLElement>, opts: ChartGesture
         state.mode === 'pinch' ||
         state.mode === 'scrub' ||
         state.mode === 'markerDrag' ||
-        state.mode === 'surface'
+        state.mode === 'surface' ||
+        state.mode === 'cross'
       ) {
         e.preventDefault();
       }

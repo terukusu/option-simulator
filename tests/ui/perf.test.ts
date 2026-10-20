@@ -79,6 +79,7 @@ import {
   pnlViewDomain,
   todayLine,
 } from '../../ui/view/pnlChart';
+import { pnlCrosshair } from '../../ui/view/pnlCrosshair';
 import {
   surfaceDayTicks,
   surfaceDragPatch,
@@ -291,6 +292,54 @@ describe('性能（#52 AC-10: 長押しドラッグの 1 フレーム）', () =>
     expect(date).not.toBeNull();
     expect(scrubFrame()).toBeGreaterThan(8);
     expectWithinBudget('#52 長押しドラッグの 1 フレーム', scrubFrame, { warmup: 20, runs: 30 });
+  });
+});
+
+/**
+ * #201: 損益グラフの十字線。ホバー・交点のドラッグの 1 フレームはカーソルだけが変わり、グラフの表示モデルは作り直さない
+ * （PnlPlot の useMemo）。十字線の表示モデル（3 本の値 = 足 10 本の評価 × 2 + 満期、札・読み取りの置き場所）だけを測る。
+ */
+describe('性能（#201 十字線の 1 フレーム）', () => {
+  const { ctx, rows } = makeMarket();
+  const legs = preparePosition(PERF_LEGS, ctx);
+  const board = {
+    months: [
+      { F: M1.F, rows: rows[M1.id] ?? [] },
+      { F: M2.F, rows: rows[M2.id] ?? [] },
+    ],
+  };
+  const base = pnlDomains(board, legs, ctx);
+  if (!base) throw new Error('損益グラフの基礎が作れない');
+  const scenario = { ...ZERO_SCENARIO, days: 5, dSigma: 2 };
+  const chart = pnlChartModel({
+    base,
+    scenario,
+    viewport: null,
+    pnlY: DEFAULT_PNL_Y,
+    plotWidth: 1000,
+    plotHeight: 260,
+  });
+  const [lo, hi] = chart.domain;
+  const [ylo, yhi] = chart.yDomain;
+  let tick = 0;
+
+  function crossFrame(): number {
+    tick = (tick + 1) % 97;
+    const c = pnlCrosshair({
+      base: base as NonNullable<typeof base>,
+      scenario,
+      chart,
+      cursor: { x: lo + ((hi - lo) * tick) / 97, y: ylo + ((yhi - ylo) * tick) / 97, pinned: true },
+      width: 1068,
+      height: 296,
+      obstacles: [{ x0: 900, x1: 1060, y0: 100, y1: 116 }],
+    });
+    return (c?.read.items.length ?? 0) + (c?.dots.length ?? 0);
+  }
+
+  it(`十字線の表示モデル（足 10 本）が ${BUDGET_MS} ms 以内（30 回の最小値）`, () => {
+    expect(crossFrame()).toBeGreaterThan(0);
+    expectWithinBudget('#201 十字線の 1 フレーム', crossFrame, { warmup: 20, runs: 30 });
   });
 });
 

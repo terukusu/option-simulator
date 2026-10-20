@@ -630,6 +630,80 @@ section.stage > .panel-body.stage-main {
   stroke-width: 3px;
 }
 
+/* 十字線（#201。線モード）: 線・札は IV 推移の十字線（#130）と同じ見た目。読み取りは交点のラベルと同じ線の色 + 縁取り */
+.chart .xh {
+  pointer-events: none;
+}
+
+.chart .xh-line {
+  stroke: var(--ink-2);
+  stroke-width: 1;
+  stroke-dasharray: 4 3;
+}
+
+.chart .xh-tag rect {
+  fill: var(--ink-2);
+}
+
+.chart .xh-tag text {
+  dominant-baseline: central;
+  fill: var(--s1);
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+  text-anchor: middle;
+}
+
+.chart .xh-dot {
+  fill: var(--s1);
+  stroke-width: 1.75;
+}
+
+.chart .xh-dot.expiry {
+  stroke: var(--expiry);
+}
+
+.chart .xh-dot.date {
+  stroke: var(--accent);
+}
+
+.chart .xh-dot.today {
+  stroke: var(--today);
+}
+
+.chart .xh-val,
+.chart .xh-close {
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 600;
+  dominant-baseline: central;
+  paint-order: stroke;
+  stroke: var(--s1);
+  stroke-width: 3px;
+  stroke-linejoin: round;
+}
+
+.chart .xh-read.end .xh-val {
+  text-anchor: end;
+}
+
+.chart .xh-val.expiry {
+  fill: var(--expiry);
+}
+
+.chart .xh-val.date {
+  fill: var(--accent);
+}
+
+.chart .xh-val.today {
+  fill: var(--today);
+}
+
+.chart .xh-close {
+  fill: var(--ink-2);
+  font-size: 13px;
+  text-anchor: middle;
+}
+
 /* ===== IV レール（右） ===== */
 .ivrail {
   position: relative;

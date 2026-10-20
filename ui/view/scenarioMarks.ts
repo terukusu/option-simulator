@@ -26,7 +26,7 @@ export const LABEL_PAD = 4;
 export const LABEL_CHAR_PX = 6;
 export const LABEL_WIDE_CHAR_PX = 10;
 
-const KIND_PREFIX: Record<PnlLineKind, string> = { expiry: '満', date: '指', today: '今' };
+export const KIND_PREFIX: Record<PnlLineKind, string> = { expiry: '満', date: '指', today: '今' };
 
 export type MarkEdge = 'top' | 'bottom';
 
@@ -127,19 +127,18 @@ export function placeLabels(
   return out;
 }
 
-/** シナリオ点の交点とラベル。足なし・空・X₀ 不正・X_s が表示範囲外は null。 */
-export function scenarioMarks(input: ScenarioMarksInput): ScenarioMarks | null {
-  const { base, scenario, chart, unit } = input;
-  if (!base || chart.empty) return null;
+/**
+ * 描いている線（満期・指定日・今日）の X での損益（円。NaN は除く。並びは chart.lines の順）。満期 = base.expiry(x)、
+ * 指定日 = theoreticalPnl(x, シナリオ（d = chart.days）)、今日 = theoreticalPnl(x, todayScenario)。シナリオ点の交点と
+ * 十字線（#201）で共用する。
+ */
+export function lineValuesAt(
+  base: PnlBase,
+  scenario: Scenario,
+  chart: Pick<PnlChartModel, 'days' | 'lines'>,
+  x: number,
+): Array<{ kind: PnlLineKind; y: number }> {
   const { legs, ctx, settings } = base;
-  if (!(Number.isFinite(ctx.x0) && ctx.x0 > 0)) return null;
-  const x = ctx.x0 + (Number.isFinite(scenario.dX) ? scenario.dX : 0);
-  const [lo, hi] = chart.domain;
-  if (!(x >= lo && x <= hi)) return null;
-  const { plot, yDomain } = chart;
-  const px = linear(chart.domain, [plot.left, plot.left + plot.width])(x);
-  const syRaw = linear(yDomain as Domain, [plot.top + plot.height, plot.top]);
-
   const values: Array<{ kind: PnlLineKind; y: number }> = [];
   for (const l of chart.lines) {
     let y: number;
@@ -149,6 +148,23 @@ export function scenarioMarks(input: ScenarioMarksInput): ScenarioMarks | null {
     } else y = theoreticalPnl(legs, x, todayScenario(scenario), ctx, settings);
     if (!Number.isNaN(y)) values.push({ kind: l.kind, y });
   }
+  return values;
+}
+
+/** シナリオ点の交点とラベル。足なし・空・X₀ 不正・X_s が表示範囲外は null。 */
+export function scenarioMarks(input: ScenarioMarksInput): ScenarioMarks | null {
+  const { base, scenario, chart, unit } = input;
+  if (!base || chart.empty) return null;
+  const { ctx } = base;
+  if (!(Number.isFinite(ctx.x0) && ctx.x0 > 0)) return null;
+  const x = ctx.x0 + (Number.isFinite(scenario.dX) ? scenario.dX : 0);
+  const [lo, hi] = chart.domain;
+  if (!(x >= lo && x <= hi)) return null;
+  const { plot, yDomain } = chart;
+  const px = linear(chart.domain, [plot.left, plot.left + plot.width])(x);
+  const syRaw = linear(yDomain as Domain, [plot.top + plot.height, plot.top]);
+
+  const values = lineValuesAt(base, scenario, chart, x);
 
   const pre = values.map((v) => {
     const raw = syRaw(v.y);

@@ -324,3 +324,195 @@ describe('後方互換（AC-5 c）: マーカー・つかむ幅を渡さない�
     expect(initialGesture().marker).toBeNull();
   });
 });
+
+/**
+ * #201: 損益グラフの十字線。舞台の文脈（scrub + markers）のタップ（十字線を置く）と、タッチで置いた十字線の交点を
+ * つかむ cross。
+ */
+describe('十字線のタップ（#201）', () => {
+  const stage = { scrub: { linePx: 500, grabPx: 14 }, markers: markers() };
+
+  it('短い押下（6px 未満・500ms 未満）は tap、長押し（450ms で発火）は tap を出さずにつかむ', () => {
+    const tap = play(
+      [
+        ['down', 1, 700, 0, 120],
+        ['move', 1, 703, 50, 121],
+        ['up', 1, 703, 120, 121],
+      ],
+      stage,
+    );
+    expect(collect(tap, 'tap')).toEqual([{ x: 703, y: 121 }]);
+    const long = play(
+      [
+        ['down', 1, 700, 0, 120],
+        ['long', LONG_PRESS_MS],
+        ['up', 1, 700, LONG_PRESS_MS + 20, 120],
+      ],
+      stage,
+    );
+    expect(collect(long, 'tap')).toEqual([]);
+    expect(collect(long, 'scrub')).toEqual([{ x: 700 }]);
+  });
+
+  it('ダブルタップは 1 回目だけ tap、2 回目は reset（tap なし）。パンは tap なし', () => {
+    const dbl = play(
+      [
+        ['down', 1, 700, 0],
+        ['up', 1, 700, 60],
+        ['down', 2, 704, 150],
+        ['up', 2, 704, 200],
+      ],
+      stage,
+    );
+    expect(collect(dbl, 'tap')).toHaveLength(1);
+    expect(collect(dbl, 'reset')).toEqual([true]);
+    const pan = play(
+      [
+        ['down', 1, 700, 0],
+        ['move', 1, 700 + TAP_MOVE_PX, 30],
+        ['up', 1, 700 + TAP_MOVE_PX, 60],
+      ],
+      stage,
+    );
+    expect(collect(pan, 'tap')).toEqual([]);
+    expect(collect(pan, 'viewport').length).toBeGreaterThan(0);
+  });
+
+  it('足マーカーのタップは markerTap（tap なし）', () => {
+    const r = play(
+      [
+        ['down', 1, 300, 0, AXIS_Y - 5],
+        ['up', 1, 300, 60, AXIS_Y - 5],
+      ],
+      stage,
+    );
+    expect(collect(r, 'markerTap')).toEqual([{ id: 1 }]);
+    expect(collect(r, 'tap')).toEqual([]);
+  });
+
+  it('ハンドルの縦線で即つかんだ短い押下は tap（ダブルタップに数えない）。動かした・長い押下は tap なし', () => {
+    const r = play(
+      [
+        ['down', 1, 505, 0, 90],
+        ['up', 1, 505, 80, 90],
+      ],
+      stage,
+    );
+    expect(collect(r, 'tap')).toEqual([{ x: 505, y: 90 }]);
+    expect(r.state.mode).toBe('idle');
+    expect(r.state.lastTap).toBeNull();
+    const moved = play(
+      [
+        ['down', 1, 505, 0],
+        ['move', 1, 505 + TAP_MOVE_PX, 30],
+        ['up', 1, 505 + TAP_MOVE_PX, 60],
+      ],
+      stage,
+    );
+    expect(collect(moved, 'tap')).toEqual([]);
+    // 6px 動かして戻した押下も tap なし
+    const back = play(
+      [
+        ['down', 1, 505, 0],
+        ['move', 1, 505 + TAP_MOVE_PX + 4, 30],
+        ['move', 1, 506, 60],
+        ['up', 1, 506, 90],
+      ],
+      stage,
+    );
+    expect(collect(back, 'tap')).toEqual([]);
+    const slow = play(
+      [
+        ['down', 1, 505, 0],
+        ['up', 1, 505, LONG_PRESS_MS],
+      ],
+      stage,
+    );
+    expect(collect(slow, 'tap')).toEqual([]);
+  });
+});
+
+describe('十字線の交点をつかむ cross（#201）', () => {
+  const cross = (x: number, y: number, grabPx = 14): Partial<GestureCtx> => ({
+    scrub: { linePx: 500, grabPx: 14 },
+    markers: markers(),
+    cross: { pointPx: { x, y }, grabPx },
+  });
+
+  it('交点から 14px 以内（距離）の押下ですぐ cross: ずれを保って move の位置を返す。パンしない・長押しでつかまない', () => {
+    const r = play(
+      [
+        ['down', 1, 708, 0, 108],
+        ['long', LONG_PRESS_MS],
+        ['move', 1, 760, 500, 150],
+        ['move', 1, 640, 520, 60],
+        ['up', 1, 640, 900, 60],
+      ],
+      cross(700, 100),
+    );
+    expect(r.results[0]?.state.mode).toBe('cross');
+    expect(collect(r, 'cross')).toEqual([
+      { x: 752, y: 142 },
+      { x: 632, y: 52 },
+    ]);
+    expect(collect(r, 'viewport')).toEqual([]);
+    expect(collect(r, 'scrub')).toEqual([]);
+    expect(collect(r, 'tap')).toEqual([]);
+    expect(r.state.mode).toBe('idle');
+    // 14px を超えたら今の押下（pending）
+    expect(play([['down', 1, 711, 0, 111]], cross(700, 100)).state.mode).toBe('pending');
+  });
+
+  it('動かさずに離しても tap・reset を出さない', () => {
+    const r = play(
+      [
+        ['down', 1, 700, 0, 100],
+        ['up', 1, 700, 50, 100],
+        ['down', 2, 700, 120, 100],
+        ['up', 2, 700, 160, 100],
+      ],
+      cross(700, 100),
+    );
+    expect(collect(r, 'tap')).toEqual([]);
+    expect(collect(r, 'reset')).toEqual([]);
+  });
+
+  it('足マーカーが先、交点がハンドルより先', () => {
+    const onMarker = play([['down', 1, 300, 0, AXIS_Y - 5]], cross(300, AXIS_Y - 5));
+    expect(onMarker.state.mode).toBe('marker');
+    const onHandle = play([['down', 1, 500, 0, 100]], cross(505, 100));
+    expect(onHandle.state.mode).toBe('cross');
+  });
+
+  it('2 本目の指でピンチ（cross を出さない）、cancel で idle', () => {
+    const r = play(
+      [
+        ['down', 1, 700, 0, 100],
+        ['down', 2, 900, 10, 100],
+        ['move', 2, 950, 20, 100],
+      ],
+      cross(700, 100),
+    );
+    expect(r.state.mode).toBe('pinch');
+    expect(r.state.crossOffset).toBeNull();
+    expect(collect(r, 'cross')).toEqual([]);
+    expect(collect(r, 'viewport').length).toBeGreaterThan(0);
+    const c = play(
+      [
+        ['down', 1, 700, 0, 100],
+        ['cancel', 1, 700, 10, 100],
+      ],
+      cross(700, 100),
+    );
+    expect(c.state.mode).toBe('idle');
+  });
+
+  it('pointPx が null・cross を渡さない文脈では今のまま', () => {
+    const none = play([['down', 1, 700, 0, 100]], {
+      scrub: { linePx: 500, grabPx: 14 },
+      cross: { pointPx: null, grabPx: 14 },
+    });
+    expect(none.state.mode).toBe('pending');
+    expect(initialGesture().crossOffset).toBeNull();
+  });
+});
