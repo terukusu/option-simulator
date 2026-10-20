@@ -107,10 +107,16 @@ class FakeQuery:
     def __call__(self, prompt, options):
         self.options = options
 
+        async def drain():
+            async for p in prompt:
+                self.prompts.append(p)
+
         async def gen():
+            # 本物の SDK と同じく入力の stream は並行して読む（中継は結果まで stream を開けておく。#209）
+            reader = asyncio.ensure_future(drain())
             try:
-                async for p in prompt:
-                    self.prompts.append(p)
+                await asyncio.sleep(0)
+                await asyncio.sleep(0)
                 if self.gate is not None:
                     while not self.gate.is_set():
                         await asyncio.sleep(0.01)
@@ -121,6 +127,7 @@ class FakeQuery:
                 if self.raise_after is not None and self.raise_after >= len(self.events + self.tail):
                     raise self.error
             finally:
+                reader.cancel()
                 self.closed = True
 
         return gen()

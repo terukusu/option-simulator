@@ -415,10 +415,17 @@ class AgentSdkGateway:
                                                              __cli_version__))
         opts = self.options(params, base, prompt is None, store, session_id)
 
+        # 入力の stream は結果（ResultMessage）か報告・終わりまで開けておく。prompt が None（最後が tool_result）で
+        # 空のまま終えると、SDK は 1 件も書いていないので stdin をすぐ閉じ（Query.stream_input）、CLI からの制御要求
+        # （SDK MCP の接続・tools/list、PreToolUse のフック）に答えられず、上流への要求からツールが全部落ちる（#209）
+        input_done = asyncio.Event()
+
         async def prompt_stream():
             if prompt is not None:
                 yield {"type": "user", "message": {"role": "user", "content": prompt}, "parent_tool_use_id": None,
                        "session_id": "default"}
+            else:
+                await input_done.wait()
 
         asm = Assembler()
         assistant_error = None
@@ -430,6 +437,7 @@ class AgentSdkGateway:
             if not reported:
                 reported = True
                 q.put(item)
+            input_done.set()
 
         # 途中で抜けない（break・return・本体の例外）: 公開の query() は内側の generator を aclose しないので、抜けると
         # 子の後始末（SDK の shield の中の close）が走らない。報告の後は CLI が終わるまで読み捨て、中継の cancel
@@ -461,3 +469,5 @@ class AgentSdkGateway:
                     report(e)
         except Exception as e:  # noqa: BLE001
             report(classify_exception(e, assistant_error))
+        finally:
+            input_done.set()

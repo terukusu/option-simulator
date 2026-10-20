@@ -165,6 +165,9 @@ def test_history_with_tool_result_last_adds_only_resume_text(parent_creds):
     assert got[-1]["content"][-1] == {"type": "text", "text": agent_sdk.RESUME_PROMPT}
     got[-1]["content"] = got[-1]["content"][:-1]
     assert got == want
+    # tool_result の後の要求にもツールが全部載る（入力の stream を結果まで開けておく。#209）
+    assert sorted(t["name"] for t in posts[0]["body"].get("tools", [])) == sorted(
+        agent_sdk.to_cli_name(n) for n in REGISTRY)
 
 
 def test_at_path_is_not_read(parent_creds, tmp_path):
