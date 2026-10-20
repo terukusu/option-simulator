@@ -2782,6 +2782,10 @@ async function runFlows() {
   const pc = { width: 1440, height: 900 };
   const next = pageUrl('next');
 
+  // #207 先物推移の段の高さ・最大化・段の十字線（タッチ。マウスは既定の実行の futSweep）。後ろの手順の既知の止まり
+  // （#87 の TimeoutError など）に隠れないよう先に回す
+  await futPaneTouchFlow();
+
   // (a) 開いただけでは作業の保存を書き換えない・ドックのバッジ
   {
     const ctx = await newContext(phone, { [WORKSPACE_KEY]: twoLegs });
@@ -3138,8 +3142,6 @@ async function runFlows() {
   // #130 IV 推移の十字線と軸の札（AC-7 (a)〜(c)）、ドックの IV の既定と保持（AC-7 (d)）
   await ivCrossFlows(pc);
   await ivCrossTouchFlow();
-  // #207 先物推移の段の高さ・最大化・段の十字線（タッチ。マウスは既定の実行の futSweep）
-  await futPaneTouchFlow();
   for (const vp of [phone, { width: 900, height: 1100 }]) await ivDockFlows(vp);
   // #190 先物推移の遅延ロード・IV 推移と要求が混ざらない・限月交代の印・切替で足を保つ（AC-9）
   for (const vp of [phone, pc]) await futFlows(vp);
