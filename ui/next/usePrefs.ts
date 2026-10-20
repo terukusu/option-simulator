@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useRef, useState } from 'preact/hooks';
-import { sameTechParams, type TechParams } from '../../model';
+import { isTechParams, sameTechParams, type TechParams } from '../../model';
 import {
   type MarginPrefs,
   PREFS_KEY,
@@ -45,7 +45,8 @@ export function usePrefs(initial: PrefsRead, storage: Storage | null) {
     (patch: Partial<TechParams>) => {
       const cur = techParamsOfPrefs(ref.current);
       const next = { ...cur, ...patch };
-      if (sameTechParams(cur, next)) return;
+      // 組として不正（範囲外・MACD の短期 ≥ 長期）なら保存しない（読むときに 7 つとも既定に戻るのを防ぐ）
+      if (!isTechParams(next) || sameTechParams(cur, next)) return;
       commit({ ...ref.current, technicals: next });
     },
     [commit],
