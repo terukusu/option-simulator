@@ -1,13 +1,13 @@
 /**
  * AI のチャットのフック（#135。docs/design.md 14 章）。会話の状態は ui/view/aiChat.ts の reducer（純関数）、ここは
- * fetch（data/aiStream.ts）・sessionStorage（1 キー）・道具の実行（ui/view/aiTools.ts）・描き直しのまとめ方だけ。
+ * fetch（data/aiStream.ts）・sessionStorage（1 キー）・ツールの実行（ui/view/aiTools.ts）・描き直しのまとめ方だけ。
  *
  * - [このポジションを診断] / 送信: 押した瞬間に begin（「計算中」）を描いてから、次のタスクで文脈（事前計算 5 本）を
  *   作って送る（計算の前に進み具合を出す = 押して 1 秒以内）
  * - 流れの事象は状態の ref にすぐ入れ、描き直しは 1 フレームに 1 回（text の delta ごとに描かない）
- * - tool_use で止まったら道具を実行して tool_result を足し、次の要求（MAX_TOOL_ROUNDS まで）
+ * - tool_use で止まったらツールを実行して tool_result を足し、次の要求（MAX_TOOL_ROUNDS まで）
  * - /api/ai/status は見えたとき（閉 → 開）と発言の後に読む（ポーリングしない）
- * - technicals（#200）の tool_use があるときだけ、道具を実行する前に先物の足を読む（tech。読めなければ道具は no_data）
+ * - technicals（#200）の tool_use があるときだけ、ツールを実行する前に先物の足を読む（tech。読めなければツールは no_data）
  * - 保存は sessionStorage の AI_SESSION_KEY だけ（タブを閉じたら消える）。読めない・書けないときは保存せずに続ける
  */
 
@@ -56,7 +56,7 @@ const isAbort = (e: unknown) => e instanceof Error && e.name === 'AbortError';
 
 /**
  * visible: パネルが見えている（ui/view/shell.ts の aiVisible）。base: 口（本番は /api/ai、dev の合成の板は
- * /fixtures/ai）。env: 送るときに読む道具の環境（足・板・シナリオ・証拠金の設定。ref で最新を読む）
+ * /fixtures/ai）。env: 送るときに読むツールの環境（足・板・シナリオ・証拠金の設定。ref で最新を読む）
  */
 export function useAiChat(
   visible: boolean,
@@ -134,7 +134,7 @@ export function useAiChat(
     if (visible) void loadStatus();
   }, [visible, loadStatus]);
 
-  /** 今の turn の要求を送り、道具の往復が要れば続ける */
+  /** 今の turn の要求を送り、ツールの往復が要れば続ける */
   const request = useCallback(async () => {
     for (;;) {
       const body = requestOf(stateRef.current as AiChatState);
@@ -174,12 +174,12 @@ export function useAiChat(
           if (abortRef.current === ac) abortRef.current = null;
         }
         if (ac.signal.aborted) {
-          // 中止: 道具の結果を送らない（新しい会話・別の turn に移っていれば何もしない）
+          // 中止: ツールの結果を送らない（新しい会話・別の turn に移っていれば何もしない）
           if (stateRef.current === s0) apply({ type: 'fail', code: 'aborted' });
           break;
         }
       }
-      // 読んでいる間に状態が変わった（新しい会話・別の turn）なら道具を返さない
+      // 読んでいる間に状態が変わった（新しい会話・別の turn）ならツールを返さない
       const s = stateRef.current as AiChatState;
       if (s !== s0) break;
       const e = envRef.current();

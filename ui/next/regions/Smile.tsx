@@ -38,7 +38,7 @@ export interface SmileRegionProps {
 }
 
 /**
- * スマイル（docs/ui-redesign.md §3・§4.3・§11 決定 12。#85）: 見出し行（拡大 [− ＋ ⟲]・市場の Seg・ⓘ）→ 道具の行
+ * スマイル（docs/ui-redesign.md §3・§4.3・§11 決定 12。#85）: 見出し行（拡大 [− ＋ ⟲]・市場の Seg・ⓘ）→ ツールの行
  * （限月・横軸）→ 描画域（限月ごと。market/SmilePlot.tsx）→ 操作行（グラフの下）→ 凡例。
  */
 function SmileView(p: SmileRegionProps) {

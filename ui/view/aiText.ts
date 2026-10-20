@@ -71,7 +71,7 @@ export function parseAiText(text: string): TextBlock[] {
 
 export interface MarkedText {
   text: string;
-  /** 照合できない数字（道具の値に無い） */
+  /** 照合できない数字（ツールの値に無い） */
   unmatched: boolean;
 }
 

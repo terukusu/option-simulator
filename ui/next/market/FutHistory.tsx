@@ -60,7 +60,7 @@ export interface FutHistoryProps {
 const NO_IND: Indicators | null = null;
 
 /**
- * 先物推移（#190。docs/ui-redesign.md §4.8）: IV 推移（IvHistory.tsx）と同じ並び = 見出し行（タイトル・Seg・ⓘ）→ 道具の
+ * 先物推移（#190。docs/ui-redesign.md §4.8）: IV 推移（IvHistory.tsx）と同じ並び = 見出し行（タイトル・Seg・ⓘ）→ ツールの
  * 行（足・ローソク / 線・最新化 ⟳）→ 読み取りの 1 行（始 / 高 / 安 / 終 = 円と限月）→ 描画域（IvPlot に円の書式と限月
  * 交代の印を渡す）→ 指標の段（#200。IndicatorPanes。凡例の行のトグルで出す）→ 凡例。シナリオの水準は無い。状態は
  * NextApp の useFutureBars（パネルを閉じても残る）。指標は段を 1 つでも出すときだけ足の並び・期間（#205）ごとに 1 回

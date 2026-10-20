@@ -8,7 +8,7 @@
 // 合成の板 latest の先物の値で終わる決まった関数。既定の 1 時間足の範囲に限月交代（取引最終日の 17:00）を 1 回含む）。
 // 日次の値（#152）の合成の応答も `/fixtures/atm_daily` で配る（`/api/atm_daily` と同じ形。架空の値。種つき）。
 // AI の中継（#135）の偽の応答も `/fixtures/ai/status`・`/fixtures/ai/messages`（偽の SSE。Anthropic を呼ばない）で配る。
-// 診断 = 考え中 → 文（事前計算の値を書き写す）、追加の質問 = tool_use（evaluate_scenario）→ 道具の結果を受けて文。
+// 診断 = 考え中 → 文（事前計算の値を書き写す）、追加の質問 = tool_use（evaluate_scenario）→ ツールの結果を受けて文。
 // 「ヘッジ」を含む質問はツール propose_position（#139）→ 提案のカード。
 // 質問に「切断」を含むと done の無いまま終える（画面の incomplete の確認用）。遅れつき（進み具合の表示の確認用）。
 
@@ -435,7 +435,7 @@ export function synthAiReply(body) {
       const f = r.frames[0] ?? {};
       const br = f.base_rates?.rsi ?? f.base_rates?.all ?? {};
       const text = `${f.tf ?? '—'} の RSI は ${f.rsi?.rsi ?? '—'} です。同じ状態の後の ${f.horizon_bars ?? '—'} 本先は中央値 ${br.median_pct ?? '—'}%（件数 ${br.n ?? '—'}${br.insufficient ? '・サンプル不足' : ''}）で、予想ではなく材料です。`;
-      return { thinking: '道具の結果を読む', text, stop: 'end_turn' };
+      return { thinking: 'ツールの結果を読む', text, stop: 'end_turn' };
     }
     if (r?.after && Array.isArray(r?.diff)) {
       // propose_position（#139）の結果: 後の満期の最大損失と必要証拠金だけを引く（架空の値）
@@ -443,7 +443,7 @@ export function synthAiReply(body) {
       return { thinking: 'ツールの結果を読む', text, stop: 'end_turn' };
     }
     const text = `その条件（${pct(r?.scenario?.dx_pct)}・${r?.scenario?.days ?? '—'} 日・IV +${r?.scenario?.iv_shift_pt ?? '—'}pt）の損益は ${thousand(r?.pnl_yen)} です。満期なら ${thousand(r?.expiry_pnl_yen)} です。`;
-    return { thinking: '道具の結果を読む', text, stop: 'end_turn' };
+    return { thinking: 'ツールの結果を読む', text, stop: 'end_turn' };
   }
   if (body?.kind === 'diagnose') {
     // 架空の文（合成の板からの事前計算の値だけを引く。README の画像にも使う）
@@ -503,7 +503,7 @@ export function synthAiReply(body) {
     return { thinking: '考える', text: '途中まで書いて', stop: null, cut: true };
   }
   return {
-    thinking: '条件を決めて道具を呼ぶ',
+    thinking: '条件を決めてツールを呼ぶ',
     text: '',
     stop: 'tool_use',
     tool: {

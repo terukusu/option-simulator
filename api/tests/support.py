@@ -336,7 +336,7 @@ def synth_board(at: datetime, future=30000.0, quoted=None, fine_quoted=True, ltd
     return rows
 
 
-# ---- AI の中継（#134）: 合成の文脈・会話・テスト専用の道具の登録。値はすべて架空 ----
+# ---- AI の中継（#134）: 合成の文脈・会話・テスト専用のツールの登録。値はすべて架空 ----
 
 FAKE_KEY = "sk-ant-api03-" + "Zq7XyW3vU9tS1rQ5pO8nM2lK6jH4gF0eD9cB3aZ1yX5wV7uT"  # 鍵の形の架空の値（漏れの検査用）
 FAKE_TOKEN = "sk-ant-oat01-" + "Hj2Kl4Mn6Pq8Rs0Tu2Vw4Xy6Za8Bc0De2Fg4Hi6Jk8Lm0No"  # トークンの形の架空の値
@@ -350,7 +350,7 @@ FAKE_WIF_ENV = {"ANTHROPIC_FEDERATION_RULE_ID": "fdrl_0example0rule",
 
 
 def ai_registry():
-    """テスト専用の道具 2 本（#135 の本物の登録でも同じテストが効くように、登録を引数にして使う）"""
+    """テスト専用のツール 2 本（#135 の本物の登録でも同じテストが効くように、登録を引数にして使う）"""
     from simulator_api.ai.shape import Num, Obj
     from simulator_api.ai.tools import ToolSpec
 
@@ -413,7 +413,7 @@ def ai_body(messages=None, context=None, **extra) -> dict:
 
 
 def ai_tool_roundtrip() -> list[dict]:
-    """会話 1 往復 + 道具の往復（AI の thinking・tool_use → ブラウザの tool_result）"""
+    """会話 1 往復 + ツールの往復（AI の thinking・tool_use → ブラウザの tool_result）"""
     return [
         {"role": "user", "content": [{"type": "text", "text": "このポジションの弱点は？"}]},
         {"role": "assistant", "content": [{"type": "text", "text": "下に弱い形です。"}]},

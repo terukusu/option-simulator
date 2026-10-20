@@ -92,7 +92,7 @@ class AiRequest:
     messages: list[dict]
 
     def tool_names(self) -> list[str]:
-        """会話に出た道具の名前（ログ用。重複なし・出た順）"""
+        """会話に出たツールの名前（ログ用。重複なし・出た順）"""
         out: list[str] = []
         for m in self.messages:
             for b in m["content"]:

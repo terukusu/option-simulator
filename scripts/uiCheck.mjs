@@ -23,7 +23,7 @@
 //                                          証拠金（#131）: 資金あり（prefs の capital_yen）の売り 5 枚 × 4 幅 × ダーク / ライトで
 //                                          縦・横・折り返し・読み取り、タイル 8 枚・テール表・テールの証拠金の表が切れない・表が 5 行
 //                                          市場（#85）: 板の列の数（360・390・900・1200×800・1280×800 で 5、1440 で 7、1800×1000 で 9）・
-//                                          見えている行のセル・道具の行・脚注の F / ATM / SQ・スマイルの道具の行・操作行（選択なし / あり）・
+//                                          見えている行のセル・ツールの行・脚注の F / ATM / SQ・スマイルのツールの行・操作行（選択なし / あり）・
 //                                          凡例が切れていない・.board-wrap が横にはみ出さない・スマイルの描画域（360 peek で 140px 以上）。
 //                                          1200 / 1280 / 1800 は市場の列の中の折り返しを判定（ページ全体は記録）。322 行の板
 //                                          （buildWideChainJson を /fixtures/latest.json に差し替え）× 既定の字幅 / 実機相当の字幅
@@ -46,7 +46,7 @@
 //                                          切れず画面内・canvas がある。1280×800・1800×1000 は記録だけ（--shots の撮影用）
 //                                          IV 推移（#79 段 B）: 4 幅 × ダーク / ライトで IV 推移を開いた状態（PC は市場の Seg、タブレットは
 //                                          ドックの IV → [IV 推移 | スマイル]、スマホは IV のシート peek / hidden / full）の縦・横・
-//                                          折り返しと、見出し・道具の行（足・ローソク / 線・⟳）・読み取りの 1 行・凡例が切れない
+//                                          折り返しと、見出し・ツールの行（足・ローソク / 線・⟳）・読み取りの 1 行・凡例が切れない
 //                                          （scrollWidth ≤ clientWidth）・描画域の高さ・進行中の足が 1 本。線のモードも同じ検査。
 //                                          段 C で「今」の印 1 個・シナリオの水準の線 1 本（凡例に値が入っても切れない）を足した。
 //                                          #130: 各状態で描画域にフォーカスして , → 十字線 2 本・札 2 個が svg の内側・横の札 = 読み取りの
@@ -139,7 +139,7 @@
 //                                          免責の文は初めてだけ（閉じて開き直すと出ない）、偽の SSE の診断の返答を出した状態も測る
 //                                          #135 AC6（--flows）: 390×844 と 1440×900 で [このポジションを診断] → 進み具合が出るまで < 1,000 ms・
 //                                          考え中 → 書いています → 完了の順・中止で止まる・終端なし（「切断」）で incomplete・追加の質問の
-//                                          道具のカードと [シナリオに適用] → [元に戻す]・提案のカードと [今のタブに適用] →
+//                                          ツールのカードと [シナリオに適用] → [元に戻す]・提案のカードと [今のタブに適用] →
 //                                          [元に戻す]（#139）・再読み込みで会話が残る（sessionStorage）
 //   --ai                                   #135 の項目だけ（既定の検査・--flows とも。手元の確かめ用）
 //   --url <base>                           dev サーバーを起こさず、その URL を使う（例 http://127.0.0.1:5173/?parts）
@@ -1082,8 +1082,8 @@ const MARKET_SIZES = [
 const marketStats = { pass: 0, total: 0, skip: 0 };
 
 /**
- * 見えている板・スマイルの (a) 板の列の数（表示中の表の thead th）、(b) 見出し行・道具の行・見えている行のセル /
- * ボタン・脚注（F / ATM / SQ）・スマイルの道具の行・操作行・凡例が切れていない（scrollWidth ≤ clientWidth）、
+ * 見えている板・スマイルの (a) 板の列の数（表示中の表の thead th）、(b) 見出し行・ツールの行・見えている行のセル /
+ * ボタン・脚注（F / ATM / SQ）・スマイルのツールの行・操作行・凡例が切れていない（scrollWidth ≤ clientWidth）、
  * 表の枠 .board-wrap が横にはみ出していない、(c) スマイルの描画域の高さ（want.smileMin 以上）
  */
 async function marketCheck(page, label, want) {
@@ -1846,7 +1846,7 @@ async function pinCheck(w, h, long) {
         if (hit !== x) bad.push(`${label} × が隠れている`);
       }
     }
-    // 凡例行の右の道具（ピン・拡大縮小・⋯・ⓘ。出しているものすべて）が舞台の中にあって押せる
+    // 凡例行の右のツール（ピン・拡大縮小・⋯・ⓘ。出しているものすべて）が舞台の中にあって押せる
     const tools = [...document.querySelectorAll('.stage-tools button')].filter(
       (b) => b.getClientRects().length > 0,
     );
@@ -1856,11 +1856,11 @@ async function pinCheck(w, h, long) {
       const inStage =
         !!stage && !!head && bb.width > 0 && bb.left >= stage.left && bb.right <= stage.right + 0.5;
       if (!inStage) {
-        bad.push(`道具「${label}」が舞台の外`);
+        bad.push(`ツール「${label}」が舞台の外`);
         continue;
       }
       const hit = document.elementFromPoint(bb.left + bb.width / 2, bb.top + bb.height / 2);
-      if (!hit || !b.contains(hit)) bad.push(`道具「${label}」が押せない`);
+      if (!hit || !b.contains(hit)) bad.push(`ツール「${label}」が押せない`);
     }
     return { n: chips.length, tools: tools.length, bad };
   });
@@ -1875,7 +1875,7 @@ async function pinCheck(w, h, long) {
   }
   if (!ok) failed = true;
   console.log(
-    `${tag} ${w}x${h}: 凡例のピン ${r.n} 本・× と道具 ${r.tools} 個が見えて押せる ${ok ? 'pass' : `NG ${r.bad.join('・')}`}`,
+    `${tag} ${w}x${h}: 凡例のピン ${r.n} 本・× とツール ${r.tools} 個が見えて押せる ${ok ? 'pass' : `NG ${r.bad.join('・')}`}`,
   );
   await ctx.close();
 }
@@ -2279,8 +2279,8 @@ async function openIv(page, w, sheet = 'peek') {
 }
 
 /**
- * IV 推移の検査（AC-13）: 見出し行・道具の行（足の Seg・形の Seg・⟳）・読み取りの 1 行・凡例が切れていない
- * （scrollWidth ≤ clientWidth）、道具の行の要素が section の中、描画域の高さ（want.minHeight 以上）、
+ * IV 推移の検査（AC-13）: 見出し行・ツールの行（足の Seg・形の Seg・⟳）・読み取りの 1 行・凡例が切れていない
+ * （scrollWidth ≤ clientWidth）、ツールの行の要素が section の中、描画域の高さ（want.minHeight 以上）、
  * 進行中の足（ローソクは .iv-bar.progress、線は .iv-line.progress）が 1 個
  */
 async function ivCheck(page, label, want = {}) {
@@ -2388,7 +2388,7 @@ async function ivSweep() {
         const lbl = `${tag}${sheet ? ` ${sheet}` : ''}`;
         await report(page, lbl, w, h, `${name}${sheet ? `-${sheet}` : ''}`);
         if (sheet !== 'hidden') {
-          // 360 peek は高さの余裕が最も小さい（スマイルと同じ 140px を下限にしない = 道具・読み取りの 2 行の分）
+          // 360 peek は高さの余裕が最も小さい（スマイルと同じ 140px を下限にしない = ツール・読み取りの 2 行の分）
           await ivCheck(page, `${lbl} ${w}x${h}`, {
             minHeight: w <= PHONE_MAX && sheet === 'peek' ? 80 : 160,
           });
@@ -2437,7 +2437,7 @@ function futYTagOk(st) {
 
 /**
  * #200: 指標の段の検査。段 3 つ・4 時間が押されている・価格の描画域が 80px 以上・段の幅 = 描画域の幅・段が枠の中
- * （下端が .panel-body の下端以内）・道具の行と凡例の行が切れない・段の線が 3 本以上ある
+ * （下端が .panel-body の下端以内）・ツールの行と凡例の行が切れない・段の線が 3 本以上ある
  */
 async function indCheck(page, label) {
   futStats.total++;
@@ -2469,7 +2469,7 @@ async function indCheck(page, label) {
   if (!r.paneW.every((x) => Math.abs(x - r.wrapW) <= 1)) bad.push(`段の幅 ${r.paneW.join('/')}`);
   if (!r.inside) bad.push('段が枠の外');
   if (r.lines < 3) bad.push(`線 ${r.lines}`);
-  if (r.toolsCut) bad.push('道具の行が切れる');
+  if (r.toolsCut) bad.push('ツールの行が切れる');
   if (r.legendCut) bad.push('凡例が切れる');
   const ok = bad.length === 0;
   if (ok) futStats.pass++;
@@ -2904,7 +2904,7 @@ async function runFlows() {
   await pnlCrossTouchFlow();
   // #174 追証マップの開閉の時間・開いたときの滑らかなスクロールとスピナー（AC4）
   for (const vp of [pc, phone]) await holdToggleFlow(vp);
-  // #135 AI のチャットの進み具合・中止・終端なし・道具のカード・会話の保存（AC6）
+  // #135 AI のチャットの進み具合・中止・終端なし・ツールのカード・会話の保存（AC6）
   for (const vp of [phone, pc]) await aiFlows(vp);
 }
 
@@ -9506,7 +9506,7 @@ async function aiSweep() {
 }
 
 /**
- * #135 AC6: 進み具合（押してから表示まで < 1,000 ms・考え中 → 書いています → 完了の順）・中止・終端なし・道具のカードと
+ * #135 AC6: 進み具合（押してから表示まで < 1,000 ms・考え中 → 書いています → 完了の順）・中止・終端なし・ツールのカードと
  * [シナリオに適用]・再読み込みで会話が残る
  */
 async function aiFlows(vp) {
@@ -9586,7 +9586,7 @@ async function aiFlows(vp) {
     .then(() => true)
     .catch(() => false);
   check(`${tag} done の無い終わりは「途中で切れました」`, inc);
-  // (d) 追加の質問 → 道具のカード → [シナリオに適用] → [元に戻す]
+  // (d) 追加の質問 → ツールのカード → [シナリオに適用] → [元に戻す]
   await page.fill('section.ai .ai-input textarea', '−6% なら？');
   await page.press('section.ai .ai-input textarea', 'Enter');
   await page
@@ -9595,7 +9595,7 @@ async function aiFlows(vp) {
   const card = await page.$(
     'section.ai .ai-tool[data-ai-tool="evaluate_scenario"] button[data-ai="apply"]',
   );
-  check(`${tag} 追加の質問で道具のカード（evaluate_scenario）と [シナリオに適用]`, card !== null);
+  check(`${tag} 追加の質問でツールのカード（evaluate_scenario）と [シナリオに適用]`, card !== null);
   if (card) {
     const before = await page.evaluate(
       (k) => JSON.parse(localStorage.getItem(k) ?? '{}'),

@@ -1,4 +1,4 @@
-"""道具の登録（#135 AC3）。ブラウザの実装（ui/view/aiTools.ts）が生成した見本 fixtures/synthetic/ai_tools.json を、
+"""ツールの登録（#135 AC3）。ブラウザの実装（ui/view/aiTools.ts）が生成した見本 fixtures/synthetic/ai_tools.json を、
 中継の形（tools.py の result_shape・allowlist.py の context_shape）に通す = 言語をまたぐ契約。値はすべて架空。"""
 
 import copy
@@ -83,7 +83,7 @@ def test_evaluate_input_unknown_key_and_range():
     assert _bad_input({**ok, "iv_shift_pt": 41}) == ("input.iv_shift_pt", "range")
     assert _bad_input({**ok, "dx_pct": -61}) == ("input.dx_pct", "range")
     assert _bad_input({"dx_pct": 1, "iv_shift_pt": 0}) == ("input.days", "missing")
-    # 入力なしの道具に引数
+    # 入力なしのツールに引数
     with pytest.raises(Bad):
         REGISTRY["tail_table"].input_shape.check({"x": 1}, "input")
 

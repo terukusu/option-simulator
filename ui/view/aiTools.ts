@@ -1,5 +1,5 @@
 /**
- * AI の道具（#135。docs/design.md 14 章・K15、docs/ai-advisor.md 論点 5）。決定論的な計算で、AI に計算させない。
+ * AI のツール（#135。docs/design.md 14 章・K15、docs/ai-advisor.md 論点 5）。決定論的な計算で、AI に計算させない。
  * 純関数（DOM・通信・時計に依存しない）。画面の表示モデル（ui/view/metrics.ts の metricsModel・ui/view/margin.ts・
  * model/ の tailTable・evaluatePosition）を呼ぶだけ = 画面と同じ数字。
  *
@@ -42,7 +42,7 @@ export interface AiToolEnv {
   atmBasis: AtmBasis;
   margin: { params: MarginParams; capital: number | null };
   holidays: Holidays;
-  /** 先物の日足・1 時間足（technicals の道具だけ。#200。呼ばれたときだけフックが読んで入れる。無ければ no_data） */
+  /** 先物の日足・1 時間足（technicals のツールだけ。#200。呼ばれたときだけフックが読んで入れる。無ければ no_data） */
   technicals?: TechnicalsData | null;
   /** 提案のツール（#139。作業中のタブの足と、足の列の評価。aiEnvFromState が作る。無ければ no_data） */
   draft?: ProposeDraft | null;
@@ -60,7 +60,7 @@ export type ToolError = {
     | 'no_candidate';
 };
 
-/** 道具の名前（名前の順。中継の tools.py と同じ集合） */
+/** ツールの名前（名前の順。中継の tools.py と同じ集合） */
 export const AI_TOOL_NAMES = [
   'evaluate_scenario',
   'margin_summary',
@@ -83,7 +83,7 @@ export const PRECOMPUTED_TOOLS: readonly AiToolName[] = [
   'smile_position',
 ];
 
-/** 道具の名前の表示（カードの見出し） */
+/** ツールの名前の表示（カードの見出し） */
 export const AI_TOOL_LABEL: Record<AiToolName, string> = {
   position_summary: 'ポジションの要約',
   tail_table: 'テール表',
@@ -387,7 +387,7 @@ function evaluateScenario(env: AiToolEnv, base: PnlBase, input: Record<string, u
   };
 }
 
-/** 道具を実行する（入力は tool_use の input。結果か `{ error }`） */
+/** ツールを実行する（入力は tool_use の input。結果か `{ error }`） */
 export function runTool(
   name: string,
   input: Record<string, unknown>,
@@ -449,7 +449,7 @@ export function scenarioOfResult(
   };
 }
 
-// ---------------------------------------------------------------- 道具のカード（画面の表示）
+// ---------------------------------------------------------------- ツールのカード（画面の表示）
 
 const num = (v: unknown): number | null => (typeof v === 'number' && Number.isFinite(v) ? v : null);
 const obj = (v: unknown): Record<string, unknown> =>
@@ -501,7 +501,7 @@ export interface ToolCard {
   applicable: boolean;
 }
 
-/** 道具のカードの文字（結果は中継を通った JSON。形が違えば「—」） */
+/** ツールのカードの文字（結果は中継を通った JSON。形が違えば「—」） */
 export function toolCard(
   name: string,
   _input: Record<string, unknown>,

@@ -69,7 +69,7 @@ function AiPanelView(p: {
   visible: boolean;
   base: string;
   env: () => AiToolEnv | null;
-  /** technicals の道具の先物の足の読み込み（#200。NextApp が口を決める） */
+  /** technicals のツールの先物の足の読み込み（#200。NextApp が口を決める） */
   tech?: () => Promise<TechnicalsData>;
   hasChain: boolean;
   legCount: number;
@@ -103,7 +103,7 @@ export const AiPanel = pure(AiPanelView);
 
 /**
  * AI のチャット（#135。docs/ui-redesign.md 2 章・docs/design.md 14 章）。見出し行（残り・[新しい会話]）→ 免責の文
- * （初回だけ）→ 会話（user の吹き出し・考え中の要約（折りたたみ）・返答（aiText の木）・道具のカード）→ 進み具合・
+ * （初回だけ）→ 会話（user の吹き出し・考え中の要約（折りたたみ）・返答（aiText の木）・ツールのカード）→ 進み具合・
  * 押せない理由 → [このポジションを診断] と入力欄。返答・入力は JSX のテキストだけ（HTML を入れない・style 属性を使わない）。
  * 照合できない数字（ui/view/aiNumbers.ts）は class の印（点線の下線）。
  */

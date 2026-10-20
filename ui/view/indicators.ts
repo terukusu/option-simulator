@@ -1,6 +1,6 @@
 /**
  * 先物推移の指標の段（#200。docs/ui-redesign.md §4.8）の表示モデル（純関数。Preact に依存しない）。指標の値は
- * model/technicals.ts の indicators（AI の道具 technicals と同じ計算）。ここは段の座標・補助線・見出しの文字だけ。
+ * model/technicals.ts の indicators（AI のツール technicals と同じ計算）。ここは段の座標・補助線・見出しの文字だけ。
  *
  * - 段は価格の描画域の下に、同じ表示範囲（index の viewport）・同じ横の画素範囲（左の余白 = 系列の目盛りの列、右 =
  *   IV_MARGIN.right）で描く = パン・拡大・カーソルが価格と揃う。段の高さは IND_PANE_H（縦に狭いとき = スマホのシートの

@@ -1,12 +1,12 @@
 /**
  * AI のチャットの状態と reducer（#135。docs/design.md 14 章、docs/ai-advisor.md 論点 6）。純関数（Preact・DOM・通信に
- * 依存しない）。fetch・sessionStorage・道具の実行の呼び出しは ui/components/useAiChat.ts。
+ * 依存しない）。fetch・sessionStorage・ツールの実行の呼び出しは ui/components/useAiChat.ts。
  *
  * - 会話はブラウザが持ち、毎回全部送る（論点 6 = A）。最初の文脈（context）は固定し、板・ポジション・シナリオ・資金が
  *   変わったら（指紋 = canonical JSON の比較）次の発言に context_update の block を足す（前の履歴は変えない = preserved
  *   thinking と prompt caching の前置きを保つ）
  * - 1 回の発言（turn）: begin（押した瞬間に「計算中」）→ send（文脈を作って user の発言を足す）→ イベント →
- *   done（stop_reason が tool_use なら道具の結果を足して次の要求。道具の往復は MAX_TOOL_ROUNDS 回まで）
+ *   done（stop_reason が tool_use ならツールの結果を足して次の要求。ツールの往復は MAX_TOOL_ROUNDS 回まで）
  * - 失敗・中止: その turn の履歴を戻し（次に送る会話の形を壊さない）、途中までの文と理由を failed に残す（[もう一度]）
  * - 保存: sessionStorage の 1 キー（AI_SESSION_KEY）だけ。タブを閉じたら消える。保存一覧・URL 共有・書き出しには
  *   載せない（オーナー判断 2026-10-19）
@@ -30,7 +30,7 @@ export const DIAGNOSE_TEXT = 'このポジションを診断してください�
 export const MAX_MESSAGES = 60;
 export const MAX_FREE_TEXT = 100_000;
 export const MAX_USER_TEXT = 4_000;
-/** 1 回の発言の道具の往復の上限（費用の暴走を止める） */
+/** 1 回の発言のツールの往復の上限（費用の暴走を止める） */
 export const MAX_TOOL_ROUNDS = 4;
 /** 上限のこの割合で「長くなりました」 */
 export const LONG_RATIO = 0.8;
@@ -57,9 +57,9 @@ export interface AiTurn {
   /** この要求の考え中の要約・本文（流れの途中） */
   thinking: string;
   text: string;
-  /** 道具の往復の回数 */
+  /** ツールの往復の回数 */
   rounds: number;
-  /** done で stop_reason が tool_use（道具の結果を待つ） */
+  /** done で stop_reason が tool_use（ツールの結果を待つ） */
   awaitingTools: boolean;
   /** 失敗したら戻す前の状態 */
   prev: { context: AiContext | null; lastKey: string | null; length: number };
@@ -142,7 +142,7 @@ function onEvent(s: AiChatState, ev: AiEvent): AiChatState {
       const wantsTools =
         ev.stop_reason === 'tool_use' && content.some((b) => b.type === 'tool_use');
       if (wantsTools && t.rounds > MAX_TOOL_ROUNDS) {
-        // 上限の知らせの後も道具を求めた: その発言の履歴を戻して終える（最後が tool_result の user のまま残すと、
+        // 上限の知らせの後もツールを求めた: その発言の履歴を戻して終える（最後が tool_result の user のまま残すと、
         // 次の発言で user が続き中継が 400 にする）。途中の文と理由（tool_limit）は失敗と同じく残す（[もう一度]）
         return fail({ ...s, remainingUsd }, 'tool_limit', remainingUsd);
       }
@@ -258,11 +258,11 @@ export function pendingToolUses(s: AiChatState): Extract<AiAssistantBlock, { typ
   );
 }
 
-/** 道具の上限の知らせ（最後の往復で道具の代わりに返す文） */
-export const TOOL_LIMIT_NOTE = '道具の回数の上限です。ここまでの結果で答えてください。';
+/** ツールの上限の知らせ（最後の往復でツールの代わりに返す文） */
+export const TOOL_LIMIT_NOTE = 'ツールの回数の上限です。ここまでの結果で答えてください。';
 
 /**
- * 道具の結果の block（tool_result。失敗は is_error）。上限（rounds ≥ MAX_TOOL_ROUNDS）なら道具を実行せずに
+ * ツールの結果の block（tool_result。失敗は is_error）。上限（rounds ≥ MAX_TOOL_ROUNDS）ならツールを実行せずに
  * `{"error":"tool_limit"}` と知らせの文
  */
 export function toolResultBlocks(
@@ -309,7 +309,7 @@ export function nearLimit(s: AiChatState): boolean {
   return z.messages >= MAX_MESSAGES * LONG_RATIO || z.freeText >= MAX_FREE_TEXT * LONG_RATIO;
 }
 
-/** これ以上送れない（発言 1 件と道具の往復の分が残らない） */
+/** これ以上送れない（発言 1 件とツールの往復の分が残らない） */
 export function atLimit(s: AiChatState): boolean {
   const z = chatSize(s);
   return (
@@ -449,7 +449,7 @@ const parseJson = (t: string): unknown => {
   }
 };
 
-/** 会話 → 表示の項目（user の吹き出し・考え中・返答・道具のカード。流れの途中・失敗も） */
+/** 会話 → 表示の項目（user の吹き出し・考え中・返答・ツールのカード。流れの途中・失敗も） */
 export function chatItems(s: AiChatState): ChatItem[] {
   const out: ChatItem[] = [];
   const results = new Map<string, { result: unknown; isError: boolean }>();
@@ -519,7 +519,7 @@ export function chatItems(s: AiChatState): ChatItem[] {
   return out;
 }
 
-/** 照合の値（最初の文脈・文脈の更新・道具の結果） */
+/** 照合の値（最初の文脈・文脈の更新・ツールの結果） */
 export function numberSources(s: AiChatState): unknown[] {
   const out: unknown[] = [];
   if (s.context) out.push(s.context);
@@ -557,7 +557,7 @@ function validMessage(m: unknown): m is AiMessage {
 }
 
 /**
- * 読む（JSON でない・版が違う・形が違う → null = 捨てる）。送っている途中で閉じた会話は、最後が user・道具を待つ
+ * 読む（JSON でない・版が違う・形が違う → null = 捨てる）。送っている途中で閉じた会話は、最後が user・ツールを待つ
  * assistant なら落として、次に送れる形にする
  */
 export function decodeAiChat(text: string | null): SavedAiChat | null {

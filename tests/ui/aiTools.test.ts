@@ -20,8 +20,8 @@ import { todayScenario } from '../../ui/view/pnlChart';
 import { fixture } from '../support/fixtures';
 
 /**
- * #135 AC3: AI の道具（ui/view/aiTools.ts）。合成の板（fixtures/synthetic/latest.json）と合成のポジション 10 通り
- * （scripts/aiEvalCases.ts）で、道具の出力が画面の表示モデル（指標のタイル・テール表・証拠金）と同じ値。値は架空。
+ * #135 AC3: AI のツール（ui/view/aiTools.ts）。合成の板（fixtures/synthetic/latest.json）と合成のポジション 10 通り
+ * （scripts/aiEvalCases.ts）で、ツールの出力が画面の表示モデル（指標のタイル・テール表・証拠金）と同じ値。値は架空。
  */
 
 const latest = fixture('latest');
@@ -43,7 +43,7 @@ const run = (env: AiToolEnv, name: string, input: Record<string, unknown> = {}) 
 const yen = (v: number | null | undefined) =>
   v === null || v === undefined || !Number.isFinite(v) ? null : Math.round(v) || 0;
 
-describe.each(AI_EVAL_CASES.map((c) => c.name))('道具 = 画面の表示モデル（%s）', (name) => {
+describe.each(AI_EVAL_CASES.map((c) => c.name))('ツール = 画面の表示モデル（%s）', (name) => {
   const env = envOf(name);
   const base = env.base as NonNullable<AiToolEnv['base']>;
   const m = metricsModel({ base, scenario: env.scenario, unit: 'yen' });
@@ -130,10 +130,10 @@ describe.each(AI_EVAL_CASES.map((c) => c.name))('道具 = 画面の表示モデ�
   });
 });
 
-describe('道具の境界', () => {
+describe('ツールの境界', () => {
   const env = envOf('iron_condor');
 
-  it('範囲外・形の違い・道具の名前', () => {
+  it('範囲外・形の違い・ツールの名前', () => {
     expect(runTool('evaluate_scenario', { dx_pct: -80, days: 0, iv_shift_pt: 0 }, env)).toEqual({
       error: 'out_of_range',
     });

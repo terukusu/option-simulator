@@ -1,6 +1,6 @@
 // AI の評価（`npm run ai:eval`。#135 AC1・AC2、EPIC #141 終了条件 1・2）。合成の板（fixtures/synthetic/latest.json）と
 // 合成のポジション 10 通り（scripts/aiEvalCases.ts）で、画面と同じコード（ui/view/aiContext.ts の文脈と事前計算・
-// ui/view/aiChat.ts の会話の reducer と道具の往復・ui/view/aiTools.ts の道具・data/aiStream.ts の SSE）を通して
+// ui/view/aiChat.ts の会話の reducer とツールの往復・ui/view/aiTools.ts のツール・data/aiStream.ts の SSE）を通して
 // 中継（POST /api/ai/messages）に送り、[このポジションを診断] の返答の弱点の数と数字の照合（ui/view/aiNumbers.ts）を出す。
 // TypeScript のモジュールは Vite のモジュールランナーで読む（依存を増やさない）。
 //
@@ -146,7 +146,7 @@ console.log(`台帳の累計 $${ledger.total_usd.toFixed(4)} / 上限 $${limitUs
 /** 直前の今日の残り（数える資格情報。done の残り = 精算の後） */
 let lastRemaining = status.remaining_usd;
 
-/** 1 回の発言（道具の往復を含む）。画面の useAiChat と同じ順（begin → 文脈 → send → 要求 → 道具 → 要求…） */
+/** 1 回の発言（ツールの往復を含む）。画面の useAiChat と同じ順（begin → 文脈 → send → 要求 → ツール → 要求…） */
 async function turn(chat, env, kind, text) {
   const run = { requests: 0, firstTextMs: null, totalMs: 0, stop: null, error: null, costUsd: 0 };
   const t0 = performance.now();
@@ -279,14 +279,14 @@ for (let rep = 0; rep < (techOnly || proposeOnly ? 0 : repeat); rep++) {
       });
       writeFileSync(join(outDir, `${c.name}-followup.md`), `# 追加の質問: ${fu.text}\n\n${t2}\n`);
       console.log(
-        `${ok2 ? 'pass' : 'FAIL'}  ${c.name} 追加の質問: 道具 ${tools.join(',') || 'なし'}・一致 ${ck2.matched}・不一致 ${un2.length}${un2.length ? `［${un2.join('、')}］` : ''}・往復 ${r2.run.requests}・${r2.run.stop ?? r2.run.error}・完了 ${(r2.run.totalMs / 1000).toFixed(1)} 秒・$${r2.run.costUsd.toFixed(4)}`,
+        `${ok2 ? 'pass' : 'FAIL'}  ${c.name} 追加の質問: ツール ${tools.join(',') || 'なし'}・一致 ${ck2.matched}・不一致 ${un2.length}${un2.length ? `［${un2.join('、')}］` : ''}・往復 ${r2.run.requests}・${r2.run.stop ?? r2.run.error}・完了 ${(r2.run.totalMs / 1000).toFixed(1)} 秒・$${r2.run.costUsd.toFixed(4)}`,
       );
     }
   }
 }
 
-// ---- テクニカルの質問（#200）: 新しい会話で 1 問ずつ。道具の環境に合成の先物の足を入れる
-// 合成の足の水準を合成の板の先物の値に合わせる（比で縮める。AI が板と道具の水準の食い違いに気を取られないように）
+// ---- テクニカルの質問（#200）: 新しい会話で 1 問ずつ。ツールの環境に合成の先物の足を入れる
+// 合成の足の水準を合成の板の先物の値に合わせる（比で縮める。AI が板とツールの水準の食い違いに気を取られないように）
 const techData = (() => {
   const d = synthFut.synthTechnicalsData();
   const k = latest.future.price / d.daily.at(-1).c;
@@ -336,7 +336,7 @@ for (const q of proposeOnly ? [] : TECH_QUESTIONS) {
   });
   writeFileSync(join(outDir, `tech-${q.case}.md`), `# テクニカル: ${q.text}\n\n${t}\n`);
   console.log(
-    `${ok ? 'pass' : 'FAIL'}  テクニカル ${q.case}: 道具 ${tools.join(',') || 'なし'}・結果 ${resultChars.join('/') || '—'} 字・一致 ${ck.matched}・不一致 ${un.length}${un.length ? `［${un.join('、')}］` : ''}・見立て ${direction ?? 'なし'}・但し書き ${caveat ? 'あり' : 'なし'}・往復 ${r.run.requests}・${r.run.stop ?? r.run.error}・完了 ${(r.run.totalMs / 1000).toFixed(1)} 秒`,
+    `${ok ? 'pass' : 'FAIL'}  テクニカル ${q.case}: ツール ${tools.join(',') || 'なし'}・結果 ${resultChars.join('/') || '—'} 字・一致 ${ck.matched}・不一致 ${un.length}${un.length ? `［${un.join('、')}］` : ''}・見立て ${direction ?? 'なし'}・但し書き ${caveat ? 'あり' : 'なし'}・往復 ${r.run.requests}・${r.run.stop ?? r.run.error}・完了 ${(r.run.totalMs / 1000).toFixed(1)} 秒`,
   );
 }
 

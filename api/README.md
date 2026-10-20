@@ -15,7 +15,7 @@ optionchan の BigQuery（データセット `optionchan_tokyo` のテーブル�
 | `/`・`/assets/<path>` | `STATIC_DIR` があるときだけ、Vite のビルド成果物（`dist/`）を配る |
 | `/manifest.webmanifest`・`/favicon.svg`・`/apple-touch-icon.png`・`/icon-192.png`・`/icon-512.png` | `STATIC_DIR` があるときだけ、`dist/` 直下のこの 5 つの名前だけを配る（`no-cache`。名前の集合は `app.py` の `ROOT_FILES`。他の名前は 404。#90） |
 
-作り（`src/simulator_api/`）: `sources.py`（供給元の口 `DataSource` と `DATA_SOURCE` → 実装の表 `BUILDERS`）、`quotes.py`（中立の気配の一覧 → 板の JSON 版 1。純関数。#154）、`usable.py`（使える板の判定。純関数。定数は `settings.py` の上部）、`chain.py`（板の JSON の組み立て）、`calendar.py`（SQ 日の規則と `/api/calendar` の JSON）、`atm_iv.py`（IV 推移の要求の検査・足の束ね・JSON。純関数）、`atm_daily.py`（日次の値の確定した範囲・行の検査・JSON。純関数。#152）、`future_bars.py`（先物推移の読む窓・足・限月・JSON。純関数。#190）、`cache.py`（TTL・LRU・期限付きの LRU と single-flight）、`service.py`（BigQuery の読み方とキャッシュ、`file`・`quotes` の供給元）、`bq.py`（SQL の読み込みと実行）、`contract.py`（optionchan との契約 = 使う列と型）、`sql/*.sql`、`app.py`（Flask・セキュリティヘッダ）、`log.py`（JSON の構造化ログ）。AI の中継は `ai/`: `shape.py`（形の検査）・`tools.py`（道具の登録。#135 で 6 本）・`allowlist.py`（要求の許可リストと送る本文の組み立て直し。純関数）・`budget.py`（料金表・見積もり・予約 / 精算・JST の日）・`firestore_store.py`（日の計上。REST）・`gateway.py`（SDK の薄い包みと偽の送信先）・`guard.py`（同じオリジン・同時の本数・回数）・`relay.py`（エンドポイントの本体・SSE・ログ）。
+作り（`src/simulator_api/`）: `sources.py`（供給元の口 `DataSource` と `DATA_SOURCE` → 実装の表 `BUILDERS`）、`quotes.py`（中立の気配の一覧 → 板の JSON 版 1。純関数。#154）、`usable.py`（使える板の判定。純関数。定数は `settings.py` の上部）、`chain.py`（板の JSON の組み立て）、`calendar.py`（SQ 日の規則と `/api/calendar` の JSON）、`atm_iv.py`（IV 推移の要求の検査・足の束ね・JSON。純関数）、`atm_daily.py`（日次の値の確定した範囲・行の検査・JSON。純関数。#152）、`future_bars.py`（先物推移の読む窓・足・限月・JSON。純関数。#190）、`cache.py`（TTL・LRU・期限付きの LRU と single-flight）、`service.py`（BigQuery の読み方とキャッシュ、`file`・`quotes` の供給元）、`bq.py`（SQL の読み込みと実行）、`contract.py`（optionchan との契約 = 使う列と型）、`sql/*.sql`、`app.py`（Flask・セキュリティヘッダ）、`log.py`（JSON の構造化ログ）。AI の中継は `ai/`: `shape.py`（形の検査）・`tools.py`（ツールの登録。#135 で 6 本）・`allowlist.py`（要求の許可リストと送る本文の組み立て直し。純関数）・`budget.py`（料金表・見積もり・予約 / 精算・JST の日）・`firestore_store.py`（日の計上。REST）・`gateway.py`（SDK の薄い包みと偽の送信先）・`guard.py`（同じオリジン・同時の本数・回数）・`relay.py`（エンドポイントの本体・SSE・ログ）。
 
 ## 設定（環境変数）
 
@@ -166,12 +166,12 @@ gcloud logging read 'resource.type="cloud_run_revision" AND resource.labels.serv
 設計は `docs/design.md` 7.1・13.4「AI の中継」・14 章、`docs/ai-advisor.md` 論点 1・3・4・6〜8、計上の置き場所は `docs/adr-0004-ai-spend-counter-firestore.md`、資格情報は `docs/adr-0001-ai-credentials-secret-manager.md`、`oauth_token` の送信路は `docs/adr-0005-ai-oauth-via-agent-sdk.md`。
 
 - **送信先**（`AI_CREDENTIAL` で選ぶ）: `oauth_token` → `ai/agent_sdk.py` の `AgentSdkGateway`（`claude-agent-sdk` 0.2.160。wheel に同梱の Claude Code CLI 2.1.283 を要求ごとに子プロセスで起動する。#186）、`api_key`・`wif` → `ai/gateway.py` の `AnthropicGateway`（`anthropic` 1.8.0 で Messages API を直接）、`fake` → `FakeGateway`。どれも同じ事象（`thinking`・`text`・`tool_use`・`final`）を返すので、SSE の形は資格情報によらない
-- **`oauth_token` の送信路の決まり**（ADR-0005）: 道具 6 本は SDK MCP の道具（CLI では `mcp__sim__<名>`）として見せ、`PreToolUse` フックで実行せずに turn を終える（ブラウザが計算する）。組み込みの道具は 0 本（`tools=[]`）、設定・CLAUDE.md を読まない（`setting_sources=[]`）、`@<パス>` をファイルとして読ませない（`verbatim_prompts=True`）、再試行しない（`CLAUDE_CODE_MAX_RETRIES=0`）、出力の上限は `CLAUDE_CODE_MAX_OUTPUT_TOKENS=8000`、設定ディレクトリと cwd は要求ごとの一時ディレクトリ（`/tmp`。終わったら消す）、CLI の標準エラーは捨てる。会話の履歴は要求ごとにメモリ上の transcript にして渡す（最後の発言が道具の結果のときは、CLI がその末尾に固定の短い文を 1 つ足す）。中止・締め切り・切断で子を止める。イメージは `CLAUDE_AGENT_SDK_SKIP_VERSION_CHECK=1`（版は `uv.lock` で固定）。SDK の版を上げるときは `tests/test_ai_agent_sdk_cli.py` を必ず通し、ADR-0005 の版を直す
+- **`oauth_token` の送信路の決まり**（ADR-0005）: ツール 6 本は SDK MCP のツール（CLI では `mcp__sim__<名>`）として見せ、`PreToolUse` フックで実行せずに turn を終える（ブラウザが計算する）。組み込みのツールは 0 本（`tools=[]`）、設定・CLAUDE.md を読まない（`setting_sources=[]`）、`@<パス>` をファイルとして読ませない（`verbatim_prompts=True`）、再試行しない（`CLAUDE_CODE_MAX_RETRIES=0`）、出力の上限は `CLAUDE_CODE_MAX_OUTPUT_TOKENS=8000`、設定ディレクトリと cwd は要求ごとの一時ディレクトリ（`/tmp`。終わったら消す）、CLI の標準エラーは捨てる。会話の履歴は要求ごとにメモリ上の transcript にして渡す（最後の発言がツールの結果のときは、CLI がその末尾に固定の短い文を 1 つ足す）。中止・締め切り・切断で子を止める。イメージは `CLAUDE_AGENT_SDK_SKIP_VERSION_CHECK=1`（版は `uv.lock` で固定）。SDK の版を上げるときは `tests/test_ai_agent_sdk_cli.py` を必ず通し、ADR-0005 の版を直す
 
-- **許可リスト**（`ai/allowlist.py`）: ブラウザから受けるのは `schema_version`・`kind`・`context`・`messages` だけ（`model`・`system`・`tools`・`max_tokens` などは 400）。`context` のキー・型・範囲・個数を検査し（自由な文字列は無い。板の行は `k`・`type`・`bid`・`ask`・`iv` だけで、JPX のグリーク・`bid_iv` / `ask_iv`・数量・建玉は 400）、`messages` は role の交互・block の型（user は `text`・`tool_result`、assistant は `text`・`thinking`・`redacted_thinking`・`tool_use`）・道具の名前と入出力の形（`ai/tools.py` の登録）を検査する。送る本文は検査済みの値から組み立て直す（`context` は最初の user の先頭の text block に `<context>…</context>` の決定的な JSON）
+- **許可リスト**（`ai/allowlist.py`）: ブラウザから受けるのは `schema_version`・`kind`・`context`・`messages` だけ（`model`・`system`・`tools`・`max_tokens` などは 400）。`context` のキー・型・範囲・個数を検査し（自由な文字列は無い。板の行は `k`・`type`・`bid`・`ask`・`iv` だけで、JPX のグリーク・`bid_iv` / `ask_iv`・数量・建玉は 400）、`messages` は role の交互・block の型（user は `text`・`tool_result`、assistant は `text`・`thinking`・`redacted_thinking`・`tool_use`）・ツールの名前と入出力の形（`ai/tools.py` の登録）を検査する。送る本文は検査済みの値から組み立て直す（`context` は最初の user の先頭の text block に `<context>…</context>` の決定的な JSON）
 - **1 日の上限**（`ai/budget.py`）: 予約 = 入力の見積もり（送る本文の UTF-8 のバイト数 + 2,000。トークン数の上界）× 5 分のキャッシュ書き込みの単価（入力の 1.25 倍）+ `max_tokens` × 出力の単価（µUSD の整数）。`計上額 + 予約額 ≤ 上限` のときだけ送り、終わったら `usage` × 料金表で精算、途中で切れたら予約額のまま。計上の場所が読めない・書けないときは 503 で送らない
 - **SSE**: `accepted`（検査と予約の直後、Anthropic を呼ぶ前）→ `progress`（`thinking` / `writing` / `tool`）・`thinking`・`text`・`tool_use` → `done`（`stop_reason`・assistant の `content`・`remaining_usd`）か `error`（`timeout`・`upstream_auth`・`upstream_rate_limited`・`upstream_overloaded`・`upstream_bad_request`・`upstream_unavailable`・`upstream_incomplete`・`bad_tool_input`）。締め切りは 50 秒
-- **道具**（`ai/tools.py`。#135）: `position_summary`・`tail_table`・`margin_summary`・`scenario_grid`・`smile_position`（入力なし。[このポジションを診断] ではブラウザが事前計算して `context.precomputed`）と `evaluate_scenario`（`dx_pct` か `x`・`days`・`iv_shift_pt`・任意の `skew_pt`。範囲は画面のシナリオの欄と同じ）。中継は道具を実行せず、入力（`tool_use`）・結果（`tool_result`・`precomputed`）を形で検査する。計算はブラウザの `ui/view/aiTools.ts` で、生成した見本 `fixtures/synthetic/ai_tools.json` を `tests/test_ai_tools.py` が結果の形に通す（言語をまたぐ契約）
+- **ツール**（`ai/tools.py`。#135）: `position_summary`・`tail_table`・`margin_summary`・`scenario_grid`・`smile_position`（入力なし。[このポジションを診断] ではブラウザが事前計算して `context.precomputed`）と `evaluate_scenario`（`dx_pct` か `x`・`days`・`iv_shift_pt`・任意の `skew_pt`。範囲は画面のシナリオの欄と同じ）。中継はツールを実行せず、入力（`tool_use`）・結果（`tool_result`・`precomputed`）を形で検査する。計算はブラウザの `ui/view/aiTools.ts` で、生成した見本 `fixtures/synthetic/ai_tools.json` を `tests/test_ai_tools.py` が結果の形に通す（言語をまたぐ契約）
 - **会話の途中の文脈の更新**（#135）: 2 件目以降の user の発言に `{"type": "context_update", "context": {…}}` を 1 つ（`tool_result` の後ろ）。`context` と同じ形で検査し、`<context_update>…</context_update>` の text block にして同じ位置に置く。最初の `context` と前の messages は変えない（Opus 5.5 の preserved thinking・prompt caching の前置きを保つ）。`kind: "diagnose"` は [このポジションを診断]（system prompt は 1 つ。`relay.DIAGNOSE_TEXT` が最初の発言）
 - テストは偽の送信先（`ai/gateway.py` の `FakeGateway`）と、本物の SDK に httpx2 の `MockTransport` を渡したもの（送られる見出し・本文を捕まえる。ネットワークに出ない）、偽の Firestore の session。`oauth_token` の送信路は偽の `query`・偽の CLI（`tests/test_ai_agent_sdk.py`）と、同梱の本物の CLI を pytest の中の 127.0.0.1 の偽の Messages API（`tests/fake_messages_api.py`。ダミーのトークン）に向けた結合（`tests/test_ai_agent_sdk_cli.py`。同梱の CLI が無いプラットフォームでは skip）。Anthropic・GCP には触れない
 
@@ -179,13 +179,13 @@ gcloud logging read 'resource.type="cloud_run_revision" AND resource.labels.serv
 
 | イベント | いつ | 項目 |
 |---|---|---|
-| `ai_request` | 1 要求 1 行（失敗も。失敗は WARNING） | `kind`・`model`・`credential`（種類だけ）・`n_messages`・`request_bytes`・`est_input_tokens`・`reserved_usd`・`accepted_ms`・`first_delta_ms`（最初の thinking / text）・`first_text_ms`（最初の text。K15 の「最初の文字」）・`total_ms`・`stop_reason`・`tools`（会話に出た道具の名前）・`input_tokens`・`cache_creation_input_tokens`・`cache_read_input_tokens`・`output_tokens`・`cost_usd_est`（料金表の概算。`oauth_token` も）・`charged_usd`（計上額。`oauth_token` は 0）・`price_checked`・`remaining_usd`・`error`・`error_type`（例外の型名）・`upstream_status`・`spawn_ms`（`oauth_token` だけ。送信の開始 → CLI の最初の事象。子の起動・CLI の初期化・上流の応答の始まりを含む） |
+| `ai_request` | 1 要求 1 行（失敗も。失敗は WARNING） | `kind`・`model`・`credential`（種類だけ）・`n_messages`・`request_bytes`・`est_input_tokens`・`reserved_usd`・`accepted_ms`・`first_delta_ms`（最初の thinking / text）・`first_text_ms`（最初の text。K15 の「最初の文字」）・`total_ms`・`stop_reason`・`tools`（会話に出たツールの名前）・`input_tokens`・`cache_creation_input_tokens`・`cache_read_input_tokens`・`output_tokens`・`cost_usd_est`（料金表の概算。`oauth_token` も）・`charged_usd`（計上額。`oauth_token` は 0）・`price_checked`・`remaining_usd`・`error`・`error_type`（例外の型名）・`upstream_status`・`spawn_ms`（`oauth_token` だけ。送信の開始 → CLI の最初の事象。子の起動・CLI の初期化・上流の応答の始まりを含む） |
 | `ai_rejected` | ストリームの前の拒否（400 / 403 / 413 / 415 / 429 / 503 `ai_disabled`） | `status`・`error`・`reason`・`path`（キーの道筋。知らないキーは `<unknown>`。値は出さない） |
 | `ai_disabled` | 起動時に設定が不正（WARNING） | `reason`（`ai_credential_conflict`・`ai_credential_missing`・`ai_wif_invalid` など） |
 | `ai_sdk_warning` | SDK（logger `anthropic`・`claude_agent_sdk`）の WARNING 以上。例: `wif` の期限の手前の交換し直しの失敗（古いトークンで続ける）（WARNING） | `logger`・`level`・`error_type`・`upstream_status`（SDK の文言は交換の失敗の本文を含むので出さない。SDK のログは stderr にも流さない） |
 | `ai_status_unavailable` / `ai_settle_failed` | 計上が読めない / 精算が書けない（WARNING） | `error_type` |
 
-出さないもの: 会話の本文・`context` の値・道具の入出力・鍵・SDK の例外の本文・IAP の見出し・WIF の ID トークン・交換したトークン・WIF の ID の値。
+出さないもの: 会話の本文・`context` の値・ツールの入出力・鍵・SDK の例外の本文・IAP の見出し・WIF の ID トークン・交換したトークン・WIF の ID の値。
 
 `wif` の失敗: 交換（`POST /v1/oauth/token`）の 401 / 403 は `upstream_auth`（`error_type` `WorkloadIdentityError`。401 は SDK が 1 回だけ交換し直す。多くはルールの不一致）、ID トークンが取れないときも `upstream_auth`（`error_type` `IdentityTokenError`）、交換のその他の失敗は `upstream_unavailable`。交換のタイムアウトは `settings.AI_TOKEN_EXCHANGE_TIMEOUT_SECONDS`（10 秒。SDK の既定 30 秒では 401 の交換し直しを含めて締め切り 50 秒を越えうる）。ID トークンは交換のたびに取り直す（キャッシュしない）。
 
@@ -214,7 +214,7 @@ gcloud logging read 'resource.type="cloud_run_revision" AND resource.labels.serv
 
 `api_key` のときは `infra/README.md`「AI の費用の計上（Firestore）」の 4 で今日の計上が増えたことも確かめる。
 
-`oauth_token` のとき（#186 AC9〜AC12）: `/api/ai/status` が `"credential":"oauth_token","counted":false`。画面で [このポジションを診断] を 1 回、続けて道具を使う質問を 1 回押し、ログで `stop_reason` が `end_turn`（と `tool_use` の後の `end_turn`）・`error` が null・`spawn_ms` ≤ 10,000・`first_delta_ms` ≤ 30,000 を確かめる。`error` が `upstream_auth` / `upstream_rate_limited` なら `infra/README.md` の手順で `wif` に戻す:
+`oauth_token` のとき（#186 AC9〜AC12）: `/api/ai/status` が `"credential":"oauth_token","counted":false`。画面で [このポジションを診断] を 1 回、続けてツールを使う質問を 1 回押し、ログで `stop_reason` が `end_turn`（と `tool_use` の後の `end_turn`）・`error` が null・`spawn_ms` ≤ 10,000・`first_delta_ms` ≤ 30,000 を確かめる。`error` が `upstream_auth` / `upstream_rate_limited` なら `infra/README.md` の手順で `wif` に戻す:
 
 ```sh
 gcloud logging read 'resource.type="cloud_run_revision" AND resource.labels.service_name="simulator" AND jsonPayload.event="ai_request" AND jsonPayload.credential="oauth_token"' \
@@ -224,7 +224,7 @@ gcloud logging read 'resource.type="cloud_run_revision" AND resource.labels.serv
 
 ## AI の評価（#135）
 
-`npm run ai:eval`（`scripts/aiEval.mjs`）は、合成の板・合成のポジション 10 通り（`scripts/aiEvalCases.ts`）で、画面と同じコード（文脈と事前計算・会話の reducer・道具の往復）を通して中継に送り、[このポジションを診断] の返答の弱点の数と数字の照合（`ui/view/aiNumbers.ts`）を出す。送り先は手元で起動した中継（`AI_EVAL_BASE`、既定 `http://127.0.0.1:8080`）で、本番の IAP は越えない。資格情報は中継の環境変数だけ（スクリプトは読まない・出さない）。
+`npm run ai:eval`（`scripts/aiEval.mjs`）は、合成の板・合成のポジション 10 通り（`scripts/aiEvalCases.ts`）で、画面と同じコード（文脈と事前計算・会話の reducer・ツールの往復）を通して中継に送り、[このポジションを診断] の返答の弱点の数と数字の照合（`ui/view/aiNumbers.ts`）を出す。送り先は手元で起動した中継（`AI_EVAL_BASE`、既定 `http://127.0.0.1:8080`）で、本番の IAP は越えない。資格情報は中継の環境変数だけ（スクリプトは読まない・出さない）。
 
 ```bash
 # 1) 中継を本物の資格情報で起動（値は表示しない。ログは fixtures/local/ に）
@@ -237,4 +237,4 @@ AI_EVAL_RELAY_LOG=fixtures/local/ai_eval/relay.log npm run ai:eval
 - 費用の上限: 累計の台帳 `fixtures/local/ai_eval/ledger.json`（gitignore）で `AI_EVAL_LIMIT_USD`（既定 6.5）を超える前に止める。数える資格情報は今日の残りの差、数えない資格情報（`oauth_token`）は 0。`AI_CREDENTIAL=fake` は配線の確かめ用で台帳に入れない
 - 出力: 標準出力に要約（各組の弱点の数・各弱点の一致の数・不一致の一覧・`stop_reason`・最初の文字と完了の秒・費用）と、`AI_EVAL_RELAY_LOG` があれば `ai_request` のトークン量・概算費用・`dropped_blocks`・`first_text_ms` の中央値。返答の全文は `fixtures/local/ai_eval/<時刻>/` にだけ書く（コミットしない）
 - 合格: 全組で弱点 3 つ以上・各弱点に照合が一致した数字 1 つ以上・不一致 0（終了コード 0）
-- テクニカルの質問 3 件（#200。`--tech-only` で これだけ）: 合成の先物の足（`scripts/synthFutBars.ts`）を道具の環境に入れ、`technicals` を呼ぶ・不一致 0・方向の断定の言い回し（`DIRECTION_RE`）なしで合格。全文を目でも読む
+- テクニカルの質問 3 件（#200。`--tech-only` で これだけ）: 合成の先物の足（`scripts/synthFutBars.ts`）をツールの環境に入れ、`technicals` を呼ぶ・不一致 0・方向の断定の言い回し（`DIRECTION_RE`）なしで合格。全文を目でも読む

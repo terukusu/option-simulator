@@ -25,7 +25,7 @@ describe('板の JSON の検証', () => {
 
   it('コミット済みの固定 JSON は生成器の出力と一致する（npm run fixtures で作り直す）', () => {
     const files = buildFixtureFiles();
-    // 板の 3 つと、道具の出力の見本（#135。板ではない）
+    // 板の 3 つと、ツールの出力の見本（#135。板ではない）
     expect(Object.keys(files).sort()).toEqual(
       [...Object.keys(RAW_FIXTURES), 'ai_tools.json'].sort(),
     );

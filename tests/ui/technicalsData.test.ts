@@ -1,4 +1,4 @@
-/** #200 AC7: AI の道具 technicals の読み込み（ui/components/technicalsData.ts）。偽の読み込み関数（通信しない）。値は架空 */
+/** #200 AC7: AI のツール technicals の読み込み（ui/components/technicalsData.ts）。偽の読み込み関数（通信しない）。値は架空 */
 import { beforeEach, describe, expect, it } from 'vitest';
 import type { AtmIvLoadOptions, AtmIvSource, FutBar, FutureBarsData } from '../../data';
 import {

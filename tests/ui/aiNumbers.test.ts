@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { checkNumbers, collectValues, sectionsOf } from '../../ui/view/aiNumbers';
 
 /**
- * #135 AC2: AI の返答の数字の照合（ui/view/aiNumbers.ts）。返答の数値トークンを、その会話の context・道具の結果の
+ * #135 AC2: AI の返答の数字の照合（ui/view/aiNumbers.ts）。返答の数値トークンを、その会話の context・ツールの結果の
  * 数値と丸めの規則で照合する。値は架空。
  */
 

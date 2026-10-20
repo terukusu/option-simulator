@@ -94,7 +94,7 @@ section.ai .ai-body {
   color: var(--ink-2);
 }
 
-/* 照合できない数字（道具の値に無い）。点線の下線 + 警告の色 */
+/* 照合できない数字（ツールの値に無い）。点線の下線 + 警告の色 */
 .ai-unmatched {
   color: var(--warn);
   text-decoration: underline dotted;

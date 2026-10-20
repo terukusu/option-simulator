@@ -15,7 +15,7 @@
   padding: 0 8px;
 }
 
-/* ===== 板: 道具の行（2 段） ===== */
+/* ===== 板: ツールの行（2 段） ===== */
 .board-tools {
   display: flex;
   flex: 0 0 auto;

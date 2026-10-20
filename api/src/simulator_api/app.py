@@ -108,7 +108,7 @@ def create_app(runner=None, clock=None, monotonic=None, cfg: st.Settings | None 
                ai_cfg: st.AiSettings | None = None, ai_gateway=None, ai_store=None, ai_registry=None) -> Flask:
     """runner: (name, params) -> rows（省略時は設定の BigQuery）。clock: 現在時刻、monotonic: 単調時計（テスト用）。
     cfg: 設定（省略時は環境変数）。ai_cfg: AI の設定（省略時は環境変数）。ai_gateway: 送信先、
-    ai_store: 日の計上の置き場所、ai_registry: 道具の登録（テスト用。省略時は設定から）"""
+    ai_store: 日の計上の置き場所、ai_registry: ツールの登録（テスト用。省略時は設定から）"""
     app = Flask(__name__, static_folder=None)
     if cfg is None:
         cfg = st.from_env()

@@ -73,7 +73,7 @@ function Pane({ m, ro }: { m: IndPaneModel; ro: IndReadout }) {
 
 /**
  * 先物推移の指標の段（#200。docs/ui-redesign.md §4.8）。座標は ui/view/indicators.ts の indPaneModel、値は
- * model/technicals.ts（AI の道具 technicals と同じ計算）。価格の描画域（IvPlot）と同じ表示範囲・横の画素範囲で、操作は
+ * model/technicals.ts（AI のツール technicals と同じ計算）。価格の描画域（IvPlot）と同じ表示範囲・横の画素範囲で、操作は
  * 持たない（パン・拡大・カーソルは価格の描画域で）。枠の高さは段の数のクラス（n1〜n3）で CSS が決め、縦に狭いと縮む
  * （段の高さは枠の高さ ÷ 段の数 = indPaneHeight）。色は CSS のクラスだけ（style 属性なし）。
  */

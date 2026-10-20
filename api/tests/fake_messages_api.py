@@ -1,7 +1,7 @@
 """テストの補助: 127.0.0.1 だけで待ち受ける偽の Messages API（Anthropic を呼ばない。#186 の結合テスト）。
 
 届いた要求を記録し（Authorization・x-api-key は scheme と長さだけ。値は持たない）、決まった SSE を返す。
-script: "tool2"（thinking → text → 道具 2 本。最後の user が tool_result なら text まで）/ "text" /
+script: "tool2"（thinking → text → ツール 2 本。最後の user が tool_result なら text まで）/ "text" /
 "redact"（thinking の後に
 redacted_thinking）/ "err429" / "err401"。値はすべて架空。
 """

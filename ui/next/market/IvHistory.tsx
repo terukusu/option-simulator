@@ -52,7 +52,7 @@ export interface IvHistoryProps {
 }
 
 /**
- * IV 推移（#79。docs/ui-redesign.md §4.7）: 見出し行（タイトル・Seg・ⓘ）→ 道具の行（足・ローソク / 線・最新化 ⟳）→
+ * IV 推移（#79。docs/ui-redesign.md §4.7）: 見出し行（タイトル・Seg・ⓘ）→ ツールの行（足・ローソク / 線・最新化 ⟳）→
  * 読み取りの 1 行（カーソルの足、無ければ最新の足の 始 / 高 / 安 / 終）→ 描画域（market/IvPlot.tsx）→ 凡例。
  * 状態は NextApp の useIvHistory（パネルを閉じても残る）。ここは表示モデルを描くだけ。
  */

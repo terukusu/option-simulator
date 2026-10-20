@@ -1,5 +1,5 @@
 /**
- * AI の道具 `technicals`（#200。docs/design.md 13.4・14 章）: 先物（ラージ・期近）の週足・日足・4 時間足のテクニカル
+ * AI のツール `technicals`（#200。docs/design.md 13.4・14 章）: 先物（ラージ・期近）の週足・日足・4 時間足のテクニカル
  * 指標（RSI・MACD・スロー・ストキャスティクス。期間は設定の値 = 先物推移の段と同じ。既定 14 / 12・26・9 / 14・3・3。
  * #205）の今の値・直近の推移・状態・過去の基準率を返す。
  * 純関数（DOM・通信・時計に依存しない）。指標・束ね・基準率は model/（先物推移の段と同じ計算）。
@@ -37,7 +37,7 @@ import {
   zoneOf,
 } from '../../model';
 
-/** 道具に渡す足（時刻は UNIX 秒。日足は取引日の 00:00 JST） */
+/** ツールに渡す足（時刻は UNIX 秒。日足は取引日の 00:00 JST） */
 export interface TechnicalsData {
   daily: readonly FutBar[];
   hourly: readonly FutBar[];
@@ -220,7 +220,7 @@ const isEnumList = <T extends string>(v: unknown, all: readonly T[]): v is T[] =
   v.length <= all.length &&
   v.every((x) => typeof x === 'string' && (all as readonly string[]).includes(x));
 
-/** 道具の本体（入力は tool_use の input。データが無ければ no_data） */
+/** ツールの本体（入力は tool_use の input。データが無ければ no_data） */
 export function technicalsTool(
   data: TechnicalsData | null,
   input: Record<string, unknown>,

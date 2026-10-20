@@ -80,7 +80,7 @@ export const SYNTH_AI_STATUS: {
 };
 /** 偽の SSE の事象の間隔（ms） */
 export const SYNTH_AI_STEP_MS: { thinking: number; writing: number; chunk: number };
-/** 偽の返答の組み立て（要求の本文 → 考え中・文・道具。純関数） */
+/** 偽の返答の組み立て（要求の本文 → 考え中・文・ツール。純関数） */
 export function synthAiReply(body: unknown): {
   thinking: string;
   text: string;

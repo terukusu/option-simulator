@@ -30,7 +30,7 @@ import {
 } from '../../ui/view/aiChat';
 
 /**
- * #135 AC8: AI のチャットの状態（ui/view/aiChat.ts）。送信・イベント・道具の往復・失敗・中止・保存の形・押せない理由。
+ * #135 AC8: AI のチャットの状態（ui/view/aiChat.ts）。送信・イベント・ツールの往復・失敗・中止・保存の形・押せない理由。
  * 文脈・値は架空。
  */
 
@@ -128,7 +128,7 @@ describe('aiChatReduce', () => {
     expect(JSON.stringify(changed.messages.slice(0, 2))).toBe(JSON.stringify(first.messages));
   });
 
-  it('道具の往復: tool_use で止まり、結果を足して次の要求。上限で知らせ、超えたら終える', () => {
+  it('ツールの往復: tool_use で止まり、結果を足して次の要求。上限で知らせ、超えたら終える', () => {
     let s = run(
       first,
       { type: 'begin', kind: 'chat', text: '−6% なら？', now: 3000 },
@@ -167,7 +167,7 @@ describe('aiChatReduce', () => {
       expect(s.turn?.rounds).toBe(i + 1);
     }
     expect(calls).toHaveLength(MAX_TOOL_ROUNDS);
-    // 上限: 道具を実行せずに error と知らせの文
+    // 上限: ツールを実行せずに error と知らせの文
     s = aiChatReduce(s, toolDone('t9'));
     const last = toolResultBlocks(s, () => {
       throw new Error('呼ばない');
@@ -182,10 +182,10 @@ describe('aiChatReduce', () => {
       { type: 'text', text: TOOL_LIMIT_NOTE },
     ]);
     s = aiChatReduce(s, { type: 'toolResults', blocks: last });
-    // 道具のカードは結果と組になる
+    // ツールのカードは結果と組になる
     const cards = chatItems(s).filter((i) => i.kind === 'tool');
     expect(cards[0]).toMatchObject({ name: 'evaluate_scenario', result: { pnl_yen: -2119796 } });
-    // それでも道具を求めたら、その発言の履歴を戻して終える（最後は assistant = 交互の形）
+    // それでもツールを求めたら、その発言の履歴を戻して終える（最後は assistant = 交互の形）
     s = aiChatReduce(s, toolDone('t10'));
     expect(s.turn).toBeNull();
     expect(s.failed).toMatchObject({ code: 'tool_limit', userText: '−6% なら？' });
@@ -255,7 +255,7 @@ describe('aiChatReduce', () => {
     expect(aiChatReduce(first, { type: 'reset' })).toBe(INITIAL_AI_CHAT);
   });
 
-  it('照合の値: 最初の文脈・文脈の更新・道具の結果', () => {
+  it('照合の値: 最初の文脈・文脈の更新・ツールの結果', () => {
     const s = run(
       first,
       { type: 'begin', kind: 'chat', text: 'x', now: 1 },

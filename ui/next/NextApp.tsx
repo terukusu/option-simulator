@@ -119,7 +119,7 @@ import { useTheme } from './useTheme';
  * では、離れる側の足と見ていた時間の範囲を入る側に渡す（shellSend）。
  * #152 で指標 · テールに追証マップ（regions/HoldMap.tsx）を入れた。開閉は ShellState.holdMap（保存しない）、過去の点は
  * 常駐の useAtmMoves（見えたら 1 回だけ /api/atm_daily を読む）、マスの計算は useHoldMap（止まってから列ごと）。
- * #135 で AI のチャット（regions/AiChat.tsx の AiPanel。会話の状態は AiPanel の中の useAiChat）を入れた。道具の環境は
+ * #135 で AI のチャット（regions/AiChat.tsx の AiPanel。会話の状態は AiPanel の中の useAiChat）を入れた。ツールの環境は
  * 送るときに今の state と端末の証拠金の設定から作る（aiEnvFromState）。口は API のときは /api/ai、dev の合成の板は
  * dev だけ /fixtures/ai（偽の SSE）。PC は作業台の列の入れ替え（ShellState.bench・トップバーの [AI]・キー 6）。
  */
@@ -250,11 +250,11 @@ export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
   // 閉じたタブの [元に戻す] は押した時点の state で判定する（トーストの undo は push した時点のクロージャ）
   const stateRef = useRef(state);
   stateRef.current = state;
-  // ---- AI（#135）。道具の環境は送るときに今の state・証拠金の設定から作る（参照の変わらない関数）
+  // ---- AI（#135）。ツールの環境は送るときに今の state・証拠金の設定から作る（参照の変わらない関数）
   const marginRef = useRef(userPrefs.prefs.margin);
   marginRef.current = userPrefs.prefs.margin;
   const aiEnv = useCallback(() => aiEnvFromState(stateRef.current, marginRef.current), []);
-  // technicals の道具（#200）: 先物推移と同じ口から日足・1 時間足を読む（呼ばれたときだけ・10 分覚える）
+  // technicals のツール（#200）: 先物推移と同じ口から日足・1 時間足を読む（呼ばれたときだけ・10 分覚える）
   // 期間（#205）は送るときの端末の設定 = 先物推移の段と同じ値をデータに載せる（中継のスキーマは変えない）
   const techRef = useRef(userPrefs.technicals);
   techRef.current = userPrefs.technicals;

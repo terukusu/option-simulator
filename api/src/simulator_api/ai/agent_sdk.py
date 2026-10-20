@@ -3,15 +3,15 @@
 
 サブスクリプションの OAuth トークンは Messages API の直接呼び出しでは 429 になり、CLI 経由でだけ使える
 （ADR-0001 の追補）。
-中継の残り（許可リスト・system prompt・道具の登録・SSE・締め切り・中止・同時の本数・1 分の回数・ログ）は
+中継の残り（許可リスト・system prompt・ツールの登録・SSE・締め切り・中止・同時の本数・1 分の回数・ログ）は
 変えない。
 stream(params, cancel) は AnthropicGateway と同じ事象（thinking / text / tool_use / final）を返し、最初の事象の前に
 {"type": "meta", "spawn_ms"}（子の起動 → 最初の StreamEvent）を 1 回返す（中継は ai_request に載せるだけ）。
 
 作り（spike S1〜S6 の結果。ADR-0005）:
-- 道具 6 本は in-process の SDK MCP 道具（名前は mcp__sim__<名>）として CLI に見せる。モデルが tool_use を出したら
-  PreToolUse フックが deny + continue_=False を返し、CLI は道具を実行せずに turn を終える（関数は呼ばれない前提。
-  呼ばれたら is_error を返す）。組み込みの道具は tools=[] で 0 本
+- ツール 6 本は in-process の SDK MCP ツール（名前は mcp__sim__<名>）として CLI に見せる。モデルが tool_use を出したら
+  PreToolUse フックが deny + continue_=False を返し、CLI はツールを実行せずに turn を終える（関数は呼ばれない前提。
+  呼ばれたら is_error を返す）。組み込みのツールは tools=[] で 0 本
 - 事象は include_partial_messages の StreamEvent（生の API の SSE 事象）から組み立てる。AssistantMessage は
   redacted_thinking を落とすので content には使わない（error の種類だけ見る）
 - 履歴は要求ごとのメモリ上の SessionStore（load だけが履歴から作った transcript の項目を返す）+ resume=<新しい uuid>。
@@ -47,7 +47,7 @@ from datetime import UTC, datetime
 
 from .gateway import UpstreamError, quiet_sdk_logs
 
-SERVER = "sim"  # SDK MCP の server 名（CLI の道具の名前は mcp__sim__<名>）
+SERVER = "sim"  # SDK MCP の server 名（CLI のツールの名前は mcp__sim__<名>）
 CLI_PREFIX = f"mcp__{SERVER}__"
 # 最後の user が tool_result の turn で CLI がその user の末尾に足す文（空にはできない。ADR-0005）
 RESUME_PROMPT = "Continue from the tool results."
@@ -275,7 +275,7 @@ def _deny_hook():
 
 class AgentSdkGateway:
     """query_fn: テスト用（claude_agent_sdk.query と同じ形の async generator 関数）。cli_path: テスト用（偽の CLI）。
-    extra_env: テスト用（ANTHROPIC_BASE_URL など）。tool_calls: SDK の道具の関数が呼ばれた回数（0 のはず）"""
+    extra_env: テスト用（ANTHROPIC_BASE_URL など）。tool_calls: SDK のツールの関数が呼ばれた回数（0 のはず）"""
 
     def __init__(self, secret: str | None, query_fn: Callable | None = None, cli_path: str | None = None,
                  extra_env: dict[str, str] | None = None, monotonic: Callable[[], float] = time.monotonic):
@@ -311,7 +311,7 @@ class AgentSdkGateway:
         return create_sdk_mcp_server(name=SERVER, version="1.0.0", tools=self.sdk_tools(tools))
 
     def sdk_tools(self, tools: list[dict]) -> list:
-        """道具の定義（relay の params["tools"]）→ SDK MCP の道具（名前・説明・JSON Schema はそのまま）"""
+        """ツールの定義（relay の params["tools"]）→ SDK MCP のツール（名前・説明・JSON Schema はそのまま）"""
         from claude_agent_sdk import tool as sdk_tool
 
         def make(t: dict):

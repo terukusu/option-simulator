@@ -79,7 +79,7 @@ export interface BoardRegionProps {
 const ATM_JUMP_FRAMES = 30;
 
 /**
- * 板（docs/ui-redesign.md §2・§4.3・§11 決定 1・12。#85）: 見出し行（市場の Seg・ⓘ）→ 道具の行 2 段（限月・put / call、
+ * 板（docs/ui-redesign.md §2・§4.3・§11 決定 1・12。#85）: 見出し行（市場の Seg・ⓘ）→ ツールの行 2 段（限月・put / call、
  * [ATM] + ジャンプと絞り込みのチップ）→ 限月ごとの表（market/BoardMonth.tsx）→ 脚注。
  * 列の段階は section.board の幅（枠線込み）で 9 / 7 / 5。ジャンプ・初めて見えたときの ATM・5 列の種別の切替の規則は
  * 旧 Board と同じ（枠 .board-wrap の scrollTop だけを動かす）。強調は 0.9 秒。
