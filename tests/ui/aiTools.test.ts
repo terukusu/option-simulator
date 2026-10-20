@@ -157,9 +157,11 @@ describe('道具の境界', () => {
     const e = aiEnvFromState(s, DEFAULT_MARGIN_PREFS);
     if (!e) throw new Error('環境が無い');
     expect(e.base).toBeNull();
-    for (const n of AI_TOOL_NAMES.filter((x) => x !== 'smile_position')) {
+    for (const n of AI_TOOL_NAMES.filter((x) => x !== 'smile_position' && x !== 'technicals')) {
       expect(runTool(n, {}, e)).toEqual({ error: 'no_legs' });
     }
+    // technicals（#200）は足に依らない（先物の足が無ければ no_data）
+    expect(runTool('technicals', {}, e)).toEqual({ error: 'no_data' });
     const sm = run(e, 'smile_position');
     expect(sm.expiries.length).toBe(2);
     expect(sm.legs).toEqual([]);

@@ -429,6 +429,13 @@ export function synthAiReply(body) {
     try {
       r = JSON.parse(result.content?.[0]?.text ?? '{}');
     } catch {}
+    if (Array.isArray(r?.frames)) {
+      // technicals（#200）の結果: 日足の RSI と基準率の件数だけを引く（架空の値）
+      const f = r.frames[0] ?? {};
+      const br = f.base_rates?.rsi ?? f.base_rates?.all ?? {};
+      const text = `${f.tf ?? '—'} の RSI は ${f.rsi?.rsi ?? '—'} です。同じ状態の後の ${f.horizon_bars ?? '—'} 本先は中央値 ${br.median_pct ?? '—'}%（件数 ${br.n ?? '—'}${br.insufficient ? '・サンプル不足' : ''}）で、予想ではなく材料です。`;
+      return { thinking: '道具の結果を読む', text, stop: 'end_turn' };
+    }
     const text = `その条件（${pct(r?.scenario?.dx_pct)}・${r?.scenario?.days ?? '—'} 日・IV +${r?.scenario?.iv_shift_pt ?? '—'}pt）の損益は ${thousand(r?.pnl_yen)} です。満期なら ${thousand(r?.expiry_pnl_yen)} です。`;
     return { thinking: '道具の結果を読む', text, stop: 'end_turn' };
   }
@@ -457,6 +464,18 @@ export function synthAiReply(body) {
       '- 下側にプットの買いを足したヘッジ案をピンで重ねる',
     ].join('\n');
     return { thinking: '事前計算のテール表と格子を見る', text, stop: 'end_turn' };
+  }
+  if (userText.includes('RSI')) {
+    return {
+      thinking: 'テクニカルを読む',
+      text: '',
+      stop: 'tool_use',
+      tool: {
+        id: `toolu_dev_${msgs.length}`,
+        name: 'technicals',
+        input: { timeframes: ['daily'] },
+      },
+    };
   }
   if (userText.includes('切断')) {
     return { thinking: '考える', text: '途中まで書いて', stop: null, cut: true };

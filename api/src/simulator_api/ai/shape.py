@@ -60,6 +60,19 @@ class Bool(Spec):
 
 
 @dataclass(frozen=True)
+class Nullable(Spec):
+    """null か inner（#200。真偽値・文字列の null）"""
+
+    inner: Spec
+
+    def check(self, value, path):
+        return None if value is None else self.inner.check(value, path)
+
+    def keys(self):
+        return self.inner.keys()
+
+
+@dataclass(frozen=True)
 class Enum(Spec):
     values: tuple
 

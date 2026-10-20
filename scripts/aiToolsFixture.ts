@@ -9,6 +9,7 @@ import type { ChainJson } from '../data/chainTypes';
 import { aiEnvFromState, buildAiContext } from '../ui/view/aiContext';
 import { AI_TOOL_NAMES, runTool } from '../ui/view/aiTools';
 import { AI_EVAL_CASES, caseMargin, caseState } from './aiEvalCases';
+import { synthTechnicalsData } from './synthFutBars';
 
 export const AI_TOOLS_FIXTURE_CASES = ['put_sell', 'iron_condor', 'mini_future_put', 'calendar'];
 
@@ -22,6 +23,17 @@ const ERROR_INPUTS: Record<string, unknown>[] = [
   { days: 0, iv_shift_pt: 0 },
   { dx_pct: 1, x: 66000, days: 0, iv_shift_pt: 0 },
 ];
+
+const TECH_INPUTS: Record<string, unknown>[] = [
+  {},
+  { timeframes: ['daily'], indicators: ['rsi'] },
+  { timeframes: ['4h', 'weekly'], indicators: ['macd', 'stoch'], horizon_bars: 3 },
+];
+const TECH_ERROR_INPUTS: Record<string, unknown>[] = [{ timeframes: ['1m'] }, { horizon_bars: 30 }];
+
+function fail(): never {
+  throw new Error('道具の環境を作れない');
+}
 
 export function buildAiToolsFixture(latest: ChainJson): string {
   const cases = AI_TOOLS_FIXTURE_CASES.map((name) => {
@@ -42,5 +54,23 @@ export function buildAiToolsFixture(latest: ChainJson): string {
       })),
     };
   });
-  return `${JSON.stringify({ schema_version: 1, tools: AI_TOOL_NAMES, cases }, null, 1)}\n`;
+  // technicals（#200）: 合成の先物の足（scripts/synthFutBars.ts。架空の値）
+  const techEnv = {
+    ...(aiEnvFromState(
+      caseState(latest, AI_EVAL_CASES[0] as (typeof AI_EVAL_CASES)[number]),
+      caseMargin(AI_EVAL_CASES[0] as (typeof AI_EVAL_CASES)[number]),
+    ) ?? fail()),
+    technicals: synthTechnicalsData(),
+  };
+  const technicals = {
+    results: TECH_INPUTS.map((input) => ({ input, result: runTool('technicals', input, techEnv) })),
+    errors: [
+      ...TECH_ERROR_INPUTS.map((input) => ({
+        input,
+        result: runTool('technicals', input, techEnv),
+      })),
+      { input: {}, result: runTool('technicals', {}, { ...techEnv, technicals: null }) },
+    ],
+  };
+  return `${JSON.stringify({ schema_version: 1, tools: AI_TOOL_NAMES, cases, technicals }, null, 1)}\n`;
 }

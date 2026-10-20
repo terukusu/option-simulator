@@ -6,7 +6,8 @@
   "position_summary",
   "scenario_grid",
   "smile_position",
-  "tail_table"
+  "tail_table",
+  "technicals"
  ],
  "cases": [
   {
@@ -2787,5 +2788,752 @@
     }
    ]
   }
- ]
+ ],
+ "technicals": {
+  "results": [
+   {
+    "input": {},
+    "result": {
+     "params": {
+      "rsi": 14,
+      "macd": [
+       12,
+       26,
+       9
+      ],
+      "stoch": [
+       14,
+       3,
+       3
+      ],
+      "rsi_zones": [
+       30,
+       70
+      ],
+      "stoch_zones": [
+       20,
+       80
+      ]
+     },
+     "frames": [
+      {
+       "tf": "weekly",
+       "n_bars": 105,
+       "last_t": "2026-10-12",
+       "close_x": 37205,
+       "horizon_bars": 4,
+       "rsi": {
+        "rsi": 55.6,
+        "recent": [
+         29.2,
+         40.9,
+         45.6,
+         52.1,
+         48.8,
+         53.8,
+         54.2,
+         49.9,
+         54.6,
+         53.6,
+         48.4,
+         47.3,
+         45.1,
+         52.1,
+         56.4,
+         58.8,
+         54.3,
+         57.4,
+         59.1,
+         55.6
+        ],
+        "zone": "mid",
+        "bars_in_zone": 19
+       },
+       "macd": {
+        "macd_yen": 229,
+        "signal_yen": 89,
+        "hist_yen": 140,
+        "recent_hist_yen": [
+         -107,
+         -83,
+         -31,
+         52,
+         82,
+         137,
+         171,
+         158,
+         179,
+         179,
+         137,
+         96,
+         53,
+         69,
+         109,
+         148,
+         139,
+         149,
+         162,
+         140
+        ],
+        "above_signal": true,
+        "bars_since_cross": 17,
+        "above_zero": true
+       },
+       "stoch": {
+        "stoch_k": 82.2,
+        "stoch_d": 81,
+        "recent_k": [
+         14,
+         18.1,
+         33.9,
+         61.5,
+         71.8,
+         84.1,
+         86.3,
+         87.6,
+         86,
+         84,
+         81.2,
+         72,
+         61.1,
+         65.2,
+         76.5,
+         91.4,
+         86.4,
+         81.9,
+         78.8,
+         82.2
+        ],
+        "zone": "high",
+        "bars_in_zone": 1,
+        "k_above_d": true,
+        "bars_since_cross": 1
+       },
+       "base_rates": {
+        "all": {
+         "n": 25,
+         "median_pct": -0.5,
+         "p10_pct": -2.6,
+         "p90_pct": 3.9,
+         "insufficient": false
+        },
+        "rsi": {
+         "n": 22,
+         "median_pct": -0.2,
+         "p10_pct": -3.4,
+         "p90_pct": 2.8,
+         "insufficient": false,
+         "condition": "rsi_mid"
+        },
+        "macd": {
+         "n": 4,
+         "median_pct": -0.6,
+         "p10_pct": -2.5,
+         "p90_pct": 3.6,
+         "insufficient": true,
+         "condition": "macd_above_signal_above_zero"
+        },
+        "stoch": {
+         "n": 7,
+         "median_pct": -0.5,
+         "p10_pct": -1.5,
+         "p90_pct": 1.3,
+         "insufficient": true,
+         "condition": "stoch_high"
+        }
+       }
+      },
+      {
+       "tf": "daily",
+       "n_bars": 522,
+       "last_t": "2026-10-13",
+       "close_x": 37205,
+       "horizon_bars": 5,
+       "rsi": {
+        "rsi": 51.4,
+        "recent": [
+         69.8,
+         62.9,
+         67.1,
+         64.8,
+         64.8,
+         58.3,
+         60.4,
+         52.6,
+         54.4,
+         52.1,
+         55.1,
+         53.5,
+         60.9,
+         64.1,
+         67,
+         64.7,
+         65.6,
+         62.3,
+         64.3,
+         51.4
+        ],
+        "zone": "mid",
+        "bars_in_zone": 92
+       },
+       "macd": {
+        "macd_yen": 196,
+        "signal_yen": 202,
+        "hist_yen": -6,
+        "recent_hist_yen": [
+         97,
+         83,
+         84,
+         74,
+         62,
+         38,
+         25,
+         -3,
+         -18,
+         -33,
+         -35,
+         -40,
+         -22,
+         -1,
+         20,
+         27,
+         32,
+         25,
+         24,
+         -6
+        ],
+        "above_signal": false,
+        "bars_since_cross": 1,
+        "above_zero": true
+       },
+       "stoch": {
+        "stoch_k": 69.4,
+        "stoch_d": 78,
+        "recent_k": [
+         91.4,
+         90.2,
+         93.7,
+         88.6,
+         84.4,
+         69.7,
+         61.1,
+         46.8,
+         38,
+         24.6,
+         25.7,
+         25.1,
+         39.2,
+         54.9,
+         76.9,
+         83.8,
+         86.4,
+         81.4,
+         83.1,
+         69.4
+        ],
+        "zone": "mid",
+        "bars_in_zone": 1,
+        "k_above_d": false,
+        "bars_since_cross": 3
+       },
+       "base_rates": {
+        "all": {
+         "n": 104,
+         "median_pct": 0,
+         "p10_pct": -1.5,
+         "p90_pct": 1.8,
+         "insufficient": false
+        },
+        "rsi": {
+         "n": 96,
+         "median_pct": 0,
+         "p10_pct": -1.3,
+         "p90_pct": 1.4,
+         "insufficient": false,
+         "condition": "rsi_mid"
+        },
+        "macd": {
+         "n": 21,
+         "median_pct": 0.3,
+         "p10_pct": -2,
+         "p90_pct": 1,
+         "insufficient": false,
+         "condition": "macd_below_signal_above_zero"
+        },
+        "stoch": {
+         "n": 62,
+         "median_pct": 0.1,
+         "p10_pct": -1.8,
+         "p90_pct": 1.7,
+         "insufficient": false,
+         "condition": "stoch_mid"
+        }
+       }
+      },
+      {
+       "tf": "4h",
+       "n_bars": 430,
+       "last_t": "2026-10-14 01:00",
+       "close_x": 37205,
+       "horizon_bars": 5,
+       "rsi": {
+        "rsi": 37,
+        "recent": [
+         61.3,
+         53.4,
+         54.7,
+         55.4,
+         57.8,
+         54.9,
+         54,
+         57.5,
+         52.3,
+         51.7,
+         45.4,
+         50,
+         48.3,
+         50.9,
+         56.7,
+         51.1,
+         46.9,
+         49.2,
+         47.6,
+         37
+        ],
+        "zone": "mid",
+        "bars_in_zone": 24
+       },
+       "macd": {
+        "macd_yen": -16,
+        "signal_yen": 21,
+        "hist_yen": -37,
+        "recent_hist_yen": [
+         1,
+         -12,
+         -19,
+         -23,
+         -21,
+         -24,
+         -26,
+         -22,
+         -26,
+         -28,
+         -36,
+         -34,
+         -34,
+         -30,
+         -20,
+         -19,
+         -22,
+         -21,
+         -22,
+         -37
+        ],
+        "above_signal": false,
+        "bars_since_cross": 19,
+        "above_zero": false
+       },
+       "stoch": {
+        "stoch_k": 24.4,
+        "stoch_d": 32,
+        "recent_k": [
+         79,
+         67.1,
+         62.9,
+         48.6,
+         50.3,
+         46.5,
+         45.5,
+         46,
+         42.9,
+         44.6,
+         30,
+         32.3,
+         28.5,
+         38.8,
+         52.3,
+         59.3,
+         52.8,
+         39.3,
+         32.3,
+         24.4
+        ],
+        "zone": "mid",
+        "bars_in_zone": 20,
+        "k_above_d": false,
+        "bars_since_cross": 4
+       },
+       "base_rates": {
+        "all": {
+         "n": 85,
+         "median_pct": 0,
+         "p10_pct": -0.5,
+         "p90_pct": 0.7,
+         "insufficient": false
+        },
+        "rsi": {
+         "n": 81,
+         "median_pct": 0.1,
+         "p10_pct": -0.6,
+         "p90_pct": 0.7,
+         "insufficient": false,
+         "condition": "rsi_mid"
+        },
+        "macd": {
+         "n": 25,
+         "median_pct": 0.1,
+         "p10_pct": -0.4,
+         "p90_pct": 0.7,
+         "insufficient": false,
+         "condition": "macd_below_signal_below_zero"
+        },
+        "stoch": {
+         "n": 62,
+         "median_pct": 0,
+         "p10_pct": -0.5,
+         "p90_pct": 0.8,
+         "insufficient": false,
+         "condition": "stoch_mid"
+        }
+       }
+      }
+     ]
+    }
+   },
+   {
+    "input": {
+     "timeframes": [
+      "daily"
+     ],
+     "indicators": [
+      "rsi"
+     ]
+    },
+    "result": {
+     "params": {
+      "rsi": 14,
+      "macd": [
+       12,
+       26,
+       9
+      ],
+      "stoch": [
+       14,
+       3,
+       3
+      ],
+      "rsi_zones": [
+       30,
+       70
+      ],
+      "stoch_zones": [
+       20,
+       80
+      ]
+     },
+     "frames": [
+      {
+       "tf": "daily",
+       "n_bars": 522,
+       "last_t": "2026-10-13",
+       "close_x": 37205,
+       "horizon_bars": 5,
+       "rsi": {
+        "rsi": 51.4,
+        "recent": [
+         69.8,
+         62.9,
+         67.1,
+         64.8,
+         64.8,
+         58.3,
+         60.4,
+         52.6,
+         54.4,
+         52.1,
+         55.1,
+         53.5,
+         60.9,
+         64.1,
+         67,
+         64.7,
+         65.6,
+         62.3,
+         64.3,
+         51.4
+        ],
+        "zone": "mid",
+        "bars_in_zone": 92
+       },
+       "base_rates": {
+        "all": {
+         "n": 104,
+         "median_pct": 0,
+         "p10_pct": -1.5,
+         "p90_pct": 1.8,
+         "insufficient": false
+        },
+        "rsi": {
+         "n": 96,
+         "median_pct": 0,
+         "p10_pct": -1.3,
+         "p90_pct": 1.4,
+         "insufficient": false,
+         "condition": "rsi_mid"
+        }
+       }
+      }
+     ]
+    }
+   },
+   {
+    "input": {
+     "timeframes": [
+      "4h",
+      "weekly"
+     ],
+     "indicators": [
+      "macd",
+      "stoch"
+     ],
+     "horizon_bars": 3
+    },
+    "result": {
+     "params": {
+      "rsi": 14,
+      "macd": [
+       12,
+       26,
+       9
+      ],
+      "stoch": [
+       14,
+       3,
+       3
+      ],
+      "rsi_zones": [
+       30,
+       70
+      ],
+      "stoch_zones": [
+       20,
+       80
+      ]
+     },
+     "frames": [
+      {
+       "tf": "weekly",
+       "n_bars": 105,
+       "last_t": "2026-10-12",
+       "close_x": 37205,
+       "horizon_bars": 3,
+       "macd": {
+        "macd_yen": 229,
+        "signal_yen": 89,
+        "hist_yen": 140,
+        "recent_hist_yen": [
+         -107,
+         -83,
+         -31,
+         52,
+         82,
+         137,
+         171,
+         158,
+         179,
+         179,
+         137,
+         96,
+         53,
+         69,
+         109,
+         148,
+         139,
+         149,
+         162,
+         140
+        ],
+        "above_signal": true,
+        "bars_since_cross": 17,
+        "above_zero": true
+       },
+       "stoch": {
+        "stoch_k": 82.2,
+        "stoch_d": 81,
+        "recent_k": [
+         14,
+         18.1,
+         33.9,
+         61.5,
+         71.8,
+         84.1,
+         86.3,
+         87.6,
+         86,
+         84,
+         81.2,
+         72,
+         61.1,
+         65.2,
+         76.5,
+         91.4,
+         86.4,
+         81.9,
+         78.8,
+         82.2
+        ],
+        "zone": "high",
+        "bars_in_zone": 1,
+        "k_above_d": true,
+        "bars_since_cross": 1
+       },
+       "base_rates": {
+        "all": {
+         "n": 34,
+         "median_pct": -0.3,
+         "p10_pct": -2.4,
+         "p90_pct": 2.7,
+         "insufficient": false
+        },
+        "macd": {
+         "n": 5,
+         "median_pct": 0.7,
+         "p10_pct": -2.8,
+         "p90_pct": 2.8,
+         "insufficient": true,
+         "condition": "macd_above_signal_above_zero"
+        },
+        "stoch": {
+         "n": 8,
+         "median_pct": -0.7,
+         "p10_pct": -2.6,
+         "p90_pct": 1.5,
+         "insufficient": true,
+         "condition": "stoch_high"
+        }
+       }
+      },
+      {
+       "tf": "4h",
+       "n_bars": 430,
+       "last_t": "2026-10-14 01:00",
+       "close_x": 37205,
+       "horizon_bars": 3,
+       "macd": {
+        "macd_yen": -16,
+        "signal_yen": 21,
+        "hist_yen": -37,
+        "recent_hist_yen": [
+         1,
+         -12,
+         -19,
+         -23,
+         -21,
+         -24,
+         -26,
+         -22,
+         -26,
+         -28,
+         -36,
+         -34,
+         -34,
+         -30,
+         -20,
+         -19,
+         -22,
+         -21,
+         -22,
+         -37
+        ],
+        "above_signal": false,
+        "bars_since_cross": 19,
+        "above_zero": false
+       },
+       "stoch": {
+        "stoch_k": 24.4,
+        "stoch_d": 32,
+        "recent_k": [
+         79,
+         67.1,
+         62.9,
+         48.6,
+         50.3,
+         46.5,
+         45.5,
+         46,
+         42.9,
+         44.6,
+         30,
+         32.3,
+         28.5,
+         38.8,
+         52.3,
+         59.3,
+         52.8,
+         39.3,
+         32.3,
+         24.4
+        ],
+        "zone": "mid",
+        "bars_in_zone": 20,
+        "k_above_d": false,
+        "bars_since_cross": 4
+       },
+       "base_rates": {
+        "all": {
+         "n": 142,
+         "median_pct": 0,
+         "p10_pct": -0.5,
+         "p90_pct": 0.6,
+         "insufficient": false
+        },
+        "macd": {
+         "n": 38,
+         "median_pct": 0.2,
+         "p10_pct": -0.3,
+         "p90_pct": 0.5,
+         "insufficient": false,
+         "condition": "macd_below_signal_below_zero"
+        },
+        "stoch": {
+         "n": 95,
+         "median_pct": 0,
+         "p10_pct": -0.4,
+         "p90_pct": 0.6,
+         "insufficient": false,
+         "condition": "stoch_mid"
+        }
+       }
+      }
+     ]
+    }
+   }
+  ],
+  "errors": [
+   {
+    "input": {
+     "timeframes": [
+      "1m"
+     ]
+    },
+    "result": {
+     "error": "bad_input"
+    }
+   },
+   {
+    "input": {
+     "horizon_bars": 30
+    },
+    "result": {
+     "error": "out_of_range"
+    }
+   },
+   {
+    "input": {},
+    "result": {
+     "error": "no_data"
+    }
+   }
+  ]
+ }
 }

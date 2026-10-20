@@ -9,7 +9,8 @@
  *   （ui/view/aiNumbers.ts）。評価できない値（非有限）は null
  * - 単位はキーの名前（`*_yen` 円、`x`・`k`・`*_x` 原資産・行使価格、`*_pct` %、`*_pt` pt、`delta_*` 枚、`*days*` 日、
  *   `*ratio` 倍）
- * - 失敗は `{ error: '<列挙>' }`（no_legs・bad_input・out_of_range・unknown_tool）。中継へは tool_result の is_error
+ * - 失敗は `{ error: '<列挙>' }`（no_legs・bad_input・out_of_range・unknown_tool・no_data）。中継へは tool_result の is_error
+ * - technicals（#200）は足が無くても使える（先物の足。ui/view/aiTechnicals.ts）。事前計算には入れない
  */
 
 import type { Chain } from '../../data';
@@ -23,6 +24,7 @@ import {
   theoreticalPnl,
   ZERO_SCENARIO,
 } from '../../model';
+import { type TechnicalsData, technicalsTool } from './aiTechnicals';
 import { fmtNum } from './format';
 import { type MarginCalc, marginLine, marginNow, marginPoint, marginTail } from './margin';
 import { AMOUNT_UNIT_LABEL, fmtAmount, metricsModel } from './metrics';
@@ -36,10 +38,14 @@ export interface AiToolEnv {
   atmBasis: AtmBasis;
   margin: { params: MarginParams; capital: number | null };
   holidays: Holidays;
+  /** 先物の日足・1 時間足（technicals の道具だけ。#200。呼ばれたときだけフックが読んで入れる。無ければ no_data） */
+  technicals?: TechnicalsData | null;
 }
 
 export type ToolResult = Record<string, unknown>;
-export type ToolError = { error: 'no_legs' | 'bad_input' | 'out_of_range' | 'unknown_tool' };
+export type ToolError = {
+  error: 'no_legs' | 'bad_input' | 'out_of_range' | 'unknown_tool' | 'no_data';
+};
 
 /** 道具の名前（名前の順。中継の tools.py と同じ集合） */
 export const AI_TOOL_NAMES = [
@@ -49,6 +55,7 @@ export const AI_TOOL_NAMES = [
   'scenario_grid',
   'smile_position',
   'tail_table',
+  'technicals',
 ] as const;
 export type AiToolName = (typeof AI_TOOL_NAMES)[number];
 /** 診断で事前計算する 5 本（入力なし。最初の要求の context.precomputed） */
@@ -68,6 +75,7 @@ export const AI_TOOL_LABEL: Record<AiToolName, string> = {
   scenario_grid: 'シナリオの格子',
   smile_position: 'スマイルと足の IV',
   evaluate_scenario: 'シナリオの評価',
+  technicals: 'テクニカル（先物）',
 };
 
 export const isAiToolName = (v: unknown): v is AiToolName =>
@@ -410,6 +418,7 @@ export function runTool(
 ): ToolResult | ToolError {
   if (!isAiToolName(name)) return { error: 'unknown_tool' };
   if (name === 'smile_position') return smilePosition(env);
+  if (name === 'technicals') return technicalsTool(env.technicals ?? null, input);
   const base = env.base;
   if (!base || base.legs.length === 0) return { error: 'no_legs' };
   switch (name) {
@@ -543,6 +552,26 @@ export function toolCard(
         title,
         input: null,
         lines: [`必要証拠金 ${cardYen(now.margin_yen, false)} · 余力 ${cardYen(now.room_yen)}`],
+        applicable: false,
+      };
+    }
+    case 'technicals': {
+      const frames = Array.isArray(r.frames) ? r.frames.map(obj) : [];
+      const tfText: Record<string, string> = { weekly: '週足', daily: '日足', '4h': '4 時間足' };
+      return {
+        title,
+        input: null,
+        lines: frames.map((f) => {
+          const parts: string[] = [];
+          const rsi = obj(f.rsi);
+          if (num(rsi.rsi) !== null) parts.push(`RSI ${fmtNum(num(rsi.rsi), 1)}`);
+          const m = obj(f.macd);
+          const hist = num(m.hist_yen);
+          if (hist !== null) parts.push(`MACD H ${hist > 0 ? '+' : ''}${fmtNum(hist, 0)}`);
+          const so = obj(f.stoch);
+          if (num(so.stoch_k) !== null) parts.push(`SO %K ${fmtNum(num(so.stoch_k), 1)}`);
+          return `${tfText[String(f.tf)] ?? '—'}: ${parts.join(' · ') || '—'}`;
+        }),
         applicable: false,
       };
     }

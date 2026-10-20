@@ -2,6 +2,7 @@ import type { ComponentChildren } from 'preact';
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'preact/hooks';
 import { defaultName } from '../book';
 import type { Domain } from '../chart/scale';
+import { loadTechnicalsData } from '../components/technicalsData';
 import {
   type Boot,
   DEV_FIXTURES,
@@ -245,6 +246,8 @@ export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
   const marginRef = useRef(userPrefs.prefs.margin);
   marginRef.current = userPrefs.prefs.margin;
   const aiEnv = useCallback(() => aiEnvFromState(stateRef.current, marginRef.current), []);
+  // technicals の道具（#200）: 先物推移と同じ口から日足・1 時間足を読む（呼ばれたときだけ・10 分覚える）
+  const aiTech = useCallback(() => loadTechnicalsData(futEndpoint), [futEndpoint]);
   const aiApi = useRef<AiPanelApi | null>(null);
   const aiBase =
     import.meta.env.DEV && state.sourceLabel !== API_LABEL ? '/fixtures/ai' : '/api/ai';
@@ -711,6 +714,7 @@ export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
             visible={aiVisible(shell, tier)}
             base={aiBase}
             env={aiEnv}
+            tech={aiTech}
             hasChain={chain !== null}
             legCount={c.pnlBase?.legs.length ?? 0}
             x0={c.positions?.ctx.x0 ?? Number.NaN}

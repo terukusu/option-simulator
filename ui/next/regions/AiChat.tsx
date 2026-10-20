@@ -16,6 +16,7 @@ import {
   remainingText,
   sendBlocked,
 } from '../../view/aiChat';
+import type { TechnicalsData } from '../../view/aiTechnicals';
 import { answerModel, type MarkedInline } from '../../view/aiText';
 import { type AiToolEnv, scenarioOfResult, toolCard } from '../../view/aiTools';
 import { PANEL_FOCUS_LABEL } from '../../view/keys';
@@ -62,6 +63,8 @@ function AiPanelView(p: {
   visible: boolean;
   base: string;
   env: () => AiToolEnv | null;
+  /** technicals の道具の先物の足の読み込み（#200。NextApp が口を決める） */
+  tech?: () => Promise<TechnicalsData>;
   hasChain: boolean;
   legCount: number;
   x0: number;
@@ -70,7 +73,7 @@ function AiPanelView(p: {
   onApplyScenario: (s: AiApply) => void;
   apiRef: { current: AiPanelApi | null };
 }) {
-  const chat = useAiChat(p.visible, p.base, p.env);
+  const chat = useAiChat(p.visible, p.base, p.env, p.tech);
   const gate = { hasChain: p.hasChain, legCount: p.legCount };
   p.apiRef.current = {
     diagnose: chat.diagnose,
