@@ -13,13 +13,13 @@ import {
   todayScenario,
 } from '../../ui/view/pnlChart';
 import {
+  CLOSE_HIT_PX,
   CROSS_X_STEP,
-  inCrossRead,
+  inCrossClose,
   markLabelBox,
   type PnlCursor,
   pnlCrosshair,
   pnlCursorAt,
-  READ_HIT_PAD,
 } from '../../ui/view/pnlCrosshair';
 import { labelWidth } from '../../ui/view/scenarioMarks';
 import { M1, M2, makeMarket } from '../support/market';
@@ -172,6 +172,42 @@ describe('範囲の外（#201）', () => {
   });
 });
 
+describe('格子に乗らない表示範囲（#201 レビュー B1）', () => {
+  for (const { name, width, height } of SIZES) {
+    it(`${name}: 3 円・7 円パンした範囲でも、描画域の左端・右端（端へ寄せたカーソル）で十字線が出て X は範囲の内側の 10 円の格子`, () => {
+      const init = chartOf(SC, width, height);
+      for (const shift of [3, 7, -3]) {
+        const vp: Domain = [init.domain[0] + shift, init.domain[1] + shift];
+        const chart = chartOf(SC, width, height, vp);
+        const [lo, hi] = chart.domain;
+        expect(lo % 10).not.toBe(0);
+        const { plot } = chart;
+        for (const sx of [
+          plot.left - 30,
+          plot.left,
+          plot.left + plot.width,
+          plot.left + plot.width + 30,
+        ]) {
+          const at = pnlCursorAt(chart, sx, plot.top + plot.height / 2, true);
+          if (!at) throw new Error('カーソルが無い');
+          const r = crossOf(chart, { ...at, pinned: true }, width, height);
+          expect(r).not.toBeNull();
+          expect(r?.x).toBeGreaterThanOrEqual(lo);
+          expect(r?.x).toBeLessThanOrEqual(hi);
+          expect((r?.x ?? 1) % CROSS_X_STEP).toBe(0);
+        }
+        // 丸める前の X が範囲の外（パンで外れた）なら null
+        expect(
+          crossOf(chart, { x: lo - 1, y: midY(chart), pinned: true }, width, height),
+        ).toBeNull();
+        expect(
+          crossOf(chart, { x: hi + 1, y: midY(chart), pinned: true }, width, height),
+        ).toBeNull();
+      }
+    });
+  }
+});
+
 describe('置き場所（#201）', () => {
   for (const { name, width, height } of SIZES) {
     it(`${name}: 札・読み取り・点が svg / 描画域の内側（X を左端〜右端、損益を上端〜下端で 11 × 5 点）`, () => {
@@ -186,6 +222,8 @@ describe('置き場所（#201）', () => {
             const x = lo + ((hi - lo) * i) / 10;
             const y = ylo + ((yhi - ylo) * j) / 4;
             const r = crossOf(chart, { x, y, pinned }, width, height);
+            // 端（i = 0 / 10）も含めてすべて出る
+            expect(r).not.toBeNull();
             if (!r) continue;
             n++;
             for (const t of [r.xTag, r.yTag]) {
@@ -327,14 +365,18 @@ describe('画素 → 値・読み取りのタップ（#201）', () => {
     expect(c?.y).toBeCloseTo(chart.yDomain[1], 6);
   });
 
-  it('inCrossRead: 箱 + 余白の中だけ true', () => {
+  it('inCrossClose: × の中心 ±CLOSE_HIT_PX だけ true（箱のほかの所・× の無い十字線は false）', () => {
     const chart = chartOf(SC, 900, 420);
     const r = crossOf(chart, { x: x0, y: midY(chart), pinned: true }, 900, 420);
-    const b = r?.read.box;
-    if (!r || !b) throw new Error('箱が無い');
-    expect(inCrossRead(r, (b.x0 + b.x1) / 2, (b.y0 + b.y1) / 2)).toBe(true);
-    expect(inCrossRead(r, b.x1 + READ_HIT_PAD, b.y0)).toBe(true);
-    expect(inCrossRead(r, b.x1 + READ_HIT_PAD + 1, b.y0)).toBe(false);
-    expect(inCrossRead(null, 0, 0)).toBe(false);
+    const k = r?.read.close;
+    if (!r || !k) throw new Error('× が無い');
+    expect(inCrossClose(r, k.x, k.y)).toBe(true);
+    expect(inCrossClose(r, k.x + CLOSE_HIT_PX, k.y - CLOSE_HIT_PX)).toBe(true);
+    expect(inCrossClose(r, k.x + CLOSE_HIT_PX + 1, k.y)).toBe(false);
+    const row = r.read.items[r.read.items.length - 1];
+    expect(inCrossClose(r, r.read.textX, row?.y ?? 0)).toBe(false);
+    const hover = crossOf(chart, { x: x0, y: midY(chart), pinned: false }, 900, 420);
+    expect(inCrossClose(hover, k.x, k.y)).toBe(false);
+    expect(inCrossClose(null, 0, 0)).toBe(false);
   });
 });

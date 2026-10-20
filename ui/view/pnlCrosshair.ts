@@ -11,7 +11,7 @@
  * - 読み取り = 線ごとの 1 行（`満 / 指 / 今` + 符号つきの金額 + 単位。単位はグラフの縦軸の単位。範囲外は ▲ / ▼）を
  *   積み上げた箱。縦線と反対の側（左右）の上端。箱が縦線に届き、横線・点を覆うなら下端（足マーカーの帯の上）。箱が障害物
  *   （IV レールの吹き出し・追証の札・交点のラベル）に重なるならもう一方の高さ。タッチで置いた十字線（pinned）は箱の右上に × を出し、
- *   箱のタップで消す（当たりは箱 + READ_HIT_PAD）
+ *   × のタップで消す（当たりは × の中心から ±CLOSE_HIT_PX。箱のほかの所のタップは十字線をそこへ移す）
  */
 
 import type { Scenario } from '../../model';
@@ -31,8 +31,8 @@ export const READ_ROW = 14;
 export const READ_PAD = 4;
 /** × の幅（px。pinned のとき箱の右に足す） */
 export const READ_CLOSE_W = 16;
-/** 読み取りの箱のタップの当たりの余白（px） */
-export const READ_HIT_PAD = 6;
+/** × のタップの当たり（中心から左右・上下の px。24px の四角） */
+export const CLOSE_HIT_PX = 12;
 /** 交点をつかむ距離（px。舞台のハンドルと同じ） */
 export const CROSS_GRAB_PX = 14;
 /** 11px の文字の幅（labelWidth は 10px の見積もり） */
@@ -112,9 +112,13 @@ export function pnlCrosshair(p: PnlCrosshairInput): PnlCrosshair | null {
   const { base, chart, cursor } = p;
   if (!base || chart.empty || !cursor) return null;
   if (!Number.isFinite(cursor.x)) return null;
-  const x = crossX(cursor.x);
   const [lo, hi] = chart.domain;
-  if (!(x >= lo && x <= hi)) return null;
+  // 外れの判定は丸める前の X。格子は範囲の内側に収める（パンで範囲が格子に乗らないとき端で消えない。範囲の幅は
+  // minWidth から 10 円より広い）
+  if (!(cursor.x >= lo && cursor.x <= hi)) return null;
+  const gLo = Math.ceil(lo / CROSS_X_STEP) * CROSS_X_STEP;
+  const gHi = Math.floor(hi / CROSS_X_STEP) * CROSS_X_STEP;
+  const x = gLo <= gHi ? clamp(crossX(cursor.x), gLo, gHi) : cursor.x;
   const { plot } = chart;
   const right = plot.left + plot.width;
   const bottom = plot.top + plot.height;
@@ -248,14 +252,9 @@ export function pnlCursorAt(
   };
 }
 
-/** 読み取りの箱（+ READ_HIT_PAD）の中か（タッチで置いた十字線を消すタップ） */
-export function inCrossRead(c: PnlCrosshair | null, sx: number, sy: number): boolean {
-  if (!c) return false;
-  const b = c.read.box;
-  return (
-    sx >= b.x0 - READ_HIT_PAD &&
-    sx <= b.x1 + READ_HIT_PAD &&
-    sy >= b.y0 - READ_HIT_PAD &&
-    sy <= b.y1 + READ_HIT_PAD
-  );
+/** × の当たりの中か（タッチで置いた十字線を消すタップ。× が無ければ false） */
+export function inCrossClose(c: PnlCrosshair | null, sx: number, sy: number): boolean {
+  const k = c?.read.close;
+  if (!k) return false;
+  return Math.abs(sx - k.x) <= CLOSE_HIT_PX && Math.abs(sy - k.y) <= CLOSE_HIT_PX;
 }

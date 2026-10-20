@@ -2842,7 +2842,7 @@ async function runFlows() {
   for (const vp of [phone, { width: 900, height: 1100 }]) await ivDockFlows(vp);
   // #190 先物推移の遅延ロード・IV 推移と要求が混ざらない・限月交代の印・切替で足を保つ（AC-9）
   for (const vp of [phone, pc]) await futFlows(vp);
-  // #201 損益グラフの十字線（PC のホバー・タッチのタップ / 交点のドラッグ / 読み取りのタップ・長押しとパンは今のまま）
+  // #201 損益グラフの十字線（PC のホバー・タッチのタップ / 交点のドラッグ / 読み取りの箱のタップで移る / × で消す・長押しとパンは今のまま）
   await pnlCrossFlows(pc);
   await pnlCrossTouchFlow();
   // #174 追証マップの開閉の時間・開いたときの滑らかなスクロールとスピナー（AC4）
@@ -9876,7 +9876,7 @@ async function pnlCrossFlows(vp) {
 
 /**
  * 390×844 のタッチ（CDP。#201 AC-5）: タップで十字線（× あり）→ 交点をドラッグで動く（ページ・シートは動かない）→
- * 読み取りのタップで消える → 長押しでシナリオ点・すぐのドラッグでパン（十字線は出ない）・描画域の外のタップで消える
+ * 読み取りの箱（× 以外）のタップで移る → × のタップで消える → 長押しでシナリオ点・すぐのドラッグでパン（十字線は出ない）・描画域の外のタップで消える
  */
 async function pnlCrossTouchFlow() {
   const tag = '390x844 touch';
@@ -9949,17 +9949,29 @@ async function pnlCrossTouchFlow() {
     `x ${st1?.vx} → ${st2?.vx}・y ${st1?.hy} → ${st2?.hy}・札 ${st1?.xTag} → ${st2?.xTag}・目盛り ${st2?.ticksX.map((t) => t[1]).join() === ticks1 ? '同じ' : '変わった'}`,
   );
   if (shotsDir) await page.screenshot({ path: join(shotsDir, `flows-pnl-cross-${tag}.png`) });
-  // (c) 読み取りのタップで消える
-  const rb = await page.evaluate(() => {
-    const g = document.querySelector('section.stage .chart .xh-read');
-    const r = g?.getBoundingClientRect();
-    return r ? { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) } : null;
-  });
+  // (c) 読み取りの箱（× 以外 = 最後の行）のタップは十字線をそこへ移す、× のタップで消える
+  const center = (sel) =>
+    page.evaluate((q) => {
+      const els = document.querySelectorAll(q);
+      const r = els[els.length - 1]?.getBoundingClientRect();
+      return r
+        ? { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) }
+        : null;
+    }, sel);
+  const rb = await center('section.stage .chart .xh-read .xh-val');
   if (rb) await tapAt(rb);
+  const stMoved = await pnlCrossState(page);
+  check(
+    `#201 ${tag} 読み取りの箱（× 以外）のタップで十字線がそこへ移る（消えない）`,
+    !!rb && stMoved?.lines === 2 && Math.abs((stMoved.vx ?? 0) - (rb.x - stMoved.left)) <= 6,
+    `${stMoved?.lines} 本・縦線 x ${stMoved?.vx}（指 ${rb ? rb.x - (stMoved?.left ?? 0) : '-'}）`,
+  );
+  const xb = await center('section.stage .chart .xh-close');
+  if (xb) await tapAt(xb);
   const st3 = await pnlCrossState(page);
   check(
-    `#201 ${tag} 読み取りのタップで十字線 0 本・札 0 個`,
-    !!rb && st3?.lines === 0 && st3.tags.length === 0,
+    `#201 ${tag} × のタップで十字線 0 本・札 0 個`,
+    !!xb && st3?.lines === 0 && st3.tags.length === 0,
     `${st3?.lines} 本`,
   );
   // (d) 長押しでシナリオ点（十字線は出ない）

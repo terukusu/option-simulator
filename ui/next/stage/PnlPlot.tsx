@@ -11,7 +11,7 @@ import type { PinLabel } from '../../view/pins';
 import { type PnlBase, type PnlChartModel, Y_UNIT_LABEL } from '../../view/pnlChart';
 import {
   CROSS_GRAB_PX,
-  inCrossRead,
+  inCrossClose,
   markLabelBox,
   type PnlCursor,
   pnlCrosshair,
@@ -51,7 +51,7 @@ const STAGE_GRAB_PX = 14;
 const KIND_CLASS = { expiry: 'expiry', date: 'date', today: 'today' } as const;
 
 const LINE_LABEL =
-  '損益グラフ（マウスを載せる・タップで十字線（タップで置いた十字線は交点をドラッグで動かし、読み取りのタップで消す）、ドラッグでパン、ホイール・ピンチで拡大、ダブルクリックでリセット、ハンドルをつかむか長押しして左右にドラッグでシナリオ点 ΔX、足のマーカーで足を選ぶ・長押しして横にドラッグで行使価格。キー: ← / → ΔX ∓100 円（Shift で 1,000 円）、↑ / ↓ Δσ ±0.5pt、[ / ] 経過日数 ∓1 日、0 シナリオを 0 に、+ / − 拡大縮小、R リセット）';
+  '損益グラフ（マウスを載せる・タップで十字線（タップで置いた十字線は交点をドラッグで動かし、読み取りの × のタップで消す）、ドラッグでパン、ホイール・ピンチで拡大、ダブルクリックでリセット、ハンドルをつかむか長押しして左右にドラッグでシナリオ点 ΔX、足のマーカーで足を選ぶ・長押しして横にドラッグで行使価格。キー: ← / → ΔX ∓100 円（Shift で 1,000 円）、↑ / ↓ Δσ ±0.5pt、[ / ] 経過日数 ∓1 日、0 シナリオを 0 に、+ / − 拡大縮小、R リセット）';
 const SURFACE_LABEL =
   '損益の面（横 原資産・縦 経過日数・色 損益。描画域を押してドラッグでシナリオ点の ΔX と経過日数 d を同時に動かす、2 本指・横ホイールでパン、ホイール・ピンチで拡大、ダブルクリック / ダブルタップでリセット、足のマーカーで足を選ぶ・長押しして横にドラッグで行使価格。キー: ← / → ΔX ∓100 円（Shift で 1,000 円）、↑ / ↓ Δσ ±0.5pt、[ / ] 経過日数 ∓1 日、0 シナリオを 0 に、+ / − 拡大縮小、R リセット）';
 
@@ -70,7 +70,7 @@ function readSurfaceColors(): SurfaceColors | null {
  * 面モード（#88 段 B）: 描画域を押すとすぐ面の点をつかみ、位置 → (ΔX, d) を 1 フレーム 1 回の setScenario に入れる
  * （surfaceDragPatch）。2 本目の指・cancel は押す前の値に戻す。つかんでいる間は .live。
  * 十字線（#201。線モードだけ）: カーソルは値の座標のローカル state（pnlCrosshair）。マウスのホバーで置き外れて消す、
- * タッチ・ペンのタップで置く（pinned。交点の ±14px をドラッグで動かす = gesture の cross、読み取りのタップ・描画域の外の
+ * タッチ・ペンのタップで置く（pinned。交点の ±14px をドラッグで動かす = gesture の cross、読み取りの ×・描画域の外の
  * タップ・ダブルタップ（リセット）で消す）。面・ミニ・空では消す。
  */
 export function PnlPlot(p: {
@@ -111,6 +111,10 @@ export function PnlPlot(p: {
   /** 十字線のカーソル（値の座標。#201）と、最後に押したポインタの種類（マウスのクリックでは置かない） */
   const [cursor, setCursor] = useState<PnlCursor | null>(null);
   const pointerType = useRef('mouse');
+  /** ホバーの位置を 1 フレーム 1 回にまとめる（rAF） */
+  const hoverFrame = useRef(0);
+  const hoverAt = useRef<{ x: number; y: number } | null>(null);
+  useEffect(() => () => cancelAnimationFrame(hoverFrame.current), []);
   const crossOn = !surfaceOn && !mini && !model.empty;
   useEffect(() => {
     if (!crossOn) setCursor(null);
@@ -272,10 +276,10 @@ export function PnlPlot(p: {
       if (v === null) setCursor(null);
       dispatch({ type: 'setPnlViewport', viewport: v });
     },
-    // 十字線（#201。線モード）: タッチ・ペンのタップで置く / 移す。読み取りの箱・描画域の外のタップで消す
+    // 十字線（#201。線モード）: タッチ・ペンのタップで置く / 移す。読み取りの ×・描画域の外のタップで消す
     onTap: (x: number, y: number) => {
       if (!crossOn || pointerType.current === 'mouse') return;
-      if (cursor?.pinned && inCrossRead(cross, x + ox, y + frame.offsetY)) {
+      if (cursor?.pinned && inCrossClose(cross, x + ox, y + frame.offsetY)) {
         setCursor(null);
         return;
       }
@@ -390,16 +394,22 @@ export function PnlPlot(p: {
         // 十字線のホバー（マウス・ボタンを押していない間だけ。押している間は値の座標のまま = パンで付いて動く）
         if (!crossOn || e.pointerType !== 'mouse' || e.buttons !== 0) return;
         const r = e.currentTarget.getBoundingClientRect();
-        const at = pnlCursorAt(
-          model,
-          e.clientX - r.left + ox,
-          e.clientY - r.top + frame.offsetY,
-          false,
-        );
-        setCursor(at ? { ...at, pinned: false } : null);
+        hoverAt.current = { x: e.clientX - r.left + ox, y: e.clientY - r.top + frame.offsetY };
+        if (hoverFrame.current) return;
+        hoverFrame.current = requestAnimationFrame(() => {
+          hoverFrame.current = 0;
+          const h = hoverAt.current;
+          if (!h) return;
+          // 位置 → 値は予約した描画の model で読む（1 フレーム以内の差）
+          const at = pnlCursorAt(model, h.x, h.y, false);
+          setCursor(at ? { ...at, pinned: false } : null);
+        });
       }}
       onPointerLeave={(e) => {
-        if (e.pointerType === 'mouse') setCursor((c) => (c && !c.pinned ? null : c));
+        if (e.pointerType !== 'mouse') return;
+        // 未反映のホバーを捨ててから消す
+        hoverAt.current = null;
+        setCursor((c) => (c && !c.pinned ? null : c));
       }}
     >
       {surfaceOn && (
