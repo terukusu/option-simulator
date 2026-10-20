@@ -457,9 +457,11 @@
   font-size: var(--fs-xs);
 }
 
-/* 段の切替がある凡例（先物推移。#200）は、市場の列の狭い PC（列 360〜432px）でも 1 行に入るよう補足と「確定前」を隠す */
+/*
+ * 段の切替がある凡例（先物推移。#200）は、市場の列の狭い PC（列 420〜520px）でも 1 行に入るよう補足「（ラージ・期近・円）」
+ * だけを隠す（「薄い足 = 確定前」は残す。420px 未満は IV 推移と同じ上の規則で両方隠す）
+ */
 @container (max-width: 519.98px) {
-  .iv-legend:has(> .ind-toggles) > .prog,
   .iv-legend:has(> .ind-toggles) .long {
     display: none;
   }

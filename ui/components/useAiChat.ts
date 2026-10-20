@@ -163,15 +163,25 @@ export function useAiChat(
       let technicals: TechnicalsData | null = null;
       const load = techRef.current;
       if (load && pendingToolUses(s0).some((u) => u.name === 'technicals')) {
+        // 読んでいる間も [停止] が効くように、読み込みに中止の控えを割り当てる（#200 レビュー指摘 2）
+        const ac = new AbortController();
+        abortRef.current = ac;
         try {
           technicals = await load();
         } catch {
           technicals = null;
+        } finally {
+          if (abortRef.current === ac) abortRef.current = null;
+        }
+        if (ac.signal.aborted) {
+          // 中止: 道具の結果を送らない（新しい会話・別の turn に移っていれば何もしない）
+          if (stateRef.current === s0) apply({ type: 'fail', code: 'aborted' });
+          break;
         }
       }
-      // 読んでいる間に中止・新しい会話になったら道具を返さない
+      // 読んでいる間に状態が変わった（新しい会話・別の turn）なら道具を返さない
       const s = stateRef.current as AiChatState;
-      if (s !== s0 && !s.turn?.awaitingTools) break;
+      if (s !== s0) break;
       const e = envRef.current();
       const blocks = toolResultBlocks(s, (name, input) =>
         e ? runTool(name, input, { ...e, technicals }) : { error: 'no_legs' },

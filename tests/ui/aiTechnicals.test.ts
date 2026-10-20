@@ -92,6 +92,21 @@ describe('結果', () => {
     const b = techFrame(bars, 'daily', ['rsi'], 5) as { base_rates: { all: unknown } };
     expect(b.base_rates.all).toEqual(a.base_rates.all);
   });
+  it('限月交代をまたぐ窓は基準率から除く（rolls_excluded）。最新の足は確定前のことがある印', () => {
+    const f = run({ timeframes: ['weekly'] }).frames[0];
+    expect(f.last_bar_may_be_partial).toBe(true);
+    // 合成の足は四半期ごとに限月が替わる = 週足 4 本先の窓の一部が交代をまたぐ
+    expect(f.base_rates.all.rolls_excluded).toBeGreaterThan(0);
+    // 限月を 1 つにすると除かれない（件数は除いた分だけ増える = 窓の選び方は同じ規則）
+    const one = { daily: data.daily.map((b) => ({ ...b, m: '2026-12' })), hourly: [] };
+    const g = (
+      technicalsTool(one, { timeframes: ['weekly'] }) as {
+        frames: { base_rates: { all: { n: number; rolls_excluded: number } } }[];
+      }
+    ).frames[0];
+    expect(g?.base_rates.all.rolls_excluded).toBe(0);
+    expect(g?.base_rates.all.n).toBeGreaterThan(f.base_rates.all.n);
+  });
   it('指標・足を絞る、horizon_bars', () => {
     const r = run({ timeframes: ['4h', 'weekly'], indicators: ['stoch'], horizon_bars: 3 });
     expect(r.frames.map((f: { tf: string }) => f.tf)).toEqual(['weekly', '4h']);
@@ -101,6 +116,7 @@ describe('結果', () => {
       'last_t',
       'close_x',
       'horizon_bars',
+      'last_bar_may_be_partial',
       'stoch',
       'base_rates',
     ]);

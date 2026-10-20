@@ -152,6 +152,7 @@ COUNT = Num(0, 100_000, integer=True)
 ZONE = Enum(("high", "low", "mid", None))
 BARS_SINCE = Num(0, 100_000, integer=True, nullable=True)
 BASE_RATE = Obj({"n": COUNT, "median_pct": PCT, "p10_pct": PCT, "p90_pct": PCT, "insufficient": Bool(),
+                 "rolls_excluded": COUNT,
                  "condition": Enum(("rsi_high", "rsi_low", "rsi_mid", "stoch_high", "stoch_low", "stoch_mid",
                                     "macd_above_signal_above_zero", "macd_above_signal_below_zero",
                                     "macd_below_signal_above_zero", "macd_below_signal_below_zero"))},
@@ -162,6 +163,7 @@ TECH_FRAME = Obj({
     "last_t": Nullable(Str(r"\d{4}-\d{2}-\d{2}( \d{2}:\d{2})?", 16)),
     "close_x": LEVEL,
     "horizon_bars": Num(1, 20, integer=True),
+    "last_bar_may_be_partial": Bool(),
     "rsi": Obj({"rsi": INDEX, "recent": Arr(INDEX, TECH_RECENT), "zone": ZONE, "bars_in_zone": COUNT}),
     "macd": Obj({"macd_yen": YEN, "signal_yen": YEN, "hist_yen": YEN, "recent_hist_yen": Arr(YEN, TECH_RECENT),
                  "above_signal": Nullable(Bool()), "bars_since_cross": BARS_SINCE,
@@ -234,7 +236,9 @@ REGISTRY: Registry = {t.name: t for t in (
           "RSI 14・MACD 12/26/9（円）・スロー・ストキャスティクス 14/3/3 の今の値・直近 20 本・"
           "ゾーン（high / low / mid）と続いた本数・シグナル交差から何本目、"
           "base_rates = 今と同じ状態だった過去の足の horizon_bars 本先の騰落率の分布"
-          "（件数 n・中央値・p10・p90 の %。all は条件なし）。insufficient は件数 20 未満", TECHNICALS,
+          "（件数 n・中央値・p10・p90 の %。all は条件なし）。insufficient は件数 20 未満。"
+          "足は期近のつなぎ足（調整なし）で限月交代の跳びが指標に入る。交代をまたぐ窓は基準率から除く（rolls_excluded）。"
+          "最新の足は確定前のことがあり（last_bar_may_be_partial）、今の値は確定値として扱わない", TECHNICALS,
           TECHNICALS_INPUT, TECHNICALS_INPUT_SCHEMA),
 )}
 

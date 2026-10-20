@@ -230,6 +230,21 @@ describe('基準率', () => {
     expect(r.insufficient).toBe(false);
     expect(BASE_RATE_MIN_N).toBe(20);
   });
+  it('valid が false の窓（限月交代をまたぐ）は除いて数え、次の足を見る', () => {
+    const c = Array.from({ length: 11 }, (_, i) => 100 + i);
+    // 窓 [j, j+2] が 4〜5 の間をまたぐなら除く（4 と 5 の間で交代）
+    const m = (i: number) => (i <= 4 ? 'a' : 'b');
+    const r = baseRate(
+      c,
+      2,
+      10,
+      () => true,
+      (a, b) => m(a) === m(b),
+    );
+    // j = 0（0→2）採る、2（2→4）採る、4（4→6）除く、5（5→7）採る、7（7→9）採る、9 は 11 > 10
+    expect(r.n).toBe(4);
+    expect(r.excluded).toBe(1);
+  });
   it('未来の値で条件を決めない: 条件は j までで、結果は j + N の値だけ', () => {
     const c = [100, 110, 90, 120, 80];
     // 最後の足（確定前）は使わない: lastUsable = 3 → j + 1 ≤ 3

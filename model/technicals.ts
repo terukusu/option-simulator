@@ -237,6 +237,8 @@ export interface BaseRate {
   p90: number | null;
   /** n < BASE_RATE_MIN_N */
   insufficient: boolean;
+  /** 条件に合ったが valid で除いた窓の数（先物の限月交代をまたぐ窓など） */
+  excluded: number;
 }
 
 /** 分位（線形補間。sorted は昇順。空なら null） */
@@ -253,18 +255,26 @@ export function quantile(sorted: readonly number[], q: number): number | null {
 
 /**
  * 基準率: 条件 match(j) を満たす j（0 ≤ j、j + horizon ≤ lastUsable）を左から選び（窓を重ねない = 次は j + horizon 以降）、
- * 騰落率 100·(c[j+horizon] / c[j] − 1)（%）の件数・中央値・p10・p90。match は j までのデータだけで決まる状態にする
+ * 騰落率 100·(c[j+horizon] / c[j] − 1)（%）の件数・中央値・p10・p90。match は j までのデータだけで決まる状態にする。
+ * valid(j, j + horizon) が false の窓（例: 先物の限月交代をまたぐ = つなぎ足の跳びが騰落率に入る）は数えずに除き
+ * （excluded に数える）、次の j を見る
  */
 export function baseRate(
   closes: readonly number[],
   horizon: number,
   lastUsable: number,
   match: (j: number) => boolean,
+  valid: (j0: number, j1: number) => boolean = () => true,
 ): BaseRate {
   const rets: number[] = [];
+  let excluded = 0;
   if (horizon >= 1) {
     for (let j = 0; j + horizon <= lastUsable && j + horizon < closes.length; j++) {
       if (!match(j)) continue;
+      if (!valid(j, j + horizon)) {
+        excluded++;
+        continue;
+      }
       const c0 = closes[j] as number;
       const c1 = closes[j + horizon] as number;
       if (!(c0 > 0) || !Number.isFinite(c1)) continue;
@@ -279,5 +289,6 @@ export function baseRate(
     p10: quantile(rets, 0.1),
     p90: quantile(rets, 0.9),
     insufficient: rets.length < BASE_RATE_MIN_N,
+    excluded,
   };
 }

@@ -86,6 +86,7 @@ delta_large / delta_mini は枚、days は日、*ratio は倍。null は「評�
 断定しない（例: RSI が 70 を超えても上げ続けることはある）
 - base_rates は過去に同じ状態だった後の値動きの分布で、予想ではない。書くときは件数 n を添え、insufficient が true\
 なら「サンプル不足」と書いて分布の値に頼らない。all（条件なし）と並べて差を言葉で比べる（差を計算しない）
+- 最新の足は確定前のことがある（last_bar_may_be_partial）。今の値・ゾーンを確定したものとして書かない
 """
 THINKING = {"type": "adaptive", "display": "summarized"}
 OUTPUT_CONFIG = {"effort": st.AI_EFFORT}

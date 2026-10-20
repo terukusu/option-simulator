@@ -94,6 +94,7 @@ function rateOut(r: ReturnType<typeof baseRate>, condition: string | null): R {
     p10_pct: r1(r.p10),
     p90_pct: r1(r.p90),
     insufficient: r.insufficient,
+    rolls_excluded: r.excluded,
   };
   if (condition !== null) out.condition = condition;
   return out;
@@ -114,16 +115,21 @@ export function techFrame(
   const closes = bars.map((b) => b.c);
   // 結果に使う最後の足（最新の足は確定前のことがある）。今の足自身（last）は条件の候補に入れない
   const lastUsable = n - 2;
+  // 期近のつなぎ足（調整なし。#190）: 限月交代をまたぐ窓は跳びが騰落率に入るので除く（両端の限月が違う = 間で交代。
+  // 週足は束ねた最後の日足の限月）
+  const sameContract = (a: number, b: number) => bars[a]?.m === bars[b]?.m;
   const out: R = {
     tf,
     n_bars: n,
     last_t: n > 0 ? timeText((bars[last] as FutBar).t, tf) : null,
     close_x: n > 0 ? r0((bars[last] as FutBar).c) : null,
     horizon_bars: horizon,
+    // 最新の足は立会中なら確定前（値・ゾーン・本数は確定値ではない。基準率には使わない）
+    last_bar_may_be_partial: true,
   };
   const rates: R = {
     all: rateOut(
-      baseRate(closes, horizon, lastUsable, () => true),
+      baseRate(closes, horizon, lastUsable, () => true, sameContract),
       null,
     ),
   };
@@ -141,6 +147,7 @@ export function techFrame(
         horizon,
         lastUsable,
         (j) => zoneOf(ind.rsi[j], RSI_HIGH, RSI_LOW) === z,
+        sameContract,
       );
       rates.rsi = rateOut(r, `rsi_${z}`);
     }
@@ -165,6 +172,7 @@ export function techFrame(
         horizon,
         lastUsable,
         (j) => signOf(hist[j]) === hs && signOf(macd[j]) === ms,
+        sameContract,
       );
       const cond = `macd_${hs > 0 ? 'above' : 'below'}_signal_${ms > 0 ? 'above' : 'below'}_zero`;
       rates.macd = rateOut(r, cond);
@@ -189,6 +197,7 @@ export function techFrame(
         horizon,
         lastUsable,
         (j) => zoneOf(k[j], STOCH_HIGH, STOCH_LOW) === z,
+        sameContract,
       );
       rates.stoch = rateOut(r, `stoch_${z}`);
     }

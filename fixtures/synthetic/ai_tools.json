@@ -2822,6 +2822,7 @@
        "last_t": "2026-10-12",
        "close_x": 37205,
        "horizon_bars": 4,
+       "last_bar_may_be_partial": true,
        "rsi": {
         "rsi": 55.6,
         "recent": [
@@ -2911,34 +2912,38 @@
        },
        "base_rates": {
         "all": {
-         "n": 25,
-         "median_pct": -0.5,
-         "p10_pct": -2.6,
-         "p90_pct": 3.9,
-         "insufficient": false
+         "n": 23,
+         "median_pct": -0.4,
+         "p10_pct": -3.3,
+         "p90_pct": 3.7,
+         "insufficient": false,
+         "rolls_excluded": 9
         },
         "rsi": {
-         "n": 22,
-         "median_pct": -0.2,
-         "p10_pct": -3.4,
-         "p90_pct": 2.8,
+         "n": 20,
+         "median_pct": -0.6,
+         "p10_pct": -3.5,
+         "p90_pct": 3.4,
          "insufficient": false,
+         "rolls_excluded": 7,
          "condition": "rsi_mid"
         },
         "macd": {
-         "n": 4,
-         "median_pct": -0.6,
-         "p10_pct": -2.5,
-         "p90_pct": 3.6,
+         "n": 3,
+         "median_pct": -2.6,
+         "p10_pct": -3.3,
+         "p90_pct": 1.7,
          "insufficient": true,
+         "rolls_excluded": 3,
          "condition": "macd_above_signal_above_zero"
         },
         "stoch": {
-         "n": 7,
-         "median_pct": -0.5,
-         "p10_pct": -1.5,
-         "p90_pct": 1.3,
+         "n": 6,
+         "median_pct": -0.3,
+         "p10_pct": -2.4,
+         "p90_pct": 1.5,
          "insufficient": true,
+         "rolls_excluded": 3,
          "condition": "stoch_high"
         }
        }
@@ -2949,6 +2954,7 @@
        "last_t": "2026-10-13",
        "close_x": 37205,
        "horizon_bars": 5,
+       "last_bar_may_be_partial": true,
        "rsi": {
         "rsi": 51.4,
         "recent": [
@@ -3038,34 +3044,38 @@
        },
        "base_rates": {
         "all": {
-         "n": 104,
-         "median_pct": 0,
-         "p10_pct": -1.5,
-         "p90_pct": 1.8,
-         "insufficient": false
+         "n": 99,
+         "median_pct": 0.2,
+         "p10_pct": -1.7,
+         "p90_pct": 1.7,
+         "insufficient": false,
+         "rolls_excluded": 23
         },
         "rsi": {
-         "n": 96,
-         "median_pct": 0,
-         "p10_pct": -1.3,
+         "n": 91,
+         "median_pct": -0.1,
+         "p10_pct": -1.8,
          "p90_pct": 1.4,
          "insufficient": false,
+         "rolls_excluded": 22,
          "condition": "rsi_mid"
         },
         "macd": {
-         "n": 21,
-         "median_pct": 0.3,
+         "n": 20,
+         "median_pct": -0.2,
          "p10_pct": -2,
-         "p90_pct": 1,
+         "p90_pct": 1.7,
          "insufficient": false,
+         "rolls_excluded": 4,
          "condition": "macd_below_signal_above_zero"
         },
         "stoch": {
-         "n": 62,
+         "n": 59,
          "median_pct": 0.1,
          "p10_pct": -1.8,
-         "p90_pct": 1.7,
+         "p90_pct": 1.9,
          "insufficient": false,
+         "rolls_excluded": 12,
          "condition": "stoch_mid"
         }
        }
@@ -3076,6 +3086,7 @@
        "last_t": "2026-10-14 01:00",
        "close_x": 37205,
        "horizon_bars": 5,
+       "last_bar_may_be_partial": true,
        "rsi": {
         "rsi": 37,
         "recent": [
@@ -3165,34 +3176,38 @@
        },
        "base_rates": {
         "all": {
-         "n": 85,
+         "n": 83,
          "median_pct": 0,
          "p10_pct": -0.5,
          "p90_pct": 0.7,
-         "insufficient": false
+         "insufficient": false,
+         "rolls_excluded": 10
         },
         "rsi": {
-         "n": 81,
-         "median_pct": 0.1,
-         "p10_pct": -0.6,
+         "n": 80,
+         "median_pct": 0,
+         "p10_pct": -0.5,
          "p90_pct": 0.7,
          "insufficient": false,
+         "rolls_excluded": 5,
          "condition": "rsi_mid"
         },
         "macd": {
-         "n": 25,
+         "n": 24,
          "median_pct": 0.1,
          "p10_pct": -0.4,
          "p90_pct": 0.7,
          "insufficient": false,
+         "rolls_excluded": 1,
          "condition": "macd_below_signal_below_zero"
         },
         "stoch": {
-         "n": 62,
+         "n": 61,
          "median_pct": 0,
          "p10_pct": -0.5,
          "p90_pct": 0.8,
          "insufficient": false,
+         "rolls_excluded": 4,
          "condition": "stoch_mid"
         }
        }
@@ -3238,6 +3253,7 @@
        "last_t": "2026-10-13",
        "close_x": 37205,
        "horizon_bars": 5,
+       "last_bar_may_be_partial": true,
        "rsi": {
         "rsi": 51.4,
         "recent": [
@@ -3267,18 +3283,20 @@
        },
        "base_rates": {
         "all": {
-         "n": 104,
-         "median_pct": 0,
-         "p10_pct": -1.5,
-         "p90_pct": 1.8,
-         "insufficient": false
+         "n": 99,
+         "median_pct": 0.2,
+         "p10_pct": -1.7,
+         "p90_pct": 1.7,
+         "insufficient": false,
+         "rolls_excluded": 23
         },
         "rsi": {
-         "n": 96,
-         "median_pct": 0,
-         "p10_pct": -1.3,
+         "n": 91,
+         "median_pct": -0.1,
+         "p10_pct": -1.8,
          "p90_pct": 1.4,
          "insufficient": false,
+         "rolls_excluded": 22,
          "condition": "rsi_mid"
         }
        }
@@ -3327,6 +3345,7 @@
        "last_t": "2026-10-12",
        "close_x": 37205,
        "horizon_bars": 3,
+       "last_bar_may_be_partial": true,
        "macd": {
         "macd_yen": 229,
         "signal_yen": 89,
@@ -3389,26 +3408,29 @@
        },
        "base_rates": {
         "all": {
-         "n": 34,
+         "n": 31,
          "median_pct": -0.3,
          "p10_pct": -2.4,
-         "p90_pct": 2.7,
-         "insufficient": false
+         "p90_pct": 3.1,
+         "insufficient": false,
+         "rolls_excluded": 8
         },
         "macd": {
-         "n": 5,
-         "median_pct": 0.7,
-         "p10_pct": -2.8,
-         "p90_pct": 2.8,
+         "n": 3,
+         "median_pct": -0.4,
+         "p10_pct": -1.9,
+         "p90_pct": 1.6,
          "insufficient": true,
+         "rolls_excluded": 4,
          "condition": "macd_above_signal_above_zero"
         },
         "stoch": {
-         "n": 8,
-         "median_pct": -0.7,
-         "p10_pct": -2.6,
-         "p90_pct": 1.5,
+         "n": 6,
+         "median_pct": -1.9,
+         "p10_pct": -2.9,
+         "p90_pct": 1.2,
          "insufficient": true,
+         "rolls_excluded": 4,
          "condition": "stoch_high"
         }
        }
@@ -3419,6 +3441,7 @@
        "last_t": "2026-10-14 01:00",
        "close_x": 37205,
        "horizon_bars": 3,
+       "last_bar_may_be_partial": true,
        "macd": {
         "macd_yen": -16,
         "signal_yen": 21,
@@ -3481,26 +3504,29 @@
        },
        "base_rates": {
         "all": {
-         "n": 142,
+         "n": 141,
          "median_pct": 0,
          "p10_pct": -0.5,
          "p90_pct": 0.6,
-         "insufficient": false
+         "insufficient": false,
+         "rolls_excluded": 4
         },
         "macd": {
-         "n": 38,
-         "median_pct": 0.2,
-         "p10_pct": -0.3,
+         "n": 37,
+         "median_pct": 0.1,
+         "p10_pct": -0.4,
          "p90_pct": 0.5,
          "insufficient": false,
+         "rolls_excluded": 1,
          "condition": "macd_below_signal_below_zero"
         },
         "stoch": {
-         "n": 95,
+         "n": 94,
          "median_pct": 0,
          "p10_pct": -0.4,
          "p90_pct": 0.6,
          "insufficient": false,
+         "rolls_excluded": 4,
          "condition": "stoch_mid"
         }
        }
