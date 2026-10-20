@@ -5,7 +5,7 @@
  * - ステッパー 4 つ（d・ΔX・Δσ・Δs）と「モデルの前提」の β: 仕様・値（表示の単位）・文字・副題・hot・無効
  * - 操作 → action（既存の setScenario / applyPreset / resetScenario / setFutureBasis だけ）
  * - 数値入力のパース（parseSliderInput / parseBeta の文言のまま）
- * - プリセットのチップ（CRASH_PRESETS の順に 急落・下落・反発 + リセット）・評価時刻のチップ（足の全限月）
+ * - プリセットのチップ（リセット + CRASH_PRESETS の順に 急落・下落・反発。リセットを先頭 = 横スクロールせずに見える）・評価時刻のチップ（足の全限月）
  * - 「モデルの前提」の要約 1 行
  */
 
@@ -215,7 +215,7 @@ export const PRESET_NAMES: readonly string[] = ['急落', '下落', '反発'];
 const sameYen = (a: number, b: number) => Math.abs(a - b) <= 1e-6 * Math.max(1, Math.abs(b));
 
 /**
- * プリセットのチップ: [急落 −10% / +20pt / +3][下落 …][反発 …][リセット]。今のシナリオと同じ値のチップは pressed。
+ * プリセットのチップ: [リセット][急落 −10% / +20pt / +3][下落 …][反発 …]（リセットを先頭 = スマホでも横スクロールせずに見える）。今のシナリオと同じ値のチップは pressed。
  * X₀ が決まらなければ 3 つは押せない（リセットは押せる）。
  */
 export function presetChips(input: ScenarioRegionInput): Chip[] {
@@ -233,7 +233,12 @@ export function presetChips(input: ScenarioRegionInput): Chip[] {
       action: ok ? { type: 'applyPreset', index, x0: input.x0 } : null,
     };
   });
-  out.push({ key: 'reset', text: 'リセット', disabled: false, action: { type: 'resetScenario' } });
+  out.unshift({
+    key: 'reset',
+    text: 'リセット',
+    disabled: false,
+    action: { type: 'resetScenario' },
+  });
   return out;
 }
 
