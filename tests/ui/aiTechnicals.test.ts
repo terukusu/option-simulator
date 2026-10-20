@@ -38,6 +38,7 @@ describe('結果', () => {
       rsi: 14,
       macd: [12, 26, 9],
       stoch: [14, 3, 3],
+      ema: [5, 25, 75],
       rsi_zones: [30, 70],
       stoch_zones: [20, 80],
     });
@@ -74,7 +75,7 @@ describe('結果', () => {
         p90_pct: number | null;
         insufficient: boolean;
       }[];
-      expect(rates.length).toBe(4);
+      expect(rates.length).toBe(5);
       for (const b of rates) {
         expect(b.insufficient).toBe(b.n < 20);
         if (b.n === 0) continue;
@@ -134,6 +135,51 @@ describe('結果', () => {
       expect(one.length).toBeLessThan(3750);
     }
     expect(all.length).toBeLessThan(3 * 3750);
+  });
+});
+
+describe('EMA の 3 本（#206）', () => {
+  it('値・距離・並び順・交差は画面と同じ emaSet（丸めただけ）', () => {
+    const f = run({ timeframes: ['daily'], indicators: ['ema'] }).frames[0];
+    const ind = indicators(data.daily);
+    const last = data.daily.length - 1;
+    const c = data.daily[last]?.c as number;
+    const series = [ind.ema.short, ind.ema.mid, ind.ema.long];
+    expect(f.ema.lines.map((l: { period: number }) => l.period)).toEqual([5, 25, 75]);
+    f.ema.lines.forEach((l: { ema_x: number; dist_yen: number; dist_pct: number }, k: number) => {
+      const v = series[k]?.[last] as number;
+      expect(l.ema_x).toBe(Math.round(v));
+      expect(l.dist_yen).toBe(Math.round(c - v));
+      expect(l.dist_pct).toBe(Math.round((c / v - 1) * 1000) / 10);
+    });
+    const [s, m, l] = series.map((x) => x[last] as number) as [number, number, number];
+    expect(f.ema.order).toBe(s > m && m > l ? 'up' : s < m && m < l ? 'down' : 'mixed');
+    expect(f.ema.bars_in_order).toBeGreaterThanOrEqual(1);
+    expect(f.ema.crosses.map((x: { pair: string }) => x.pair)).toEqual([
+      'short_mid',
+      'mid_long',
+      'short_long',
+    ]);
+    expect(f.ema.crosses[0].shorter_above).toBe(s >= m);
+    expect(f.ema.crosses[1].shorter_above).toBe(m >= l);
+    expect(f.base_rates.ema.condition).toBe(`ema_order_${f.ema.order}`);
+    expect(Object.keys(f.base_rates)).toEqual(['all', 'ema']);
+  });
+  it('ウォームアップ: 長期の EMA に足りない足では値・並び順・基準率が無い（間違った値を出さない）', () => {
+    const few = { daily: data.daily.slice(0, 40), hourly: [] };
+    // biome-ignore lint/suspicious/noExplicitAny: 結果の JSON を添字で読む
+    const f: any = (technicalsTool(few, { timeframes: ['daily'], indicators: ['ema'] }) as any)
+      .frames[0];
+    expect(f.ema.lines[0].ema_x).not.toBeNull();
+    expect(f.ema.lines[2]).toEqual({ period: 75, ema_x: null, dist_yen: null, dist_pct: null });
+    expect(f.ema.order).toBeNull();
+    expect(f.ema.bars_in_order).toBe(0);
+    expect(f.ema.crosses[1]).toEqual({
+      pair: 'mid_long',
+      shorter_above: null,
+      bars_since_cross: null,
+    });
+    expect(f.base_rates.ema).toBeUndefined();
   });
 });
 
@@ -208,6 +254,9 @@ describe('期間（#205）: 段とツールが同じ期間を使う', () => {
     stochK: 9,
     stochSmooth: 2,
     stochD: 4,
+    emaShort: 4,
+    emaMid: 10,
+    emaLong: 30,
   };
   it('データの params で計算し、出力の params はその期間。値は段（indicators と indPaneModel）と同じ', () => {
     // biome-ignore lint/suspicious/noExplicitAny: 結果の JSON を添字で読む
@@ -216,6 +265,7 @@ describe('期間（#205）: 段とツールが同じ期間を使う', () => {
       rsi: 9,
       macd: [8, 21, 5],
       stoch: [9, 2, 4],
+      ema: [4, 10, 30],
       rsi_zones: [30, 70],
       stoch_zones: [20, 80],
     });
@@ -243,13 +293,20 @@ describe('期間（#205）: 段とツールが同じ期間を使う', () => {
     // biome-ignore lint/suspicious/noExplicitAny: 結果の JSON を添字で読む
     const r: any = technicalsTool({ ...data, params: p }, { timeframes: ['daily'] });
     // biome-ignore lint/suspicious/noExplicitAny: 結果の JSON を添字で読む
-    const f: any = techFrame(data.daily, 'daily', ['rsi', 'macd', 'stoch'], TECH_HORIZON.daily, p);
+    const f: any = techFrame(
+      data.daily,
+      'daily',
+      ['rsi', 'macd', 'stoch', 'ema'],
+      TECH_HORIZON.daily,
+      p,
+    );
     expect(r.frames[0].base_rates).toEqual(f.base_rates);
   });
   it('params が無い・不正（短期 ≥ 長期・範囲外）→ 既定', () => {
     expect(techParamsOf(null)).toEqual(DEFAULT_TECH_PARAMS);
     expect(techParamsOf({ ...data, params: { ...p, macdFast: 30 } })).toEqual(DEFAULT_TECH_PARAMS);
     expect(techParamsOf({ ...data, params: { ...p, rsi: 101 } })).toEqual(DEFAULT_TECH_PARAMS);
+    expect(techParamsOf({ ...data, params: { ...p, emaMid: 40 } })).toEqual(DEFAULT_TECH_PARAMS);
     expect(techParamsOf({ ...data, params: p })).toEqual(p);
   });
 });

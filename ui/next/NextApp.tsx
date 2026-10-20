@@ -144,6 +144,9 @@ export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
   // 先物推移の指標の段（#200。既定はすべて隠す。保存しない = ローソク / 線と同じ）
   const [indKinds, setIndKinds] = useState<readonly IndKind[]>(NO_IND_KINDS);
   const onIndToggle = useCallback((k: IndKind) => setIndKinds((s) => toggleInd(s, k)), []);
+  // 先物推移の EMA の 3 本（#206）: 既定は出す（線は高さを使わない）。段の切替と同じく保存しない
+  const [showEma, setShowEma] = useState(true);
+  const onEmaToggle = useCallback(() => setShowEma((v) => !v), []);
   // IV 推移 ⇄ 先物の切替で足と見ていた時間の範囲を保つ（離れる側に読んだ足があるときだけ渡す）
   const shellRef = useRef(shell);
   shellRef.current = shell;
@@ -731,6 +734,8 @@ export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
               onViewport={fut.setViewport}
               indKinds={indKinds}
               onIndToggle={onIndToggle}
+              showEma={showEma}
+              onEmaToggle={onEmaToggle}
               techParams={userPrefs.technicals}
             />
           ) : smileView(shell, tier) === 'iv' ? (

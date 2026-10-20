@@ -74,6 +74,66 @@
   font-family: var(--font);
 }
 
+/*
+ * EMA の値の行（#206。読み取りの 2 行目。EMA を出しているときだけ）: 名前は文字の色、線の色は名前の左の短い見本だけ
+ * （凡例を兼ねる）。上の行と同じ高さ固定
+ */
+.iv-readout.ema {
+  padding-top: 0;
+  height: 21px;
+}
+
+/* 色の見本は名前の前の疑似要素（文字の行の箱を増やさない） */
+.iv-readout.ema .k::before {
+  display: inline-block;
+  width: 10px;
+  height: 0;
+  margin-right: 4px;
+  vertical-align: middle;
+  border-top: 2px solid var(--ink-3);
+  content: "";
+}
+
+.iv-readout.ema .k.s::before {
+  border-color: var(--ema-s);
+}
+
+.iv-readout.ema .k.m::before {
+  border-color: var(--ema-m);
+}
+
+.iv-readout.ema .k.l::before {
+  border-color: var(--ema-l);
+}
+
+.iv-wrap .ema-line.s {
+  stroke: var(--ema-s);
+}
+
+.iv-wrap .ema-line.m {
+  stroke: var(--ema-m);
+}
+
+.iv-wrap .ema-line.l {
+  stroke: var(--ema-l);
+}
+
+/* 線の太さも変える（色だけに頼らない。短期は細く、長期は太く） */
+.iv-wrap .ema-line {
+  fill: none;
+  stroke-linejoin: round;
+  stroke-width: 1.25;
+  pointer-events: none;
+}
+
+.iv-wrap .ema-line.s {
+  stroke-width: 1;
+}
+
+.iv-wrap .ema-line.l {
+  stroke-width: 1.75;
+}
+
 @container (max-width: 419.98px) {
   .iv-readout {
     gap: 7px;

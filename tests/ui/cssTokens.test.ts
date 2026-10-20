@@ -56,6 +56,10 @@ const TABLE: Record<string, readonly [string, string]> = {
   '--gain': ['#2fb483', '#0f8a5c'],
   '--loss': ['#ef6b6b', '#d13f3f'],
   '--warn': ['#d9962a', '#a86b00'],
+  // #206 先物推移の EMA の 3 本
+  '--ema-s': ['#b48a2c', '#b07d00'],
+  '--ema-m': ['#9c6de4', '#8c52d6'],
+  '--ema-l': ['#2196ad', '#0d8ca3'],
 };
 const PRESENT_ONLY = ['--gain-fill', '--loss-fill'];
 

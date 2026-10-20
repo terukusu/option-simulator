@@ -592,6 +592,17 @@ export interface IvChartInput {
   scenario?: number | null;
   /** 系列の書式（無ければ IV_SERIES。縦の目盛りの列の幅に使う） */
   series?: IvSeries;
+  /**
+   * 価格に重ねる線（#206 先物推移の EMA。足の index ごとの値、無い足は null）。縦軸の範囲には入れない（はみ出しは
+   * 描画域の clip で切る = 線の出し入れで軸を動かさない）
+   */
+  overlays?: readonly IvOverlay[];
+}
+
+/** 重ねる線の入力（cls = CSS のクラス。色は CSS だけ） */
+export interface IvOverlay {
+  cls: string;
+  values: readonly (number | null)[];
 }
 
 export interface IvChartModel {
@@ -614,6 +625,8 @@ export interface IvChartModel {
   nowPt: { x: number; y: number } | null;
   /** シナリオの水準の横線の y（無ければ null） */
   scenarioY: number | null;
+  /** 重ねる線の path（入力の overlays の順。見えている足 + 端の 1 本外だけ。値の無い足で切る。無ければ空文字） */
+  overlays: { cls: string; d: string }[];
 }
 
 /** [i0, i1] の足の安値〜高値（無ければ null） */
@@ -707,6 +720,31 @@ export function ivChartModel(p: IvChartInput): IvChartModel {
     }
   }
 
+  // 重ねる線（#206）: 見えている足（端は 1 本外まで）を結ぶ。値の無い足（ウォームアップ中）で切る。1 画素に 2 本以上の
+  // 足が入るとき（縮小）は 1 画素の列に 1 点（その列の最後の足）= 指標の段の線と同じ規則（1 万本でも 1 フレームの予算に収める）
+  const thin = (range[1] - range[0]) / Math.max(viewport[1] - viewport[0], 1e-9) < 1;
+  const has = (v: number | null | undefined): v is number =>
+    v !== null && v !== undefined && Number.isFinite(v);
+  const overlays = (p.overlays ?? []).map((o) => {
+    let d = '';
+    let pen = false;
+    const from = Math.max(0, i0 - 1);
+    const to = Math.min(n - 1, i1 + 1);
+    for (let i = from; i <= to; i++) {
+      const v = o.values[i];
+      if (!has(v)) {
+        pen = false;
+        continue;
+      }
+      const x = sx(i);
+      if (thin && i < to && Math.floor(sx(i + 1)) === Math.floor(x) && has(o.values[i + 1]))
+        continue;
+      d += `${pen ? 'L' : 'M'}${r1(x)} ${r1(sy(v))}`;
+      pen = true;
+    }
+    return { cls: o.cls, d };
+  });
+
   const yVals = niceTicks(
     yDomain[0],
     yDomain[1],
@@ -734,6 +772,7 @@ export function ivChartModel(p: IvChartInput): IvChartModel {
     yTicks,
     nowPt: now && n > 0 ? { x: r1(sx(now.index)), y: r1(sy(now.iv)) } : null,
     scenarioY: scenario !== null && Number.isFinite(scenario) && n > 0 ? r1(sy(scenario)) : null,
+    overlays,
   };
 }
 

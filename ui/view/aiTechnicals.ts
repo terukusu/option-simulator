@@ -13,15 +13,20 @@
  *   insufficient = true（AI は「サンプル不足」と書く）
  * - 値の丸め: RSI・SO は小数 1 桁、MACD は円の整数、% は小数 1 桁（tools.py の規則）。キーの単位は aiNumbers の規則
  *   （`*_yen` 円、`*_pct` %、`close_x` 原資産の水準）
+ * - EMA の 3 本（#206）: 足ごとの ema = 各線の値（ema_x）・終値との距離（dist_yen = 終値 − EMA、dist_pct = 終値 / EMA − 1）・
+ *   並び順（order = up / down / mixed。up = 短 > 中 > 長 = 上向きのパーフェクトオーダー）と続いた本数・組ごとの直近の交差
+ *   （短い方が上か・交差から何本目）。足りない間（ウォームアップ。週足の 75 など）は値・並び順が null。基準率は今と同じ並び順
  * - 期間（#205）: データに載った params（NextApp が端末の設定の値を入れる = 段と同じ値）。無い・不正 → 既定。出力の
  *   params は実際に使った期間（AI が「RSI（9）」のように書ける）。基準率の状態もこの期間の指標で決める
  */
 
 import type { FutBar } from '../../data';
 import {
+  barsInEmaOrder,
   barsInZone,
   baseRate,
   DEFAULT_TECH_PARAMS,
+  emaOrderAt,
   type Indicators,
   indicators,
   isTechParams,
@@ -53,7 +58,7 @@ export function techParamsOf(data: TechnicalsData | null): TechParams {
 
 export const TECH_TFS = ['weekly', 'daily', '4h'] as const;
 export type TechTf = (typeof TECH_TFS)[number];
-export const TECH_INDICATORS = ['rsi', 'macd', 'stoch'] as const;
+export const TECH_INDICATORS = ['rsi', 'macd', 'stoch', 'ema'] as const;
 export type TechIndicator = (typeof TECH_INDICATORS)[number];
 
 /** 基準率の既定の先（本。週足 4 本 ≈ 1 か月、日足 5 本 ≈ 1 週、4 時間足 5 本 ≈ 1 取引日） */
@@ -210,6 +215,53 @@ export function techFrame(
       rates.stoch = rateOut(r, `stoch_${z}`);
     }
   }
+  if (kinds.includes('ema')) {
+    const e = ind.ema;
+    const c = n > 0 ? (bars[last] as FutBar).c : null;
+    const line = (period: number, s: Series) => {
+      const v = s[last];
+      const ok = fin(v) && fin(c) && v > 0;
+      return {
+        period,
+        ema_x: r0(v),
+        dist_yen: ok ? r0((c as number) - (v as number)) : null,
+        dist_pct: ok ? r1(((c as number) / (v as number) - 1) * 100) : null,
+      };
+    };
+    const cross = (pair: string, a: Series, b: Series) => {
+      const x = sinceCross(a, b, last);
+      return {
+        pair,
+        shorter_above: x ? x.above : null,
+        bars_since_cross: x?.crossed ? x.bars : null,
+      };
+    };
+    const order = emaOrderAt(e, last);
+    out.ema = {
+      lines: [
+        line(params.emaShort, e.short),
+        line(params.emaMid, e.mid),
+        line(params.emaLong, e.long),
+      ],
+      order,
+      bars_in_order: barsInEmaOrder(e, last),
+      crosses: [
+        cross('short_mid', e.short, e.mid),
+        cross('mid_long', e.mid, e.long),
+        cross('short_long', e.short, e.long),
+      ],
+    };
+    if (order !== null) {
+      const r = baseRate(
+        closes,
+        horizon,
+        lastUsable,
+        (j) => emaOrderAt(e, j) === order,
+        sameContract,
+      );
+      rates.ema = rateOut(r, `ema_order_${order}`);
+    }
+  }
   out.base_rates = rates;
   return out;
 }
@@ -247,6 +299,7 @@ export function technicalsTool(
       rsi: p.rsi,
       macd: [p.macdFast, p.macdSlow, p.macdSignal],
       stoch: [p.stochK, p.stochSmooth, p.stochD],
+      ema: [p.emaShort, p.emaMid, p.emaLong],
       rsi_zones: [RSI_LOW, RSI_HIGH],
       stoch_zones: [STOCH_LOW, STOCH_HIGH],
     },

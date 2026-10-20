@@ -9,15 +9,22 @@
  *   EMA は α = 2 / (n + 1)、最初の n 個の単純平均で始める（TA-Lib と同じ）
  * - ストキャスティクス(14, 3, 3): George Lane のスロー。生の %K = 100·(C − LL14) / (HH14 − LL14)、
  *   スロー %K = 生の %K の SMA3、%D = スロー %K の SMA3
+ * - EMA の 3 本(5, 25, 75)（#206）: 上と同じ EMA（α = 2 / (n + 1)、最初の n 個の単純平均で始める。TA-Lib の EMA の
+ *   既定の始め方 = SMA の種）。参照値は下の 100 本の足で、Python 3 の素朴な実装（ema(xs, n): prev = sum(xs[:n]) / n、
+ *   以後 prev = a·x + (1 − a)·prev）で別に求めた値
  */
 import { describe, expect, it } from 'vitest';
 import {
   BASE_RATE_MIN_N,
+  barsInEmaOrder,
   barsInZone,
   baseRate,
   DEFAULT_TECH_PARAMS,
   ema,
+  emaOrderAt,
+  emaSet,
   indicators,
+  isEmaOrder,
   isTechParams,
   isTechParamValue,
   macd,
@@ -165,8 +172,77 @@ describe('スロー・ストキャスティクス（14, 3, 3）', () => {
   });
 });
 
+describe('EMA の 3 本（#206）', () => {
+  // 上の C と同じ式で 100 本（EMA 75 の値が出る長さ）
+  const C100 = Array.from(
+    { length: 100 },
+    (_, i) => Math.round((30000 + 200 * Math.sin(i / 3) + 15 * i) / 5) * 5,
+  );
+  it('参照値（Python）: 5・25・75 と最初の値の位置（足りない先頭は null = ウォームアップ）', () => {
+    const e = emaSet(C100);
+    expect(C100.at(-1)).toBe(31685);
+    expect(e.short.findIndex((v) => v !== null)).toBe(4);
+    expect(e.mid.findIndex((v) => v !== null)).toBe(24);
+    expect(e.long.findIndex((v) => v !== null)).toBe(74);
+    expect(e.short[4]).toBeCloseTo(30141.0, 6);
+    expect(e.short[10]).toBeCloseTo(30171.363511659816, 6);
+    expect(e.short[24]).toBeCloseTo(30474.24640213538, 6);
+    expect(e.mid[24]).toBeCloseTo(30211.4, 6);
+    expect(e.short[60]).toBeCloseTo(30960.87304422397, 6);
+    expect(e.mid[60]).toBeCloseTo(30719.96437767082, 6);
+    expect(e.long[74]).toBeCloseTo(30555.466666666667, 6);
+    expect(e.short[80]).toBeCloseTo(31300.668584106483, 6);
+    expect(e.mid[80]).toBeCloseTo(31036.865601983103, 6);
+    expect(e.long[80]).toBeCloseTo(30662.06781711462, 6);
+    expect(e.short[99]).toBeCloseTo(31590.073313749148, 6);
+    expect(e.mid[99]).toBeCloseTo(31324.17155232884, 6);
+    expect(e.long[99]).toBeCloseTo(30942.507473246667, 6);
+    // 参照: 74〜99 本目はすべて 短 > 中 > 長（上向きのパーフェクトオーダー）
+    expect(emaOrderAt(e, 73)).toBeNull();
+    expect(emaOrderAt(e, 74)).toBe('up');
+    expect(barsInEmaOrder(e, 99)).toBe(26);
+    expect(barsInEmaOrder(e, 73)).toBe(0);
+  });
+  it('並び順: up・down・mixed と続いた本数（手で作った 3 本）', () => {
+    const e = {
+      short: [null, 3, 1, 1, 2, 3],
+      mid: [null, 2, 2, 2, 2, 2],
+      long: [null, 1, 3, 3, 1, 1],
+    };
+    expect([0, 1, 2, 3, 4, 5].map((i) => emaOrderAt(e, i))).toEqual([
+      null,
+      'up',
+      'down',
+      'down',
+      'mixed',
+      'up',
+    ]);
+    expect(barsInEmaOrder(e, 3)).toBe(2);
+    expect(barsInEmaOrder(e, 5)).toBe(1);
+  });
+  it('期間は params の emaShort・emaMid・emaLong（ema と同じ値）。足りなければ全部 null', () => {
+    const p = { ...DEFAULT_TECH_PARAMS, emaShort: 3, emaMid: 8, emaLong: 20 };
+    const e = emaSet(C100, p);
+    expect(e.short).toEqual(ema(C100, 3));
+    expect(e.mid).toEqual(ema(C100, 8));
+    expect(e.long).toEqual(ema(C100, 20));
+    expect(
+      indicators(
+        C100.map((c) => ({ h: c, l: c, c })),
+        p,
+      ).ema,
+    ).toEqual(e);
+    expect(emaSet(C100.slice(0, 74)).long.every((v) => v === null)).toBe(true);
+  });
+  it('isEmaOrder: 短期 < 中期 < 長期', () => {
+    expect(isEmaOrder(DEFAULT_TECH_PARAMS)).toBe(true);
+    expect(isEmaOrder({ emaShort: 25, emaMid: 25, emaLong: 75 })).toBe(false);
+    expect(isEmaOrder({ emaShort: 5, emaMid: 80, emaLong: 75 })).toBe(false);
+  });
+});
+
 describe('先読みしない（途中までの足の値 = 全部の足の同じ位置の値）', () => {
-  it('RSI・MACD・ストキャス', () => {
+  it('RSI・MACD・ストキャス・EMA', () => {
     const bars = randomWalk(150, 11);
     const all = indicators(bars);
     const part = indicators(bars.slice(0, 100));
@@ -175,6 +251,9 @@ describe('先読みしない（途中までの足の値 = 全部の足の同じ�
       expect(part.macd.hist[i]).toBe(all.macd.hist[i]);
       expect(part.stoch.k[i]).toBe(all.stoch.k[i]);
       expect(part.stoch.d[i]).toBe(all.stoch.d[i]);
+      expect(part.ema.short[i]).toBe(all.ema.short[i]);
+      expect(part.ema.mid[i]).toBe(all.ema.mid[i]);
+      expect(part.ema.long[i]).toBe(all.ema.long[i]);
     }
   });
 });
@@ -270,6 +349,9 @@ describe('期間（#205）', () => {
       stochK: 9,
       stochSmooth: 1,
       stochD: 4,
+      emaShort: 4,
+      emaMid: 10,
+      emaLong: 30,
     };
     const ind = indicators(bars, p);
     const closes = bars.map((b) => b.c);
@@ -282,8 +364,14 @@ describe('期間（#205）', () => {
     expect(ind.rsi[8]).toBeNull();
     expect(ind.rsi[9]).not.toBeNull();
   });
-  it('isTechParams: 範囲内の整数で MACD は短期 < 長期', () => {
+  it('isTechParams: 範囲内の整数で MACD は短期 < 長期、EMA は短期 < 中期 < 長期', () => {
     expect(isTechParams(DEFAULT_TECH_PARAMS)).toBe(true);
+    expect(DEFAULT_TECH_PARAMS).toMatchObject({ emaShort: 5, emaMid: 25, emaLong: 75 });
+    expect(isTechParams({ ...DEFAULT_TECH_PARAMS, emaMid: 80 })).toBe(false);
+    expect(isTechParams({ ...DEFAULT_TECH_PARAMS, emaShort: 1 })).toBe(false);
+    expect(isTechParams({ ...DEFAULT_TECH_PARAMS, emaLong: 101 })).toBe(false);
+    const { emaLong: _, ...noEma } = DEFAULT_TECH_PARAMS;
+    expect(isTechParams(noEma)).toBe(false);
     expect(isTechParams({ ...DEFAULT_TECH_PARAMS, macdFast: 26 })).toBe(false);
     expect(isTechParams({ ...DEFAULT_TECH_PARAMS, rsi: 101 })).toBe(false);
     expect(isTechParams({ ...DEFAULT_TECH_PARAMS, stochD: 0 })).toBe(false);

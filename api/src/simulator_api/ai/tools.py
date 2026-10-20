@@ -147,7 +147,7 @@ EVALUATE_SCENARIO = Obj({
 
 # technicals（#200）: 先物の週足・日足・4 時間足のテクニカル指標（ui/view/aiTechnicals.ts）。生の足の列は返さない
 TECH_TFS = ("weekly", "daily", "4h")
-TECH_INDICATORS = ("rsi", "macd", "stoch")
+TECH_INDICATORS = ("rsi", "macd", "stoch", "ema")  # ema は #206
 TECH_RECENT = 20
 INDEX = Num(0, 100, nullable=True)  # RSI・%K・%D（0〜100）
 COUNT = Num(0, 100_000, integer=True)
@@ -157,7 +157,8 @@ BASE_RATE = Obj({"n": COUNT, "median_pct": PCT, "p10_pct": PCT, "p90_pct": PCT, 
                  "rolls_excluded": COUNT,
                  "condition": Enum(("rsi_high", "rsi_low", "rsi_mid", "stoch_high", "stoch_low", "stoch_mid",
                                     "macd_above_signal_above_zero", "macd_above_signal_below_zero",
-                                    "macd_below_signal_above_zero", "macd_below_signal_below_zero"))},
+                                    "macd_below_signal_above_zero", "macd_below_signal_below_zero",
+                                    "ema_order_up", "ema_order_down", "ema_order_mixed"))},
                 frozenset({"condition"}))
 TECH_FRAME = Obj({
     "tf": Enum(TECH_TFS),
@@ -172,13 +173,25 @@ TECH_FRAME = Obj({
                  "above_zero": Nullable(Bool())}),
     "stoch": Obj({"stoch_k": INDEX, "stoch_d": INDEX, "recent_k": Arr(INDEX, TECH_RECENT), "zone": ZONE,
                   "bars_in_zone": COUNT, "k_above_d": Nullable(Bool()), "bars_since_cross": BARS_SINCE}),
-    "base_rates": Obj({"all": BASE_RATE, "rsi": BASE_RATE, "macd": BASE_RATE, "stoch": BASE_RATE},
-                      frozenset({"rsi", "macd", "stoch"})),
-}, frozenset({"rsi", "macd", "stoch"}))
+    # EMA の 3 本（#206）: 各線の値・終値との距離・並び順（パーフェクトオーダー）と続いた本数・組ごとの直近の交差
+    "ema": Obj({
+        "lines": Arr(Obj({"period": Num(1, 100, integer=True), "ema_x": LEVEL, "dist_yen": YEN, "dist_pct": PCT}),
+                     3, fixed=True),
+        "order": Enum(("up", "down", "mixed", None)),
+        "bars_in_order": COUNT,
+        "crosses": Arr(Obj({"pair": Enum(("short_mid", "mid_long", "short_long")),
+                            "shorter_above": Nullable(Bool()), "bars_since_cross": BARS_SINCE}), 3, fixed=True),
+    }),
+    "base_rates": Obj({"all": BASE_RATE, "rsi": BASE_RATE, "macd": BASE_RATE, "stoch": BASE_RATE, "ema": BASE_RATE},
+                      frozenset({"rsi", "macd", "stoch", "ema"})),
+}, frozenset({"rsi", "macd", "stoch", "ema"}))
 TECHNICALS = Obj({
     "params": Obj({"rsi": Num(1, 100, integer=True), "macd": Arr(Num(1, 100, integer=True), 3, fixed=True),
                    "stoch": Arr(Num(1, 100, integer=True), 3, fixed=True),
-                   "rsi_zones": Arr(INDEX, 2, fixed=True), "stoch_zones": Arr(INDEX, 2, fixed=True)}),
+                   "ema": Arr(Num(1, 100, integer=True), 3, fixed=True),
+                   "rsi_zones": Arr(INDEX, 2, fixed=True), "stoch_zones": Arr(INDEX, 2, fixed=True)},
+                  # ema は #206 で足した。デプロイ前に開いた画面（古い JS）は送らないので任意（400 にしない）
+                  frozenset({"ema"})),
     "frames": Arr(TECH_FRAME, len(TECH_TFS), min_len=1),
 })
 TECHNICALS_INPUT = Obj({
@@ -191,8 +204,9 @@ TECHNICALS_INPUT_SCHEMA = {
     "properties": {
         "timeframes": {"type": "array", "items": {"enum": list(TECH_TFS)}, "minItems": 1, "maxItems": 3,
                        "description": "足（省略 = 3 つ）"},
-        "indicators": {"type": "array", "items": {"enum": list(TECH_INDICATORS)}, "minItems": 1, "maxItems": 3,
-                       "description": "指標（stoch = スロー・ストキャスティクス。省略 = 3 つ）"},
+        "indicators": {"type": "array", "items": {"enum": list(TECH_INDICATORS)}, "minItems": 1,
+                       "maxItems": len(TECH_INDICATORS),
+                       "description": "指標（stoch = スロー・ストキャスティクス、ema = EMA の 3 本。省略 = 4 つ）"},
         "horizon_bars": {"type": "integer", "minimum": 1, "maximum": 20,
                          "description": "基準率の何本先（省略 = 週足 4・日足 5・4 時間足 5）"},
     },
@@ -395,9 +409,12 @@ REGISTRY: Registry = {t.name: t for t in (
     _spec("technicals",
           "日経225 先物（ラージ・期近）の週足・日足・4 時間足のテクニカル指標（画面の先物推移の段と同じ計算）。"
           "RSI・MACD（円）・スロー・ストキャスティクスの今の値・直近 20 本・"
-          "期間は利用者の設定（params。既定 RSI 14・MACD 12/26/9・ストキャスティクス 14/3/3。"
+          "期間は利用者の設定（params。既定 RSI 14・MACD 12/26/9・ストキャスティクス 14/3/3・EMA 5/25/75。"
           "書くときは params の期間を添える）・"
           "ゾーン（high / low / mid）と続いた本数・シグナル交差から何本目、"
+          "ema = EMA 短期・中期・長期の値（ema_x）と終値との距離（dist_yen = 終値 − EMA、dist_pct）・"
+          "並び順 order（up = 短 > 中 > 長 の上向きのパーフェクトオーダー、down = 下向き、mixed = それ以外。"
+          "足りない足では null）と続いた本数・組ごとの直近の交差（shorter_above = 短い方が上、何本目）、"
           "base_rates = 今と同じ状態だった過去の足の horizon_bars 本先の騰落率の分布"
           "（件数 n・中央値・p10・p90 の %。all は条件なし）。insufficient は件数 20 未満。"
           "足は期近のつなぎ足（調整なし）で限月交代の跳びが指標に入る。交代をまたぐ窓は基準率から除く（rolls_excluded）。"
