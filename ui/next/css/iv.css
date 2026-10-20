@@ -396,8 +396,8 @@
  * 補助線（30 / 70・20 / 80・0）= --line-2 の破線
  *
  * #207: 価格と段を .fut-stack で包み、JS が枠を測って配置（futPaneLayout）を決める。段の高さは svg の height 属性
- * （style 属性なし）、段の枠は中身の高さ、価格の描画域は残り（flex: 1）。段の前の境目 .ind-split は高さ 0 で、
- * 当たり判定は ::before の帯（マウス 10px・タッチ 20px）
+ * （style 属性なし）、段の枠は中身の高さ、価格の描画域は残り（flex: 1）。段の前の境目 .ind-split は高さ 0 の見た目と
+ * フォーカスだけ（pointer-events: none）で、当たり判定は JS（futSplitAt: マウス ±5px・タッチ ±10px。境目 0 は価格側にも）
  */
 .fut-stack {
   position: relative;
@@ -428,6 +428,12 @@
  * 枠に下限は付けない（#207 はみ出し: 段を全部出しても価格と段の和は枠の高さまで）。価格の下限 80px と段の下限 28px は
  * 配置（futPaneLayout）が守り、入らない段は後ろから隠して .ind-hidden-note で知らせる
  */
+.ind-hidden-wrap {
+  position: relative;
+  flex: 0 0 0;
+  height: 0;
+}
+
 .ind-hidden-note {
   position: absolute;
   bottom: 24px;
@@ -445,7 +451,7 @@
 
 /*
  * 境目（#207）: 高さ 0 の要素（role="separator"。フォーカスとキー・線の見た目だけ）。pointer-events: none で、押下の当たり
- * 判定は段の枠の座標（futSplitAt。マウス ±5px・タッチ ±10px、段の高さの 1/4 まで）。近くでは row-resize のカーソルと線
+ * 判定は段の枠の座標（futSplitAt。マウス ±5px・タッチ ±10px。境目 0 は価格の描画域の側にも）。近くでは row-resize のカーソルと線
  */
 .ind-split {
   position: relative;
@@ -474,7 +480,8 @@
   background: var(--accent);
 }
 
-.ind-panes.split-hot {
+.fut-stack:has(.ind-panes.split-hot),
+.fut-stack:has(.ind-panes.split-hot) * {
   cursor: row-resize;
 }
 

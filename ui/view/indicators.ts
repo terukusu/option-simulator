@@ -3,8 +3,8 @@
  * model/technicals.ts の indicators（AI のツール technicals と同じ計算）。ここは段の座標・補助線・見出しの文字だけ。
  *
  * - 段は価格の描画域の下に、同じ表示範囲（index の viewport）・同じ横の画素範囲（左の余白 = 系列の目盛りの列、右 =
- *   IV_MARGIN.right）で描く = パン・拡大・カーソルが価格と揃う。段の高さは IND_PANE_H（縦に狭いとき = スマホのシートの
- *   覗く は段の枠の高さを段の数で割った高さ。下限 IND_PANE_MIN_H。indPaneHeight）
+ *   IV_MARGIN.right）で描く = パン・拡大・カーソルが価格と揃う。段の高さは既定 IND_PANE_H（#207 で覚えた高さ。縦に狭いと
+ *   縮み、下限 IND_PANE_MIN_H が入らない段は隠す = futPaneLayout）
  * - RSI・ストキャスティクスは 0〜100 の固定（補助線 30 / 70・20 / 80）、MACD は見えている足の MACD・シグナル・ヒストの
  *   最小〜最大（0 を含む）で、ヒストは棒（正 / 負）、MACD とシグナルは線
  * - 見出し: 名前とパラメータ（計算に使った期間 = ind.params。#205 で設定から変えられる。例「RSI（14）」）、カーソルの足
@@ -62,11 +62,6 @@ export const IND_PANE_H = 56;
 /** 段の高さの下限（px） */
 export const IND_PANE_MIN_H = 28;
 
-/** 段 1 つの高さ: 段の枠の高さ ÷ 段の数を [IND_PANE_MIN_H, IND_PANE_H] に収める */
-export function indPaneHeight(boxHeight: number, count: number): number {
-  if (!(count > 0) || !Number.isFinite(boxHeight)) return IND_PANE_H;
-  return Math.min(IND_PANE_H, Math.max(IND_PANE_MIN_H, Math.floor(boxHeight / count)));
-}
 /** 段の上下の余白（px。上は見出しの行） */
 const PAD_TOP = 14;
 const PAD_BOTTOM = 4;
@@ -447,7 +442,9 @@ export function futPaneLayout(p: {
 /**
  * 境目のドラッグ（#207）。border 0 = 価格 | 1 段目（1 段目 = 開始の高さ − dy、価格は残り）、border i = 段 i−1 | 段 i
  * （段 i−1 に dy を足して段 i から引く = 2 段の和を保つ）。下限（価格 FUT_PRICE_MIN_H・段 IND_PANE_MIN_H）で止める。
- * start は押したときの配置（描いている高さ）。返すのは描いている段すべての高さ（整数 px）
+ * start は押したときの配置（描いている高さ）。返すのは **動かした境目の両側の段だけ**（整数 px。境目 0 は 1 段目だけ）:
+ * 縦に狭くて縮めて描いているとき、触っていない段の縮んだ高さを覚えた高さにしない（覚えた高さのまま、描くときに
+ * futPaneLayout が枠に合わせる）
  */
 export function futPaneDrag(
   start: FutPaneLayout,
@@ -469,9 +466,11 @@ export function futPaneDrag(
     hs[border] = b - m;
   }
   const out: IndPaneHeights = {};
-  start.panes.forEach((s, i) => {
-    out[s.kind] = Math.min(hs[i] as number, IND_PANE_MAX_H);
-  });
+  const touched = border === 0 ? [0] : [border - 1, border];
+  for (const i of touched) {
+    const s = start.panes[i];
+    if (s) out[s.kind] = Math.min(hs[i] as number, IND_PANE_MAX_H);
+  }
   return out;
 }
 
@@ -488,29 +487,27 @@ export function indSplitLabel(kinds: readonly IndKind[], border: number): string
   return `${upper}と${name(kinds[border])}の段の境目（↑ ↓ で高さ・Enter / ダブルクリックで既定の高さ）`;
 }
 
-/** 境目の当たり判定の幅（片側 px。マウス・タッチ。段が低いときは段の高さの 1/4 まで） */
+/** 境目の当たり判定の幅（片側 px。マウス・タッチ。#207 AC1: タッチは ±10px 以上） */
 export const SPLIT_HIT_PX = { fine: 5, coarse: 10 } as const;
 
 /**
- * 段の枠の座標 y にある境目（#207。無ければ null）。境目 i（i ≥ 1）は段 i の上端の ±幅、境目 0（価格 | 1 段目）は
- * 1 段目の上端から下へ 2 × 幅（上は価格の描画域 = 段の枠の外）。幅は段の高さの 1/4 まで（低い段でも十字線を置ける）。
- * 最大化中は無し
+ * 段の枠の座標 y にある境目（#207。無ければ null）。境目 i は段 i の上端の ±幅（境目 0 = 価格 | 1 段目は上側が価格の
+ * 描画域 = y < 0。押下は価格と段を包む枠で取る）。幅はいつも全部（低い 28px の段では帯が段に重なり、帯の中は
+ * ドラッグが先、帯の外 = 段の真ん中で十字線・最大化）。近い境目が先。最大化中は無し
  */
 export function futSplitAt(layout: FutPaneLayout, y: number, coarse: boolean): number | null {
   if (layout.max !== null || !Number.isFinite(y)) return null;
   const px = coarse ? SPLIT_HIT_PX.coarse : SPLIT_HIT_PX.fine;
-  const ps = layout.panes;
-  for (let i = 0; i < ps.length; i++) {
-    const s = ps[i] as FutPaneSlot;
-    const below = Math.min(i === 0 ? 2 * px : px, s.h / 4);
-    if (i === 0) {
-      if (y >= s.top && y <= s.top + below) return 0;
-      continue;
+  let best: number | null = null;
+  let bestD = Number.POSITIVE_INFINITY;
+  layout.panes.forEach((s, i) => {
+    const d = Math.abs(y - s.top);
+    if (d <= px && d < bestD) {
+      best = i;
+      bestD = d;
     }
-    const above = Math.min(px, (ps[i - 1] as FutPaneSlot).h / 4);
-    if (y >= s.top - above && y <= s.top + below) return i;
-  }
-  return null;
+  });
+  return best;
 }
 
 /** 高さが足りないので隠した段の知らせ（無ければ null。例「高さが足りないので SO を隠しています」） */

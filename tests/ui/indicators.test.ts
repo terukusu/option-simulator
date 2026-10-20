@@ -216,15 +216,31 @@ describe('#207 価格と段の配置（futPaneLayout）', () => {
 
 describe('#207 境目のドラッグ（futPaneDrag）', () => {
   const start = futPaneLayout({ stackH: 400, kinds: ['rsi', 'macd', 'stoch'], max: null });
-  it('境目 0（価格 | 1 段目）: 上へ動かすと 1 段目が高くなり、価格の下限 80px で止まる', () => {
-    expect(futPaneDrag(start, 0, -40, 400)).toEqual({ rsi: 96, macd: 56, stoch: 56 });
+  it('境目 0（価格 | 1 段目）: 上へ動かすと 1 段目が高くなり、価格の下限 80px で止まる。返すのは 1 段目だけ', () => {
+    expect(futPaneDrag(start, 0, -40, 400)).toEqual({ rsi: 96 });
     expect(futPaneDrag(start, 0, -1000, 400).rsi).toBe(400 - FUT_PRICE_MIN_H - 2 * 56);
     expect(futPaneDrag(start, 0, 1000, 400).rsi).toBe(IND_PANE_MIN_H);
   });
-  it('境目 i（段 i−1 | 段 i）: 2 段の和を保ち、どちらも 28px で止まる', () => {
-    expect(futPaneDrag(start, 1, 20, 400)).toEqual({ rsi: 76, macd: 36, stoch: 56 });
-    expect(futPaneDrag(start, 2, -100, 400)).toEqual({ rsi: 56, macd: 28, stoch: 84 });
-    expect(futPaneDrag(start, 1, 100, 400)).toEqual({ rsi: 84, macd: 28, stoch: 56 });
+  it('境目 i（段 i−1 | 段 i）: 2 段の和を保ち、どちらも 28px で止まる。返すのは両側の 2 段だけ', () => {
+    expect(futPaneDrag(start, 1, 20, 400)).toEqual({ rsi: 76, macd: 36 });
+    expect(futPaneDrag(start, 2, -100, 400)).toEqual({ macd: 28, stoch: 84 });
+    expect(futPaneDrag(start, 1, 100, 400)).toEqual({ rsi: 84, macd: 28 });
+  });
+  it('縦に狭くて縮めて描いているとき、触っていない段の縮んだ高さを返さない（覚えた高さのまま）', () => {
+    const kinds = ['rsi', 'macd', 'stoch'] as const;
+    const heights = { rsi: 120, macd: 120, stoch: 120 };
+    const shrunk = futPaneLayout({ stackH: 260, kinds, heights, max: null });
+    expect(shrunk.panes.map((s) => s.h)).toEqual([60, 60, 60]);
+    const patch = futPaneDrag(shrunk, 2, 10, 260);
+    expect(Object.keys(patch)).toEqual(['macd', 'stoch']);
+    // 広い枠では、触っていない RSI は覚えた 120px のまま
+    const wide = futPaneLayout({
+      stackH: 900,
+      kinds,
+      heights: { ...heights, ...patch },
+      max: null,
+    });
+    expect(wide.panes[0]?.h).toBe(120);
   });
   it('移動量は整数に丸める・NaN は 0', () => {
     expect(futPaneDrag(start, 1, 3.6, 400).rsi).toBe(60);
@@ -241,22 +257,37 @@ describe('#207 当たり判定（futPaneAt・futSplitAt）', () => {
     expect(futPaneAt(l, 136)).toBeNull();
     expect(futPaneAt(l, -1)).toBeNull();
   });
-  it('境目 0 は 1 段目の上端から下へ 2 × 幅、境目 i は ±幅（マウス 5px・タッチ 10px）', () => {
-    expect(futSplitAt(l, 0, false)).toBe(0);
-    expect(futSplitAt(l, 10, false)).toBe(0);
-    expect(futSplitAt(l, 11, false)).toBeNull();
-    expect(futSplitAt(l, 75, false)).toBe(1);
+  it('AC1: どの境目も ±幅（マウス 5px・タッチ 10px）。境目 0 は価格の側（y < 0）にも', () => {
+    for (const [y, b] of [
+      [-10, 0],
+      [-5, 0],
+      [0, 0],
+      [10, 0],
+      [70, 1],
+      [80, 1],
+      [90, 1],
+    ] as const) {
+      expect(futSplitAt(l, y, true)).toBe(b);
+    }
+    expect(futSplitAt(l, -11, true)).toBeNull();
+    expect(futSplitAt(l, 11, true)).toBeNull();
+    expect(futSplitAt(l, 91, true)).toBeNull();
+    expect(futSplitAt(l, 40, true)).toBeNull();
+    expect(futSplitAt(l, -5, false)).toBe(0);
+    expect(futSplitAt(l, 5, false)).toBe(0);
+    expect(futSplitAt(l, 6, false)).toBeNull();
     expect(futSplitAt(l, 85, false)).toBe(1);
     expect(futSplitAt(l, 86, false)).toBeNull();
-    expect(futSplitAt(l, 70, true)).toBe(1);
-    expect(futSplitAt(l, 40, true)).toBeNull();
   });
-  it('幅は段の高さの 1/4 まで（低い段でも十字線を置ける）・最大化中は境目なし', () => {
+  it('28px の段でも ±10px（帯は段に重なる。帯の外 = 段の真ん中は十字線）・近い境目が先・最大化中は無し', () => {
     const low = futPaneLayout({ stackH: 164, kinds: ['rsi', 'macd', 'stoch'], max: null });
     expect(low.panes.map((s) => s.h)).toEqual([28, 28, 28]);
+    expect(futSplitAt(low, -10, true)).toBe(0);
+    expect(futSplitAt(low, 10, true)).toBe(0);
     expect(futSplitAt(low, 14, true)).toBeNull();
-    expect(futSplitAt(low, 28 + 7, true)).toBe(1);
-    expect(futSplitAt(low, 28 + 8, true)).toBeNull();
+    expect(futSplitAt(low, 18, true)).toBe(1);
+    expect(futSplitAt(low, 38, true)).toBe(1);
+    expect(futSplitAt(low, 46, true)).toBe(2);
     const max = futPaneLayout({ stackH: 300, kinds: ['rsi', 'macd'], max: 'rsi' });
     expect(futSplitAt(max, 0, true)).toBeNull();
   });

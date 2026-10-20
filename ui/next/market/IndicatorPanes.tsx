@@ -26,6 +26,7 @@ import {
   type IndPaneModel,
   type IndReadout,
   indCrosshair,
+  indHiddenNote,
   indPaneModel,
   indReadout,
   indSplitLabel,
@@ -210,14 +211,8 @@ function IndicatorPanesView(p: IndicatorPanesProps) {
     onTap: () => p.onCursor(null),
     scrub: { linePx: null },
     onScrub: (x) => p.onCursor(indexAt(x), at(ptr.current.y, ptr.current.touch)),
+    // 境目の帯の上の dblclick は、価格と段を包む枠の捕捉の段階で止める（下の useEffect）
     onDouble: (_x, y) => {
-      // 境目の帯の上のダブルクリックは境目（既定の高さ）が扱う。既定に戻すと配置が変わるので、帯の判定だけでなく
-      // 直前（SPLIT_DBL_MS 以内）に境目を離したかでも除く（dblclick は 2 回目の pointerup の直後に来る）
-      if (futSplitAt(layout, y, false) !== null) return;
-      // 位置は画面の座標で比べる（既定に戻すと段の枠の上端が動く）
-      const sa = splitAt.current;
-      const cy = y + (ref.current?.getBoundingClientRect().top ?? 0);
-      if (performance.now() - sa.t < SPLIT_DBL_MS && Math.abs(cy - sa.y) <= DOUBLE_TAP_PX) return;
       const slot = futPaneAt(layout, y);
       if (slot) p.onMax(slot.kind);
     },
@@ -236,7 +231,8 @@ function IndicatorPanesView(p: IndicatorPanesProps) {
 
   // 境目（#207）: 押下の状態機械（ui/chart/split.ts）と 1 フレーム 1 回の反映。境目の要素は pointer-events: none
   // （Chrome のタッチの当たりの補正 = touch adjustment が、近くのフォーカスできる境目に段の上の押下を吸い寄せないように）で、
-  // 当たり判定は段の枠の座標で futSplitAt が決める。押下は捕捉の段階で取り、useChartGestures に渡さない
+  // 当たり判定は段の枠の座標で futSplitAt が決める。境目 0 の帯は価格の描画域にもかかるので、listener は価格と段を包む枠
+  // （.fut-stack = 段の枠の親）に付け、帯の押下・ホバー・dblclick は捕捉の段階で取って価格・段の操作に渡さない
   const [hot, setHot] = useState<number | null>(null);
   /** 最後に境目を離した時刻（performance.now）と位置（画面の座標。境目のダブルクリックの dblclick を最大化にしない） */
   const splitAt = useRef({ t: Number.NEGATIVE_INFINITY, y: 0 });
@@ -244,7 +240,8 @@ function IndicatorPanesView(p: IndicatorPanesProps) {
   latest.current = p;
   useEffect(() => {
     const el = ref.current;
-    if (!el) return;
+    const host = el?.parentElement;
+    if (!el || !host) return;
     let s = initialSplit();
     let start: FutPaneLayout | null = null;
     let border = 0;
@@ -302,7 +299,7 @@ function IndicatorPanesView(p: IndicatorPanesProps) {
       e.stopImmediatePropagation();
       e.preventDefault();
       try {
-        el.setPointerCapture(e.pointerId);
+        host.setPointerCapture(e.pointerId);
       } catch {
         // capture できない環境でも続ける
       }
@@ -318,7 +315,13 @@ function IndicatorPanesView(p: IndicatorPanesProps) {
         return;
       }
       if (e.pointerType === 'mouse' && e.buttons === 0) {
-        setHotOnce(futSplitAt(latest.current.layout, localY(e), false));
+        const b = futSplitAt(latest.current.layout, localY(e), false);
+        // 帯の上では十字線を出さない（row-resize のカーソルと境目の線だけ）
+        if (b !== null) {
+          if (hotNow === null) latest.current.onCursor(null);
+          e.stopPropagation();
+        }
+        setHotOnce(b);
       }
     };
     const onUp = (e: PointerEvent) => {
@@ -335,20 +338,34 @@ function IndicatorPanesView(p: IndicatorPanesProps) {
     const onLeave = (e: PointerEvent) => {
       if (s.border === null && e.pointerType === 'mouse') setHotOnce(null);
     };
-    el.addEventListener('pointerdown', onDown, { capture: true });
-    el.addEventListener('pointermove', onMove);
-    el.addEventListener('pointerup', onUp);
-    el.addEventListener('lostpointercapture', onUp);
-    el.addEventListener('pointercancel', onCancel);
-    el.addEventListener('pointerleave', onLeave);
+    // 境目の帯の上のダブルクリック（境目が既定の高さに戻す）は、価格の初期表示・段の最大化にしない。既定に戻すと段の
+    // 枠が動くので、帯の判定だけでなく「境目を離して SPLIT_DBL_MS 以内・同じ位置（画面の座標）」でも止める
+    const onDbl = (e: MouseEvent) => {
+      const sa = splitAt.current;
+      const near =
+        performance.now() - sa.t < SPLIT_DBL_MS && Math.abs(e.clientY - sa.y) <= DOUBLE_TAP_PX;
+      const y = e.clientY - el.getBoundingClientRect().top;
+      if (!near && futSplitAt(latest.current.layout, y, false) === null) return;
+      e.stopPropagation();
+      e.preventDefault();
+    };
+    const cap = { capture: true };
+    host.addEventListener('pointerdown', onDown, cap);
+    host.addEventListener('pointermove', onMove, cap);
+    host.addEventListener('pointerup', onUp);
+    host.addEventListener('lostpointercapture', onUp);
+    host.addEventListener('pointercancel', onCancel);
+    host.addEventListener('pointerleave', onLeave);
+    host.addEventListener('dblclick', onDbl, cap);
     return () => {
       stopFrame();
-      el.removeEventListener('pointerdown', onDown, { capture: true });
-      el.removeEventListener('pointermove', onMove);
-      el.removeEventListener('pointerup', onUp);
-      el.removeEventListener('lostpointercapture', onUp);
-      el.removeEventListener('pointercancel', onCancel);
-      el.removeEventListener('pointerleave', onLeave);
+      host.removeEventListener('pointerdown', onDown, cap);
+      host.removeEventListener('pointermove', onMove, cap);
+      host.removeEventListener('pointerup', onUp);
+      host.removeEventListener('lostpointercapture', onUp);
+      host.removeEventListener('pointercancel', onCancel);
+      host.removeEventListener('pointerleave', onLeave);
+      host.removeEventListener('dblclick', onDbl, cap);
     };
   }, []);
   // 境目にフォーカスしたキー: ↑ ↓ で 8px（Shift で 32px）、Enter で既定の高さ
@@ -364,6 +381,7 @@ function IndicatorPanesView(p: IndicatorPanesProps) {
     p.onPaneCommit(futPaneDrag(layout, b, e.key === 'ArrowUp' ? -step : step, p.stackH));
   };
 
+  const note = indHiddenNote(layout.hidden);
   // スマホ（タッチ）の十字線: 触っている段の名前・横線の値・その足の値を指から離れた所（枠の上端、指が上側なら下端）にも
   const fi = pc?.touch ? models.findIndex((m) => m.kind === pc.pane) : -1;
   const fm = fi >= 0 ? models[fi] : undefined;
@@ -393,6 +411,14 @@ function IndicatorPanesView(p: IndicatorPanesProps) {
         if (e.pointerType === 'mouse') p.onCursor(null);
       }}
     >
+      {note && (
+        // 隠した段の知らせ: 段の枠の上端（= 価格の描画域の下端）の上、横軸の文字の上に重ねる（最後の段に重ねない）
+        <div class="ind-hidden-wrap">
+          <p class="ind-hidden-note" role="status">
+            {note}
+          </p>
+        </div>
+      )}
       {layout.panes.map((s, i) => {
         const m = models[i] as IndPaneModel;
         return (

@@ -32,7 +32,6 @@ import {
   IND_PANE_H,
   type IndKind,
   type IndPaneHeights,
-  indHiddenNote,
   indKindLabel,
 } from '../../view/indicators';
 import { IV_MODES, IV_TFS, type IvMode, type IvTf, lineSegments } from '../../view/ivHistory';
@@ -163,7 +162,8 @@ function FutHistoryView(p: FutHistoryProps) {
   useEffect(() => {
     if (maxKind !== null && !p.indKinds.includes(maxKind)) setMaxKind(null);
   }, [maxKind, p.indKinds]);
-  const heights = dragH ?? p.paneH;
+  // ドラッグ中は動かした段だけを覚えた高さに重ねる（触っていない段は覚えた高さのまま）
+  const heights = useMemo(() => (dragH ? { ...p.paneH, ...dragH } : p.paneH), [dragH, p.paneH]);
   const layout = useMemo(
     () => futPaneLayout({ stackH, kinds: p.indKinds, heights, max }),
     [stackH, p.indKinds, heights, max],
@@ -299,11 +299,6 @@ function FutHistoryView(p: FutHistoryProps) {
               {...(overlays ? { overlays } : {})}
               {...(ind && bars.length > 0 ? { height: layout.priceH } : {})}
             />
-          )}
-          {ind && bars.length > 0 && indHiddenNote(layout.hidden) && (
-            <p class="ind-hidden-note" role="status">
-              {indHiddenNote(layout.hidden)}
-            </p>
           )}
           {ind && bars.length > 0 && (
             <IndicatorPanes
