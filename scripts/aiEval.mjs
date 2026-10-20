@@ -7,7 +7,8 @@
 // 送り先は AI_EVAL_BASE（既定 http://127.0.0.1:8080）= 手元で起動した中継。本番の IAP は越えない。資格情報は中継の
 // 環境変数（このスクリプトは読まない・出さない）。手順は api/README.md「AI の評価」。
 //
-//   npm run ai:eval                          10 通りの診断 + 追加の質問 2 件
+//   npm run ai:eval                          10 通りの診断 + 追加の質問 2 件 + テクニカルの質問 3 件（#200）
+//   npm run ai:eval -- --tech-only           テクニカルの質問 3 件だけ
 //   npm run ai:eval -- --cases put_sell,calendar --repeat 2 --no-followups
 //
 // 費用の上限: 累計の台帳 fixtures/local/ai_eval/ledger.json（gitignore）で AI_EVAL_LIMIT_USD（既定 6.5）を超える前に
@@ -41,6 +42,24 @@ const FOLLOWUPS = [
   { case: 'iron_condor', text: '10 日後に原資産が +4% のときの損益と Δ を教えてください。' },
 ];
 
+// テクニカルの質問（#200）: 合成の先物の足（scripts/synthFutBars.ts。架空の値）で technicals を呼ぶか・照合の不一致 0・
+// 方向を断定しないか（言い回しの簡単な検査 + 全文を目で読む）
+const TECH_QUESTIONS = [
+  {
+    case: 'put_sell',
+    text: '日足と4時間足のRSI・MACD・ストキャスティクスを見て、このポジの崩れ方は？',
+  },
+  {
+    case: 'iron_condor',
+    text: '週足のRSI・MACD・ストキャスティクスはどんな状態？過去に似た状態の後はどう動いた？',
+  },
+  { case: 'calendar', text: '4時間足のストキャスティクスとRSIは今どこにいる？' },
+];
+/** 方向の断定（予想の言い回し）。「〜でしょう」「〜見込み」「〜はず」などを上げ / 下げの動詞と組で見る */
+export const DIRECTION_RE =
+  /(上が|下が|上昇|下落|反発|反落|戻|崩れ|続伸|続落)[^。\n]{0,8}(でしょう|だろう|見込[みま]|はずです|はずだ|と予想|と予測|可能性が高い)/;
+const techOnly = args.includes('--tech-only');
+
 const load = async (p) =>
   (await runnerImport(join(root, p), { configFile: false, root, logLevel: 'error' })).module;
 const cases = await load('scripts/aiEvalCases.ts');
@@ -49,6 +68,7 @@ const chatMod = await load('ui/view/aiChat.ts');
 const toolsMod = await load('ui/view/aiTools.ts');
 const numMod = await load('ui/view/aiNumbers.ts');
 const stream = await load('data/aiStream.ts');
+const synthFut = await load('scripts/synthFutBars.ts');
 
 const latest = JSON.parse(readFileSync(join(root, 'fixtures', 'synthetic', 'latest.json'), 'utf8'));
 const want = opt('--cases');
@@ -168,7 +188,7 @@ const answerOf = (chat) => {
 };
 
 const rows = [];
-for (let rep = 0; rep < repeat; rep++) {
+for (let rep = 0; rep < (techOnly ? 0 : repeat); rep++) {
   for (const c of selected) {
     const env = ctxMod.aiEnvFromState(cases.caseState(latest, c), cases.caseMargin(c));
     const { chat, run } = await turn(
@@ -235,6 +255,58 @@ for (let rep = 0; rep < repeat; rep++) {
   }
 }
 
+// ---- テクニカルの質問（#200）: 新しい会話で 1 問ずつ。道具の環境に合成の先物の足を入れる
+// 合成の足の水準を合成の板の先物の値に合わせる（比で縮める。AI が板と道具の水準の食い違いに気を取られないように）
+const techData = (() => {
+  const d = synthFut.synthTechnicalsData();
+  const k = latest.future.price / d.daily.at(-1).c;
+  const scale = (b) => ({ ...b, o: b.o * k, h: b.h * k, l: b.l * k, c: b.c * k });
+  return { daily: d.daily.map(scale), hourly: d.hourly.map(scale) };
+})();
+for (const q of TECH_QUESTIONS) {
+  const c = cases.AI_EVAL_CASES.find((x) => x.name === q.case);
+  const env = {
+    ...ctxMod.aiEnvFromState(cases.caseState(latest, c), cases.caseMargin(c)),
+    technicals: techData,
+  };
+  const r = await turn(chatMod.INITIAL_AI_CHAT, env, 'chat', q.text);
+  const t = answerOf(r.chat);
+  const ck = numMod.checkNumbers(t, chatMod.numberSources(r.chat));
+  const uses = r.chat.messages
+    .flatMap((m) => (m.role === 'assistant' ? m.content : []))
+    .filter((b) => b.type === 'tool_use');
+  const tools = uses.map((b) => b.name);
+  const resultChars = r.chat.messages
+    .flatMap((m) => (m.role === 'user' ? m.content : []))
+    .filter(
+      (b) =>
+        b.type === 'tool_result' &&
+        uses.some((u) => u.id === b.tool_use_id && u.name === 'technicals'),
+    )
+    .map((b) => b.content[0]?.text.length ?? 0);
+  const un = ck.tokens.filter((x) => x.status === 'unmatched').map((x) => x.raw);
+  const direction = t.match(DIRECTION_RE)?.[0] ?? null;
+  const ok = !r.run.error && tools.includes('technicals') && ck.unmatched === 0 && !direction;
+  rows.push({
+    case: q.case,
+    kind: 'technicals',
+    rep: 0,
+    pass: ok,
+    tools,
+    inputs: uses.filter((u) => u.name === 'technicals').map((u) => u.input),
+    result_chars: resultChars,
+    matchedTotal: ck.matched,
+    unmatched: un,
+    direction,
+    chars: t.length,
+    ...r.run,
+  });
+  writeFileSync(join(outDir, `tech-${q.case}.md`), `# テクニカル: ${q.text}\n\n${t}\n`);
+  console.log(
+    `${ok ? 'pass' : 'FAIL'}  テクニカル ${q.case}: 道具 ${tools.join(',') || 'なし'}・結果 ${resultChars.join('/') || '—'} 字・一致 ${ck.matched}・不一致 ${un.length}${un.length ? `［${un.join('、')}］` : ''}・断定 ${direction ?? 'なし'}・往復 ${r.run.requests}・${r.run.stop ?? r.run.error}・完了 ${(r.run.totalMs / 1000).toFixed(1)} 秒`,
+  );
+}
+
 // ---- 中継のログ（任意）: ai_request の概算費用・トークン・落とした block
 let relay = null;
 if (relayLog) {
@@ -275,12 +347,14 @@ if (relayLog) {
 
 const diag = rows.filter((r) => r.kind === 'diagnose');
 const fus = rows.filter((r) => r.kind === 'followup');
+const techs = rows.filter((r) => r.kind === 'technicals');
 const summary = {
   model: status.model,
   credential: status.credential,
   counted: status.counted,
   diagnose: { pass: diag.filter((r) => r.pass).length, total: diag.length },
   followup: { pass: fus.filter((r) => r.pass).length, total: fus.length },
+  technicals: { pass: techs.filter((r) => r.pass).length, total: techs.length },
   unmatched_total: rows.reduce((n, r) => n + r.unmatched.length, 0),
   cost_usd: Number(rows.reduce((n, r) => n + r.costUsd, 0).toFixed(4)),
   ledger_total_usd: Number(ledger.total_usd.toFixed(4)),
@@ -291,5 +365,6 @@ console.log(JSON.stringify(summary, null, 1));
 console.log(`返答の全文: fixtures/local/ai_eval/${stamp}/（コミットしない）`);
 const ok =
   summary.diagnose.pass === summary.diagnose.total &&
-  summary.followup.pass === summary.followup.total;
+  summary.followup.pass === summary.followup.total &&
+  summary.technicals.pass === summary.technicals.total;
 process.exit(ok ? 0 : 1);

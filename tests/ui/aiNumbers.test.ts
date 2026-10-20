@@ -43,6 +43,14 @@ describe('collectValues', () => {
 });
 
 describe('checkNumbers', () => {
+  it('#200: 分位の名前（下位 10%・上位 10%・p90・10〜90% の幅）は数えない', () => {
+    const src = [{ median_pct: -0.4, p10_pct: -3.3 }];
+    const r = checkNumbers('下位 10% は -3.3%、上位 10% と p90、10〜90% の幅。中央値 -0.4%', src);
+    expect(r.unmatched).toBe(0);
+    expect(r.matched).toBe(2);
+    // 名前でない 90% は数える
+    expect(checkNumbers('上げ幅は 90% です', src).unmatched).toBe(1);
+  });
   it('円・千円・万円への丸め（四捨五入。境界）', () => {
     expect(statusOf('最大損失は -617,234 円')).toEqual(['matched']);
     expect(statusOf('最大損失は 617 千円')).toEqual(['matched']);
