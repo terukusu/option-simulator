@@ -10,6 +10,14 @@ import type { AmountUnit } from '../../view/metrics';
 import type { PinLabel } from '../../view/pins';
 import { type PnlBase, type PnlChartModel, Y_UNIT_LABEL } from '../../view/pnlChart';
 import {
+  CROSS_GRAB_PX,
+  inCrossRead,
+  markLabelBox,
+  type PnlCursor,
+  pnlCrosshair,
+  pnlCursorAt,
+} from '../../view/pnlCrosshair';
+import {
   parseCssColor,
   SURFACE_Y_UNIT,
   type SurfaceColors,
@@ -43,7 +51,7 @@ const STAGE_GRAB_PX = 14;
 const KIND_CLASS = { expiry: 'expiry', date: 'date', today: 'today' } as const;
 
 const LINE_LABEL =
-  '損益グラフ（ドラッグでパン、ホイール・ピンチで拡大、ダブルクリックでリセット、ハンドルをつかむか長押しして左右にドラッグでシナリオ点 ΔX、足のマーカーで足を選ぶ・長押しして横にドラッグで行使価格。キー: ← / → ΔX ∓100 円（Shift で 1,000 円）、↑ / ↓ Δσ ±0.5pt、[ / ] 経過日数 ∓1 日、0 シナリオを 0 に、+ / − 拡大縮小、R リセット）';
+  '損益グラフ（マウスを載せる・タップで十字線（タップで置いた十字線は交点をドラッグで動かし、読み取りのタップで消す）、ドラッグでパン、ホイール・ピンチで拡大、ダブルクリックでリセット、ハンドルをつかむか長押しして左右にドラッグでシナリオ点 ΔX、足のマーカーで足を選ぶ・長押しして横にドラッグで行使価格。キー: ← / → ΔX ∓100 円（Shift で 1,000 円）、↑ / ↓ Δσ ±0.5pt、[ / ] 経過日数 ∓1 日、0 シナリオを 0 に、+ / − 拡大縮小、R リセット）';
 const SURFACE_LABEL =
   '損益の面（横 原資産・縦 経過日数・色 損益。描画域を押してドラッグでシナリオ点の ΔX と経過日数 d を同時に動かす、2 本指・横ホイールでパン、ホイール・ピンチで拡大、ダブルクリック / ダブルタップでリセット、足のマーカーで足を選ぶ・長押しして横にドラッグで行使価格。キー: ← / → ΔX ∓100 円（Shift で 1,000 円）、↑ / ↓ Δσ ±0.5pt、[ / ] 経過日数 ∓1 日、0 シナリオを 0 に、+ / − 拡大縮小、R リセット）';
 
@@ -61,6 +69,9 @@ function readSurfaceColors(): SurfaceColors | null {
  * ジェスチャーは useChartGestures（規則は ui/chart/gesture.ts）。ミニ（シート全開）は線だけで操作を受けない。
  * 面モード（#88 段 B）: 描画域を押すとすぐ面の点をつかみ、位置 → (ΔX, d) を 1 フレーム 1 回の setScenario に入れる
  * （surfaceDragPatch）。2 本目の指・cancel は押す前の値に戻す。つかんでいる間は .live。
+ * 十字線（#201。線モードだけ）: カーソルは値の座標のローカル state（pnlCrosshair）。マウスのホバーで置き外れて消す、
+ * タッチ・ペンのタップで置く（pinned。交点の ±14px をドラッグで動かす = gesture の cross、読み取りのタップ・描画域の外の
+ * タップ・ダブルタップ（リセット）で消す）。面・ミニ・空では消す。
  */
 export function PnlPlot(p: {
   chartRef: RefObject<HTMLDivElement>;
@@ -97,6 +108,13 @@ export function PnlPlot(p: {
   /** 面の点をつかんでいる間（.live）と、押す前の ΔX・d（取り消しで戻す） */
   const [live, setLive] = useState(false);
   const surfaceBefore = useRef<{ dX: number; days: number } | null>(null);
+  /** 十字線のカーソル（値の座標。#201）と、最後に押したポインタの種類（マウスのクリックでは置かない） */
+  const [cursor, setCursor] = useState<PnlCursor | null>(null);
+  const pointerType = useRef('mouse');
+  const crossOn = !surfaceOn && !mini && !model.empty;
+  useEffect(() => {
+    if (!crossOn) setCursor(null);
+  }, [crossOn]);
   // つかんでいる間に面モードでなくなった（線へ・ミニ・足が無くなった）ら .live と押す前の値を捨てる
   useEffect(() => {
     if (surfaceOn) return;
@@ -127,6 +145,38 @@ export function PnlPlot(p: {
         ];
     return stageMarkLabels(marks, model, obstacles);
   }, [marks, model, mini, surfaceOn, dSigma, p.height, p.width, frame.offsetX, callLabels]);
+  // 十字線（#201）: 読み取りの箱は IV レールの吹き出し・追証の札・交点のラベルを避ける。カーソルが変わったときはこれだけ作り直す
+  const cross = useMemo(
+    () =>
+      crossOn && cursor
+        ? pnlCrosshair({
+            base,
+            scenario,
+            chart: model,
+            cursor,
+            width: p.width,
+            height: p.height,
+            obstacles: [
+              ivRailObstacle(dSigma, p.height, p.width + frame.offsetX),
+              ...callLabels.map((l) => l.box),
+              ...labels.map(markLabelBox),
+            ],
+          })
+        : null,
+    [
+      crossOn,
+      cursor,
+      base,
+      scenario,
+      model,
+      p.width,
+      p.height,
+      dSigma,
+      frame.offsetX,
+      callLabels,
+      labels,
+    ],
+  );
   // 面: 色（テーマが変わったら読み直す。テーマの属性は親のレイアウトの effect が入れるので passive で読む）
   const [colors, setColors] = useState<SurfaceColors | null>(null);
   const { theme } = p;
@@ -217,7 +267,33 @@ export function PnlPlot(p: {
     minWidth: model.minWidth,
     range,
     disabled: model.empty || mini,
-    onViewport: (v) => dispatch({ type: 'setPnlViewport', viewport: v }),
+    onViewport: (v) => {
+      // リセット（ダブルタップ・ダブルクリック・R・[⟲]）で十字線も消す
+      if (v === null) setCursor(null);
+      dispatch({ type: 'setPnlViewport', viewport: v });
+    },
+    // 十字線（#201。線モード）: タッチ・ペンのタップで置く / 移す。読み取りの箱・描画域の外のタップで消す
+    onTap: (x: number, y: number) => {
+      if (!crossOn || pointerType.current === 'mouse') return;
+      if (cursor?.pinned && inCrossRead(cross, x + ox, y + frame.offsetY)) {
+        setCursor(null);
+        return;
+      }
+      const at = pnlCursorAt(model, x + ox, y + frame.offsetY, false);
+      setCursor(at ? { ...at, pinned: true } : null);
+    },
+    ...(crossOn && cursor?.pinned && cross && cross.py !== null
+      ? {
+          cross: {
+            pointPx: { x: cross.px - ox, y: cross.py - frame.offsetY },
+            grabPx: CROSS_GRAB_PX,
+          },
+          onCross: (x: number, y: number) => {
+            const at = pnlCursorAt(model, x + ox, y + frame.offsetY, true);
+            if (at) setCursor({ ...at, pinned: true });
+          },
+        }
+      : {}),
     // 線モード: ハンドル（ΔX = 0 でも X₀ 上）の ±14px で即つかむ。それ以外は長押しでつかむ → ΔX（10 円の格子）
     // 面モード: 押すとすぐ面の点（点の ±14px は飛ばない）→ ΔX と d を同時に（scrub は渡さない）
     ...(surfaceOn
@@ -307,6 +383,24 @@ export function PnlPlot(p: {
       tabIndex={model.empty || mini ? -1 : 0}
       role="application"
       aria-label={surfaceOn ? SURFACE_LABEL : LINE_LABEL}
+      onPointerDown={(e) => {
+        pointerType.current = e.pointerType;
+      }}
+      onPointerMove={(e) => {
+        // 十字線のホバー（マウス・ボタンを押していない間だけ。押している間は値の座標のまま = パンで付いて動く）
+        if (!crossOn || e.pointerType !== 'mouse' || e.buttons !== 0) return;
+        const r = e.currentTarget.getBoundingClientRect();
+        const at = pnlCursorAt(
+          model,
+          e.clientX - r.left + ox,
+          e.clientY - r.top + frame.offsetY,
+          false,
+        );
+        setCursor(at ? { ...at, pinned: false } : null);
+      }}
+      onPointerLeave={(e) => {
+        if (e.pointerType === 'mouse') setCursor((c) => (c && !c.pinned ? null : c));
+      }}
     >
       {surfaceOn && (
         <SurfaceCanvas width={p.width} height={p.height} image={image} rect={surfaceRect} />
@@ -543,6 +637,64 @@ export function PnlPlot(p: {
             <text class="legdrag" x={dragMarker.px} y={bottom - MARKER_BAND_PX - 4}>
               K {fmtNum(dragMarker.k, 0)}
             </text>
+          )}
+          {cross && (
+            <g class="xh">
+              <line class="xh-line v" x1={cross.px} x2={cross.px} y1={plot.top} y2={bottom} />
+              {cross.py !== null && (
+                <line class="xh-line h" x1={plot.left} x2={right} y1={cross.py} y2={cross.py} />
+              )}
+              {cross.dots.map((d) => (
+                <circle
+                  key={`xd${d.kind}`}
+                  class={`xh-dot ${KIND_CLASS[d.kind]}`}
+                  cx={cross.px}
+                  cy={d.py}
+                  r={3}
+                />
+              ))}
+              <g class="xh-tag x">
+                <rect
+                  x={cross.xTag.x}
+                  y={cross.xTag.y}
+                  width={cross.xTag.w}
+                  height={cross.xTag.h}
+                />
+                <text x={cross.xTag.x + cross.xTag.w / 2} y={cross.xTag.y + cross.xTag.h / 2}>
+                  {cross.xTag.text}
+                </text>
+              </g>
+              {cross.yTag && (
+                <g class="xh-tag y">
+                  <rect
+                    x={cross.yTag.x}
+                    y={cross.yTag.y}
+                    width={cross.yTag.w}
+                    height={cross.yTag.h}
+                  />
+                  <text x={cross.yTag.x + cross.yTag.w / 2} y={cross.yTag.y + cross.yTag.h / 2}>
+                    {cross.yTag.text}
+                  </text>
+                </g>
+              )}
+              <g class={`xh-read ${cross.read.anchor}`}>
+                {cross.read.items.map((it) => (
+                  <text
+                    key={`xr${it.kind}`}
+                    class={`xh-val ${KIND_CLASS[it.kind]}`}
+                    x={cross.read.textX}
+                    y={it.y}
+                  >
+                    {it.text}
+                  </text>
+                ))}
+                {cross.read.close && (
+                  <text class="xh-close" x={cross.read.close.x} y={cross.read.close.y}>
+                    ×
+                  </text>
+                )}
+              </g>
+            </g>
           )}
         </svg>
       )}

@@ -21,6 +21,11 @@
  *   離して idle + surfaceEnd、6px 未満・500ms 未満の押下はタップとしてダブルタップ（reset）に数える（tap は出さない）。
  *   2 本目の指でピンチに移り surfaceCancel（押す前に戻す）、cancel も surfaceCancel。長押しは何もしない。
  *   マーカーの上で押して 6px 動かすとパンではなく 'surface'（その位置から）。ctx.surface があると ctx.scrub は使わない
+ * - 十字線の交点（ctx.cross を渡したときだけ。損益グラフでタッチで置いた十字線。#201）: 1 本目を交点（pointPx）から
+ *   grabPx 以内（距離）で押すとすぐ 'cross'（パン・長押しを待たない。マーカーが先、ハンドルより先）。交点と指のずれを
+ *   保ち、move で cross（viewport は返さない）。離して idle（タップ・リセットは出さない）。2 本目の指でピンチ、cancel で idle
+ * - ハンドルの縦線（scrub.linePx）の ±grabPx で即つかんだ押下を 6px 未満・LONG_PRESS_MS 未満で離したら tap を出す
+ *   （#201。十字線をハンドルの近くにも置ける。ダブルタップの 1 回目には数えない）
  *
  * 拡大・パンの規則そのものは ui/chart/scale.ts（panBy・pinchViewport）。DOM のイベントの受け口は
  * ui/components/useChartGestures.ts。
@@ -72,6 +77,11 @@ export interface GestureCtx {
    * つかむ距離（px）。渡すと scrub は使わない
    */
   surface?: { pointPx: { x: number; y: number } | null; grabPx: number };
+  /**
+   * 十字線の交点（#201。無ければ従来どおり）。pointPx = 交点の画素（要素の座標。無ければ null = つかめない）、
+   * grabPx = つかむ距離（px）
+   */
+  cross?: { pointPx: { x: number; y: number } | null; grabPx: number };
 }
 
 interface TrackedPointer {
@@ -92,7 +102,8 @@ export type GestureMode =
   | 'scrub'
   | 'marker'
   | 'markerDrag'
-  | 'surface';
+  | 'surface'
+  | 'cross';
 
 export interface GestureState {
   mode: GestureMode;
@@ -109,6 +120,8 @@ export interface GestureState {
   marker: { id: number; drag: boolean } | null;
   /** 面の点をつかんでいる間の、指の位置から点までのずれ（画素。'surface' の間だけ。それ以外は null） */
   surfaceOffset: { x: number; y: number } | null;
+  /** 十字線の交点をつかんでいる間の、指の位置から交点までのずれ（画素。'cross' の間だけ。それ以外は null） */
+  crossOffset: { x: number; y: number } | null;
 }
 
 export interface GestureResult {
@@ -134,6 +147,8 @@ export interface GestureResult {
   surfaceEnd?: true;
   /** 面の点の取り消し（2 本目の指・cancel。押す前の値に戻す） */
   surfaceCancel?: true;
+  /** 十字線の交点の位置（要素の座標の画素。#201） */
+  cross?: { x: number; y: number };
 }
 
 export function initialGesture(): GestureState {
@@ -146,6 +161,7 @@ export function initialGesture(): GestureState {
     scrubOffset: 0,
     marker: null,
     surfaceOffset: null,
+    crossOffset: null,
   };
 }
 
@@ -194,6 +210,19 @@ export function gestureDown(s: GestureState, p: PointerSample, ctx: GestureCtx):
       surfaceCancel: true,
     };
   }
+  if (s.mode === 'cross') {
+    // 十字線をつかんでいる間の 2 本目の指: ピンチへ（十字線は最後の位置のまま）
+    return {
+      state: {
+        ...s,
+        mode: 'pinch',
+        pointers,
+        start: ctx.viewport,
+        anchorPx: pinchPx(pointers),
+        crossOffset: null,
+      },
+    };
+  }
   if (s.mode === 'markerDrag' && s.marker) {
     // マーカーのドラッグ中の 2 本目の指: 取り消してピンチへ（確定しない）
     return {
@@ -220,6 +249,20 @@ export function gestureDown(s: GestureState, p: PointerSample, ctx: GestureCtx):
           start: ctx.viewport,
           anchorPx: [p.x, p.x],
           marker: hit,
+        },
+      };
+    }
+    const cp = ctx.cross?.pointPx;
+    if (ctx.cross && cp && Math.hypot(p.x - cp.x, p.y - cp.y) <= ctx.cross.grabPx) {
+      // 十字線の交点の近く: すぐつかむ（交点は飛ばさず、押した位置とのずれを保つ）
+      return {
+        state: {
+          ...s,
+          mode: 'cross',
+          pointers,
+          start: null,
+          anchorPx: null,
+          crossOffset: { x: cp.x - p.x, y: cp.y - p.y },
         },
       };
     }
@@ -306,10 +349,20 @@ export function gestureMove(s: GestureState, p: PointerSample, ctx: GestureCtx):
   if (i < 0) return { state: s };
   const pointers = s.pointers.map((q, j) => (j === i ? { ...q, x: p.x, y: p.y } : q));
   if (s.mode === 'scrub') {
-    return { state: { ...s, pointers }, scrub: { x: p.x + s.scrubOffset } };
+    // 一度 6px 動いた押下は戻ってきてもタップに数えない（#201。押した時刻を捨てる）
+    const q = pointers[i] as TrackedPointer;
+    const kept =
+      Math.hypot(q.x - q.x0, q.y - q.y0) >= TAP_MOVE_PX
+        ? pointers.map((r, j) => (j === i ? { ...r, t0: Number.NEGATIVE_INFINITY } : r))
+        : pointers;
+    return { state: { ...s, pointers: kept }, scrub: { x: p.x + s.scrubOffset } };
   }
   if (s.mode === 'markerDrag' && s.marker) {
     return { state: { ...s, pointers }, markerDrag: { id: s.marker.id, x: p.x } };
+  }
+  if (s.mode === 'cross' && s.crossOffset) {
+    const o = s.crossOffset;
+    return { state: { ...s, pointers }, cross: { x: p.x + o.x, y: p.y + o.y } };
   }
   const cur = pointers[i] as TrackedPointer;
   const far = Math.hypot(cur.x - cur.x0, cur.y - cur.y0) >= TAP_MOVE_PX;
@@ -372,8 +425,16 @@ export function gestureUp(s: GestureState, p: PointerSample, ctx: GestureCtx): G
   if (i < 0) return { state: s };
   const released = s.pointers[i] as TrackedPointer;
   const pointers = s.pointers.filter((_, j) => j !== i);
-  // つかむ操作の後はタップ・ダブルタップの判定を続けない
-  if (s.mode === 'scrub') return { state: initialGesture() };
+  // つかむ操作の後はダブルタップの判定を続けない。ハンドルの縦線で即つかんで動かさずに離した短い押下だけ tap（#201。
+  // 長押しでつかんだ押下は LONG_PRESS_MS 以上なので出さない）
+  if (s.mode === 'scrub') {
+    const moved = Math.hypot(p.x - released.x0, p.y - released.y0);
+    if (moved < TAP_MOVE_PX && p.t - released.t0 < LONG_PRESS_MS) {
+      return { state: initialGesture(), tap: { x: p.x, y: p.y } };
+    }
+    return { state: initialGesture() };
+  }
+  if (s.mode === 'cross') return { state: initialGesture() };
   if (s.mode === 'surface') {
     // 面の点を離す。動かさない短い押下はダブルタップ（リセット）の判定に数える（tap は出さない）
     const idle: GestureState = { ...initialGesture(), lastTap: s.lastTap };

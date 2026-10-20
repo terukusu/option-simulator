@@ -475,8 +475,8 @@ const TICK_RULES: readonly TickRule[] = [
   { maxTf: DAY_S, key: monthKey(12), label: (t: number) => `${jstParts(t).y}` },
 ];
 
-/** 目盛りのラベルの推定幅（px。10.5px の等幅の数字 ≈ 6.3px、全角 ≈ 10.5px） */
-function labelPx(s: string): number {
+/** 目盛りのラベルの推定幅（px。10.5px の等幅の数字 ≈ 6.3px、全角 ≈ 10.5px）。損益グラフの十字線の札も使う（#201） */
+export function labelPx(s: string): number {
   let w = 0;
   for (const c of s) w += c.charCodeAt(0) > 255 ? 10.5 : 6.3;
   return w;
@@ -736,8 +736,8 @@ export interface IvCrosshair {
 
 /** 札の高さ（px）と文字の左右の余白の合計（横軸・縦軸） */
 export const IV_TAG_H = 15;
-const IV_TAG_PAD_X = 8;
-const IV_TAG_PAD_Y = 6;
+export const IV_TAG_PAD_X = 8;
+export const IV_TAG_PAD_Y = 6;
 
 export interface IvCrosshairInput {
   bars: readonly IvBar[];
