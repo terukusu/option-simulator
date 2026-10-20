@@ -21,10 +21,14 @@
  * tech_rsi・tech_macd_fast・tech_macd_slow・tech_macd_signal・tech_stoch_k・tech_stoch_slowing・tech_stoch_d で、既定と
  * 違う項目だけ書く（既定を書き込んで固めない = 既定を見直したら効く）。無い・不正 → 既定（項目ごと）、MACD の短期 ≥ 長期
  * → MACD の 3 つを既定。古い画面はこのキーを読まずに書き直すので消える（期間が既定に戻るだけ）。
+ * #206 で EMA の 3 本の期間（tech_ema_short・tech_ema_mid・tech_ema_long）を足した。版は 1 のまま。同じ規則（既定と違う
+ * 項目だけ書く、無い・不正 → 項目ごとに既定）で、短期 < 中期 < 長期でなければ EMA の 3 つを既定。#206 より前の保存
+ * （キーが無い）は EMA が既定（5・25・75）。
  */
 
 import {
   DEFAULT_TECH_PARAMS,
+  isEmaOrder,
   isTechParams,
   isTechParamValue,
   TECH_PARAM_KEYS,
@@ -98,6 +102,9 @@ const TECH_JSON_KEY: Record<TechParamKey, string> = {
   stochK: 'tech_stoch_k',
   stochSmooth: 'tech_stoch_slowing',
   stochD: 'tech_stoch_d',
+  emaShort: 'tech_ema_short',
+  emaMid: 'tech_ema_mid',
+  emaLong: 'tech_ema_long',
 };
 
 export interface Prefs {
@@ -126,7 +133,10 @@ export function techParamsOr(t: TechParams | undefined): TechParams {
   return isTechParams(t) ? t : { ...DEFAULT_TECH_PARAMS };
 }
 
-/** 保存したテクニカルの期間を読む（項目ごとに: 無い・不正 → 既定。MACD の短期 ≥ 長期 → MACD の 3 つを既定） */
+/**
+ * 保存したテクニカルの期間を読む（項目ごとに: 無い・不正 → 既定。MACD の短期 ≥ 長期 → MACD の 3 つを既定。
+ * EMA が短期 < 中期 < 長期でない → EMA の 3 つを既定。#206）
+ */
 export function readTechParams(o: Record<string, unknown>): TechParams {
   const t: TechParams = { ...DEFAULT_TECH_PARAMS };
   for (const key of TECH_PARAM_KEYS) {
@@ -137,6 +147,11 @@ export function readTechParams(o: Record<string, unknown>): TechParams {
     t.macdFast = DEFAULT_TECH_PARAMS.macdFast;
     t.macdSlow = DEFAULT_TECH_PARAMS.macdSlow;
     t.macdSignal = DEFAULT_TECH_PARAMS.macdSignal;
+  }
+  if (!isEmaOrder(t)) {
+    t.emaShort = DEFAULT_TECH_PARAMS.emaShort;
+    t.emaMid = DEFAULT_TECH_PARAMS.emaMid;
+    t.emaLong = DEFAULT_TECH_PARAMS.emaLong;
   }
   return t;
 }

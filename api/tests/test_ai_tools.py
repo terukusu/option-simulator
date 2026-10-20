@@ -144,8 +144,10 @@ def test_technicals_input_rejects():
     spec = REGISTRY["technicals"].input_shape
     spec.check({}, "input")
     spec.check({"timeframes": ["weekly", "4h"], "indicators": ["stoch"], "horizon_bars": 20}, "input")
+    spec.check({"indicators": ["ema"]}, "input")
     for bad, reason in [({"timeframes": ["1m"]}, "enum"), ({"timeframes": []}, "size"),
-                        ({"indicators": ["rsi", "macd", "stoch", "rsi"]}, "size"), ({"horizon_bars": 21}, "range"),
+                        ({"indicators": ["rsi", "macd", "stoch", "ema", "rsi"]}, "size"),
+                        ({"horizon_bars": 21}, "range"),
                         ({"horizon_bars": 2.5}, "type"), ({"cmd": "x"}, "unknown_key")]:
         with pytest.raises(Bad) as e:
             spec.check(bad, "input")
@@ -177,6 +179,39 @@ def test_technicals_params_range_fits_result_shape():
     with pytest.raises(Bad) as e:
         spec.check(r, "r")
     assert e.value.reason == "range"
+
+
+def test_technicals_ema_shape():
+    """#206: EMA の 3 本（params.ema・足ごとの ema・基準率 ema）が形を通る。古い画面（ema を送らない）の結果も通る。
+    ウォームアップ中（値・並び順が null）も通る。期間の範囲 2〜100 の両端も通る"""
+    spec = REGISTRY["technicals"].result_shape
+    full = SAMPLE["technicals"]["results"][0]["result"]
+    assert full["params"]["ema"] == [5, 25, 75]
+    f0 = full["frames"][0]
+    assert [ln["period"] for ln in f0["ema"]["lines"]] == [5, 25, 75]
+    assert f0["ema"]["order"] in ("up", "down", "mixed")
+    assert f0["base_rates"]["ema"]["condition"] == f"ema_order_{f0['ema']['order']}"
+    only = next(e for e in SAMPLE["technicals"]["results"] if e["input"].get("indicators") == ["ema"])
+    assert set(only["result"]["frames"][0]) >= {"ema"} and "rsi" not in only["result"]["frames"][0]
+    old = copy.deepcopy(full)
+    del old["params"]["ema"]
+    for f in old["frames"]:
+        del f["ema"]
+        del f["base_rates"]["ema"]
+    spec.check(old, "r")
+    warm = copy.deepcopy(full)
+    warm["frames"][0]["ema"].update({"order": None, "bars_in_order": 0})
+    warm["frames"][0]["ema"]["lines"][2].update({"ema_x": None, "dist_yen": None, "dist_pct": None})
+    warm["frames"][0]["ema"]["crosses"][1].update({"shorter_above": None, "bars_since_cross": None})
+    del warm["frames"][0]["base_rates"]["ema"]
+    spec.check(warm, "r")
+    for e in ([2, 3, 4], [98, 99, 100]):
+        warm["params"]["ema"] = e
+        spec.check(warm, "r")
+    bad = copy.deepcopy(full)
+    bad["frames"][0]["ema"]["order"] = "perfect"
+    with pytest.raises(Bad):
+        spec.check(bad, "r")
 
 
 PROPOSE = SAMPLE["propose"]

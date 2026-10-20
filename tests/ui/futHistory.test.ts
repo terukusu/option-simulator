@@ -1,13 +1,18 @@
 import { describe, expect, it } from 'vitest';
 import type { ChainJson, FutBar } from '../../data';
+import { emaSet } from '../../model';
 import { linear } from '../../ui/chart/scale';
 import {
+  FUT_EMA_TEXT,
   FUT_NOTE,
   FUT_ROLL_LABEL_GAP_PX,
   FUT_SERIES,
   fmtYen,
   futContractAt,
   futContractLabel,
+  futEmaLabel,
+  futEmaOverlays,
+  futEmaReadout,
   futNowPoint,
   futNowValue,
   futReadout,
@@ -275,5 +280,93 @@ describe('IV 推移 ⇄ 先物の切替で足と時間の範囲を保つ', () =>
     expect(r.request?.src).toBe('1d');
     const e = mergeIvEntry(undefined, fut(futHours), { src: '1h', side: 'right' });
     expect(e.bars.map((b) => b.m)).toEqual(futHours.map((b) => b.m));
+  });
+});
+
+/** #206: EMA の 3 本（価格に重ねる線・読み取りの 2 行目・切替の名前） */
+describe('EMA の 3 本（#206）', () => {
+  const bars: FutBar[] = Array.from({ length: 120 }, (_, i) => {
+    const c = 30000 + 10 * i + 100 * Math.sin(i / 4);
+    return { t: 1_700_000_000 + i * 3600, o: c, h: c + 20, l: c - 20, c, m: '2026-12' };
+  });
+  const P = { emaShort: 5, emaMid: 25, emaLong: 75 };
+  const e = emaSet(
+    bars.map((b) => b.c),
+    P,
+  );
+  it('切替の名前は期間つき', () => {
+    expect(FUT_EMA_TEXT).toBe('EMA');
+    expect(futEmaLabel(P)).toBe('EMA（5・25・75）の線');
+    expect(futEmaLabel({ emaShort: 8, emaMid: 21, emaLong: 55 })).toBe('EMA（8・21・55）の線');
+  });
+  it('読み取り: カーソルの足（無ければ最新の足）の値と期間つきの名前。足りない間は —', () => {
+    const last = futEmaReadout(e, P, bars.length, null);
+    expect(last.map((x) => x.name)).toEqual(['EMA5', 'EMA25', 'EMA75']);
+    expect(last.map((x) => x.key)).toEqual(['s', 'm', 'l']);
+    expect(last[2]?.value).toBe(fmtYen(e.long[119]));
+    // 30 本目: 75 はまだ無い（ウォームアップ）= —、5・25 は値
+    const early = futEmaReadout(e, P, bars.length, 30);
+    expect(early[0]?.value).toBe(fmtYen(e.short[30]));
+    expect(early[2]?.value).toBe('—');
+    // 範囲の外のカーソルは端に寄せる・足が無ければ —
+    expect(futEmaReadout(e, P, bars.length, 500)[0]?.value).toBe(last[0]?.value);
+    expect(futEmaReadout(emaSet([], P), P, 0, null).every((x) => x.value === '—')).toBe(true);
+  });
+  it('重ねる線: 見えている足だけ・値の無い足（ウォームアップ）で切る。縦軸は足だけで決める', () => {
+    const input = {
+      bars,
+      tf: '1h' as const,
+      mode: 'candle' as const,
+      viewport: [60, 119] as const,
+      segments: lineSegments(bars, '1h', NONE),
+      width: 400,
+      height: 200,
+      rightLoaded: false,
+      series: FUT_SERIES,
+    };
+    const plain = ivChartModel({ ...input, viewport: [60, 119] });
+    const m = ivChartModel({ ...input, viewport: [60, 119], overlays: futEmaOverlays(e) });
+    expect(plain.overlays).toEqual([]);
+    expect(m.yDomain).toEqual(plain.yDomain);
+    expect(m.overlays.map((o) => o.cls)).toEqual(['ema-line s', 'ema-line m', 'ema-line l']);
+    // 短期: 59〜119 本目（端の 1 本外から）= 61 点の 1 本の線
+    const s = m.overlays[0]?.d ?? '';
+    expect(s.startsWith('M')).toBe(true);
+    expect(s.match(/[ML]/g)).toHaveLength(61);
+    // 長期: 74 本目から値がある = 59〜73 本目は描かず、74〜119 本目の 46 点
+    const l = m.overlays[2]?.d ?? '';
+    expect(l.match(/M/g)).toHaveLength(1);
+    expect(l.match(/[ML]/g)).toHaveLength(46);
+    // 長期の値が 1 つも無い範囲は空
+    const w = ivChartModel({ ...input, viewport: [0, 40], overlays: futEmaOverlays(e) });
+    expect(w.overlays[2]?.d).toBe('');
+  });
+  it('縮小（1 画素に 2 本以上）では 1 画素の列に 1 点だけ（点の数は描画域の幅まで）', () => {
+    const many: FutBar[] = Array.from({ length: 3000 }, (_, i) => {
+      const c = 30000 + 50 * Math.sin(i / 30);
+      return { t: 1_700_000_000 + i * 60, o: c, h: c + 5, l: c - 5, c, m: '2026-12' };
+    });
+    const ee = emaSet(
+      many.map((b) => b.c),
+      P,
+    );
+    const m = ivChartModel({
+      bars: many,
+      tf: '1m',
+      mode: 'line',
+      viewport: [0, 2999],
+      segments: lineSegments(many, '1m', NONE),
+      width: 360,
+      height: 200,
+      rightLoaded: false,
+      series: FUT_SERIES,
+      overlays: futEmaOverlays(ee),
+    });
+    const width = m.range[1] - m.range[0];
+    for (const o of m.overlays) {
+      const pts = o.d.match(/[ML]/g)?.length ?? 0;
+      expect(pts).toBeGreaterThan(100);
+      expect(pts).toBeLessThanOrEqual(Math.ceil(width) + 2);
+    }
   });
 });

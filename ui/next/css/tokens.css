@@ -38,6 +38,10 @@
   --warn-fill: rgba(217, 150, 42, 0.15);
   --bid: #55c796;
   --ask: #ef8585;
+  /* 先物推移の EMA の 3 本（#206。短期・中期・長期。ローソクの --gain / --loss と別の色相） */
+  --ema-s: #b48a2c;
+  --ema-m: #9c6de4;
+  --ema-l: #2196ad;
   /* 試作品が直書きしていた色の役割（§10.1） */
   --on-accent: #ffffff;
   --scrim: rgba(0, 0, 0, 0.35);
@@ -76,6 +80,9 @@
   --warn-fill: rgba(168, 107, 0, 0.14);
   --bid: #0f8a5c;
   --ask: #d13f3f;
+  --ema-s: #b07d00;
+  --ema-m: #8c52d6;
+  --ema-l: #0d8ca3;
   --on-accent: #ffffff;
   --scrim: rgba(0, 0, 0, 0.25);
   --backdrop: rgba(0, 0, 0, 0.35);

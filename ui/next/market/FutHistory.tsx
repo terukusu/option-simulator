@@ -1,11 +1,12 @@
 import type { ComponentChildren } from 'preact';
 import { useCallback, useMemo, useState } from 'preact/hooks';
 import type { FutBar } from '../../../data';
-import { type Indicators, indicators, type TechParams } from '../../../model';
+import { emaSet, type Indicators, indicators, type TechParams } from '../../../model';
 import type { Domain } from '../../chart/scale';
 import { pure } from '../../components/pure';
 import type { IvView } from '../../components/useIvHistory';
 import {
+  FUT_EMA_TEXT,
   FUT_FOCUS_LABEL,
   FUT_HINT,
   FUT_IMG_LABEL,
@@ -16,6 +17,9 @@ import {
   FUT_SERIES,
   type FutNowValue,
   fmtYen,
+  futEmaLabel,
+  futEmaOverlays,
+  futEmaReadout,
   futNowPoint,
   futReadout,
   futRollMarks,
@@ -55,6 +59,9 @@ export interface FutHistoryProps {
   onIndToggle: (kind: IndKind) => void;
   /** 指標の期間（#205。端末の設定。AI のツール technicals と同じ値） */
   techParams: TechParams;
+  /** EMA の 3 本を価格に重ねるか（#206。凡例の行のトグル。保存しない） */
+  showEma: boolean;
+  onEmaToggle: () => void;
 }
 
 const NO_IND: Indicators | null = null;
@@ -62,7 +69,8 @@ const NO_IND: Indicators | null = null;
 /**
  * 先物推移（#190。docs/ui-redesign.md §4.8）: IV 推移（IvHistory.tsx）と同じ並び = 見出し行（タイトル・Seg・ⓘ）→ ツールの
  * 行（足・ローソク / 線・最新化 ⟳）→ 読み取りの 1 行（始 / 高 / 安 / 終 = 円と限月）→ 描画域（IvPlot に円の書式と限月
- * 交代の印を渡す）→ 指標の段（#200。IndicatorPanes。凡例の行のトグルで出す）→ 凡例。シナリオの水準は無い。状態は
+ * 交代の印を渡す。EMA の 3 本を重ねる = #206）→ 指標の段（#200。IndicatorPanes。凡例の行のトグルで出す）→ 凡例。
+ * EMA を出すときは読み取りの下に EMA の値の行（期間つきの名前と色の見本 = 凡例を兼ねる）。シナリオの水準は無い。状態は
  * NextApp の useFutureBars（パネルを閉じても残る）。指標は段を 1 つでも出すときだけ足の並び・期間（#205）ごとに 1 回
  * 計算する。
  */
@@ -101,6 +109,21 @@ function FutHistoryView(p: FutHistoryProps) {
     () => (showInd ? indicators(bars, techParams) : NO_IND),
     [showInd, bars, techParams],
   );
+  // EMA の 3 本（#206）: 出すときだけ足の並び・期間ごとに 1 回（段の指標とは別。AI のツールと同じ emaSet）
+  const { showEma } = p;
+  const { emaShort, emaMid, emaLong } = techParams;
+  const ema = useMemo(
+    () =>
+      showEma
+        ? emaSet(
+            bars.map((b) => b.c),
+            { emaShort, emaMid, emaLong },
+          )
+        : null,
+    [showEma, bars, emaShort, emaMid, emaLong],
+  );
+  const overlays = useMemo(() => (ema ? futEmaOverlays(ema) : undefined), [ema]);
+  const emaRo = ema ? futEmaReadout(ema, techParams, bars.length, cursor) : null;
   const rightLoaded = ivInProgress(entry);
   const ro = futReadout(bars, tf, cursor, rightLoaded);
   const status = !entry
@@ -160,6 +183,16 @@ function FutHistoryView(p: FutHistoryProps) {
           </span>
           {ro.contract && <span class="contract">{ro.contract}</span>}
         </div>
+        {emaRo && (
+          <div class="iv-readout ema" aria-live="off">
+            {emaRo.map((e) => (
+              <span class="v" key={e.key}>
+                <span class={`k ${e.key}`}>{e.name}</span>
+                {e.value}
+              </span>
+            ))}
+          </div>
+        )}
         <IvPlot
           bars={bars}
           tf={tf}
@@ -182,6 +215,7 @@ function FutHistoryView(p: FutHistoryProps) {
           plotLabel={FUT_PLOT_LABEL}
           imgLabel={FUT_IMG_LABEL}
           rolls={rolls}
+          {...(overlays ? { overlays } : {})}
         />
         {ind && bars.length > 0 && (
           <IndicatorPanes
@@ -206,6 +240,12 @@ function FutHistoryView(p: FutHistoryProps) {
           {rightLoaded && <span class="prog">薄い足 = 確定前</span>}
           {/* biome-ignore lint/a11y/useSemanticElements: fieldset は既定の枠・余白と flex の癖があるので div + role="group" */}
           <span class="ind-toggles" role="group" aria-label="指標の段">
+            <Chip
+              text={FUT_EMA_TEXT}
+              label={futEmaLabel(techParams)}
+              pressed={showEma}
+              onClick={p.onEmaToggle}
+            />
             {IND_KINDS.map((k) => (
               <Chip
                 key={k.value}

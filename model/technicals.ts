@@ -12,6 +12,9 @@
  *   スロー %K = 生の %K の 3 本の単純平均、%D = スロー %K の 3 本の単純平均。最初の値はスロー %K が index 15、%D が 17
  * - 基準率（baseRate）: 過去の足 j のうち条件を満たすものを左から選び、N 本先の騰落率 c[j+N] / c[j] − 1 を集める。
  *   窓は重ねない（次の候補は j + N 以降）。結果に使う足は lastUsable まで（確定前の最後の足を使わない）
+ * - EMA の 3 本（#206）: 短期・中期・長期（既定 5・25・75）の EMA(n)（上の ema と同じ = MACD と同じ計算）。足りない先頭は
+ *   null（最初の値は index n − 1）。並び順は 短 > 中 > 長 = up（上向きのパーフェクトオーダー）、短 < 中 < 長 = down、
+ *   それ以外 = mixed（どれかが null なら null）
  * - 期間は #205 で設定から変えられる（TechParams。上の数は既定 DEFAULT_TECH_PARAMS の場合）
  */
 
@@ -24,6 +27,10 @@ export const MACD_SIGNAL = 9;
 export const STOCH_K = 14;
 export const STOCH_SMOOTH = 3;
 export const STOCH_D = 3;
+/** EMA の 3 本の既定の期間（#206。オーナー決定 2026-10-20「5.25.75でいいよ」。全部の足で共通） */
+export const EMA_SHORT = 5;
+export const EMA_MID = 25;
+export const EMA_LONG = 75;
 
 /** ゾーンの閾値（RSI 70 / 30、ストキャスティクス 80 / 20） */
 export const RSI_HIGH = 70;
@@ -179,6 +186,10 @@ export interface TechParams {
   stochK: number;
   stochSmooth: number;
   stochD: number;
+  /** EMA の 3 本（#206。短期 < 中期 < 長期） */
+  emaShort: number;
+  emaMid: number;
+  emaLong: number;
 }
 
 export type TechParamKey = keyof TechParams;
@@ -191,6 +202,9 @@ export const DEFAULT_TECH_PARAMS: Readonly<TechParams> = Object.freeze({
   stochK: STOCH_K,
   stochSmooth: STOCH_SMOOTH,
   stochD: STOCH_D,
+  emaShort: EMA_SHORT,
+  emaMid: EMA_MID,
+  emaLong: EMA_LONG,
 });
 
 /** 欄の並び（設定のダイアログ・保存の順） */
@@ -202,6 +216,9 @@ export const TECH_PARAM_KEYS: readonly TechParamKey[] = [
   'stochK',
   'stochSmooth',
   'stochD',
+  'emaShort',
+  'emaMid',
+  'emaLong',
 ];
 
 /**
@@ -216,6 +233,9 @@ export const TECH_PARAM_RANGE: Record<TechParamKey, { min: number; max: number }
   stochK: { min: 2, max: 100 },
   stochSmooth: { min: 1, max: 20 },
   stochD: { min: 1, max: 20 },
+  emaShort: { min: 2, max: 100 },
+  emaMid: { min: 2, max: 100 },
+  emaLong: { min: 2, max: 100 },
 };
 
 /** 1 つの期間が範囲内の整数か */
@@ -225,12 +245,17 @@ export function isTechParamValue(key: TechParamKey, v: unknown): v is number {
   return v >= r.min && v <= r.max;
 }
 
-/** 期間の組が使えるか（どれも範囲内、MACD は短期 < 長期） */
+/** EMA の 3 本の期間が 短期 < 中期 < 長期 か（#206） */
+export function isEmaOrder(p: Pick<TechParams, 'emaShort' | 'emaMid' | 'emaLong'>): boolean {
+  return p.emaShort < p.emaMid && p.emaMid < p.emaLong;
+}
+
+/** 期間の組が使えるか（どれも範囲内、MACD は短期 < 長期、EMA は短期 < 中期 < 長期） */
 export function isTechParams(p: unknown): p is TechParams {
   if (typeof p !== 'object' || p === null) return false;
   const o = p as Record<string, unknown>;
   if (!TECH_PARAM_KEYS.every((k) => isTechParamValue(k, o[k]))) return false;
-  return (o.macdFast as number) < (o.macdSlow as number);
+  return (o.macdFast as number) < (o.macdSlow as number) && isEmaOrder(o as unknown as TechParams);
 }
 
 /** 期間の組が同じか */
@@ -238,11 +263,57 @@ export function sameTechParams(a: TechParams, b: TechParams): boolean {
   return TECH_PARAM_KEYS.every((k) => a[k] === b[k]);
 }
 
-/** 3 つの指標をまとめて計算する（画面の段と AI のツールで同じ値）。params = 計算に使った期間（見出し・ツールの出力に出す） */
+/** EMA の 3 本（#206。先物推移の価格に重ねる線と AI のツールで同じ値） */
+export interface EmaSet {
+  short: Series;
+  mid: Series;
+  long: Series;
+}
+
+/** EMA の 3 本を計算する（期間は params の emaShort・emaMid・emaLong） */
+export function emaSet(
+  closes: readonly number[],
+  params: Pick<TechParams, 'emaShort' | 'emaMid' | 'emaLong'> = DEFAULT_TECH_PARAMS,
+): EmaSet {
+  return {
+    short: ema(closes, params.emaShort),
+    mid: ema(closes, params.emaMid),
+    long: ema(closes, params.emaLong),
+  };
+}
+
+/** 並び順（up = 短 > 中 > 長 = 上向きのパーフェクトオーダー、down = 短 < 中 < 長、mixed = それ以外） */
+export type EmaOrder = 'up' | 'down' | 'mixed';
+
+/** i の足の並び順（どれかの値が無い = ウォームアップ中なら null） */
+export function emaOrderAt(e: EmaSet, i: number): EmaOrder | null {
+  const s = e.short[i];
+  const m = e.mid[i];
+  const l = e.long[i];
+  if (!Number.isFinite(s) || !Number.isFinite(m) || !Number.isFinite(l)) return null;
+  const a = s as number;
+  const b = m as number;
+  const c = l as number;
+  if (a > b && b > c) return 'up';
+  if (a < b && b < c) return 'down';
+  return 'mixed';
+}
+
+/** i の時点で同じ並び順が何本続いているか（i を含む。i が null なら 0） */
+export function barsInEmaOrder(e: EmaSet, i: number): number {
+  const o = emaOrderAt(e, i);
+  if (o === null) return 0;
+  let k = 0;
+  for (let j = i; j >= 0 && emaOrderAt(e, j) === o; j--) k++;
+  return k;
+}
+
+/** 3 つの指標と EMA をまとめて計算する（画面と AI のツールで同じ値）。params = 計算に使った期間（見出し・ツールの出力に出す） */
 export interface Indicators {
   rsi: Series;
   macd: MacdSeries;
   stoch: StochSeries;
+  ema: EmaSet;
   params: TechParams;
 }
 
@@ -255,6 +326,7 @@ export function indicators(
     rsi: rsi(closes, params.rsi),
     macd: macd(closes, params.macdFast, params.macdSlow, params.macdSignal),
     stoch: stochastic(bars, params.stochK, params.stochSmooth, params.stochD),
+    ema: emaSet(closes, params),
     params: { ...params },
   };
 }

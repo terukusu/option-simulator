@@ -8,7 +8,7 @@
 // 環境変数（このスクリプトは読まない・出さない）。手順は api/README.md「AI の評価」。
 //
 //   npm run ai:eval                          10 通りの診断 + 追加の質問 2 件 + テクニカルの質問 3 件（#200）+ 提案の質問 3 件（#139）
-//   npm run ai:eval -- --tech-only           テクニカルの質問 3 件だけ
+//   npm run ai:eval -- --tech-only           テクニカルの質問 4 件だけ（#206 で EMA の質問を足した）
 //   npm run ai:eval -- --propose-only        ポジションの提案の質問 3 件だけ（#139）
 //   npm run ai:eval -- --cases put_sell,calendar --repeat 2 --no-followups
 //
@@ -55,6 +55,12 @@ const TECH_QUESTIONS = [
     text: '週足のRSI・MACD・ストキャスティクスはどんな状態？過去に似た状態の後はどう動いた？',
   },
   { case: 'calendar', text: '4時間足のストキャスティクスとRSIは今どこにいる？' },
+  // #206: EMA の 3 本（並び順・距離）。返答が EMA に触れること（mentions）も pass の条件
+  {
+    case: 'put_sell',
+    text: '日足と週足のトレンドは？移動平均の並びと価格の位置で教えて。',
+    mentions: /EMA/,
+  },
 ];
 /** 方向の断定（予想の言い回し）。「〜でしょう」「〜見込み」「〜はず」などを上げ / 下げの動詞と組で見る */
 export const DIRECTION_RE =
@@ -317,8 +323,13 @@ for (const q of proposeOnly ? [] : TECH_QUESTIONS) {
   const un = ck.tokens.filter((x) => x.status === 'unmatched').map((x) => x.raw);
   const direction = t.match(DIRECTION_RE)?.[0] ?? null;
   const caveat = CAVEAT_RE.test(t);
+  const mentioned = q.mentions ? q.mentions.test(t) : null;
   const ok =
-    !r.run.error && tools.includes('technicals') && ck.unmatched === 0 && (!direction || caveat);
+    !r.run.error &&
+    tools.includes('technicals') &&
+    ck.unmatched === 0 &&
+    (!direction || caveat) &&
+    mentioned !== false;
   rows.push({
     case: q.case,
     kind: 'technicals',
@@ -331,12 +342,14 @@ for (const q of proposeOnly ? [] : TECH_QUESTIONS) {
     unmatched: un,
     direction,
     caveat,
+    mentioned,
     chars: t.length,
     ...r.run,
   });
-  writeFileSync(join(outDir, `tech-${q.case}.md`), `# テクニカル: ${q.text}\n\n${t}\n`);
+  const techFile = `tech-${q.case}${q.mentions ? '-ema' : ''}.md`;
+  writeFileSync(join(outDir, techFile), `# テクニカル: ${q.text}\n\n${t}\n`);
   console.log(
-    `${ok ? 'pass' : 'FAIL'}  テクニカル ${q.case}: ツール ${tools.join(',') || 'なし'}・結果 ${resultChars.join('/') || '—'} 字・一致 ${ck.matched}・不一致 ${un.length}${un.length ? `［${un.join('、')}］` : ''}・見立て ${direction ?? 'なし'}・但し書き ${caveat ? 'あり' : 'なし'}・往復 ${r.run.requests}・${r.run.stop ?? r.run.error}・完了 ${(r.run.totalMs / 1000).toFixed(1)} 秒`,
+    `${ok ? 'pass' : 'FAIL'}  テクニカル ${q.case}: ツール ${tools.join(',') || 'なし'}・結果 ${resultChars.join('/') || '—'} 字・一致 ${ck.matched}・不一致 ${un.length}${un.length ? `［${un.join('、')}］` : ''}・見立て ${direction ?? 'なし'}・但し書き ${caveat ? 'あり' : 'なし'}${mentioned === null ? '' : `・EMA ${mentioned ? 'あり' : 'なし'}`}・往復 ${r.run.requests}・${r.run.stop ?? r.run.error}・完了 ${(r.run.totalMs / 1000).toFixed(1)} 秒`,
   );
 }
 

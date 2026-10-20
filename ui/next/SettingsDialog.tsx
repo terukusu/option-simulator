@@ -127,7 +127,7 @@ function MarginField({
 
 /**
  * テクニカル指標の 1 欄（証拠金の欄と同じ規則: 入力ごとに検証、通って値が変わったら入れる。外で値が変わったら欄を戻す）。
- * MACD の短期 < 長期は今の相手の値で判定する（#205）
+ * MACD の短期 < 長期・EMA の短期 < 中期 < 長期は今の相手の値で判定する（#205・#206）
  */
 function TechField({
   field,
@@ -149,15 +149,15 @@ function TechField({
       setError(null);
     }
   }, [value]);
-  // MACD の相手が変わって短期 < 長期になったら、エラーのままの欄の値を入れる
-  const { macdFast, macdSlow } = params;
+  // MACD・EMA（#206）の相手が変わって順序が正しくなったら、エラーのままの欄の値を入れる
+  const { macdFast, macdSlow, emaShort, emaMid, emaLong } = params;
   useEffect(() => {
     if (error === null) return;
     const r = techField(key, text, params);
     if (!r.ok) return;
     setError(null);
     if (r.value !== value) onTechParams({ [key]: r.value });
-  }, [macdFast, macdSlow]);
+  }, [macdFast, macdSlow, emaShort, emaMid, emaLong]);
   const onInput = (t: string) => {
     setText(t);
     const r = techField(key, t, params);

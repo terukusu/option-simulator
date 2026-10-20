@@ -7,6 +7,7 @@ import {
   IV_MIN_BARS,
   IV_PLOT_LABEL,
   type IvMode,
+  type IvOverlay,
   type IvSeries,
   type IvTf,
   ivChartModel,
@@ -52,6 +53,8 @@ export interface IvPlotProps {
    * 札 .fut-roll-tag（label が null なら線だけ）
    */
   rolls?: (range: Domain) => readonly { x: number; label: string | null }[];
+  /** 価格に重ねる線（#206 先物推移の EMA。無ければ描かない。同じ配列なら座標を作り直さない） */
+  overlays?: readonly IvOverlay[];
 }
 
 /**
@@ -77,6 +80,7 @@ function IvPlotView(p: IvPlotProps) {
         now: p.now,
         scenario: p.scenario,
         ...(p.series ? { series: p.series } : {}),
+        ...(p.overlays ? { overlays: p.overlays } : {}),
       }),
     [
       bars,
@@ -90,6 +94,7 @@ function IvPlotView(p: IvPlotProps) {
       p.now,
       p.scenario,
       p.series,
+      p.overlays,
     ],
   );
   const { range } = model;
@@ -241,6 +246,7 @@ function IvPlotView(p: IvPlotProps) {
                 {model.progress && <path class="iv-line progress" d={model.progress} />}
               </>
             )}
+            {model.overlays.map((o) => o.d && <path key={o.cls} class={o.cls} d={o.d} />)}
           </g>
           {rollMarks.map((r) => (
             <g key={`roll${r.x}`} class="fut-roll-mark">

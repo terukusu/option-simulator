@@ -4,6 +4,7 @@ import type { AiMessage } from '../../data/aiStream';
 import {
   DEFAULT_MARGIN_PARAMS,
   DEFAULT_SETTINGS,
+  emaSet,
   holdMapAxes,
   holdMapColumn,
   indicators,
@@ -44,7 +45,7 @@ import { answerModel, markNumbers, parseAiText } from '../../ui/view/aiText';
 import { atmStrike, boardRows } from '../../ui/view/board';
 import { boardBadges, boardRowTexts } from '../../ui/view/boardPanel';
 import { bookListModel } from '../../ui/view/bookList';
-import { FUT_SERIES, futRollMarks } from '../../ui/view/futHistory';
+import { FUT_SERIES, futEmaOverlays, futRollMarks } from '../../ui/view/futHistory';
 import { headerModel, keptBoardNote } from '../../ui/view/header';
 import { hedgeModel } from '../../ui/view/hedge';
 import { holdMapCalcOf, holdMapInput, holdMapPlot, holdMapRooms } from '../../ui/view/holdMap';
@@ -1627,6 +1628,25 @@ describe('性能（#79 IV 推移の 1 フレーム）', () => {
       warmup: 3,
       runs: 10,
     });
+  });
+
+  // #206: EMA の 3 本を重ねたパンの 1 フレーム（EMA は足の並び・期間ごとに 1 回 = パンでは作り直さない）
+  it(`#206: 先物推移のパン + EMA の 3 本（1 分足 ${futs.length.toLocaleString('en-US')} 本）が ${BUDGET_MS} ms 以内`, () => {
+    const overlays = futEmaOverlays(emaSet(futs.map((b) => b.c)));
+    let tick = 0;
+    const frame = () => {
+      tick = (tick + 1) % 40;
+      const m = ivChartModel({
+        ...input('candle', tick),
+        bars: futs,
+        segments: futSegments,
+        series: FUT_SERIES,
+        overlays,
+      });
+      return m.candles.length + m.overlays.reduce((a, o) => a + o.d.length, 0);
+    };
+    expect(frame()).toBeGreaterThan(1000);
+    expectWithinBudget('#206 先物推移のパン + EMA の 3 本', frame, { warmup: 10, runs: 30 });
   });
 });
 

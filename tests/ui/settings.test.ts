@@ -25,6 +25,7 @@ import {
   SETTINGS_NO_BOARD_TEXT,
   type SettingsInput,
   settingsModel,
+  TECH_EMA_ORDER_ERROR,
   TECH_FIELD_ERROR,
   TECH_FIELDS,
   TECH_MACD_ORDER_ERROR,
@@ -250,7 +251,7 @@ describe('#149 買いの OP の設定', () => {
 /** #205: テクニカル指標の欄（範囲・整数・MACD の短期 < 長期。不正なら値に入れない） */
 describe('テクニカル指標の欄（#205）', () => {
   const T = { ...DEFAULT_TECH_PARAMS };
-  it('欄は 7 つ（model の並び）、[既定に戻す] は既定の期間', () => {
+  it('欄は 10 個（model の並び。#206 で EMA の 3 つ）、[既定に戻す] は既定の期間', () => {
     expect(TECH_FIELDS.map((f) => f.key)).toEqual([...TECH_PARAM_KEYS]);
     expect(TECH_RESET).toEqual({
       rsi: 14,
@@ -260,8 +261,16 @@ describe('テクニカル指標の欄（#205）', () => {
       stochK: 14,
       stochSmooth: 3,
       stochD: 3,
+      emaShort: 5,
+      emaMid: 25,
+      emaLong: 75,
     });
-    expect(TECH_SETTINGS_NOTES.length).toBeGreaterThan(0);
+    expect(TECH_FIELDS.slice(-3).map((f) => f.label)).toEqual([
+      'EMA の短期',
+      'EMA の中期',
+      'EMA の長期',
+    ]);
+    expect(TECH_SETTINGS_NOTES.join('')).toContain('EMA 5 / 25 / 75');
   });
   it('範囲内の整数は通る（前後の空白・両端を含む）', () => {
     expect(techField('rsi', ' 9 ', T)).toEqual({ ok: true, value: 9 });
@@ -283,5 +292,22 @@ describe('テクニカル指標の欄（#205）', () => {
     expect(techField('macdSlow', '12', T)).toEqual({ ok: false, error: TECH_MACD_ORDER_ERROR });
     expect(techField('macdSlow', '13', T)).toEqual({ ok: true, value: 13 });
     expect(techField('macdFast', '30', { ...T, macdSlow: 50 })).toEqual({ ok: true, value: 30 });
+  });
+  it('#206 EMA は 2〜100 の整数で、今の残り 2 つの値と短期 < 中期 < 長期', () => {
+    expect(techField('emaShort', '24', T)).toEqual({ ok: true, value: 24 });
+    expect(techField('emaShort', '25', T)).toEqual({ ok: false, error: TECH_EMA_ORDER_ERROR });
+    expect(techField('emaMid', '5', T)).toEqual({ ok: false, error: TECH_EMA_ORDER_ERROR });
+    expect(techField('emaMid', '75', T)).toEqual({ ok: false, error: TECH_EMA_ORDER_ERROR });
+    expect(techField('emaMid', '20', T)).toEqual({ ok: true, value: 20 });
+    expect(techField('emaLong', '25', T)).toEqual({ ok: false, error: TECH_EMA_ORDER_ERROR });
+    expect(techField('emaLong', '100', T)).toEqual({ ok: true, value: 100 });
+    expect(techField('emaLong', '101', T)).toEqual({
+      ok: false,
+      error: TECH_FIELD_ERROR.emaLong,
+    });
+    expect(techField('emaShort', '1', T)).toEqual({
+      ok: false,
+      error: 'EMA の短期は 2〜100 の整数',
+    });
   });
 });

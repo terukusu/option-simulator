@@ -10,16 +10,20 @@
  * - 「今」の 1 点: 今の板の先物の値を、表の最後の行（last_at）より新しく、限月が最後の足と同じときだけ（futNowPoint）。
  *   板の限月は板の JSON の contract_month を使わず、足と同じ規則（取引日以後に取引最終日がある最初の四半期限月）で
  *   スナップショットの時刻から求める
+ * - EMA の 3 本（#206）: 価格に重ねる線（futEmaOverlays → ivChartModel の overlays）と読み取りの 2 行目（futEmaReadout。
+ *   期間つきの名前と値 = 凡例を兼ねる）。値は model/technicals.ts の emaSet（AI のツール technicals と同じ計算）。足りない
+ *   間（ウォームアップ）は線を描かず値は —
  * - 色は持たない（CSS のクラス名だけ）。値は円の整数（桁区切り）、時刻は JST
  */
 
 import type { ChainJson, FutBar } from '../../data';
-import { lastTradingDay } from '../../model';
+import { type EmaSet, lastTradingDay, type TechParams } from '../../model';
 import { type Domain, linear } from '../chart/scale';
 import { fmtNum } from './format';
 import {
   IV_HINT,
   type IvNowValue,
+  type IvOverlay,
   type IvReadout,
   type IvSeries,
   type IvTf,
@@ -171,3 +175,55 @@ export const FUT_PLOT_LABEL = '先物推移のグラフ（矢印でパン・+ �
 export const FUT_IMG_LABEL = '日経225 先物（ラージ・期近）の推移（縦軸 円）';
 /** 1〜5 の行き先の枠の名前（スマイルのパネルで先物推移を見せているとき） */
 export const FUT_FOCUS_LABEL = '先物推移の図';
+
+// ---------------------------------------------------------------- EMA の 3 本（#206）
+
+/** EMA の線の種類（CSS のクラス ema-line s / m / l と読み取りの見本の色） */
+export type FutEmaKey = 's' | 'm' | 'l';
+
+/** EMA の切替の文字（凡例の行のチップ） */
+export const FUT_EMA_TEXT = 'EMA';
+
+/** 期間の文字（「5・25・75」） */
+export function futEmaParamText(p: Pick<TechParams, 'emaShort' | 'emaMid' | 'emaLong'>): string {
+  return `${p.emaShort}・${p.emaMid}・${p.emaLong}`;
+}
+
+/** EMA の切替の aria-label（「EMA（5・25・75）の線」） */
+export function futEmaLabel(p: Pick<TechParams, 'emaShort' | 'emaMid' | 'emaLong'>): string {
+  return `EMA（${futEmaParamText(p)}）の線`;
+}
+
+/** 価格に重ねる線（短期・中期・長期の順） */
+export function futEmaOverlays(e: EmaSet): IvOverlay[] {
+  return [
+    { cls: 'ema-line s', values: e.short },
+    { cls: 'ema-line m', values: e.mid },
+    { cls: 'ema-line l', values: e.long },
+  ];
+}
+
+export interface FutEmaReadoutItem {
+  key: FutEmaKey;
+  /** 期間つきの名前（「EMA5」） */
+  name: string;
+  /** 値（円の整数。足りない間は —） */
+  value: string;
+}
+
+/** 読み取りの 2 行目（カーソルの足、無ければ最新の足の EMA の値。読み取りの 1 行目と同じ足） */
+export function futEmaReadout(
+  e: EmaSet,
+  p: Pick<TechParams, 'emaShort' | 'emaMid' | 'emaLong'>,
+  n: number,
+  cursor: number | null,
+): FutEmaReadoutItem[] {
+  const i =
+    n === 0 ? -1 : cursor === null ? n - 1 : Math.min(Math.max(Math.round(cursor), 0), n - 1);
+  const at = (s: EmaSet['short']) => fmtYen(i < 0 ? null : (s[i] ?? null));
+  return [
+    { key: 's', name: `EMA${p.emaShort}`, value: at(e.short) },
+    { key: 'm', name: `EMA${p.emaMid}`, value: at(e.mid) },
+    { key: 'l', name: `EMA${p.emaLong}`, value: at(e.long) },
+  ];
+}

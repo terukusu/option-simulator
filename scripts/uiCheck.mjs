@@ -2431,8 +2431,11 @@ function futYTagOk(st) {
   const [y0, l0] = st.ticks[0];
   const [y1, l1] = st.ticks[st.ticks.length - 1];
   if (!(Math.abs(y1 - y0) > 0)) return false;
+  const perPx = Math.abs((num(l1) - num(l0)) / (y1 - y0));
   const v = num(l0) + ((st.hy - y0) * (num(l1) - num(l0))) / (y1 - y0);
-  return /^\d{1,3}(,\d{3})*$/.test(st.yTag) && Math.abs(num(st.yTag) - v) <= 1;
+  // 許す差: 札の整数の丸め 1 円 + 座標の 0.1px の丸め（横線・目盛りの y の 3 か所 × 0.05px。#206 で EMA の値の行の分だけ
+  // 描画域が低くなると 1px あたりの円が大きくなり、1 円だけでは丸めの差で落ちる）
+  return /^\d{1,3}(,\d{3})*$/.test(st.yTag) && Math.abs(num(st.yTag) - v) <= 1 + 0.15 * perPx;
 }
 
 /**

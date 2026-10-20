@@ -11,6 +11,7 @@
 import {
   type AtmBasis,
   DEFAULT_TECH_PARAMS,
+  isEmaOrder,
   isTechParamValue,
   TECH_PARAM_RANGE,
   type TechParamKey,
@@ -196,6 +197,9 @@ export const TECH_FIELDS: readonly { key: TechParamKey; label: string }[] = [
   { key: 'stochK', label: 'SO の %K の期間' },
   { key: 'stochSmooth', label: 'SO のスロー' },
   { key: 'stochD', label: 'SO の %D' },
+  { key: 'emaShort', label: 'EMA の短期' },
+  { key: 'emaMid', label: 'EMA の中期' },
+  { key: 'emaLong', label: 'EMA の長期' },
 ];
 
 const rangeText = (k: TechParamKey) => `${TECH_PARAM_RANGE[k].min}〜${TECH_PARAM_RANGE[k].max}`;
@@ -209,22 +213,29 @@ export const TECH_FIELD_ERROR: Record<TechParamKey, string> = {
   stochK: `%K の期間は ${rangeText('stochK')} の整数`,
   stochSmooth: `スローは ${rangeText('stochSmooth')} の整数`,
   stochD: `%D は ${rangeText('stochD')} の整数`,
+  emaShort: `EMA の短期は ${rangeText('emaShort')} の整数`,
+  emaMid: `EMA の中期は ${rangeText('emaMid')} の整数`,
+  emaLong: `EMA の長期は ${rangeText('emaLong')} の整数`,
 };
 
 /** MACD の短期 ≥ 長期の文 */
 export const TECH_MACD_ORDER_ERROR = 'MACD は短期 < 長期にする';
 
+/** EMA が短期 < 中期 < 長期でないときの文（#206） */
+export const TECH_EMA_ORDER_ERROR = 'EMA は短期 < 中期 < 長期にする';
+
 /** テクニカルの節の注記 */
 export const TECH_SETTINGS_NOTES: readonly string[] = [
-  '先物推移の指標の段と AI のツール（テクニカル）に同じ期間を使う。基準率もこの期間の指標で数える。SO = スロー・ストキャスティクス（スロー = %K の平滑）',
-  'この端末にだけ保存（保存一覧・共有の URL に載せない）。既定 = RSI 14・MACD 12 / 26 / 9・ストキャスティクス 14 / 3 / 3',
+  '先物推移の指標の段・価格に重ねる EMA の線と AI のツール（テクニカル）に同じ期間を使う。基準率もこの期間の指標で数える。SO = スロー・ストキャスティクス（スロー = %K の平滑）',
+  'この端末にだけ保存（保存一覧・共有の URL に載せない）。既定 = RSI 14・MACD 12 / 26 / 9・ストキャスティクス 14 / 3 / 3・EMA 5 / 25 / 75',
 ];
 
 /** [既定に戻す] で戻す値 */
 export const TECH_RESET: TechParams = { ...DEFAULT_TECH_PARAMS };
 
 /**
- * テクニカルの欄の判定（入力ごと）: 範囲内の整数で、MACD は今の相手の値と短期 < 長期のときだけ通す。
+ * テクニカルの欄の判定（入力ごと）: 範囲内の整数で、MACD は今の相手の値と短期 < 長期、EMA は今の残り 2 つの値と
+ * 短期 < 中期 < 長期（#206）のときだけ通す。
  * 書き方は parseNum と同じ（前後の空白・桁区切り）
  */
 export function techField(
@@ -238,5 +249,10 @@ export function techField(
     return { ok: false, error: TECH_MACD_ORDER_ERROR };
   if (key === 'macdSlow' && v <= current.macdFast)
     return { ok: false, error: TECH_MACD_ORDER_ERROR };
+  if (
+    (key === 'emaShort' || key === 'emaMid' || key === 'emaLong') &&
+    !isEmaOrder({ ...current, [key]: v })
+  )
+    return { ok: false, error: TECH_EMA_ORDER_ERROR };
   return { ok: true, value: v };
 }

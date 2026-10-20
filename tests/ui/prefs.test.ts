@@ -360,6 +360,9 @@ describe('テクニカル指標の期間（#205）', () => {
     stochK: 9,
     stochSmooth: 1,
     stochD: 4,
+    emaShort: 8,
+    emaMid: 21,
+    emaLong: 55,
   };
 
   it('移行: キーの無い古い設定（#205 より前）→ 持たない = 既定。書き出しにもキーが出ない', () => {
@@ -384,6 +387,9 @@ describe('テクニカル指標の期間（#205）', () => {
       tech_stoch_k: 9,
       tech_stoch_slowing: 1,
       tech_stoch_d: 4,
+      tech_ema_short: 8,
+      tech_ema_mid: 21,
+      tech_ema_long: 55,
     });
     expect(readPrefs(text).prefs.technicals).toEqual(custom);
     // 1 つだけ変えた → そのキーだけ
@@ -409,5 +415,32 @@ describe('テクニカル指標の期間（#205）', () => {
     const bad = { ...T, macdFast: 40 };
     expect(serializePrefs({ theme: 'auto', margin: M0, technicals: bad })).not.toContain('tech_');
     expect(techParamsOr(bad)).toEqual(T);
+  });
+
+  it('#206 EMA: #205 の保存（EMA のキーなし）→ EMA は既定 5・25・75、他の期間はそのまま', () => {
+    const r = readPrefs('{"schema_version":1,"theme":"auto","tech_rsi":9}');
+    expect(r.prefs.technicals).toEqual({ ...T, rsi: 9, emaShort: 5, emaMid: 25, emaLong: 75 });
+    // EMA だけを変えた → EMA のキーだけ
+    const one = JSON.parse(
+      serializePrefs({ theme: 'auto', margin: M0, technicals: { ...T, emaLong: 100 } }),
+    );
+    expect(Object.keys(one).filter((k) => k.startsWith('tech_'))).toEqual(['tech_ema_long']);
+  });
+
+  it('#206 EMA: 短期 < 中期 < 長期でない → EMA の 3 つを既定（他の項目は残す）。範囲外はその項目だけ既定', () => {
+    const r = readPrefs(
+      '{"schema_version":1,"theme":"auto","tech_ema_short":30,"tech_ema_mid":20,"tech_ema_long":60,"tech_rsi":9}',
+    );
+    expect(r.prefs.technicals).toEqual({ ...T, rsi: 9 });
+    // 長期 101 は範囲外 → 長期だけ既定（75）。8 < 21 < 75 なので短期・中期は残る
+    const r2 = readPrefs(
+      '{"schema_version":1,"theme":"auto","tech_ema_short":8,"tech_ema_mid":21,"tech_ema_long":101}',
+    );
+    expect(r2.prefs.technicals).toEqual({ ...T, emaShort: 8, emaMid: 21 });
+    // 長期の既定 75 より中期が大きい組で長期が範囲外 → 順序が崩れるので EMA の 3 つを既定
+    const r3 = readPrefs(
+      '{"schema_version":1,"theme":"auto","tech_ema_short":8,"tech_ema_mid":80,"tech_ema_long":0}',
+    );
+    expect(r3.prefs.technicals).toEqual(T);
   });
 });

@@ -29,6 +29,8 @@ const TECH_INPUTS: Record<string, unknown>[] = [
   {},
   { timeframes: ['daily'], indicators: ['rsi'] },
   { timeframes: ['4h', 'weekly'], indicators: ['macd', 'stoch'], horizon_bars: 3 },
+  // #206 EMA の 3 本だけ
+  { timeframes: ['weekly'], indicators: ['ema'] },
 ];
 const TECH_ERROR_INPUTS: Record<string, unknown>[] = [{ timeframes: ['1m'] }, { horizon_bars: 30 }];
 

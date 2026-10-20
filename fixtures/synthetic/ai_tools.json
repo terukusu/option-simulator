@@ -2818,6 +2818,11 @@
        3,
        3
       ],
+      "ema": [
+       5,
+       25,
+       75
+      ],
       "rsi_zones": [
        30,
        70
@@ -2922,6 +2927,47 @@
         "k_above_d": true,
         "bars_since_cross": 1
        },
+       "ema": {
+        "lines": [
+         {
+          "period": 5,
+          "ema_x": 37187,
+          "dist_yen": 18,
+          "dist_pct": 0
+         },
+         {
+          "period": 25,
+          "ema_x": 36665,
+          "dist_yen": 540,
+          "dist_pct": 1.5
+         },
+         {
+          "period": 75,
+          "ema_x": 36884,
+          "dist_yen": 321,
+          "dist_pct": 0.9
+         }
+        ],
+        "order": "mixed",
+        "bars_in_order": 6,
+        "crosses": [
+         {
+          "pair": "short_mid",
+          "shorter_above": true,
+          "bars_since_cross": 6
+         },
+         {
+          "pair": "mid_long",
+          "shorter_above": false,
+          "bars_since_cross": null
+         },
+         {
+          "pair": "short_long",
+          "shorter_above": true,
+          "bars_since_cross": 4
+         }
+        ]
+       },
        "base_rates": {
         "all": {
          "n": 23,
@@ -2957,6 +3003,15 @@
          "insufficient": true,
          "rolls_excluded": 3,
          "condition": "stoch_high"
+        },
+        "ema": {
+         "n": 2,
+         "median_pct": 0.4,
+         "p10_pct": -1.1,
+         "p90_pct": 2,
+         "insufficient": true,
+         "rolls_excluded": 1,
+         "condition": "ema_order_mixed"
         }
        }
       },
@@ -3054,6 +3109,47 @@
         "k_above_d": false,
         "bars_since_cross": 3
        },
+       "ema": {
+        "lines": [
+         {
+          "period": 5,
+          "ema_x": 37426,
+          "dist_yen": -221,
+          "dist_pct": -0.6
+         },
+         {
+          "period": 25,
+          "ema_x": 37176,
+          "dist_yen": 29,
+          "dist_pct": 0.1
+         },
+         {
+          "period": 75,
+          "ema_x": 36757,
+          "dist_yen": 448,
+          "dist_pct": 1.2
+         }
+        ],
+        "order": "up",
+        "bars_in_order": 29,
+        "crosses": [
+         {
+          "pair": "short_mid",
+          "shorter_above": true,
+          "bars_since_cross": 29
+         },
+         {
+          "pair": "mid_long",
+          "shorter_above": true,
+          "bars_since_cross": 29
+         },
+         {
+          "pair": "short_long",
+          "shorter_above": true,
+          "bars_since_cross": 29
+         }
+        ]
+       },
        "base_rates": {
         "all": {
          "n": 99,
@@ -3089,6 +3185,15 @@
          "insufficient": false,
          "rolls_excluded": 12,
          "condition": "stoch_mid"
+        },
+        "ema": {
+         "n": 27,
+         "median_pct": 0.2,
+         "p10_pct": -1.4,
+         "p90_pct": 1.7,
+         "insufficient": false,
+         "rolls_excluded": 12,
+         "condition": "ema_order_up"
         }
        }
       },
@@ -3186,6 +3291,47 @@
         "k_above_d": false,
         "bars_since_cross": 4
        },
+       "ema": {
+        "lines": [
+         {
+          "period": 5,
+          "ema_x": 37384,
+          "dist_yen": -179,
+          "dist_pct": -0.5
+         },
+         {
+          "period": 25,
+          "ema_x": 37469,
+          "dist_yen": -264,
+          "dist_pct": -0.7
+         },
+         {
+          "period": 75,
+          "ema_x": 37328,
+          "dist_yen": -123,
+          "dist_pct": -0.3
+         }
+        ],
+        "order": "mixed",
+        "bars_in_order": 4,
+        "crosses": [
+         {
+          "pair": "short_mid",
+          "shorter_above": false,
+          "bars_since_cross": 4
+         },
+         {
+          "pair": "mid_long",
+          "shorter_above": true,
+          "bars_since_cross": 144
+         },
+         {
+          "pair": "short_long",
+          "shorter_above": true,
+          "bars_since_cross": 39
+         }
+        ]
+       },
        "base_rates": {
         "all": {
          "n": 83,
@@ -3221,6 +3367,15 @@
          "insufficient": false,
          "rolls_excluded": 4,
          "condition": "stoch_mid"
+        },
+        "ema": {
+         "n": 28,
+         "median_pct": 0,
+         "p10_pct": -0.5,
+         "p90_pct": 0.8,
+         "insufficient": false,
+         "rolls_excluded": 3,
+         "condition": "ema_order_mixed"
         }
        }
       }
@@ -3248,6 +3403,11 @@
        14,
        3,
        3
+      ],
+      "ema": [
+       5,
+       25,
+       75
       ],
       "rsi_zones": [
        30,
@@ -3340,6 +3500,11 @@
        14,
        3,
        3
+      ],
+      "ema": [
+       5,
+       25,
+       75
       ],
       "rsi_zones": [
        30,
@@ -3540,6 +3705,114 @@
          "insufficient": false,
          "rolls_excluded": 4,
          "condition": "stoch_mid"
+        }
+       }
+      }
+     ]
+    }
+   },
+   {
+    "input": {
+     "timeframes": [
+      "weekly"
+     ],
+     "indicators": [
+      "ema"
+     ]
+    },
+    "result": {
+     "params": {
+      "rsi": 14,
+      "macd": [
+       12,
+       26,
+       9
+      ],
+      "stoch": [
+       14,
+       3,
+       3
+      ],
+      "ema": [
+       5,
+       25,
+       75
+      ],
+      "rsi_zones": [
+       30,
+       70
+      ],
+      "stoch_zones": [
+       20,
+       80
+      ]
+     },
+     "frames": [
+      {
+       "tf": "weekly",
+       "n_bars": 105,
+       "last_t": "2026-10-12",
+       "close_x": 37205,
+       "horizon_bars": 4,
+       "last_bar_may_be_partial": true,
+       "ema": {
+        "lines": [
+         {
+          "period": 5,
+          "ema_x": 37187,
+          "dist_yen": 18,
+          "dist_pct": 0
+         },
+         {
+          "period": 25,
+          "ema_x": 36665,
+          "dist_yen": 540,
+          "dist_pct": 1.5
+         },
+         {
+          "period": 75,
+          "ema_x": 36884,
+          "dist_yen": 321,
+          "dist_pct": 0.9
+         }
+        ],
+        "order": "mixed",
+        "bars_in_order": 6,
+        "crosses": [
+         {
+          "pair": "short_mid",
+          "shorter_above": true,
+          "bars_since_cross": 6
+         },
+         {
+          "pair": "mid_long",
+          "shorter_above": false,
+          "bars_since_cross": null
+         },
+         {
+          "pair": "short_long",
+          "shorter_above": true,
+          "bars_since_cross": 4
+         }
+        ]
+       },
+       "base_rates": {
+        "all": {
+         "n": 23,
+         "median_pct": -0.4,
+         "p10_pct": -3.3,
+         "p90_pct": 3.7,
+         "insufficient": false,
+         "rolls_excluded": 9
+        },
+        "ema": {
+         "n": 2,
+         "median_pct": 0.4,
+         "p10_pct": -1.1,
+         "p90_pct": 2,
+         "insufficient": true,
+         "rolls_excluded": 1,
+         "condition": "ema_order_mixed"
         }
        }
       }
