@@ -2595,6 +2595,16 @@ async function futPaneCheck(page, label) {
     console.log(`${label}: #207 ${bad.join('・')}  ← NG`);
     return;
   }
+  // 境目 0 の帯（価格の側 3px）のホバー: 十字線なし・row-resize
+  await page.mouse.move(midX, st3.paneTop[0] - 3);
+  await page.waitForTimeout(120);
+  const hb = await paneState(page);
+  const cur = await page.evaluate(
+    ([x, y]) => getComputedStyle(document.elementFromPoint(x, y)).cursor,
+    [midX, st3.paneTop[0] - 3],
+  );
+  if (!(hb.cross === 0 && hb.priceV === 0 && cur === 'row-resize'))
+    bad.push(`帯のホバー 十字線 ${hb.cross}・価格 ${hb.priceV}・カーソル ${cur}`);
   // RSI の段のホバー（段の座標 30px = 描画域の中）
   const hy = st3.paneTop[0] + 30;
   await page.mouse.move(midX, hy);
@@ -9343,8 +9353,39 @@ async function futPaneTouchFlow() {
     st3.kinds.length === 3 && st3.paneH.every((h) => h === 56) && st3.keys.length === 0,
     `${st3.kinds.join(',')} ${st3.paneH.join('/')}・キー ${st3.keys.join(',')}`,
   );
+  // (d') AC1 の帯の幅: 境目 0（価格 | RSI）と境目 1（RSI | MACD）の ±9px を指で押して 12px 下へ → ドラッグになる
+  //（境目 0 の −9px は価格の描画域の中）。1 回ごとに境目のダブルタップで既定に戻す
+  const band = [];
+  for (const [b, off] of [
+    [0, -9],
+    [0, 9],
+    [1, -9],
+    [1, 9],
+  ]) {
+    const sb = await paneState(page);
+    const y0 = Math.round(sb.paneTop[b] + off);
+    await touch('touchStart', [{ x: midX, y: y0, id: 0 }]);
+    for (let i = 1; i <= 4; i++) {
+      await touch('touchMove', [{ x: midX, y: y0 + i * 3, id: 0 }]);
+      await page.waitForTimeout(30);
+    }
+    await touch('touchEnd', []);
+    await page.waitForTimeout(250);
+    const sa = await paneState(page);
+    const d = sa.paneH[0] - sb.paneH[0];
+    band.push({ b, off, d, ok: d === (b === 0 ? -12 : 12) && sa.cross === 0 });
+    await tap2({ x: midX, y: Math.round(sa.paneTop[b]) });
+  }
+  check(
+    `#207 AC1 ${tag} 境目の帯はタッチで ±10px（境目 0・1 の ±9px の押下がドラッグ。境目 0 の上は価格の描画域）`,
+    band.every((r) => r.ok),
+    band
+      .map((r) => `境目 ${r.b} ${r.off > 0 ? '+' : ''}${r.off}px → RSI ${r.d > 0 ? '+' : ''}${r.d}`)
+      .join('・'),
+  );
+  const st3b = await paneState(page);
   // (e) MACD の段のダブルタップ → 最大化、もう一度 → 戻す
-  await tap2({ x: midX, y: Math.round(st3.paneTop[1] + st3.paneH[1] / 2) });
+  await tap2({ x: midX, y: Math.round(st3b.paneTop[1] + st3b.paneH[1] / 2) });
   const st4 = await paneState(page);
   await tap2({ x: midX, y: Math.round(st4.paneTop[0] + (st4.paneH[0] ?? 0) / 2) });
   const st5 = await paneState(page);
