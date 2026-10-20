@@ -163,9 +163,9 @@ describe('paletteItems（AC-B2）', () => {
     );
     const nan = paletteItems(inputOf(twoLegs, { scenario: { ...inp.scenario, x0: Number.NaN } }));
     const nanRows = ofGroup(nan, 'preset');
-    expect(nanRows.map((r) => r.disabled)).toEqual([true, true, true, false]);
-    expect(nanRows.slice(0, 3).every((r) => r.run === null)).toBe(true);
-    expect(nanRows[3]?.run).toEqual({ kind: 'action', action: { type: 'resetScenario' } });
+    expect(nanRows.map((r) => r.disabled)).toEqual([false, true, true, true]);
+    expect(nanRows.slice(1).every((r) => r.run === null)).toBe(true);
+    expect(nanRows[0]?.run).toEqual({ kind: 'action', action: { type: 'resetScenario' } });
   });
 
   it('(c) 評価時刻の行は evalChips と同じ数・disabled（評価時刻なしは全部押せない）', () => {

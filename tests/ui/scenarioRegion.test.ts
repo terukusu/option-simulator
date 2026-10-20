@@ -146,8 +146,8 @@ describe('#83 AC-3 (a) ステッパー 4 つ + β', () => {
     expect(dX).toMatchObject({ disabled: true, text: '—', hot: false });
     expect(stepperAction('dX', 1, noX0)).toBeNull();
     const chips = presetChips(noX0);
-    expect(chips.slice(0, 3).every((c) => c.disabled && c.action === null)).toBe(true);
-    expect(chips[3]).toMatchObject({ text: 'リセット', disabled: false });
+    expect(chips.slice(1).every((c) => c.disabled && c.action === null)).toBe(true);
+    expect(chips[0]).toMatchObject({ text: 'リセット', disabled: false });
   });
 });
 
@@ -156,17 +156,17 @@ describe('#83 AC-3 (b) プリセット', () => {
     const input = inputOf(twoLegs);
     const chips = presetChips(input);
     expect(chips.map((c) => c.text)).toEqual([
+      'リセット',
       '急落 −10% / +20pt / +3',
       '下落 −5% / +8pt / +1',
       '反発 +5% / −5pt / −1',
-      'リセット',
     ]);
-    expect(chips[3]?.pressed).toBeUndefined();
+    expect(chips[0]?.pressed).toBeUndefined();
     CRASH_PRESETS.forEach((_, i) => {
-      const s = apply(twoLegs, presetChips(input)[i]?.action ?? null);
+      const s = apply(twoLegs, presetChips(input)[i + 1]?.action ?? null);
       const pressed = presetChips(inputOf(s)).map((c) => c.pressed === true);
-      expect(pressed).toEqual([0, 1, 2, 3].map((j) => j === i));
-      const reset = apply(s, presetChips(inputOf(s))[3]?.action ?? null);
+      expect(pressed).toEqual([0, 1, 2, 3].map((j) => j === i + 1));
+      const reset = apply(s, presetChips(inputOf(s))[0]?.action ?? null);
       expect(presetChips(inputOf(reset)).some((c) => c.pressed === true)).toBe(false);
       // リセットは β・IV の動き方を保つ
       expect(reset.scenario.beta).toBe(s.scenario.beta);
@@ -311,7 +311,7 @@ describe('#83 AC-5 状態の action だけで動き、#82 の舞台と同じ状�
   });
 
   it('リセット: チップ = 描画域の 0', () => {
-    const mine = apply(s0, presetChips(input)[3]?.action ?? null);
+    const mine = apply(s0, presetChips(input)[0]?.action ?? null);
     expect(stageKey('0', false, s0.scenario, ctx)).toEqual({ reset: true });
     const stage = reduce(s0, { type: 'resetScenario' });
     expect(mine.scenario).toEqual(stage.scenario);
