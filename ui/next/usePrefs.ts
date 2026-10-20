@@ -11,6 +11,7 @@ import {
   techParamsOr,
 } from '../prefs';
 import { writeKey } from '../storage';
+import type { IndPaneHeights } from '../view/indicators';
 
 /**
  * 端末の設定（option-simulator.prefs。ui/prefs.ts）の state（#131）。テーマ・証拠金・テクニカルの期間（#205）を 1 つの値で持ち、
@@ -51,8 +52,28 @@ export function usePrefs(initial: PrefsRead, storage: Storage | null) {
     },
     [commit],
   );
+  // 先物推移の段の高さ（#207）: 描いている段の高さを足し合わせて書く（ほかの段の値は残す）。null = 既定に戻す（キーを消す）
+  const setFutPaneH = useCallback(
+    (patch: IndPaneHeights | null) => {
+      const { futPaneH: _old, ...rest } = ref.current;
+      if (patch === null) {
+        if (_old) commit(rest);
+        return;
+      }
+      commit({ ...rest, futPaneH: { ..._old, ...patch } });
+    },
+    [commit],
+  );
   // 段とツールに渡す期間（保存した組が変わったときだけ作り直す = 指標の再計算は期間が変わったときだけ）
   const stored = prefs.technicals;
   const technicals = useMemo(() => techParamsOr(stored), [stored]);
-  return { prefs, technicals, setTheme, setMargin, setAiDisclaimerSeen, setTechnicals };
+  return {
+    prefs,
+    technicals,
+    setTheme,
+    setMargin,
+    setAiDisclaimerSeen,
+    setTechnicals,
+    setFutPaneH,
+  };
 }

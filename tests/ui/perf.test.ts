@@ -49,7 +49,7 @@ import { FUT_SERIES, futEmaOverlays, futRollMarks } from '../../ui/view/futHisto
 import { headerModel, keptBoardNote } from '../../ui/view/header';
 import { hedgeModel } from '../../ui/view/hedge';
 import { holdMapCalcOf, holdMapInput, holdMapPlot, holdMapRooms } from '../../ui/view/holdMap';
-import { indPaneModel } from '../../ui/view/indicators';
+import { futPaneDrag, futPaneLayout, indPaneModel } from '../../ui/view/indicators';
 import {
   ivChartModel,
   ivCrosshair,
@@ -1647,6 +1647,47 @@ describe('性能（#79 IV 推移の 1 フレーム）', () => {
     };
     expect(frame()).toBeGreaterThan(1000);
     expectWithinBudget('#206 先物推移のパン + EMA の 3 本', frame, { warmup: 10, runs: 30 });
+  });
+
+  // #207 AC8: 境目のドラッグの 1 フレーム（高さだけが変わる = 配置 + 価格の描画域を新しい高さで + 段 3 つを新しい高さで。
+  // 指標・EMA は作り直さない。DOM 側は requestAnimationFrame で 1 フレーム 1 回）
+  it(`#207: 先物推移の境目のドラッグ（1 分足 ${futs.length.toLocaleString('en-US')} 本・段 3 つ・EMA）が ${BUDGET_MS} ms 以内`, () => {
+    const ind = indicators(futs);
+    const overlays = futEmaOverlays(emaSet(futs.map((b) => b.c)));
+    const kinds = ['rsi', 'macd', 'stoch'] as const;
+    const stackH = 700;
+    const start = futPaneLayout({ stackH, kinds, max: null });
+    const viewport = input('candle', 0).viewport;
+    let tick = 0;
+    const frame = () => {
+      tick = (tick + 1) % 60;
+      const heights = futPaneDrag(start, tick % 3, (tick % 2 ? -1 : 1) * tick * 3, stackH);
+      const layout = futPaneLayout({ stackH, kinds, heights, max: null });
+      const m = ivChartModel({
+        ...input('candle', 0),
+        height: layout.priceH,
+        bars: futs,
+        segments: futSegments,
+        series: FUT_SERIES,
+        overlays,
+      });
+      let n = m.candles.length;
+      for (const slot of layout.panes) {
+        const pane = indPaneModel({
+          ind,
+          kind: slot.kind,
+          n: futs.length,
+          viewport,
+          width: 1000,
+          marginLeft: FUT_SERIES.marginLeft,
+          height: slot.h,
+        });
+        n += pane.lines.reduce((a, l) => a + l.d.length, 0) + pane.histUp.length;
+      }
+      return n;
+    };
+    expect(frame()).toBeGreaterThan(1000);
+    expectWithinBudget('#207 先物推移の境目のドラッグ', frame, { warmup: 10, runs: 30 });
   });
 });
 

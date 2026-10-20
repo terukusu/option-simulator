@@ -1055,7 +1055,11 @@ async function measureAll() {
     console.log(`ドックの IV の検査（#130）: ${dockStats.pass} / ${dockStats.total} で pass`);
     // 先物推移（#190 AC-9）
     await futSweep();
+    await futAllPanesSweep();
     console.log(`先物推移の検査（#190）: ${futStats.pass} / ${futStats.total} 状態で pass`);
+    console.log(
+      `先物推移の段の操作の検査（#207）: ${paneStats.pass} / ${paneStats.total} 状態で pass`,
+    );
     // 損益グラフの十字線（#201 AC-5）
     await pnlCrossAll();
     console.log(
@@ -2454,6 +2458,7 @@ async function indCheck(page, label) {
     const bodyBottom = body?.getBoundingClientRect().bottom ?? 0;
     return {
       panes: panes.length,
+      note: (s?.querySelector('.ind-hidden-note')?.textContent ?? '').trim(),
       tf,
       plotH: wrap?.clientHeight ?? 0,
       wrapW: wrap?.clientWidth ?? 0,
@@ -2466,7 +2471,9 @@ async function indCheck(page, label) {
     };
   });
   const bad = [];
-  if (r.panes !== 3) bad.push(`段 ${r.panes}`);
+  // #207: 高さが足りなければ後ろの段を隠して知らせる（価格が先）
+  if (r.panes !== 3 && !(r.panes < 3 && r.note.includes('隠しています')))
+    bad.push(`段 ${r.panes}・知らせ「${r.note}」`);
   if (r.tf !== '4時間') bad.push(`足「${r.tf}」`);
   if (r.plotH < 80) bad.push(`描画域 ${r.plotH}px`);
   if (!r.paneW.every((x) => Math.abs(x - r.wrapW) <= 1)) bad.push(`段の幅 ${r.paneW.join('/')}`);
@@ -2480,6 +2487,244 @@ async function indCheck(page, label) {
   console.log(
     `${label}: 段 ${r.panes}（高さ ${r.paneH.join('/')}px）・描画域 ${r.plotH}px ${ok ? 'pass' : `${bad.join('・')}  ← NG`}`,
   );
+}
+
+// ---- #207 先物推移の段の高さ・最大化・段の十字線
+const paneStats = { pass: 0, total: 0 };
+/** 段の状態（段の高さ・価格の描画域・境目の位置・十字線・札・浮いた読み取り・保存の段の高さのキー） */
+const paneState = (page) =>
+  page.evaluate(() => {
+    const s = document.querySelector('section.smile');
+    const r = (e) => (e ? e.getBoundingClientRect() : null);
+    const panes = [...(s?.querySelectorAll('.ind-pane') ?? [])];
+    const stack = r(s?.querySelector('.fut-stack'));
+    const wrap = s?.querySelector('.iv-wrap');
+    const fl = s?.querySelector('.ind-float');
+    const hl = s?.querySelector('.ind-cross .ind-cursor.h');
+    const crossPane = hl?.closest('svg');
+    let prefs = {};
+    try {
+      prefs = JSON.parse(localStorage.getItem('option-simulator.prefs') ?? '{}');
+    } catch {}
+    return {
+      kinds: panes.map((p) => [...p.classList].find((c) => c !== 'ind-pane')),
+      paneH: panes.map((p) => Math.round(r(p).height)),
+      paneTop: panes.map((p) => r(p).top),
+      paneX: panes.length ? r(panes[0]).left : 0,
+      paneW: panes.length ? r(panes[0]).width : 0,
+      stackH: stack ? Math.round(stack.height) : 0,
+      wrapH: wrap ? Math.round(wrap.getBoundingClientRect().height) : null,
+      splits: s?.querySelectorAll('.ind-split').length ?? 0,
+      cross: s?.querySelectorAll('.ind-cross').length ?? 0,
+      crossKind: crossPane ? [...crossPane.classList].find((c) => c !== 'ind-pane') : null,
+      crossPaneH: crossPane ? Number(crossPane.getAttribute('height')) : null,
+      hy: hl ? Number(hl.getAttribute('y1')) : null,
+      tag: (s?.querySelector('.ind-tag text')?.textContent ?? '').trim() || null,
+      priceV: s?.querySelectorAll('.iv-cross .iv-cursor.v').length ?? 0,
+      priceH: s?.querySelectorAll('.iv-cross .iv-cursor.h').length ?? 0,
+      xTag: (s?.querySelector('.iv-tag.x text')?.textContent ?? '').trim() || null,
+      time: (s?.querySelector('.iv-readout .time')?.textContent ?? '').trim(),
+      float: fl ? (fl.textContent ?? '').trim() : null,
+      floatBox: fl
+        ? (({ top, bottom, left, right }) => ({ top, bottom, left, right }))(r(fl))
+        : null,
+      xTick: (s?.querySelector('.iv-wrap .ax .tx')?.textContent ?? '').trim(),
+      keys: Object.keys(prefs).filter((k) => k.startsWith('fut_pane_h_')),
+      prefs,
+    };
+  });
+
+/** RSI の段の横線の高さ（段の座標）→ 値（0〜100。段の描画域 = 上 14px・下 4px）。札の文字（小数 1 桁）と比べる */
+function rsiTagOk(st) {
+  if (st.hy === null || st.tag === null || st.crossPaneH === null) return false;
+  const top = 14;
+  const bottom = st.crossPaneH - 4;
+  const v = (100 * (bottom - st.hy)) / (bottom - top);
+  return (
+    /^\d{1,3}\.\d$/.test(st.tag) && Math.abs(Number(st.tag) - v) <= 0.06 + 100 / (bottom - top) / 20
+  );
+}
+
+/**
+ * #207 AC1〜AC5（マウス。360 は全開のシート、1440）: 境目 1（RSI | MACD）を下へ 24px → RSI +24・MACD −24 と保存のキー、
+ * 境目 0（価格 | RSI）を上へ 30px → RSI +30・価格 −30、境目のダブルクリック → 56px とキーなし、RSI の段のホバー →
+ * 段の十字線（横線 = マウスの高さ・札 = その高さの値）・価格は縦線だけ・横軸の札 = 読み取りの時刻、MACD の段のダブル
+ * クリック → 最大化（段 1 つ・価格なし・境目なし・枠の全部）、もう一度 → 戻す
+ */
+async function futPaneCheck(page, label) {
+  const bad = [];
+  const st0 = await paneState(page);
+  if (st0.kinds.join(',') !== 'rsi,macd,stoch') {
+    console.log(`${label}: #207 段 ${st0.kinds.join(',')}  ← NG`);
+    failed = true;
+    paneStats.total++;
+    return;
+  }
+  const midX = st0.paneX + st0.paneW * 0.6;
+  const drag = async (y, dy) => {
+    await page.mouse.move(midX, y);
+    await page.mouse.down();
+    for (let i = 1; i <= 6; i++) {
+      await page.mouse.move(midX, y + (dy * i) / 6);
+      await page.waitForTimeout(16);
+    }
+    await page.mouse.up();
+    await page.waitForTimeout(150);
+  };
+  // 境目 1（MACD の上端）
+  await drag(st0.paneTop[1] + 1, 24);
+  const st1 = await paneState(page);
+  if (!(st1.paneH[0] === st0.paneH[0] + 24 && st1.paneH[1] === st0.paneH[1] - 24))
+    bad.push(`境目 1 ${st0.paneH.join('/')} → ${st1.paneH.join('/')}`);
+  if (st1.prefs.fut_pane_h_rsi !== st1.paneH[0] || st1.prefs.fut_pane_h_macd !== st1.paneH[1])
+    bad.push(`保存 ${JSON.stringify(st1.keys.map((k) => [k, st1.prefs[k]]))}`);
+  // 境目 0（RSI の上端。帯は段の中の下側）
+  await drag(st1.paneTop[0] + 2, -30);
+  const st2 = await paneState(page);
+  if (!(st2.paneH[0] === st1.paneH[0] + 30 && st2.wrapH === (st1.wrapH ?? 0) - 30))
+    bad.push(`境目 0 段 ${st1.paneH[0]} → ${st2.paneH[0]}・価格 ${st1.wrapH} → ${st2.wrapH}`);
+  // 境目のダブルクリック → 既定
+  await page.mouse.dblclick(midX, st2.paneTop[1] + 1);
+  await page.waitForTimeout(200);
+  const st3 = await paneState(page);
+  if (!(st3.paneH.every((h) => h === 56) && st3.keys.length === 0 && st3.kinds.length === 3))
+    bad.push(`既定に戻す ${st3.paneH.join('/')}・キー ${st3.keys.join(',')}`);
+  if (st3.kinds.length !== 3) {
+    paneStats.total++;
+    failed = true;
+    console.log(`${label}: #207 ${bad.join('・')}  ← NG`);
+    return;
+  }
+  // 境目 0 の帯（価格の側 3px）のホバー: 十字線なし・row-resize
+  await page.mouse.move(midX, st3.paneTop[0] - 3);
+  await page.waitForTimeout(120);
+  const hb = await paneState(page);
+  const cur = await page.evaluate(
+    ([x, y]) => getComputedStyle(document.elementFromPoint(x, y)).cursor,
+    [midX, st3.paneTop[0] - 3],
+  );
+  if (!(hb.cross === 0 && hb.priceV === 0 && cur === 'row-resize'))
+    bad.push(`帯のホバー 十字線 ${hb.cross}・価格 ${hb.priceV}・カーソル ${cur}`);
+  // RSI の段のホバー（段の座標 30px = 描画域の中）
+  const hy = st3.paneTop[0] + 30;
+  await page.mouse.move(midX, hy);
+  await page.waitForTimeout(150);
+  const st4 = await paneState(page);
+  const crossOk =
+    st4.cross === 1 &&
+    st4.crossKind === 'rsi' &&
+    st4.hy !== null &&
+    Math.abs(st4.hy - 30) <= 0.6 &&
+    rsiTagOk(st4) &&
+    st4.priceV === 1 &&
+    st4.priceH === 0 &&
+    st4.xTag === st4.time &&
+    st4.float === null;
+  if (!crossOk)
+    bad.push(
+      `十字線 ${st4.cross}（${st4.crossKind}・y ${st4.hy}・札 ${st4.tag}）・価格 縦 ${st4.priceV} 横 ${st4.priceH}・時刻 ${st4.xTag} / ${st4.time}・浮き ${st4.float}`,
+    );
+  // MACD の段のダブルクリック → 最大化
+  await page.mouse.dblclick(midX, st4.paneTop[1] + st4.paneH[1] / 2);
+  await page.waitForTimeout(250);
+  const st5 = await paneState(page);
+  if (
+    !(
+      st5.kinds.join(',') === 'macd' &&
+      st5.wrapH === null &&
+      st5.splits === 0 &&
+      Math.abs(st5.paneH[0] - st5.stackH) <= 1
+    )
+  )
+    bad.push(
+      `最大化 ${st5.kinds.join(',')}・${st5.paneH.join('/')} / 枠 ${st5.stackH}・価格 ${st5.wrapH}`,
+    );
+  await page.mouse.dblclick(midX, st5.paneTop[0] + st5.paneH[0] / 2);
+  await page.waitForTimeout(250);
+  const st6 = await paneState(page);
+  if (
+    !(
+      st6.kinds.join(',') === 'rsi,macd,stoch' &&
+      st6.paneH.every((h) => h === 56) &&
+      st6.wrapH !== null
+    )
+  )
+    bad.push(`戻す ${st6.kinds.join(',')}・${st6.paneH.join('/')}`);
+  await page.mouse.move(1, 1);
+  paneStats.total++;
+  const ok = bad.length === 0;
+  if (ok) paneStats.pass++;
+  else failed = true;
+  console.log(
+    `${label}: #207 境目 ${st0.paneH.join('/')} → ${st1.paneH.join('/')} → ${st2.paneH.join('/')} → 既定・十字線 RSI ${st4.tag}・最大化 ${st5.paneH[0]}px ${ok ? 'pass' : `${bad.join('・')}  ← NG`}`,
+  );
+}
+
+/**
+ * #207 はみ出し（オーナーの指摘「てくにかるぜんぶだしたら下端がはみ出した」）: 段 3 つ + EMA を出した先物推移を
+ * 360×780・390×844（シートの覗く / 全開）・768×1024・1440×900 で開き、ページ・パネルの本体・価格と段の枠の縦のはみ出しが
+ * 0px、段の下端と凡例が本体の中、隠した段があれば知らせがあること
+ */
+async function futAllPanesSweep() {
+  for (const [w, h] of [
+    [360, 780],
+    [390, 844],
+    [768, 1024],
+    [1440, 900],
+  ]) {
+    const ctx = await newContext(
+      { width: w, height: h },
+      { [WORKSPACE_KEY]: twoLegs, [PREFS_KEY]: prefsText('dark') },
+    );
+    const page = await ctx.newPage();
+    await page.goto(pageUrl('next'));
+    await waitReady(page, 'next');
+    await openFut(page, w, 'peek');
+    for (const t of ['RSI', 'MACD', 'SO']) {
+      await page.click(`section.smile .iv-legend .ind-toggles button:text-is("${t}")`);
+    }
+    for (const sheet of w <= PHONE_MAX ? ['peek', 'full'] : [null]) {
+      if (sheet) await openFut(page, w, sheet);
+      await page.waitForTimeout(250);
+      const r = await page.evaluate(() => {
+        const s = document.querySelector('section.smile');
+        const body = s?.querySelector('.panel-body');
+        const stack = s?.querySelector('.fut-stack');
+        const bb = body?.getBoundingClientRect().bottom ?? 0;
+        const se = document.scrollingElement;
+        const panes = [...(s?.querySelectorAll('.ind-pane') ?? [])];
+        return {
+          ema: s?.querySelector('.iv-readout.ema') !== null,
+          page: se ? se.scrollHeight - se.clientHeight : 0,
+          body: body ? body.scrollHeight - body.clientHeight : -1,
+          stack: stack ? stack.scrollHeight - stack.clientHeight : -1,
+          panes: panes.length,
+          paneOut: panes.some((p) => p.getBoundingClientRect().bottom > bb + 0.5),
+          legendOut:
+            (s?.querySelector('.iv-legend')?.getBoundingClientRect().bottom ?? 1e9) > bb + 0.5,
+          note: (s?.querySelector('.ind-hidden-note')?.textContent ?? '').trim(),
+          plotH: s?.querySelector('.iv-wrap')?.clientHeight ?? 0,
+        };
+      });
+      const bad = [];
+      if (!r.ema) bad.push('EMA の行なし');
+      if (r.page !== 0) bad.push(`ページ ${r.page}px`);
+      if (r.body !== 0) bad.push(`本体 ${r.body}px`);
+      if (r.stack !== 0) bad.push(`枠 ${r.stack}px`);
+      if (r.paneOut) bad.push('段が本体の外');
+      if (r.legendOut) bad.push('凡例が本体の外');
+      if (r.panes < 3 && !r.note.includes('隠しています')) bad.push(`段 ${r.panes} で知らせなし`);
+      if (r.panes > 0 && r.plotH < 80) bad.push(`価格 ${r.plotH}px`);
+      paneStats.total++;
+      const ok = bad.length === 0;
+      if (ok) paneStats.pass++;
+      else failed = true;
+      console.log(
+        `next dark 先物推移 段 3 つ + EMA${sheet ? ` ${sheet}` : ''} ${w}x${h}: はみ出し ページ ${r.page}・本体 ${r.body}・枠 ${r.stack}px・段 ${r.panes}${r.note ? `（${r.note}）` : ''}・価格 ${r.plotH}px ${ok ? 'pass' : `${bad.join('・')}  ← NG`}`,
+      );
+    }
+    await ctx.close();
+  }
 }
 
 /** 4 幅 × ダーク / ライトで先物推移を開いた状態（スマホはシート 3 段階）。線のモードも測る */
@@ -2525,6 +2770,10 @@ async function futSweep() {
         await report(page, lbl, w, h, `${name}-ind${sheet ? `-${sheet}` : ''}`);
         await indCheck(page, `${lbl} ${w}x${h}`);
       }
+      // #207: 境目のドラッグ・既定に戻す・段の十字線・最大化 / 戻す（360 は全開・1440。ダークだけ）
+      if (theme === 'dark' && (w === 360 || w === 1440)) {
+        await futPaneCheck(page, `${tag} 段の操作 ${w}x${h}`);
+      }
       await ctx.close();
     }
   }
@@ -2542,6 +2791,15 @@ async function runFlows() {
   const phone = { width: 390, height: 844 };
   const pc = { width: 1440, height: 900 };
   const next = pageUrl('next');
+
+  // #207 先物推移の段の高さ・最大化・段の十字線（タッチ。マウスは既定の実行の futSweep）。後ろの手順の既知の止まり
+  // （#87 の TimeoutError など）に隠れないよう先に回す
+  await futPaneTouchFlow();
+  for (const vp of [
+    { width: 360, height: 780 },
+    { width: 390, height: 844 },
+  ])
+    await futPanePeekTouchFlow(vp);
 
   // (a) 開いただけでは作業の保存を書き換えない・ドックのバッジ
   {
@@ -7234,10 +7492,10 @@ async function surfaceTouchFlow() {
 }
 
 /** タッチの端末のエミュレーション（hasTouch・isMobile。390×844）。AC-19 の Chromium での根拠（iPhone の Safari は手動） */
-async function touchContext(storage) {
+async function touchContext(storage, viewport = { width: 390, height: 844 }) {
   const localStorage = Object.entries(storage).map(([name, v]) => ({ name, value: v }));
   return browser.newContext({
-    viewport: { width: 390, height: 844 },
+    viewport,
     hasTouch: true,
     isMobile: true,
     deviceScaleFactor: 2,
@@ -8990,6 +9248,233 @@ async function ivCrossFlows(vp) {
   );
   if (shotsDir) await page.screenshot({ path: join(shotsDir, `flows-iv-cross-${tag}.png`) });
   await ctx.close();
+}
+
+/**
+ * #207 AC1・AC2・AC4〜AC6（--flows）: 360×780 のタッチ（CDP）・全開のシート・段 3 つ。RSI の段の長押し 500ms → 段の十字線
+ * （横線 = 指の高さ・札 = その高さの値）と指から離れた浮いた読み取り（指の位置を含まない）・価格は縦線だけ、長押しの前に
+ * 6px 以上動かすとパン（十字線なし・横軸の目盛りが動く）、境目 1 を指で 20px 下へ → RSI +20、境目のダブルタップ →
+ * 既定、MACD の段のダブルタップ → 最大化・もう一度 → 戻す。その間ページ・シートが動かない
+ */
+async function futPaneTouchFlow() {
+  const tag = '360x780 touch';
+  const ctx = await touchContext({ [WORKSPACE_KEY]: twoLegs }, { width: 360, height: 780 });
+  const page = await ctx.newPage();
+  await page.goto(pageUrl('next'));
+  await waitReady(page, 'next');
+  await page.tap('.dock button[data-panel="smile"]');
+  await page.waitForTimeout(300);
+  await page.tap('section.smile .panel-head .seg button:text-is("先物")');
+  await page.waitForSelector('section.smile .iv-wrap svg', { timeout: 10000 }).catch(() => null);
+  for (const t of ['RSI', 'MACD', 'SO']) {
+    await page.tap(`section.smile .iv-legend .ind-toggles button:text-is("${t}")`);
+  }
+  // 全開（つまみのタップ）
+  if ((await page.getAttribute('.layout', 'data-sheet')) !== 'full') await page.tap('.grabber');
+  await settleMotion(page);
+  await page.waitForTimeout(300);
+  const cdp = await ctx.newCDPSession(page);
+  const touch = (type, touchPoints) => cdp.send('Input.dispatchTouchEvent', { type, touchPoints });
+  const tap2 = async (pt) => {
+    for (let k = 0; k < 2; k++) {
+      await touch('touchStart', [{ ...pt, id: 0 }]);
+      await page.waitForTimeout(30);
+      await touch('touchEnd', []);
+      await page.waitForTimeout(80);
+    }
+    await page.waitForTimeout(300);
+  };
+  const sheet = () => page.getAttribute('.layout', 'data-sheet');
+  const sheet0 = await sheet();
+  const st0 = await paneState(page);
+  const midX = Math.round(st0.paneX + st0.paneW * 0.6);
+  // (a) RSI の段の長押し（段の座標 30px）
+  const a = { x: midX, y: Math.round(st0.paneTop[0] + 30) };
+  await touch('touchStart', [{ ...a, id: 0 }]);
+  await page.waitForTimeout(600);
+  const st1 = await paneState(page);
+  await touch('touchEnd', []);
+  await page.waitForTimeout(120);
+  const fb = st1.floatBox;
+  const awayFromFinger =
+    fb !== null &&
+    !(a.y >= fb.top - 8 && a.y <= fb.bottom + 8 && a.x >= fb.left && a.x <= fb.right);
+  check(
+    `#207 AC5・AC6 ${tag} RSI の段の長押しで段の十字線（横線 = 指の高さ・札 = その高さの値）・価格は縦線と横軸の札だけ・浮いた読み取りは指から離れた所`,
+    st1.cross === 1 &&
+      st1.crossKind === 'rsi' &&
+      st1.hy !== null &&
+      Math.abs(st1.hy - (a.y - st0.paneTop[0])) <= 1 &&
+      rsiTagOk(st1) &&
+      st1.priceV === 1 &&
+      st1.priceH === 0 &&
+      st1.xTag === st1.time &&
+      (st1.float ?? '').includes(st1.tag ?? '?') &&
+      awayFromFinger,
+    `十字線 ${st1.cross}・y ${st1.hy}・札 ${st1.tag}・価格 縦 ${st1.priceV} 横 ${st1.priceH}・浮き「${st1.float}」${fb ? ` ${Math.round(fb.top)}〜${Math.round(fb.bottom)}px` : ''}・指 ${a.y}px`,
+  );
+  // タップで消す → (b) 長押しの前に 6px 以上動かす = パン
+  await touch('touchStart', [{ ...a, id: 0 }]);
+  await page.waitForTimeout(40);
+  await touch('touchEnd', []);
+  await page.waitForTimeout(400);
+  const before = await paneState(page);
+  await touch('touchStart', [{ ...a, id: 0 }]);
+  for (let i = 1; i <= 6; i++) {
+    await touch('touchMove', [{ x: a.x + i * 12, y: a.y, id: 0 }]);
+    await page.waitForTimeout(20);
+  }
+  await page.waitForTimeout(550);
+  const mid = await paneState(page);
+  await touch('touchEnd', []);
+  await page.waitForTimeout(300);
+  check(
+    `#207 AC6 ${tag} 長押しの前に 6px 以上動かすとパン（十字線なし・横軸が動く）`,
+    before.cross === 0 && mid.cross === 0 && mid.priceV === 0 && mid.xTick !== before.xTick,
+    `十字線 ${before.cross} → ${mid.cross}・目盛り ${before.xTick} → ${mid.xTick}`,
+  );
+  // (c) 境目 1 を指で 20px 下へ
+  const b = { x: midX, y: Math.round(st0.paneTop[1] + 2) };
+  await touch('touchStart', [{ ...b, id: 0 }]);
+  for (let i = 1; i <= 5; i++) {
+    await touch('touchMove', [{ x: b.x, y: b.y + i * 4, id: 0 }]);
+    await page.waitForTimeout(30);
+  }
+  await touch('touchEnd', []);
+  await page.waitForTimeout(300);
+  const st2 = await paneState(page);
+  check(
+    `#207 AC1・AC3 ${tag} 境目（RSI | MACD）を指で 20px 下へ → RSI +20・MACD −20、端末の設定に残る`,
+    st2.paneH[0] === st0.paneH[0] + 20 &&
+      st2.paneH[1] === st0.paneH[1] - 20 &&
+      st2.prefs.fut_pane_h_rsi === st2.paneH[0],
+    `${st0.paneH.join('/')} → ${st2.paneH.join('/')}・キー ${st2.keys.join(',')}`,
+  );
+  // (d) 境目のダブルタップ → 既定
+  await tap2({ x: midX, y: Math.round(st2.paneTop[1] + 2) });
+  const st3 = await paneState(page);
+  check(
+    `#207 AC2 ${tag} 境目のダブルタップで既定の高さ（56px）・キーを消す`,
+    st3.kinds.length === 3 && st3.paneH.every((h) => h === 56) && st3.keys.length === 0,
+    `${st3.kinds.join(',')} ${st3.paneH.join('/')}・キー ${st3.keys.join(',')}`,
+  );
+  // (d') AC1 の帯の幅: 境目 0（価格 | RSI）と境目 1（RSI | MACD）の ±9px を指で押して 12px 下へ → ドラッグになる
+  //（境目 0 の −9px は価格の描画域の中）。1 回ごとに境目のダブルタップで既定に戻す
+  const band = [];
+  for (const [b, off] of [
+    [0, -9],
+    [0, 9],
+    [1, -9],
+    [1, 9],
+  ]) {
+    const sb = await paneState(page);
+    const y0 = Math.round(sb.paneTop[b] + off);
+    await touch('touchStart', [{ x: midX, y: y0, id: 0 }]);
+    for (let i = 1; i <= 4; i++) {
+      await touch('touchMove', [{ x: midX, y: y0 + i * 3, id: 0 }]);
+      await page.waitForTimeout(30);
+    }
+    await touch('touchEnd', []);
+    await page.waitForTimeout(250);
+    const sa = await paneState(page);
+    const d = sa.paneH[0] - sb.paneH[0];
+    band.push({ b, off, d, ok: d === (b === 0 ? -12 : 12) && sa.cross === 0 });
+    await tap2({ x: midX, y: Math.round(sa.paneTop[b]) });
+  }
+  check(
+    `#207 AC1 ${tag} 境目の帯はタッチで ±10px（境目 0・1 の ±9px の押下がドラッグ。境目 0 の上は価格の描画域）`,
+    band.every((r) => r.ok),
+    band
+      .map((r) => `境目 ${r.b} ${r.off > 0 ? '+' : ''}${r.off}px → RSI ${r.d > 0 ? '+' : ''}${r.d}`)
+      .join('・'),
+  );
+  const st3b = await paneState(page);
+  // (e) MACD の段のダブルタップ → 最大化、もう一度 → 戻す
+  await tap2({ x: midX, y: Math.round(st3b.paneTop[1] + st3b.paneH[1] / 2) });
+  const st4 = await paneState(page);
+  await tap2({ x: midX, y: Math.round(st4.paneTop[0] + (st4.paneH[0] ?? 0) / 2) });
+  const st5 = await paneState(page);
+  const sheet1 = await sheet();
+  const sy = await page.evaluate(() => window.scrollY);
+  check(
+    `#207 AC4 ${tag} MACD の段のダブルタップで最大化（段 1 つ・価格なし・枠の全部）、もう一度で戻す。シート・ページは動かない`,
+    st4.kinds.join(',') === 'macd' &&
+      st4.wrapH === null &&
+      Math.abs((st4.paneH[0] ?? 0) - st4.stackH) <= 1 &&
+      st5.kinds.join(',') === 'rsi,macd,stoch' &&
+      st5.wrapH !== null &&
+      sheet1 === sheet0 &&
+      sy === 0,
+    `${st4.kinds.join(',')} ${st4.paneH.join('/')} / 枠 ${st4.stackH} → ${st5.kinds.join(',')}・シート ${sheet0} → ${sheet1}・scrollY ${sy}`,
+  );
+  if (shotsDir) await page.screenshot({ path: join(shotsDir, `flows-fut-panes-${tag}.png`) });
+  await ctx.close();
+}
+
+/**
+ * #207 再レビュー B2（--flows）: 縦に狭い覗く（段を縮めて描いている）でも境目のドラッグが指に 1:1。
+ * (A) 覚えた RSI 120px・RSI だけの段（覗くでは縮めて描く）で境目 0 を指で 20px 下へ → RSI −20・価格 +20
+ * (B) 段 3 つ（360 は 34px × 2 で SO を隠す・390 は 30px 前後 × 3）で境目 1 を 20px 下へ → RSI +・MACD −（下限 28px で
+ *     止まるまで 1:1）・ほかの段と価格は同じ
+ * どちらも動かしている間と離した後（保存の値で描き直し）が同じ高さ
+ */
+async function futPanePeekTouchFlow(vp) {
+  const tag = `${vp.width}x${vp.height} touch peek`;
+  for (const mode of ['A', 'B']) {
+    const prefs = mode === 'A' ? { [PREFS_KEY]: prefsText('dark', { fut_pane_h_rsi: 120 }) } : {};
+    const ctx = await touchContext({ [WORKSPACE_KEY]: twoLegs, ...prefs }, vp);
+    const page = await ctx.newPage();
+    await page.goto(pageUrl('next'));
+    await waitReady(page, 'next');
+    await page.tap('.dock button[data-panel="smile"]');
+    await page.waitForTimeout(300);
+    await page.tap('section.smile .panel-head .seg button:text-is("先物")');
+    await page.waitForSelector('section.smile .iv-wrap svg', { timeout: 10000 }).catch(() => null);
+    for (const t of mode === 'A' ? ['RSI'] : ['RSI', 'MACD', 'SO']) {
+      await page.tap(`section.smile .iv-legend .ind-toggles button:text-is("${t}")`);
+    }
+    if ((await page.getAttribute('.layout', 'data-sheet')) !== 'peek') await page.tap('.grabber');
+    await settleMotion(page);
+    await page.waitForTimeout(300);
+    const cdp = await ctx.newCDPSession(page);
+    const touch = (type, touchPoints) =>
+      cdp.send('Input.dispatchTouchEvent', { type, touchPoints });
+    const st0 = await paneState(page);
+    const border = mode === 'A' ? 0 : 1;
+    const midX = Math.round(st0.paneX + st0.paneW * 0.6);
+    const y0 = Math.round(st0.paneTop[border] + 2);
+    await touch('touchStart', [{ x: midX, y: y0, id: 0 }]);
+    let during = null;
+    for (let i = 1; i <= 5; i++) {
+      await touch('touchMove', [{ x: midX, y: y0 + i * 4, id: 0 }]);
+      await page.waitForTimeout(40);
+      if (i === 5) during = await paneState(page);
+    }
+    await touch('touchEnd', []);
+    await page.waitForTimeout(300);
+    const st1 = await paneState(page);
+    const h = st0.paneH;
+    const want = mode === 'A' ? 20 : Math.min(20, (h[1] ?? 0) - 28);
+    const follows = (st) => {
+      if (!st || st.paneH.length !== h.length) return false;
+      const d0 = st.paneH[0] - h[0];
+      if (mode === 'A')
+        return Math.abs(d0 + want) <= 1 && Math.abs(st.wrapH - st0.wrapH - want) <= 1;
+      return (
+        Math.abs(d0 - want) <= 1 &&
+        Math.abs(h[1] - st.paneH[1] - want) <= 1 &&
+        st.paneH.slice(2).every((x, i) => x === h[i + 2]) &&
+        st.wrapH === st0.wrapH
+      );
+    };
+    const constrained = mode === 'A' ? h[0] < 120 : st0.stackH < 80 + h.length * 56;
+    check(
+      `#207 B2 ${tag} ${mode === 'A' ? '(A) 覚えた RSI 120px を縮めて描く覗くで境目 0 を指で 20px 下へ → RSI −20・価格 +20' : `(B) 段 ${h.length} つを縮めて描く覗くで境目 1 を指で 20px 下へ → RSI +${want}・MACD −${want}（下限 28px まで）・ほかの段と価格は同じ`}（指に 1:1）、離した後も同じ高さ`,
+      constrained && follows(during) && follows(st1),
+      `枠 ${st0.stackH}px・${h.join('/')}（価格 ${st0.wrapH}）→ 動かしている間 ${during?.paneH.join('/')}（価格 ${during?.wrapH}）→ 離した後 ${st1.paneH.join('/')}（価格 ${st1.wrapH}）・保存 ${st1.keys.map((k) => `${k}=${st1.prefs[k]}`).join(',')}`,
+    );
+    await ctx.close();
+  }
 }
 
 /** 390×844 のタッチ（CDP）: 長押し 500ms で十字線・札、横に動かすと時刻が変わる、離してタップで消える。ページ・シートは動かない */

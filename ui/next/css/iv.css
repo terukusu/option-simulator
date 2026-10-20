@@ -391,33 +391,145 @@
 }
 
 /*
- * 指標の段（#200。先物推移の価格の下。ui/next/market/IndicatorPanes.tsx）: 段は 1 つ 56px（IND_PANE_H）の svg で、価格の
+ * 指標の段（#200。先物推移の価格の下。ui/next/market/IndicatorPanes.tsx）: 段は既定 56px（IND_PANE_H）の svg で、価格の
  * 描画域と同じ横の画素範囲。線 = --accent（RSI・MACD・%K）と --handle（シグナル・%D）、ヒスト = --gain / --loss を薄く、
  * 補助線（30 / 70・20 / 80・0）= --line-2 の破線
+ *
+ * #207: 価格と段を .fut-stack で包み、JS が枠を測って配置（futPaneLayout）を決める。段の高さは svg の height 属性
+ * （style 属性なし）、段の枠は中身の高さ、価格の描画域は残り（flex: 1）。段の前の境目 .ind-split は高さ 0 の見た目と
+ * フォーカスだけ（pointer-events: none）で、当たり判定は JS（futSplitAt: マウス ±5px・タッチ ±10px。境目 0 は価格側にも）
  */
-.ind-panes {
+.fut-stack {
+  position: relative;
   display: flex;
-  flex: 0 1 56px;
+  flex: 1;
   flex-direction: column;
   min-width: 0;
-  min-height: 28px;
+  min-height: 0;
   overflow: hidden;
 }
 
-/* 枠の高さ = 段の数 × 56px（IND_PANE_H）。縦に狭いと縮む（下限 = 段の数 × 28px。段の高さは JS が枠を測って決める） */
-.ind-panes.n2 {
-  flex-basis: 112px;
-  min-height: 56px;
+.ind-panes {
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  min-width: 0;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
-.ind-panes.n3 {
-  flex-basis: 168px;
-  min-height: 84px;
+.ind-panes:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
 }
 
-/* 段があるときの価格の描画域の下限（スマホのシートの 覗く でも価格が潰れない） */
-.market-body:has(.ind-panes) .iv-wrap {
-  min-height: 80px;
+/*
+ * 枠に下限は付けない（#207 はみ出し: 段を全部出しても価格と段の和は枠の高さまで）。価格の下限 80px と段の下限 28px は
+ * 配置（futPaneLayout）が守り、入らない段は後ろから隠して .ind-hidden-note で知らせる
+ */
+.ind-hidden-wrap {
+  position: relative;
+  flex: 0 0 0;
+  height: 0;
+}
+
+.ind-hidden-note {
+  position: absolute;
+  bottom: 24px;
+  left: 52px;
+  z-index: 3;
+  margin: 0;
+  padding: 1px 6px;
+  border-radius: var(--r-sm);
+  background: var(--s2);
+  color: var(--ink-3);
+  font-size: var(--fs-xs);
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+/*
+ * 境目（#207）: 高さ 0 の要素（role="separator"。フォーカスとキー・線の見た目だけ）。pointer-events: none で、押下の当たり
+ * 判定は段の枠の座標（futSplitAt。マウス ±5px・タッチ ±10px。境目 0 は価格の描画域の側にも）。近くでは row-resize のカーソルと線
+ */
+.ind-split {
+  position: relative;
+  z-index: 2;
+  flex: 0 0 0;
+  height: 0;
+  outline: none;
+  pointer-events: none;
+}
+
+.ind-split::after {
+  position: absolute;
+  top: -1px;
+  right: 0;
+  left: 0;
+  height: 2px;
+  content: "";
+  background: transparent;
+}
+
+.ind-split.hot::after {
+  background: var(--line-2);
+}
+
+.ind-split:focus-visible::after {
+  background: var(--accent);
+}
+
+.fut-stack:has(.ind-panes.split-hot),
+.fut-stack:has(.ind-panes.split-hot) * {
+  cursor: row-resize;
+}
+
+/* スマホ（タッチ）の段の十字線の読み取り（#207）: 指から離れた枠の上端（指が上側なら下端）に重ねる。操作は受けない */
+.ind-float {
+  position: absolute;
+  top: 4px;
+  right: 10px;
+  left: 48px;
+  z-index: 3;
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 6px;
+  align-items: center;
+  overflow: hidden;
+  padding: 2px 6px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--s2);
+  color: var(--ink-2);
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.ind-float.bottom {
+  top: auto;
+  bottom: 4px;
+}
+
+.ind-float .name {
+  color: var(--ink-3);
+  font-family: var(--font);
+}
+
+.ind-float .ruler .k {
+  margin-right: 3px;
+  color: var(--ink-3);
+  font-family: var(--font);
+}
+
+.ind-float .v.main {
+  color: var(--accent);
+}
+
+.ind-float .v.sub {
+  color: var(--handle);
 }
 
 .ind-pane {
@@ -477,6 +589,19 @@
   stroke-dasharray: 2 3;
 }
 
+/* 段の十字線の縦軸の札（#207。価格の .iv-tag と同じ見た目。横線の高さの値） */
+.ind-pane .ind-tag rect {
+  fill: var(--ink-2);
+}
+
+.ind-pane .ind-tag text {
+  dominant-baseline: central;
+  fill: var(--s1);
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+  text-anchor: middle;
+}
+
 .ind-pane .ind-head {
   dominant-baseline: hanging;
   font-family: var(--mono);
@@ -497,6 +622,11 @@
 
 .ind-pane .ind-head .v.sub {
   fill: var(--handle);
+}
+
+.ind-pane .ind-head .hint {
+  fill: var(--ink-3);
+  font-family: var(--font);
 }
 
 .ind-pane .ind-head .v.hist {

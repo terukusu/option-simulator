@@ -444,3 +444,37 @@ describe('テクニカル指標の期間（#205）', () => {
     expect(r3.prefs.technicals).toEqual(T);
   });
 });
+
+describe('#207 先物推移の指標の段の高さ（fut_pane_h_*）', () => {
+  it('移行: キーの無い古い設定 → 持たない = 既定。書き出しにもキーが出ない', () => {
+    const read = readPrefs(`{"schema_version":1,"theme":"dark",${M0_JSON}}`);
+    expect(read.writable).toBe(true);
+    expect(read.prefs.futPaneH).toBeUndefined();
+    expect(serializePrefs(read.prefs)).not.toContain('fut_pane_h');
+  });
+  it('往復: 覚えた段だけ書き、読むと同じ値。版は 1 のまま', () => {
+    const text = serializePrefs({ theme: 'auto', margin: M0, futPaneH: { rsi: 90, stoch: 40 } });
+    const o = JSON.parse(text);
+    expect(o.schema_version).toBe(PREFS_SCHEMA_VERSION);
+    expect(o.fut_pane_h_rsi).toBe(90);
+    expect(o.fut_pane_h_stoch).toBe(40);
+    expect('fut_pane_h_macd' in o).toBe(false);
+    expect(readPrefs(text).prefs.futPaneH).toEqual({ rsi: 90, stoch: 40 });
+  });
+  it('不正（範囲外・小数・文字列）は段ごとに既定（読まない・書かない）。ほかの設定は残る', () => {
+    const read = readPrefs(
+      `{"schema_version":1,"theme":"light",${M0_JSON},"fut_pane_h_rsi":27,"fut_pane_h_macd":70.5,"fut_pane_h_stoch":"80"}`,
+    );
+    expect(read.prefs.theme).toBe('light');
+    expect(read.prefs.futPaneH).toBeUndefined();
+    const mixed = readPrefs(
+      `{"schema_version":1,"theme":"dark",${M0_JSON},"fut_pane_h_rsi":2001,"fut_pane_h_macd":120}`,
+    );
+    expect(mixed.prefs.futPaneH).toEqual({ macd: 120 });
+    const out = JSON.parse(
+      serializePrefs({ theme: 'dark', margin: M0, futPaneH: { rsi: Number.NaN, macd: 28 } }),
+    );
+    expect(out.fut_pane_h_macd).toBe(28);
+    expect('fut_pane_h_rsi' in out).toBe(false);
+  });
+});

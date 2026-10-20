@@ -1,5 +1,5 @@
 import type { ComponentChildren } from 'preact';
-import { useCallback, useMemo, useState } from 'preact/hooks';
+import { useCallback, useEffect, useMemo, useState } from 'preact/hooks';
 import type { FutBar } from '../../../data';
 import { emaSet, type Indicators, indicators, type TechParams } from '../../../model';
 import type { Domain } from '../../chart/scale';
@@ -13,6 +13,7 @@ import {
   FUT_LEGEND,
   FUT_LEGEND_LONG,
   FUT_NOTE,
+  FUT_PANE_HINT,
   FUT_PLOT_LABEL,
   FUT_SERIES,
   type FutNowValue,
@@ -25,7 +26,15 @@ import {
   futRollMarks,
 } from '../../view/futHistory';
 import { HINT_TERMS } from '../../view/glossary';
-import { IND_KINDS, type IndKind, indKindLabel } from '../../view/indicators';
+import {
+  futPaneLayout,
+  futPaneSave,
+  IND_KINDS,
+  IND_PANE_H,
+  type IndKind,
+  type IndPaneHeights,
+  indKindLabel,
+} from '../../view/indicators';
 import { IV_MODES, IV_TFS, type IvMode, type IvTf, lineSegments } from '../../view/ivHistory';
 import { type IvLoadState, ivInProgress, ivLoadView } from '../../view/ivLoad';
 import { PanelHead } from '../PanelHead';
@@ -33,7 +42,8 @@ import { Chip } from '../parts/Chip';
 import { Popover } from '../parts/Popover';
 import { Seg } from '../parts/Seg';
 import { TermLinks } from '../parts/TermLinks';
-import { IndicatorPanes } from './IndicatorPanes';
+import { useSize } from '../useSize';
+import { IndicatorPanes, type IndPaneCursor } from './IndicatorPanes';
 import { IvPlot } from './IvPlot';
 
 export interface FutHistoryProps {
@@ -62,6 +72,19 @@ export interface FutHistoryProps {
   /** EMA の 3 本を価格に重ねるか（#206。凡例の行のトグル。保存しない） */
   showEma: boolean;
   onEmaToggle: () => void;
+  /** 段の高さ（#207。端末の設定。無い段 = 既定） */
+  paneH: IndPaneHeights | undefined;
+  /** 段の高さを書く（null = 既定に戻す） */
+  onPaneH: (h: IndPaneHeights | null) => void;
+}
+
+/** カーソル（足と、触っている所。pane = 'price' は価格の描画域、段の種類は段の上、null は縦線だけ） */
+interface FutCursor {
+  bars: readonly FutBar[];
+  i: number;
+  y: number | null;
+  pane: 'price' | IndKind | null;
+  touch: boolean;
 }
 
 const NO_IND: Indicators | null = null;
@@ -73,6 +96,9 @@ const NO_IND: Indicators | null = null;
  * EMA を出すときは読み取りの下に EMA の値の行（期間つきの名前と色の見本 = 凡例を兼ねる）。シナリオの水準は無い。状態は
  * NextApp の useFutureBars（パネルを閉じても残る）。指標は段を 1 つでも出すときだけ足の並び・期間（#205）ごとに 1 回
  * 計算する。
+ * #207: 価格と段を .fut-stack で包んで測り、配置（futPaneLayout）を決める（段の高さ = 端末の設定、境目のドラッグ中は
+ * その高さ、最大化はこの部品の状態 = 保存しない）。カーソルは触っている所（価格 / 段）も持ち、横線と縦軸の札は触っている
+ * 所だけ、縦線は全部で同じ足。
  */
 function FutHistoryView(p: FutHistoryProps) {
   const { load, view } = p;
@@ -89,21 +115,74 @@ function FutHistoryView(p: FutHistoryProps) {
     () => (right ? futNowPoint(p.now, bars, tf, load.lastAt, p.nonTradingDays) : null),
     [right, p.now, bars, tf, load.lastAt, p.nonTradingDays],
   );
-  const [cur, setCur] = useState<{ bars: readonly FutBar[]; i: number; y: number | null } | null>(
-    null,
-  );
-  const cursor = cur && cur.bars === bars ? cur.i : null;
-  const cursorY = cur && cur.bars === bars ? cur.y : null;
+  const [cur, setCur] = useState<FutCursor | null>(null);
+  const live = cur && cur.bars === bars ? cur : null;
+  const cursor = live ? live.i : null;
+  // 価格の十字線の横線は価格の上のときだけ（段の上なら縦線と横軸の札だけ。#207）
+  const onPrice = live?.pane === 'price';
+  const cursorY = onPrice ? (live?.y ?? null) : null;
   const onCursor = useMemo(
     () => (i: number | null, y?: number | null) =>
-      setCur(i === null ? null : { bars, i, y: y ?? null }),
+      setCur(i === null ? null : { bars, i, y: y ?? null, pane: 'price', touch: false }),
     [bars],
+  );
+  const onPaneCursor = useMemo(
+    () => (i: number | null, at?: IndPaneCursor | null) =>
+      setCur(
+        i === null
+          ? null
+          : { bars, i, y: at?.y ?? null, pane: at?.pane ?? null, touch: at?.touch ?? false },
+      ),
+    [bars],
+  );
+  const pane = live?.pane;
+  const paneY = live?.y;
+  const paneTouch = live?.touch ?? false;
+  const paneCursor = useMemo<IndPaneCursor | null>(
+    () =>
+      pane && pane !== 'price' && paneY !== null && paneY !== undefined
+        ? { pane, y: paneY, touch: paneTouch }
+        : null,
+    [pane, paneY, paneTouch],
   );
   const rolls = useCallback(
     (range: Domain) => futRollMarks(bars, viewport, range),
     [bars, viewport],
   );
   const showInd = p.indKinds.length > 0;
+  // 価格と段の配置（#207）: 枠を測り、覚えた高さ（ドラッグ中はその高さ）と最大化から決める
+  const {
+    ref: stackRef,
+    width: stackW,
+    height: stackH,
+  } = useSize(480, 200 + IND_PANE_H * p.indKinds.length);
+  const [dragH, setDragH] = useState<IndPaneHeights | null>(null);
+  const [maxKind, setMaxKind] = useState<IndKind | null>(null);
+  const max = maxKind !== null && p.indKinds.includes(maxKind) ? maxKind : null;
+  // 最大化した段を消したら戻す（もう一度出しても最大化しない）
+  useEffect(() => {
+    if (maxKind !== null && !p.indKinds.includes(maxKind)) setMaxKind(null);
+  }, [maxKind, p.indKinds]);
+  // ドラッグ中は描いていた全部の段の高さ + 境目の両側の変化（futPaneDrag）を重ねる = 縮め直さないので指に 1:1
+  const heights = useMemo(() => (dragH ? { ...p.paneH, ...dragH } : p.paneH), [dragH, p.paneH]);
+  const layout = useMemo(
+    () => futPaneLayout({ stackH, kinds: p.indKinds, heights, max }),
+    [stackH, p.indKinds, heights, max],
+  );
+  const { onPaneH } = p;
+  const onMax = useCallback((k: IndKind) => setMaxKind((m) => (m === k ? null : k)), []);
+  // 離したとき: 描いていた高さ（shown）から、動かした段だけの保存の値を作る（描き直しても同じ高さ = futPaneSave）
+  const onPaneCommit = useCallback(
+    (shown: IndPaneHeights, border: number) => {
+      setDragH(null);
+      onPaneH(futPaneSave({ stackH, kinds: p.indKinds, stored: p.paneH, shown, border }));
+    },
+    [onPaneH, stackH, p.indKinds, p.paneH],
+  );
+  const onPaneReset = useCallback(() => {
+    setDragH(null);
+    onPaneH(null);
+  }, [onPaneH]);
   const { techParams } = p;
   const ind = useMemo(
     () => (showInd ? indicators(bars, techParams) : NO_IND),
@@ -142,6 +221,7 @@ function FutHistoryView(p: FutHistoryProps) {
         {p.seg}
         <Popover label="先物推移の操作" button="ⓘ">
           <p>{FUT_HINT}</p>
+          <p>{FUT_PANE_HINT}</p>
           <p>{FUT_NOTE}</p>
           <TermLinks ids={HINT_TERMS.futHistory} />
         </Popover>
@@ -193,40 +273,56 @@ function FutHistoryView(p: FutHistoryProps) {
             ))}
           </div>
         )}
-        <IvPlot
-          bars={bars}
-          tf={tf}
-          mode={view.mode}
-          viewport={viewport}
-          segments={segments}
-          rightLoaded={rightLoaded}
-          cursor={cursor}
-          cursorY={cursorY}
-          leftSlack={p.leftSlack}
-          now={nowPt}
-          scenario={null}
-          status={status}
-          failedSide={failedSide}
-          busy={loading && entry ? (pending === 'left' ? 'left' : 'right') : null}
-          onViewport={p.onViewport}
-          onCursor={onCursor}
-          onRetry={p.onRetry}
-          series={FUT_SERIES}
-          plotLabel={FUT_PLOT_LABEL}
-          imgLabel={FUT_IMG_LABEL}
-          rolls={rolls}
-          {...(overlays ? { overlays } : {})}
-        />
-        {ind && bars.length > 0 && (
-          <IndicatorPanes
-            ind={ind}
-            n={bars.length}
-            kinds={p.indKinds}
-            viewport={viewport}
-            marginLeft={FUT_SERIES.marginLeft}
-            cursor={cursor}
-          />
-        )}
+        <div class={max ? 'fut-stack max' : 'fut-stack'} ref={stackRef}>
+          {!max && (
+            <IvPlot
+              bars={bars}
+              tf={tf}
+              mode={view.mode}
+              viewport={viewport}
+              segments={segments}
+              rightLoaded={rightLoaded}
+              cursor={cursor}
+              cursorY={cursorY}
+              crossH={onPrice}
+              leftSlack={p.leftSlack}
+              now={nowPt}
+              scenario={null}
+              status={status}
+              failedSide={failedSide}
+              busy={loading && entry ? (pending === 'left' ? 'left' : 'right') : null}
+              onViewport={p.onViewport}
+              onCursor={onCursor}
+              onRetry={p.onRetry}
+              series={FUT_SERIES}
+              plotLabel={FUT_PLOT_LABEL}
+              imgLabel={FUT_IMG_LABEL}
+              rolls={rolls}
+              {...(overlays ? { overlays } : {})}
+              {...(ind && bars.length > 0 ? { height: layout.priceH } : {})}
+            />
+          )}
+          {ind && bars.length > 0 && (
+            <IndicatorPanes
+              ind={ind}
+              n={bars.length}
+              viewport={viewport}
+              marginLeft={FUT_SERIES.marginLeft}
+              cursor={cursor}
+              layout={layout}
+              width={stackW}
+              stackH={stackH}
+              leftSlack={p.leftSlack}
+              paneCursor={paneCursor}
+              onViewport={p.onViewport}
+              onCursor={onPaneCursor}
+              onMax={onMax}
+              onPaneLive={setDragH}
+              onPaneCommit={onPaneCommit}
+              onPaneReset={onPaneReset}
+            />
+          )}
+        </div>
         <div class="iv-legend">
           <span class="line">
             {FUT_LEGEND}
