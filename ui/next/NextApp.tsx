@@ -19,7 +19,14 @@ import type { PrefsRead } from '../prefs';
 import { shareSupported } from '../share';
 import { legAtStrike, MAX_TABS, restoreTabAction } from '../state';
 import { aiEnvFromState } from '../view/aiContext';
-import { newTabFullText, PROPOSAL_APPLY_ERROR, proposalApply } from '../view/aiPropose';
+import {
+  NEW_TAB_UNDO_TEXT,
+  newTabFullText,
+  newTabPlan,
+  newTabUndoActions,
+  PROPOSAL_APPLY_ERROR,
+  proposalApply,
+} from '../view/aiPropose';
 import { marketAddPlan, marketAddToast } from '../view/boardPanel';
 import { closedTabText, restoreTabError, type ShareResult, shareResultView } from '../view/boxTabs';
 import { fmtNum } from '../view/format';
@@ -304,24 +311,24 @@ export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
         });
         return;
       }
-      if (st.tabs.length >= MAX_TABS) {
+      const plan = newTabPlan(st, r.legs);
+      if (!plan) {
         push({ kind: 'ai-propose', text: newTabFullText(MAX_TABS), note: 'info' });
         return;
       }
-      const id = st.nextTabId;
-      dispatch({
-        type: 'openPositionInNewTab',
-        legs: r.legs.map(({ id: _id, ...rest }) => rest),
-        scenario: null,
-        feePerLot: null,
-        futureBasis: null,
-      });
+      dispatch(plan.action);
       push({
         kind: 'ai-propose',
         text: `AI の提案を新しいタブに入れた（足 ${r.legs.length} 本）`,
         keep: true,
         undo: () => {
-          if (stateRef.current.tabs.some((t) => t.id === id)) dispatch({ type: 'closeTab', id });
+          // 押したときのタブに戻り、足したタブだけを閉じる。編集していたら戻さない（#139 レビュー B1）
+          const acts = newTabUndoActions(stateRef.current, plan.undo);
+          if (typeof acts === 'string') {
+            push({ kind: 'ai-propose', text: NEW_TAB_UNDO_TEXT[acts], note: 'info' });
+            return;
+          }
+          for (const a of acts) dispatch(a);
         },
       });
     },

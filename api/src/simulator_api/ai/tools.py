@@ -60,7 +60,9 @@ POSITION_SUMMARY = Obj({
     "max_days": DAYS,
     "n_legs": Num(0, MAX_LEGS, integer=True),
     "legs": Arr(Obj({"leg_no": Num(1, MAX_LEGS, integer=True), **LEG_ID, "entry_yen": Num(0, 1e9), "iv_pct": PCT,
-                     "days_to_sq": DAYS, "delta_large": LOTS, "delta_mini": LOTS}, LEG_OPTIONAL), MAX_LEGS),
+                     "days_to_sq": DAYS, "delta_large": LOTS, "delta_mini": LOTS},
+                    # leg_no は #139 で足した。デプロイ前に開いた画面（古い JS）は送らないので任意（400 にしない）
+                    LEG_OPTIONAL | {"leg_no"}), MAX_LEGS),
     "premium": Obj({"received_yen": YEN, "paid_yen": YEN, "net_yen": YEN, "fees_yen": YEN,
                     "net_after_fees_yen": YEN}),
     "expiry": Obj({"max_profit_yen": YEN, "max_profit_x": LEVEL, "max_profit_unbounded": Bool(),

@@ -3,6 +3,8 @@ import { AI_EVAL_CASES, caseMargin, caseState } from '../../scripts/aiEvalCases'
 import { reduce, type State, type UiLeg } from '../../ui/state';
 import { aiEnvFromState } from '../../ui/view/aiContext';
 import {
+  newTabPlan,
+  newTabUndoActions,
   planProposal,
   proposalApply,
   proposalCard,
@@ -388,5 +390,84 @@ describe('k を省いて simulator が選ぶ（1 回の往復で提案まで）'
     expect('error' in proposalApply(env, input, r)).toBe(false);
     const forged = { ...r, diff: [{ ...r.diff[0], k: r.diff[0].k - 250 }] };
     expect(proposalApply(env, input, forged)).toEqual({ error: 'changed' });
+  });
+});
+
+describe('[新しいタブに入れる] の [元に戻す]（#139 レビュー B1）', () => {
+  // [A, B] の 2 タブで A を開いている（B は空）
+  const a = stateOf('strangle_sell');
+  const twoTabs = reduce(reduce(a, { type: 'addTab', mode: 'empty' }), {
+    type: 'switchTab',
+    id: 1,
+  });
+  const env = envOf('strangle_sell', twoTabs);
+  const input = { target: 'new_tab', candidate: { structure: 'iron_condor', abs_delta: 0.15 } };
+  const r = proposalApply(env, input, run(env, 'propose_position', input));
+  if ('error' in r) throw new Error(r.error);
+  const plan = newTabPlan(twoTabs, r.legs);
+  if (!plan) throw new Error('plan');
+  const applied = reduce(twoTabs, plan.action);
+  const undoAll = (s: State) => {
+    const acts = newTabUndoActions(s, plan.undo);
+    if (typeof acts === 'string') throw new Error(acts);
+    return acts.reduce(reduce, s);
+  };
+
+  it('足したタブは元のタブの右隣で開き、[元に戻す] で元のタブに戻って足したタブだけ閉じる', () => {
+    expect(twoTabs.tabs.map((t) => t.id)).toEqual([1, 2]);
+    expect(applied.tabs.map((t) => t.id)).toEqual([1, 3, 2]);
+    expect(applied.activeTab).toBe(3);
+    const back = undoAll(applied);
+    expect(back.tabs.map((t) => t.id)).toEqual([1, 2]);
+    expect(back.activeTab).toBe(1);
+    expect(back.legs).toEqual(twoTabs.legs);
+    expect(back.pnlViewport).toEqual(twoTabs.pnlViewport);
+  });
+
+  it('別のタブに移ってから押しても、押したときのタブに戻る', () => {
+    const moved = reduce(applied, { type: 'switchTab', id: 2 });
+    const back = undoAll(moved);
+    expect(back.tabs.map((t) => t.id)).toEqual([1, 2]);
+    expect(back.activeTab).toBe(1);
+    expect(back.legs).toEqual(twoTabs.legs);
+  });
+
+  it('足したタブを編集していたら戻さない（edited）・もう閉じていたら gone', () => {
+    const edited = reduce(applied, { type: 'removeLeg', id: 1 });
+    expect(newTabUndoActions(edited, plan.undo)).toBe('edited');
+    // 別のタブに移っても編集は退避した足で分かる
+    expect(newTabUndoActions(reduce(edited, { type: 'switchTab', id: 1 }), plan.undo)).toBe(
+      'edited',
+    );
+    expect(newTabUndoActions(reduce(applied, { type: 'closeTab', id: 3 }), plan.undo)).toBe('gone');
+  });
+
+  it('タブが上限なら計画は null', () => {
+    let full = twoTabs;
+    for (let i = 0; i < 10; i++) full = reduce(full, { type: 'addTab', mode: 'empty' });
+    expect(newTabPlan(full, r.legs)).toBeNull();
+  });
+});
+
+describe('検査の細部（#139 レビュー L2・L4）', () => {
+  const env = envOf('put_ratio');
+  it('set_qty・move_strike に関係の無いキーは bad_input', () => {
+    const one = (c: Record<string, unknown>) =>
+      runTool('propose_position', { target: 'current', changes: [c] }, env);
+    expect(one({ action: 'set_qty', leg_no: 1, qty: 2, expiry: '2026-11' })).toEqual({
+      error: 'bad_input',
+    });
+    expect(one({ action: 'move_strike', leg_no: 1, k: 65500, type: 'P' })).toEqual({
+      error: 'bad_input',
+    });
+  });
+  it('structure_candidates の枚数は 2 倍の足でも上限を越えない', () => {
+    expect(
+      runTool(
+        'structure_candidates',
+        { structure: 'put_ratio', qty: 60_000 },
+        envOf('strangle_sell'),
+      ),
+    ).toEqual({ error: 'bad_input' });
   });
 });

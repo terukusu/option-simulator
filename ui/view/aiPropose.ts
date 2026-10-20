@@ -25,7 +25,16 @@ import {
   type Side,
   ZERO_SCENARIO,
 } from '../../model';
-import { legAtStrike, QTY_MAX, type UiLeg } from '../state';
+import type { Domain } from '../chart/scale';
+import {
+  type Action,
+  legAtStrike,
+  QTY_MAX,
+  reduce,
+  type State,
+  sameUiLeg,
+  type UiLeg,
+} from '../state';
 import { fin, greeksOf, legId, r1, r2, yen } from './aiRound';
 import type { AiToolEnv, ToolError, ToolResult } from './aiTools';
 import { fmtNum } from './format';
@@ -403,15 +412,21 @@ export function planProposal(
     }
     if (action === 'set_qty') {
       if (!isInt(c.qty, 1, QTY_MAX) || c.qty === cur.leg.qty) return err('bad_input');
-      if (c.k !== undefined || c.side !== undefined || c.type !== undefined)
+      if (['k', 'side', 'type', 'product', 'expiry'].some((k) => c[k] !== undefined)) {
         return err('bad_input');
+      }
       const next: UiLeg = { ...cur, leg: { ...cur.leg, qty: c.qty } };
       replaced.set(i, next);
       diff.push(diffOf('qty', next, c.leg_no, { from_qty: cur.leg.qty }));
       continue;
     }
     // move_strike（板の OP の足だけ）
-    if (!isNum(c.k) || c.qty !== undefined || c.side !== undefined) return err('bad_input');
+    if (
+      !isNum(c.k) ||
+      ['qty', 'side', 'type', 'product', 'expiry'].some((k) => c[k] !== undefined)
+    ) {
+      return err('bad_input');
+    }
     if (cur.leg.kind !== 'option') return err('bad_input');
     if (c.k === cur.leg.strike) return err('bad_input');
     const next = legAtStrike(env.chain, cur, c.k);
@@ -729,7 +744,8 @@ export function structureCandidates(env: AiToolEnv, input: Record<string, unknow
   }
   const qty = input.qty ?? 1;
   const wingPct = input.wing_pct ?? WING_PCT_DEFAULT;
-  if (!isInt(qty, 1, QTY_MAX)) return err('bad_input');
+  // put_ratio の売りは 2 倍の枚数（枚数の上限を越えない）
+  if (!isInt(qty, 1, Math.floor(QTY_MAX / 2))) return err('bad_input');
   if (!isNum(wingPct) || wingPct < WING_PCT_RANGE[0] || wingPct > WING_PCT_RANGE[1]) {
     return err('bad_input');
   }
@@ -950,3 +966,77 @@ export const PROPOSAL_APPLY_ERROR: Record<'changed' | 'invalid', string> = {
 /** タブが上限で新しいタブに入れられないときの文 */
 export const newTabFullText = (max: number) =>
   `タブが上限（${max} 個）です。タブを閉じてから [新しいタブに入れる] を押してください`;
+
+// ---------------------------------------------------------------- 新しいタブの [元に戻す]（#139 レビュー B1）
+
+/** [新しいタブに入れる] の控え（押した時点の作業中のタブ・横軸の表示範囲・入れた足） */
+export interface NewTabUndo {
+  /** 足したタブ */
+  tab: number;
+  /** 押したときに開いていたタブ */
+  from: number;
+  viewport: Domain | null;
+  /** 足したタブに入った足（reducer を通した後。id は除く） */
+  legs: ReadonlyArray<Omit<UiLeg, 'id'>>;
+}
+
+/**
+ * [新しいタブに入れる] の action と控え（タブが上限なら null）。入った足は reducer を通した結果（足の市場の作り直しを含む）
+ * で控える = [元に戻す] の照合が反映のときと同じ形になる
+ */
+export function newTabPlan(
+  st: State,
+  legs: readonly UiLeg[],
+): { action: Action; undo: NewTabUndo } | null {
+  const action: Action = {
+    type: 'openPositionInNewTab',
+    legs: legs.map(({ id: _id, ...rest }) => rest),
+    scenario: null,
+    feePerLot: null,
+    futureBasis: null,
+  };
+  const next = reduce(st, action);
+  if (next === st || next.tabs.length === st.tabs.length) return null;
+  return {
+    action,
+    undo: {
+      tab: next.activeTab,
+      from: st.activeTab,
+      viewport: st.pnlViewport,
+      legs: next.legs.map(({ id: _id, ...rest }) => rest),
+    },
+  };
+}
+
+const sameLegs = (
+  a: ReadonlyArray<Omit<UiLeg, 'id'>>,
+  b: ReadonlyArray<Omit<UiLeg, 'id'>>,
+): boolean =>
+  a.length === b.length &&
+  a.every((l, i) => sameUiLeg({ ...l, id: 0 }, { ...(b[i] as Omit<UiLeg, 'id'>), id: 0 }));
+
+/**
+ * [新しいタブに入れる] の [元に戻す]: 押したときのタブに戻り、足したタブだけを閉じ、横軸の表示範囲を戻す。足したタブの
+ * 足が反映のときと違う（利用者が編集した）なら戻さない（edited = 編集を黙って捨てない）。足したタブがもう無ければ gone
+ */
+export function newTabUndoActions(s: State, u: NewTabUndo): Action[] | 'edited' | 'gone' {
+  const slot = s.tabs.find((t) => t.id === u.tab);
+  if (!slot) return 'gone';
+  const cur = slot.saved
+    ? slot.saved.legs
+    : s.legs.map(({ id: _id, ...rest }) => rest as Omit<UiLeg, 'id'>);
+  if (!sameLegs(cur, u.legs)) return 'edited';
+  const out: Action[] = [];
+  if (u.from !== u.tab && s.tabs.some((t) => t.id === u.from)) {
+    out.push({ type: 'switchTab', id: u.from });
+  }
+  out.push({ type: 'closeTab', id: u.tab });
+  if (out[0]?.type === 'switchTab') out.push({ type: 'setPnlViewport', viewport: u.viewport });
+  return out;
+}
+
+/** [元に戻す] できないときの文 */
+export const NEW_TAB_UNDO_TEXT = {
+  edited: '提案のタブを編集したので戻しません（タブは × で閉じられます）',
+  gone: '提案のタブはもう閉じています',
+} as const;

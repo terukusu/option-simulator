@@ -241,3 +241,11 @@ def test_propose_input_rejects_free_text_and_ranges():
     assert _bad("propose_position", {"target": "current", "changes": []}) == "size"
     assert _bad("strike_scan", {"type": "P", "side": "buy", "max_loss_floor_yen": 1}) == "range"
     assert _bad("structure_candidates", {"structure": "butterfly"}) == "enum"
+
+
+def test_position_summary_without_leg_no_still_passes():
+    """#139 レビュー M3: デプロイの前に開いた画面（leg_no の無い position_summary）でも 400 にしない"""
+    old = copy.deepcopy(SAMPLE["cases"][0]["context"]["precomputed"]["position_summary"])
+    for leg in old["legs"]:
+        leg.pop("leg_no")
+    REGISTRY["position_summary"].result_shape.check(old, "r")
