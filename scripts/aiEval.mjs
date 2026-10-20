@@ -7,8 +7,9 @@
 // 送り先は AI_EVAL_BASE（既定 http://127.0.0.1:8080）= 手元で起動した中継。本番の IAP は越えない。資格情報は中継の
 // 環境変数（このスクリプトは読まない・出さない）。手順は api/README.md「AI の評価」。
 //
-//   npm run ai:eval                          10 通りの診断 + 追加の質問 2 件 + テクニカルの質問 3 件（#200）
+//   npm run ai:eval                          10 通りの診断 + 追加の質問 2 件 + テクニカルの質問 3 件（#200）+ 提案の質問 3 件（#139）
 //   npm run ai:eval -- --tech-only           テクニカルの質問 3 件だけ
+//   npm run ai:eval -- --propose-only        ポジションの提案の質問 3 件だけ（#139）
 //   npm run ai:eval -- --cases put_sell,calendar --repeat 2 --no-followups
 //
 // 費用の上限: 累計の台帳 fixtures/local/ai_eval/ledger.json（gitignore）で AI_EVAL_LIMIT_USD（既定 6.5）を超える前に
@@ -62,6 +63,31 @@ export const DIRECTION_RE =
 export const CAVEAT_RE =
   /(続けることが|続くことが|続きうる|続く場合|上がり続け|下がり続け|上げ続け|下げ続け|過熱のまま|過熱したまま)/;
 const techOnly = args.includes('--tech-only');
+const proposeOnly = args.includes('--propose-only');
+
+// ポジションの提案の質問（#139）: 候補のツール → propose_position が呼ばれる・提案が板の検査を通る（error でない）・
+// カードの表示モデルができる・押した時点の反映の純関数で足が作れる・照合の不一致 0。floor があれば後の最大損失 ≥ floor
+const PROPOSE_QUESTIONS = [
+  {
+    case: 'strangle_sell',
+    text: '今の IV と資金規模から見て、ボラ売りのポジションの候補を出して。新しいタブで比べられるようにして。',
+    want: 'structure_candidates',
+    target: 'new_tab',
+  },
+  {
+    case: 'put_ratio',
+    text: '最大損失を −1,000 千円に抑えるヘッジの足を足して。',
+    want: 'strike_scan',
+    target: 'current',
+    floor: -1_000_000,
+  },
+  {
+    case: 'iron_condor',
+    text: 'このアイアンコンドルの調整案を出して。足の削除・枚数・行使価格の変更でもいい。',
+    want: null,
+    target: 'current',
+  },
+];
 
 const load = async (p) =>
   (await runnerImport(join(root, p), { configFile: false, root, logLevel: 'error' })).module;
@@ -72,6 +98,7 @@ const toolsMod = await load('ui/view/aiTools.ts');
 const numMod = await load('ui/view/aiNumbers.ts');
 const stream = await load('data/aiStream.ts');
 const synthFut = await load('scripts/synthFutBars.ts');
+const proposeMod = await load('ui/view/aiPropose.ts');
 
 const latest = JSON.parse(readFileSync(join(root, 'fixtures', 'synthetic', 'latest.json'), 'utf8'));
 const want = opt('--cases');
@@ -191,7 +218,7 @@ const answerOf = (chat) => {
 };
 
 const rows = [];
-for (let rep = 0; rep < (techOnly ? 0 : repeat); rep++) {
+for (let rep = 0; rep < (techOnly || proposeOnly ? 0 : repeat); rep++) {
   for (const c of selected) {
     const env = ctxMod.aiEnvFromState(cases.caseState(latest, c), cases.caseMargin(c));
     const { chat, run } = await turn(
@@ -266,7 +293,7 @@ const techData = (() => {
   const scale = (b) => ({ ...b, o: b.o * k, h: b.h * k, l: b.l * k, c: b.c * k });
   return { daily: d.daily.map(scale), hourly: d.hourly.map(scale) };
 })();
-for (const q of TECH_QUESTIONS) {
+for (const q of proposeOnly ? [] : TECH_QUESTIONS) {
   const c = cases.AI_EVAL_CASES.find((x) => x.name === q.case);
   const env = {
     ...ctxMod.aiEnvFromState(cases.caseState(latest, c), cases.caseMargin(c)),
@@ -313,6 +340,73 @@ for (const q of TECH_QUESTIONS) {
   );
 }
 
+// ---- ポジションの提案（#139）: 新しい会話で 1 問ずつ
+for (const q of techOnly ? [] : PROPOSE_QUESTIONS) {
+  const c = cases.AI_EVAL_CASES.find((x) => x.name === q.case);
+  const env = ctxMod.aiEnvFromState(cases.caseState(latest, c), cases.caseMargin(c));
+  const r = await turn(chatMod.INITIAL_AI_CHAT, env, 'chat', q.text);
+  const t = answerOf(r.chat);
+  const ck = numMod.checkNumbers(t, chatMod.numberSources(r.chat));
+  const uses = r.chat.messages
+    .flatMap((m) => (m.role === 'assistant' ? m.content : []))
+    .filter((b) => b.type === 'tool_use');
+  const results = new Map(
+    r.chat.messages
+      .flatMap((m) => (m.role === 'user' ? m.content : []))
+      .filter((b) => b.type === 'tool_result')
+      .map((b) => [b.tool_use_id, JSON.parse(b.content[0].text)]),
+  );
+  const tools = uses.map((b) => b.name);
+  const props = uses
+    .filter((u) => u.name === 'propose_position')
+    .map((u) => {
+      const res = results.get(u.id);
+      const card = proposeMod.proposalCard(u.input, res);
+      const apply = proposeMod.proposalApply(env, u.input, res);
+      const after = res && !res.error ? res.after : null;
+      return {
+        target: u.input.target,
+        error: res?.error ?? null,
+        card: card !== null,
+        apply: !('error' in apply),
+        lines: card ? card.lines.map((l) => `${l.mark} ${l.text}`) : [],
+        metrics: card ? card.metrics : [],
+        max_loss_after: after?.max_loss_yen ?? null,
+      };
+    });
+  const un = ck.tokens.filter((x) => x.status === 'unmatched').map((x) => x.raw);
+  // 板の検査で落ちた提案（error）はカードを出さない設計（返答にも書かない）ので失敗にしない。通った提案は全部
+  // カードと反映ができ、頼んだ種類（target）の提案が 1 つ以上あること
+  const valid = props.filter((p) => p.error === null);
+  const okProps =
+    valid.length > 0 &&
+    valid.every((p) => p.card && p.apply) &&
+    valid.some((p) => p.target === q.target) &&
+    (q.floor === undefined ||
+      valid.some((p) => p.max_loss_after !== null && p.max_loss_after >= q.floor));
+  const ok =
+    !r.run.error && (q.want === null || tools.includes(q.want)) && okProps && ck.unmatched === 0;
+  rows.push({
+    case: q.case,
+    kind: 'propose',
+    rep: 0,
+    pass: ok,
+    tools,
+    proposals: props,
+    matchedTotal: ck.matched,
+    unmatched: un,
+    chars: t.length,
+    ...r.run,
+  });
+  writeFileSync(
+    join(outDir, `propose-${q.case}.md`),
+    `# 提案: ${q.text}\n\n${t}\n\n## カード\n\n${props.map((p) => [`- ${p.target}${p.error ? `（${p.error}）` : ''}`, ...p.lines.map((l) => `  - ${l}`), ...p.metrics.map((m) => `  - ${m}`)].join('\n')).join('\n')}\n`,
+  );
+  console.log(
+    `${ok ? 'pass' : 'FAIL'}  提案 ${q.case}: ツール ${tools.join(',') || 'なし'}・提案 ${props.map((p) => `${p.target}${p.error ? `(${p.error})` : ''}`).join('/') || 'なし'}・一致 ${ck.matched}・不一致 ${un.length}${un.length ? `［${un.join('、')}］` : ''}・往復 ${r.run.requests}・${r.run.stop ?? r.run.error}・完了 ${(r.run.totalMs / 1000).toFixed(1)} 秒`,
+  );
+}
+
 // ---- 中継のログ（任意）: ai_request の概算費用・トークン・落とした block
 let relay = null;
 if (relayLog) {
@@ -354,6 +448,7 @@ if (relayLog) {
 const diag = rows.filter((r) => r.kind === 'diagnose');
 const fus = rows.filter((r) => r.kind === 'followup');
 const techs = rows.filter((r) => r.kind === 'technicals');
+const proposes = rows.filter((r) => r.kind === 'propose');
 const summary = {
   model: status.model,
   credential: status.credential,
@@ -361,6 +456,7 @@ const summary = {
   diagnose: { pass: diag.filter((r) => r.pass).length, total: diag.length },
   followup: { pass: fus.filter((r) => r.pass).length, total: fus.length },
   technicals: { pass: techs.filter((r) => r.pass).length, total: techs.length },
+  propose: { pass: proposes.filter((r) => r.pass).length, total: proposes.length },
   unmatched_total: rows.reduce((n, r) => n + r.unmatched.length, 0),
   cost_usd: Number(rows.reduce((n, r) => n + r.costUsd, 0).toFixed(4)),
   ledger_total_usd: Number(ledger.total_usd.toFixed(4)),
@@ -372,5 +468,6 @@ console.log(`返答の全文: fixtures/local/ai_eval/${stamp}/（コミットし
 const ok =
   summary.diagnose.pass === summary.diagnose.total &&
   summary.followup.pass === summary.followup.total &&
-  summary.technicals.pass === summary.technicals.total;
+  summary.technicals.pass === summary.technicals.total &&
+  summary.propose.pass === summary.propose.total;
 process.exit(ok ? 0 : 1);

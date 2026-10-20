@@ -143,6 +143,38 @@ section.ai .ai-body {
   margin-top: var(--sp-1);
 }
 
+/* 提案のカード（#139）: 差分の行（＋ / − / ±）と前 → 後の行 */
+.ai-prop {
+  border-color: var(--accent);
+}
+
+.ai-prop-line {
+  display: flex;
+  gap: var(--sp-1);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.ai-prop-mark {
+  flex: none;
+  width: 1em;
+  font-weight: 600;
+  color: var(--ink-2);
+}
+
+.ai-prop-mark[data-mark="+"] {
+  color: var(--gain);
+}
+
+.ai-prop-mark[data-mark="−"] {
+  color: var(--loss);
+}
+
+.ai-prop-metric {
+  color: var(--ink-2);
+  overflow-wrap: anywhere;
+}
+
 .ai-error {
   display: flex;
   flex-wrap: wrap;

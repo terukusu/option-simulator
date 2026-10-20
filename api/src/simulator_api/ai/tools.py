@@ -59,8 +59,10 @@ POSITION_SUMMARY = Obj({
     "x0": LEVEL,
     "max_days": DAYS,
     "n_legs": Num(0, MAX_LEGS, integer=True),
-    "legs": Arr(Obj({**LEG_ID, "entry_yen": Num(0, 1e9), "iv_pct": PCT, "days_to_sq": DAYS, "delta_large": LOTS,
-                     "delta_mini": LOTS}, LEG_OPTIONAL), MAX_LEGS),
+    "legs": Arr(Obj({"leg_no": Num(1, MAX_LEGS, integer=True), **LEG_ID, "entry_yen": Num(0, 1e9), "iv_pct": PCT,
+                     "days_to_sq": DAYS, "delta_large": LOTS, "delta_mini": LOTS},
+                    # leg_no は #139 で足した。デプロイ前に開いた画面（古い JS）は送らないので任意（400 にしない）
+                    LEG_OPTIONAL | {"leg_no"}), MAX_LEGS),
     "premium": Obj({"received_yen": YEN, "paid_yen": YEN, "net_yen": YEN, "fees_yen": YEN,
                     "net_after_fees_yen": YEN}),
     "expiry": Obj({"max_profit_yen": YEN, "max_profit_x": LEVEL, "max_profit_unbounded": Bool(),
@@ -198,6 +200,165 @@ TECHNICALS_INPUT_SCHEMA = {
 }
 
 
+# ---- ポジションの提案（#139。ui/view/aiPropose.ts）: 候補は simulator が板の行から作り、AI は propose_position で足を
+# 構造化して出す（画面が板で検査・評価してカードにする）
+MAX_CHANGES = 10
+SCAN_MAX_ROWS = 25
+MAX_CANDIDATES = 5
+CALL_LEVELS_MAX = 4
+STRUCTURES = ("short_put", "short_call", "short_strangle", "short_straddle", "iron_condor", "bull_put", "bear_call",
+              "put_ratio")
+STRIKE = Num(0, 1e8, lo_open=True)
+ENTRY = Num(0, 1e9)
+SUMMARY = Obj({
+    "n_legs": Num(0, MAX_LEGS, integer=True), "premium_net_yen": YEN, "max_profit_yen": YEN,
+    "max_profit_unbounded": Bool(), "max_loss_yen": YEN, "max_loss_x": LEVEL, "max_loss_unbounded": Bool(),
+    "margin_yen": YEN, "room_yen": YEN, "multiple": RATIO, "delta_large": LOTS, "delta_mini": LOTS,
+    "theta_yen_per_day": YEN, "vega_yen_per_pt": YEN, "call_levels_x": Arr(LEVEL, CALL_LEVELS_MAX),
+})
+
+
+STRIKE_SCAN_INPUT = Obj({
+    "type": OPT_TYPE, "side": SIDE, "expiry": MONTH, "qty": QTY, "max_loss_floor_yen": Num(-1e12, 0),
+    "k_min": STRIKE, "k_max": STRIKE,
+}, frozenset({"expiry", "qty", "max_loss_floor_yen", "k_min", "k_max"}))
+STRIKE_SCAN_INPUT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "type": {"enum": ["P", "C"], "description": "足す足の種別"},
+        "side": {"enum": ["buy", "sell"], "description": "足す足の売買（ヘッジの put は buy）"},
+        "expiry": {"type": "string", "pattern": r"^\d{4}-\d{2}$",
+                   "description": "限月 YYYY-MM（省略 = 今の足の最初の OP の限月、無ければ期近）"},
+        "qty": {"type": "integer", "minimum": 1, "maximum": 100000, "description": "枚数（省略 = 1）"},
+        "max_loss_floor_yen": {"type": "number", "maximum": 0,
+                               "description": "満期の最大損失の下限（円・負の数。例 -1000000 = −1,000 千円まで）。"
+                                              "行ごとに満たすか（meets_floor）と、満たす中で最も安い行（best_k）を返す"},
+        "k_min": {"type": "number", "exclusiveMinimum": 0,
+                  "description": "行使価格の下限（省略 = OTM 側の F の 30% まで）"},
+        "k_max": {"type": "number", "exclusiveMinimum": 0, "description": "行使価格の上限"},
+    },
+    "required": ["type", "side"],
+    "additionalProperties": False,
+}
+STRIKE_SCAN = Obj({
+    "expiry": MONTH, "type": OPT_TYPE, "side": SIDE, "qty": QTY, "forward": LEVEL, "max_loss_floor_yen": YEN,
+    "before": Nullable(SUMMARY), "best_k": LEVEL, "n_scanned": Num(0, 10_000, integer=True),
+    "rows": Arr(Obj({"k": LEVEL, "entry_yen": ENTRY, "leg_premium_yen": YEN, "max_loss_yen": YEN,
+                     "max_loss_unbounded": Bool(), "margin_yen": YEN, "delta_large": LOTS, "delta_mini": LOTS,
+                     "meets_floor": Nullable(Bool())}), SCAN_MAX_ROWS, min_len=1),
+})
+
+CANDIDATES_INPUT = Obj({"structure": Enum(STRUCTURES), "expiry": MONTH, "qty": QTY, "wing_pct": Num(1, 10)},
+                       frozenset({"expiry", "qty", "wing_pct"}))
+CANDIDATES_INPUT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "structure": {"enum": list(STRUCTURES),
+                      "description": "型（short_put・short_call・short_strangle・short_straddle（ATM）・iron_condor・"
+                                     "bull_put・bear_call・put_ratio（1 買 2 売））"},
+        "expiry": {"type": "string", "pattern": r"^\d{4}-\d{2}$",
+                   "description": "限月 YYYY-MM（省略 = 期近）"},
+        "qty": {"type": "integer", "minimum": 1, "maximum": 100000, "description": "1 組の枚数（省略 = 1）"},
+        "wing_pct": {"type": "number", "minimum": 1, "maximum": 10,
+                     "description": "翼（買いの足）の短い足からの距離（F に対する %。省略 = 3）"},
+    },
+    "required": ["structure"],
+    "additionalProperties": False,
+}
+CANDIDATES = Obj({
+    "structure": Enum(STRUCTURES), "expiry": MONTH, "forward": LEVEL, "qty": QTY, "wing_pct": PCT,
+    "capital_yen": YEN,
+    "candidates": Arr(Obj({
+        "id": Str(r"c[1-9]", 2), "target_abs_delta": Num(0, 1, nullable=True),
+        "legs": Arr(Obj({**LEG_ID, "entry_yen": ENTRY}, LEG_OPTIONAL), 4, min_len=1),
+        "breakevens_x": Arr(LEVEL, 4),
+        "shocks": Arr(Obj({"shock_pct": PCT, "x": LEVEL, "sq_pnl_yen": YEN}), 4, fixed=True),
+        "summary": SUMMARY,
+    }), MAX_CANDIDATES, min_len=1),
+})
+
+LEG_IN = {"product": PRODUCT, "type": OPT_TYPE, "expiry": MONTH, "k": STRIKE, "side": SIDE, "qty": QTY}
+FLOOR = Num(-1e12, 0)
+ABS_DELTA = Num(0.01, 0.6)
+CHANGE = Obj({"action": Enum(("add", "remove", "set_qty", "move_strike")), "leg_no": Num(1, MAX_LEGS, integer=True),
+              **LEG_IN, "max_loss_floor_yen": FLOOR, "abs_delta": ABS_DELTA},
+             frozenset({"leg_no", *LEG_IN, "max_loss_floor_yen", "abs_delta"}))
+CANDIDATE_IN = Obj({"structure": Enum(STRUCTURES), "abs_delta": ABS_DELTA, "expiry": MONTH, "qty": QTY,
+                    "wing_pct": Num(1, 10)}, frozenset({"abs_delta", "expiry", "qty", "wing_pct"}))
+PROPOSE_INPUT = Obj({
+    "target": Enum(("current", "new_tab")),
+    "changes": Arr(CHANGE, MAX_CHANGES, min_len=1),
+    "legs": Arr(Obj(LEG_IN, frozenset({"product", "type", "expiry", "k", "qty"})), MAX_LEGS, min_len=1),
+    "candidate": CANDIDATE_IN,
+}, frozenset({"changes", "legs", "candidate"}))
+_LEG_IN_SCHEMA = {
+    "product": {"enum": ["op", "fut_large", "fut_mini", "fut_micro"],
+                "description": "op（既定）か先物（板の先物の限月）"},
+    "type": {"enum": ["P", "C"], "description": "OP の種別"},
+    "expiry": {"type": "string", "pattern": r"^\d{4}-\d{2}$",
+               "description": "限月 YYYY-MM（OP は必須）"},
+    "k": {"type": "number", "exclusiveMinimum": 0, "description": "行使価格（板にある値だけ。ツールの結果から写す）"},
+    "side": {"enum": ["buy", "sell"]},
+    "qty": {"type": "integer", "minimum": 1, "maximum": 100000, "description": "枚数（省略 = 1）"},
+}
+PROPOSE_INPUT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "target": {"enum": ["current", "new_tab"],
+                   "description": "current = 今のタブへの差分（changes）、new_tab = 新しいタブに足の丸ごと（legs）"},
+        "changes": {
+            "type": "array", "minItems": 1, "maxItems": MAX_CHANGES,
+            "description": "target=current のとき。add（足を足す: product・type・expiry・k・side・qty。OP の k を"
+                           "省いて max_loss_floor_yen か abs_delta を渡すと simulator が板から行使価格を選ぶ）・"
+                           "remove（leg_no）・set_qty（leg_no・qty）・move_strike（leg_no・k）。"
+                           "leg_no は position_summary.legs の leg_no"
+                           "（無ければ <context> の position.legs の順に 1 から）",
+            "items": {"type": "object", "additionalProperties": False, "required": ["action"],
+                      "properties": {
+                          "action": {"enum": ["add", "remove", "set_qty", "move_strike"]},
+                          "leg_no": {"type": "integer", "minimum": 1, "maximum": MAX_LEGS},
+                          **_LEG_IN_SCHEMA,
+                          "max_loss_floor_yen": {
+                              "type": "number", "maximum": 0,
+                              "description": "add で k を省くとき: 足した後の満期の最大損失の下限（円・負）。"
+                                             "満たす中で受払が最も有利な行使価格（strike_scan の best_k）"},
+                          "abs_delta": {"type": "number", "minimum": 0.01, "maximum": 0.6,
+                                        "description": "add で k を省くとき: OTM 側で |Δ| が最も近い行使価格"}}},
+        },
+        "legs": {
+            "type": "array", "minItems": 1, "maxItems": MAX_LEGS,
+            "description": "target=new_tab のとき（candidate と片方だけ）。新しいタブの足"
+                           "（structure_candidates の候補の legs を写す）",
+            "items": {"type": "object", "additionalProperties": False, "required": ["side"],
+                      "properties": _LEG_IN_SCHEMA},
+        },
+        "candidate": {
+            "type": "object", "additionalProperties": False, "required": ["structure"],
+            "description": "target=new_tab のとき（legs と片方だけ）。型と短い足の |Δ| を渡すと simulator が"
+                           "structure_candidates と同じ規則で板から足を作る",
+            "properties": {"structure": {"enum": list(STRUCTURES)},
+                           "abs_delta": {"type": "number", "minimum": 0.01, "maximum": 0.6,
+                                         "description": "短い足の |Δ|（省略 = 0.15。short_straddle は無視）"},
+                           "expiry": {"type": "string", "pattern": r"^\d{4}-\d{2}$"},
+                           "qty": {"type": "integer", "minimum": 1, "maximum": 100000},
+                           "wing_pct": {"type": "number", "minimum": 1, "maximum": 10}},
+        },
+    },
+    "required": ["target"],
+    "additionalProperties": False,
+}
+PROPOSE_POSITION = Obj({
+    "target": Enum(("current", "new_tab")),
+    "diff": Arr(Obj({"change": Enum(("add", "remove", "qty", "strike")),
+                     "leg_no": Num(1, MAX_LEGS, integer=True, nullable=True), **LEG_ID, "entry_yen": ENTRY,
+                     "quoted": Bool(), "from_qty": QTY, "from_k": LEVEL, "picked_by": Enum(("floor", "delta"))},
+                    LEG_OPTIONAL | {"from_qty", "from_k", "picked_by"}), MAX_LEGS, min_len=1),
+    "legs_before": Arr(Obj(LEG_ID, LEG_OPTIONAL), MAX_LEGS),
+    "before": Nullable(SUMMARY),
+    "after": SUMMARY,
+})
+
+
 def _spec(name, description, result, input_shape=NO_INPUT, input_schema=None) -> ToolSpec:
     return ToolSpec(name=name, description=description, input_shape=input_shape, result_shape=result,
                     input_schema=NO_INPUT_SCHEMA if input_schema is None else input_schema)
@@ -241,6 +402,25 @@ REGISTRY: Registry = {t.name: t for t in (
           "足は期近のつなぎ足（調整なし）で限月交代の跳びが指標に入る。交代をまたぐ窓は基準率から除く（rolls_excluded）。"
           "最新の足は確定前のことがあり（last_bar_may_be_partial）、今の値は確定値として扱わない", TECHNICALS,
           TECHNICALS_INPUT, TECHNICALS_INPUT_SCHEMA),
+    _spec("strike_scan",
+          "ヘッジ・調整の足の探索（#139）。今のポジションに 1 本の OP の足（種別・売買・限月・枚数）を足したときの、"
+          "板の行使価格（両気配の行）ごとの結果: 建値・足の受払（leg_premium_yen。負は支払）・足した後の満期の"
+          "最大損失（円。無限なら max_loss_unbounded）・必要証拠金・Δ（ラージ / ミニ）。max_loss_floor_yen を"
+          "渡すと行ごとに満たすか（meets_floor）と、満たす中で受払が最も有利な行（best_k）。before は今の要約。"
+          "行は最大 25（下限の境の周り）", STRIKE_SCAN, STRIKE_SCAN_INPUT, STRIKE_SCAN_INPUT_SCHEMA),
+    _spec("structure_candidates",
+          "組み合わせの候補（#139）。型を指定すると、simulator が板の両気配の行から短い足の |Δ| 0.10・0.15・0.20・"
+          "0.25・0.30 で候補（最大 5 つ。id c1〜）を作り、単体で評価する: 足（行使価格・建値）・損益分岐・"
+          "原資産 ±10・20% の SQ 損益（shocks）・summary（受払・満期の最大利益 / 最大損失（無限なら null と"
+          "*_unbounded）・必要証拠金・余力・何倍・Δ・Θ・V・追証の水準 call_levels_x（資金があるとき））。"
+          "行使価格は自分で選ばず、ここの候補から選ぶ", CANDIDATES, CANDIDATES_INPUT, CANDIDATES_INPUT_SCHEMA),
+    _spec("propose_position",
+          "ポジションの提案を画面のカードにする（#139）。target=current は今のタブへの差分（changes）、new_tab は"
+          "新しいタブの足（legs か candidate）。行使価格は自分で決めない: 結果の値を写すか、k を省いて"
+          " max_loss_floor_yen / abs_delta / candidate で simulator に板から選ばせる。"
+          "画面が今の板で検査（板に無い限月・行使価格は error）し、差分（diff）と前 → 後の要約（満期の最大損失・"
+          "必要証拠金・Δ・追証の水準など。before / after）を返す。利用者はカードのボタンで反映し、元に戻せる",
+          PROPOSE_POSITION, PROPOSE_INPUT, PROPOSE_INPUT_SCHEMA),
 )}
 
 

@@ -14,7 +14,8 @@
 import type { AiContext } from '../../data/aiStream';
 import { DEFAULT_SETTINGS, type ModelSettings } from '../../model';
 import type { MarginPrefs } from '../prefs';
-import type { State } from '../state';
+import type { State, UiLeg } from '../state';
+import type { DraftEval } from './aiPropose';
 import { type AiToolEnv, legId, precompute, yen } from './aiTools';
 import { capitalOf, marginParamsOf } from './margin';
 import { clampDays, pnlDomains, scenarioFull, withScenarioFull } from './pnlChart';
@@ -51,9 +52,15 @@ export function aiEnvFromState(state: State, margin: MarginPrefs): AiToolEnv | n
     feePerLot: state.feePerLot,
     futureBasis: state.futureBasis,
   };
-  const pm = positionModel(chain, state.legs, state.atmBasis, state.calendar, settings);
-  const board = pnlDomains(chain, pm.prepared, pm.ctx, settings);
-  const base = board ? withScenarioFull(board, scenarioFull(board, state.scenario.dX)) : null;
+  const evalLegs = (legs: readonly UiLeg[]): DraftEval => {
+    const pm = positionModel(chain, legs, state.atmBasis, state.calendar, settings);
+    const board = pnlDomains(chain, pm.prepared, pm.ctx, settings);
+    return {
+      base: board ? withScenarioFull(board, scenarioFull(board, state.scenario.dX)) : null,
+      evaluable: pm.rows.map((r) => r.error === null),
+    };
+  };
+  const { base } = evalLegs(state.legs);
   return {
     chain,
     base,
@@ -61,6 +68,7 @@ export function aiEnvFromState(state: State, margin: MarginPrefs): AiToolEnv | n
     atmBasis: state.atmBasis,
     margin: { params: marginParamsOf(margin), capital: capitalOf(margin) },
     holidays: state.calendar.holidays,
+    draft: { legs: state.legs, evalLegs },
   };
 }
 

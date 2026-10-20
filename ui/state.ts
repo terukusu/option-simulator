@@ -263,6 +263,11 @@ export type Action =
    * 構造的に等しい（expect = null なら id が無い）ときだけ、置き換えるか index に挿入する。それ以外は何もしない
    */
   | { type: 'restoreLeg'; leg: UiLeg; index: number; expect: UiLeg | null; tab: number }
+  /**
+   * 作業中のタブの足を丸ごと置き換える（#139。AI の提案の [今のタブに適用] とその [元に戻す]）。作業中のタブが tab で、
+   * 今の足が expect と構造的に等しい（sameUiLeg・同じ並び）ときだけ。id が重なれば何もしない。nextId は id の最大 + 1 以上
+   */
+  | { type: 'replaceLegs'; legs: readonly UiLeg[]; expect: readonly UiLeg[]; tab: number }
   | { type: 'removeLeg'; id: number }
   | { type: 'clearLegs' }
   | { type: 'clearLegError' }
@@ -738,6 +743,26 @@ export function reduce(state: State, action: Action): State {
       const legs = state.legs.slice();
       legs[i] = leg;
       return { ...state, legs };
+    }
+    case 'replaceLegs': {
+      if (state.activeTab !== action.tab) return state;
+      const { expect } = action;
+      if (
+        state.legs.length !== expect.length ||
+        state.legs.some((l, i) => !sameUiLeg(l, expect[i] as UiLeg))
+      ) {
+        return state;
+      }
+      const legs = action.legs.slice();
+      if (new Set(legs.map((l) => l.id)).size !== legs.length) return state;
+      const maxId = legs.reduce((n, l) => Math.max(n, l.id), 0);
+      return {
+        ...state,
+        legs,
+        nextId: Math.max(state.nextId, maxId + 1),
+        legError: null,
+        pnlViewport: legs.length === 0 ? null : state.pnlViewport,
+      };
     }
     case 'removeLeg': {
       const legs = state.legs.filter((l) => l.id !== action.id);

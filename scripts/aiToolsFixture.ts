@@ -7,6 +7,7 @@
 
 import type { ChainJson } from '../data/chainTypes';
 import { aiEnvFromState, buildAiContext } from '../ui/view/aiContext';
+import { STRUCTURES } from '../ui/view/aiPropose';
 import { AI_TOOL_NAMES, runTool } from '../ui/view/aiTools';
 import { AI_EVAL_CASES, caseMargin, caseState } from './aiEvalCases';
 import { synthTechnicalsData } from './synthFutBars';
@@ -72,5 +73,123 @@ export function buildAiToolsFixture(latest: ChainJson): string {
       { input: {}, result: runTool('technicals', {}, { ...techEnv, technicals: null }) },
     ],
   };
-  return `${JSON.stringify({ schema_version: 1, tools: AI_TOOL_NAMES, cases, technicals }, null, 1)}\n`;
+  // 提案のツール（#139）: レシオ（1 買 2 売）のヘッジの探索と差分、ストラングル売りの文脈の組み合わせの候補と丸ごと
+  const envOf = (name: string) => {
+    const c = AI_EVAL_CASES.find((x) => x.name === name);
+    if (!c) throw new Error(`評価の組が無い: ${name}`);
+    return aiEnvFromState(caseState(latest, c), caseMargin(c)) ?? fail();
+  };
+  const ratio = envOf('put_ratio');
+  const scanIn = { type: 'P', side: 'buy', max_loss_floor_yen: -1_000_000 };
+  const scan = runTool('strike_scan', scanIn, ratio) as Record<string, unknown>;
+  const scanBest = typeof scan.best_k === 'number' ? scan.best_k : fail();
+  const strangle = envOf('strangle_sell');
+  const candIns = STRUCTURES.map((structure) => ({ structure }));
+  const cands = candIns.map((input) => ({
+    input,
+    result: runTool('structure_candidates', input, strangle),
+  }));
+  const first = (cands[2]?.result as { candidates?: { legs: Record<string, unknown>[] }[] })
+    ?.candidates?.[0];
+  const newTabLegs = (first ?? fail()).legs.map(({ entry_yen: _e, ...l }) => l);
+  const proposeIns: [string, Record<string, unknown>][] = [
+    [
+      'put_ratio',
+      {
+        target: 'current',
+        changes: [
+          {
+            action: 'add',
+            product: 'op',
+            type: 'P',
+            expiry: scan.expiry,
+            k: scanBest,
+            side: 'buy',
+          },
+        ],
+      },
+    ],
+    [
+      'put_ratio',
+      {
+        target: 'current',
+        changes: [
+          { action: 'remove', leg_no: 3 },
+          { action: 'move_strike', leg_no: 1, k: 65500 },
+        ],
+      },
+    ],
+    ['iron_condor', { target: 'current', changes: [{ action: 'set_qty', leg_no: 2, qty: 2 }] }],
+    [
+      'mini_future_put',
+      { target: 'current', changes: [{ action: 'add', product: 'fut_mini', side: 'buy', qty: 1 }] },
+    ],
+    ['strangle_sell', { target: 'new_tab', legs: newTabLegs }],
+    // k を省いて simulator に選ばせる（1 回の往復で提案まで）
+    [
+      'put_ratio',
+      {
+        target: 'current',
+        changes: [{ action: 'add', type: 'P', side: 'buy', max_loss_floor_yen: -1_000_000 }],
+      },
+    ],
+    [
+      'iron_condor',
+      { target: 'current', changes: [{ action: 'add', type: 'P', side: 'buy', abs_delta: 0.05 }] },
+    ],
+    [
+      'strangle_sell',
+      { target: 'new_tab', candidate: { structure: 'iron_condor', abs_delta: 0.15 } },
+    ],
+  ];
+  const proposeErrors: [string, Record<string, unknown>][] = [
+    [
+      'put_ratio',
+      {
+        target: 'current',
+        changes: [{ action: 'add', type: 'P', expiry: scan.expiry, k: 1234, side: 'buy' }],
+      },
+    ],
+    ['put_ratio', { target: 'current', changes: [{ action: 'remove', leg_no: 9 }] }],
+    ['put_ratio', { target: 'new_tab', changes: [{ action: 'remove', leg_no: 1 }] }],
+    [
+      'put_ratio',
+      {
+        target: 'current',
+        changes: [{ action: 'add', type: 'P', side: 'buy', max_loss_floor_yen: -1 }],
+      },
+    ],
+    [
+      'strangle_sell',
+      { target: 'new_tab', legs: newTabLegs, candidate: { structure: 'short_put' } },
+    ],
+  ];
+  const propose = {
+    scan: [
+      { input: scanIn, result: scan },
+      {
+        input: { type: 'C', side: 'buy', qty: 2 },
+        result: runTool('strike_scan', { type: 'C', side: 'buy', qty: 2 }, ratio),
+      },
+    ],
+    scan_errors: [
+      { type: 'X', side: 'buy' },
+      { type: 'P', side: 'buy', expiry: '2030-01' },
+    ].map((input) => ({ input, result: runTool('strike_scan', input, ratio) })),
+    candidates: cands,
+    candidate_errors: [{ structure: 'butterfly' }, { structure: 'iron_condor', wing_pct: 30 }].map(
+      (input) => ({ input, result: runTool('structure_candidates', input, strangle) }),
+    ),
+    proposals: proposeIns.map(([name, input]) => ({
+      case: name,
+      input,
+      result: runTool('propose_position', input, envOf(name)),
+    })),
+    proposal_errors: proposeErrors.map(([name, input]) => ({
+      case: name,
+      input,
+      result: runTool('propose_position', input, envOf(name)),
+    })),
+  };
+  return `${JSON.stringify({ schema_version: 1, tools: AI_TOOL_NAMES, cases, technicals, propose }, null, 1)}\n`;
 }
