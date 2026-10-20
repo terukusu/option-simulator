@@ -162,3 +162,17 @@ def test_technicals_result_rejects_raw_bars():
     r2["frames"][0]["rsi"]["recent"] = list(range(21))
     with pytest.raises(Bad):
         REGISTRY["technicals"].result_shape.check(r2, "r")
+
+
+def test_technicals_params_range_fits_result_shape():
+    """#205: 設定の期間の範囲（ブラウザの TECH_PARAM_RANGE。期間 2〜100・スロー / %D 1〜20）の両端が結果の形を通る
+    （中継のスキーマは変えない）。101 は通らない"""
+    spec = REGISTRY["technicals"].result_shape
+    r = copy.deepcopy(SAMPLE["technicals"]["results"][0]["result"])
+    for rsi, m, s in [(2, [2, 3, 2], [2, 1, 1]), (100, [99, 100, 100], [100, 20, 20])]:
+        r["params"].update({"rsi": rsi, "macd": m, "stoch": s})
+        spec.check(r, "r")
+    r["params"]["rsi"] = 101
+    with pytest.raises(Bad) as e:
+        spec.check(r, "r")
+    assert e.value.reason == "range"

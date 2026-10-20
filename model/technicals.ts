@@ -12,6 +12,7 @@
  *   スロー %K = 生の %K の 3 本の単純平均、%D = スロー %K の 3 本の単純平均。最初の値はスロー %K が index 15、%D が 17
  * - 基準率（baseRate）: 過去の足 j のうち条件を満たすものを左から選び、N 本先の騰落率 c[j+N] / c[j] − 1 を集める。
  *   窓は重ねない（次の候補は j + N 以降）。結果に使う足は lastUsable まで（確定前の最後の足を使わない）
+ * - 期間は #205 で設定から変えられる（TechParams。上の数は既定 DEFAULT_TECH_PARAMS の場合）
  */
 
 export type Series = (number | null)[];
@@ -164,16 +165,98 @@ export function stochastic(
   return { k, d: sma(k, dPeriod) };
 }
 
-/** 3 つの指標（既定のパラメータ）をまとめて計算する（画面の段と AI の道具で同じ値） */
+// ---------------------------------------------------------------- パラメータ（#205）
+
+/**
+ * 3 つの指標の期間（#205。設定のダイアログで変えられる。端末の設定 ui/prefs.ts に保存し、先物推移の段と AI のツール
+ * technicals の両方に同じ値を渡す）。stochSmooth = スロー %K の平滑（slowing）
+ */
+export interface TechParams {
+  rsi: number;
+  macdFast: number;
+  macdSlow: number;
+  macdSignal: number;
+  stochK: number;
+  stochSmooth: number;
+  stochD: number;
+}
+
+export type TechParamKey = keyof TechParams;
+
+export const DEFAULT_TECH_PARAMS: Readonly<TechParams> = Object.freeze({
+  rsi: RSI_PERIOD,
+  macdFast: MACD_FAST,
+  macdSlow: MACD_SLOW,
+  macdSignal: MACD_SIGNAL,
+  stochK: STOCH_K,
+  stochSmooth: STOCH_SMOOTH,
+  stochD: STOCH_D,
+});
+
+/** 欄の並び（設定のダイアログ・保存の順） */
+export const TECH_PARAM_KEYS: readonly TechParamKey[] = [
+  'rsi',
+  'macdFast',
+  'macdSlow',
+  'macdSignal',
+  'stochK',
+  'stochSmooth',
+  'stochD',
+];
+
+/**
+ * 期間の範囲（両端を含む整数）。上限 100 は AI の中継の結果の検査（tools.py の TECHNICALS.params = 整数 1〜100）に
+ * 合わせる（中継のスキーマを変えない）。平滑・%D は 1（= 平滑しない）から
+ */
+export const TECH_PARAM_RANGE: Record<TechParamKey, { min: number; max: number }> = {
+  rsi: { min: 2, max: 100 },
+  macdFast: { min: 2, max: 100 },
+  macdSlow: { min: 2, max: 100 },
+  macdSignal: { min: 2, max: 100 },
+  stochK: { min: 2, max: 100 },
+  stochSmooth: { min: 1, max: 20 },
+  stochD: { min: 1, max: 20 },
+};
+
+/** 1 つの期間が範囲内の整数か */
+export function isTechParamValue(key: TechParamKey, v: unknown): v is number {
+  if (typeof v !== 'number' || !Number.isInteger(v)) return false;
+  const r = TECH_PARAM_RANGE[key];
+  return v >= r.min && v <= r.max;
+}
+
+/** 期間の組が使えるか（どれも範囲内、MACD は短期 < 長期） */
+export function isTechParams(p: unknown): p is TechParams {
+  if (typeof p !== 'object' || p === null) return false;
+  const o = p as Record<string, unknown>;
+  if (!TECH_PARAM_KEYS.every((k) => isTechParamValue(k, o[k]))) return false;
+  return (o.macdFast as number) < (o.macdSlow as number);
+}
+
+/** 期間の組が同じか */
+export function sameTechParams(a: TechParams, b: TechParams): boolean {
+  return TECH_PARAM_KEYS.every((k) => a[k] === b[k]);
+}
+
+/** 3 つの指標をまとめて計算する（画面の段と AI のツールで同じ値）。params = 計算に使った期間（見出し・ツールの出力に出す） */
 export interface Indicators {
   rsi: Series;
   macd: MacdSeries;
   stoch: StochSeries;
+  params: TechParams;
 }
 
-export function indicators(bars: readonly { h: number; l: number; c: number }[]): Indicators {
+export function indicators(
+  bars: readonly { h: number; l: number; c: number }[],
+  params: TechParams = DEFAULT_TECH_PARAMS,
+): Indicators {
   const closes = bars.map((b) => b.c);
-  return { rsi: rsi(closes), macd: macd(closes), stoch: stochastic(bars) };
+  return {
+    rsi: rsi(closes, params.rsi),
+    macd: macd(closes, params.macdFast, params.macdSlow, params.macdSignal),
+    stoch: stochastic(bars, params.stochK, params.stochSmooth, params.stochD),
+    params: { ...params },
+  };
 }
 
 // ---------------------------------------------------------------- 状態

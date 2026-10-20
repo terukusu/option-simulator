@@ -5,6 +5,7 @@
 import { describe, expect, it } from 'vitest';
 import { buildCalendar, normalizeChain } from '../../data';
 import bundledJson from '../../data/calendar/calendar.json';
+import { DEFAULT_TECH_PARAMS, TECH_PARAM_KEYS } from '../../model';
 import { CALENDAR } from '../../ui/calendar';
 import { DEFAULT_MARGIN_PREFS, THEME_PREFS } from '../../ui/prefs';
 import { parseFee } from '../../ui/state';
@@ -24,6 +25,12 @@ import {
   SETTINGS_NO_BOARD_TEXT,
   type SettingsInput,
   settingsModel,
+  TECH_FIELD_ERROR,
+  TECH_FIELDS,
+  TECH_MACD_ORDER_ERROR,
+  TECH_RESET,
+  TECH_SETTINGS_NOTES,
+  techField,
 } from '../../ui/view/settings';
 import { fixture } from '../support/fixtures';
 
@@ -237,5 +244,44 @@ describe('#149 買いの OP の設定', () => {
     const notes = MARGIN_SETTINGS_NOTES.join(' ');
     expect(notes).toContain('買いの OP');
     expect(notes).toContain('売りの OP と先物だけ');
+  });
+});
+
+/** #205: テクニカル指標の欄（範囲・整数・MACD の短期 < 長期。不正なら値に入れない） */
+describe('テクニカル指標の欄（#205）', () => {
+  const T = { ...DEFAULT_TECH_PARAMS };
+  it('欄は 7 つ（model の並び）、[既定に戻す] は既定の期間', () => {
+    expect(TECH_FIELDS.map((f) => f.key)).toEqual([...TECH_PARAM_KEYS]);
+    expect(TECH_RESET).toEqual({
+      rsi: 14,
+      macdFast: 12,
+      macdSlow: 26,
+      macdSignal: 9,
+      stochK: 14,
+      stochSmooth: 3,
+      stochD: 3,
+    });
+    expect(TECH_SETTINGS_NOTES.length).toBeGreaterThan(0);
+  });
+  it('範囲内の整数は通る（前後の空白・両端を含む）', () => {
+    expect(techField('rsi', ' 9 ', T)).toEqual({ ok: true, value: 9 });
+    expect(techField('rsi', '2', T)).toEqual({ ok: true, value: 2 });
+    expect(techField('rsi', '100', T)).toEqual({ ok: true, value: 100 });
+    expect(techField('stochSmooth', '1', T)).toEqual({ ok: true, value: 1 });
+    expect(techField('stochD', '20', T)).toEqual({ ok: true, value: 20 });
+  });
+  it('範囲外・整数でない・空欄・文字はエラー（欄の文）', () => {
+    for (const t of ['1', '101', '9.5', '', 'abc', '-3']) {
+      expect(techField('rsi', t, T)).toEqual({ ok: false, error: TECH_FIELD_ERROR.rsi });
+    }
+    expect(techField('stochD', '21', T)).toEqual({ ok: false, error: TECH_FIELD_ERROR.stochD });
+    expect(TECH_FIELD_ERROR.rsi).toBe('RSI の期間は 2〜100 の整数');
+  });
+  it('MACD は今の相手の値と短期 < 長期', () => {
+    expect(techField('macdFast', '26', T)).toEqual({ ok: false, error: TECH_MACD_ORDER_ERROR });
+    expect(techField('macdFast', '25', T)).toEqual({ ok: true, value: 25 });
+    expect(techField('macdSlow', '12', T)).toEqual({ ok: false, error: TECH_MACD_ORDER_ERROR });
+    expect(techField('macdSlow', '13', T)).toEqual({ ok: true, value: 13 });
+    expect(techField('macdFast', '30', { ...T, macdSlow: 50 })).toEqual({ ok: true, value: 30 });
   });
 });

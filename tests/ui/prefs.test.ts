@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { DEFAULT_TECH_PARAMS } from '../../model';
 import {
   DEFAULT_MARGIN_PREFS,
   DEFAULT_PREFS,
@@ -9,6 +10,8 @@ import {
   resolveTheme,
   serializePrefs,
   type ThemePref,
+  techParamsOfPrefs,
+  techParamsOr,
 } from '../../ui/prefs';
 
 /** #81: 端末の設定（option-simulator.prefs。版 1: テーマ + #131 の証拠金）。作業の保存とは別のキー。 */
@@ -343,5 +346,68 @@ describe('#135 AI の免責の文を見た（ai_disclaimer_seen）', () => {
     expect(JSON.parse(seen).schema_version).toBe(PREFS_SCHEMA_VERSION);
     expect(readPrefs(seen).prefs.aiDisclaimerSeen).toBe(true);
     expect(readPrefs(seen).prefs.theme).toBe('dark');
+  });
+});
+
+/** #205: テクニカル指標の期間（端末の設定。版は 1 のまま、既定と違う項目だけ書く） */
+describe('テクニカル指標の期間（#205）', () => {
+  const T = { ...DEFAULT_TECH_PARAMS };
+  const custom = {
+    rsi: 9,
+    macdFast: 8,
+    macdSlow: 21,
+    macdSignal: 5,
+    stochK: 9,
+    stochSmooth: 1,
+    stochD: 4,
+  };
+
+  it('移行: キーの無い古い設定（#205 より前）→ 持たない = 既定。書き出しにもキーが出ない', () => {
+    const read = readPrefs(`{"schema_version":1,"theme":"dark",${M0_JSON}}`);
+    expect(read.writable).toBe(true);
+    expect(read.prefs.technicals).toBeUndefined();
+    expect(techParamsOfPrefs(read.prefs)).toEqual(T);
+    expect(serializePrefs(read.prefs)).not.toContain('tech_');
+    expect(techParamsOfPrefs(DEFAULT_PREFS)).toEqual(T);
+  });
+
+  it('往復: 既定と違う項目だけ tech_* に書き、読むと同じ値。版は 1', () => {
+    const text = serializePrefs({ theme: 'auto', margin: M0, technicals: custom });
+    const o = JSON.parse(text);
+    expect(o.schema_version).toBe(PREFS_SCHEMA_VERSION);
+    expect(PREFS_SCHEMA_VERSION).toBe(1);
+    expect(o).toMatchObject({
+      tech_rsi: 9,
+      tech_macd_fast: 8,
+      tech_macd_slow: 21,
+      tech_macd_signal: 5,
+      tech_stoch_k: 9,
+      tech_stoch_slowing: 1,
+      tech_stoch_d: 4,
+    });
+    expect(readPrefs(text).prefs.technicals).toEqual(custom);
+    // 1 つだけ変えた → そのキーだけ
+    const one = JSON.parse(
+      serializePrefs({ theme: 'auto', margin: M0, technicals: { ...T, rsi: 21 } }),
+    );
+    expect(Object.keys(one).filter((k) => k.startsWith('tech_'))).toEqual(['tech_rsi']);
+    expect(techParamsOfPrefs(readPrefs(JSON.stringify(one)).prefs)).toEqual({ ...T, rsi: 21 });
+    // 既定どおり → キーなし
+    expect(serializePrefs({ theme: 'auto', margin: M0, technicals: T })).not.toContain('tech_');
+  });
+
+  it('不正な項目はその項目だけ既定。MACD の短期 ≥ 長期は MACD の 3 つを既定', () => {
+    const r = readPrefs(
+      '{"schema_version":1,"theme":"auto","tech_rsi":1,"tech_stoch_k":"9","tech_stoch_d":4.5,"tech_stoch_slowing":2}',
+    );
+    expect(r.prefs.technicals).toEqual({ ...T, stochSmooth: 2 });
+    const m = readPrefs(
+      '{"schema_version":1,"theme":"auto","tech_macd_fast":30,"tech_macd_slow":20,"tech_macd_signal":7,"tech_rsi":9}',
+    );
+    expect(m.prefs.technicals).toEqual({ ...T, rsi: 9 });
+    // 書き出し: 組が不正なら書かない（= 既定）
+    const bad = { ...T, macdFast: 40 };
+    expect(serializePrefs({ theme: 'auto', margin: M0, technicals: bad })).not.toContain('tech_');
+    expect(techParamsOr(bad)).toEqual(T);
   });
 });
