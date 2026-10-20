@@ -254,7 +254,9 @@ function IvPlotView(p: IvPlotProps) {
                 {model.progress && <path class="iv-line progress" d={model.progress} />}
               </>
             )}
-            {model.overlays.map((o) => o.d && <path key={o.cls} class={o.cls} d={o.d} />)}
+            {model.overlays.map(
+              (o) => o.d && <path key={o.cls} class={o.cls} d={o.d} stroke-width={o.width} />,
+            )}
           </g>
           {rollMarks.map((r) => (
             <g key={`roll${r.x}`} class="fut-roll-mark">

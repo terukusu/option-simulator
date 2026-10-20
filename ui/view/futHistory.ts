@@ -197,12 +197,12 @@ export function futEmaLabel(p: Pick<TechParams, 'emaShort' | 'emaMid' | 'emaLong
   return `EMA（${futEmaParamText(p)}）の線`;
 }
 
-/** 価格に重ねる線（短期・中期・長期の順） */
-export function futEmaOverlays(e: EmaSet): IvOverlay[] {
+/** 価格に重ねる線（短期・中期・長期の順。3 本とも同じ太さ = 色で見分ける。width = 設定の線の太さ px。#214） */
+export function futEmaOverlays(e: EmaSet, width: number): IvOverlay[] {
   return [
-    { cls: 'ema-line s', values: e.short },
-    { cls: 'ema-line m', values: e.mid },
-    { cls: 'ema-line l', values: e.long },
+    { cls: 'ema-line s', values: e.short, width },
+    { cls: 'ema-line m', values: e.mid, width },
+    { cls: 'ema-line l', values: e.long, width },
   ];
 }
 

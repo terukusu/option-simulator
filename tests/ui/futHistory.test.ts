@@ -33,6 +33,7 @@ import {
   ivLoadReduce,
   mergeIvEntry,
 } from '../../ui/view/ivLoad';
+import { techLineWidths } from '../../ui/view/techLineWidth';
 import { barsAt, everyStep, jst } from '../support/synthIv';
 
 /**
@@ -325,10 +326,12 @@ describe('EMA の 3 本（#206）', () => {
       series: FUT_SERIES,
     };
     const plain = ivChartModel({ ...input, viewport: [60, 119] });
-    const m = ivChartModel({ ...input, viewport: [60, 119], overlays: futEmaOverlays(e) });
+    const m = ivChartModel({ ...input, viewport: [60, 119], overlays: futEmaOverlays(e, 1) });
     expect(plain.overlays).toEqual([]);
     expect(m.yDomain).toEqual(plain.yDomain);
     expect(m.overlays.map((o) => o.cls)).toEqual(['ema-line s', 'ema-line m', 'ema-line l']);
+    // #214: 3 本とも同じ太さ（設定の値）が描画のモデルまで通る
+    expect(m.overlays.map((o) => o.width)).toEqual([1, 1, 1]);
     // 短期: 59〜119 本目（端の 1 本外から）= 61 点の 1 本の線
     const s = m.overlays[0]?.d ?? '';
     expect(s.startsWith('M')).toBe(true);
@@ -338,7 +341,7 @@ describe('EMA の 3 本（#206）', () => {
     expect(l.match(/M/g)).toHaveLength(1);
     expect(l.match(/[ML]/g)).toHaveLength(46);
     // 長期の値が 1 つも無い範囲は空
-    const w = ivChartModel({ ...input, viewport: [0, 40], overlays: futEmaOverlays(e) });
+    const w = ivChartModel({ ...input, viewport: [0, 40], overlays: futEmaOverlays(e, 1) });
     expect(w.overlays[2]?.d).toBe('');
   });
   it('縮小（1 画素に 2 本以上）では 1 画素の列に 1 点だけ（点の数は描画域の幅まで）', () => {
@@ -360,7 +363,7 @@ describe('EMA の 3 本（#206）', () => {
       height: 200,
       rightLoaded: false,
       series: FUT_SERIES,
-      overlays: futEmaOverlays(ee),
+      overlays: futEmaOverlays(ee, 1),
     });
     const width = m.range[1] - m.range[0];
     for (const o of m.overlays) {
@@ -368,5 +371,17 @@ describe('EMA の 3 本（#206）', () => {
       expect(pts).toBeGreaterThan(100);
       expect(pts).toBeLessThanOrEqual(Math.ceil(width) + 2);
     }
+  });
+});
+
+describe('#214 EMA の 3 本は同じ太さ', () => {
+  it('futEmaOverlays は 3 本に同じ width（設定の段ごとの EMA の太さ）を付ける', () => {
+    const e = emaSet(Array.from({ length: 100 }, (_, i) => 30000 + i * 10));
+    for (const w of ['thin', 'normal', 'thick'] as const) {
+      const px = techLineWidths(w).ema;
+      const o = futEmaOverlays(e, px);
+      expect(o.map((x) => x.width)).toEqual([px, px, px]);
+    }
+    expect(futEmaOverlays(e, techLineWidths(undefined).ema).map((x) => x.width)).toEqual([1, 1, 1]);
   });
 });

@@ -118,20 +118,14 @@
   stroke: var(--ema-l);
 }
 
-/* 線の太さも変える（色だけに頼らない。短期は細く、長期は太く） */
+/*
+ * 線の太さは書かない: 3 本とも同じ太さを設定の値（#214。細い / 普通 / 太い）で SVG の stroke-width 属性に入れる
+ * （CSS の stroke-width は表示属性より強いので、ここに書くと設定が効かない）。見分けは色と読み取りの名前
+ */
 .iv-wrap .ema-line {
   fill: none;
   stroke-linejoin: round;
-  stroke-width: 1.25;
   pointer-events: none;
-}
-
-.iv-wrap .ema-line.s {
-  stroke-width: 1;
-}
-
-.iv-wrap .ema-line.l {
-  stroke-width: 1.75;
 }
 
 @container (max-width: 419.98px) {
@@ -558,10 +552,10 @@
   text-anchor: end;
 }
 
+/* 線の太さは設定の値（#214）を stroke-width 属性で描く（ここに書くと属性より強くなり設定が効かない） */
 .ind-pane .ind-line {
   fill: none;
   stroke-linejoin: round;
-  stroke-width: 1.25;
 }
 
 .ind-pane .ind-line.main {

@@ -271,6 +271,9 @@ describe('テクニカル指標の欄（#205）', () => {
       'EMA の長期',
     ]);
     expect(TECH_SETTINGS_NOTES.join('')).toContain('EMA 5 / 25 / 75');
+    // #214: 線の太さの既定と効く範囲（ヒストは変わらない）を注記に書く
+    expect(TECH_SETTINGS_NOTES.join('')).toContain('線の太さ 普通');
+    expect(TECH_SETTINGS_NOTES.join('')).toContain('ヒストの棒は変わらない');
   });
   it('範囲内の整数は通る（前後の空白・両端を含む）', () => {
     expect(techField('rsi', ' 9 ', T)).toEqual({ ok: true, value: 9 });

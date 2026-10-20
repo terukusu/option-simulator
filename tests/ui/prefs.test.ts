@@ -478,3 +478,46 @@ describe('#207 先物推移の指標の段の高さ（fut_pane_h_*）', () => {
     expect('fut_pane_h_rsi' in out).toBe(false);
   });
 });
+
+describe('#214 テクニカルの線の太さ（tech_line_width）', () => {
+  it('移行: キーの無い古い設定 → 持たない = 普通。書き出しにもキーが出ない', () => {
+    const read = readPrefs(`{"schema_version":1,"theme":"dark",${M0_JSON},"tech_rsi":10}`);
+    expect(read.writable).toBe(true);
+    expect(read.prefs.techLineWidth).toBeUndefined();
+    expect(techParamsOfPrefs(read.prefs).rsi).toBe(10);
+    expect(serializePrefs(read.prefs)).not.toContain('tech_line_width');
+  });
+  it('往復: 細い / 太いは書いて読める。普通（既定）は書かない。版は 1 のまま', () => {
+    for (const w of ['thin', 'thick'] as const) {
+      const text = serializePrefs({ theme: 'auto', margin: M0, techLineWidth: w });
+      const o = JSON.parse(text);
+      expect(o.schema_version).toBe(PREFS_SCHEMA_VERSION);
+      expect(o.tech_line_width).toBe(w);
+      expect(readPrefs(text).prefs.techLineWidth).toBe(w);
+    }
+    const normal = serializePrefs({ theme: 'auto', margin: M0, techLineWidth: 'normal' });
+    expect(normal).not.toContain('tech_line_width');
+    expect(
+      readPrefs(`{"schema_version":1,"theme":"auto","tech_line_width":"normal"}`).prefs
+        .techLineWidth,
+    ).toBeUndefined();
+  });
+  it('不正（知らない文字・数・null）→ 普通。ほかの設定（期間・段の高さ・証拠金）は残る', () => {
+    for (const bad of ['"bold"', '1.5', 'null', '"THIN"']) {
+      const read = readPrefs(
+        `{"schema_version":1,"theme":"light","capital_yen":3000000,"tech_ema_mid":30,"fut_pane_h_rsi":90,"tech_line_width":${bad}}`,
+      );
+      expect(read.prefs.techLineWidth).toBeUndefined();
+      expect(read.prefs.theme).toBe('light');
+      expect(read.prefs.margin.capitalYen).toBe(3000000);
+      expect(techParamsOfPrefs(read.prefs).emaMid).toBe(30);
+      expect(read.prefs.futPaneH).toEqual({ rsi: 90 });
+    }
+    const out = serializePrefs({
+      theme: 'dark',
+      margin: M0,
+      techLineWidth: 'bold' as unknown as 'thin',
+    });
+    expect(out).not.toContain('tech_line_width');
+  });
+});

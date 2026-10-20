@@ -739,6 +739,7 @@ export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
               techParams={userPrefs.technicals}
               paneH={userPrefs.prefs.futPaneH}
               onPaneH={userPrefs.setFutPaneH}
+              lineWidth={userPrefs.techLineWidth}
             />
           ) : smileView(shell, tier) === 'iv' ? (
             <IvHistory
@@ -827,6 +828,8 @@ export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
         onMargin={userPrefs.setMargin}
         techParams={userPrefs.technicals}
         onTechParams={userPrefs.setTechnicals}
+        techLineWidth={userPrefs.techLineWidth}
+        onTechLineWidth={userPrefs.setTechLineWidth}
       />
       <BookDialog
         open={c.bookOpen}
