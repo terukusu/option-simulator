@@ -191,6 +191,9 @@ const QUANTILE_RANGE = /(^|[^\d.])(5|10|25)\s*[〜~～]\s*$/;
 const QUANTILE_TOP = new Set(['75', '90', '95']);
 const QUANTILE_RANGE_AFTER = /^\s*[〜~～]\s*(75|90|95)\s*[%％]/;
 const QUANTILE_LOW = new Set(['5', '10', '25']);
+/** 「10% 点」「90%点」（分位点の名前。表の見出しなど）: 分位の数の後の `%` と `点` */
+const QUANTILE_POINT_AFTER = /^\s*[%％]\s*点/;
+const QUANTILE_ANY = new Set(['5', '10', '25', '50', '75', '90', '95']);
 
 function matches(
   t: { value: number; decimals: number; unit: TokenUnit; signed: number },
@@ -269,6 +272,7 @@ export function checkNumbers(text: string, sources: readonly unknown[]): NumberC
       else if (QUANTILE_BEFORE.test(before)) reason = 'number';
       else if (QUANTILE_TOP.has(numText) && QUANTILE_RANGE.test(before)) reason = 'number';
       else if (QUANTILE_LOW.has(numText) && QUANTILE_RANGE_AFTER.test(rest)) reason = 'number';
+      else if (QUANTILE_ANY.has(numText) && QUANTILE_POINT_AFTER.test(rest)) reason = 'number';
       else if (/^\s*(#+\s*)?([-*]\s*)?$/.test(before) && /^[.)）:]/.test(rest)) reason = 'number';
     }
     const decimalPart = numText.split('.')[1];

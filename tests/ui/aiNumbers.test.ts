@@ -48,6 +48,8 @@ describe('checkNumbers', () => {
     const r = checkNumbers('下位 10% は -3.3%、上位 10% と p90、10〜90% の幅。中央値 -0.4%', src);
     expect(r.unmatched).toBe(0);
     expect(r.matched).toBe(2);
+    // 表の見出しの「10% 点」「90%点」も名前
+    expect(checkNumbers('| 中央値 | 10% 点 | 90%点 |', src).unmatched).toBe(0);
     // 名前でない 90% は数える
     expect(checkNumbers('上げ幅は 90% です', src).unmatched).toBe(1);
   });
