@@ -43,7 +43,7 @@ const FOLLOWUPS = [
 ];
 
 // テクニカルの質問（#200）: 合成の先物の足（scripts/synthFutBars.ts。架空の値）で technicals を呼ぶか・照合の不一致 0・
-// 方向を断定しないか（言い回しの簡単な検査 + 全文を目で読む）
+// 方向の見立てを書くなら「トレンドでは続くことがある」の但し書きを添えているか（言い回しの簡単な検査 + 全文を目で読む）
 const TECH_QUESTIONS = [
   {
     case: 'put_sell',
@@ -58,6 +58,9 @@ const TECH_QUESTIONS = [
 /** 方向の断定（予想の言い回し）。「〜でしょう」「〜見込み」「〜はず」などを上げ / 下げの動詞と組で見る */
 export const DIRECTION_RE =
   /(上が|下が|上昇|下落|反発|反落|戻|崩れ|続伸|続落)[^。\n]{0,8}(でしょう|だろう|見込[みま]|はずです|はずだ|と予想|と予測|可能性が高い)/;
+/** 見立ての但し書き（強いトレンドでは過熱のまま続くことがある） */
+export const CAVEAT_RE =
+  /(続けることが|続くことが|続きうる|続く場合|上がり続け|下がり続け|上げ続け|下げ続け|過熱のまま|過熱したまま)/;
 const techOnly = args.includes('--tech-only');
 
 const load = async (p) =>
@@ -286,7 +289,9 @@ for (const q of TECH_QUESTIONS) {
     .map((b) => b.content[0]?.text.length ?? 0);
   const un = ck.tokens.filter((x) => x.status === 'unmatched').map((x) => x.raw);
   const direction = t.match(DIRECTION_RE)?.[0] ?? null;
-  const ok = !r.run.error && tools.includes('technicals') && ck.unmatched === 0 && !direction;
+  const caveat = CAVEAT_RE.test(t);
+  const ok =
+    !r.run.error && tools.includes('technicals') && ck.unmatched === 0 && (!direction || caveat);
   rows.push({
     case: q.case,
     kind: 'technicals',
@@ -298,12 +303,13 @@ for (const q of TECH_QUESTIONS) {
     matchedTotal: ck.matched,
     unmatched: un,
     direction,
+    caveat,
     chars: t.length,
     ...r.run,
   });
   writeFileSync(join(outDir, `tech-${q.case}.md`), `# テクニカル: ${q.text}\n\n${t}\n`);
   console.log(
-    `${ok ? 'pass' : 'FAIL'}  テクニカル ${q.case}: 道具 ${tools.join(',') || 'なし'}・結果 ${resultChars.join('/') || '—'} 字・一致 ${ck.matched}・不一致 ${un.length}${un.length ? `［${un.join('、')}］` : ''}・断定 ${direction ?? 'なし'}・往復 ${r.run.requests}・${r.run.stop ?? r.run.error}・完了 ${(r.run.totalMs / 1000).toFixed(1)} 秒`,
+    `${ok ? 'pass' : 'FAIL'}  テクニカル ${q.case}: 道具 ${tools.join(',') || 'なし'}・結果 ${resultChars.join('/') || '—'} 字・一致 ${ck.matched}・不一致 ${un.length}${un.length ? `［${un.join('、')}］` : ''}・見立て ${direction ?? 'なし'}・但し書き ${caveat ? 'あり' : 'なし'}・往復 ${r.run.requests}・${r.run.stop ?? r.run.error}・完了 ${(r.run.totalMs / 1000).toFixed(1)} 秒`,
   );
 }
 
