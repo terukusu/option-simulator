@@ -55,6 +55,13 @@ export interface IvPlotProps {
   rolls?: (range: Domain) => readonly { x: number; label: string | null }[];
   /** 価格に重ねる線（#206 先物推移の EMA。無ければ描かない。同じ配列なら座標を作り直さない） */
   overlays?: readonly IvOverlay[];
+  /**
+   * 描画域の高さ（#207。先物推移の段があるとき = 配置の futPaneLayout の価格の高さ。境目のドラッグで ResizeObserver の
+   * 1 フレームの遅れを出さない）。無ければ測った高さ
+   */
+  height?: number;
+  /** 十字線の横線と縦軸の札を描くか（#207。段の上の十字線のときは false = 縦線と横軸の札だけ。無ければ描く） */
+  crossH?: boolean;
 }
 
 /**
@@ -65,7 +72,8 @@ export interface IvPlotProps {
 function IvPlotView(p: IvPlotProps) {
   const { bars, viewport, cursor, cursorY, onCursor } = p;
   const n = bars.length;
-  const { ref, width, height } = useSize(480, 200);
+  const { ref, width, height: measured } = useSize(480, 200);
+  const height = p.height ?? measured;
   const model = useMemo(
     () =>
       ivChartModel({
@@ -275,7 +283,9 @@ function IvPlotView(p: IvPlotProps) {
           {cross && (
             <g class="iv-cross">
               <line class="iv-cursor v" x1={cross.x} x2={cross.x} y1={8} y2={h - 22} />
-              <line class="iv-cursor h" x1={range[0]} x2={range[1]} y1={cross.y} y2={cross.y} />
+              {p.crossH !== false && (
+                <line class="iv-cursor h" x1={range[0]} x2={range[1]} y1={cross.y} y2={cross.y} />
+              )}
               <g class="iv-tag x">
                 <rect
                   x={cross.xTag.x}
@@ -287,17 +297,19 @@ function IvPlotView(p: IvPlotProps) {
                   {cross.xTag.text}
                 </text>
               </g>
-              <g class="iv-tag y">
-                <rect
-                  x={cross.yTag.x}
-                  y={cross.yTag.y}
-                  width={cross.yTag.w}
-                  height={cross.yTag.h}
-                />
-                <text x={cross.yTag.x + cross.yTag.w / 2} y={cross.yTag.y + cross.yTag.h / 2}>
-                  {cross.yTag.text}
-                </text>
-              </g>
+              {p.crossH !== false && (
+                <g class="iv-tag y">
+                  <rect
+                    x={cross.yTag.x}
+                    y={cross.yTag.y}
+                    width={cross.yTag.w}
+                    height={cross.yTag.h}
+                  />
+                  <text x={cross.yTag.x + cross.yTag.w / 2} y={cross.yTag.y + cross.yTag.h / 2}>
+                    {cross.yTag.text}
+                  </text>
+                </g>
+              )}
             </g>
           )}
         </svg>

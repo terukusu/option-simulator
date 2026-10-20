@@ -737,6 +737,8 @@ export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
               showEma={showEma}
               onEmaToggle={onEmaToggle}
               techParams={userPrefs.technicals}
+              paneH={userPrefs.prefs.futPaneH}
+              onPaneH={userPrefs.setFutPaneH}
             />
           ) : smileView(shell, tier) === 'iv' ? (
             <IvHistory

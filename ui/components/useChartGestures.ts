@@ -16,6 +16,10 @@
  *   より前）→ onSurface(x, y)（1 フレーム 1 回）→ onSurfaceEnd（同期。最後の位置は次のフレームで流す）。2 本目の指・
  *   cancel は未反映の位置を捨てて onSurfaceCancel。リセット（ダブルタップ・dblclick・R）の前に未反映の位置を流す
  * - 十字線（#201）: cross を渡すと交点の ±grabPx の押下ですぐつかみ、onCross(x, y)（1 フレーム 1 回）に位置を渡す
+ * - onDouble（#207。先物推移の指標の段）: 渡すとダブルタップ / ダブルクリックを初期表示に戻す代わりに onDouble(x, y)
+ *   （離した位置。要素の座標）に渡す（段の最大化）。マウスは dblclick だけで拾い（OS のダブルクリックの間隔）、タッチ・ペンは
+ *   状態機械のダブルタップで拾う（マウスで両方を拾うと 2 回効く = 戻ってしまう）。R キーは今のまま初期表示
+ * - `[role="separator"]`（境目。#207）の上の押下・ダブルクリック・キーは対象外（境目が自分で扱う）
  *
  * 規則はすべて純関数（ui/chart/scale.ts・ui/chart/gesture.ts）。ここはイベントを受けて渡すだけ。
  * move・wheel の反映は requestAnimationFrame で 1 フレーム 1 回にまとめる。最新の props は ref で持ち、
@@ -87,7 +91,12 @@ export interface ChartGestureOptions {
   cross?: GestureCtx['cross'];
   /** つかんでいる十字線の交点の位置（要素の座標の画素。1 フレーム 1 回） */
   onCross?: (x: number, y: number) => void;
+  /** ダブルタップ / ダブルクリック（#207。渡すと初期表示に戻さずこれを呼ぶ。位置は要素の座標） */
+  onDouble?: (x: number, y: number) => void;
 }
+
+/** グラフの操作の対象外（ツール行のボタン・入力欄・境目） */
+const NOT_CHART = 'button, input, select, label, [role="separator"]';
 
 export function useChartGestures(ref: RefObject<HTMLElement>, opts: ChartGestureOptions): void {
   const optsRef = useRef(opts);
@@ -110,6 +119,8 @@ export function useChartGestures(ref: RefObject<HTMLElement>, opts: ChartGesture
     let frame = 0;
     /** 長押しのタイマー */
     let longTimer = 0;
+    /** 最後に押した pointer の種類（#207。タッチのダブルタップで来る dblclick を onDouble に二重に渡さない） */
+    let lastType = 'mouse';
 
     const current = (): Domain => pending ?? optsRef.current.viewport;
     const ctx = (): GestureCtx => {
@@ -183,7 +194,7 @@ export function useChartGestures(ref: RefObject<HTMLElement>, opts: ChartGesture
       const r = el.getBoundingClientRect();
       return { id: e.pointerId, x: e.clientX - r.left, y: e.clientY - r.top, t: e.timeStamp };
     };
-    const apply = (res: GestureResult) => {
+    const apply = (res: GestureResult, at?: PointerSample, mouse = false) => {
       state = res.state;
       if (res.surfaceCancel) {
         // 未反映の位置を捨ててから押す前に戻す
@@ -193,7 +204,10 @@ export function useChartGestures(ref: RefObject<HTMLElement>, opts: ChartGesture
       if (res.surfaceStart) optsRef.current.onSurfaceStart?.();
       if (res.surface) scheduleSurface(res.surface);
       if (res.surfaceEnd) optsRef.current.onSurfaceEnd?.();
-      if (res.reset) reset();
+      const dbl = optsRef.current.onDouble;
+      if (res.reset && dbl) {
+        if (!mouse) dbl(at?.x ?? 0, at?.y ?? 0);
+      } else if (res.reset) reset();
       else if (res.viewport) schedule(res.viewport);
       if (res.scrub) scheduleScrub(res.scrub.x);
       if (res.cross) scheduleCross(res.cross);
@@ -213,8 +227,9 @@ export function useChartGestures(ref: RefObject<HTMLElement>, opts: ChartGesture
     const onDown = (e: PointerEvent) => {
       if (optsRef.current.disabled) return;
       if (e.pointerType === 'mouse' && e.button !== 0) return;
-      // ボタン・入力欄の上は対象外（グラフの外のツール行）
-      if ((e.target as Element | null)?.closest('button, input, select, label')) return;
+      lastType = e.pointerType;
+      // ボタン・入力欄・境目の上は対象外（グラフの外のツール行・#207 の境目）
+      if ((e.target as Element | null)?.closest(NOT_CHART)) return;
       try {
         el.setPointerCapture(e.pointerId);
       } catch {
@@ -251,7 +266,8 @@ export function useChartGestures(ref: RefObject<HTMLElement>, opts: ChartGesture
     };
     const onUp = (e: PointerEvent) => {
       if (state.pointers.length === 0) return;
-      apply(gestureUp(state, sample(e), ctx()));
+      const at = sample(e);
+      apply(gestureUp(state, at, ctx()), at, e.pointerType === 'mouse');
     };
     const onCancel = (e: PointerEvent) => {
       apply(gestureCancel(state, sample(e), ctx()));
@@ -276,6 +292,7 @@ export function useChartGestures(ref: RefObject<HTMLElement>, opts: ChartGesture
     const onKey = (e: KeyboardEvent) => {
       const o = optsRef.current;
       if (o.disabled || e.altKey || e.ctrlKey || e.metaKey) return;
+      if ((e.target as Element | null)?.closest('[role="separator"]')) return;
       const v = current();
       let next: Domain | null = null;
       switch (e.key) {
@@ -309,7 +326,16 @@ export function useChartGestures(ref: RefObject<HTMLElement>, opts: ChartGesture
     };
     const onDbl = (e: MouseEvent) => {
       if (optsRef.current.disabled) return;
-      if ((e.target as Element | null)?.closest('button, input, select, label')) return;
+      if ((e.target as Element | null)?.closest(NOT_CHART)) return;
+      // onDouble（#207）: マウスはここで拾う（pointer の判定では呼ばない）
+      const dbl = optsRef.current.onDouble;
+      if (dbl) {
+        e.preventDefault();
+        if (lastType !== 'mouse') return;
+        const r = el.getBoundingClientRect();
+        dbl(e.clientX - r.left, e.clientY - r.top);
+        return;
+      }
       // 足マーカーの上のダブルクリックはリセットしない（#82）
       if (optsRef.current.markers) {
         const r = el.getBoundingClientRect();
