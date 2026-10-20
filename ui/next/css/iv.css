@@ -329,3 +329,138 @@
     padding: 0 5px;
   }
 }
+
+/*
+ * 指標の段（#200。先物推移の価格の下。ui/next/market/IndicatorPanes.tsx）: 段は 1 つ 56px（IND_PANE_H）の svg で、価格の
+ * 描画域と同じ横の画素範囲。線 = --accent（RSI・MACD・%K）と --handle（シグナル・%D）、ヒスト = --gain / --loss を薄く、
+ * 補助線（30 / 70・20 / 80・0）= --line-2 の破線
+ */
+.ind-panes {
+  display: flex;
+  flex: 0 1 56px;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 28px;
+  overflow: hidden;
+}
+
+/* 枠の高さ = 段の数 × 56px（IND_PANE_H）。縦に狭いと縮む（下限 = 段の数 × 28px。段の高さは JS が枠を測って決める） */
+.ind-panes.n2 {
+  flex-basis: 112px;
+  min-height: 56px;
+}
+
+.ind-panes.n3 {
+  flex-basis: 168px;
+  min-height: 84px;
+}
+
+/* 段があるときの価格の描画域の下限（スマホのシートの 覗く でも価格が潰れない） */
+.market-body:has(.ind-panes) .iv-wrap {
+  min-height: 80px;
+}
+
+.ind-pane {
+  display: block;
+  flex: 0 0 auto;
+}
+
+.ind-pane .ind-sep {
+  stroke: var(--line);
+}
+
+.ind-pane .ind-guide {
+  stroke: var(--line-2);
+  stroke-dasharray: 3 3;
+}
+
+.ind-pane .ind-guide.zero {
+  stroke-dasharray: none;
+}
+
+.ind-pane .ind-ty {
+  dominant-baseline: middle;
+  fill: var(--ink-3);
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+  text-anchor: end;
+}
+
+.ind-pane .ind-line {
+  fill: none;
+  stroke-linejoin: round;
+  stroke-width: 1.25;
+}
+
+.ind-pane .ind-line.main {
+  stroke: var(--accent);
+}
+
+.ind-pane .ind-line.sub {
+  stroke: var(--handle);
+}
+
+.ind-pane .ind-hist {
+  opacity: 0.55;
+}
+
+.ind-pane .ind-hist.up {
+  fill: var(--gain);
+}
+
+.ind-pane .ind-hist.down {
+  fill: var(--loss);
+}
+
+.ind-pane .ind-cursor {
+  stroke: var(--ink-3);
+  stroke-dasharray: 2 3;
+}
+
+.ind-pane .ind-head {
+  dominant-baseline: hanging;
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+  paint-order: stroke;
+  stroke: var(--s1);
+  stroke-width: 3;
+}
+
+.ind-pane .ind-head .name {
+  fill: var(--ink-3);
+  font-family: var(--font);
+}
+
+.ind-pane .ind-head .v.main {
+  fill: var(--accent);
+}
+
+.ind-pane .ind-head .v.sub {
+  fill: var(--handle);
+}
+
+.ind-pane .ind-head .v.hist {
+  fill: var(--ink-2);
+}
+
+/* 凡例の行の右の段の切替（RSI・MACD・SO）。凡例の行の高さを変えない小さなチップ */
+.iv-legend > .ind-toggles {
+  display: inline-flex;
+  flex: 0 0 auto;
+  gap: 4px;
+  margin-left: auto;
+}
+
+.iv-legend > .ind-toggles .chip {
+  height: 18px;
+  padding: 0 6px;
+  font-size: var(--fs-xs);
+}
+
+/* 段の切替がある凡例（先物推移。#200）は、市場の列の狭い PC（列 360〜432px）でも 1 行に入るよう補足と「確定前」を隠す */
+@container (max-width: 519.98px) {
+  .iv-legend:has(> .ind-toggles) > .prog,
+  .iv-legend:has(> .ind-toggles) .long {
+    display: none;
+  }
+}

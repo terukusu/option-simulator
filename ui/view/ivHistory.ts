@@ -1,7 +1,8 @@
 /**
  * IV 推移（ATM IV の 30 日固定 = iv30。#79、docs/ui-redesign.md §4.7）の表示モデル（純関数。Preact に依存しない）。
  *
- * - 足: 1 分・5 分・15 分・1 時間（既定）・日足。5 分・15 分は 1 分の読み込みから束ねる（resampleBars）
+ * - 足: 1 分・5 分・15 分・1 時間（既定）・4 時間・日足。5 分・15 分は 1 分の読み込みから束ねる（resampleBars）。4 時間は
+ *   1 時間の読み込みを立会に合わせて束ねる（model/bars.ts の resample4h: 08・12・17・21・01 時に始まる 1 取引日 5 本。#200）
  * - 横軸は足の index（取引の無い時間・休日は詰まる）。表示範囲は index の Domain（ui/chart/scale.ts の規則で拡大・パン）
  * - 欠けで線を切る（lineSegments）: 隣り合う足の間の立会の時間が max(足の長さ, 30 分) 以上なら分ける。立会は
  *   日中 08:45〜15:45・夜間 17:00〜翌 06:00（JST）で、その日（夜間は始まる日）が取引日のときだけ数える。日足は間に
@@ -17,11 +18,19 @@
  */
 
 import type { AtmIvSource, ChainJson, IvBar } from '../../data';
-import { type CmMethod, constantMaturityIv, type Scenario, SIGMA_MIN, sigmaAt } from '../../model';
+import {
+  type CmMethod,
+  constantMaturityIv,
+  fourHourStart,
+  resample4h,
+  type Scenario,
+  SIGMA_MIN,
+  sigmaAt,
+} from '../../model';
 import { clampViewport, type Domain, linear, niceTicks, padDomain } from '../chart/scale';
 import { DASH, fmtNum } from './format';
 
-export type IvTf = '1m' | '5m' | '15m' | '1h' | '1d';
+export type IvTf = '1m' | '5m' | '15m' | '1h' | '4h' | '1d';
 export type IvMode = 'candle' | 'line';
 
 /** 足の切替（道具の行の Seg。文字は短く、aria-label に全文） */
@@ -30,6 +39,7 @@ export const IV_TFS: readonly { value: IvTf; text: string; label: string }[] = [
   { value: '5m', text: '5分', label: '5 分足' },
   { value: '15m', text: '15分', label: '15 分足' },
   { value: '1h', text: '1時間', label: '1 時間足' },
+  { value: '4h', text: '4時間', label: '4 時間足（立会に合わせる）' },
   { value: '1d', text: '日足', label: '日足' },
 ];
 export const IV_DEFAULT_TF: IvTf = '1h';
@@ -41,18 +51,19 @@ export const IV_MODES: readonly { value: IvMode; text: string; label: string }[]
 ];
 export const IV_DEFAULT_MODE: IvMode = 'candle';
 
-/** 足の長さ（秒） */
+/** 足の長さ（秒。4 時間足は名目。夜間の最後の足は 5 時間 = model/bars.ts の fourHourStart） */
 export const IV_TF_SECONDS: Record<IvTf, number> = {
   '1m': 60,
   '5m': 300,
   '15m': 900,
   '1h': 3600,
+  '4h': 14400,
   '1d': 86400,
 };
 
-/** その足を作るためにサーバーから読む足（5 分・15 分は 1 分を共有する） */
+/** その足を作るためにサーバーから読む足（5 分・15 分は 1 分、4 時間は 1 時間を共有する） */
 export function ivSource(tf: IvTf): AtmIvSource {
-  return tf === '5m' || tf === '15m' ? '1m' : tf;
+  return tf === '5m' || tf === '15m' ? '1m' : tf === '4h' ? '1h' : tf;
 }
 
 /** 初期表示の本数（ビューアーの initialBars）。右に IV_RIGHT_OFFSET 本の余白 */
@@ -61,6 +72,7 @@ export const IV_INITIAL_BARS: Record<IvTf, number> = {
   '5m': 150,
   '15m': 120,
   '1h': 120,
+  '4h': 120,
   '1d': 100,
 };
 export const IV_RIGHT_OFFSET = 3;
@@ -69,6 +81,8 @@ export const IV_MIN_BARS = 10;
 
 /** 欠けの閾値の下限（分）。足の長さがこれより長ければ足の長さ */
 export const IV_GAP_MIN_MINUTES = 30;
+/** 4 時間足の欠けの閾値（分。足の半分） */
+export const IV_GAP_4H_MINUTES = 120;
 /** 立会の窓（JST の 0 時からの分。夜間は翌 06:00 = 1800 分まで） */
 export const IV_SESSIONS: readonly (readonly [number, number])[] = [
   [8 * 60 + 45, 15 * 60 + 45],
@@ -125,7 +139,8 @@ function isGap(a: IvBar, b: IvBar, tf: IvTf, nonTradingDays: ReadonlySet<string>
     return false;
   }
   const sec = IV_TF_SECONDS[tf];
-  const limit = Math.max(sec / 60, IV_GAP_MIN_MINUTES);
+  // 4 時間足は足の半分（日中の後半 3 時間 45 分が欠けても切れるように）
+  const limit = tf === '4h' ? IV_GAP_4H_MINUTES : Math.max(sec / 60, IV_GAP_MIN_MINUTES);
   return sessionMinutesBetween(a.t + sec, b.t, nonTradingDays) >= limit;
 }
 
@@ -172,8 +187,9 @@ export function resampleBars<B extends IvBar>(bars: readonly B[], seconds: numbe
   return out;
 }
 
-/** 読んだ足（ivSource の足）から表示する足を作る */
+/** 読んだ足（ivSource の足）から表示する足を作る（4 時間足は立会に合わせる = model/bars.ts の resample4h。#200） */
 export function barsForTf<B extends IvBar>(bars: readonly B[], tf: IvTf): readonly B[] {
+  if (tf === '4h') return resample4h(bars);
   return tf === '5m' || tf === '15m' ? resampleBars(bars, IV_TF_SECONDS[tf]) : bars;
 }
 
@@ -343,7 +359,11 @@ export function ivNowPoint(
   if (lastAt !== null && !(now.t > lastAt)) return null;
   const sec = IV_TF_SECONDS[tf];
   const bucket =
-    tf === '1d' ? ivTradingDayStart(now.t, nonTradingDays) : Math.floor(now.t / sec) * sec;
+    tf === '1d'
+      ? ivTradingDayStart(now.t, nonTradingDays)
+      : tf === '4h'
+        ? fourHourStart(now.t)
+        : Math.floor(now.t / sec) * sec;
   return { index: bucket <= (bars[n - 1] as IvBar).t ? n - 1 : n, iv: now.iv };
 }
 

@@ -1,6 +1,7 @@
 import type { ComponentChildren } from 'preact';
 import { useCallback, useMemo, useState } from 'preact/hooks';
 import type { FutBar } from '../../../data';
+import { type Indicators, indicators } from '../../../model';
 import type { Domain } from '../../chart/scale';
 import { pure } from '../../components/pure';
 import type { IvView } from '../../components/useIvHistory';
@@ -20,12 +21,15 @@ import {
   futRollMarks,
 } from '../../view/futHistory';
 import { HINT_TERMS } from '../../view/glossary';
+import { IND_KINDS, type IndKind } from '../../view/indicators';
 import { IV_MODES, IV_TFS, type IvMode, type IvTf, lineSegments } from '../../view/ivHistory';
 import { type IvLoadState, ivInProgress, ivLoadView } from '../../view/ivLoad';
 import { PanelHead } from '../PanelHead';
+import { Chip } from '../parts/Chip';
 import { Popover } from '../parts/Popover';
 import { Seg } from '../parts/Seg';
 import { TermLinks } from '../parts/TermLinks';
+import { IndicatorPanes } from './IndicatorPanes';
 import { IvPlot } from './IvPlot';
 
 export interface FutHistoryProps {
@@ -46,12 +50,18 @@ export interface FutHistoryProps {
   onTf: (tf: IvTf) => void;
   onMode: (mode: IvMode) => void;
   onViewport: (v: Domain | null) => void;
+  /** 指標の段（#200。出す段。IND_KINDS の順。空 = 出さない） */
+  indKinds: readonly IndKind[];
+  onIndToggle: (kind: IndKind) => void;
 }
+
+const NO_IND: Indicators | null = null;
 
 /**
  * 先物推移（#190。docs/ui-redesign.md §4.8）: IV 推移（IvHistory.tsx）と同じ並び = 見出し行（タイトル・Seg・ⓘ）→ 道具の
  * 行（足・ローソク / 線・最新化 ⟳）→ 読み取りの 1 行（始 / 高 / 安 / 終 = 円と限月）→ 描画域（IvPlot に円の書式と限月
- * 交代の印を渡す）→ 凡例。シナリオの水準は無い。状態は NextApp の useFutureBars（パネルを閉じても残る）。
+ * 交代の印を渡す）→ 指標の段（#200。IndicatorPanes。凡例の行のトグルで出す）→ 凡例。シナリオの水準は無い。状態は
+ * NextApp の useFutureBars（パネルを閉じても残る）。指標は段を 1 つでも出すときだけ足の並びごとに 1 回計算する。
  */
 function FutHistoryView(p: FutHistoryProps) {
   const { load, view } = p;
@@ -82,6 +92,8 @@ function FutHistoryView(p: FutHistoryProps) {
     (range: Domain) => futRollMarks(bars, viewport, range),
     [bars, viewport],
   );
+  const showInd = p.indKinds.length > 0;
+  const ind = useMemo(() => (showInd ? indicators(bars) : NO_IND), [showInd, bars]);
   const rightLoaded = ivInProgress(entry);
   const ro = futReadout(bars, tf, cursor, rightLoaded);
   const status = !entry
@@ -164,6 +176,16 @@ function FutHistoryView(p: FutHistoryProps) {
           imgLabel={FUT_IMG_LABEL}
           rolls={rolls}
         />
+        {ind && bars.length > 0 && (
+          <IndicatorPanes
+            ind={ind}
+            n={bars.length}
+            kinds={p.indKinds}
+            viewport={viewport}
+            marginLeft={FUT_SERIES.marginLeft}
+            cursor={cursor}
+          />
+        )}
         <div class="iv-legend">
           <span class="line">
             {FUT_LEGEND}
@@ -175,6 +197,18 @@ function FutHistoryView(p: FutHistoryProps) {
             </span>
           )}
           {rightLoaded && <span class="prog">薄い足 = 確定前</span>}
+          {/* biome-ignore lint/a11y/useSemanticElements: fieldset は既定の枠・余白と flex の癖があるので div + role="group" */}
+          <span class="ind-toggles" role="group" aria-label="指標の段">
+            {IND_KINDS.map((k) => (
+              <Chip
+                key={k.value}
+                text={k.text}
+                label={k.label}
+                pressed={p.indKinds.includes(k.value)}
+                onClick={() => p.onIndToggle(k.value)}
+              />
+            ))}
+          </span>
         </div>
       </div>
     </>
