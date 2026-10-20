@@ -1,7 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import { boardOptionLeg, normalizeChain } from '../../data';
 import type { AiMessage } from '../../data/aiStream';
-import { DEFAULT_MARGIN_PARAMS, DEFAULT_SETTINGS, holdMapAxes, holdMapColumn } from '../../model';
+import {
+  DEFAULT_MARGIN_PARAMS,
+  DEFAULT_SETTINGS,
+  holdMapAxes,
+  holdMapColumn,
+  indicators,
+} from '../../model';
 import { preparePosition } from '../../model/position';
 import { ZERO_SCENARIO } from '../../model/scenario';
 import { buildWideChainJson } from '../../scripts/synthBoard';
@@ -42,6 +48,7 @@ import { FUT_SERIES, futRollMarks } from '../../ui/view/futHistory';
 import { headerModel, keptBoardNote } from '../../ui/view/header';
 import { hedgeModel } from '../../ui/view/hedge';
 import { holdMapCalcOf, holdMapInput, holdMapPlot, holdMapRooms } from '../../ui/view/holdMap';
+import { indPaneModel } from '../../ui/view/indicators';
 import {
   ivChartModel,
   ivCrosshair,
@@ -1586,6 +1593,41 @@ describe('性能（#79 IV 推移の 1 フレーム）', () => {
       expectWithinBudget(`#190 先物推移のパン（${mode}）`, frame, { warmup: 10, runs: 30 });
     });
   }
+
+  // #200 AC7: 指標の段 3 つを足したパンの 1 フレーム（指標は足の並びごとに 1 回 = パンでは作り直さない）と、
+  // 足の並びが変わったときの指標の計算（1 分足 1 万本）
+  it(`#200: 先物推移のパン + 指標の段 3 つ（1 分足 ${futs.length.toLocaleString('en-US')} 本）が ${BUDGET_MS} ms 以内`, () => {
+    const ind = indicators(futs);
+    let tick = 0;
+    const frame = () => {
+      tick = (tick + 1) % 40;
+      const m = ivChartModel({
+        ...input('candle', tick),
+        bars: futs,
+        segments: futSegments,
+        series: FUT_SERIES,
+      });
+      let n = m.candles.length;
+      for (const kind of ['rsi', 'macd', 'stoch'] as const) {
+        const pane = indPaneModel({
+          ind,
+          kind,
+          n: futs.length,
+          viewport: input('candle', tick).viewport,
+          width: 1000,
+          marginLeft: FUT_SERIES.marginLeft,
+        });
+        n += pane.lines.reduce((a, l) => a + l.d.length, 0) + pane.histUp.length;
+      }
+      return n;
+    };
+    expect(frame()).toBeGreaterThan(1000);
+    expectWithinBudget('#200 先物推移のパン + 段 3 つ', frame, { warmup: 10, runs: 30 });
+    expectWithinBudget('#200 指標の計算（1 万本）', () => indicators(futs).rsi.length, {
+      warmup: 3,
+      runs: 10,
+    });
+  });
 });
 
 /**

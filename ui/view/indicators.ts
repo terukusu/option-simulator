@@ -110,23 +110,33 @@ const at = (s: Series, i: number): number | null => {
   return v === undefined || v === null || !Number.isFinite(v) ? null : v;
 };
 
-/** 線の path（値の無い足で切る。i0 − 1〜i1 + 1） */
+/**
+ * 線の path（値の無い足で切る。i0 − 1〜i1 + 1）。1 画素に 2 本以上の足が入るとき（縮小）は 1 画素の列に 1 点
+ * （その列の最後の足）だけ描く = 点の数は描画域の幅まで（1 万本でも 1 フレームの予算に収める。#200 AC7）
+ */
 function linePath(
   s: Series,
   i0: number,
   i1: number,
   sx: (v: number) => number,
   sy: (v: number) => number,
+  thin: boolean,
 ): string {
   let d = '';
   let pen = false;
-  for (let i = Math.max(i0 - 1, 0); i <= Math.min(i1 + 1, s.length - 1); i++) {
+  const from = Math.max(i0 - 1, 0);
+  const to = Math.min(i1 + 1, s.length - 1);
+  for (let i = from; i <= to; i++) {
     const v = at(s, i);
     if (v === null) {
       pen = false;
       continue;
     }
-    d += `${pen ? 'L' : 'M'}${r1(sx(i))} ${r1(sy(v))}`;
+    const x = sx(i);
+    // 縮小: 次の足が同じ画素の列で値があるなら、この足は飛ばす（列の最後の足だけ）
+    if (thin && i < to && Math.floor(sx(i + 1)) === Math.floor(x) && at(s, i + 1) !== null)
+      continue;
+    d += `${pen ? 'L' : 'M'}${r1(x)} ${r1(sy(v))}`;
     pen = true;
   }
   return d;
@@ -146,6 +156,8 @@ export function indPaneModel(p: IndPaneInput): IndPaneModel {
   const i0 = Math.max(0, Math.ceil(viewport[0]));
   const i1 = Math.min(n - 1, Math.floor(viewport[1]));
   const yPx: Domain = [h - PAD_BOTTOM, PAD_TOP];
+  // 1 画素に 2 本以上の足が入る（縮小）
+  const thin = (viewport[1] - viewport[0]) / Math.max(range[1] - range[0], 1) >= 2;
 
   if (kind === 'macd') {
     const { macd, signal, hist } = ind.macd;
@@ -166,15 +178,32 @@ export function indPaneModel(p: IndPaneInput): IndPaneModel {
     const y0 = r1(sy(0));
     let histUp = '';
     let histDown = '';
+    // 縮小（1 画素に 2 本以上）は 1 画素の列に 1 本（その列で絶対値が最大の足）
+    let col = Number.NaN;
+    let best: number | null = null;
+    let bestI = 0;
+    const flush = () => {
+      if (best === null || best === 0) return;
+      const x = r1(sx(bestI) - bw / 2);
+      const bar = `M${x} ${y0}V${r1(sy(best))}h${r1(bw)}V${y0}Z`;
+      if (best > 0) histUp += bar;
+      else histDown += bar;
+    };
     for (let i = i0; i <= i1; i++) {
       const v = at(hist, i);
-      if (v === null || v === 0) continue;
-      const x = r1(sx(i) - bw / 2);
-      const y = r1(sy(v));
-      const bar = `M${x} ${y0}V${y}h${r1(bw)}V${y0}Z`;
-      if (v > 0) histUp += bar;
-      else histDown += bar;
+      if (v === null) continue;
+      const c = thin ? Math.floor(sx(i)) : i;
+      if (c !== col) {
+        flush();
+        col = c;
+        best = v;
+        bestI = i;
+      } else if (Math.abs(v) > Math.abs(best ?? 0)) {
+        best = v;
+        bestI = i;
+      }
     }
+    flush();
     return {
       kind,
       width: w,
@@ -182,8 +211,8 @@ export function indPaneModel(p: IndPaneInput): IndPaneModel {
       range,
       guides: [{ y: y0, label: '0', zero: true }],
       lines: [
-        { cls: 'ind-line main', d: linePath(macd, i0, i1, sx, sy) },
-        { cls: 'ind-line sub', d: linePath(signal, i0, i1, sx, sy) },
+        { cls: 'ind-line main', d: linePath(macd, i0, i1, sx, sy, thin) },
+        { cls: 'ind-line sub', d: linePath(signal, i0, i1, sx, sy, thin) },
       ],
       histUp,
       histDown,
@@ -200,7 +229,7 @@ export function indPaneModel(p: IndPaneInput): IndPaneModel {
       height: h,
       range,
       guides: [guide(RSI_HIGH), guide(RSI_LOW)],
-      lines: [{ cls: 'ind-line main', d: linePath(ind.rsi, i0, i1, sx, sy) }],
+      lines: [{ cls: 'ind-line main', d: linePath(ind.rsi, i0, i1, sx, sy, thin) }],
       histUp: '',
       histDown: '',
       title: `RSI ${RSI_PERIOD}`,
@@ -213,8 +242,8 @@ export function indPaneModel(p: IndPaneInput): IndPaneModel {
     range,
     guides: [guide(STOCH_HIGH), guide(STOCH_LOW)],
     lines: [
-      { cls: 'ind-line main', d: linePath(ind.stoch.k, i0, i1, sx, sy) },
-      { cls: 'ind-line sub', d: linePath(ind.stoch.d, i0, i1, sx, sy) },
+      { cls: 'ind-line main', d: linePath(ind.stoch.k, i0, i1, sx, sy, thin) },
+      { cls: 'ind-line sub', d: linePath(ind.stoch.d, i0, i1, sx, sy, thin) },
     ],
     histUp: '',
     histDown: '',

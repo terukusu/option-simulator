@@ -78,6 +78,33 @@ describe('段の座標', () => {
   });
 });
 
+describe('縮小（1 画素に 2 本以上）', () => {
+  it('線は 1 画素の列に 1 点、ヒストは 1 列に 1 本（点の数は描画域の幅まで）', () => {
+    const many = Array.from({ length: 3000 }, (_, i) => {
+      const c = 30000 + 300 * Math.sin(i / 25) + 40 * Math.sin(i);
+      return { h: c + 30, l: c - 30, c };
+    });
+    const ind2 = indicators(many);
+    const inp = {
+      ind: ind2,
+      n: many.length,
+      viewport: [-0.5, 2999.5] as [number, number],
+      width: 360,
+      marginLeft: 48,
+    };
+    const width = 360 - 48 - IV_MARGIN.right;
+    const rsi = indPaneModel({ ...inp, kind: 'rsi' });
+    expect((rsi.lines[0]?.d.match(/[ML]/g) ?? []).length).toBeLessThanOrEqual(width + 2);
+    const macd = indPaneModel({ ...inp, kind: 'macd' });
+    const bars = (macd.histUp.match(/M/g) ?? []).length + (macd.histDown.match(/M/g) ?? []).length;
+    expect(bars).toBeLessThanOrEqual(width + 2);
+    expect(bars).toBeGreaterThan(width / 2);
+    // 拡大（1 画素に 1 本未満）は全部の足（左の 1 本外 2899〜2999）
+    const zoom = indPaneModel({ ...inp, viewport: [2899.5, 2999.5], kind: 'rsi' });
+    expect((zoom.lines[0]?.d.match(/[ML]/g) ?? []).length).toBe(101);
+  });
+});
+
 describe('段の読み取り（カーソルの足、無ければ最新の足）', () => {
   const range: [number, number] = [48, 350];
   it('カーソルなし = 最新の足の値・縦線なし', () => {
