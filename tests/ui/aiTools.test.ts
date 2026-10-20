@@ -157,8 +157,19 @@ describe('道具の境界', () => {
     const e = aiEnvFromState(s, DEFAULT_MARGIN_PREFS);
     if (!e) throw new Error('環境が無い');
     expect(e.base).toBeNull();
-    for (const n of AI_TOOL_NAMES.filter((x) => x !== 'smile_position' && x !== 'technicals')) {
+    const legFree = [
+      'smile_position',
+      'technicals',
+      'strike_scan',
+      'structure_candidates',
+      'propose_position',
+    ];
+    for (const n of AI_TOOL_NAMES.filter((x) => !legFree.includes(x))) {
       expect(runTool(n, {}, e)).toEqual({ error: 'no_legs' });
+    }
+    // 提案のツール（#139）は足が無くても使える（入力が無ければ bad_input）
+    for (const n of ['strike_scan', 'structure_candidates', 'propose_position']) {
+      expect(runTool(n, {}, e)).toEqual({ error: 'bad_input' });
     }
     // technicals（#200）は足に依らない（先物の足が無ければ no_data）
     expect(runTool('technicals', {}, e)).toEqual({ error: 'no_data' });

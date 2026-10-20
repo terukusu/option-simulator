@@ -16,6 +16,7 @@ import {
   remainingText,
   sendBlocked,
 } from '../../view/aiChat';
+import { proposalCard } from '../../view/aiPropose';
 import type { TechnicalsData } from '../../view/aiTechnicals';
 import { answerModel, type MarkedInline } from '../../view/aiText';
 import { type AiToolEnv, scenarioOfResult, toolCard } from '../../view/aiTools';
@@ -28,6 +29,8 @@ export const AI_DISCLAIMER =
 export const AI_EMPTY_TEXT =
   '今のポジションの弱点を、AI が simulator の計算の数字で説明します。[このポジションを診断] を押すか、質問を入れてください。';
 const UNMATCHED_LABEL = '計算結果に無い数字';
+/** 提案の差分の印の読み上げ（#139） */
+const PROPOSAL_MARK_LABEL = { '+': '追加: ', '−': '削除: ', '±': '変更: ' } as const;
 
 export interface AiApply {
   days: number;
@@ -35,6 +38,9 @@ export interface AiApply {
   dSigma: number;
   skew: number;
 }
+
+/** 提案のカードの [適用]（#139。ツールの入力と結果をそのまま渡す。反映の検査は NextApp） */
+export type AiProposeApply = (input: Record<string, unknown>, result: unknown) => void;
 
 /** パレット（NextApp）が読む口（AiPanel が描くたびに入れる） */
 export interface AiPanelApi {
@@ -71,6 +77,7 @@ function AiPanelView(p: {
   disclaimerSeen: boolean;
   onDisclaimerSeen: () => void;
   onApplyScenario: (s: AiApply) => void;
+  onApplyProposal: AiProposeApply;
   apiRef: { current: AiPanelApi | null };
 }) {
   const chat = useAiChat(p.visible, p.base, p.env, p.tech);
@@ -87,6 +94,7 @@ function AiPanelView(p: {
       disclaimerSeen={p.disclaimerSeen}
       onDisclaimerSeen={p.onDisclaimerSeen}
       onApplyScenario={p.onApplyScenario}
+      onApplyProposal={p.onApplyProposal}
     />
   );
 }
@@ -106,6 +114,7 @@ export function AiChat(p: {
   disclaimerSeen: boolean;
   onDisclaimerSeen: () => void;
   onApplyScenario: (s: AiApply) => void;
+  onApplyProposal: AiProposeApply;
 }) {
   const { chat } = p;
   const { state, status } = chat;
@@ -176,6 +185,7 @@ export function AiChat(p: {
               sources={sources}
               x0={p.x0}
               onApply={p.onApplyScenario}
+              onPropose={p.onApplyProposal}
               onRetry={chat.retry}
               canRetry={sendReason === null}
             />
@@ -270,6 +280,7 @@ function ChatRow(p: {
   sources: readonly unknown[];
   x0: number;
   onApply: (s: AiApply) => void;
+  onPropose: AiProposeApply;
   onRetry: () => void;
   canRetry: boolean;
 }) {
@@ -306,6 +317,39 @@ function ChatRow(p: {
         </div>
       );
     case 'tool': {
+      const prop =
+        it.name === 'propose_position' && !it.isError ? proposalCard(it.input, it.result) : null;
+      if (prop) {
+        return (
+          <div class="ai-tool ai-prop" data-ai-tool={it.name} data-target={prop.target}>
+            <p class="ai-tool-title">{prop.title}</p>
+            {prop.lines.map((l, i) => (
+              <p key={i} class="ai-prop-line">
+                <span class="ai-prop-mark" data-mark={l.mark} aria-hidden="true">
+                  {l.mark === '+' ? '＋' : l.mark === '−' ? '−' : '±'}
+                </span>
+                <span>
+                  <span class="sr">{PROPOSAL_MARK_LABEL[l.mark]}</span>
+                  {l.text}
+                </span>
+              </p>
+            ))}
+            {prop.metrics.map((m) => (
+              <p key={m} class="ai-prop-metric">
+                {m}
+              </p>
+            ))}
+            <button
+              type="button"
+              class="btn sm primary"
+              data-ai="propose"
+              onClick={() => p.onPropose(it.input, it.result)}
+            >
+              {prop.button}
+            </button>
+          </div>
+        );
+      }
       const card = toolCard(it.name, it.input, it.result, it.isError);
       const sc = card.applicable ? scenarioOfResult(it.result, p.x0) : null;
       return (

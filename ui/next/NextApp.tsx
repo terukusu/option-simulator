@@ -19,6 +19,7 @@ import type { PrefsRead } from '../prefs';
 import { shareSupported } from '../share';
 import { legAtStrike, MAX_TABS, restoreTabAction } from '../state';
 import { aiEnvFromState } from '../view/aiContext';
+import { newTabFullText, PROPOSAL_APPLY_ERROR, proposalApply } from '../view/aiPropose';
 import { marketAddPlan, marketAddToast } from '../view/boardPanel';
 import { closedTabText, restoreTabError, type ShareResult, shareResultView } from '../view/boxTabs';
 import { fmtNum } from '../view/format';
@@ -63,7 +64,7 @@ import { Palette } from './parts/Palette';
 import { TermCard } from './parts/TermCard';
 import { Toasts, useToasts } from './parts/Toast';
 import { openTerm } from './parts/termCard';
-import { type AiApply, AiPanel, type AiPanelApi } from './regions/AiChat';
+import { type AiApply, AiPanel, type AiPanelApi, type AiProposeApply } from './regions/AiChat';
 import { Board } from './regions/Board';
 import type { HoldBundle } from './regions/HoldMap';
 import { Metrics } from './regions/Metrics';
@@ -278,6 +279,50 @@ export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
               ivShift: before.ivShift,
             },
           }),
+      });
+    },
+    [dispatch, push],
+  );
+  // 提案のカード（#139）: 押した時点の state で作り直し、今のタブは足を丸ごと置き換え（[元に戻す] は前の足へ）、
+  // 新しいタブは足して切り替える（[元に戻す] は足したタブを閉じる。タブの切り替えで閉じない keep のトースト）
+  const onAiPropose = useCallback<AiProposeApply>(
+    (input, result) => {
+      const st = stateRef.current;
+      const r = proposalApply(aiEnvFromState(st, marginRef.current), input, result);
+      if ('error' in r) {
+        push({ kind: 'ai-propose', text: PROPOSAL_APPLY_ERROR[r.error], note: 'info' });
+        return;
+      }
+      if (r.target === 'current') {
+        const before = st.legs;
+        const tab = st.activeTab;
+        dispatch({ type: 'replaceLegs', legs: r.legs, expect: before, tab });
+        push({
+          kind: 'ai-propose',
+          text: `AI の提案を今のタブに入れた（足 ${r.legs.length} 本）`,
+          undo: () => dispatch({ type: 'replaceLegs', legs: before, expect: r.legs, tab }),
+        });
+        return;
+      }
+      if (st.tabs.length >= MAX_TABS) {
+        push({ kind: 'ai-propose', text: newTabFullText(MAX_TABS), note: 'info' });
+        return;
+      }
+      const id = st.nextTabId;
+      dispatch({
+        type: 'openPositionInNewTab',
+        legs: r.legs.map(({ id: _id, ...rest }) => rest),
+        scenario: null,
+        feePerLot: null,
+        futureBasis: null,
+      });
+      push({
+        kind: 'ai-propose',
+        text: `AI の提案を新しいタブに入れた（足 ${r.legs.length} 本）`,
+        keep: true,
+        undo: () => {
+          if (stateRef.current.tabs.some((t) => t.id === id)) dispatch({ type: 'closeTab', id });
+        },
       });
     },
     [dispatch, push],
@@ -728,6 +773,7 @@ export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
             disclaimerSeen={userPrefs.prefs.aiDisclaimerSeen === true}
             onDisclaimerSeen={userPrefs.setAiDisclaimerSeen}
             onApplyScenario={onAiApply}
+            onApplyProposal={onAiPropose}
             apiRef={aiApi}
           />
         }

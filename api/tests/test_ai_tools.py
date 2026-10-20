@@ -19,7 +19,8 @@ PRECOMPUTED = ["margin_summary", "position_summary", "scenario_grid", "smile_pos
 
 def test_names_match_browser():
     assert SAMPLE["tools"] == sorted(REGISTRY)
-    assert sorted(REGISTRY) == sorted([*PRECOMPUTED, "evaluate_scenario", "technicals"])
+    assert sorted(REGISTRY) == sorted([*PRECOMPUTED, "evaluate_scenario", "technicals", "strike_scan",
+                                       "structure_candidates", "propose_position"])
 
 
 def test_definitions_sorted_and_deterministic():
@@ -176,3 +177,67 @@ def test_technicals_params_range_fits_result_shape():
     with pytest.raises(Bad) as e:
         spec.check(r, "r")
     assert e.value.reason == "range"
+
+
+PROPOSE = SAMPLE["propose"]
+
+
+def test_propose_samples_pass_shapes():
+    """#139: 提案のツール 3 本の見本（合成の板）の入力・結果・失敗が tools.py の形を通る"""
+    scan, cand, prop = REGISTRY["strike_scan"], REGISTRY["structure_candidates"], REGISTRY["propose_position"]
+    for e in PROPOSE["scan"]:
+        scan.input_shape.check(e["input"], "input")
+        r = scan.result_shape.check(e["result"], "result")
+        assert 1 <= len(r["rows"]) <= 25
+    assert PROPOSE["scan"][0]["result"]["best_k"] is not None
+    for e in PROPOSE["candidates"]:
+        cand.input_shape.check(e["input"], "input")
+        cand.result_shape.check(e["result"], "result")
+    assert sorted(e["input"]["structure"] for e in PROPOSE["candidates"]) == sorted(
+        cand.input_shape.fields["structure"].values)
+    for e in PROPOSE["proposals"]:
+        prop.input_shape.check(e["input"], "input")
+        prop.result_shape.check(e["result"], "result")
+    for e in [*PROPOSE["scan_errors"], *PROPOSE["candidate_errors"], *PROPOSE["proposal_errors"]]:
+        allowlist.TOOL_ERROR.check(e["result"], "result")
+
+
+def test_propose_round_trip_request():
+    """候補 → 提案の 2 往復が要求の本文として通る（tool_use の入力の検査・tool_result の結果の形）"""
+    case = SAMPLE["cases"][0]
+    scan = PROPOSE["scan"][0]
+    prop = PROPOSE["proposals"][0]
+    msgs = [
+        {"role": "user", "content": [{"type": "text", "text": "ヘッジを足して"}]},
+        {"role": "assistant", "content": [{"type": "tool_use", "id": "toolu_1", "name": "strike_scan",
+                                           "input": scan["input"]}]},
+        {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "toolu_1", "content": [
+            {"type": "text", "text": json.dumps(scan["result"], ensure_ascii=False)}]}]},
+        {"role": "assistant", "content": [{"type": "tool_use", "id": "toolu_2", "name": "propose_position",
+                                           "input": prop["input"]}]},
+        {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "toolu_2", "content": [
+            {"type": "text", "text": json.dumps(prop["result"], ensure_ascii=False)}]}]},
+    ]
+    body = ai_body(msgs, context=case["context"], kind="chat")
+    req = allowlist.parse_request(json.dumps(body, ensure_ascii=False).encode(), REGISTRY)
+    assert req.tool_names() == ["strike_scan", "propose_position"]
+
+
+def _bad(name, inp):
+    with pytest.raises(Bad) as e:
+        REGISTRY[name].input_shape.check(inp, "input")
+    return e.value.reason
+
+
+def test_propose_input_rejects_free_text_and_ranges():
+    """足は構造だけ（自由な文字列・知らないキー・範囲外は 400）"""
+    ok = {"target": "current", "changes": [{"action": "add", "type": "P", "expiry": "2026-11", "k": 60000,
+                                            "side": "buy"}]}
+    REGISTRY["propose_position"].input_shape.check(ok, "input")
+    assert _bad("propose_position", {**ok, "note": "買うべき"}) == "unknown_key"
+    assert _bad("propose_position", {"target": "current", "changes": [{"action": "add", "memo": "x"}]}) == "unknown_key"
+    assert _bad("propose_position", {"target": "elsewhere"}) == "enum"
+    assert _bad("propose_position", {"target": "current", "changes": [{"action": "remove", "leg_no": 21}]}) == "range"
+    assert _bad("propose_position", {"target": "current", "changes": []}) == "size"
+    assert _bad("strike_scan", {"type": "P", "side": "buy", "max_loss_floor_yen": 1}) == "range"
+    assert _bad("structure_candidates", {"structure": "butterfly"}) == "enum"

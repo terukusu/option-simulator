@@ -9,7 +9,7 @@
  *   （ui/view/aiNumbers.ts）。評価できない値（非有限）は null
  * - 単位はキーの名前（`*_yen` 円、`x`・`k`・`*_x` 原資産・行使価格、`*_pct` %、`*_pt` pt、`delta_*` 枚、`*days*` 日、
  *   `*ratio` 倍）
- * - 失敗は `{ error: '<列挙>' }`（no_legs・bad_input・out_of_range・unknown_tool・no_data）。中継へは tool_result の is_error
+ * - 失敗は `{ error: '<列挙>' }`（no_legs・bad_input・out_of_range・unknown_tool・no_data・not_on_board）。中継へは tool_result の is_error
  * - technicals（#200）は足が無くても使える（先物の足。ui/view/aiTechnicals.ts）。事前計算には入れない
  */
 
@@ -24,11 +24,15 @@ import {
   theoreticalPnl,
   ZERO_SCENARIO,
 } from '../../model';
+import { type ProposeDraft, proposePosition, strikeScan, structureCandidates } from './aiPropose';
+import { fin, greeksOf, legId, r1, r2, round, yen } from './aiRound';
 import { type TechnicalsData, technicalsTool } from './aiTechnicals';
 import { fmtNum } from './format';
 import { type MarginCalc, marginLine, marginNow, marginPoint, marginTail } from './margin';
 import { AMOUNT_UNIT_LABEL, fmtAmount, metricsModel } from './metrics';
 import { clampDays, type PnlBase, THOUSAND_YEN_FROM } from './pnlChart';
+
+export { legId, yen };
 
 export interface AiToolEnv {
   chain: Chain;
@@ -40,11 +44,13 @@ export interface AiToolEnv {
   holidays: Holidays;
   /** 先物の日足・1 時間足（technicals の道具だけ。#200。呼ばれたときだけフックが読んで入れる。無ければ no_data） */
   technicals?: TechnicalsData | null;
+  /** 提案のツール（#139。作業中のタブの足と、足の列の評価。aiEnvFromState が作る。無ければ no_data） */
+  draft?: ProposeDraft | null;
 }
 
 export type ToolResult = Record<string, unknown>;
 export type ToolError = {
-  error: 'no_legs' | 'bad_input' | 'out_of_range' | 'unknown_tool' | 'no_data';
+  error: 'no_legs' | 'bad_input' | 'out_of_range' | 'unknown_tool' | 'no_data' | 'not_on_board';
 };
 
 /** 道具の名前（名前の順。中継の tools.py と同じ集合） */
@@ -52,8 +58,11 @@ export const AI_TOOL_NAMES = [
   'evaluate_scenario',
   'margin_summary',
   'position_summary',
+  'propose_position',
   'scenario_grid',
   'smile_position',
+  'strike_scan',
+  'structure_candidates',
   'tail_table',
   'technicals',
 ] as const;
@@ -76,23 +85,13 @@ export const AI_TOOL_LABEL: Record<AiToolName, string> = {
   smile_position: 'スマイルと足の IV',
   evaluate_scenario: 'シナリオの評価',
   technicals: 'テクニカル（先物）',
+  strike_scan: '行使価格の探索',
+  structure_candidates: '組み合わせの候補',
+  propose_position: 'ポジションの提案',
 };
 
 export const isAiToolName = (v: unknown): v is AiToolName =>
   typeof v === 'string' && (AI_TOOL_NAMES as readonly string[]).includes(v);
-
-// ---- 丸め（−0 は 0。非有限は null）
-const fin = (v: number | null | undefined): v is number =>
-  typeof v === 'number' && Number.isFinite(v);
-const round = (v: number | null | undefined, d: number): number | null => {
-  if (!fin(v)) return null;
-  const f = 10 ** d;
-  return Math.round(v * f) / f || 0;
-};
-export const yen = (v: number | null | undefined) => round(v, 0);
-const r1 = (v: number | null | undefined) => round(v, 1);
-const r2 = (v: number | null | undefined) => round(v, 2);
-const r3 = (v: number | null | undefined) => round(v, 3);
 
 /** シナリオの格子の軸（tools.py の説明と同じ） */
 export const GRID_DX_PCT = [-10, -5, -3, 0, 3, 5, 10] as const;
@@ -104,36 +103,6 @@ export const EVAL_RANGE = {
   iv_shift_pt: [-10, 40],
   skew_pt: [-5, 5],
 } as const;
-
-/** 足の名札（限月・種別・行使価格・売買・枚数。tools.py の LEG_ID） */
-export function legId(p: PreparedLeg): Record<string, unknown> {
-  const l = p.leg;
-  if (l.kind === 'future') {
-    return { product: l.product, expiry: l.contract, side: l.side, qty: l.qty };
-  }
-  return {
-    product: 'op',
-    type: l.type === 'put' ? 'P' : 'C',
-    expiry: l.expiry,
-    k: l.strike,
-    side: l.side,
-    qty: l.qty,
-  };
-}
-
-const greeksOf = (g: {
-  deltaLarge: number;
-  deltaMini: number;
-  gammaPer100: number;
-  thetaPerDay: number;
-  vegaPerPt: number;
-}) => ({
-  delta_large: r2(g.deltaLarge),
-  delta_mini: r2(g.deltaMini),
-  gamma_per100: r3(g.gammaPer100),
-  theta_yen_per_day: yen(g.thetaPerDay),
-  vega_yen_per_pt: yen(g.vegaPerPt),
-});
 
 const ivPctOf = (p: PreparedLeg) => (p.option ? r1(p.option.anchor * 100) : null);
 
@@ -154,6 +123,7 @@ function positionSummary(env: AiToolEnv, base: PnlBase): ToolResult {
     legs: legs.map((p, i) => {
       const d = now.legs[i]?.display;
       return {
+        leg_no: i + 1,
         ...legId(p),
         entry_yen: round(p.leg.entry, 1) ?? 0,
         iv_pct: ivPctOf(p),
@@ -419,6 +389,10 @@ export function runTool(
   if (!isAiToolName(name)) return { error: 'unknown_tool' };
   if (name === 'smile_position') return smilePosition(env);
   if (name === 'technicals') return technicalsTool(env.technicals ?? null, input);
+  // 提案のツール（#139）は足が無くても使える（新しいタブの候補・丸ごとの提案）
+  if (name === 'strike_scan') return strikeScan(env, input);
+  if (name === 'structure_candidates') return structureCandidates(env, input);
+  if (name === 'propose_position') return proposePosition(env, input);
   const base = env.base;
   if (!base || base.legs.length === 0) return { error: 'no_legs' };
   switch (name) {
@@ -489,6 +463,27 @@ const pctText = (v: unknown, signed = true) => {
   return signed && n > 0 ? `+${s}` : s;
 };
 
+/** 提案のツールの失敗の理由（カードの 1 行） */
+export const PROPOSE_ERROR_TEXT: Record<string, string> = {
+  not_on_board: '板に無い限月・行使価格',
+  bad_input: '足の指定の形が違う',
+  no_legs: '足がありません',
+  no_data: '板・足を読めない',
+  tool_limit: '計算の回数の上限',
+};
+
+/** 組み合わせの型の表示 */
+export const STRUCTURE_LABEL: Record<string, string> = {
+  short_put: 'put 売り',
+  short_call: 'call 売り',
+  short_strangle: 'ストラングル売り',
+  short_straddle: 'ストラドル売り',
+  iron_condor: 'アイアンコンドル',
+  bull_put: 'ブル put スプレッド',
+  bear_call: 'ベア call スプレッド',
+  put_ratio: 'put のレシオ（1 買 2 売）',
+};
+
 export interface ToolCard {
   title: string;
   /** 入力の要約（evaluate_scenario だけ） */
@@ -509,7 +504,11 @@ export function toolCard(
   const r = obj(result);
   if (isError || result === null) {
     const code = typeof r.error === 'string' ? r.error : '—';
-    return { title, input: null, lines: [`計算できなかった（${code}）`], applicable: false };
+    const head = name === 'propose_position' ? '提案を作れなかった' : '計算できなかった';
+    const propose =
+      name === 'propose_position' || name === 'strike_scan' || name === 'structure_candidates';
+    const why = propose ? (PROPOSE_ERROR_TEXT[code] ?? code) : code;
+    return { title, input: null, lines: [`${head}（${why}）`], applicable: false };
   }
   switch (name) {
     case 'evaluate_scenario': {
@@ -571,6 +570,36 @@ export function toolCard(
           const so = obj(f.stoch);
           if (num(so.stoch_k) !== null) parts.push(`SO %K ${fmtNum(num(so.stoch_k), 1)}`);
           return `${tfText[String(f.tf)] ?? '—'}: ${parts.join(' · ') || '—'}`;
+        }),
+        applicable: false,
+      };
+    }
+    case 'strike_scan': {
+      const rows = Array.isArray(r.rows) ? r.rows.length : 0;
+      const best = num(r.best_k);
+      const floor = num(r.max_loss_floor_yen);
+      return {
+        title,
+        input: `${String(r.expiry ?? '')} ${String(r.type ?? '')} ${r.side === 'sell' ? '売' : '買'} ×${fmtNum(num(r.qty))}${floor === null ? '' : ` · 最大損失 ${cardYen(floor)} まで`}`,
+        lines: [
+          `${fmtNum(num(r.n_scanned))} 行を評価（${fmtNum(rows)} 行を AI に渡した）`,
+          ...(floor === null
+            ? []
+            : [best === null ? '下限を満たす行なし' : `下限を満たす最安 K ${fmtNum(best)}`]),
+        ],
+        applicable: false,
+      };
+    }
+    case 'structure_candidates': {
+      const cs = Array.isArray(r.candidates) ? r.candidates.map(obj) : [];
+      return {
+        title,
+        input: `${STRUCTURE_LABEL[String(r.structure)] ?? '—'} · ${String(r.expiry ?? '')}`,
+        lines: cs.map((c) => {
+          const sm = obj(c.summary);
+          const legs = Array.isArray(c.legs) ? c.legs.map(obj) : [];
+          const ks = legs.map((l) => `${l.type}${fmtNum(num(l.k))}`).join('/');
+          return `${String(c.id)}: ${ks} · 受払 ${cardYen(sm.premium_net_yen)} · 最大損失 ${sm.max_loss_unbounded === true ? '無限' : cardYen(sm.max_loss_yen)}`;
         }),
         applicable: false,
       };
