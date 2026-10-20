@@ -2434,6 +2434,50 @@ function futYTagOk(st) {
   return /^\d{1,3}(,\d{3})*$/.test(st.yTag) && Math.abs(num(st.yTag) - v) <= 1;
 }
 
+/**
+ * #200: 指標の段の検査。段 3 つ・4 時間が押されている・価格の描画域が 80px 以上・段の幅 = 描画域の幅・段が枠の中
+ * （下端が .panel-body の下端以内）・道具の行と凡例の行が切れない・段の線が 3 本以上ある
+ */
+async function indCheck(page, label) {
+  futStats.total++;
+  const r = await page.evaluate(() => {
+    const s = document.querySelector('section.smile');
+    const panes = [...(s?.querySelectorAll('.ind-pane') ?? [])];
+    const wrap = s?.querySelector('.iv-wrap');
+    const body = s?.querySelector('.panel-body');
+    const cut = (el) => (el ? el.scrollWidth > el.clientWidth + 1 : true);
+    const tf = s?.querySelector('.iv-tools button[aria-pressed="true"]')?.textContent ?? '';
+    const bodyBottom = body?.getBoundingClientRect().bottom ?? 0;
+    return {
+      panes: panes.length,
+      tf,
+      plotH: wrap?.clientHeight ?? 0,
+      wrapW: wrap?.clientWidth ?? 0,
+      paneW: panes.map((p) => Math.round(p.getBoundingClientRect().width)),
+      paneH: panes.map((p) => Math.round(p.getBoundingClientRect().height)),
+      inside: panes.every((p) => p.getBoundingClientRect().bottom <= bodyBottom + 1),
+      lines: s?.querySelectorAll('.ind-pane .ind-line[d^="M"]:not([d="M0 0"])').length ?? 0,
+      toolsCut: cut(s?.querySelector('.iv-tools')),
+      legendCut: cut(s?.querySelector('.iv-legend')),
+    };
+  });
+  const bad = [];
+  if (r.panes !== 3) bad.push(`段 ${r.panes}`);
+  if (r.tf !== '4時間') bad.push(`足「${r.tf}」`);
+  if (r.plotH < 80) bad.push(`描画域 ${r.plotH}px`);
+  if (!r.paneW.every((x) => Math.abs(x - r.wrapW) <= 1)) bad.push(`段の幅 ${r.paneW.join('/')}`);
+  if (!r.inside) bad.push('段が枠の外');
+  if (r.lines < 3) bad.push(`線 ${r.lines}`);
+  if (r.toolsCut) bad.push('道具の行が切れる');
+  if (r.legendCut) bad.push('凡例が切れる');
+  const ok = bad.length === 0;
+  if (ok) futStats.pass++;
+  else failed = true;
+  console.log(
+    `${label}: 段 ${r.panes}（高さ ${r.paneH.join('/')}px）・描画域 ${r.plotH}px ${ok ? 'pass' : `${bad.join('・')}  ← NG`}`,
+  );
+}
+
 /** 4 幅 × ダーク / ライトで先物推移を開いた状態（スマホはシート 3 段階）。線のモードも測る */
 async function futSweep() {
   for (const [w, h] of SIZES) {
@@ -2465,6 +2509,18 @@ async function futSweep() {
       await page.waitForTimeout(150);
       await report(page, `${tag} 線`, w, h, `${name}-line`);
       await ivCheck(page, `${tag} 線 ${w}x${h}`, { fut: true });
+      // #200: 4 時間足 + 指標の段 3 つ（凡例の行の切替）。スマホは覗く（最も狭い）と全開
+      await page.click('section.smile .iv-tools button:text-is("4時間")');
+      for (const t of ['RSI', 'MACD', 'SO']) {
+        await page.click(`section.smile .iv-legend .ind-toggles button:text-is("${t}")`);
+      }
+      for (const sheet of w <= PHONE_MAX ? ['peek', 'full'] : [null]) {
+        if (sheet) await openFut(page, w, sheet);
+        await page.waitForTimeout(200);
+        const lbl = `${tag} 4 時間・段 3 つ${sheet ? ` ${sheet}` : ''}`;
+        await report(page, lbl, w, h, `${name}-ind${sheet ? `-${sheet}` : ''}`);
+        await indCheck(page, `${lbl} ${w}x${h}`);
+      }
       await ctx.close();
     }
   }

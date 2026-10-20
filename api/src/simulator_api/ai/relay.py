@@ -80,6 +80,13 @@ delta_large / delta_mini は枚、days は日、*ratio は倍。null は「評�
 
 # 追加の質問
 - 質問に答える。数字が要れば道具を呼ぶ（1 回の質問で 4 回まで）。結論から書き、2〜6 行程度にする
+
+# テクニカル（technicals）
+- 先物の RSI・MACD・ストキャスティクスを聞かれたら technicals を呼ぶ。指標の値・状態は材料として書き、上がる / 下がるを\
+断定しない（例: RSI が 70 を超えても上げ続けることはある）
+- base_rates は過去に同じ状態だった後の値動きの分布で、予想ではない。書くときは件数 n を添え、insufficient が true\
+なら「サンプル不足」と書いて分布の値に頼らない。all（条件なし）と並べて差を言葉で比べる（差を計算しない）
+- 最新の足は確定前のことがある（last_bar_may_be_partial）。今の値・ゾーンを確定したものとして書かない
 """
 THINKING = {"type": "adaptive", "display": "summarized"}
 OUTPUT_CONFIG = {"effort": st.AI_EFFORT}

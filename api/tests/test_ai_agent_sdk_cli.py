@@ -124,7 +124,7 @@ def test_diagnose_roundtrip_through_real_cli(parent_creds):
     assert b["output_config"]["effort"] == "medium"
     # system: CLI が先頭に 2 block を足し、最後が我々の SYSTEM_PROMPT（バイト一致）
     assert b["system"][-1]["text"] == relay.SYSTEM_PROMPT and len(b["system"]) == 3
-    # 道具は我々の 6 本だけ（組み込みの道具は 0 本）
+    # 道具は我々の 7 本だけ（組み込みの道具は 0 本。#200 で technicals）
     assert sorted(t["name"] for t in b["tools"]) == sorted(agent_sdk.to_cli_name(n) for n in REGISTRY)
     # messages: role=system（CLI の環境）を除けば、最初の user（context + 診断の文）だけ
     assert strip(b["messages"]) == [{"role": "user", "content": [

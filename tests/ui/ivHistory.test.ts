@@ -45,22 +45,68 @@ const segOf = (list: string[], tf: Parameters<typeof lineSegments>[1]) =>
   lineSegments(barsAt(times(list)), tf, NTD);
 
 describe('足・形の一覧と足の共有', () => {
-  it('足は 1分 5分 15分 1時間 日足（aria-label に全文）、形はローソク / 線', () => {
+  it('足は 1分 5分 15分 1時間 4時間 日足（aria-label に全文）、形はローソク / 線', () => {
     expect(IV_TFS.map((t) => [t.value, t.text, t.label])).toEqual([
       ['1m', '1分', '1 分足'],
       ['5m', '5分', '5 分足'],
       ['15m', '15分', '15 分足'],
       ['1h', '1時間', '1 時間足'],
+      ['4h', '4時間', '4 時間足（立会に合わせる）'],
       ['1d', '日足', '日足'],
     ]);
     expect(IV_MODES.map((m) => m.value)).toEqual(['candle', 'line']);
-    expect(['1m', '5m', '15m', '1h', '1d'].map((t) => ivSource(t as never))).toEqual([
+    expect(['1m', '5m', '15m', '1h', '4h', '1d'].map((t) => ivSource(t as never))).toEqual([
       '1m',
       '1m',
       '1m',
       '1h',
+      '1h',
       '1d',
     ]);
+  });
+});
+
+describe('#200: 4 時間足（1 時間足を立会に合わせて束ねる）', () => {
+  // 2026-11-04（水）の日中 8 本・夜間 13 本の 1 時間足
+  const day = [8, 9, 10, 11, 12, 13, 14, 15].map(
+    (h) => `2026-11-04T${String(h).padStart(2, '0')}:00`,
+  );
+  const night = [
+    ...[17, 18, 19, 20, 21, 22, 23].map((h) => `2026-11-04T${h}:00`),
+    ...[0, 1, 2, 3, 4, 5].map((h) => `2026-11-05T0${h}:00`),
+  ];
+  it('1 取引日 = 08・12・17・21・01 時の 5 本（追加の読み込みなし = 1h の読み込みを使う）', () => {
+    const out = barsForTf(barsAt(times([...day, ...night])), '4h');
+    expect(out.map((b) => b.t)).toEqual(
+      times([
+        '2026-11-04T08:00',
+        '2026-11-04T12:00',
+        '2026-11-04T17:00',
+        '2026-11-04T21:00',
+        '2026-11-05T01:00',
+      ]),
+    );
+    expect(IV_TF_SECONDS['4h']).toBe(4 * H);
+    expect(IV_INITIAL_BARS['4h']).toBe(120);
+  });
+  it('欠け: 日中の後半の足が無い・週末は切らない、夜間の始まりの足が無ければ切る', () => {
+    const t4 = (list: string[]) => barsForTf(barsAt(times(list)), '4h');
+    // 立会がつながっている（翌日の 08:00 へ）
+    expect(lineSegments(t4([...day, ...night, '2026-11-05T08:00']), '4h', NTD)).toEqual([[0, 5]]);
+    // 12:00〜15:45 の足が無い（08:00 の次が 17:00）→ 3 時間 45 分 ≥ 2 時間で切る
+    expect(lineSegments(t4(['2026-11-04T08:00', '2026-11-04T17:00']), '4h', NTD)).toEqual([
+      [0, 0],
+      [1, 1],
+    ]);
+    // 金曜の夜間の最後（01:00）→ 月曜の 08:00 は切らない
+    expect(lineSegments(t4(['2026-11-07T01:00', '2026-11-09T08:00']), '4h', NTD)).toEqual([[0, 1]]);
+  });
+  it('「今」の印は同じ 4 時間足なら最後の足、次の区切りなら右', () => {
+    const bars = barsForTf(barsAt(times(day)), '4h');
+    const at = (s: string) =>
+      ivNowPoint({ t: jst(s), iv: 20, method: 'interp' }, bars, '4h', null, NTD);
+    expect(at('2026-11-04T15:30')?.index).toBe(1);
+    expect(at('2026-11-04T17:10')?.index).toBe(2);
   });
 });
 
@@ -383,7 +429,14 @@ describe('ivChartModel（描画の座標）', () => {
   });
 
   it('足の長さの表（秒）', () => {
-    expect(IV_TF_SECONDS).toEqual({ '1m': 60, '5m': 300, '15m': 900, '1h': 3600, '1d': 86400 });
+    expect(IV_TF_SECONDS).toEqual({
+      '1m': 60,
+      '5m': 300,
+      '15m': 900,
+      '1h': 3600,
+      '4h': 14400,
+      '1d': 86400,
+    });
   });
 });
 

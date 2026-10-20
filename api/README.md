@@ -237,3 +237,4 @@ AI_EVAL_RELAY_LOG=fixtures/local/ai_eval/relay.log npm run ai:eval
 - 費用の上限: 累計の台帳 `fixtures/local/ai_eval/ledger.json`（gitignore）で `AI_EVAL_LIMIT_USD`（既定 6.5）を超える前に止める。数える資格情報は今日の残りの差、数えない資格情報（`oauth_token`）は 0。`AI_CREDENTIAL=fake` は配線の確かめ用で台帳に入れない
 - 出力: 標準出力に要約（各組の弱点の数・各弱点の一致の数・不一致の一覧・`stop_reason`・最初の文字と完了の秒・費用）と、`AI_EVAL_RELAY_LOG` があれば `ai_request` のトークン量・概算費用・`dropped_blocks`・`first_text_ms` の中央値。返答の全文は `fixtures/local/ai_eval/<時刻>/` にだけ書く（コミットしない）
 - 合格: 全組で弱点 3 つ以上・各弱点に照合が一致した数字 1 つ以上・不一致 0（終了コード 0）
+- テクニカルの質問 3 件（#200。`--tech-only` で これだけ）: 合成の先物の足（`scripts/synthFutBars.ts`）を道具の環境に入れ、`technicals` を呼ぶ・不一致 0・方向の断定の言い回し（`DIRECTION_RE`）なしで合格。全文を目でも読む

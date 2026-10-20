@@ -2,6 +2,7 @@ import type { ComponentChildren } from 'preact';
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'preact/hooks';
 import { defaultName } from '../book';
 import type { Domain } from '../chart/scale';
+import { loadTechnicalsData } from '../components/technicalsData';
 import {
   type Boot,
   DEV_FIXTURES,
@@ -23,6 +24,7 @@ import { closedTabText, restoreTabError, type ShareResult, shareResultView } fro
 import { fmtNum } from '../view/format';
 import { futNowValue } from '../view/futHistory';
 import { keptBoardNote } from '../view/header';
+import { type IndKind, toggleInd } from '../view/indicators';
 import { ivNowValue } from '../view/ivHistory';
 import { PC_QUERY, PHONE_QUERY } from '../view/layout';
 import { marketPill } from '../view/marketPill';
@@ -113,6 +115,8 @@ import { useTheme } from './useTheme';
  * 送るときに今の state と端末の証拠金の設定から作る（aiEnvFromState）。口は API のときは /api/ai、dev の合成の板は
  * dev だけ /fixtures/ai（偽の SSE）。PC は作業台の列の入れ替え（ShellState.bench・トップバーの [AI]・キー 6）。
  */
+const NO_IND_KINDS: readonly IndKind[] = [];
+
 export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
   // 端末の設定（テーマ・証拠金。#131）は useAppController より先に（証拠金の項目を渡す）
   const userPrefs = usePrefs(prefs, boot.storage);
@@ -129,6 +133,9 @@ export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
       ? '/fixtures/future_bars'
       : '/api/future_bars';
   const fut = useFutureBars(futVisible(shell, tier), futEndpoint);
+  // 先物推移の指標の段（#200。既定はすべて隠す。保存しない = ローソク / 線と同じ）
+  const [indKinds, setIndKinds] = useState<readonly IndKind[]>(NO_IND_KINDS);
+  const onIndToggle = useCallback((k: IndKind) => setIndKinds((s) => toggleInd(s, k)), []);
   // IV 推移 ⇄ 先物の切替で足と見ていた時間の範囲を保つ（離れる側に読んだ足があるときだけ渡す）
   const shellRef = useRef(shell);
   shellRef.current = shell;
@@ -239,6 +246,8 @@ export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
   const marginRef = useRef(userPrefs.prefs.margin);
   marginRef.current = userPrefs.prefs.margin;
   const aiEnv = useCallback(() => aiEnvFromState(stateRef.current, marginRef.current), []);
+  // technicals の道具（#200）: 先物推移と同じ口から日足・1 時間足を読む（呼ばれたときだけ・10 分覚える）
+  const aiTech = useCallback(() => loadTechnicalsData(futEndpoint), [futEndpoint]);
   const aiApi = useRef<AiPanelApi | null>(null);
   const aiBase =
     import.meta.env.DEV && state.sourceLabel !== API_LABEL ? '/fixtures/ai' : '/api/ai';
@@ -662,6 +671,8 @@ export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
               onTf={fut.setTf}
               onMode={fut.setMode}
               onViewport={fut.setViewport}
+              indKinds={indKinds}
+              onIndToggle={onIndToggle}
             />
           ) : smileView(shell, tier) === 'iv' ? (
             <IvHistory
@@ -703,6 +714,7 @@ export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
             visible={aiVisible(shell, tier)}
             base={aiBase}
             env={aiEnv}
+            tech={aiTech}
             hasChain={chain !== null}
             legCount={c.pnlBase?.legs.length ?? 0}
             x0={c.positions?.ctx.x0 ?? Number.NaN}

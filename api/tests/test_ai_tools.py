@@ -19,7 +19,7 @@ PRECOMPUTED = ["margin_summary", "position_summary", "scenario_grid", "smile_pos
 
 def test_names_match_browser():
     assert SAMPLE["tools"] == sorted(REGISTRY)
-    assert sorted(REGISTRY) == sorted([*PRECOMPUTED, "evaluate_scenario"])
+    assert sorted(REGISTRY) == sorted([*PRECOMPUTED, "evaluate_scenario", "technicals"])
 
 
 def test_definitions_sorted_and_deterministic():
@@ -107,3 +107,58 @@ def test_sample_body_size_within_limits():
     for case in SAMPLE["cases"]:
         body = ai_body(context=case["context"], kind="diagnose")
         assert len(json.dumps(body, ensure_ascii=False).encode()) < st.AI_MAX_BODY_BYTES / 8
+
+
+def test_technicals_sample_passes_shapes():
+    """#200: technicals の見本（合成の先物の足）の入力・結果・失敗が tools.py の形を通り、1 往復の要求の本文になる"""
+    spec = REGISTRY["technicals"]
+    tech = SAMPLE["technicals"]
+    assert len(tech["results"]) >= 3
+    for e in tech["results"]:
+        spec.input_shape.check(e["input"], "input")
+        r = spec.result_shape.check(e["result"], "result")
+        for f in r["frames"]:
+            for b in f["base_rates"].values():
+                assert b["insufficient"] == (b["n"] < 20)
+            # 1 足あたりの大きさ（JSON の字数。1.5k トークン ≈ 3,750 字の目安より十分小さい）
+            assert len(allowlist.canonical(f)) < 3750
+    codes = [e["result"]["error"] for e in tech["errors"]]
+    assert codes == ["bad_input", "out_of_range", "no_data"]
+    for e in tech["errors"]:
+        allowlist.TOOL_ERROR.check(e["result"], "result")
+    first = tech["results"][0]
+    msgs = [
+        {"role": "user", "content": [{"type": "text", "text": "日足の RSI は？"}]},
+        {"role": "assistant", "content": [{"type": "tool_use", "id": "toolu_t", "name": "technicals",
+                                           "input": first["input"]}]},
+        {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "toolu_t", "content": [
+            {"type": "text", "text": json.dumps(first["result"], ensure_ascii=False)}]}]},
+    ]
+    body = ai_body(msgs, context=SAMPLE["cases"][0]["context"])
+    req = allowlist.parse_request(json.dumps(body, ensure_ascii=False).encode(), REGISTRY)
+    assert req.tool_names() == ["technicals"]
+
+
+def test_technicals_input_rejects():
+    spec = REGISTRY["technicals"].input_shape
+    spec.check({}, "input")
+    spec.check({"timeframes": ["weekly", "4h"], "indicators": ["stoch"], "horizon_bars": 20}, "input")
+    for bad, reason in [({"timeframes": ["1m"]}, "enum"), ({"timeframes": []}, "size"),
+                        ({"indicators": ["rsi", "macd", "stoch", "rsi"]}, "size"), ({"horizon_bars": 21}, "range"),
+                        ({"horizon_bars": 2.5}, "type"), ({"cmd": "x"}, "unknown_key")]:
+        with pytest.raises(Bad) as e:
+            spec.check(bad, "input")
+        assert e.value.reason == reason
+
+
+def test_technicals_result_rejects_raw_bars():
+    """生の足の列（o・h・l・c）や知らないキーは結果の形を通らない"""
+    r = copy.deepcopy(SAMPLE["technicals"]["results"][0]["result"])
+    r["frames"][0]["bars"] = [{"t": 1, "o": 1, "h": 1, "l": 1, "c": 1}]
+    with pytest.raises(Bad) as e:
+        REGISTRY["technicals"].result_shape.check(r, "r")
+    assert e.value.reason == "unknown_key"
+    r2 = copy.deepcopy(SAMPLE["technicals"]["results"][0]["result"])
+    r2["frames"][0]["rsi"]["recent"] = list(range(21))
+    with pytest.raises(Bad):
+        REGISTRY["technicals"].result_shape.check(r2, "r")

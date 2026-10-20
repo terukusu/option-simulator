@@ -7,6 +7,7 @@
  * - 流れの事象は状態の ref にすぐ入れ、描き直しは 1 フレームに 1 回（text の delta ごとに描かない）
  * - tool_use で止まったら道具を実行して tool_result を足し、次の要求（MAX_TOOL_ROUNDS まで）
  * - /api/ai/status は見えたとき（閉 → 開）と発言の後に読む（ポーリングしない）
+ * - technicals（#200）の tool_use があるときだけ、道具を実行する前に先物の足を読む（tech。読めなければ道具は no_data）
  * - 保存は sessionStorage の AI_SESSION_KEY だけ（タブを閉じたら消える）。読めない・書けないときは保存せずに続ける
  */
 
@@ -22,10 +23,12 @@ import {
   decodeAiChat,
   encodeAiChat,
   INITIAL_AI_CHAT,
+  pendingToolUses,
   requestOf,
   toolResultBlocks,
 } from '../view/aiChat';
 import { buildAiContext, contextKey } from '../view/aiContext';
+import type { TechnicalsData } from '../view/aiTechnicals';
 import { type AiToolEnv, runTool } from '../view/aiTools';
 
 /** sessionStorage（使えなければ null。プライベートブラウズ・設定で拒否） */
@@ -59,6 +62,7 @@ export function useAiChat(
   visible: boolean,
   base: string,
   env: () => AiToolEnv | null,
+  tech?: () => Promise<TechnicalsData>,
 ): AiChatController {
   const storage = useRef<Storage | null | undefined>(undefined);
   if (storage.current === undefined) storage.current = sessionStore();
@@ -73,6 +77,8 @@ export function useAiChat(
   const [status, setStatus] = useState<AiStatusView>(null);
   const envRef = useRef(env);
   envRef.current = env;
+  const techRef = useRef(tech);
+  techRef.current = tech;
   const baseRef = useRef(base);
   baseRef.current = base;
   const frame = useRef<number | null>(null);
@@ -152,11 +158,33 @@ export function useAiChat(
       } finally {
         if (abortRef.current === ac) abortRef.current = null;
       }
+      const s0 = stateRef.current as AiChatState;
+      if (!s0.turn?.awaitingTools) break;
+      let technicals: TechnicalsData | null = null;
+      const load = techRef.current;
+      if (load && pendingToolUses(s0).some((u) => u.name === 'technicals')) {
+        // 読んでいる間も [停止] が効くように、読み込みに中止の控えを割り当てる（#200 レビュー指摘 2）
+        const ac = new AbortController();
+        abortRef.current = ac;
+        try {
+          technicals = await load();
+        } catch {
+          technicals = null;
+        } finally {
+          if (abortRef.current === ac) abortRef.current = null;
+        }
+        if (ac.signal.aborted) {
+          // 中止: 道具の結果を送らない（新しい会話・別の turn に移っていれば何もしない）
+          if (stateRef.current === s0) apply({ type: 'fail', code: 'aborted' });
+          break;
+        }
+      }
+      // 読んでいる間に状態が変わった（新しい会話・別の turn）なら道具を返さない
       const s = stateRef.current as AiChatState;
-      if (!s.turn?.awaitingTools) break;
+      if (s !== s0) break;
       const e = envRef.current();
       const blocks = toolResultBlocks(s, (name, input) =>
-        e ? runTool(name, input, e) : { error: 'no_legs' },
+        e ? runTool(name, input, { ...e, technicals }) : { error: 'no_legs' },
       );
       apply({ type: 'toolResults', blocks });
     }

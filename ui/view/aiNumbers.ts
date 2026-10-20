@@ -185,6 +185,12 @@ const PER_UNIT_RE = /^\s?(あたり|当たり|につき)/;
 const NUMBERING_BEFORE = /(弱点|第|No\.?)\s?$/;
 /** 「Γ（… / 原資産 100 円）」のような単位の言い方（直前が / ） */
 const PER_BEFORE = /\/\s*(原資産\s*)?$/;
+/** 分位の名前（#200 technicals の p10・p90）: 「下位 10%」「上位 10%」「p90」と「10〜90% の幅」の 90% は値でなく名前 */
+const QUANTILE_BEFORE = /(下位|上位|[pP]|分位)\s*$/;
+const QUANTILE_RANGE = /(^|[^\d.])(5|10|25)\s*[〜~～]\s*$/;
+const QUANTILE_TOP = new Set(['75', '90', '95']);
+const QUANTILE_RANGE_AFTER = /^\s*[〜~～]\s*(75|90|95)\s*[%％]/;
+const QUANTILE_LOW = new Set(['5', '10', '25']);
 
 function matches(
   t: { value: number; decimals: number; unit: TokenUnit; signed: number },
@@ -260,6 +266,9 @@ export function checkNumbers(text: string, sources: readonly unknown[]): NumberC
       const before = n.slice(lineStart, start);
       if (NUMBERING_BEFORE.test(before)) reason = 'number';
       else if (PER_BEFORE.test(before)) reason = 'per_unit';
+      else if (QUANTILE_BEFORE.test(before)) reason = 'number';
+      else if (QUANTILE_TOP.has(numText) && QUANTILE_RANGE.test(before)) reason = 'number';
+      else if (QUANTILE_LOW.has(numText) && QUANTILE_RANGE_AFTER.test(rest)) reason = 'number';
       else if (/^\s*(#+\s*)?([-*]\s*)?$/.test(before) && /^[.)）:]/.test(rest)) reason = 'number';
     }
     const decimalPart = numText.split('.')[1];

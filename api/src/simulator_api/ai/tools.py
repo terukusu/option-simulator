@@ -15,7 +15,7 @@ api/tests/test_ai_tools.py がここの result_shape に通して確かめる（
 
 from dataclasses import dataclass
 
-from .shape import DATE, MONTH, Arr, Bool, Enum, Num, Obj, Spec
+from .shape import DATE, MONTH, Arr, Bool, Enum, Nullable, Num, Obj, Spec, Str
 
 
 @dataclass(frozen=True)
@@ -143,6 +143,61 @@ EVALUATE_SCENARIO = Obj({
 })
 
 
+# technicals（#200）: 先物の週足・日足・4 時間足のテクニカル指標（ui/view/aiTechnicals.ts）。生の足の列は返さない
+TECH_TFS = ("weekly", "daily", "4h")
+TECH_INDICATORS = ("rsi", "macd", "stoch")
+TECH_RECENT = 20
+INDEX = Num(0, 100, nullable=True)  # RSI・%K・%D（0〜100）
+COUNT = Num(0, 100_000, integer=True)
+ZONE = Enum(("high", "low", "mid", None))
+BARS_SINCE = Num(0, 100_000, integer=True, nullable=True)
+BASE_RATE = Obj({"n": COUNT, "median_pct": PCT, "p10_pct": PCT, "p90_pct": PCT, "insufficient": Bool(),
+                 "rolls_excluded": COUNT,
+                 "condition": Enum(("rsi_high", "rsi_low", "rsi_mid", "stoch_high", "stoch_low", "stoch_mid",
+                                    "macd_above_signal_above_zero", "macd_above_signal_below_zero",
+                                    "macd_below_signal_above_zero", "macd_below_signal_below_zero"))},
+                frozenset({"condition"}))
+TECH_FRAME = Obj({
+    "tf": Enum(TECH_TFS),
+    "n_bars": COUNT,
+    "last_t": Nullable(Str(r"\d{4}-\d{2}-\d{2}( \d{2}:\d{2})?", 16)),
+    "close_x": LEVEL,
+    "horizon_bars": Num(1, 20, integer=True),
+    "last_bar_may_be_partial": Bool(),
+    "rsi": Obj({"rsi": INDEX, "recent": Arr(INDEX, TECH_RECENT), "zone": ZONE, "bars_in_zone": COUNT}),
+    "macd": Obj({"macd_yen": YEN, "signal_yen": YEN, "hist_yen": YEN, "recent_hist_yen": Arr(YEN, TECH_RECENT),
+                 "above_signal": Nullable(Bool()), "bars_since_cross": BARS_SINCE,
+                 "above_zero": Nullable(Bool())}),
+    "stoch": Obj({"stoch_k": INDEX, "stoch_d": INDEX, "recent_k": Arr(INDEX, TECH_RECENT), "zone": ZONE,
+                  "bars_in_zone": COUNT, "k_above_d": Nullable(Bool()), "bars_since_cross": BARS_SINCE}),
+    "base_rates": Obj({"all": BASE_RATE, "rsi": BASE_RATE, "macd": BASE_RATE, "stoch": BASE_RATE},
+                      frozenset({"rsi", "macd", "stoch"})),
+}, frozenset({"rsi", "macd", "stoch"}))
+TECHNICALS = Obj({
+    "params": Obj({"rsi": Num(1, 100, integer=True), "macd": Arr(Num(1, 100, integer=True), 3, fixed=True),
+                   "stoch": Arr(Num(1, 100, integer=True), 3, fixed=True),
+                   "rsi_zones": Arr(INDEX, 2, fixed=True), "stoch_zones": Arr(INDEX, 2, fixed=True)}),
+    "frames": Arr(TECH_FRAME, len(TECH_TFS), min_len=1),
+})
+TECHNICALS_INPUT = Obj({
+    "timeframes": Arr(Enum(TECH_TFS), len(TECH_TFS), min_len=1),
+    "indicators": Arr(Enum(TECH_INDICATORS), len(TECH_INDICATORS), min_len=1),
+    "horizon_bars": Num(1, 20, integer=True),
+}, frozenset({"timeframes", "indicators", "horizon_bars"}))
+TECHNICALS_INPUT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "timeframes": {"type": "array", "items": {"enum": list(TECH_TFS)}, "minItems": 1, "maxItems": 3,
+                       "description": "足（省略 = 3 つ）"},
+        "indicators": {"type": "array", "items": {"enum": list(TECH_INDICATORS)}, "minItems": 1, "maxItems": 3,
+                       "description": "指標（stoch = スロー・ストキャスティクス。省略 = 3 つ）"},
+        "horizon_bars": {"type": "integer", "minimum": 1, "maximum": 20,
+                         "description": "基準率の何本先（省略 = 週足 4・日足 5・4 時間足 5）"},
+    },
+    "additionalProperties": False,
+}
+
+
 def _spec(name, description, result, input_shape=NO_INPUT, input_schema=None) -> ToolSpec:
     return ToolSpec(name=name, description=description, input_shape=input_shape, result_shape=result,
                     input_schema=NO_INPUT_SCHEMA if input_schema is None else input_schema)
@@ -176,6 +231,15 @@ REGISTRY: Registry = {t.name: t for t in (
           "原資産（dx_pct か x）・経過日数・IV の平行移動・"
           "スキューを指定すると、その点の損益（指定日と満期。円）・合計グリーク・足ごとの損益と IV を返す。"
           "<context> や他の道具に無い条件の数字が要るときに呼ぶ", EVALUATE_SCENARIO, EVAL_INPUT, EVAL_INPUT_SCHEMA),
+    _spec("technicals",
+          "日経225 先物（ラージ・期近）の週足・日足・4 時間足のテクニカル指標（画面の先物推移の段と同じ計算）。"
+          "RSI 14・MACD 12/26/9（円）・スロー・ストキャスティクス 14/3/3 の今の値・直近 20 本・"
+          "ゾーン（high / low / mid）と続いた本数・シグナル交差から何本目、"
+          "base_rates = 今と同じ状態だった過去の足の horizon_bars 本先の騰落率の分布"
+          "（件数 n・中央値・p10・p90 の %。all は条件なし）。insufficient は件数 20 未満。"
+          "足は期近のつなぎ足（調整なし）で限月交代の跳びが指標に入る。交代をまたぐ窓は基準率から除く（rolls_excluded）。"
+          "最新の足は確定前のことがあり（last_bar_may_be_partial）、今の値は確定値として扱わない", TECHNICALS,
+          TECHNICALS_INPUT, TECHNICALS_INPUT_SCHEMA),
 )}
 
 

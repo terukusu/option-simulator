@@ -1,6 +1,7 @@
 """AI の中継の許可リスト（#134 AC1。docs/ai-advisor.md 論点 1・6）。正常形 1 本から 1 か所ずつ壊す表駆動。
 
-登録（道具）は引数にして使う: テスト専用の 2 本（support.ai_registry）と、本物の REGISTRY（#135 の 6 本）。
+登録（道具）は引数にして使う: テスト専用の 2 本（support.ai_registry）と、本物の REGISTRY（#135 の 6 本 +
+#200 の technicals）。
 #135 AC4: 会話の途中の文脈の更新（context_update の block）は許可リストの形でだけ通り、送る本文では後ろに足される。
 """
 
