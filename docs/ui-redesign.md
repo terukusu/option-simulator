@@ -620,7 +620,7 @@ ATM IV の 30 日固定（optionchan の表 `atm_cm_iv` の `iv30`、%）の推�
 ### 2026-10-20 AI のポジションの提案のカード（#139）
 
 - §2.1 の AI の行に提案のカード。見た目は [シナリオに適用] のツールのカードと同じ枠（`.ai-tool`）に強調の枠線（`--accent`）、差分の行は印（＋ = `--gain`・− = `--loss`・±）+ 文（`.ai-prop-line`。折り返してよい説明文）、前 → 後の行（`.ai-prop-metric`）、ボタン 1 つ（`btn sm primary`、`data-ai="propose"`）。印は読み上げに「追加 / 削除 / 変更」
-- 反映はトースト（`kind: ai-propose`）。今のタブは [元に戻す] 付き 5 秒、新しいタブは keep（タブの切り替えで閉じない）。反映できないとき（提案の後に足・板が変わった・タブが上限）は知らせ（info）
+- 反映はトースト（`kind: ai-propose`）。今のタブは [元に戻す] 付き 5 秒、新しいタブは keep（タブの切り替えで閉じない）で、[元に戻す] は押したときのタブに戻って足したタブだけを閉じる（足したタブを編集していたら戻さず知らせ）。反映できないとき（提案の後に足・板が変わった・タブが上限）は知らせ（info）
 - 部品: `ui/view/aiPropose.ts`（新規。ツールと `proposalCard`・`proposalApply`）、`ui/next/regions/AiChat.tsx`、`ui/next/NextApp.tsx`（`onAiPropose`）、`css/ai.css`、`ui/state.ts`（`replaceLegs`）
 
 ### 2026-10-20 テクニカル指標の期間の設定（#205）

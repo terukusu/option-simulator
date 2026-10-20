@@ -593,7 +593,11 @@ export function toolCard(
           `${fmtNum(num(r.n_scanned))} 行を評価（${fmtNum(rows)} 行を AI に渡した）`,
           ...(floor === null
             ? []
-            : [best === null ? '下限を満たす行なし' : `下限を満たす中で最も有利な K ${fmtNum(best)}`]),
+            : [
+                best === null
+                  ? '下限を満たす行なし'
+                  : `下限を満たす中で最も有利な K ${fmtNum(best)}`,
+              ]),
         ],
         applicable: false,
       };

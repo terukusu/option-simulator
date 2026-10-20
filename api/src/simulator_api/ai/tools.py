@@ -418,7 +418,6 @@ REGISTRY: Registry = {t.name: t for t in (
           "ポジションの提案を画面のカードにする（#139）。target=current は今のタブへの差分（changes）、new_tab は"
           "新しいタブの足（legs か candidate）。行使価格は自分で決めない: 結果の値を写すか、k を省いて"
           " max_loss_floor_yen / abs_delta / candidate で simulator に板から選ばせる。"
-          "候補のツールと同じ返答で並べて呼んでよい（1 回の往復で済む）。"
           "画面が今の板で検査（板に無い限月・行使価格は error）し、差分（diff）と前 → 後の要約（満期の最大損失・"
           "必要証拠金・Δ・追証の水準など。before / after）を返す。利用者はカードのボタンで反映し、元に戻せる",
           PROPOSE_POSITION, PROPOSE_INPUT, PROPOSE_INPUT_SCHEMA),

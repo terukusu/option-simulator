@@ -1202,8 +1202,8 @@ F の推定・補間・ATM の判定はブラウザ（`model/`）。`sq_date`・
   - 数字の照合（`ui/view/aiNumbers.ts`）: 返答の数値トークン（符号・桁区切り・全角 + 単位 円・千円・万円・枚・pt・%・倍・日）を、文脈・道具の結果の値とキーの単位・丸めの規則で照合する。日付・限月・番号・数の言葉は数えない。画面は照合できない数字に点線の印、評価用スクリプト（`npm run ai:eval`）は不一致を数える
   - 会話の状態（`ui/view/aiChat.ts` の reducer・`ui/components/useAiChat.ts`）: sessionStorage の 1 キーだけ（論点 6）。失敗・中止・終端なしはその発言の履歴を戻して途中の文と理由を残す（[もう一度]）。上限（60 件・自由文 10 万字）の 8 割で新しい会話を促し、押せない理由（足 0 本・AI 無効・今日の残り 0・送信中）を出す。免責の文は端末で最初の 1 回だけ（端末の設定 `ai_disclaimer_seen`）
   - 終わり方（`data/aiStream.ts`）: `done` / `error` の無い終わりは `incomplete`、IAP のセッション切れ（リダイレクト・SSE でない 200）は `session_expired`、fetch の失敗は `network`。画面の文言を分ける
-  - ポジションの提案（#139）: ツール 3 本を足して計 10 本。候補は simulator が板の両気配の行から作り、AI に行使価格を自由に選ばせない（#120 柱 5）。`strike_scan`（今のポジション + 1 本の OP の足を行使価格ごとに評価。満期の最大損失の下限 `max_loss_floor_yen` を満たす中で受払が最も有利な `best_k`）、`structure_candidates`（型 8 種 × 短い足の |Δ| 0.10〜0.30 の候補を単体で評価）、`propose_position`（AI が足を **構造化した入力** で出す。今のタブへの差分 add / remove / set_qty / move_strike か、新しいタブの丸ごと）。`propose_position` は画面が今の板で検査し（板に無い限月・行使価格・範囲外の番号は `error`）、通ったときだけ提案のカード（差分の ＋ / − / ± と、前 → 後の満期の最大損失・必要証拠金・Δ（ラージ / ミニ）・追証の水準）と [今のタブに適用] / [新しいタブに入れる]。反映は押した時点の state から同じ純関数（`ui/view/aiPropose.ts` の `planProposal`）で作り直し、提案の後に作業中の足か選ばれる行使価格が変わっていたら反映しない。トーストの [元に戻す] で戻す（今のタブは reducer の `replaceLegs`、新しいタブは閉じる）。要約の満期の最大損失は無限なら `null` と `*_unbounded`（候補は ±10・20% の SQ 損益を添える）
-  - 往復 1 回で提案まで（#139）: `oauth_token`（Agent SDK）の経路では、tool_result の後の要求に CLI がツールを載せない（同梱の CLI 2.1.283 で、偽の Messages API に届いた本文の `tools` が空。#186 の作りの制約）。そのため `propose_position` は候補のツールと同じ返答で呼べるようにした: add の `k` を省いて `max_loss_floor_yen`（= `strike_scan` の `best_k`）か `abs_delta` を渡す、新しいタブは `candidate`（型・|Δ|）で simulator が板から選ぶ。system prompt は「候補のツールと propose_position を並べて呼び、結果を見た後にツールを呼び直さない」
+  - ポジションの提案（#139）: ツール 3 本を足して計 10 本。候補は simulator が板の両気配の行から作り、AI に行使価格を自由に選ばせない（#120 柱 5）。`strike_scan`（今のポジション + 1 本の OP の足を行使価格ごとに評価。満期の最大損失の下限 `max_loss_floor_yen` を満たす中で受払が最も有利な `best_k`）、`structure_candidates`（型 8 種 × 短い足の |Δ| 0.10〜0.30 の候補を単体で評価）、`propose_position`（AI が足を **構造化した入力** で出す。今のタブへの差分 add / remove / set_qty / move_strike か、新しいタブの丸ごと）。`propose_position` は画面が今の板で検査し（板に無い限月・行使価格・範囲外の番号は `error`）、通ったときだけ提案のカード（差分の ＋ / − / ± と、前 → 後の満期の最大損失・必要証拠金・Δ（ラージ / ミニ）・追証の水準）と [今のタブに適用] / [新しいタブに入れる]。反映は押した時点の state から同じ純関数（`ui/view/aiPropose.ts` の `planProposal`）で作り直し、提案の後に作業中の足か選ばれる行使価格が変わっていたら反映しない。トーストの [元に戻す] で戻す（今のタブは reducer の `replaceLegs`。新しいタブは押したときのタブに戻って足したタブだけを閉じ、横軸の表示範囲も戻す。足したタブの足を編集していたら戻さず知らせる = 編集を黙って捨てない。`newTabPlan`・`newTabUndoActions`）。要約の満期の最大損失は無限なら `null` と `*_unbounded`（候補は ±10・20% の SQ 損益を添える）
+  - 行使価格を simulator に選ばせる指定（#139）: `propose_position` の add は `k` を省いて `max_loss_floor_yen`（= `strike_scan` の `best_k`）か `abs_delta` を渡せ、新しいタブは `candidate`（型・|Δ|）で板から作れる。候補を見てから値を写す使い方と並んで、AI が行使価格を決めない（#120 柱 5）。反映は押した時点の板で選び直し、カードの足と違えば反映しない。（実装の途中では Agent SDK の経路で tool_result の後にツールが載らない不具合の回避に「往復 1 回」をプロンプトで求めたが、#209 の修正の後に外した）
 - 用語の根拠は画面の用語集のデータ `ui/view/glossary.ts`（#167。JSON に直せる形）を渡せる（渡すのは #137）
 
 ## 付録 A. データの根拠表（2026-10-13 の実測）
@@ -1269,11 +1269,11 @@ optionchan-gcp の bootstrap / prod を写すだけでは足りないもの。
 
 ### 2026-10-20 AI のポジションの提案（#139）
 
-- 14 章に「ポジションの提案」と「往復 1 回で提案まで」を足した。ツールは 10 本（`strike_scan`・`structure_candidates`・`propose_position`）。`position_summary` の足に `leg_no`。提案の失敗の `error` に `not_on_board`・`no_candidate`
-- system prompt: 「売買の推奨・勧誘はしない」を「断定的な推奨・勧誘はしない。組み方・ヘッジ・調整の案は頼まれたときに検討材料として出す」に改め、提案の節（行使価格は simulator に選ばせる・最大損失と追証の水準を必ず書く・error の案に触れない）と、値の範囲（「200〜300 円台」）を作らない規則を足した
+- 14 章に「ポジションの提案」と「行使価格を simulator に選ばせる指定」を足した。ツールは 10 本（`strike_scan`・`structure_candidates`・`propose_position`）。`position_summary` の足に `leg_no`。提案の失敗の `error` に `not_on_board`・`no_candidate`
+- system prompt: 「売買の推奨・勧誘はしない」を「断定的な推奨・勧誘はしない。組み方・ヘッジ・調整の案は頼まれたときに検討材料として出す」に改め、提案の節（行使価格は自分で決めず結果から写すか simulator に選ばせる・最大損失と追証の水準を必ず書く・error の案に触れない）と、値の範囲（「200〜300 円台」）を作らない規則を足した
 - 保存の形（localStorage・URL・sessionStorage の会話の版 1）は変えない。新しい action `replaceLegs`（保存しない）
 - 評価（合成の板・`oauth_token`）: `npm run ai:eval` の提案の 3 問（ボラ売りの候補・レシオに最大損失 −1,000 千円のヘッジ・調整）を含む 18 件が通り、照合の不一致 0
-- 懸念（別 Issue 候補）: Agent SDK の経路では tool_result の後にツールを呼べず、モデルが呼ぼうとすると CLI が 2 回目の turn を始めて `upstream_unavailable`（`unexpected_turn`）になる。提案はプロンプトで往復 1 回にしたが、2 往復目を要る質問は同じ失敗になりうる
+- Agent SDK の経路で tool_result の後にツールが載らない件は #209 で直った（この変更はその後に乗せた。プロンプトに往復の制限は入れない）。デプロイ前に開いた画面が送る `position_summary`（`leg_no` 無し）も中継で通す（`leg_no` は任意）
 
 ### 2026-10-20 Agent SDK 経由で tool_result の後もツールを載せる（#209）
 
