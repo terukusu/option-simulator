@@ -25,6 +25,13 @@ import {
   TECH_SETTINGS_NOTES,
   techField,
 } from '../view/settings';
+import {
+  DEFAULT_TECH_LINE_WIDTHS,
+  TECH_LINE_FIELDS,
+  TECH_LINE_PX_OPTIONS,
+  type TechLineWidths,
+  techLinePxOf,
+} from '../view/techLineWidth';
 import { Dialog } from './parts/Dialog';
 import { Seg } from './parts/Seg';
 import { YAxisFields } from './parts/YAxisFields';
@@ -53,11 +60,14 @@ export interface SettingsDialogProps {
   /** テクニカル指標の期間（端末の設定。先物推移の段と AI のツール technicals に同じ値。#205） */
   techParams: TechParams;
   onTechParams: (patch: Partial<TechParams>) => void;
+  /** テクニカルの線の太さ（px。端末の設定。EMA の 3 本と指標の段の線。#214） */
+  techLineWidths: TechLineWidths;
+  onTechLineWidths: (patch: Partial<TechLineWidths>) => void;
 }
 
 /**
  * 設定のダイアログ（#87 (C)。docs/ui-redesign.md §3・§11-9）: ATM の基準・金額の単位・手数料・損益グラフの縦軸・
- * 先物の basis・ΔX の単位・テーマ・証拠金（概算。#131）・テクニカル指標（#205）・前提（読み取り専用）。変えたらすぐ state / prefs に入る（[保存] なし）。
+ * 先物の basis・ΔX の単位・テーマ・証拠金（概算。#131）・テクニカル指標（#205。線の太さ = #214）・前提（読み取り専用）。変えたらすぐ state / prefs に入る（[保存] なし）。
  * 値と選べない理由は ui/view/settings.ts、縦軸の欄は舞台の ⋯ と同じ YAxisFields。開いている間だけ描く。
  */
 export function SettingsDialog(p: SettingsDialogProps) {
@@ -351,6 +361,7 @@ function SettingsBody(p: SettingsDialogProps) {
             class="btn sm"
             onClick={() => {
               p.onTechParams(TECH_RESET);
+              p.onTechLineWidths(DEFAULT_TECH_LINE_WIDTHS);
               setTechGen((g) => g + 1);
             }}
           >
@@ -364,6 +375,29 @@ function SettingsBody(p: SettingsDialogProps) {
             onTechParams={p.onTechParams}
             key={`${f.key}-${techGen}`}
           />
+        ))}
+        {TECH_LINE_FIELDS.map((f) => (
+          <div class="set-line" key={f.key}>
+            <label class="set-k" for={`set-tech-lw-${f.key}`}>
+              {f.label}
+            </label>
+            <select
+              id={`set-tech-lw-${f.key}`}
+              class="set-input"
+              aria-label={f.aria}
+              value={String(p.techLineWidths[f.key])}
+              onChange={(e) => {
+                const px = techLinePxOf(e.currentTarget.value);
+                if (px !== null) p.onTechLineWidths({ [f.key]: px });
+              }}
+            >
+              {TECH_LINE_PX_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.text}
+                </option>
+              ))}
+            </select>
+          </div>
         ))}
         {TECH_SETTINGS_NOTES.map((t) => (
           <p class="set-note" key={t}>

@@ -27,6 +27,10 @@
  * #207 で先物推移の指標の段の高さ（fut_pane_h_rsi・fut_pane_h_macd・fut_pane_h_stoch。整数 px・28〜2000）を足した。版は 1 の
  * まま。境目をドラッグしたときに描いている段の高さを書き、既定に戻すとキーを消す。無い・不正 → その段は既定（56px）。
  * 古い画面はこのキーを読まずに書き直すので消える（段の高さが既定に戻るだけ）。
+ * #214 でテクニカルの線の太さ（tech_ema_width_px・tech_pane_width_px。px = 1 / 1.25 / 1.5 / 2 / 3。既定と違う項目だけ書く）を
+ * 足した。版は 1 のまま。無い（#214 より前の保存）・不正 → 項目ごとに既定。px のキーが無く、作業中の版の段のキー
+ * tech_line_width（thin / normal / thick）があれば読み替える（細い → 1、普通 → 既定、太い → 2）。段のキーは書かない。
+ * 古い画面はこのキーを読まずに書き直すので消える（既定に戻るだけ）。
  */
 
 import {
@@ -39,6 +43,14 @@ import {
   type TechParams,
 } from '../model';
 import { IND_KINDS, type IndKind, type IndPaneHeights, isIndPaneH } from './view/indicators';
+import {
+  DEFAULT_TECH_LINE_WIDTHS,
+  isTechLinePx,
+  legacyStepWidths,
+  TECH_LINE_FIELDS,
+  type TechLineKey,
+  type TechLineWidths,
+} from './view/techLineWidth';
 
 export const PREFS_KEY = 'option-simulator.prefs';
 export const PREFS_SCHEMA_VERSION = 1;
@@ -120,6 +132,30 @@ export interface Prefs {
   aiDisclaimerSeen?: boolean;
   /** 先物推移の指標の段の高さ（#207。段ごと px。無い段・無い = 既定） */
   futPaneH?: IndPaneHeights;
+  /** テクニカルの線の太さ（#214。px。EMA の 3 本と指標の段の線。無い項目・無い = 既定） */
+  techLineWidths?: Partial<TechLineWidths>;
+}
+
+/** 線の太さの JSON のキー（#214。px） */
+const LINE_WIDTH_JSON_KEY: Record<TechLineKey, string> = {
+  ema: 'tech_ema_width_px',
+  pane: 'tech_pane_width_px',
+};
+/** 作業中の版の段のキー（thin / normal / thick。読むだけ） */
+const LEGACY_LINE_STEP_JSON_KEY = 'tech_line_width';
+
+/** 線の太さを読む（項目ごとに: 無い・不正 → 持たない = 既定。px のキーが 1 つも無ければ段のキーを読み替える）。既定だけなら null */
+function readLineWidths(o: Record<string, unknown>): Partial<TechLineWidths> | null {
+  const out: Partial<TechLineWidths> = {};
+  const hasPx = TECH_LINE_FIELDS.some(({ key }) => LINE_WIDTH_JSON_KEY[key] in o);
+  const src: Partial<Record<TechLineKey, unknown>> = hasPx
+    ? { ema: o[LINE_WIDTH_JSON_KEY.ema], pane: o[LINE_WIDTH_JSON_KEY.pane] }
+    : (legacyStepWidths(o[LEGACY_LINE_STEP_JSON_KEY]) ?? {});
+  for (const { key } of TECH_LINE_FIELDS) {
+    const v = src[key];
+    if (isTechLinePx(v) && v !== DEFAULT_TECH_LINE_WIDTHS[key]) out[key] = v;
+  }
+  return Object.keys(out).length > 0 ? out : null;
 }
 
 /** 段の高さの JSON のキー（#207） */
@@ -236,6 +272,9 @@ export function readPrefs(text: string | null): PrefsRead {
   if (o[AI_DISCLAIMER_JSON_KEY] === true) prefs.aiDisclaimerSeen = true;
   const paneH = readPaneH(o);
   if (paneH) prefs.futPaneH = paneH;
+  // 線の太さ（#214）: 無い・不正・既定 → 持たない = 既定
+  const lw = readLineWidths(o);
+  if (lw) prefs.techLineWidths = lw;
   return { prefs, writable: true };
 }
 
@@ -267,6 +306,14 @@ export function serializePrefs(p: Prefs): string {
     for (const { value: k } of IND_KINDS) {
       const v = ph[k];
       if (isIndPaneH(v)) out[PANE_H_JSON_KEY[k]] = v;
+    }
+  }
+  // 線の太さ（#214）は既定と違う項目だけ（不正な値は書かない = 既定）
+  const lw = p.techLineWidths;
+  if (lw) {
+    for (const { key } of TECH_LINE_FIELDS) {
+      const v = lw[key];
+      if (isTechLinePx(v) && v !== DEFAULT_TECH_LINE_WIDTHS[key]) out[LINE_WIDTH_JSON_KEY[key]] = v;
     }
   }
   return JSON.stringify(out);

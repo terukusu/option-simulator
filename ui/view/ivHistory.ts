@@ -599,10 +599,11 @@ export interface IvChartInput {
   overlays?: readonly IvOverlay[];
 }
 
-/** 重ねる線の入力（cls = CSS のクラス。色は CSS だけ） */
+/** 重ねる線の入力（cls = CSS のクラス。色は CSS だけ。width = 線の太さ px = SVG の stroke-width 属性。#214） */
 export interface IvOverlay {
   cls: string;
   values: readonly (number | null)[];
+  width?: number;
 }
 
 export interface IvChartModel {
@@ -626,7 +627,7 @@ export interface IvChartModel {
   /** シナリオの水準の横線の y（無ければ null） */
   scenarioY: number | null;
   /** 重ねる線の path（入力の overlays の順。見えている足 + 端の 1 本外だけ。値の無い足で切る。無ければ空文字） */
-  overlays: { cls: string; d: string }[];
+  overlays: { cls: string; d: string; width?: number }[];
 }
 
 /** [i0, i1] の足の安値〜高値（無ければ null） */
@@ -742,7 +743,7 @@ export function ivChartModel(p: IvChartInput): IvChartModel {
       d += `${pen ? 'L' : 'M'}${r1(x)} ${r1(sy(v))}`;
       pen = true;
     }
-    return { cls: o.cls, d };
+    return o.width === undefined ? { cls: o.cls, d } : { cls: o.cls, d, width: o.width };
   });
 
   const yVals = niceTicks(

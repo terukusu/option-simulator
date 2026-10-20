@@ -68,6 +68,8 @@ export interface IndicatorPanesProps {
   onPaneCommit: (shown: IndPaneHeights, border: number) => void;
   /** 境目のダブルタップ / ダブルクリック・Enter（既定の高さに戻す） */
   onPaneReset: () => void;
+  /** 段の線の太さ（CSS px。設定の線の太さ。#214。SVG の stroke-width 属性 + non-scaling-stroke。ヒストの棒には効かない） */
+  lineWidth: number;
 }
 
 function Pane({
@@ -75,11 +77,13 @@ function Pane({
   ro,
   cross,
   max,
+  lineWidth,
 }: {
   m: IndPaneModel;
   ro: IndReadout;
   cross: IndCross | null;
   max: boolean;
+  lineWidth: number;
 }) {
   const { width: w, height: h, range } = m;
   return (
@@ -109,7 +113,7 @@ function Pane({
       {m.histUp && <path class="ind-hist up" d={m.histUp} />}
       {m.histDown && <path class="ind-hist down" d={m.histDown} />}
       {m.lines.map((l) => (
-        <path key={l.cls} class={l.cls} d={l.d || 'M0 0'} />
+        <path key={l.cls} class={l.cls} d={l.d || 'M0 0'} stroke-width={lineWidth} />
       ))}
       {ro.cursorX !== null && (
         <line class="ind-cursor" x1={ro.cursorX} x2={ro.cursorX} y1={2} y2={h - 2} />
@@ -154,7 +158,7 @@ const SPLIT_KEY_PX = 8;
  * model/technicals.ts（AI のツール technicals と同じ計算）。価格の描画域（IvPlot）と同じ表示範囲・横の画素範囲。
  * #207: 段の高さは配置（futPaneLayout）の値を svg の height 属性で描く（style 属性なし）。段の前に境目（role="separator"）、
  * 段の枠に useChartGestures（パン・ピンチ・ホイール・キー・長押し / ホバーの十字線・ダブルタップで最大化）。
- * 色は CSS のクラスだけ。
+ * 色は CSS のクラスだけ。線の太さ（#214）は設定の値を stroke-width 属性で描く。
  */
 function IndicatorPanesView(p: IndicatorPanesProps) {
   const ref = useRef<HTMLDivElement>(null);
@@ -442,6 +446,7 @@ function IndicatorPanesView(p: IndicatorPanesProps) {
               ro={readouts[i] as IndReadout}
               cross={crosses[i] ?? null}
               max={layout.max !== null}
+              lineWidth={p.lineWidth}
             />
           </Fragment>
         );

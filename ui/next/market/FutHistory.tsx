@@ -37,6 +37,7 @@ import {
 } from '../../view/indicators';
 import { IV_MODES, IV_TFS, type IvMode, type IvTf, lineSegments } from '../../view/ivHistory';
 import { type IvLoadState, ivInProgress, ivLoadView } from '../../view/ivLoad';
+import type { TechLineWidths } from '../../view/techLineWidth';
 import { PanelHead } from '../PanelHead';
 import { Chip } from '../parts/Chip';
 import { Popover } from '../parts/Popover';
@@ -76,6 +77,8 @@ export interface FutHistoryProps {
   paneH: IndPaneHeights | undefined;
   /** 段の高さを書く（null = 既定に戻す） */
   onPaneH: (h: IndPaneHeights | null) => void;
+  /** テクニカルの線の太さ（#214。px。端末の設定。EMA の 3 本と段の線） */
+  lineWidths: TechLineWidths;
 }
 
 /** カーソル（足と、触っている所。pane = 'price' は価格の描画域、段の種類は段の上、null は縦線だけ） */
@@ -201,7 +204,10 @@ function FutHistoryView(p: FutHistoryProps) {
         : null,
     [showEma, bars, emaShort, emaMid, emaLong],
   );
-  const overlays = useMemo(() => (ema ? futEmaOverlays(ema) : undefined), [ema]);
+  // 線の太さ（#214）: EMA の 3 本は同じ太さ、段の線は段の太さ
+  const widths = p.lineWidths;
+  const emaW = widths.ema;
+  const overlays = useMemo(() => (ema ? futEmaOverlays(ema, emaW) : undefined), [ema, emaW]);
   const emaRo = ema ? futEmaReadout(ema, techParams, bars.length, cursor) : null;
   const rightLoaded = ivInProgress(entry);
   const ro = futReadout(bars, tf, cursor, rightLoaded);
@@ -320,6 +326,7 @@ function FutHistoryView(p: FutHistoryProps) {
               onPaneLive={setDragH}
               onPaneCommit={onPaneCommit}
               onPaneReset={onPaneReset}
+              lineWidth={widths.pane}
             />
           )}
         </div>

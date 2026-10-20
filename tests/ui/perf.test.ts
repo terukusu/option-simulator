@@ -1632,7 +1632,7 @@ describe('性能（#79 IV 推移の 1 フレーム）', () => {
 
   // #206: EMA の 3 本を重ねたパンの 1 フレーム（EMA は足の並び・期間ごとに 1 回 = パンでは作り直さない）
   it(`#206: 先物推移のパン + EMA の 3 本（1 分足 ${futs.length.toLocaleString('en-US')} 本）が ${BUDGET_MS} ms 以内`, () => {
-    const overlays = futEmaOverlays(emaSet(futs.map((b) => b.c)));
+    const overlays = futEmaOverlays(emaSet(futs.map((b) => b.c)), 1);
     let tick = 0;
     const frame = () => {
       tick = (tick + 1) % 40;
@@ -1653,7 +1653,7 @@ describe('性能（#79 IV 推移の 1 フレーム）', () => {
   // 指標・EMA は作り直さない。DOM 側は requestAnimationFrame で 1 フレーム 1 回）
   it(`#207: 先物推移の境目のドラッグ（1 分足 ${futs.length.toLocaleString('en-US')} 本・段 3 つ・EMA）が ${BUDGET_MS} ms 以内`, () => {
     const ind = indicators(futs);
-    const overlays = futEmaOverlays(emaSet(futs.map((b) => b.c)));
+    const overlays = futEmaOverlays(emaSet(futs.map((b) => b.c)), 1);
     const kinds = ['rsi', 'macd', 'stoch'] as const;
     const stackH = 700;
     const start = futPaneLayout({ stackH, kinds, max: null });
