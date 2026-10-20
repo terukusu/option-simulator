@@ -24,6 +24,9 @@
  * #206 で EMA の 3 本の期間（tech_ema_short・tech_ema_mid・tech_ema_long）を足した。版は 1 のまま。同じ規則（既定と違う
  * 項目だけ書く、無い・不正 → 項目ごとに既定）で、短期 < 中期 < 長期でなければ EMA の 3 つを既定。#206 より前の保存
  * （キーが無い）は EMA が既定（5・25・75）。
+ * #207 で先物推移の指標の段の高さ（fut_pane_h_rsi・fut_pane_h_macd・fut_pane_h_stoch。整数 px・28〜2000）を足した。版は 1 の
+ * まま。境目をドラッグしたときに描いている段の高さを書き、既定に戻すとキーを消す。無い・不正 → その段は既定（56px）。
+ * 古い画面はこのキーを読まずに書き直すので消える（段の高さが既定に戻るだけ）。
  */
 
 import {
@@ -35,6 +38,7 @@ import {
   type TechParamKey,
   type TechParams,
 } from '../model';
+import { IND_KINDS, type IndKind, type IndPaneHeights, isIndPaneH } from './view/indicators';
 
 export const PREFS_KEY = 'option-simulator.prefs';
 export const PREFS_SCHEMA_VERSION = 1;
@@ -114,6 +118,29 @@ export interface Prefs {
   technicals?: TechParams;
   /** AI のパネルの免責の文を閉じた（端末で 1 回だけ出す。#135。無い = false） */
   aiDisclaimerSeen?: boolean;
+  /** 先物推移の指標の段の高さ（#207。段ごと px。無い段・無い = 既定） */
+  futPaneH?: IndPaneHeights;
+}
+
+/** 段の高さの JSON のキー（#207） */
+const PANE_H_JSON_KEY: Record<IndKind, string> = {
+  rsi: 'fut_pane_h_rsi',
+  macd: 'fut_pane_h_macd',
+  stoch: 'fut_pane_h_stoch',
+};
+
+/** 段の高さを読む（段ごとに: 無い・不正 → 持たない = 既定）。1 つも無ければ null */
+function readPaneH(o: Record<string, unknown>): IndPaneHeights | null {
+  const out: IndPaneHeights = {};
+  let any = false;
+  for (const { value: k } of IND_KINDS) {
+    const v = o[PANE_H_JSON_KEY[k]];
+    if (isIndPaneH(v)) {
+      out[k] = v;
+      any = true;
+    }
+  }
+  return any ? out : null;
 }
 
 /** AI の免責の文を見たかの JSON のキー（#135） */
@@ -207,6 +234,8 @@ export function readPrefs(text: string | null): PrefsRead {
   // テクニカルの期間（#205）: キーが 1 つも無い（#205 より前の保存・既定のまま）→ 持たない = 既定
   if (TECH_PARAM_KEYS.some((k) => TECH_JSON_KEY[k] in o)) prefs.technicals = readTechParams(o);
   if (o[AI_DISCLAIMER_JSON_KEY] === true) prefs.aiDisclaimerSeen = true;
+  const paneH = readPaneH(o);
+  if (paneH) prefs.futPaneH = paneH;
   return { prefs, writable: true };
 }
 
@@ -230,6 +259,14 @@ export function serializePrefs(p: Prefs): string {
   if (isTechParams(t)) {
     for (const key of TECH_PARAM_KEYS) {
       if (t[key] !== DEFAULT_TECH_PARAMS[key]) out[TECH_JSON_KEY[key]] = t[key];
+    }
+  }
+  // 段の高さ（#207）は覚えた段だけ（不正な値は書かない = 既定）
+  const ph = p.futPaneH;
+  if (ph) {
+    for (const { value: k } of IND_KINDS) {
+      const v = ph[k];
+      if (isIndPaneH(v)) out[PANE_H_JSON_KEY[k]] = v;
     }
   }
   return JSON.stringify(out);

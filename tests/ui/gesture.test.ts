@@ -355,3 +355,50 @@ describe('ジェスチャー: 長押しでシナリオ点をつかむ（#52）',
     expect(scrubPlay([['down', 1, 500, 0]], null).state.mode).toBe('pending');
   });
 });
+
+/**
+ * #207: 先物推移の指標の段も同じ状態機械（ctx.scrub = { linePx: null }）。長押し 450ms → 十字線（scrub）、長押しの前に
+ * 6px 以上動いたらパン（その後の長押しのタイマーは何もしない）、ダブルタップ = reset（段では useChartGestures が
+ * onDouble = 最大化に渡す）。損益グラフ・価格の描画域と同じ決まり
+ */
+describe('#207 指標の段（scrub の縦線なし）', () => {
+  const v0: Domain = [50_000, 70_000];
+  const pane: GestureCtx = { viewport: v0, range, full, minWidth: 250, scrub: { linePx: null } };
+  it('6px 未満のまま 450ms で scrub（押した位置）、move で位置、表示範囲は変えない', () => {
+    let s = gestureDown(initialGesture(), { id: 1, x: 400, y: 30, t: 0 }, pane).state;
+    s = gestureMove(s, { id: 1, x: 403, y: 31, t: 100 }, pane).state;
+    const lp = gestureLongPress(s, LONG_PRESS_MS, pane);
+    expect(lp.state.mode).toBe('scrub');
+    expect(lp.scrub).toEqual({ x: 403 });
+    const mv = gestureMove(lp.state, { id: 1, x: 500, y: 60, t: 600 }, pane);
+    expect(mv.scrub).toEqual({ x: 500 });
+    expect(mv.viewport).toBeUndefined();
+    const up = gestureUp(mv.state, { id: 1, x: 500, y: 60, t: 700 }, pane);
+    expect(up.tap).toBeUndefined();
+    expect(up.reset).toBeUndefined();
+  });
+  it('長押しの前に 6px 動いたらパン（drag）。その後の長押しは何もしない', () => {
+    let s = gestureDown(initialGesture(), { id: 1, x: 400, y: 30, t: 0 }, pane).state;
+    const mv = gestureMove(s, { id: 1, x: 400 + TAP_MOVE_PX, y: 30, t: 100 }, pane);
+    expect(mv.state.mode).toBe('drag');
+    expect(mv.viewport).toBeDefined();
+    s = mv.state;
+    const lp = gestureLongPress(s, LONG_PRESS_MS, pane);
+    expect(lp.state.mode).toBe('drag');
+    expect(lp.scrub).toBeUndefined();
+  });
+  it('ダブルタップは reset（1 回目は tap = 十字線を外す）', () => {
+    let s = gestureDown(initialGesture(), { id: 1, x: 400, y: 30, t: 0 }, pane).state;
+    const t1 = gestureUp(s, { id: 1, x: 400, y: 30, t: 50 }, pane);
+    expect(t1.tap).toEqual({ x: 400, y: 30 });
+    s = gestureDown(t1.state, { id: 1, x: 402, y: 32, t: 150 }, pane).state;
+    const t2 = gestureUp(s, { id: 1, x: 402, y: 32, t: 200 }, pane);
+    expect(t2.reset).toBe(true);
+  });
+  it('2 本目の指はピンチ（scrub の前）', () => {
+    const s = gestureDown(initialGesture(), { id: 1, x: 300, y: 30, t: 0 }, pane).state;
+    const p2 = gestureDown(s, { id: 2, x: 600, y: 30, t: 50 }, pane);
+    expect(p2.state.mode).toBe('pinch');
+    expect(gestureLongPress(p2.state, LONG_PRESS_MS, pane).scrub).toBeUndefined();
+  });
+});
