@@ -20,7 +20,7 @@ PRECOMPUTED = ["margin_summary", "position_summary", "scenario_grid", "smile_pos
 def test_names_match_browser():
     assert SAMPLE["tools"] == sorted(REGISTRY)
     assert sorted(REGISTRY) == sorted([*PRECOMPUTED, "evaluate_scenario", "technicals", "strike_scan",
-                                       "structure_candidates", "propose_position"])
+                                       "structure_candidates", "propose_position", "iv_stats"])
 
 
 def test_definitions_sorted_and_deterministic():
@@ -284,3 +284,67 @@ def test_position_summary_without_leg_no_still_passes():
     for leg in old["legs"]:
         leg.pop("leg_no")
     REGISTRY["position_summary"].result_shape.check(old, "r")
+
+
+def test_iv_stats_sample_passes_shapes():
+    """#138・#158: iv_stats の見本（合成の日次の値）の入力・結果・失敗が tools.py の形を通り、1 往復の要求の
+    本文になる"""
+    spec = REGISTRY["iv_stats"]
+    ivs = SAMPLE["iv_stats"]
+    assert len(ivs["results"]) >= 4
+    sources = set()
+    for e in ivs["results"]:
+        spec.input_shape.check(e["input"], "input")
+        r = spec.result_shape.check(e["result"], "result")
+        sources.add(r["data"]["now_source"])
+        # 結果の大きさ（JSON の字数。technicals の 1 足の目安と同じ桁）
+        assert len(allowlist.canonical(r)) < 6000
+        for b in r.get("moves", {}).get("buckets", []):
+            assert b["insufficient"] == (b["n"] < 20)
+    assert sources == {"intraday", "daily_close"}
+    full = ivs["results"][0]["result"]
+    assert set(full) == {"data", "level", "spikes", "moves", "hv"}
+    codes = [e["result"]["error"] for e in ivs["errors"]]
+    assert codes == ["bad_input", "out_of_range", "no_data"]
+    for e in ivs["errors"]:
+        allowlist.TOOL_ERROR.check(e["result"], "result")
+    msgs = [
+        {"role": "user", "content": [{"type": "text", "text": "今の IV は過去のどの辺？"}]},
+        {"role": "assistant", "content": [{"type": "tool_use", "id": "toolu_i", "name": "iv_stats",
+                                           "input": ivs["results"][0]["input"]}]},
+        {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "toolu_i", "content": [
+            {"type": "text", "text": json.dumps(full, ensure_ascii=False)}]}]},
+    ]
+    body = ai_body(msgs, context=SAMPLE["cases"][0]["context"])
+    req = allowlist.parse_request(json.dumps(body, ensure_ascii=False).encode(), REGISTRY)
+    assert req.tool_names() == ["iv_stats"]
+
+
+def test_iv_stats_input_rejects():
+    spec = REGISTRY["iv_stats"].input_shape
+    spec.check({}, "input")
+    spec.check({"sections": ["level", "spikes", "moves", "hv"], "spike_rise_pct": 100}, "input")
+    for bad, reason in [({"sections": ["iv"]}, "enum"), ({"sections": []}, "size"),
+                        ({"sections": ["level"] * 5}, "size"), ({"spike_rise_pct": 9}, "range"),
+                        ({"spike_rise_pct": "30"}, "type"), ({"cmd": "x"}, "unknown_key")]:
+        with pytest.raises(Bad) as e:
+            spec.check(bad, "input")
+        assert e.value.reason == reason
+
+
+def test_iv_stats_result_rejects_raw_days():
+    """生の日次の列や知らないキー・長すぎる回の一覧は結果の形を通らない"""
+    spec = REGISTRY["iv_stats"].result_shape
+    r = copy.deepcopy(SAMPLE["iv_stats"]["results"][0]["result"])
+    r["data"]["days"] = [{"d": "2026-01-05", "iv": 20, "f1": 30000}]
+    with pytest.raises(Bad) as e:
+        spec.check(r, "r")
+    assert e.value.reason == "unknown_key"
+    r2 = copy.deepcopy(SAMPLE["iv_stats"]["results"][0]["result"])
+    r2["spikes"]["recent"] = r2["spikes"]["recent"][:1] * 9
+    with pytest.raises(Bad):
+        spec.check(r2, "r")
+    r3 = copy.deepcopy(SAMPLE["iv_stats"]["results"][0]["result"])
+    r3["data"]["now_at"] = "<script>"
+    with pytest.raises(Bad):
+        spec.check(r3, "r")

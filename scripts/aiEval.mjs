@@ -8,8 +8,9 @@
 // 環境変数（このスクリプトは読まない・出さない）。手順は api/README.md「AI の評価」。
 //
 //   npm run ai:eval                          10 通りの診断 + 追加の質問 2 件 + テクニカルの質問 4 件（#200）+ 提案の質問 3 件（#139）
-//                                            + 文書の質問 7 件（#137）+ [AI に聞く] 5 件（#136）
+//                                            + 文書の質問 7 件（#137）+ [AI に聞く] 5 件（#136）+ IV の統計の質問 3 件（#138・#158）
 //   npm run ai:eval -- --tech-only           テクニカルの質問 4 件だけ（#206 で EMA の質問を足した）
+//   npm run ai:eval -- --iv-only             IV の統計の質問 3 件だけ（#138・#158。iv_stats）
 //   npm run ai:eval -- --propose-only        ポジションの提案の質問 3 件だけ（#139）
 //   npm run ai:eval -- --docs-only           文書（マニュアル・設計書）の質問 7 件だけ（#137）
 //   npm run ai:eval -- --ask-only            数字・パネルから [AI に聞く] の 5 件だけ（#136。画面と同じ表示モデルから質問を作る）
@@ -74,11 +75,31 @@ export const DIRECTION_RE =
 /** 見立ての但し書き（強いトレンドでは過熱のまま続くことがある） */
 export const CAVEAT_RE =
   /(続けることが|続くことが|続きうる|続く場合|上がり続け|下がり続け|上げ続け|下げ続け|過熱のまま|過熱したまま)/;
+// IV の統計の質問（#138・#158）: 合成の日次の値（dev の /fixtures/atm_daily と同じ。架空の値）で iv_stats を呼ぶか・
+// 照合の不一致 0・IV の上げ下げを断定しないか（DIRECTION_RE）・聞いたことに触れるか（mentions）
+const IV_QUESTIONS = [
+  {
+    case: 'strangle_sell',
+    text: '今の IV は過去のどの辺？前に IV が跳ねたときは、どれくらいで萎んだ？',
+    mentions: /分位|%/,
+  },
+  {
+    case: 'put_sell',
+    text: '2 日で 5% くらい下げたとき、IV は過去どれくらい跳ねてきた？β の実測も教えて。',
+    mentions: /β/,
+  },
+  {
+    case: 'iron_condor',
+    text: '今の IV は実際の値動き（HV）に比べて高い？ボラ売りのタイミングとしてはどう？',
+    mentions: /HV/,
+  },
+];
 const techOnly = args.includes('--tech-only');
+const ivOnly = args.includes('--iv-only');
 const proposeOnly = args.includes('--propose-only');
 const docsOnly = args.includes('--docs-only');
 const askOnly = args.includes('--ask-only');
-const anyOnly = techOnly || proposeOnly || docsOnly || askOnly;
+const anyOnly = techOnly || proposeOnly || docsOnly || askOnly || ivOnly;
 
 // ポジションの提案の質問（#139）: 候補のツール → propose_position が呼ばれる・提案が板の検査を通る（error でない）・
 // カードの表示モデルができる・押した時点の反映の純関数で足が作れる・照合の不一致 0。floor があれば後の最大損失 ≥ floor
@@ -175,6 +196,7 @@ const toolsMod = await load('ui/view/aiTools.ts');
 const numMod = await load('ui/view/aiNumbers.ts');
 const stream = await load('data/aiStream.ts');
 const synthFut = await load('scripts/synthFutBars.ts');
+const toolsFixture = await load('scripts/aiToolsFixture.ts');
 const proposeMod = await load('ui/view/aiPropose.ts');
 const askMod = await load('ui/view/aiAsk.ts');
 const metricsMod = await load('ui/view/metrics.ts');
@@ -436,6 +458,46 @@ for (const q of anyOnly && !techOnly ? [] : TECH_QUESTIONS) {
   );
 }
 
+// ---- IV の統計（#138・#158）: 新しい会話で 1 問ずつ。ツールの環境に合成の日次の値と今の IV を入れる
+const ivData = toolsFixture.synthIvStatsData();
+for (const q of anyOnly && !ivOnly ? [] : IV_QUESTIONS) {
+  const c = cases.AI_EVAL_CASES.find((x) => x.name === q.case);
+  const env = {
+    ...ctxMod.aiEnvFromState(cases.caseState(latest, c), cases.caseMargin(c)),
+    ivStats: ivData,
+  };
+  const r = await turn(chatMod.INITIAL_AI_CHAT, env, 'chat', q.text);
+  const t = answerOf(r.chat);
+  const ck = numMod.checkNumbers(t, chatMod.numberSources(r.chat));
+  const uses = r.chat.messages
+    .flatMap((m) => (m.role === 'assistant' ? m.content : []))
+    .filter((b) => b.type === 'tool_use');
+  const tools = uses.map((b) => b.name);
+  const un = ck.tokens.filter((x) => x.status === 'unmatched').map((x) => x.raw);
+  const direction = t.match(DIRECTION_RE)?.[0] ?? null;
+  const mentioned = q.mentions.test(t);
+  const ok =
+    !r.run.error && tools.includes('iv_stats') && ck.unmatched === 0 && !direction && mentioned;
+  rows.push({
+    case: q.case,
+    kind: 'iv_stats',
+    rep: 0,
+    pass: ok,
+    tools,
+    inputs: uses.filter((u) => u.name === 'iv_stats').map((u) => u.input),
+    matchedTotal: ck.matched,
+    unmatched: un,
+    direction,
+    mentioned,
+    chars: t.length,
+    ...r.run,
+  });
+  writeFileSync(join(outDir, `iv-${q.case}.md`), `# IV の統計: ${q.text}\n\n${t}\n`);
+  console.log(
+    `${ok ? 'pass' : 'FAIL'}  IV の統計 ${q.case}: ツール ${tools.join(',') || 'なし'}・一致 ${ck.matched}・不一致 ${un.length}${un.length ? `［${un.join('、')}］` : ''}・断定 ${direction ?? 'なし'}・触れた ${mentioned ? 'あり' : 'なし'}・往復 ${r.run.requests}・${r.run.stop ?? r.run.error}・完了 ${(r.run.totalMs / 1000).toFixed(1)} 秒`,
+  );
+}
+
 // ---- ポジションの提案（#139）: 新しい会話で 1 問ずつ
 for (const q of anyOnly && !proposeOnly ? [] : PROPOSE_QUESTIONS) {
   const c = cases.AI_EVAL_CASES.find((x) => x.name === q.case);
@@ -689,6 +751,7 @@ if (relayLog) {
 const diag = rows.filter((r) => r.kind === 'diagnose');
 const fus = rows.filter((r) => r.kind === 'followup');
 const techs = rows.filter((r) => r.kind === 'technicals');
+const ivRows = rows.filter((r) => r.kind === 'iv_stats');
 const proposes = rows.filter((r) => r.kind === 'propose');
 const docRows = rows.filter((r) => r.kind === 'docs');
 const askRows = rows.filter((r) => r.kind === 'ask');
@@ -699,6 +762,7 @@ const summary = {
   diagnose: { pass: diag.filter((r) => r.pass).length, total: diag.length },
   followup: { pass: fus.filter((r) => r.pass).length, total: fus.length },
   technicals: { pass: techs.filter((r) => r.pass).length, total: techs.length },
+  iv_stats: { pass: ivRows.filter((r) => r.pass).length, total: ivRows.length },
   propose: { pass: proposes.filter((r) => r.pass).length, total: proposes.length },
   docs: { pass: docRows.filter((r) => r.pass).length, total: docRows.length },
   ask: { pass: askRows.filter((r) => r.pass).length, total: askRows.length },
@@ -717,6 +781,7 @@ const ok =
   summary.diagnose.pass === summary.diagnose.total &&
   summary.followup.pass === summary.followup.total &&
   summary.technicals.pass === summary.technicals.total &&
+  summary.iv_stats.pass === summary.iv_stats.total &&
   summary.propose.pass === summary.propose.total &&
   summary.docs.pass === summary.docs.total &&
   summary.ask.pass === summary.ask.total;

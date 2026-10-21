@@ -5,11 +5,16 @@
  * 名前の集合・結果の形・文脈の形を tools.py / allowlist.py に通す = 言語をまたぐ契約。値はすべて架空。
  */
 
+import { validateAtmDailyJson } from '../data/atmDaily';
+import { validateAtmIvJson } from '../data/atmIv';
 import type { ChainJson } from '../data/chainTypes';
+import { ivNowOf } from '../ui/components/ivStatsData';
 import { aiEnvFromState, buildAiContext } from '../ui/view/aiContext';
+import type { IvStatsData } from '../ui/view/aiIvStats';
 import { STRUCTURES } from '../ui/view/aiPropose';
 import { AI_TOOL_NAMES, runTool } from '../ui/view/aiTools';
 import { AI_EVAL_CASES, caseMargin, caseState } from './aiEvalCases';
+import { SYNTH_IV_NOW, synthAtmDaily, synthAtmIv } from './devFixtures.mjs';
 import { synthTechnicalsData } from './synthFutBars';
 
 export const AI_TOOLS_FIXTURE_CASES = ['put_sell', 'iron_condor', 'mini_future_put', 'calendar'];
@@ -33,6 +38,31 @@ const TECH_INPUTS: Record<string, unknown>[] = [
   { timeframes: ['weekly'], indicators: ['ema'] },
 ];
 const TECH_ERROR_INPUTS: Record<string, unknown>[] = [{ timeframes: ['1m'] }, { horizon_bars: 30 }];
+
+const IV_STATS_INPUTS: Record<string, unknown>[] = [
+  {},
+  { sections: ['spikes'], spike_rise_pct: 20 },
+  { sections: ['moves', 'hv'] },
+];
+const IV_STATS_ERROR_INPUTS: Record<string, unknown>[] = [
+  { sections: ['iv'] },
+  { spike_rise_pct: 5 },
+];
+
+/** iv_stats（#138・#158）の合成のデータ（dev の /fixtures/atm_daily と /fixtures/atm_iv の 1 時間足の右端。架空の値） */
+export function synthIvStatsData(withNow = true): IvStatsData {
+  const daily = validateAtmDailyJson(synthAtmDaily(SYNTH_IV_NOW));
+  if (!daily.ok) throw new Error('合成の日次の値が検証に通らない');
+  const iv = validateAtmIvJson(synthAtmIv('1h', null, SYNTH_IV_NOW), '1h');
+  if (!iv.ok) throw new Error('合成の IV 推移が検証に通らない');
+  return withNow
+    ? {
+        days: daily.value.days,
+        now: ivNowOf(iv.value),
+        hourly: iv.value.bars.map((b) => ({ t: b.t, c: b.c })),
+      }
+    : { days: daily.value.days, now: null };
+}
 
 function fail(): never {
   throw new Error('ツールの環境を作れない');
@@ -73,6 +103,29 @@ export function buildAiToolsFixture(latest: ChainJson): string {
         result: runTool('technicals', input, techEnv),
       })),
       { input: {}, result: runTool('technicals', {}, { ...techEnv, technicals: null }) },
+    ],
+  };
+  // iv_stats（#138・#158）: 合成の日次の値と今の IV（架空の値）
+  const ivEnv = { ...techEnv, ivStats: synthIvStatsData() };
+  const ivStats = {
+    results: [
+      ...IV_STATS_INPUTS.map((input) => ({ input, result: runTool('iv_stats', input, ivEnv) })),
+      // 今の IV が読めない（最後の日次の終値で代える）
+      {
+        input: { sections: ['level'] },
+        result: runTool(
+          'iv_stats',
+          { sections: ['level'] },
+          { ...ivEnv, ivStats: synthIvStatsData(false) },
+        ),
+      },
+    ],
+    errors: [
+      ...IV_STATS_ERROR_INPUTS.map((input) => ({
+        input,
+        result: runTool('iv_stats', input, ivEnv),
+      })),
+      { input: {}, result: runTool('iv_stats', {}, { ...ivEnv, ivStats: null }) },
     ],
   };
   // 提案のツール（#139）: レシオ（1 買 2 売）のヘッジの探索と差分、ストラングル売りの文脈の組み合わせの候補と丸ごと
@@ -193,5 +246,5 @@ export function buildAiToolsFixture(latest: ChainJson): string {
       result: runTool('propose_position', input, envOf(name)),
     })),
   };
-  return `${JSON.stringify({ schema_version: 1, tools: AI_TOOL_NAMES, cases, technicals, propose }, null, 1)}\n`;
+  return `${JSON.stringify({ schema_version: 1, tools: AI_TOOL_NAMES, cases, technicals, iv_stats: ivStats, propose }, null, 1)}\n`;
 }

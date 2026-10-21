@@ -326,7 +326,8 @@ def test_options_enable_only_listed_skills():
     fq = FakeQuery(turn_events(), tail=[result()])
     run(AgentSdkGateway(FAKE_TOKEN, query_fn=fq))
     o = fq.options
-    assert o.skills == list(skills.ENABLED) == ["simulator:technicals", "simulator:proposals"]
+    assert o.skills == list(skills.ENABLED) == ["simulator:technicals", "simulator:proposals",
+                                                "simulator:volatility"]
     assert o.plugins == [{"type": "local", "path": str(skills.PLUGIN_DIR)}]
     assert Path(o.plugins[0]["path"]).is_absolute() and (Path(o.plugins[0]["path"]) / ".claude-plugin").is_dir()
     # パッケージの中のディレクトリ（イメージでは site-packages の中 = 読むだけ）

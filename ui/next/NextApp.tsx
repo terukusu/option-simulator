@@ -2,6 +2,7 @@ import type { ComponentChildren } from 'preact';
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'preact/hooks';
 import { defaultName } from '../book';
 import type { Domain } from '../chart/scale';
+import { loadIvStatsData } from '../components/ivStatsData';
 import { loadTechnicalsData } from '../components/technicalsData';
 import {
   type Boot,
@@ -266,6 +267,11 @@ export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
   const aiTech = useCallback(
     () => loadTechnicalsData(futEndpoint).then((d) => ({ ...d, params: techRef.current })),
     [futEndpoint],
+  );
+  // iv_stats のツール（#138・#158）: 追証マップの日次の値と IV 推移の右端と同じ口から読む（呼ばれたときだけ・10 分覚える）
+  const aiIvStats = useCallback(
+    () => loadIvStatsData(dailyEndpoint, ivEndpoint),
+    [dailyEndpoint, ivEndpoint],
   );
   const aiApi = useRef<AiPanelApi | null>(null);
   const aiBase =
@@ -791,6 +797,7 @@ export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
             base={aiBase}
             env={aiEnv}
             tech={aiTech}
+            ivStats={aiIvStats}
             hasChain={chain !== null}
             legCount={c.pnlBase?.legs.length ?? 0}
             x0={c.positions?.ctx.x0 ?? Number.NaN}

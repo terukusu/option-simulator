@@ -13,6 +13,7 @@ import {
   precompute,
   runTool,
   scenarioOfResult,
+  toolCard,
 } from '../../ui/view/aiTools';
 import { marginNow, marginPoint, marginTail } from '../../ui/view/margin';
 import { metricsModel } from '../../ui/view/metrics';
@@ -160,6 +161,7 @@ describe('ツールの境界', () => {
     const legFree = [
       'smile_position',
       'technicals',
+      'iv_stats',
       'strike_scan',
       'structure_candidates',
       'propose_position',
@@ -173,6 +175,43 @@ describe('ツールの境界', () => {
     }
     // technicals（#200）は足に依らない（先物の足が無ければ no_data）
     expect(runTool('technicals', {}, e)).toEqual({ error: 'no_data' });
+    // iv_stats（#138・#158）も足に依らない（日次の値が無ければ no_data、あれば足 0 本でも結果）
+    expect(runTool('iv_stats', {}, e)).toEqual({ error: 'no_data' });
+    const days = [
+      {
+        d: '2026-10-13',
+        t: 1_760_335_200,
+        iv: 20,
+        f1: 30000,
+        l1: '2026-11-12',
+        f2: null,
+        l2: null,
+      },
+    ];
+    const iv = run({ ...e, ivStats: { days, now: null } }, 'iv_stats', { sections: ['level'] });
+    expect(iv.data.iv_now_pct).toBe(20);
+    // ツールのカード（今の IV と 1 年の分位、HV20 と IV − HV、スパイクの回数）
+    const card = toolCard(
+      'iv_stats',
+      {},
+      {
+        data: { iv_now_pct: 24.5, now_source: 'intraday' },
+        level: { windows: [{ window: '1y', percentile_pct: 88.2 }] },
+        hv: { windows: [{ days: 20, hv_pct: 15.7, iv_minus_hv_pt: 8.8 }] },
+        spikes: { n: 3 },
+      },
+      false,
+    );
+    expect(card.title).toBe('IV の統計（過去）');
+    expect(card.lines).toEqual([
+      'IV 24.5%（今） · 1 年の分位 88.2%',
+      'HV20 15.7% · IV − HV +8.8pt',
+      'スパイク 3 回',
+    ]);
+    expect(
+      toolCard('iv_stats', {}, { data: { iv_now_pct: 20, now_source: 'daily_close' } }, false)
+        .lines,
+    ).toEqual(['IV 20.0%（最後の確定日の終値）']);
     const sm = run(e, 'smile_position');
     expect(sm.expiries.length).toBe(2);
     expect(sm.legs).toEqual([]);
