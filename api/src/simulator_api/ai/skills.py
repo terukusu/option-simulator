@@ -1,7 +1,7 @@
 """AI の相談役のスキル（#221、docs/adr-0006-ai-agent-sdk-only-and-skills.md）。
 
-system prompt に常に載せなくてよい手順（テクニカルの読み方・ポジションの提案）を Agent Skills の SKILL.md に切り出し、
-モデルが要るときだけ CLI の Skill ツールで読む。置き場所はパッケージの中のプラグイン `plugin/`
+system prompt に常に載せなくてよい手順（テクニカルの読み方・ポジションの提案・IV の統計の読み方）を Agent Skills の
+SKILL.md に切り出し、モデルが要るときだけ CLI の Skill ツールで読む。置き場所はパッケージの中のプラグイン `plugin/`
 （`.claude-plugin/plugin.json` の name = PLUGIN_NAME、`skills/<名前>/SKILL.md`）。wheel に入るので、イメージの入力
 （Dockerfile・.dockerignore・image.sh）は変えない。イメージの中では読むだけ。
 
@@ -17,7 +17,7 @@ from pathlib import Path
 PLUGIN_NAME = "simulator"
 PLUGIN_DIR = Path(__file__).resolve().parent / "plugin"
 # 使うスキル（ディレクトリの名前）。足すときは plugin/skills/<名前>/SKILL.md と一緒にここへ
-NAMES = ("technicals", "proposals")
+NAMES = ("technicals", "proposals", "volatility")
 
 
 def qualified(name: str) -> str:

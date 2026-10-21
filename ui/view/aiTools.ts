@@ -11,6 +11,7 @@
  *   `*ratio` 倍）
  * - 失敗は `{ error: '<列挙>' }`（no_legs・bad_input・out_of_range・unknown_tool・no_data・not_on_board・no_candidate）。中継へは tool_result の is_error
  * - technicals（#200）は足が無くても使える（先物の足。ui/view/aiTechnicals.ts）。事前計算には入れない
+ * - iv_stats（#138・#158）も足が無くても使える（IV と原資産の日次の値。ui/view/aiIvStats.ts）。事前計算には入れない
  */
 
 import type { Chain } from '../../data';
@@ -24,6 +25,7 @@ import {
   theoreticalPnl,
   ZERO_SCENARIO,
 } from '../../model';
+import { type IvStatsData, ivStatsTool } from './aiIvStats';
 import { type ProposeDraft, proposePosition, strikeScan, structureCandidates } from './aiPropose';
 import { fin, greeksOf, legId, r1, r2, round, yen } from './aiRound';
 import { type TechnicalsData, technicalsTool } from './aiTechnicals';
@@ -44,6 +46,8 @@ export interface AiToolEnv {
   holidays: Holidays;
   /** 先物の日足・1 時間足（technicals のツールだけ。#200。呼ばれたときだけフックが読んで入れる。無ければ no_data） */
   technicals?: TechnicalsData | null;
+  /** iv_stats のツール（#138・#158。呼ばれたときだけフックが日次の値と今の IV を読んで入れる。無ければ no_data） */
+  ivStats?: IvStatsData | null;
   /** 提案のツール（#139。作業中のタブの足と、足の列の評価。aiEnvFromState が作る。無ければ no_data） */
   draft?: ProposeDraft | null;
 }
@@ -63,6 +67,7 @@ export type ToolError = {
 /** ツールの名前（名前の順。中継の tools.py と同じ集合） */
 export const AI_TOOL_NAMES = [
   'evaluate_scenario',
+  'iv_stats',
   'margin_summary',
   'position_summary',
   'propose_position',
@@ -92,6 +97,7 @@ export const AI_TOOL_LABEL: Record<AiToolName, string> = {
   smile_position: 'スマイルと足の IV',
   evaluate_scenario: 'シナリオの評価',
   technicals: 'テクニカル（先物）',
+  iv_stats: 'IV の統計（過去）',
   strike_scan: '行使価格の探索',
   structure_candidates: '組み合わせの候補',
   propose_position: 'ポジションの提案',
@@ -396,6 +402,7 @@ export function runTool(
   if (!isAiToolName(name)) return { error: 'unknown_tool' };
   if (name === 'smile_position') return smilePosition(env);
   if (name === 'technicals') return technicalsTool(env.technicals ?? null, input);
+  if (name === 'iv_stats') return ivStatsTool(env.ivStats ?? null, env.holidays, input);
   // 提案のツール（#139）は足が無くても使える（新しいタブの候補・丸ごとの提案）
   if (name === 'strike_scan') return strikeScan(env, input);
   if (name === 'structure_candidates') return structureCandidates(env, input);
@@ -581,6 +588,27 @@ export function toolCard(
         }),
         applicable: false,
       };
+    }
+    case 'iv_stats': {
+      const d = obj(r.data);
+      const lines: string[] = [];
+      const y1 = (Array.isArray(obj(r.level).windows) ? (obj(r.level).windows as unknown[]) : [])
+        .map(obj)
+        .find((w) => w.window === '1y');
+      const head = `IV ${fmtNum(num(d.iv_now_pct), 1)}%（${d.now_source === 'intraday' ? '今' : '前日の終値'}）`;
+      lines.push(y1 ? `${head} · 1 年の分位 ${fmtNum(num(y1.percentile_pct), 1)}%` : head);
+      const hv = obj(r.hv);
+      const hv20 = (Array.isArray(hv.windows) ? hv.windows : [])
+        .map(obj)
+        .find((w) => w.days === 20);
+      if (hv20) {
+        lines.push(
+          `HV20 ${fmtNum(num(hv20.hv_pct), 1)}% · IV − HV ${pctText(hv20.iv_minus_hv_pt)}pt`,
+        );
+      }
+      const sp = obj(r.spikes);
+      if (num(sp.n) !== null) lines.push(`スパイク ${fmtNum(num(sp.n))} 回`);
+      return { title, input: null, lines, applicable: false };
     }
     case 'strike_scan': {
       const rows = Array.isArray(r.rows) ? r.rows.length : 0;

@@ -438,6 +438,13 @@ export function synthAiReply(body) {
       const text = `${tf}の RSI は ${f.rsi?.rsi ?? '—'} です。過去に同じ状態だった後の ${f.horizon_bars ?? '—'} 本先は、中央値 ${pct(br.median_pct)}・下位 10% ${pct(br.p10_pct)}・上位 10% ${pct(br.p90_pct)}（件数 ${br.n ?? '—'}${br.insufficient ? '・サンプル不足' : ''}）で、予想ではなく材料です。`;
       return { thinking: 'ツールの結果を読む', text, stop: 'end_turn' };
     }
+    if (r?.data?.iv_now_pct !== undefined) {
+      // iv_stats（#138・#158）の結果: 今の IV と 1 年の分位、半分戻しの日数の中央値だけを引く（架空の値）
+      const y1 = (r.level?.windows ?? []).find((w) => w?.window === '1y') ?? {};
+      const half = r.spikes?.summary?.days_to_half ?? {};
+      const text = `今の IV は ${r.data.iv_now_pct}% で、過去 1 年の日次の終値の中で今以下の日は ${y1.percentile_pct ?? '—'}% です。過去のスパイクは山から半分戻すまで中央値 ${half.median_days ?? '—'} 日（${half.n ?? '—'} 回${half.insufficient ? '・サンプル不足' : ''}）で、予想ではなく材料です。`;
+      return { thinking: 'ツールの結果を読む', text, stop: 'end_turn' };
+    }
     if (r?.after && Array.isArray(r?.diff)) {
       // propose_position（#139）の結果: 後の満期の最大損失と必要証拠金だけを引く（架空の値）
       const text = `カードの案を入れると、満期の最大損失は ${thousand(r.after.max_loss_yen)}、必要証拠金は ${thousand(r.after.margin_yen)} です。検討の材料にしてください。`;
@@ -514,6 +521,19 @@ export function synthAiReply(body) {
           target: 'current',
           changes: [{ action: 'add', type: 'P', side: 'buy', abs_delta: 0.05 }],
         },
+      },
+    };
+  }
+  if (userText.includes('分位')) {
+    // iv_stats（#138・#158）: 今の IV の分位とスパイクの萎み方
+    return {
+      thinking: 'IV の統計を読む',
+      text: '',
+      stop: 'tool_use',
+      tool: {
+        id: `toolu_dev_${msgs.length}`,
+        name: 'iv_stats',
+        input: { sections: ['level', 'spikes'] },
       },
     };
   }

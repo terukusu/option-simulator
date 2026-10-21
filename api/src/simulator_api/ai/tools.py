@@ -215,6 +215,82 @@ TECHNICALS_INPUT_SCHEMA = {
 }
 
 
+# iv_stats（#138・#158）: 30 日固定の ATM IV（iv30）の日次の終値と同じ限月のフォワード（/api/atm_daily）からの統計
+# （ui/view/aiIvStats.ts）。生の日次の列は返さない
+IV_SECTIONS = ("level", "spikes", "moves", "hv")
+IV_WINDOW = Enum(("1y", "3y", "all"))
+DAYS_N = Num(0, 100_000, integer=True, nullable=True)  # 取引日の数（データのある行）
+DIST_DAYS = Obj({"n": COUNT, "median_days": DAYS_N, "p10_days": DAYS_N, "p90_days": DAYS_N, "insufficient": Bool()})
+TIME_JST = Str(r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}", 16)
+IV_LEVEL = Obj({
+    "windows": Arr(Obj({"window": IV_WINDOW, "n": COUNT, "percentile_pct": PCT, "min_pct": PCT, "p10_pct": PCT,
+                        "p25_pct": PCT, "p50_pct": PCT, "p75_pct": PCT, "p90_pct": PCT, "max_pct": PCT}),
+                   3, fixed=True),
+    "changes": Arr(Obj({"days": Num(1, 20, integer=True), "iv_change_pt": PT, "iv_change_pct": PCT,
+                        "percentile_pct": PCT, "n": COUNT}), 3, fixed=True),
+})
+IV_SPIKES = Obj({
+    "rise_threshold_pct": PCT,
+    "lookback_days": Num(1, 100, integer=True),
+    "now_rise_from_low_pct": PCT,
+    "now_in_spike": Bool(),
+    "n": COUNT,
+    "summary": Obj({"days_to_peak": DIST_DAYS, "days_to_half": DIST_DAYS, "days_to_90pct": DIST_DAYS}),
+    "after_peak": Arr(Obj({"days": Num(1, 100, integer=True), "n": COUNT, "median_pct": PCT, "p10_pct": PCT,
+                           "p90_pct": PCT, "insufficient": Bool()}), 3, fixed=True),
+    "recent": Arr(Obj({"start_d": DATE, "base_pct": PCT, "trigger_pct": PCT, "peak_d": DATE, "peak_pct": PCT,
+                       "rise_pct": PCT, "days_to_peak": DAYS_N, "half_d": Nullable(DATE), "days_to_half": DAYS_N,
+                       "days_to_90pct": DAYS_N, "ongoing": Bool()}), 8),
+})
+EDGE = Num(-100, 100, nullable=True)
+IV_MOVES = Obj({
+    "horizon_days": Num(1, 20, integer=True),
+    "n": COUNT,
+    "overlapping": Bool(),
+    "dx_quantiles": Obj({"p1_pct": PCT, "p5_pct": PCT, "p50_pct": PCT, "p95_pct": PCT, "p99_pct": PCT}),
+    "buckets": Arr(Obj({"dx_from_pct": EDGE, "dx_to_pct": EDGE, "n": COUNT, "iv_change_p5_pct": PCT,
+                        "iv_change_median_pct": PCT, "iv_change_p95_pct": PCT, "iv_change_median_pt": PT,
+                        "insufficient": Bool()}), 8, fixed=True),
+    "latest": Nullable(Obj({"d0": DATE, "d1": DATE, "dx_pct": PCT, "iv_change_pct": PCT, "iv_change_pt": PT,
+                            "bucket": Num(0, 7, integer=True)})),
+    "beta": Arr(Obj({"window": Enum(("all", "1y")), "down_pt": PT, "up_pt": PT, "all_pt": PT, "n_down": COUNT,
+                     "n_up": COUNT}), 2, fixed=True),
+})
+IV_HV = Obj({
+    "days_per_year": Num(1, 400, integer=True),
+    "as_of_d": Nullable(DATE),
+    "iv_pct": PCT,
+    "windows": Arr(Obj({"days": Num(1, 100, integer=True), "n": COUNT, "hv_pct": PCT, "iv_minus_hv_pt": PT}), 3,
+                   fixed=True),
+    "iv_minus_hv20_percentile_pct": PCT,
+    "iv_minus_hv20_p50_pt": PT,
+    "n_hv20": COUNT,
+})
+IV_STATS = Obj({
+    "data": Obj({"first_d": DATE, "last_d": DATE, "n_days": COUNT, "last_close_pct": PCT,
+                 "now_source": Enum(("intraday", "daily_close")), "now_at": TIME_JST, "iv_now_pct": PCT}),
+    "level": IV_LEVEL,
+    "spikes": IV_SPIKES,
+    "moves": IV_MOVES,
+    "hv": IV_HV,
+}, frozenset(IV_SECTIONS))
+IV_STATS_INPUT = Obj({
+    "sections": Arr(Enum(IV_SECTIONS), len(IV_SECTIONS), min_len=1),
+    "spike_rise_pct": Num(10, 100),
+}, frozenset({"sections", "spike_rise_pct"}))
+IV_STATS_INPUT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "sections": {"type": "array", "items": {"enum": list(IV_SECTIONS)}, "minItems": 1,
+                     "maxItems": len(IV_SECTIONS),
+                     "description": "節（level = 今の IV の分位・変化、spikes = スパイクと萎み方、"
+                                    "moves = 2 日の動きと IV・β の実測、hv = 実現ボラと IV − HV。省略 = 4 つ）"},
+        "spike_rise_pct": {"type": "number", "minimum": 10, "maximum": 100,
+                           "description": "スパイクのしきい値（直近 10 取引日の最低からの上昇率 %。省略 = 30）"},
+    },
+    "additionalProperties": False,
+}
+
 # ---- ポジションの提案（#139。ui/view/aiPropose.ts）: 候補は simulator が板の行から作り、AI は propose_position で足を
 # 構造化して出す（画面が板で検査・評価してカードにする）
 MAX_CHANGES = 10
@@ -421,6 +497,23 @@ REGISTRY: Registry = {t.name: t for t in (
           "足は期近のつなぎ足（調整なし）で限月交代の跳びが指標に入る。交代をまたぐ窓は基準率から除く（rolls_excluded）。"
           "最新の足は確定前のことがあり（last_bar_may_be_partial）、今の値は確定値として扱わない", TECHNICALS,
           TECHNICALS_INPUT, TECHNICALS_INPUT_SCHEMA),
+    _spec("iv_stats",
+          "IV（日経225 オプションの 30 日固定の ATM IV。IV 推移の画面と同じ値）の過去の統計と、原資産の動きとの関係"
+          "（画面の追証マップの過去の点と同じ日次の値。取引日の日中の終値、全期間）。"
+          "data = 期間・今の IV（now_source: intraday = 今の値、daily_close = 前日の終値で代えた）。"
+          "level = 今の IV の分位（1y / 3y / all の日次の終値の中で今以下の割合 percentile_pct）と分布、"
+          "1・5・20 取引日前からの変化（pt・%）とその変化の過去の中での分位。"
+          "spikes = 直近 10 取引日の最低から rise_threshold_pct 以上の上昇を起点にした過去のスパイク: 山までの日数・"
+          "半分戻し（days_to_half）・9 割戻し（days_to_90pct）までの日数（山から数える。データのある取引日）の分布、"
+          "山から 5・10・20 取引日後の IV の変化（%）、新しい順の最大 8 回（ongoing = 戻し切っていない）、"
+          "今がスパイクの中か（now_in_spike）。"
+          "moves = 2 営業日の原資産（同じ限月のフォワード）の変化の分布と、変化の区分ごとの IV の変化"
+          "（% と pt。区分は dx_from_pct 以上 dx_to_pct 未満）、直近の 2 日、β の実測（down_pt / up_pt / all_pt = "
+          "原資産 1% の下げあたりの IV の上昇 pt。シナリオの β と同じ向き。全期間と直近 1 年）。組は日をずらして"
+          "重なる（overlapping）。"
+          "hv = 実現ボラ（HV。1 営業日の対数変化の 5・20・60 本、年 245 取引日）と、同じ日の IV − HV（pt）、"
+          "IV − HV20 の過去の中での分位。insufficient は件数が少ない（スパイク 5 回未満・区分 20 組未満）。"
+          "分位・分布は過去の集計で予想ではない", IV_STATS, IV_STATS_INPUT, IV_STATS_INPUT_SCHEMA),
     _spec("strike_scan",
           "ヘッジ・調整の足の探索（#139）。今のポジションに 1 本の OP の足（種別・売買・限月・枚数）を足したときの、"
           "板の行使価格（両気配の行）ごとの結果: 建値・足の受払（leg_premium_yen。負は支払）・足した後の満期の"

@@ -35,7 +35,8 @@ SSE_TYPE = "text/event-stream; charset=utf-8"
 
 # system prompt（#135。docs/design.md 14 章）。サーバーの定数で、ブラウザからは受けない。kind（chat / diagnose）で
 # 分けない（1 つの前置きを prompt caching で共有する）。診断の指示は「最初の発言が決まった文のとき」の節に置く。
-# 毎回は要らない手順（テクニカル・ポジションの提案）はスキル（ai/plugin/skills/。#221）に切り出し、要るときだけ読む
+# 毎回は要らない手順（テクニカル・ポジションの提案・IV の統計）はスキル（ai/plugin/skills/。#221）に切り出し、
+# 要るときだけ読む
 # 画面の [このポジションを診断] の最初の発言（ui/view/aiChat.ts と同じ文）
 DIAGNOSE_TEXT = "このポジションを診断してください。"
 # 画面の [AI に聞く] の発言の先頭（ui/view/aiAsk.ts の ASK_PREFIX と同じ文。#136）
@@ -98,6 +99,8 @@ delta_large / delta_mini は枚、days は日、*ratio は倍。null は「評�
 - 先物のテクニカル（RSI・MACD・ストキャスティクス・EMA・トレンド・地合い）を聞かれたら、答える前に Skill で\
 simulator:technicals を読む
 - 組み方の候補・ヘッジ・調整（ポジションの提案）を頼まれたら、答える前に Skill で simulator:proposals を読む
+- IV の高さ・過去の IV（分位・スパイクと萎み方・IV の売り時）・下げのときの IV の跳ね方・β の実測・実現ボラ（HV）を\
+聞かれたら、答える前に Skill で simulator:volatility を読む
 - 前の発言で読んでいても、この発言で要るなら読み直す（読んだ内容は次の発言に残らない）
 """
 # 文書（#137 = docs/adr-0007-ai-docs-read-tool.md）。目次（節の番号と見出し）だけを常に載せ、本文は read_doc（中継が

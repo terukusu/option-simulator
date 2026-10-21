@@ -7,7 +7,8 @@
  * - 流れの事象は状態の ref にすぐ入れ、描き直しは 1 フレームに 1 回（text の delta ごとに描かない）
  * - tool_use で止まったらツールを実行して tool_result を足し、次の要求（MAX_TOOL_ROUNDS まで）
  * - /api/ai/status は見えたとき（閉 → 開）と発言の後に読む（ポーリングしない）
- * - technicals（#200）の tool_use があるときだけ、ツールを実行する前に先物の足を読む（tech。読めなければツールは no_data）
+ * - technicals（#200）の tool_use があるときだけ、ツールを実行する前に先物の足を読む（tech。読めなければツールは no_data）。
+ *   iv_stats（#138・#158）も同じく、tool_use があるときだけ日次の値と今の IV を読む（ivStats）。両方あれば並べて読む
  * - 保存は sessionStorage の AI_SESSION_KEY だけ（タブを閉じたら消える）。読めない・書けないときは保存せずに続ける
  */
 
@@ -34,6 +35,7 @@ import {
   toolResultBlocks,
 } from '../view/aiChat';
 import { buildAiContext, contextKey } from '../view/aiContext';
+import type { IvStatsData } from '../view/aiIvStats';
 import type { TechnicalsData } from '../view/aiTechnicals';
 import { type AiToolEnv, runTool } from '../view/aiTools';
 
@@ -71,6 +73,7 @@ export function useAiChat(
   base: string,
   env: () => AiToolEnv | null,
   tech?: () => Promise<TechnicalsData>,
+  ivStats?: () => Promise<IvStatsData>,
 ): AiChatController {
   const storage = useRef<Storage | null | undefined>(undefined);
   if (storage.current === undefined) storage.current = sessionStore();
@@ -87,6 +90,8 @@ export function useAiChat(
   envRef.current = env;
   const techRef = useRef(tech);
   techRef.current = tech;
+  const ivStatsRef = useRef(ivStats);
+  ivStatsRef.current = ivStats;
   const baseRef = useRef(base);
   baseRef.current = base;
   const frame = useRef<number | null>(null);
@@ -169,15 +174,19 @@ export function useAiChat(
       const s0 = stateRef.current as AiChatState;
       if (!s0.turn?.awaitingTools) break;
       let technicals: TechnicalsData | null = null;
-      const load = techRef.current;
-      if (load && pendingToolUses(s0).some((u) => u.name === 'technicals')) {
+      let ivStatsData: IvStatsData | null = null;
+      const pending = pendingToolUses(s0);
+      const loadTech = pending.some((u) => u.name === 'technicals') ? techRef.current : undefined;
+      const loadIv = pending.some((u) => u.name === 'iv_stats') ? ivStatsRef.current : undefined;
+      if (loadTech || loadIv) {
         // 読んでいる間も [停止] が効くように、読み込みに中止の控えを割り当てる（#200 レビュー指摘 2）
         const ac = new AbortController();
         abortRef.current = ac;
         try {
-          technicals = await load();
-        } catch {
-          technicals = null;
+          [technicals, ivStatsData] = await Promise.all([
+            loadTech ? loadTech().catch(() => null) : null,
+            loadIv ? loadIv().catch(() => null) : null,
+          ]);
         } finally {
           if (abortRef.current === ac) abortRef.current = null;
         }
@@ -192,7 +201,7 @@ export function useAiChat(
       if (s !== s0) break;
       const e = envRef.current();
       const blocks = toolResultBlocks(s, (name, input) =>
-        e ? runTool(name, input, { ...e, technicals }) : { error: 'no_legs' },
+        e ? runTool(name, input, { ...e, technicals, ivStats: ivStatsData }) : { error: 'no_legs' },
       );
       apply({ type: 'toolResults', blocks });
     }

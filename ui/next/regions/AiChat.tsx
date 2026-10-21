@@ -21,6 +21,7 @@ import {
   remainingText,
   sendBlocked,
 } from '../../view/aiChat';
+import type { IvStatsData } from '../../view/aiIvStats';
 import { proposalCard } from '../../view/aiPropose';
 import type { TechnicalsData } from '../../view/aiTechnicals';
 import { answerModel, type MarkedBlock, type MarkedInline } from '../../view/aiText';
@@ -90,6 +91,8 @@ function AiPanelView(p: {
   env: () => AiToolEnv | null;
   /** technicals のツールの先物の足の読み込み（#200。NextApp が口を決める） */
   tech?: () => Promise<TechnicalsData>;
+  /** iv_stats のツールの日次の値と今の IV の読み込み（#138・#158。NextApp が口を決める） */
+  ivStats?: () => Promise<IvStatsData>;
   hasChain: boolean;
   legCount: number;
   x0: number;
@@ -99,7 +102,7 @@ function AiPanelView(p: {
   onApplyProposal: AiProposeApply;
   apiRef: { current: AiPanelApi | null };
 }) {
-  const chat = useAiChat(p.visible, p.base, p.env, p.tech);
+  const chat = useAiChat(p.visible, p.base, p.env, p.tech, p.ivStats);
   const gate = { hasChain: p.hasChain, legCount: p.legCount };
   const [draft, setDraft] = useState<AiDraft | null>(null);
   const known = { ...gate, status: chat.status ?? UNKNOWN_STATUS };
