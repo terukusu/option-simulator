@@ -274,4 +274,12 @@ describe('sectionsOf', () => {
       ['確かめるとよいこと', false, 1],
     ]);
   });
+
+  it('順番の言い方（「3 枚目」「2 本目」「1 つ目」）は数えない。枚数そのものは照合する', () => {
+    for (const x of ['カードの 3 枚目', '2 本目の足', '1 つ目の案', '3回目']) {
+      expect(checkNumbers(x, []).unmatched, x).toBe(0);
+    }
+    expect(checkNumbers('put を 3 枚売る', []).unmatched).toBe(1);
+    expect(checkNumbers('−3 枚目', []).unmatched).toBe(1);
+  });
 });

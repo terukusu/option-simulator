@@ -185,6 +185,8 @@ const NUM_RE = /(?<![0-9A-Za-z_.,])([+\-−–▲△±×]\s?)?(\d{1,3}(?:,\d{3})
 const PER_UNIT_RE = /^\s?(あたり|当たり|につき)/;
 // 番号（「弱点 1」「第 2」。#140: 定型の見出し「反論 1」「案 1」）
 const NUMBERING_BEFORE = /(弱点|反論|案|第|No\.?)\s?$/;
+/** 順番の言い方（「カードの 3 枚目」「2 本目の足」「1 つ目」）。値ではない */
+const ORDINAL_AFTER = /^\s?(枚|本|つ|個|回|番)目/;
 /**
  * 文書の節の番号（#136。「マニュアル 8.1「タイル」」「設計書 5.6」「マニュアルの 10 章」= 根拠の節の示し方。値ではない）。
  * 並べた 2 つ目以降（「マニュアル 8.1「タイル」・8.3「テール表」」「8.1、8.3」「8 章と 10 章」）も同じ（レビュー指摘 4）
@@ -296,6 +298,7 @@ export function checkNumbers(text: string, sources: readonly unknown[]): NumberC
       const lineStart = n.lastIndexOf('\n', start - 1) + 1;
       const before = n.slice(lineStart, start);
       if (NUMBERING_BEFORE.test(before)) reason = 'number';
+      else if (rawSign === '' && ORDINAL_AFTER.test(rest)) reason = 'number';
       else if (SECTION_BEFORE.test(before)) reason = 'number';
       else if (numText === '100' && rawSign === '' && GAMMA_UNIT_AFTER.test(rest))
         reason = 'per_unit';
