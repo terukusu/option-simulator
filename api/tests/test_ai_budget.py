@@ -52,7 +52,9 @@ def test_reserve_covers_turns_and_skills():
     assert budget.reserve_micro_usd(M, 25_000, 8000, 1, 5_000) == budget.reserve_micro_usd(M, 25_000, 8000)
     from simulator_api.ai import skills
 
-    assert budget.skill_tokens() == skills.total_bytes() + st.AI_SKILL_OVERHEAD_TOKENS
+    # #137: 文書の read_doc の 1 要求の上限と枠も足す
+    assert budget.loaded_tokens() == (skills.total_bytes() + st.AI_SKILL_OVERHEAD_TOKENS
+                                      + st.AI_DOC_REQUEST_MAX_BYTES + st.AI_DOC_OVERHEAD_TOKENS)
 
 
 def worst_usage(est: int, mt: int, k: int, turns: int, read_hit: bool = True) -> dict:
@@ -77,7 +79,7 @@ def worst_usage(est: int, mt: int, k: int, turns: int, read_hit: bool = True) ->
 def test_reserve_is_upper_bound_when_previous_turn_is_cached(est, turns):
     # 前の turn の要求が読み出しになる（CLI の要求の形 = tests/test_ai_agent_sdk_cli.py で固定）限り、実額 ≤ 予約。
     # 使った turn が上限より少ない・出力が少ない・読み出しが多い（前の要求より前のキャッシュ）は安い側
-    k, mt = budget.skill_tokens(), st.AI_MAX_TOKENS
+    k, mt = budget.loaded_tokens(), st.AI_MAX_TOKENS
     reserve = budget.reserve_micro_usd(M, est, mt, st.AI_MAX_TURNS, k)
     assert budget.cost_micro_usd(M, worst_usage(est, mt, k, turns)) <= reserve
     if turns == st.AI_MAX_TURNS:  # 最悪の組み合わせでちょうど（切り上げの 1 µUSD まで）
@@ -87,7 +89,7 @@ def test_reserve_is_upper_bound_when_previous_turn_is_cached(est, turns):
 def test_reserve_cache_miss_is_the_documented_exception():
     # 前の turn の要求がキャッシュから読めない（追い出し）と予約を越えうる（精算で 1 要求ぶん。次の要求は 429）。
     # 越える分は前の要求 × (書き込み − 読み出し) の和以下
-    est, k, mt, t = 31_447, budget.skill_tokens(), st.AI_MAX_TOKENS, st.AI_MAX_TURNS
+    est, k, mt, t = 31_447, budget.loaded_tokens(), st.AI_MAX_TOKENS, st.AI_MAX_TURNS
     reserve = budget.reserve_micro_usd(M, est, mt, t, k)
     miss = budget.cost_micro_usd(M, worst_usage(est, mt, k, t, read_hit=False))
     assert miss > reserve
@@ -97,8 +99,9 @@ def test_reserve_cache_miss_is_the_documented_exception():
 
 def test_reserve_long_conversation_not_rejected_at_day_start():
     # api_key / wif で本文 90k トークン（ツールの往復が数回ある長い会話）でも日の始めに上限 $3 に収まる
+    # （#137 で文書の 1 要求の上限を K に足して 約 $1.49 → 約 $1.81。ADR-0007）
     est = budget.estimate_input_tokens("x" * 90_000)
-    assert budget.reserve_micro_usd(M, est, st.AI_MAX_TOKENS, st.AI_MAX_TURNS, budget.skill_tokens()) < 1_600_000
+    assert budget.reserve_micro_usd(M, est, st.AI_MAX_TOKENS, st.AI_MAX_TURNS, budget.loaded_tokens()) < 2_000_000
 
 
 def test_cost():

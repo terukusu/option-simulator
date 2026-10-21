@@ -2,7 +2,8 @@
 input_schema。
 
 ツールはブラウザの決定論的な計算（K15。ui/view/aiTools.ts）。中継はツールを実行しない。AI の tool_use の入力と、
-ブラウザが返す tool_result の結果・事前計算（context.precomputed）を、ここの形で検査する。
+ブラウザが返す tool_result の結果・事前計算（context.precomputed）を、ここの形で検査する。唯一の例外は文書を読む
+read_doc（#137。ai/docs.py。ここには登録しない = ブラウザには渡らない。ADR-0007）。
 
 結果の値の単位はキーの名前で決める（ui/view/aiNumbers.ts の照合も同じ規則）: `*_yen` は円（整数）、`x`・`k`・`forward`・
 `atm_k`・`*_x` は原資産・行使価格の水準（円）、`*_pct` は %（小数 1 桁）、`*_pt` は pt（小数 1 桁）、

@@ -1,8 +1,10 @@
 """費用の 1 日上限（K15・docs/ai-advisor.md 論点 3）。金額は整数の µUSD（1e-6 USD。浮動小数の境界を避ける）。
 
 - 予約 = 送る前にその要求の最大額を先に計上する。1 要求で上流を最大 T = AI_MAX_TURNS 回呼ぶ（Skill の turn。#221）。
-  E = 入力の見積もり（トークン数の上界。CLI が足す分を含む）、M = max_tokens、K = 1 回に読むスキルの上界、
-  g = M + K（turn ごとに増える入力の上界 = 前の turn の出力 + Skill の結果）、w = 書き込みの単価（5 分と 1 時間の
+  E = 入力の見積もり（トークン数の上界。CLI が足す分を含む）、M = max_tokens、
+  K = 1 要求で読むスキルと文書の上界（loaded_tokens。#137 で文書の read_doc の 1 要求の上限を足した）、
+  g = M + K（turn ごとに増える入力の上界 = 前の turn の出力 + Skill・read_doc の結果。K を turn ごとに足すので
+  保守側）、w = 書き込みの単価（5 分と 1 時間の
   大きい方。CLI は資格情報によって 1 時間の TTL を付ける）、r = 読み出しの単価、o = 出力の単価:
     turn 0: E × w + M × o
     turn i（1 ≤ i < T）: (E + (i−1)·g) × r（前の turn の要求全体 = キャッシュの読み出し）+ g × w + M × o
@@ -37,20 +39,22 @@ def estimate_input_tokens(text: str) -> int:
     return len(text.encode("utf-8")) + st.AI_INPUT_OVERHEAD_TOKENS + st.AI_CLI_OVERHEAD_TOKENS
 
 
-def skill_tokens() -> int:
-    """1 回に読むスキルの上界 K（トークン）: SKILL.md の合計のバイト数（トークン数 ≤ バイト数）+ 枠の余裕"""
+def loaded_tokens() -> int:
+    """1 要求で読むものの上界 K（トークン。トークン数 ≤ バイト数）: SKILL.md の合計 + 枠の余裕 + 文書の read_doc の
+    1 要求の上限 + 枠の余裕（#137。文書の索引が無いときも足す = 保守側）"""
     from . import skills
 
-    return skills.total_bytes() + st.AI_SKILL_OVERHEAD_TOKENS
+    return (skills.total_bytes() + st.AI_SKILL_OVERHEAD_TOKENS
+            + st.AI_DOC_REQUEST_MAX_BYTES + st.AI_DOC_OVERHEAD_TOKENS)
 
 
 def reserve_micro_usd(model: str, est_input_tokens: int, max_tokens: int, turns: int = 1,
-                      skill_tokens: int = 0) -> int:
+                      loaded_tokens: int = 0) -> int:
     """予約額（µUSD）。turn 0 は E を書き込み、turn i ≥ 1 は前の turn の要求全体を読み出し + 増えた分 g を書き込み
     （モジュールの説明の式）"""
     p = st.AI_PRICES[model]
     write = max(p["cache_write_5m"], p["cache_write_1h"])
-    g = max_tokens + skill_tokens
+    g = max_tokens + loaded_tokens
     t = max(turns, 1)
     written = est_input_tokens + (t - 1) * g
     read = (t - 1) * est_input_tokens + g * (t - 1) * (t - 2) // 2

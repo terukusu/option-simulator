@@ -35,6 +35,17 @@ for n in skills.NAMES:
     assert skills.skill_path(n).read_text(encoding="utf-8").startswith("---\n"), n
 print(len(skills.NAMES))' > "$work/skills.n" || fail "イメージに AI のスキルのファイルが無い・読めない"
 echo "ok: AI のスキル $(cat "$work/skills.n") 本（${img} の simulator_api/ai/plugin）"
+# AI の文書（#137）: マニュアルと設計書が AI_DOCS_DIR（/app/docs）にあり、実行のユーザー（非 root）が読めて索引が組めること
+# （節の数を出す。設計書は 3 章・5 章だけ）
+docker run --rm "$img" python -c '
+from simulator_api.ai import docs
+idx = docs.index()
+assert idx is not None and str(docs.docs_dir()) == "/app/docs"
+files = {s.file for s in idx.sections.values()}
+assert files == set(docs.FILE_KEYS), files
+assert {s.id.split(".")[0] for s in idx.sections.values() if s.file == "design"} == {"3", "5"}
+print(len(idx.sections))' > "$work/docs.n" || fail "イメージに AI の文書が無い・読めない・索引が組めない"
+echo "ok: AI の文書 $(cat "$work/docs.n") 節（${img} の /app/docs）"
 # 送信路（claude-agent-sdk。#186・#221）: import でき、同梱の CLI が非 root・ネットワークなしで
 # --version に答え、その版が SDK の同梱の版（_cli_version）と同じこと（Anthropic には触れない）
 want=$(docker run --rm "$img" python -c 'from claude_agent_sdk._cli_version import __cli_version__; print(__cli_version__)')
@@ -61,9 +72,11 @@ found=$(docker run --rm --entrypoint sh "$img" -c '
   find /app/static -name "*.json" -print 2>/dev/null
   true')
 [ -z "$found" ] || fail "イメージに入れてはいけないものがある: $(printf '%s\n' "$found" | wc -l) 件"$'\n'"$found"
-# /app は同梱の dist（static）だけ
-top=$(docker run --rm --entrypoint ls "$img" -A /app)
-[ "$top" = static ] || fail "/app に static 以外がある: ${top}"
+# /app は同梱の dist（static）と AI の文書（docs = user-guide.md・design.md の 2 つだけ。#137）
+top=$(docker run --rm --entrypoint ls "$img" -A /app | tr '\n' ' ')
+[ "$top" = "docs static " ] || fail "/app に static・docs 以外がある: ${top}"
+docs_ls=$(docker run --rm --entrypoint ls "$img" -A /app/docs | tr '\n' ' ')
+[ "$docs_ls" = "design.md user-guide.md " ] || fail "/app/docs に文書の 2 つ以外がある: ${docs_ls}"
 echo "ok: 除外物 0 件"
 
 # 4. 同梱の index.html が ci.yml と同じ CSP 検査を通ること

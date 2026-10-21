@@ -37,10 +37,14 @@ FROM ${PYTHON_IMAGE}
 RUN useradd --system --uid 10001 --no-create-home --shell /usr/sbin/nologin app
 COPY --from=build /opt/venv /opt/venv
 COPY --from=web /src/dist /app/static
+# AI の相談役が節ごとに読む文書（#137。ADR-0007。api/src/simulator_api/ai/docs.py）。マニュアルと設計書だけ（設計書は
+# 中継が 3 章・5 章だけを渡す）。読むだけ（root の持ち物で 644）
+COPY docs/user-guide.md docs/design.md /app/docs/
 ENV PATH=/opt/venv/bin:$PATH \
     PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     STATIC_DIR=/app/static \
+    AI_DOCS_DIR=/app/docs \
     PORT=8080 \
     CLAUDE_AGENT_SDK_SKIP_VERSION_CHECK=1
 # CLAUDE_AGENT_SDK_SKIP_VERSION_CHECK: AI_CREDENTIAL=oauth_token の送信路（claude-agent-sdk。#186）が要求ごとに同梱の CLI の

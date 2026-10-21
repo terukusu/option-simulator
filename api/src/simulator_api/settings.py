@@ -121,6 +121,24 @@ AI_MAX_TURNS = 3
 # AI_SKILL_OVERHEAD_TOKENS（Skill の tool_use・tool_result の枠と CLI が足す前置き）を turn ごとに足す
 AI_SKILL_MAX_BYTES = 16 * 1024
 AI_SKILL_OVERHEAD_TOKENS = 1000
+# 文書（マニュアル・設計書の節。#137 = docs/adr-0007-ai-docs-read-tool.md）。中継の中で実行するツール read_doc が返す
+# 大きさの上限: 1 回の読み（超える節は part に分ける）・1 要求の合計・1 要求の呼び出しの回数。予約額の上界には
+# 1 要求の合計 + AI_DOC_OVERHEAD_TOKENS を足す。
+# - 1 回の読みの返り（見出しの行・「続きは」の行を含む）≤ AI_DOC_READ_MAX_BYTES（本文は AI_DOC_FRAME_BYTES を引いた
+#   大きさで part に分ける）。2 回 ≤ 1 要求の合計なので、part を 2 つは必ず読める
+# - 呼び出しは 1 要求で AI_DOC_MAX_READS 回まで。超えた呼び出しはフックが deny + continue_=False で止める（上流を
+#   もう呼ばない = その結果は送られない）。なので read_doc の結果の合計 ≤ 1 要求の合計（本文）+ 回数 ×（エラーの文の
+#   上限 AI_DOC_ERROR_MAX_BYTES + tool_result の枠 AI_DOC_RESULT_FRAME_BYTES）≤ 1 要求の合計 + AI_DOC_OVERHEAD_TOKENS
+#   （トークン数 ≤ バイト数。tests/test_ai_docs.py で固定）
+AI_DOC_READ_MAX_BYTES = 8 * 1024
+AI_DOC_REQUEST_MAX_BYTES = 16 * 1024
+AI_DOC_FRAME_BYTES = 512
+AI_DOC_MAX_READS = 6
+AI_DOC_ERROR_MAX_BYTES = 256
+AI_DOC_RESULT_FRAME_BYTES = 200  # tool_result の type・tool_use_id・is_error・content の枠
+AI_DOC_OVERHEAD_TOKENS = 3000
+# 文書の置き場所（イメージは Dockerfile の ENV で /app/docs）。未設定ならリポジトリの docs/（手元・テスト）
+AI_DOCS_DIR_ENV = "AI_DOCS_DIR"
 # 1 要求の締め切り（_start の頭 = 予約の前から数える）。超えたら error: timeout で閉じる。
 # 締め切りの直前に final が来ると精算（Firestore の書き込み、最大 AI_FIRESTORE_TIMEOUT_SECONDS = 5 秒）が
 # その後に走るので、最悪 50 + 5 = 55 秒で Cloud Run の 60 秒の内側に収まる
