@@ -2476,7 +2476,7 @@ async function indCheck(page, label) {
   if (r.panes !== 3 && !(r.panes < 3 && r.note.includes('隠しています')))
     bad.push(`段 ${r.panes}・知らせ「${r.note}」`);
   if (r.tf !== '4時間') bad.push(`足「${r.tf}」`);
-  if (r.plotH < 80) bad.push(`描画域 ${r.plotH}px`);
+  if (r.plotH < 56) bad.push(`描画域 ${r.plotH}px`);
   if (!r.paneW.every((x) => Math.abs(x - r.wrapW) <= 1)) bad.push(`段の幅 ${r.paneW.join('/')}`);
   if (!r.inside) bad.push('段が枠の外');
   if (r.lines < 3) bad.push(`線 ${r.lines}`);
@@ -2715,7 +2715,7 @@ async function futAllPanesSweep() {
       if (r.paneOut) bad.push('段が本体の外');
       if (r.legendOut) bad.push('凡例が本体の外');
       if (r.panes < 3 && !r.note.includes('隠しています')) bad.push(`段 ${r.panes} で知らせなし`);
-      if (r.panes > 0 && r.plotH < 80) bad.push(`価格 ${r.plotH}px`);
+      if (r.panes > 0 && r.plotH < 56) bad.push(`価格 ${r.plotH}px`);
       paneStats.total++;
       const ok = bad.length === 0;
       if (ok) paneStats.pass++;
@@ -9485,7 +9485,7 @@ async function futPaneTouchFlow() {
 /**
  * #207 再レビュー B2（--flows）: 縦に狭い覗く（段を縮めて描いている）でも境目のドラッグが指に 1:1。
  * (A) 覚えた RSI 120px・RSI だけの段（覗くでは縮めて描く）で境目 0 を指で 20px 下へ → RSI −20・価格 +20
- * (B) 段 3 つ（360 は 34px × 2 で SO を隠す・390 は 30px 前後 × 3）で境目 1 を 20px 下へ → RSI +・MACD −（下限 28px で
+ * (B) 段 3 つ（360 は 30px 前後 × 3・390 は 40px 前後 × 3）で境目 1 を 20px 下へ → RSI +・MACD −（下限 24px で
  *     止まるまで 1:1）・ほかの段と価格は同じ
  * どちらも動かしている間と離した後（保存の値で描き直し）が同じ高さ
  */
@@ -9525,7 +9525,7 @@ async function futPanePeekTouchFlow(vp) {
     await page.waitForTimeout(300);
     const st1 = await paneState(page);
     const h = st0.paneH;
-    const want = mode === 'A' ? 20 : Math.min(20, (h[1] ?? 0) - 28);
+    const want = mode === 'A' ? 20 : Math.min(20, (h[1] ?? 0) - 24);
     const follows = (st) => {
       if (!st || st.paneH.length !== h.length) return false;
       const d0 = st.paneH[0] - h[0];
@@ -9538,9 +9538,9 @@ async function futPanePeekTouchFlow(vp) {
         st.wrapH === st0.wrapH
       );
     };
-    const constrained = mode === 'A' ? h[0] < 120 : st0.stackH < 80 + h.length * 56;
+    const constrained = mode === 'A' ? h[0] < 120 : st0.stackH < 56 + h.length * 56;
     check(
-      `#207 B2 ${tag} ${mode === 'A' ? '(A) 覚えた RSI 120px を縮めて描く覗くで境目 0 を指で 20px 下へ → RSI −20・価格 +20' : `(B) 段 ${h.length} つを縮めて描く覗くで境目 1 を指で 20px 下へ → RSI +${want}・MACD −${want}（下限 28px まで）・ほかの段と価格は同じ`}（指に 1:1）、離した後も同じ高さ`,
+      `#207 B2 ${tag} ${mode === 'A' ? '(A) 覚えた RSI 120px を縮めて描く覗くで境目 0 を指で 20px 下へ → RSI −20・価格 +20' : `(B) 段 ${h.length} つを縮めて描く覗くで境目 1 を指で 20px 下へ → RSI +${want}・MACD −${want}（下限 24px まで）・ほかの段と価格は同じ`}（指に 1:1）、離した後も同じ高さ`,
       constrained && follows(during) && follows(st1),
       `枠 ${st0.stackH}px・${h.join('/')}（価格 ${st0.wrapH}）→ 動かしている間 ${during?.paneH.join('/')}（価格 ${during?.wrapH}）→ 離した後 ${st1.paneH.join('/')}（価格 ${st1.wrapH}）・保存 ${st1.keys.map((k) => `${k}=${st1.prefs[k]}`).join(',')}`,
     );

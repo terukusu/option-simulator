@@ -60,7 +60,7 @@ export function indTitle(kind: IndKind, p: TechParams): string {
 /** 段の高さ（px） */
 export const IND_PANE_H = 56;
 /** 段の高さの下限（px） */
-export const IND_PANE_MIN_H = 28;
+export const IND_PANE_MIN_H = 24;
 
 /** 段の上下の余白（px。上は見出しの行） */
 const PAD_TOP = 14;
@@ -360,7 +360,7 @@ export function indCrosshair(m: IndPaneModel, y: number | null): IndCross | null
 }
 
 /** 段がある間の価格の描画域の高さの下限（px。CSS の .fut-stack:has(.ind-panes) .iv-wrap と同じ） */
-export const FUT_PRICE_MIN_H = 80;
+export const FUT_PRICE_MIN_H = 56;
 /** 覚える段の高さの上限（px。保存の値の検査） */
 export const IND_PANE_MAX_H = 2000;
 
