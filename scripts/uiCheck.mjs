@@ -10259,6 +10259,133 @@ async function aiDiagnoseDone(page) {
   await page.waitForTimeout(150);
 }
 
+/** 1 件の判定を数えて出す（aiSweep の項目） */
+function aiStat(label, ok, detail = '') {
+  aiStats.total++;
+  if (ok) aiStats.pass++;
+  else failed = true;
+  console.log(
+    `${label}: ${ok ? 'pass' : 'NG'}${detail ? `（${detail}）` : ''}${ok ? '' : '  ← NG'}`,
+  );
+}
+
+/**
+ * #232: 返答の用語のボタン（最初の 1 つ）を押す → 説明カードがその語の見出しで開き窓の中 → Esc で閉じてボタンへ
+ * フォーカスが戻る
+ */
+async function aiTermCheck(page, tag) {
+  const lbl = `${tag} #232 用語のリンク`;
+  const btn = page.locator('section.ai .ai-answer .ai-term').first();
+  const n = await page.locator('section.ai .ai-answer .ai-term').count();
+  if (n === 0) {
+    aiStat(lbl, false, '用語のボタンが無い');
+    return;
+  }
+  const word = ((await btn.textContent()) ?? '').replace(/（.*$/, '').trim();
+  await btn.click();
+  const card = await page
+    .waitForSelector('dialog.term-card[open]', { timeout: 3000 })
+    .then(() => true)
+    .catch(() => false);
+  const r = await page.evaluate(() => {
+    const d = document.querySelector('dialog.term-card[open]');
+    const box = d?.querySelector('.tc-box')?.getBoundingClientRect();
+    return {
+      title: (d?.querySelector('h2')?.textContent ?? '').trim(),
+      inWin:
+        !!box &&
+        box.left >= -0.5 &&
+        box.right <= innerWidth + 0.5 &&
+        box.top >= -0.5 &&
+        box.bottom <= innerHeight + 0.5,
+    };
+  });
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(100);
+  const back = await page.evaluate(
+    () =>
+      !document.querySelector('dialog.term-card[open]') &&
+      !!document.activeElement?.classList.contains('ai-term'),
+  );
+  const ok = card && r.inWin && r.title.toLowerCase().includes(word.toLowerCase()) && back;
+  aiStat(
+    lbl,
+    ok,
+    `用語 ${n} 個・「${word}」→ カード「${r.title}」${r.inWin ? '' : '・窓の外'}${back ? '' : '・Esc の後にボタンへ戻らない'}`,
+  );
+}
+
+/**
+ * #234: 「表で」の質問の返答（偽の SSE の 3 列の表 + 7 列の表）。表 2 つ・3 列の表は枠に収まる・数字の列は右揃えで
+ * 折り返さない・列の多い表は枠の中だけ横にスクロール（data-more が end → 右端で start）・表のセルの用語・パネルと
+ * 画面の横スクロール 0
+ */
+async function aiTableCheck(page, tag, w, h, theme, want) {
+  const lbl = `${tag} #234 返答の表`;
+  await page.fill('section.ai .ai-input textarea', '表で比べて');
+  await page.press('section.ai .ai-input textarea', 'Enter');
+  await page.waitForSelector('section.ai .ai-progress', { state: 'detached', timeout: 15000 });
+  await page.waitForTimeout(150);
+  const r = await page.evaluate(() => {
+    const ans = [...document.querySelectorAll('section.ai .ai-msg.answer')].at(-1);
+    const tables = [...(ans?.querySelectorAll('.ai-table') ?? [])];
+    const [narrow, wide] = tables;
+    const nums = [...(narrow?.querySelectorAll('td.num') ?? [])].map((td) => {
+      const s = getComputedStyle(td);
+      return s.textAlign === 'right' && s.whiteSpace === 'nowrap';
+    });
+    const first = narrow?.querySelector('tbody td');
+    const lh = first ? Number.parseFloat(getComputedStyle(first).lineHeight) : 0;
+    return {
+      count: tables.length,
+      narrowFits: !!narrow && narrow.scrollWidth <= narrow.clientWidth + 0.5,
+      nums: nums.length,
+      numsOk: nums.every(Boolean),
+      firstWraps: !!first && lh > 0 && first.getBoundingClientRect().height > lh * 1.5,
+      wideOver: !!wide && wide.scrollWidth > wide.clientWidth + 0.5,
+      wideMore: wide?.getAttribute('data-more') ?? null,
+      cellTerms: ans?.querySelectorAll('.ai-table .ai-term').length ?? 0,
+    };
+  });
+  let endMore = null;
+  if (r.wideOver) {
+    await page.evaluate(() => {
+      const ans = [...document.querySelectorAll('section.ai .ai-msg.answer')].at(-1);
+      const wide = ans?.querySelectorAll('.ai-table')[1];
+      if (wide) wide.scrollLeft = wide.scrollWidth;
+    });
+    await page.waitForTimeout(100);
+    endMore = await page.evaluate(
+      () =>
+        [...document.querySelectorAll('section.ai .ai-msg.answer')]
+          .at(-1)
+          ?.querySelectorAll('.ai-table')[1]
+          ?.getAttribute('data-more') ?? null,
+    );
+  }
+  const bad = [];
+  if (r.count !== 2) bad.push(`表 ${r.count} 個`);
+  if (!r.narrowFits) bad.push('3 列の表が枠からはみ出す');
+  if (r.nums !== 4 || !r.numsOk)
+    bad.push(`数字の列 ${r.nums} セル・右揃え / 折り返さない ${r.numsOk}`);
+  if (w <= PHONE_MAX && !r.firstWraps) bad.push('1 列目が折り返していない');
+  if (w <= PHONE_MAX && !r.wideOver) bad.push('列の多い表が枠に収まっている（スマホ）');
+  if (r.wideOver && (r.wideMore !== 'end' || endMore !== 'start'))
+    bad.push(`端の印 ${r.wideMore} → 右端で ${endMore}`);
+  if (!r.wideOver && r.wideMore !== null) bad.push(`収まっているのに端の印 ${r.wideMore}`);
+  if (r.cellTerms === 0) bad.push('表のセルに用語のボタンが無い');
+  aiStat(
+    lbl,
+    bad.length === 0,
+    bad.length
+      ? bad.join('・')
+      : `列の多い表 ${r.wideOver ? `枠の中で横スクロール（${r.wideMore} → ${endMore}）` : '収まる'}`,
+  );
+  await report(page, `${tag} 返答の表`, w, h, `ai-${w}x${h}-${theme}-table`);
+  await readoutCheck(page, `${tag} 返答の表`, want);
+  await aiCheck(page, `${tag} 返答の表`, w);
+}
+
 async function aiSweep() {
   for (const [w, h] of SIZES) {
     for (const theme of ['dark', 'light']) {
@@ -10312,6 +10439,8 @@ async function aiSweep() {
       await report(page, lbl, w, h, `ai-${w}x${h}-${theme}-answer`);
       await readoutCheck(page, lbl, want);
       await aiCheck(page, lbl, w);
+      await aiTermCheck(page, tag);
+      await aiTableCheck(page, tag, w, h, theme, want);
       await ctx.close();
     }
   }

@@ -1,5 +1,5 @@
 import type { ComponentChildren } from 'preact';
-import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks';
 import type { AiStatus } from '../../../data/aiStream';
 import { pure } from '../../components/pure';
 import { type AiChatController, useAiChat } from '../../components/useAiChat';
@@ -23,10 +23,11 @@ import {
 } from '../../view/aiChat';
 import { proposalCard } from '../../view/aiPropose';
 import type { TechnicalsData } from '../../view/aiTechnicals';
-import { answerModel, type MarkedInline } from '../../view/aiText';
+import { answerModel, type MarkedBlock, type MarkedInline } from '../../view/aiText';
 import { type AiToolEnv, scenarioOfResult, toolCard } from '../../view/aiTools';
 import { PANEL_FOCUS_LABEL } from '../../view/keys';
 import { PanelHead } from '../PanelHead';
+import { openTerm } from '../parts/termCard';
 
 /** 免責の文（端末で最初の 1 回だけ。AI の返答には書かせない。#135） */
 export const AI_DISCLAIMER =
@@ -34,6 +35,8 @@ export const AI_DISCLAIMER =
 export const AI_EMPTY_TEXT =
   '今のポジションの弱点を、AI が simulator の計算の数字で説明します。[このポジションを診断] を押すか、質問を入れてください。';
 const UNMATCHED_LABEL = '計算結果に無い数字';
+/** 用語のボタンの読み上げの補い（#232。押すと説明カード） */
+const TERM_LABEL = '用語の説明';
 /** 提案の差分の印の読み上げ（#139） */
 const PROPOSAL_MARK_LABEL = { '+': '追加: ', '−': '削除: ', '±': '変更: ' } as const;
 
@@ -371,7 +374,7 @@ function ChatRow(p: {
     case 'answer':
       return (
         <div class="ai-msg answer" data-ai-live={it.live ? 'true' : undefined}>
-          {it.text !== '' && <AnswerText text={it.text} sources={p.sources} />}
+          {it.text !== '' && <AnswerText text={it.text} sources={p.sources} live={it.live} />}
           {it.failed !== null && (
             <p class="ai-error" data-ai="error" data-code={it.failed}>
               {aiErrorText(it.failed, it.remainingUsd ?? null)}
@@ -441,23 +444,39 @@ function ChatRow(p: {
 }
 
 /**
- * 返答の文（木 + 照合の印）。(text, sources) で memo する = 流れの間にフレームごとに作り直すのは流れている返答だけ
- * （終わった返答の text と、会話の sources（messages が変わったときだけ作る）は変わらない）
+ * 返答の文（木 + 照合の印 + 用語の印）。(text, sources, live) で memo する = 流れの間にフレームごとに作り直すのは
+ * 流れている返答だけ（終わった返答の text と、会話の sources（messages が変わったときだけ作る）は変わらない）。
+ * 用語（#232）は押すと説明カード（openTerm）。表（#234）は AiTable
  */
-function AnswerText(p: { text: string; sources: readonly unknown[] }) {
-  const blocks = useMemo(() => answerModel(p.text, p.sources), [p.text, p.sources]);
+function AnswerText(p: { text: string; sources: readonly unknown[]; live: boolean }) {
+  const blocks = useMemo(() => answerModel(p.text, p.sources, p.live), [p.text, p.sources, p.live]);
   const inl = (xs: MarkedInline[]): ComponentChildren =>
     xs.map((x, i) => {
-      const parts = x.parts.map((m, j) =>
-        m.unmatched ? (
+      const parts = x.parts.map((m, j) => {
+        const term = m.term;
+        if (term)
+          return (
+            <button
+              key={j}
+              type="button"
+              class="ai-term"
+              data-term={term}
+              aria-haspopup="dialog"
+              onClick={() => openTerm(term)}
+            >
+              {m.text}
+              <span class="sr">（{TERM_LABEL}）</span>
+            </button>
+          );
+        return m.unmatched ? (
           <span key={j} class="ai-unmatched" title={UNMATCHED_LABEL}>
             {m.text}
             <span class="sr">（{UNMATCHED_LABEL}）</span>
           </span>
         ) : (
           m.text
-        ),
-      );
+        );
+      });
       return x.bold ? <strong key={i}>{parts}</strong> : <span key={i}>{parts}</span>;
     });
   return (
@@ -473,9 +492,73 @@ function AnswerText(p: { text: string; sources: readonly unknown[] }) {
             const items = b.items.map((x, j) => <li key={j}>{inl(x)}</li>);
             return b.kind === 'ul' ? <ul key={i}>{items}</ul> : <ol key={i}>{items}</ol>;
           }
+          case 'table':
+            return <AiTable key={i} table={b} inl={inl} />;
         }
         return null;
       })}
+    </div>
+  );
+}
+
+/** 続きのある側（表の枠の横スクロール。#234） */
+function moreOf(el: HTMLElement): string | null {
+  const start = el.scrollLeft > 1;
+  const end = el.scrollLeft + el.clientWidth < el.scrollWidth - 1;
+  return start && end ? 'both' : start ? 'start' : end ? 'end' : null;
+}
+
+/**
+ * 返答の表（#234）。数字の列（class num）は右揃え・折り返さない、文字の列はセルの中で折り返す。入らなければ枠
+ * （.ai-table）の中だけ横にスクロールし、続きのある側を data-more（start / end / both）で示す（CSS が端をぼかす）。
+ * data-more は DOM の属性を直接書く（描き直しを起こさない。style 属性は使わない）
+ */
+function AiTable(p: {
+  table: Extract<MarkedBlock, { kind: 'table' }>;
+  inl: (xs: MarkedInline[]) => ComponentChildren;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  const update = () => {
+    const el = ref.current;
+    if (!el) return;
+    const m = moreOf(el);
+    if (m === null) el.removeAttribute('data-more');
+    else el.setAttribute('data-more', m);
+  };
+  useLayoutEffect(update);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  const { table: t } = p;
+  const cls = (j: number) => (t.num[j] ? 'num' : undefined);
+  return (
+    <div class="ai-table" ref={ref} onScroll={update}>
+      <table>
+        <thead>
+          <tr>
+            {t.head.map((c, j) => (
+              <th key={j} scope="col" class={cls(j)}>
+                {p.inl(c)}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {t.rows.map((r, i) => (
+            <tr key={i}>
+              {r.map((c, j) => (
+                <td key={j} class={cls(j)}>
+                  {p.inl(c)}
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }

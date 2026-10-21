@@ -1,10 +1,13 @@
 /*
  * AI のチャット（#135。ui/next/regions/AiChat.tsx。docs/ui-redesign.md 2 章）。section.ai は見出し行 → 会話
  * （.panel-body。スクロールはここだけ）→ 足元（進み具合・押せない理由・[このポジションを診断]・入力欄）の縦の並び。
- * 返答の文字は折り返す（長い数字・英字も途中で折る = 横スクロールを出さない）。色はトークンだけ。
+ * 返答の文字は折り返す（長い数字・英字も途中で折る = 横スクロールを出さない。列の多い表だけ表の枠の中で横に
+ * スクロールする = #234）。色はトークンだけ。
  */
 
 section.ai .ai-body {
+  /* 読み上げだけの .sr（position: absolute）をスクロールする枠の中に留める（枠の外 = 画面のはみ出しにしない） */
+  position: relative;
   display: flex;
   flex-direction: column;
   gap: var(--sp-2);
@@ -99,6 +102,88 @@ section.ai .ai-body {
   color: var(--warn);
   text-decoration: underline dotted;
   text-underline-offset: 3px;
+}
+
+/* 用語集の用語（#232）。文と同じ字・アクセントの色・細い実線の下線（照合の印の点線と区別）。押すと説明カード */
+.ai-term {
+  display: inline;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--accent-ink);
+  font: inherit;
+  text-align: inherit;
+  text-decoration: underline solid;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+
+.ai-term:hover {
+  background: var(--s3);
+}
+
+/*
+ * 返答の表（#234）。文字の列はセルの中で折り返し（最小 6em）、数字の列（.num）は折り返さず右揃え。入らなければ枠の
+ * 中だけ横にスクロール（.panel-body・画面は横にはみ出さない）。続きのある側（data-more。AiTable が付ける）の端をぼかす
+ */
+.ai-table {
+  /* セルの .sr（照合の印・用語の読み上げ）を横にスクロールする枠の中に留める */
+  position: relative;
+  max-width: 100%;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+}
+
+.ai-table[data-more="end"] {
+  mask-image: linear-gradient(to right, var(--ink) calc(100% - 28px), transparent);
+}
+
+.ai-table[data-more="start"] {
+  mask-image: linear-gradient(to left, var(--ink) calc(100% - 28px), transparent);
+}
+
+.ai-table[data-more="both"] {
+  mask-image: linear-gradient(
+    to right,
+    transparent,
+    var(--ink) 28px,
+    var(--ink) calc(100% - 28px),
+    transparent
+  );
+}
+
+.ai-table table {
+  border-collapse: collapse;
+  font-size: var(--fs-sub);
+  line-height: 1.45;
+}
+
+.ai-table th,
+.ai-table td {
+  min-width: 6em;
+  padding: 3px 8px;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+  vertical-align: top;
+  overflow-wrap: anywhere;
+}
+
+.ai-table th {
+  border-bottom-color: var(--line-2);
+  color: var(--ink-2);
+  font-weight: 600;
+}
+
+.ai-table .num {
+  min-width: 0;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.ai-table td.num {
+  white-space: nowrap;
 }
 
 .ai-thinking {
