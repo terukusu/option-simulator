@@ -28,6 +28,11 @@
 - 今のイメージ（同梱の CLI 2.1.283）を実行 SA で Job として 1 回動かした。メタデータサーバーから ID トークン（audience `https://api.anthropic.com`・`format=full`）を取り、CLI を `-p --max-turns 1` で。子の資格情報は WIF の ID + `ANTHROPIC_IDENTITY_TOKEN` だけ（`ANTHROPIC_API_KEY`・`ANTHROPIC_AUTH_TOKEN`・`CLAUDE_CODE_OAUTH_TOKEN` は空）
 - 結果: **go**（終了コード 0・`subtype=success`・応答あり・5.8 秒）。Job と値の一時ファイルは削除した（ID・トークンは表示・記録していない）
 
+### W2: 中継の `wif` の e2e（2026-10-21、traffic 0 のタグ付きリビジョン。#228 のデプロイ後）
+
+- タグの URL は未認証で 302（IAP が効く）。`/api/ai/status` は `"credential":"wif","counted":true`。テクニカルの質問 3 回: `ai_request` は 3 件とも `credential=wif`・`error` なし・`skills=["simulator:technicals"]`・`turns=2`・`charged_usd` 計 ≈ $0.19（Firestore に計上）・`spawn_ms` 2.5〜7.3 秒。ERROR 0
+- 戻し方は下の「確かめ方」6 の順（タグを外すと traffic が固定に変わることに気づいて直した）
+
 ### 結合テスト（#221。本物の同梱 CLI と 127.0.0.1 の偽の Messages API。Anthropic は呼ばない）
 
 - Skill の往復: 1 回目の応答が `Skill`（入力 `{"skill": "simulator:technicals"}`）なら、CLI はフックの許可の後に SKILL.md を読み、2 回目の要求の messages に `Skill` の tool_use と tool_result（`Launching skill: …`）と本文の text（`Base directory for this skill: <パス>` + frontmatter を除いた本文）を足す。読んでいないスキルの本文は送らない
@@ -81,4 +86,4 @@
 3. 未認証の `curl -s -o /dev/null -w '%{http_code}'` でタグの URL の `/api/ai/status` が 302 / 401 / 403（IAP がタグの URL にも効く）
 4. ブラウザ（IAP のログイン）でタグの URL を開き、`/api/ai/status` が `"credential":"wif","counted":true`、スキルを使う質問（テクニカル）を 1 回
 5. `gcloud logging read 'jsonPayload.event="ai_request" AND resource.labels.revision_name="<WIF_REV>"' --freshness=30m --project "$P"` で `credential=wif`・`error` が null・usage と `cost_usd_est`・`skills` に名前。`ai_sdk_warning` が 0。`upstream_auth` + `error_type` `token_exchange` はルールの不一致、`IdentityTokenError` は ID トークンが取れていない。`/api/ai/status` の `remaining_usd` が減る（Firestore の計上）
-6. 戻す: `gcloud run services update-traffic simulator --remove-tags <TAG> --region "$REGION" --project "$P"`（**`--to-latest` は使わない**。latest は wif のリビジョン）→ `gcloud run revisions delete <WIF_REV>` → テンプレートのドリフト（wif の env・Secret の参照なし）を消すため、すぐに deploy workflow（Environment `prod` の承認）で terraform apply → describe で traffic が `<PREV>` 100% のままであることを確かめる
+6. 戻す（2026-10-21 の W2 で確かめた順。`infra/prod` は traffic を管理しないので、gcloud で触った traffic は deploy では戻らない）: (a) `gcloud run services update-traffic simulator --remove-tags <TAG> --region "$REGION" --project "$P"`（**これで traffic は「最新に 100%」から「`<PREV>` に固定」に変わる**）→ (b) deploy workflow を `workflow_dispatch` で流し（Environment `prod` の承認）、terraform apply でテンプレートを戻す（oauth の新しいリビジョン `<NEW>` ができる。traffic は (a) の固定のまま `<PREV>`）→ (c) `gcloud run revisions delete <WIF_REV>`（latest でなくなってから消せる。latest のうちは FAILED_PRECONDITION）→ (d) `<NEW>` の env が `AI_CREDENTIAL` と Secret の `ANTHROPIC_AUTH_TOKEN` で、image が `<PREV>` と同じ digest であることを describe で確かめてから `gcloud run services update-traffic simulator --to-latest`（**`<WIF_REV>` を消す前に `--to-latest` を使わない**）→ (e) describe で `spec.traffic` が `latestRevision: true`・100%（次の deploy で traffic が新しいリビジョンに移る形）、ERROR 0 を確かめる
