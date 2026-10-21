@@ -213,6 +213,11 @@ const QUANTILE_LOW = new Set(['5', '10', '25']);
 /** 「10% 点」「90%点」（分位点の名前。表の見出しなど）: 分位の数の後の `%` と `点` */
 const QUANTILE_POINT_AFTER = /^\s*[%％]\s*点/;
 const QUANTILE_ANY = new Set(['5', '10', '25', '50', '75', '90', '95']);
+/**
+ * 戻し方の名前（#140。iv_stats の days_to_90pct・not_retraced_90pct = 「9 割戻し」）: 符号の無い 9 ちょうどで、直後が
+ * 「割戻し」「割（は / が / まで）戻」のときだけ（値ではなく指標の名前。「9 割」の値の取り違えを広く見逃さない）
+ */
+const RETRACE_AFTER = /^\s*割\s*(は|が|まで)?\s*戻/;
 
 function matches(
   t: { value: number; decimals: number; unit: TokenUnit; signed: number },
@@ -297,6 +302,7 @@ export function checkNumbers(text: string, sources: readonly unknown[]): NumberC
         MULTIPLIER_AFTER.test(rest)
       )
         reason = 'number';
+      else if (numText === '9' && rawSign === '' && RETRACE_AFTER.test(rest)) reason = 'number';
       else if (PER_BEFORE.test(before)) reason = 'per_unit';
       else if (QUANTILE_BEFORE.test(before)) reason = 'number';
       else if (QUANTILE_TOP.has(numText) && QUANTILE_RANGE.test(before)) reason = 'number';

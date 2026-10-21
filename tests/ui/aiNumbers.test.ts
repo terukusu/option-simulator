@@ -53,6 +53,19 @@ describe('checkNumbers', () => {
     // 名前でない 90% は数える
     expect(checkNumbers('上げ幅は 90% です', src).unmatched).toBe(1);
   });
+  it('#140: 戻し方の名前「9 割戻し」「9 割は戻っていません」の 9 は数えない（ほかの 9 割・9 は数える）', () => {
+    const src = [{ median_days: 12 }];
+    const r = checkNumbers(
+      '9 割戻しまで中央値 12 日。2 回は 9 割は戻っていません。9割が戻る前に次が来た',
+      src,
+    );
+    expect(r.unmatched).toBe(0);
+    expect(r.matched).toBe(1);
+    // 名前でない 9 割・符号つき・9 ちょうどでない数は数える
+    expect(checkNumbers('勝率は 9 割です', src).unmatched).toBe(1);
+    expect(checkNumbers('+9 割戻し', src).unmatched).toBe(1);
+    expect(checkNumbers('19 割戻し', src).unmatched).toBe(1);
+  });
   it('円・千円・万円への丸め（四捨五入。境界）', () => {
     expect(statusOf('最大損失は -617,234 円')).toEqual(['matched']);
     expect(statusOf('最大損失は 617 千円')).toEqual(['matched']);
