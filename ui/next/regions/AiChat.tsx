@@ -22,19 +22,23 @@ import {
   sendBlocked,
 } from '../../view/aiChat';
 import type { IvStatsData } from '../../view/aiIvStats';
+import { AI_PRESETS, presetBlocked } from '../../view/aiPresets';
 import { proposalCard } from '../../view/aiPropose';
 import type { TechnicalsData } from '../../view/aiTechnicals';
 import { answerModel, type MarkedBlock, type MarkedInline } from '../../view/aiText';
 import { type AiToolEnv, scenarioOfResult, toolCard } from '../../view/aiTools';
 import { PANEL_FOCUS_LABEL } from '../../view/keys';
 import { PanelHead } from '../PanelHead';
+import { Chip, ChipRow } from '../parts/Chip';
 import { openTerm } from '../parts/termCard';
 
 /** 免責の文（端末で最初の 1 回だけ。AI の返答には書かせない。#135） */
 export const AI_DISCLAIMER =
   'AI の説明は、このシミュレーターの計算結果をもとにした検討材料です。投資の助言ではありません。売買の判断はご自身で行ってください。';
 export const AI_EMPTY_TEXT =
-  '今のポジションの弱点を、AI が simulator の計算の数字で説明します。[このポジションを診断] を押すか、質問を入れてください。';
+  '今のポジションの弱点を、AI が simulator の計算の数字で説明します。[このポジションを診断] か下の定型の質問（崩れ方・反論など）を押すか、質問を入れてください。';
+/** 定型の質問のチップの行の名前（#140） */
+const PRESETS_LABEL = '定型の質問';
 const UNMATCHED_LABEL = '計算結果に無い数字';
 /** 用語のボタンの読み上げの補い（#232。押すと説明カード） */
 const TERM_LABEL = '用語の説明';
@@ -143,7 +147,7 @@ export const AiPanel = pure(AiPanelView);
 /**
  * AI のチャット（#135。docs/ui-redesign.md 2 章・docs/design.md 14 章）。見出し行（残り・[新しい会話]）→ 免責の文
  * （初回だけ）→ 会話（user の吹き出し・考え中の要約（折りたたみ）・返答（aiText の木）・ツールのカード）→ 進み具合・
- * 押せない理由 → [このポジションを診断] と入力欄。返答・入力は JSX のテキストだけ（HTML を入れない・style 属性を使わない）。
+ * 押せない理由 → [このポジションを診断]・定型の質問のチップ（#140。行の中を横にスクロール）と入力欄。返答・入力は JSX のテキストだけ（HTML を入れない・style 属性を使わない）。
  * 照合できない数字（ui/view/aiNumbers.ts）は class の印（点線の下線）。
  */
 export function AiChat(p: {
@@ -292,6 +296,25 @@ export function AiChat(p: {
           >
             このポジションを診断
           </button>
+        </div>
+        <div class="ai-presets" data-ai="presets">
+          <ChipRow label={PRESETS_LABEL}>
+            {AI_PRESETS.map((pr) => {
+              const why = presetBlocked(state, gate, pr);
+              return (
+                <Chip
+                  key={pr.id}
+                  text={pr.label}
+                  disabled={why !== null}
+                  {...(why !== null && { title: why })}
+                  onClick={() => {
+                    stick.current = true;
+                    chat.preset(pr);
+                  }}
+                />
+              );
+            })}
+          </ChipRow>
         </div>
         <form
           class="ai-input"

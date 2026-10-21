@@ -2,7 +2,8 @@
  * AI のチャットのフック（#135。docs/design.md 14 章）。会話の状態は ui/view/aiChat.ts の reducer（純関数）、ここは
  * fetch（data/aiStream.ts）・sessionStorage（1 キー）・ツールの実行（ui/view/aiTools.ts）・描き直しのまとめ方だけ。
  *
- * - [このポジションを診断] / 送信 / [AI に聞く]（#136。kind ask と場所の topic）: 押した瞬間に begin（「計算中」）を描いてから、次のタスクで文脈（事前計算 5 本）を
+ * - [このポジションを診断] / 送信 / [AI に聞く]（#136。kind ask と場所の topic）/ 定型のチップ（#140。kind preset と
+ *   定型の ID）: 押した瞬間に begin（「計算中」）を描いてから、次のタスクで文脈（事前計算 5 本）を
  *   作って送る（計算の前に進み具合を出す = 押して 1 秒以内）
  * - 流れの事象は状態の ref にすぐ入れ、描き直しは 1 フレームに 1 回（text の delta ごとに描かない）
  * - tool_use で止まったらツールを実行して tool_result を足し、次の要求（MAX_TOOL_ROUNDS まで）
@@ -36,6 +37,7 @@ import {
 } from '../view/aiChat';
 import { buildAiContext, contextKey } from '../view/aiContext';
 import type { IvStatsData } from '../view/aiIvStats';
+import type { AiPreset } from '../view/aiPresets';
 import type { TechnicalsData } from '../view/aiTechnicals';
 import { type AiToolEnv, runTool } from '../view/aiTools';
 
@@ -57,6 +59,8 @@ export interface AiChatController {
   send: (text: string) => void;
   /** [AI に聞く]（#136）: 場所の topic つきで送る（kind ask） */
   ask: (text: string, topic: string) => void;
+  /** 定型のチップ（#140）: 決まった文を定型の ID つきで送る（kind preset） */
+  preset: (p: AiPreset) => void;
   retry: () => void;
   abort: () => void;
   reset: () => void;
@@ -250,6 +254,7 @@ export function useAiChat(
     },
     [start],
   );
+  const preset = useCallback((p: AiPreset) => start('preset', p.text, p.id), [start]);
   const retry = useCallback(() => {
     const f = (stateRef.current as AiChatState).failed;
     if (f) start(f.kind, f.userText, f.topic);
@@ -268,5 +273,5 @@ export function useAiChat(
     [],
   );
 
-  return { state, status, diagnose, send, ask, retry, abort, reset };
+  return { state, status, diagnose, send, ask, preset, retry, abort, reset };
 }

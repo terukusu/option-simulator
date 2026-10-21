@@ -9,11 +9,13 @@
 //
 //   npm run ai:eval                          10 通りの診断 + 追加の質問 2 件 + テクニカルの質問 4 件（#200）+ 提案の質問 3 件（#139）
 //                                            + 文書の質問 7 件（#137）+ [AI に聞く] 5 件（#136）+ IV の統計の質問 3 件（#138・#158）
+//                                            + 定型の質問 7 件（#140）
 //   npm run ai:eval -- --tech-only           テクニカルの質問 4 件だけ（#206 で EMA の質問を足した）
 //   npm run ai:eval -- --iv-only             IV の統計の質問 3 件だけ（#138・#158。iv_stats）
 //   npm run ai:eval -- --propose-only        ポジションの提案の質問 3 件だけ（#139）
 //   npm run ai:eval -- --docs-only           文書（マニュアル・設計書）の質問 7 件だけ（#137）
 //   npm run ai:eval -- --ask-only            数字・パネルから [AI に聞く] の 5 件だけ（#136。画面と同じ表示モデルから質問を作る）
+//   npm run ai:eval -- --preset-only         定型の質問のチップ 7 件だけ（#140。6 つ + 足 0 本の板の前提。画面と同じ文 = ui/view/aiPresets.ts を kind preset で）
 //   npm run ai:eval -- --cases put_sell,calendar --repeat 2 --no-followups
 //
 // 費用の上限: 累計の台帳 fixtures/local/ai_eval/ledger.json（gitignore）で AI_EVAL_LIMIT_USD（既定 6.5）を超える前に
@@ -38,8 +40,9 @@ const opt = (name, def = null) => {
 const base = (process.env.AI_EVAL_BASE || 'http://127.0.0.1:8080').replace(/\/$/, '');
 const limitUsd = Number(process.env.AI_EVAL_LIMIT_USD || '6.5');
 // 1 要求の予約額の上界（中継の予約の式 budget.reserve_micro_usd。#221 で turn の上限 3・スキル・CLI が足す本文を
-// 入れた。#137 で文書の read_doc の 1 要求の上限と目次を足した: 本文 25k トークンで約 $1.26、90k で約 $1.81）
-const reserveUsd = 1.9;
+// 入れた。#137 で文書の read_doc の 1 要求の上限と目次を足した。#140 のスキル presets の後は本文 25k トークンで約 $1.36、
+// 90k で約 $1.90）
+const reserveUsd = 2.0;
 const repeat = Number(opt('--repeat', '1'));
 const followups = !args.includes('--no-followups');
 const relayLog = process.env.AI_EVAL_RELAY_LOG || null;
@@ -99,7 +102,8 @@ const ivOnly = args.includes('--iv-only');
 const proposeOnly = args.includes('--propose-only');
 const docsOnly = args.includes('--docs-only');
 const askOnly = args.includes('--ask-only');
-const anyOnly = techOnly || proposeOnly || docsOnly || askOnly || ivOnly;
+const presetOnly = args.includes('--preset-only');
+const anyOnly = techOnly || proposeOnly || docsOnly || askOnly || ivOnly || presetOnly;
 
 // ポジションの提案の質問（#139）: 候補のツール → propose_position が呼ばれる・提案が板の検査を通る（error でない）・
 // カードの表示モデルができる・押した時点の反映の純関数で足が作れる・照合の不一致 0。floor があれば後の最大損失 ≥ floor
@@ -179,6 +183,33 @@ const ASK_IV_BARS = [
   { t: 1_760_007_200, o: 21.7, h: 22.3, l: 21.1, c: 21.4 },
 ];
 
+// 定型の質問（#140）: 画面のチップと同じ文（aiPresets.AI_PRESETS）を kind preset と定型の ID で送る。判定: エラーなし・
+// want のツールのどれかを呼ぶ（スキルの節が挙げるツール。precomputed のツールは呼んだに数えない）・照合の一致 1 以上・
+// 不一致 0・ログ（あれば）の kind / topic。noLegs は足 0 本（板の前提・IV は足が無くても押せる）。headings は返答に要る見出し（[反論] は 3 つ・[出口] は利確 / 損切り）。noCall は IV の上げ下げ・売り時を
+// 断定しない（DIRECTION_RE と SELL_CALL_RE）。propose は通った提案のカード（今のタブ）が 1 つ以上
+const PRESET_QUESTIONS = [
+  { id: 'crash', case: 'put_sell', want: ['evaluate_scenario'] },
+  {
+    id: 'rebut',
+    case: 'iron_condor',
+    want: ['structure_candidates', 'evaluate_scenario'],
+    headings: [/^## 反論 1/m, /^## 反論 2/m, /^## 反論 3/m],
+  },
+  { id: 'board', case: 'strangle_sell', want: ['iv_stats'], noCall: true },
+  { id: 'board', case: 'strangle_sell', want: ['iv_stats'], noCall: true, noLegs: true },
+  { id: 'hedge', case: 'put_sell', want: ['propose_position'], propose: true },
+  {
+    id: 'exit',
+    case: 'bull_put',
+    want: ['evaluate_scenario'],
+    headings: [/^## 利確の候補/m, /^## 損切りの候補/m],
+  },
+  { id: 'iv', case: 'iron_condor', want: ['iv_stats'], noCall: true },
+];
+/** 売り時・買い時の断定（[今の IV は売り時？] で書かない） */
+export const SELL_CALL_RE =
+  /(売り時です|売り時だ(?!と)|売り時と言え(る|ます)|売るべき|買い時です|買うべき|売りに有利な局面です)/;
+
 /** 節を示す言い回し（「マニュアル 8.5「…」」「設計書 5.4」「マニュアル 10 章」） */
 export const CITE_RE = /(マニュアル|設計書)\s*(の\s*)?[0-9]+(\.[0-9]+)*/;
 /** 開発の経緯（Issue 番号・決定の記号）。答えに出さない */
@@ -199,6 +230,7 @@ const synthFut = await load('scripts/synthFutBars.ts');
 const toolsFixture = await load('scripts/aiToolsFixture.ts');
 const proposeMod = await load('ui/view/aiPropose.ts');
 const askMod = await load('ui/view/aiAsk.ts');
+const presetMod = await load('ui/view/aiPresets.ts');
 const metricsMod = await load('ui/view/metrics.ts');
 const panelMod = await load('ui/view/metricsPanel.ts');
 const readoutMod = await load('ui/view/readout.ts');
@@ -685,6 +717,83 @@ for (const [qi, q] of (anyOnly && !askOnly ? [] : ASK_QUESTIONS).entries()) {
   );
 }
 
+// ---- 定型の質問（#140）: 新しい会話で 1 問ずつ。文は画面のチップと同じ。IV の統計を使う問は合成の日次の値を入れる
+for (const q of anyOnly && !presetOnly ? [] : PRESET_QUESTIONS) {
+  const preset = presetMod.AI_PRESETS.find((p) => p.id === q.id);
+  const c0 = cases.AI_EVAL_CASES.find((x) => x.name === q.case);
+  const c = q.noLegs ? { ...c0, legs: [] } : c0;
+  const env = {
+    ...ctxMod.aiEnvFromState(cases.caseState(latest, c), cases.caseMargin(c)),
+    ivStats: ivData,
+  };
+  const before = relayRecords()?.length ?? null;
+  const r = await turn(chatMod.INITIAL_AI_CHAT, env, 'preset', preset.text, preset.id);
+  const t = answerOf(r.chat);
+  const recs = before === null ? null : (relayRecords() ?? []).slice(before);
+  const logged = recs ? recs.some((x) => x.kind === 'preset' && x.topic === preset.id) : null;
+  const skillsRead = recs ? recs.flatMap((x) => (Array.isArray(x.skills) ? x.skills : [])) : null;
+  const ck = numMod.checkNumbers(t, chatMod.numberSources(r.chat));
+  const un = ck.tokens.filter((x) => x.status === 'unmatched').map((x) => x.raw);
+  const uses = r.chat.messages
+    .flatMap((m) => (m.role === 'assistant' ? m.content : []))
+    .filter((b) => b.type === 'tool_use');
+  const tools = uses.map((b) => b.name);
+  const results = new Map(
+    r.chat.messages
+      .flatMap((m) => (m.role === 'user' ? m.content : []))
+      .filter((b) => b.type === 'tool_result')
+      .map((b) => [b.tool_use_id, JSON.parse(b.content[0].text)]),
+  );
+  const cards = uses
+    .filter((u) => u.name === 'propose_position')
+    .map((u) => {
+      const res = results.get(u.id);
+      return {
+        target: u.input.target,
+        error: res?.error ?? null,
+        card: proposeMod.proposalCard(u.input, res) !== null,
+      };
+    });
+  const headingsOk = (q.headings ?? []).every((re) => re.test(t));
+  const direction = q.noCall ? (t.match(DIRECTION_RE)?.[0] ?? null) : null;
+  const sellCall = q.noCall ? (t.match(SELL_CALL_RE)?.[0] ?? null) : null;
+  const proposeOk =
+    !q.propose || cards.some((x) => x.error === null && x.card && x.target === 'current');
+  const ok =
+    !r.run.error &&
+    q.want.some((w) => tools.includes(w)) &&
+    ck.matched >= 1 &&
+    ck.unmatched === 0 &&
+    headingsOk &&
+    !direction &&
+    !sellCall &&
+    proposeOk &&
+    logged !== false;
+  rows.push({
+    case: q.noLegs ? `${q.case}(足なし)` : q.case,
+    kind: 'preset',
+    rep: 0,
+    pass: ok,
+    topic: preset.id,
+    tools,
+    skills: skillsRead,
+    logged,
+    headingsOk,
+    direction,
+    sellCall,
+    proposals: cards,
+    matchedTotal: ck.matched,
+    unmatched: un,
+    chars: t.length,
+    ...r.run,
+  });
+  const tag = `${preset.id}${q.noLegs ? '-nolegs' : ''}`;
+  writeFileSync(join(outDir, `preset-${tag}.md`), `# 定型: ${preset.label}\n\n${t}\n`);
+  console.log(
+    `${ok ? 'pass' : 'FAIL'}  定型 ${preset.label}（${q.case}${q.noLegs ? '・足なし' : ''}）: ツール ${tools.join(',') || 'なし'}${skillsRead === null ? '' : `・スキル ${skillsRead.join(',') || 'なし'}`}${logged === null ? '' : `・ログの kind / topic ${logged ? 'あり' : 'なし'}`}${q.headings ? `・見出し ${headingsOk ? 'あり' : 'なし'}` : ''}${q.noCall ? `・断定 ${direction ?? sellCall ?? 'なし'}` : ''}${q.propose ? `・提案 ${cards.map((x) => `${x.target}${x.error ? `(${x.error})` : ''}`).join('/') || 'なし'}` : ''}・一致 ${ck.matched}・不一致 ${un.length}${un.length ? `［${un.join('、')}］` : ''}・往復 ${r.run.requests}・${r.run.stop ?? r.run.error}・完了 ${(r.run.totalMs / 1000).toFixed(1)} 秒`,
+  );
+}
+
 /** 中継のログ（標準出力の JSON 行）の ai_request。ログが無ければ null */
 function relayRecords() {
   if (!relayLog) return null;
@@ -755,6 +864,7 @@ const ivRows = rows.filter((r) => r.kind === 'iv_stats');
 const proposes = rows.filter((r) => r.kind === 'propose');
 const docRows = rows.filter((r) => r.kind === 'docs');
 const askRows = rows.filter((r) => r.kind === 'ask');
+const presetRows = rows.filter((r) => r.kind === 'preset');
 const summary = {
   model: status.model,
   credential: status.credential,
@@ -766,6 +876,7 @@ const summary = {
   propose: { pass: proposes.filter((r) => r.pass).length, total: proposes.length },
   docs: { pass: docRows.filter((r) => r.pass).length, total: docRows.length },
   ask: { pass: askRows.filter((r) => r.pass).length, total: askRows.length },
+  preset: { pass: presetRows.filter((r) => r.pass).length, total: presetRows.length },
   // 文書の質問の不一致（文書の値）は数えない（照合の対象外。#137）
   unmatched_total: rows
     .filter((r) => r.kind !== 'docs')
@@ -784,5 +895,6 @@ const ok =
   summary.iv_stats.pass === summary.iv_stats.total &&
   summary.propose.pass === summary.propose.total &&
   summary.docs.pass === summary.docs.total &&
-  summary.ask.pass === summary.ask.total;
+  summary.ask.pass === summary.ask.total &&
+  summary.preset.pass === summary.preset.total;
 process.exit(ok ? 0 : 1);

@@ -16,8 +16,8 @@ from pathlib import Path
 
 PLUGIN_NAME = "simulator"
 PLUGIN_DIR = Path(__file__).resolve().parent / "plugin"
-# 使うスキル（ディレクトリの名前）。足すときは plugin/skills/<名前>/SKILL.md と一緒にここへ
-NAMES = ("technicals", "proposals", "volatility")
+# 使うスキル（ディレクトリの名前）。足すときは plugin/skills/<名前>/SKILL.md と一緒にここへ（presets: 定型。#140）
+NAMES = ("technicals", "proposals", "volatility", "presets")
 
 
 def qualified(name: str) -> str:

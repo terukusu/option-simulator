@@ -213,7 +213,7 @@ describe('#136 AC1 場所の ID は中継の許可リストと同じ', () => {
 
   it('kind の列挙に ask がある（data/aiStream.ts の AiKind と allowlist.py の KINDS）', () => {
     const py = read('api/src/simulator_api/ai/allowlist.py');
-    expect(py).toMatch(/^KINDS = \("chat", "diagnose", "ask"\)/m);
+    expect(py).toMatch(/^KINDS = \("chat", "diagnose", "ask", "preset"\)/m);
   });
 });
 

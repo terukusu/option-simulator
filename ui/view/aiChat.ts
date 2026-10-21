@@ -22,7 +22,6 @@ import type {
   AiStatus,
   AiUserBlock,
 } from '../../data/aiStream';
-import { ASK_PREFIX } from './aiAsk';
 import { displayedValues } from './aiNumbers';
 
 export const AI_SESSION_KEY = 'optsim.ai.v1';
@@ -53,7 +52,7 @@ export const PHASE_LABEL: Record<AiPhase, string> = {
 export interface AiTurn {
   kind: AiKind;
   userText: string;
-  /** [AI に聞く] の場所（#136。kind が ask のときだけ。要求の topic） */
+  /** [AI に聞く] の場所（#136）・定型の ID（#140）。kind が ask / preset のときだけ（要求の topic） */
   topic?: string;
   phase: AiPhase;
   /** 押した時刻（ms。呼び出し側の時計） */
@@ -72,7 +71,7 @@ export interface AiTurn {
 export interface AiFailed {
   kind: AiKind;
   userText: string;
-  /** [もう一度] で同じ場所として送り直す（#136） */
+  /** [もう一度] で同じ場所・定型として送り直す（#136・#140） */
   topic?: string;
   partial: string;
   code: string;
@@ -113,6 +112,9 @@ export type AiChatAction =
   | { type: 'restore'; saved: SavedAiChat };
 
 const STOP_NOTES = new Set(['refusal', 'max_tokens', 'pause_turn']);
+
+/** topic を持つ kind（ask = [AI に聞く] の場所。#136。preset = 定型の ID。#140） */
+export const hasTopic = (k: AiKind): boolean => k === 'ask' || k === 'preset';
 
 function fail(s: AiChatState, code: string, remainingUsd: number | null = null): AiChatState {
   const t = s.turn;
@@ -200,8 +202,8 @@ export function aiChatReduce(s: AiChatState, a: AiChatAction): AiChatState {
         turn: {
           kind: a.kind,
           userText: a.text,
-          // topic は ask のときだけ（chat・diagnose に付けると中継が 400）
-          ...(a.kind === 'ask' && a.topic !== undefined && { topic: a.topic }),
+          // topic は ask・preset のときだけ（chat・diagnose に付けると中継が 400）
+          ...(hasTopic(a.kind) && a.topic !== undefined && { topic: a.topic }),
           phase: 'computing',
           startedAt: a.now,
           thinking: '',
@@ -258,7 +260,7 @@ export function aiChatReduce(s: AiChatState, a: AiChatAction): AiChatState {
   }
 }
 
-/** 今の turn の要求の本文（turn が無い・文脈が無ければ null）。ask は場所の topic を付ける（#136） */
+/** 今の turn の要求の本文（turn が無い・文脈が無ければ null）。ask は場所、preset は定型の topic を付ける（#136・#140） */
 export function requestOf(s: AiChatState): AiRequest | null {
   if (!s.turn || s.context === null) return null;
   const body: AiRequest = {
@@ -267,7 +269,7 @@ export function requestOf(s: AiChatState): AiRequest | null {
     context: s.context,
     messages: s.messages,
   };
-  if (s.turn.kind === 'ask' && s.turn.topic !== undefined) body.topic = s.turn.topic;
+  if (hasTopic(s.turn.kind) && s.turn.topic !== undefined) body.topic = s.turn.topic;
   return body;
 }
 
@@ -602,18 +604,24 @@ function betaSource(c: AiContext): unknown[] {
 
 /**
  * 照合の値（最初の文脈・文脈の更新・ツールの結果）。#136: その会話の [AI に聞く] の質問の文（ASK_PREFIX で始まる
- * 利用者の発言）に入れた画面の表示の値と、シナリオの β の 1% あたりの pt も足す
+ * 利用者の発言）に入れた画面の表示の値と、シナリオの β の 1% あたりの pt も足す。#140: その会話の利用者の発言の文の数
+ * （「最大損失を −1,000 千円に抑える」など。表示の値と同じ読み方）と、AI がツールに渡した入力の値（propose_position の
+ * max_loss_floor_yen など。キーの名前で単位）も足す（ほかの会話の値は足さない）
  */
 export function numberSources(s: AiChatState): unknown[] {
   const out: unknown[] = [];
   if (s.context) out.push(s.context, ...betaSource(s.context));
   for (const m of s.messages) {
-    if (m.role !== 'user') continue;
+    if (m.role === 'assistant') {
+      for (const b of m.content) if (b.type === 'tool_use') out.push(b.input);
+      continue;
+    }
     for (const b of m.content) {
       if (b.type === 'context_update') out.push(b.context, ...betaSource(b.context));
       else if (b.type === 'tool_result') out.push(parseJson(b.content[0].text));
-      else if (b.type === 'text' && b.text.startsWith(ASK_PREFIX)) {
-        out.push(displayedValues(b.text));
+      else if (b.type === 'text') {
+        const shown = displayedValues(b.text);
+        if (Object.keys(shown).length > 0) out.push(shown);
       }
     }
   }

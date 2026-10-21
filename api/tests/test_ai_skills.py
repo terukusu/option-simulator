@@ -67,6 +67,18 @@ def test_no_command_injection_or_tool_grants(name):
     assert [p.name for p in skills.skill_path(name).parent.iterdir()] == ["SKILL.md"]
 
 
+def test_presets_has_each_preset_section():
+    # 定型の質問（#140 AC4）: 画面のチップの名前（ui/view/aiPresets.ts）ごとに節がある
+    from simulator_api.ai import allowlist
+
+    text = skills.skill_path("presets").read_text(encoding="utf-8")
+    names = ("崩れ方", "反論", "板の前提", "ヘッジ案", "出口", "今の IV は売り時？")
+    assert len(names) == len(allowlist.PRESET_TOPICS)
+    for name in names:
+        assert f"\n## {name}\n" in text
+    assert "simulator:proposals" in text and "simulator:volatility" in text
+
+
 def test_total_size_under_limit():
     total = sum(skills.skill_path(n).stat().st_size for n in skills.NAMES)
     assert total == skills.total_bytes() <= st.AI_SKILL_MAX_BYTES

@@ -1,8 +1,8 @@
 """要求の本文の許可リスト（docs/ai-advisor.md 論点 1・6、K15）と、送る本文の組み立て直し。純関数。
 
-ブラウザから受けるのは schema_version・kind・context・messages と、kind が ask のときだけ topic（model・system・
-tools・max_tokens などは 400）。topic は [AI に聞く]（#136）の場所の ID（決まった一覧）で、ログ ai_request に出す
-だけ（Anthropic には送らない）。
+ブラウザから受けるのは schema_version・kind・context・messages と、kind が ask・preset のときだけ topic（model・
+system・tools・max_tokens などは 400）。topic は [AI に聞く]（#136）の場所の ID か定型の質問（#140）の ID（どちらも
+決まった一覧）で、ログ ai_request に出すだけ（Anthropic には送らない）。
 context に自由な文字列は無い（列挙・日付・時刻の形だけ）。板の行に JPX のグリーク・bid_iv / ask_iv・数量・建玉・出来高は
 無い（許可リストに無いので 400）。IV は simulator の IV（%）。
 
@@ -24,12 +24,17 @@ from .shape import DATE, INSTANT, MONTH, Arr, Bad, Bool, Enum, Map, Num, Obj, St
 from .tools import Registry
 
 SCHEMA_VERSION = 1
-# 定型の種類（diagnose = [このポジションを診断]。#135。ask = 数字・パネルの [AI に聞く]。#136）。#140 が足す
-KINDS = ("chat", "diagnose", "ask")
+# 定型の種類（diagnose = [このポジションを診断]。#135。ask = 数字・パネルの [AI に聞く]。#136。preset = 定型の質問の
+# チップ。#140）
+KINDS = ("chat", "diagnose", "ask", "preset")
 # [AI に聞く] の場所（#136。ui/view/aiAsk.ts の AI_ASK_TOPICS と同じ並び = tests/ui/aiAsk.test.ts が突き合わせる）
 ASK_TOPICS = ("tile.maxProfit", "tile.maxLoss", "tile.bep", "tile.premium", "tile.scenario", "tile.greeks",
               "tile.margin", "tile.room", "readout.date", "readout.expiry", "readout.delta", "readout.premium",
               "tail.pnl", "tail.margin", "iv.history")
+# 定型の質問の ID（#140。ui/view/aiPresets.ts の AI_PRESET_IDS と同じ並び = tests/ui/aiPresets.test.ts が突き合わせる）
+PRESET_TOPICS = ("crash", "rebut", "board", "hedge", "exit", "iv")
+# topic を持つ kind と、その値の一覧
+TOPICS = {"ask": ASK_TOPICS, "preset": PRESET_TOPICS}
 
 MAX_PRICE = 10_000_000  # 価格・行使価格・F の上限（円。形の検査の安全弁）
 MAX_EXPIRIES = 6
@@ -97,7 +102,8 @@ class AiRequest:
     kind: str
     context: dict
     messages: list[dict]
-    topic: str | None = None  # [AI に聞く] の場所（kind が ask のときだけ。ログ用。Anthropic には送らない）
+    # [AI に聞く] の場所・定型の ID（kind が ask / preset のときだけ。ログ用。Anthropic には送らない）
+    topic: str | None = None
 
     def tool_names(self) -> list[str]:
         """会話に出たツールの名前（ログ用。重複なし・出た順）"""
@@ -290,12 +296,12 @@ def parse_request(raw: bytes, registry: Registry) -> AiRequest:
             raise Bad(k, "missing")
     Enum((SCHEMA_VERSION,)).check(body["schema_version"], "schema_version")
     kind = Enum(KINDS).check(body["kind"], "kind")
-    # topic は ask のときだけ必須、ほかの kind では付けない（#136）
+    # topic は ask・preset のときだけ必須、ほかの kind では付けない（#136・#140）
     topic = None
-    if kind == "ask":
+    if kind in TOPICS:
         if "topic" not in body:
             raise Bad("topic", "missing")
-        topic = Enum(ASK_TOPICS).check(body["topic"], "topic")
+        topic = Enum(TOPICS[kind]).check(body["topic"], "topic")
     elif "topic" in body:
         raise Bad("topic", "unknown_key")
     context = _check_context(body["context"], registry)

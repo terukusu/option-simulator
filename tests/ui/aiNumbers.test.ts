@@ -53,6 +53,40 @@ describe('checkNumbers', () => {
     // 名前でない 90% は数える
     expect(checkNumbers('上げ幅は 90% です', src).unmatched).toBe(1);
   });
+  it('#140: 戻し方の名前「9 割戻し」「9 割は戻っていません」の 9 は数えない（ほかの 9 割・9 は数える）', () => {
+    const src = [{ median_days: 12 }];
+    const r = checkNumbers(
+      '9 割戻しまで中央値 12 日。2 回は 9 割は戻っていません。9割が戻る前に次が来た',
+      src,
+    );
+    expect(r.unmatched).toBe(0);
+    expect(r.matched).toBe(1);
+    // 名前でない 9 割・符号つき・9 ちょうどでない数は数える
+    expect(checkNumbers('勝率は 9 割です', src).unmatched).toBe(1);
+    expect(checkNumbers('+9 割戻し', src).unmatched).toBe(1);
+    expect(checkNumbers('19 割戻し', src).unmatched).toBe(1);
+    // 箇条書きの「- 」の後・「まではまだ」・空白なし・「戻らなかった」も名前（本物の評価で出た言い方）
+    expect(
+      checkNumbers(
+        '- 9 割戻しまで: 中央値 12 日\n- 9割戻し: 中央値 12 日\n9 割まではまだ戻っていません。9 割まで戻らなかった。9 割戻らないうちに',
+        src,
+      ).unmatched,
+    ).toBe(0);
+    expect(checkNumbers('−9 割戻し', src).unmatched).toBe(1);
+  });
+  it('#140: 月 / 日の日付（9/28・9/16・10/07）と「日経225」の 225 は数えない（ほかの 225 は数える）', () => {
+    const r = checkNumbers('9/28 に始まり 10/05 に山。9/16 の終値から。日経225 先物と日経 225', []);
+    expect(r.unmatched).toBe(0);
+    expect(r.tokens.filter((t) => t.reason === 'date').map((t) => t.raw)).toEqual([
+      '9/28',
+      '10/05',
+      '9/16',
+    ]);
+    expect(checkNumbers('行使価格 225 円', []).unmatched).toBe(1);
+    // 定型の見出しの番号（反論 1・案 2）は番号
+    expect(checkNumbers('## 反論 1: 受取が小さい\n## 案 2: 下を買う', []).unmatched).toBe(0);
+    expect(checkNumbers('日経 +225 円', []).unmatched).toBe(1);
+  });
   it('円・千円・万円への丸め（四捨五入。境界）', () => {
     expect(statusOf('最大損失は -617,234 円')).toEqual(['matched']);
     expect(statusOf('最大損失は 617 千円')).toEqual(['matched']);
@@ -239,5 +273,13 @@ describe('sectionsOf', () => {
       ['弱点 2: IV', true, 0],
       ['確かめるとよいこと', false, 1],
     ]);
+  });
+
+  it('順番の言い方（「3 枚目」「2 本目」「1 つ目」）は数えない。枚数そのものは照合する', () => {
+    for (const x of ['カードの 3 枚目', '2 本目の足', '1 つ目の案', '3回目']) {
+      expect(checkNumbers(x, []).unmatched, x).toBe(0);
+    }
+    expect(checkNumbers('put を 3 枚売る', []).unmatched).toBe(1);
+    expect(checkNumbers('−3 枚目', []).unmatched).toBe(1);
   });
 });
