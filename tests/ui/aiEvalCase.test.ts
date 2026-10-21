@@ -3,6 +3,9 @@
 import { describe, expect, it } from 'vitest';
 import type { AiMessage } from '../../data/aiStream';
 import { AI_EVAL_CASES, caseMargin, caseState } from '../../scripts/aiEvalCases';
+import { synthIvStatsData } from '../../scripts/aiToolsFixture';
+import { synthTechnicalsData } from '../../scripts/synthFutBars';
+import { reduce } from '../../ui/state';
 import { type AiChatState, DIAGNOSE_TEXT, INITIAL_AI_CHAT } from '../../ui/view/aiChat';
 import { aiEnvFromState, buildAiContext, contextKey } from '../../ui/view/aiContext';
 import {
@@ -12,9 +15,14 @@ import {
   aiEvalCase,
   aiEvalFileName,
   aiEvalSource,
+  keepKeys,
+  noteLine,
   readAiEvalCase,
+  recordSource,
+  sourceAt,
   turnOf,
   usedTools,
+  withToolData,
 } from '../../ui/view/aiEvalCase';
 import { AI_PRESETS } from '../../ui/view/aiPresets';
 import { fixture } from '../support/fixtures';
@@ -181,5 +189,71 @@ describe('aiEvalCase（#159）', () => {
       'ai-eval-20261022-150405.json',
     );
     expect(aiEvalSource({ ...state, chain: null }, margin, undefined, NOW)).toBeNull();
+  });
+
+  it('[評価に残す] は 1 回の返答の最後の text だけ（前置き・続いている turn には出さない）', () => {
+    // m1 = 診断の答え、m3 = 前置き + tool_use（出さない）、m5 = ツールの往復の後の答え、m7 = 定型の答え
+    expect([...keepKeys(chat)]).toEqual(['m1b0', 'm5b0', 'm7b0']);
+    // 続いている turn（流れている途中・ツールの往復の途中）の最後の返答には出さない
+    const live = { ...chat, turn: {} as NonNullable<AiChatState['turn']> };
+    expect([...keepKeys(live)]).toEqual(['m1b0', 'm5b0']);
+    // 最後が tool_use で止まった（ツールの結果を待つ）返答には出さない
+    expect([...keepKeys({ ...chat, messages: messages.slice(0, 4) })]).toEqual(['m1b0']);
+    expect([...keepKeys(INITIAL_AI_CHAT)]).toEqual([]);
+  });
+
+  it('送ったときの材料の控え: 会話の後に画面を変えても、押した返答の発言を送ったときの材料で同じ文脈', () => {
+    const sent = source();
+    let log = recordSource([], 0, sent);
+    // 2 発言目の後にシナリオ・足を変えた画面（別の材料）
+    const moved = reduce(state, { type: 'setScenario', patch: { dX: 1500, days: 3 } });
+    const later = aiEvalSource(moved, margin, PROFILE, NOW);
+    if (!later) throw new Error('later');
+    expect(later.position).not.toEqual(sent.position);
+    const tech = synthTechnicalsData();
+    log = withToolData(log, tech, null);
+    log = recordSource(log, 6, later);
+    // m1・m5 は 1 発言目・2 発言目（控えは at 0 だけ）の材料、m7 は at 6 の材料
+    const s1 = sourceAt(log, 5);
+    expect(s1?.position).toEqual(sent.position);
+    expect(s1?.technicals).toBe(tech);
+    const env1 = aiEnvFromCase(s1 ?? sent);
+    expect(contextKey(buildAiContext(env1))).toBe(contextKey(context));
+    expect(sourceAt(log, 7)?.position).toEqual(later.position);
+    // 前の控えのツールの材料を引き継ぐ
+    expect(sourceAt(log, 7)?.technicals).toBe(tech);
+    expect(sourceAt(log, 0)).toBeNull();
+    // 失敗して捨てた発言の控え（同じ位置以降）は新しい控えで置き換える
+    expect(recordSource(log, 6, sent).map((e) => e.at)).toEqual([0, 6]);
+    // 保存 → 読み直しで先物の足・IV の日次の値も通る
+    const doc = aiEvalCase({
+      chat,
+      answerKey: 'm5b0',
+      source: { ...(s1 ?? sent), iv_stats: synthIvStatsData() },
+      note: '',
+      now: NOW,
+    });
+    const read = readAiEvalCase(JSON.parse(JSON.stringify(doc)));
+    expect(read?.source.technicals?.daily.length).toBe(tech.daily.length);
+    expect(read?.source.iv_stats?.days.length).toBeGreaterThan(0);
+  });
+
+  it('先物の足・IV の日次の値の形が壊れたファイルは読まない', () => {
+    const doc = JSON.parse(
+      JSON.stringify(aiEvalCase({ chat, answerKey: 'm7b0', source: source(), note: '', now: NOW })),
+    );
+    const bad = (k: string, v: unknown) =>
+      readAiEvalCase({ ...doc, source: { ...doc.source, [k]: v } });
+    expect(bad('technicals', {})).toBeNull();
+    expect(bad('technicals', { daily: [{ t: 1 }], hourly: [] })).toBeNull();
+    expect(bad('iv_stats', { days: 'x', now: null })).toBeNull();
+    expect(bad('iv_stats', { days: [], now: { t: 1 } })).toBeNull();
+    expect(bad('iv_stats', { days: [], now: null, hourly: [{ t: 1 }] })).toBeNull();
+    expect(bad('technicals', JSON.parse(JSON.stringify(synthTechnicalsData())))).not.toBeNull();
+  });
+
+  it('メモの表示: 制御文字を空白にして長さを切る', () => {
+    expect(noteLine('数字が\n違う\u001b[31m')).toBe('数字が 違う [31m');
+    expect(noteLine('あ'.repeat(100), 10)).toBe(`${'あ'.repeat(10)}…`);
   });
 });

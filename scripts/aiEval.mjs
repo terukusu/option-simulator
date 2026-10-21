@@ -934,11 +934,19 @@ for (const f of savedFiles) {
       : ctxMod.contextKey(ctxMod.buildAiContext(env)) === ctxMod.contextKey(doc.context);
   let chat = chatMod.INITIAL_AI_CHAT;
   const runs = [];
+  // ツールの実行などの例外は件の失敗（error exception）にして次の件へ（1 件で全体を止めない）
+  let thrown = null;
   for (const t of doc.turns) {
-    const r = await turn(chat, env, t.kind, t.text, t.topic);
-    chat = r.chat;
-    runs.push(r.run);
-    if (r.run.error) break;
+    try {
+      const r = await turn(chat, env, t.kind, t.text, t.topic);
+      chat = r.chat;
+      runs.push(r.run);
+      if (r.run.error) break;
+    } catch (e) {
+      thrown = 'exception';
+      console.error(`  ${f}: ${e?.message}`);
+      break;
+    }
   }
   const t = answerOf(chat);
   const ck = numMod.checkNumbers(t, chatMod.numberSources(chat));
@@ -947,7 +955,8 @@ for (const f of savedFiles) {
     .flatMap((m) => (m.role === 'assistant' ? m.content : []))
     .filter((b) => b.type === 'tool_use')
     .map((b) => b.name);
-  const error = runs.find((r) => r.error)?.error ?? null;
+  const error = thrown ?? runs.find((r) => r.error)?.error ?? null;
+  const note = evalCaseMod.noteLine(doc.note);
   const requests = runs.reduce((n, r) => n + r.requests, 0);
   const totalMs = runs.reduce((n, r) => n + r.totalMs, 0);
   const ok = !error && runs.length === doc.turns.length && ck.unmatched === 0;
@@ -956,7 +965,7 @@ for (const f of savedFiles) {
     kind: 'saved',
     rep: 0,
     pass: ok,
-    note: doc.note,
+    note,
     turns: doc.turns.length,
     same_context: sameContext,
     tools,
@@ -972,10 +981,10 @@ for (const f of savedFiles) {
   });
   writeFileSync(
     join(outDir, `saved-${name}.md`),
-    `# 保存した会話: ${name}\n\nメモ: ${doc.note || '—'}\n\n## 保存したときの返答（不一致 ${doc.answer.unmatched.length}）\n\n${doc.answer.text}\n\n## 今の返答\n\n${t}\n`,
+    `# 保存した会話: ${name}\n\nメモ: ${note || '—'}\n\n## 保存したときの返答（不一致 ${doc.answer.unmatched.length}）\n\n${doc.answer.text}\n\n## 今の返答\n\n${t}\n`,
   );
   console.log(
-    `${ok ? 'pass' : 'FAIL'}  保存 ${name}: 発言 ${doc.turns.length}・文脈 ${sameContext === null ? '—' : sameContext ? '同じ' : '違う'}・ツール ${tools.join(',') || 'なし'}・一致 ${ck.matched}・不一致 ${un.length}${un.length ? `［${un.join('、')}］` : ''}（保存のとき ${doc.answer.unmatched.length}）・往復 ${requests}・${error ?? runs.at(-1)?.stop ?? '—'}・完了 ${(totalMs / 1000).toFixed(1)} 秒${doc.note ? `・メモ「${doc.note}」` : ''}`,
+    `${ok ? 'pass' : 'FAIL'}  保存 ${name}: 発言 ${doc.turns.length}・文脈 ${sameContext === null ? '—' : sameContext ? '同じ' : '違う'}・ツール ${tools.join(',') || 'なし'}・一致 ${ck.matched}・不一致 ${un.length}${un.length ? `［${un.join('、')}］` : ''}（保存のとき ${doc.answer.unmatched.length}）・往復 ${requests}・${error ?? runs.at(-1)?.stop ?? '—'}・完了 ${(totalMs / 1000).toFixed(1)} 秒${note ? `・メモ「${note}」` : ''}`,
   );
 }
 

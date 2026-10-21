@@ -40,6 +40,9 @@ export const AI_EVAL_KEEP_LABEL = '評価に残す';
 export const AI_EVAL_NOTE_PROMPT =
   '評価に残すメモ（任意。何が違ったか）。この会話を JSON ファイルに保存します（サーバーには送りません）';
 
+/** 保存できなかったときの知らせ（AI のパネルの足元） */
+export const keepFailText = (reason: string) => `評価に残せませんでした（${reason}）`;
+
 /** 1 回の発言（送り直しの単位） */
 export interface AiEvalTurn {
   kind: AiKind;
@@ -128,18 +131,104 @@ export function turnOf(text: string, log?: AiTurnLog): AiEvalTurn {
 export function userTurns(messages: readonly AiMessage[], log?: AiTurnLog): AiEvalTurn[] {
   const out: AiEvalTurn[] = [];
   for (const m of messages) {
-    if (m.role !== 'user') continue;
-    const text = m.content
-      .filter((b) => b.type === 'text' && b.text !== TOOL_LIMIT_NOTE)
-      .map((b) => (b as { text: string }).text)
-      .join('\n');
+    const text = utteranceOf(m);
     if (text !== '') out.push(turnOf(text, log));
   }
   return out;
 }
 
+/** 利用者の発言の文（ツールの結果だけの user・assistant は ''） */
+function utteranceOf(m: AiMessage): string {
+  if (m.role !== 'user') return '';
+  return m.content
+    .filter((b) => b.type === 'text' && b.text !== TOOL_LIMIT_NOTE)
+    .map((b) => (b as { text: string }).text)
+    .join('\n');
+}
+
+/**
+ * [評価に残す] を出す返答の行の key（chatItems の `m{i}b{j}`）。1 回の返答（利用者の 1 発言に対する、ツールの往復を
+ * 終えた最後の assistant）の最後の text block だけ。ツールを呼ぶ前の前置きの行・続いている turn（流れている途中・
+ * ツールの往復の途中）・失敗の行（失敗した turn の messages は会話に残らない）には出さない
+ */
+export function keepKeys(s: AiChatState): Set<string> {
+  const out = new Set<string>();
+  const ms = s.messages;
+  const groupEnd = (end: number, live: boolean) => {
+    if (live) return;
+    const last = ms[end];
+    if (last?.role !== 'assistant' || last.content.some((b) => b.type === 'tool_use')) return;
+    for (let j = last.content.length - 1; j >= 0; j--) {
+      const b = last.content[j];
+      if (b?.type === 'text' && b.text !== '') {
+        out.add(`m${end}b${j}`);
+        return;
+      }
+    }
+  };
+  let seen = false;
+  ms.forEach((m, i) => {
+    if (utteranceOf(m) === '') return;
+    if (seen) groupEnd(i - 1, false);
+    seen = true;
+  });
+  if (seen) groupEnd(ms.length - 1, s.turn !== null);
+  return out;
+}
+
+/** 送ったときの材料の控え（発言の user の message の位置 → その要求の材料）。新しい順に探す */
+export type AiSourceLog = ReadonlyArray<{ at: number; source: AiEvalSource }>;
+
+/** 控えに足す（同じ位置以降の古い控え = 失敗して捨てた発言の分は除く） */
+export function recordSource(
+  log: AiSourceLog,
+  at: number,
+  source: AiEvalSource,
+): { at: number; source: AiEvalSource }[] {
+  return [...log.filter((e) => e.at < at), { at, source }];
+}
+
+/** 最後の控えに、ツールの往復で読んだ先物の足・IV の日次の値を足す（読めなかった = null は足さない） */
+export function withToolData(
+  log: AiSourceLog,
+  technicals: TechnicalsData | null,
+  ivStats: IvStatsData | null,
+): { at: number; source: AiEvalSource }[] {
+  const last = log.at(-1);
+  if (!last || (!technicals && !ivStats)) return [...log];
+  return [
+    ...log.slice(0, -1),
+    {
+      at: last.at,
+      source: {
+        ...last.source,
+        ...(technicals && { technicals }),
+        ...(ivStats && { iv_stats: ivStats }),
+      },
+    },
+  ];
+}
+
+/**
+ * 押した返答の message の位置 i → その発言を送ったときの材料（i より前の最後の控え）。ツールの材料は会話のそれまでの
+ * 控えのどれかにあれば引き継ぐ。控えが無ければ null（再読み込みで戻した会話 = 呼び出し側が押した時点の材料に戻す）
+ */
+export function sourceAt(log: AiSourceLog, i: number): AiEvalSource | null {
+  const xs = log.filter((e) => e.at < i);
+  const last = xs.at(-1);
+  if (!last) return null;
+  const rev = [...xs].reverse();
+  const technicals = rev.find((e) => e.source.technicals)?.source.technicals;
+  const ivStats = rev.find((e) => e.source.iv_stats)?.source.iv_stats;
+  return {
+    ...last.source,
+    ...(technicals && { technicals }),
+    ...(ivStats && { iv_stats: ivStats }),
+  };
+}
+
 /** 返答の行の key（ui/view/aiChat.ts の chatItems の `m{i}b{j}`）→ 位置。終わった返答の行だけ */
-function answerAt(key: string): { i: number; j: number } | null {
+export function answerAt(key: string): { i: number; j: number } | null {
   const m = /^m(\d+)b(\d+)$/.exec(key);
   return m ? { i: Number(m[1]), j: Number(m[2]) } : null;
 }
@@ -204,6 +293,12 @@ export function usedTools(messages: readonly AiMessage[]): Set<string> {
   return out;
 }
 
+/** メモの表示（ai:eval の標準出力）: 制御文字（改行を含む）を空白にし、max 字で切る */
+export function noteLine(note: string, max = 80): string {
+  const t = note.replace(/\p{Cc}+/gu, ' ').trim();
+  return t.length > max ? `${t.slice(0, max)}…` : t;
+}
+
 // ---------------------------------------------------------------- 読む（ai:eval）
 
 const KINDS: readonly AiKind[] = ['chat', 'diagnose', 'ask', 'preset'];
@@ -220,6 +315,40 @@ function readTurn(v: unknown): AiEvalTurn | null {
     text: v.text,
     ...(typeof v.topic === 'string' && { topic: v.topic }),
   };
+}
+
+const fin = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
+
+/** 先物の足（data/futureBars.ts の FutBar。t・o・h・l・c の数と限月 m） */
+function readTechnicals(v: unknown): TechnicalsData | null {
+  if (!isObj(v) || !Array.isArray(v.daily) || !Array.isArray(v.hourly)) return null;
+  const bar = (b: unknown) =>
+    isObj(b) && fin(b.t) && fin(b.o) && fin(b.h) && fin(b.l) && fin(b.c) && typeof b.m === 'string';
+  if (!v.daily.every(bar) || !v.hourly.every(bar)) return null;
+  if (v.params !== undefined && !isObj(v.params)) return null;
+  return v as unknown as TechnicalsData;
+}
+
+/** IV の日次の値（data/atmDaily.ts の AtmDailyDay）・今の IV・1 時間足の右端 */
+function readIvStats(v: unknown): IvStatsData | null {
+  if (!isObj(v) || !Array.isArray(v.days)) return null;
+  const day = (d: unknown) =>
+    isObj(d) &&
+    typeof d.d === 'string' &&
+    fin(d.t) &&
+    fin(d.iv) &&
+    fin(d.f1) &&
+    typeof d.l1 === 'string' &&
+    (d.f2 === null || fin(d.f2)) &&
+    (d.l2 === null || typeof d.l2 === 'string');
+  if (!v.days.every(day)) return null;
+  if (!(v.now === null || (isObj(v.now) && fin(v.now.t) && fin(v.now.iv)))) return null;
+  if (v.hourly !== undefined) {
+    if (!Array.isArray(v.hourly) || !v.hourly.every((h) => isObj(h) && fin(h.t) && fin(h.c))) {
+      return null;
+    }
+  }
+  return v as unknown as IvStatsData;
 }
 
 function readCalendar(v: unknown): AiEvalCalendar | null {
@@ -268,6 +397,9 @@ export function readAiEvalCase(raw: unknown): AiEvalCaseFile | null {
   const calendar = readCalendar(s.calendar);
   if (!calendar) return null;
   if (s.profile !== undefined && !isAiProfile(s.profile)) return null;
+  const technicals = s.technicals === undefined ? undefined : readTechnicals(s.technicals);
+  const ivStats = s.iv_stats === undefined ? undefined : readIvStats(s.iv_stats);
+  if (technicals === null || ivStats === null) return null;
   return {
     kind: AI_EVAL_CASE_KIND,
     v: AI_EVAL_CASE_VERSION,
@@ -283,8 +415,8 @@ export function readAiEvalCase(raw: unknown): AiEvalCaseFile | null {
       calendar,
       margin: readMargin(s.margin),
       ...(typeof s.profile === 'string' && { profile: s.profile }),
-      ...(isObj(s.technicals) && { technicals: s.technicals as unknown as TechnicalsData }),
-      ...(isObj(s.iv_stats) && { iv_stats: s.iv_stats as unknown as IvStatsData }),
+      ...(technicals && { technicals }),
+      ...(ivStats && { iv_stats: ivStats }),
     },
   };
 }
