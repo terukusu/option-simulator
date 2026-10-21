@@ -7,7 +7,8 @@
 # - 形の検査（値を知らなくても効く）: run.app のホスト名、許可リスト外のドメインのメールアドレス、
 #   /home/<名前>・/Users/<名前>、10 桁以上の projects/<番号>・service-<番号>、トークン・鍵・署名の形（Anthropic の sk-ant- を含む）
 # - 値の検査: 環境変数 GCP_PROJECT_ID・GCP_PROJECT_NUMBER・REPO_OWNER のうち空でないものを固定文字列
-#   （大小無視・語単位）で探す。空なら飛ばしたことを 1 行出す
+#   （大小無視・語単位）で探す。空なら飛ばしたことを 1 行出す。例外は LICENSE の著作権表示の行
+#   `Copyright (c) <年>[-<年>] <REPO_OWNER>` ちょうどだけ（MIT の著作権者。オーナーが決めた名前。ほかのファイル・行は NG のまま）
 # - 出力は「NG <検査名>: <ファイル>:<行番号>」と件数だけ（一致した文字列・行の中身・変数の値は出さない）。1 件以上で exit 1
 # - 対象は git ls-files（package-lock.json・api/uv.lock を除く。バイナリは grep -I で飛ばす）
 set -euo pipefail
@@ -50,7 +51,18 @@ for name in GCP_PROJECT_ID GCP_PROJECT_NUMBER REPO_OWNER; do
     echo "skip: ${name} が空なので値の検査を飛ばす"
     continue
   fi
-  report "value-${name}" < <(grep -HnsIFiw -e "$v" -- "${files[@]}" || true)
+  if [ "$name" = REPO_OWNER ]; then
+    # LICENSE の著作権表示の行だけを除く（値は ENVIRON で比べる。正規表現に値を入れない）
+    report "value-${name}" < <({ grep -HnsIFiw -e "$v" -- "${files[@]}" || true; } | REPO_VALUES_V="$v" awk '{
+      f = $0; i = index(f, ":"); file = substr(f, 1, i - 1); r = substr(f, i + 1); j = index(r, ":"); body = substr(r, j + 1)
+      sub(/\r$/, "", body)
+      if (file == "LICENSE" && match(body, /^Copyright \(c\) [0-9][0-9][0-9][0-9](-[0-9][0-9][0-9][0-9])? /) &&
+          tolower(substr(body, RLENGTH + 1)) == tolower(ENVIRON["REPO_VALUES_V"])) next
+      print
+    }')
+  else
+    report "value-${name}" < <(grep -HnsIFiw -e "$v" -- "${files[@]}" || true)
+  fi
 done
 
 if [ "$hits" -gt 0 ]; then

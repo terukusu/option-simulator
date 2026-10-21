@@ -14,22 +14,23 @@ trap 'rm -rf "$tmp"' EXIT
 fails=0
 n=0
 
-# run <期待の exit> <名前> <f.txt の中身> [VAR=値 ...]: 値の環境変数は指定したもの以外を空にする
+# run <期待の exit> <名前> <f.txt の中身> [VAR=値 ...]: 値の環境変数は指定したもの以外を空にする。
+# 置くファイルの名前は RUN_FILE（既定 f.txt）
 run() {
-  local want=$1 label=$2 content=$3
+  local want=$1 label=$2 content=$3 file=${RUN_FILE:-f.txt}
   shift 3
   local dir="$tmp/r$n" out rc=0
   n=$((n + 1))
   mkdir -p "$dir"
   git -C "$dir" init -q
-  printf '%s\n' "$content" > "$dir/f.txt"
-  git -C "$dir" add f.txt
+  printf '%s\n' "$content" > "$dir/$file"
+  git -C "$dir" add "$file"
   out=$(env GCP_PROJECT_ID= GCP_PROJECT_NUMBER= REPO_OWNER= "$@" "$check" "$dir" 2>&1) || rc=$?
   local why=""
   if [ "$rc" -ne "$want" ]; then why="exit $rc（期待 $want）"; fi
   if [ "$want" -ne 0 ]; then
     if printf '%s' "$out" | grep -qF -e "$content"; then why="$why 出力に置いた文字列がある"; fi
-    if ! printf '%s' "$out" | grep -qF 'f.txt:1'; then why="$why 出力に f.txt:1 が無い"; fi
+    if ! printf '%s' "$out" | grep -qF "$file:1"; then why="$why 出力に $file:1 が無い"; fi
   fi
   if [ -n "$why" ]; then
     echo "FAIL ${label}:${why}"
@@ -60,6 +61,9 @@ run 1 'プロジェクト ID の値（バケット名の一部）' "bucket fake-
 run 1 'プロジェクト ID の値（大小無視）' "FAKE-PROJ""-123456" GCP_PROJECT_ID=fake-proj-123456
 run 1 'プロジェクト番号の値' "number 98765""4321" GCP_PROJECT_NUMBER=987654321
 run 1 'オーナー名の値' "see fake""owner/repo" REPO_OWNER=fakeowner
+RUN_FILE=LICENSE run 1 'LICENSE でも著作権表示の行でなければ NG' "maintained by fake""owner" REPO_OWNER=fakeowner
+RUN_FILE=LICENSE run 1 'LICENSE の著作権表示に続きがあれば NG' "Copyright (c) 2026 fake""owner and fake""owner/repo" REPO_OWNER=fakeowner
+RUN_FILE=README.md run 1 'LICENSE 以外の著作権表示は NG' "Copyright (c) 2026 fake""owner" REPO_OWNER=fakeowner
 
 # 陰性（プレースホルダ）
 run 0 'example.com のメール' 'someone@example.com'
@@ -73,6 +77,8 @@ run 0 '<SERVICE>-<HASH>-an.a.run.app' 'https://<SERVICE>-<HASH>-an.a.run.app/'
 run 0 'projects/<6 桁>' 'projects/123456/locations'
 run 0 'sk-ant- の接頭辞だけ（説明文）' 'キーは sk-ant- で始まる（sk-ant-api03-... / sk-ant-oat01-...）'
 run 0 '語単位（値の続きが英数字）' 'fake-proj-1234567' GCP_PROJECT_ID=fake-proj-123456
+RUN_FILE=LICENSE run 0 'LICENSE の著作権表示の行だけは例外' "Copyright (c) 2026 fake""owner" REPO_OWNER=fakeowner
+RUN_FILE=LICENSE run 0 'LICENSE の著作権表示（年の範囲・大小無視）' "Copyright (c) 2026-2027 Fake""Owner" REPO_OWNER=fakeowner
 run 0 '変数が空なら形の検査だけ' 'nothing here'
 if [ "$(printf '%s\n' "$LAST_OUT" | grep -c '^skip: ')" -ne 3 ]; then
   echo "FAIL 変数が空のときの skip: が 3 行でない"

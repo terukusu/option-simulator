@@ -32,7 +32,7 @@
 
 **置かないもの**（コミットにも Issue / PR 本文にも入れない）:
 
-- 特定の利用者の値（GCP プロジェクト ID・プロジェクト番号、GitHub のオーナー名・リポジトリ名、バケット名、メールアドレス、ホームディレクトリのパス）。コード・設定は変数で受け取り、docs の例は `<PROJECT_ID>`・`$P`・`<OWNER>/<REPO>` などのプレースホルダにする。例外は `LICENSE`・README の「ライセンス」の著作権表示（`Copyright (c) 2026 terukusu`。オーナーが決めた著作権者の名前。消さない）
+- 特定の利用者の値（GCP プロジェクト ID・プロジェクト番号、GitHub のオーナー名・リポジトリ名、バケット名、メールアドレス、ホームディレクトリのパス）。コード・設定は変数で受け取り、docs の例は `<PROJECT_ID>`・`$P`・`<OWNER>/<REPO>` などのプレースホルダにする。例外は `LICENSE` の著作権表示の 1 行だけ（MIT の著作権者。オーナーが決めた名前で、消さない。ほかの所には書かない。`.github/scripts/repo-values-check.sh` もこの行だけを除く）
 - アクセストークン、OAuth クライアントのシークレット、サービスアカウント鍵、署名付き URL
 - **JPX 由来の実データ**（板の dump など）。テストは Black-76 から生成した合成の板を使う。実データの dump は `fixtures/local/`（gitignore）に置き、件数・割合などの要約だけを Issue / PR に書く
 - `.claude/settings.local.json`、作業用ファイル（`.claude/handoff/`、`.claude/worktrees/`、一時ディレクトリ）
