@@ -22,6 +22,8 @@ import type {
   AiStatus,
   AiUserBlock,
 } from '../../data/aiStream';
+import { ASK_PREFIX } from './aiAsk';
+import { displayedValues } from './aiNumbers';
 
 export const AI_SESSION_KEY = 'optsim.ai.v1';
 /** [このポジションを診断] の最初の発言（中継の relay.DIAGNOSE_TEXT と同じ文。system prompt の診断の節が参照する） */
@@ -51,6 +53,8 @@ export const PHASE_LABEL: Record<AiPhase, string> = {
 export interface AiTurn {
   kind: AiKind;
   userText: string;
+  /** [AI に聞く] の場所（#136。kind が ask のときだけ。要求の topic） */
+  topic?: string;
   phase: AiPhase;
   /** 押した時刻（ms。呼び出し側の時計） */
   startedAt: number;
@@ -68,6 +72,8 @@ export interface AiTurn {
 export interface AiFailed {
   kind: AiKind;
   userText: string;
+  /** [もう一度] で同じ場所として送り直す（#136） */
+  topic?: string;
   partial: string;
   code: string;
   remainingUsd: number | null;
@@ -98,7 +104,7 @@ export const INITIAL_AI_CHAT: AiChatState = {
 };
 
 export type AiChatAction =
-  | { type: 'begin'; kind: AiKind; text: string; now: number }
+  | { type: 'begin'; kind: AiKind; text: string; now: number; topic?: string }
   | { type: 'send'; context: AiContext; key: string }
   | { type: 'event'; event: AiEvent }
   | { type: 'toolResults'; blocks: AiUserBlock[] }
@@ -117,7 +123,14 @@ function fail(s: AiChatState, code: string, remainingUsd: number | null = null):
     lastKey: t.prev.lastKey,
     messages: s.messages.slice(0, t.prev.length),
     turn: null,
-    failed: { kind: t.kind, userText: t.userText, partial: t.text, code, remainingUsd },
+    failed: {
+      kind: t.kind,
+      userText: t.userText,
+      ...(t.topic !== undefined && { topic: t.topic }),
+      partial: t.text,
+      code,
+      remainingUsd,
+    },
     stop: null,
   };
 }
@@ -187,6 +200,8 @@ export function aiChatReduce(s: AiChatState, a: AiChatAction): AiChatState {
         turn: {
           kind: a.kind,
           userText: a.text,
+          // topic は ask のときだけ（chat・diagnose に付けると中継が 400）
+          ...(a.kind === 'ask' && a.topic !== undefined && { topic: a.topic }),
           phase: 'computing',
           startedAt: a.now,
           thinking: '',
@@ -243,10 +258,17 @@ export function aiChatReduce(s: AiChatState, a: AiChatAction): AiChatState {
   }
 }
 
-/** 今の turn の要求の本文（turn が無い・文脈が無ければ null） */
+/** 今の turn の要求の本文（turn が無い・文脈が無ければ null）。ask は場所の topic を付ける（#136） */
 export function requestOf(s: AiChatState): AiRequest | null {
   if (!s.turn || s.context === null) return null;
-  return { schema_version: 1, kind: s.turn.kind, context: s.context, messages: s.messages };
+  const body: AiRequest = {
+    schema_version: 1,
+    kind: s.turn.kind,
+    context: s.context,
+    messages: s.messages,
+  };
+  if (s.turn.kind === 'ask' && s.turn.topic !== undefined) body.topic = s.turn.topic;
+  return body;
 }
 
 /** 最後の assistant の tool_use の block */
@@ -351,6 +373,56 @@ function commonBlocked(s: AiChatState, g: AiGate): string | null {
   if (s.turn) return '送信中です';
   if (atLimit(s)) return '会話が長くなりました。[新しい会話] で始めてください';
   return null;
+}
+
+/** 状態を読めたとして判定するための値（askPlan の「待つ」の判定だけに使う） */
+const STATUS_READY: AiStatus = {
+  schema_version: 1,
+  enabled: true,
+  model: null,
+  credential: null,
+  counted: false,
+  limit_usd: null,
+  remaining_usd: null,
+  resets_at: null,
+};
+
+/**
+ * [AI に聞く]（#136）を押したときの扱い: 送れるなら send、送れない理由（sendBlocked）があれば送らずに入力欄に入れる
+ * （draft。理由は足元の行に出る）。AI の状態をまだ読んでいない（status = null）ときは、ほかに理由が無ければ wait
+ * （読み終わってからもう一度判定する = 無効・今日の上限なら送らない。#136 レビュー指摘 1）
+ */
+export function askPlan(s: AiChatState, g: AiGate): 'send' | 'wait' | { draft: string } {
+  if (g.status === null) {
+    const other = sendBlocked(s, { ...g, status: STATUS_READY });
+    return other === null ? 'wait' : { draft: other };
+  }
+  const reason = sendBlocked(s, g);
+  return reason === null ? 'send' : { draft: reason };
+}
+
+/**
+ * 送れなかった [AI に聞く] の質問を入力欄に入れるか（#136 レビュー指摘 2）: 入力欄が空か、前に入れた質問のまま
+ * （利用者が書き換えていない）なら入れる。書きかけの文があれば入れずに残す（keep。上書きで書きかけを消さない）
+ */
+export function applyDraft(
+  current: string,
+  prevDraft: string | null,
+  next: string,
+): 'set' | 'keep' {
+  return current.trim() === '' || current === prevDraft || current === next ? 'set' : 'keep';
+}
+
+/** 書きかけの文を残したときの知らせ（足元の行） */
+export const DRAFT_KEPT_TEXT =
+  '入力欄に書きかけの文があるので、[AI に聞く] の質問は入れていません。消してからもう一度押してください';
+
+/**
+ * 足元の理由の行（#136 レビュー指摘 3）: 送れない理由（sendBlocked。送信中も出す）、無ければ [このポジションを診断]
+ * だけが押せない理由（足が無いなど）。どちらも無ければ null
+ */
+export function footReason(s: AiChatState, g: AiGate): string | null {
+  return sendBlocked(s, g) ?? diagnoseBlocked(s, g);
 }
 
 /** 今日の残りの表示（数えない資格情報は「数えない」） */
@@ -519,15 +591,30 @@ export function chatItems(s: AiChatState): ChatItem[] {
   return out;
 }
 
-/** 照合の値（最初の文脈・文脈の更新・ツールの結果） */
+/**
+ * β の定義から導ける値（#136 の評価。「β = 1 なので下落 1% ごとに IV +1.0pt」= 1% あたり β pt。docs/design.md 5.4）。
+ * 文脈のシナリオの β だけを pt の値として足す（ほかの値は足さない = 取り違えを広く見逃さない）
+ */
+function betaSource(c: AiContext): unknown[] {
+  const b = c.scenario?.beta;
+  return typeof b === 'number' && Number.isFinite(b) ? [{ beta_iv_per_1pct_pt: b }] : [];
+}
+
+/**
+ * 照合の値（最初の文脈・文脈の更新・ツールの結果）。#136: その会話の [AI に聞く] の質問の文（ASK_PREFIX で始まる
+ * 利用者の発言）に入れた画面の表示の値と、シナリオの β の 1% あたりの pt も足す
+ */
 export function numberSources(s: AiChatState): unknown[] {
   const out: unknown[] = [];
-  if (s.context) out.push(s.context);
+  if (s.context) out.push(s.context, ...betaSource(s.context));
   for (const m of s.messages) {
     if (m.role !== 'user') continue;
     for (const b of m.content) {
-      if (b.type === 'context_update') out.push(b.context);
+      if (b.type === 'context_update') out.push(b.context, ...betaSource(b.context));
       else if (b.type === 'tool_result') out.push(parseJson(b.content[0].text));
+      else if (b.type === 'text' && b.text.startsWith(ASK_PREFIX)) {
+        out.push(displayedValues(b.text));
+      }
     }
   }
   return out;

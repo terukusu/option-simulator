@@ -286,3 +286,54 @@ section.ai .ai-body {
   background: var(--accent-fill);
   color: var(--accent-ink);
 }
+
+/*
+ * [AI に聞く]（#136。ui/next/parts/AskAi.tsx）: 全文の吹き出しの末尾（区切りの線の下・右寄せ）、表の見出しの行・IV 推移の
+ * ツールの行のボタン。吹き出しの中は低いボタン。タイルの全文は 11 行を超えたら全文の中だけを縦にスクロールし、ボタンは
+ * 常に吹き出しの下に見える（360×780 の「指標」peek の .panel-body 273px に、全文 12 行でも吹き出しが収まる。#161・
+ * レビュー指摘 5）
+ */
+.pop-ask {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 4px;
+  padding-top: 4px;
+  border-top: 1px solid var(--line);
+}
+
+.pop-ask .btn.sm {
+  height: 22px;
+}
+
+.tile .popover .full {
+  max-height: calc(11lh + 20px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.ai-ask {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+/*
+ * 狭い枠（IV 推移のツールの行。PC の左の列 ≈ 431px・スマホ 360px）は「AI」だけ（読み上げ名は全文）。足の Seg の左右の
+ * 余白と間隔を 1px ずつ詰めて 1 行に入れる
+ */
+@container (max-width: 519.98px) {
+  .ai-ask.short {
+    padding: 0 5px;
+  }
+
+  .ai-ask.short .ask-long {
+    display: none;
+  }
+
+  .iv-tools:has(.ai-ask) {
+    gap: 3px;
+  }
+
+  .iv-tools:has(.ai-ask) .seg > button {
+    padding: 0 4px;
+  }
+}

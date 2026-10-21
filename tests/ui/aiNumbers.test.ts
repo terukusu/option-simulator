@@ -164,6 +164,65 @@ describe('#135 評価で見つけた書き方', () => {
   });
 });
 
+describe('#136 文書の節の番号', () => {
+  it('「マニュアル 8.1」「設計書 5.6」「マニュアルの 10 章」の番号は数えない（値は今どおり照合）', () => {
+    const r = checkNumbers(
+      '根拠はマニュアル 8.1「タイル」と設計書 5.6.1「単位」、マニュアルの 10 章。値は 1,235 千円',
+      [{ pnl_yen: -1_234_567 }],
+    );
+    const st = r.tokens.map((t) => [t.raw, t.status, t.reason ?? null]);
+    expect(st).toEqual([
+      ['8.1', 'ignored', 'number'],
+      ['5.6', 'ignored', 'number'],
+      ['10', 'ignored', 'number'],
+      ['1,235 千円', 'matched', null],
+    ]);
+    // 文書の名前の無い数は今どおり照合する
+    expect(checkNumbers('8.1 の値', []).unmatched).toBe(1);
+  });
+
+  it('レビュー指摘 4: 並べた 2 つ目以降の節の番号も数えない（「・」「、」「と」）', () => {
+    const r = checkNumbers(
+      'マニュアル 8.1「タイル」・8.3「テール表」と設計書 5.6、5.10。マニュアル 8 章と 10 章',
+      [],
+    );
+    expect(r.unmatched).toBe(0);
+    expect(r.tokens.every((t) => t.status === 'ignored' && t.reason === 'number')).toBe(true);
+    // 節の並びの後の値は今どおり照合する（「マニュアル 8.1 によると 1,235 千円」）
+    const v = checkNumbers('マニュアル 8.1 によると損失は 1,235 千円', [{ pnl_yen: -1_234_567 }]);
+    expect(v.tokens.map((t) => t.status)).toEqual(['ignored', 'matched']);
+    expect(checkNumbers('マニュアル 8.1 によると損失は 999 千円', []).unmatched).toBe(1);
+  });
+
+  it('Γ の単位の 100 円（「/ 100 円」「/100円」「100 円動いた」）は数えない。ほかの 100 円は照合する', () => {
+    const src = [{ gamma_per_100: 0.012 }];
+    for (const t of [
+      'Γ は +0.012 / 100 円です',
+      'Γ は +0.012/100円',
+      '原資産が 100 円動いたときの Δ の変化',
+      '原資産が 100 円上がると',
+      '100 円の変化あたり',
+    ]) {
+      expect(checkNumbers(t, src).unmatched, t).toBe(0);
+    }
+    // 符号つき・100 以外・動きの言葉が無い 100 円は数える（本物の値の取り違えは見逃さない）
+    expect(checkNumbers('損益は −100 円動いた', []).unmatched).toBe(1);
+    expect(checkNumbers('原資産が 200 円動いたとき', []).unmatched).toBe(1);
+    expect(checkNumbers('損益は 100 円です', []).unmatched).toBe(1);
+  });
+
+  it('乗数の比（「ミニ先物換算（ラージの 10 倍）」）は数えない。ほかの 10 倍は照合する', () => {
+    for (const t of [
+      '括弧にミニ先物換算（ラージの 10 倍）を添えます',
+      'ミニはラージ先物の10倍の枚数',
+    ]) {
+      expect(checkNumbers(t, []).unmatched, t).toBe(0);
+    }
+    expect(checkNumbers('損失は 10 倍になります', []).unmatched).toBe(1);
+    expect(checkNumbers('ラージの 20 倍', []).unmatched).toBe(1);
+  });
+});
+
 describe('sectionsOf', () => {
   it('## 弱点 の節ごとに照合が一致した数の数', () => {
     const text = [

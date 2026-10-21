@@ -225,6 +225,14 @@ gcloud logging read 'resource.type="cloud_run_revision" AND resource.labels.serv
   | jq -c '.[].jsonPayload | {kind, stop_reason, error, upstream_status, spawn_ms, first_delta_ms, first_text_ms, total_ms}'
 ```
 
+[AI に聞く]（#136）の聞かれた場所の集計（場所の ID だけ。質問の文・値はログに無い。分かりにくい所を直す材料）:
+
+```sh
+gcloud logging read 'resource.type="cloud_run_revision" AND resource.labels.service_name="simulator" AND jsonPayload.event="ai_request" AND jsonPayload.kind="ask"' \
+  --project="$P" --freshness=30d --format=json \
+  | jq -r '.[].jsonPayload.topic' | sort | uniq -c | sort -rn
+```
+
 ## AI の評価（#135）
 
 `npm run ai:eval`（`scripts/aiEval.mjs`）は、合成の板・合成のポジション 10 通り（`scripts/aiEvalCases.ts`）で、画面と同じコード（文脈と事前計算・会話の reducer・ツールの往復）を通して中継に送り、[このポジションを診断] の返答の弱点の数と数字の照合（`ui/view/aiNumbers.ts`）を出す。送り先は手元で起動した中継（`AI_EVAL_BASE`、既定 `http://127.0.0.1:8080`）で、本番の IAP は越えない。資格情報は中継の環境変数だけ（スクリプトは読まない・出さない）。
@@ -241,4 +249,5 @@ AI_EVAL_RELAY_LOG=fixtures/local/ai_eval/relay.log npm run ai:eval
 - 出力: 標準出力に要約（各組の弱点の数・各弱点の一致の数・不一致の一覧・`stop_reason`・最初の文字と完了の秒・費用）と、`AI_EVAL_RELAY_LOG` があれば `ai_request` のトークン量・概算費用・`dropped_blocks`・`first_text_ms` の中央値。返答の全文は `fixtures/local/ai_eval/<時刻>/` にだけ書く（コミットしない）
 - 合格: 全組で弱点 3 つ以上・各弱点に照合が一致した数字 1 つ以上・不一致 0（終了コード 0）
 - テクニカルの質問 3 件（#200。`--tech-only` で これだけ）: 合成の先物の足（`scripts/synthFutBars.ts`）をツールの環境に入れ、`technicals` を呼ぶ・不一致 0・方向の断定の言い回し（`DIRECTION_RE`）なしで合格。全文を目でも読む
+- [AI に聞く] 5 件（#136。`--ask-only` で これだけ）: 画面と同じ表示モデル（`metricsPanel`・`bigReadout`・`ivReadout`）から質問の文を作り、`kind: "ask"` と場所の `topic` で送る（タイル 2・読み取り 1・テール表 1・IV 推移 1。IV 推移の足は架空の値）。節を示す（`CITE_RE`）・経緯を書かない（`HISTORY_RE`）・`AI_EVAL_RELAY_LOG` があれば想定の節（`ASK_DOCS` のどれか）を `read_doc` で読んだこと・`ai_request` の `kind` / `topic`・照合の不一致 0 で合格（照合の出所は画面と同じ = 質問に入れた表示の値とシナリオの β の 1% あたり pt を含む）
 - 文書の質問 7 件（#137。`--docs-only` で これだけ）: 計算の前提 3・操作の案内 3・文書に無いこと 1。節を示す（`CITE_RE`。「マニュアル 8.5」の形）・Issue 番号と決定の記号を書かない（`HISTORY_RE`）・無いことは無いと言う（`ABSENT_RE`）で合格。`AI_EVAL_RELAY_LOG` があれば `ai_request` の `docs` で `read_doc` を読んだこと・想定の節（どれか 1 つ）を読んだことも判定する。文書の数は照合できない数字になるので不一致は数えるが失敗にしない

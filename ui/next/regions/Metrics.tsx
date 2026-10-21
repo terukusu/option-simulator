@@ -1,6 +1,7 @@
 import { Fragment } from 'preact';
 import { useId, useState } from 'preact/hooks';
 import { pure } from '../../components/pure';
+import { askMarginTail, askTail, askTile, TILE_TOPIC } from '../../view/aiAsk';
 import { HINT_TERMS, type TermId, termById } from '../../view/glossary';
 import { PANEL_FOCUS_LABEL } from '../../view/keys';
 import type { MarginView } from '../../view/margin';
@@ -17,6 +18,7 @@ import {
   UNIT_HINT,
 } from '../../view/metricsPanel';
 import { PanelHead } from '../PanelHead';
+import { AskAi } from '../parts/AskAi';
 import { FullText } from '../parts/FullText';
 import { Popover } from '../parts/Popover';
 import { TermLinks } from '../parts/TermLinks';
@@ -37,9 +39,10 @@ interface Props {
 /**
  * タイル（§5 の .tile）。8 枚とも押せて、タップ / Enter / Space で全文のポップオーバー（#107。中身は表示モデルの full）。
  * 外側の div は格子の 1 枠（余白・背景はボタン .tile-btn）。ボタンの中は phrasing content だけ（span）。
- * 見出しの行 .kh = 見出し .k + 点の印 .at（#164。必要証拠金・余力だけ。入らなければ .at だけ省略記号）
+ * 見出しの行 .kh = 見出し .k + 点の印 .at（#164。必要証拠金・余力だけ。入らなければ .at だけ省略記号）。
+ * 全文の末尾に [AI に聞く]（#136。質問の文は押したときに作る）
  */
-function Tile({ t }: { t: MetricTile }) {
+function Tile({ t, unitSub }: { t: MetricTile; unitSub: string }) {
   return (
     <div class="tile" data-tile={t.key}>
       <Popover
@@ -60,6 +63,9 @@ function Tile({ t }: { t: MetricTile }) {
         }
       >
         <FullText rows={t.full} />
+        <div class="pop-ask">
+          <AskAi topic={TILE_TOPIC[t.key]} label={t.k} make={() => askTile(t, unitSub)} />
+        </div>
       </Popover>
     </div>
   );
@@ -107,7 +113,8 @@ function TailCell({ c }: { c: TailCellView }) {
 /**
  * 指標 · テール（docs/ui-redesign.md §2・§3・§5・§5.2・§9。#86）: 見出し行（単位の副題・ⓘ）→ タイル 6 枚 →
  * 「内訳」の折りたたみ（旧画面の指標の全項目。既定は閉・保存しない）→ テール表（損益のバー付き）→ テールの証拠金の表 →
- * 「追証マップ」の折りたたみ（#152。regions/HoldMap.tsx。既定は閉・開閉は ShellState）。
+ * 「追証マップ」の折りたたみ（#152。regions/HoldMap.tsx。既定は閉・開閉は ShellState）。タイルの全文・2 つの表の見出しの
+ * 行に [AI に聞く]（#136）。
  * 表示モデルは ui/view/metricsPanel.ts。action は dispatch しない（単位・手数料の入力は #87 の設定）。
  */
 function MetricsView({ model, feePerLot, margin, hold }: Props) {
@@ -139,7 +146,7 @@ function MetricsView({ model, feePerLot, margin, hold }: Props) {
           <>
             <div class="metric-tiles">
               {view.tiles.map((t) => (
-                <Tile t={t} key={t.key} />
+                <Tile t={t} unitSub={view.unitSub} key={t.key} />
               ))}
             </div>
             <button
@@ -175,6 +182,8 @@ function MetricsView({ model, feePerLot, margin, hold }: Props) {
             )}
             <div class="sec-head">
               <h3>テール表</h3>
+              <span class="spacer" />
+              <AskAi topic="tail.pnl" label="テール表" make={() => askTail(view)} />
             </div>
             <p class="mx-note">{view.tailCaption}</p>
             <p class="mx-note">{TAIL_HINT}</p>
@@ -203,6 +212,12 @@ function MetricsView({ model, feePerLot, margin, hold }: Props) {
               <>
                 <div class="sec-head">
                   <h3>{MARGIN_TAIL_TITLE}</h3>
+                  <span class="spacer" />
+                  <AskAi
+                    topic="tail.margin"
+                    label={MARGIN_TAIL_TITLE}
+                    make={() => askMarginTail(view, MARGIN_TAIL_TITLE)}
+                  />
                 </div>
                 <p class="mx-note">{view.marginTailCaption}</p>
                 <table class="tail margin-tail">

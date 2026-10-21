@@ -503,6 +503,45 @@ def test_diagnose_kind_logged_and_tools_registered(capsys):
     assert relay.DIAGNOSE_TEXT in relay.SYSTEM_PROMPT
 
 
+def test_ask_kind_and_topic_logged_without_text(capsys):
+    # [AI に聞く]（#136 AC3）: ログ ai_request に kind と場所の topic。質問の文・値はログに出ず、
+    # 場所の ID は上流の引数に出ない
+    client, gw, _, _ = ai_app()
+    text = f"{relay.ASK_PREFIX}指標 · テール ›「満期 最大損失」\n- 満期 最大損失: {MARK}"
+    body = ai_body([{"role": "user", "content": [{"type": "text", "text": text}]}], kind="ask", topic="tile.maxLoss")
+    res = post(client, body)
+    assert res.status_code == 200
+    res.get_data()
+    out = capsys.readouterr().out
+    rec = [r for r in log_records(out) if r["event"] == "ai_request"][0]
+    assert rec["kind"] == "ask" and rec["topic"] == "tile.maxLoss" and rec.get("error") is None
+    assert MARK not in out and relay.ASK_PREFIX not in out
+    assert "topic" not in gw.calls[0] and "tile.maxLoss" not in json.dumps(gw.calls[0], ensure_ascii=False)
+
+
+def test_chat_log_has_no_topic(capsys):
+    client, _, _, _ = ai_app()
+    post(client, ai_body()).get_data()
+    assert "topic" not in logs(capsys, "ai_request")[0]
+
+
+def test_ask_topic_rejected_without_upstream_call(capsys):
+    client, gw, store, _ = ai_app()
+    for body in (ai_body(kind="ask"), ai_body(kind="ask", topic="INJECT_zz9"), ai_body(topic="tile.maxLoss")):
+        res = post(client, body)
+        assert res.status_code == 400 and res.get_json() == {"error": "bad_request"}
+    assert gw.count() == 0 and store.charged == {}
+    out = capsys.readouterr().out
+    assert "INJECT_zz9" not in out
+    assert all(r["path"] == "topic" for r in log_records(out) if r["event"] == "ai_rejected")
+
+
+def test_system_prompt_has_ask_rules():
+    # 画面の値の節は system に、節を read_doc で読む決まりは文書の節（目次があるときだけ）に
+    assert f"# 画面の値（発言が「{relay.ASK_PREFIX}」で始まるとき）" in relay.SYSTEM_PROMPT
+    assert relay.ASK_PREFIX in relay.DOCS_PROMPT and "read_doc" in relay.DOCS_PROMPT
+
+
 # ---- スキル（#221 AC9・AC6） ----
 
 def test_system_prompt_has_no_moved_sections():

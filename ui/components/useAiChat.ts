@@ -2,7 +2,7 @@
  * AI のチャットのフック（#135。docs/design.md 14 章）。会話の状態は ui/view/aiChat.ts の reducer（純関数）、ここは
  * fetch（data/aiStream.ts）・sessionStorage（1 キー）・ツールの実行（ui/view/aiTools.ts）・描き直しのまとめ方だけ。
  *
- * - [このポジションを診断] / 送信: 押した瞬間に begin（「計算中」）を描いてから、次のタスクで文脈（事前計算 5 本）を
+ * - [このポジションを診断] / 送信 / [AI に聞く]（#136。kind ask と場所の topic）: 押した瞬間に begin（「計算中」）を描いてから、次のタスクで文脈（事前計算 5 本）を
  *   作って送る（計算の前に進み具合を出す = 押して 1 秒以内）
  * - 流れの事象は状態の ref にすぐ入れ、描き直しは 1 フレームに 1 回（text の delta ごとに描かない）
  * - tool_use で止まったらツールを実行して tool_result を足し、次の要求（MAX_TOOL_ROUNDS まで）
@@ -12,7 +12,13 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'preact/hooks';
-import { AiRequestError, type AiStatus, getAiStatus, postAiMessages } from '../../data/aiStream';
+import {
+  type AiKind,
+  AiRequestError,
+  type AiStatus,
+  getAiStatus,
+  postAiMessages,
+} from '../../data/aiStream';
 import { readKey, removeKey, writeKey } from '../storage';
 import {
   AI_SESSION_KEY,
@@ -47,6 +53,8 @@ export interface AiChatController {
   status: AiStatusView;
   diagnose: () => void;
   send: (text: string) => void;
+  /** [AI に聞く]（#136）: 場所の topic つきで送る（kind ask） */
+  ask: (text: string, topic: string) => void;
   retry: () => void;
   abort: () => void;
   reset: () => void;
@@ -194,8 +202,14 @@ export function useAiChat(
   }, [apply, loadStatus]);
 
   const start = useCallback(
-    (kind: 'chat' | 'diagnose', text: string) => {
-      apply({ type: 'begin', kind, text, now: Date.now() });
+    (kind: AiKind, text: string, topic?: string) => {
+      apply({
+        type: 'begin',
+        kind,
+        text,
+        now: Date.now(),
+        ...(topic !== undefined && { topic }),
+      });
       if (!(stateRef.current as AiChatState).turn) return;
       // 「計算中」を描いてから計算する（同じタスクで計算すると表示が計算の後になる）
       setTimeout(() => {
@@ -220,9 +234,16 @@ export function useAiChat(
     },
     [start],
   );
+  const ask = useCallback(
+    (text: string, topic: string) => {
+      const t = text.trim();
+      if (t !== '') start('ask', t, topic);
+    },
+    [start],
+  );
   const retry = useCallback(() => {
     const f = (stateRef.current as AiChatState).failed;
-    if (f) start(f.kind, f.userText);
+    if (f) start(f.kind, f.userText, f.topic);
   }, [start]);
   const abort = useCallback(() => abortRef.current?.abort(), []);
   const reset = useCallback(() => {
@@ -238,5 +259,5 @@ export function useAiChat(
     [],
   );
 
-  return { state, status, diagnose, send, retry, abort, reset };
+  return { state, status, diagnose, send, ask, retry, abort, reset };
 }

@@ -141,7 +141,10 @@
 //                                          考え中 → 書いています → 完了の順・中止で止まる・終端なし（「切断」）で incomplete・追加の質問の
 //                                          ツールのカードと [シナリオに適用] → [元に戻す]・提案のカードと [今のタブに適用] →
 //                                          [元に戻す]（#139）・再読み込みで会話が残る（sessionStorage）
-//   --ai                                   #135 の項目だけ（既定の検査・--flows とも。手元の確かめ用）
+//                                          [AI に聞く]（#136 AC4）: 4 幅 × ダーク / ライトでタイル（満期 最大損失）・読み取り（Δ）・
+//                                          テール表・IV 推移のボタンが窓の中で切れない、押すと AI のパネルで送り（吹き出しに見出し・
+//                                          偽の返答）、縦・横 0px。AI が無効なら送らずに入力欄に質問の文と理由
+//   --ai                                   #135・#136 の項目だけ（既定の検査・--flows とも。手元の確かめ用）
 //   --cross                                #217 の十字線の項目だけ（既定の検査・--flows とも。--flows は #201・#130・#207 のタッチの流れも。手元の確かめ用）
 //   --url <base>                           dev サーバーを起こさず、その URL を使う（例 http://127.0.0.1:5173/?parts）
 //   --dom <file>                           body の下の要素の tag.class の並びを書き出す（DOM の変化の比較用）
@@ -1084,6 +1087,8 @@ async function measureAll() {
     );
     // AI のチャット（#135 AC7）
     await aiSweep();
+    // 数字・パネルから [AI に聞く]（#136 AC4）
+    await aiAskSweep();
   }
   // 旧のクラス名（#91・EPIC #92 の終了条件 8）: report を通ったすべての状態の合計
   console.log(
@@ -4964,6 +4969,71 @@ async function marginFull360() {
     `#161 ${tag} タイル margin / room の全文が窓と .panel-body の中`,
     res.length === 2 && res.every((r) => r.ok),
     res.map((r) => r.detail).join('・'),
+  );
+  // #136 レビュー指摘 5: 全文の末尾の [AI に聞く] も .panel-body の中で押せる。全文を 12 行（FULL_MAX_ROWS）にしても
+  // 吹き出しが .panel-body に収まり（全文の中だけが縦にスクロール）、ボタンが見えて押せる。11 行以下は全文がスクロールしない
+  const askIn = async (rows12) => {
+    const sel = `${M} .tile[data-tile="margin"] .tile-btn`;
+    await page.click(sel);
+    await page.waitForTimeout(120);
+    const r = await page.evaluate(
+      ({ sel, rows12 }) => {
+        const wrap = document.querySelector(sel)?.closest('.pop-wrap');
+        const pop = wrap?.querySelector('.popover');
+        const full = pop?.querySelector('.full');
+        const ask = pop?.querySelector('button[data-ai-ask]');
+        const host = wrap?.closest('.panel-body');
+        if (!pop || !full || !ask || !host) return null;
+        if (rows12) {
+          // 足りない行を同じ形の span で足して 12 行にする（描き直しの前に測る）
+          const n = full.querySelectorAll(':scope > span').length / 2;
+          for (let i = n; i < 12; i++) {
+            const k = document.createElement('span');
+            k.className = 'fk';
+            k.textContent = '検査の行';
+            const v = document.createElement('span');
+            v.className = 'fv';
+            v.textContent = '−1,234 千円';
+            full.append(k, v);
+          }
+        }
+        const rows = full.querySelectorAll(':scope > span').length / 2;
+        const within = (q, h) =>
+          q.top >= h.top - 0.5 &&
+          q.bottom <= h.bottom + 0.5 &&
+          q.left >= h.left - 0.5 &&
+          q.right <= h.right + 0.5;
+        const p = pop.getBoundingClientRect();
+        const h = host.getBoundingClientRect();
+        const a = ask.getBoundingClientRect();
+        const cx = (a.left + a.right) / 2;
+        const cy = (a.top + a.bottom) / 2;
+        return {
+          rows,
+          popIn: within(p, h),
+          askIn: within(a, h),
+          hit: document.elementFromPoint(cx, cy)?.closest('button') === ask,
+          scrolls: full.scrollHeight > full.clientHeight + 1,
+          spare: Math.round(h.bottom - p.bottom),
+        };
+      },
+      { sel, rows12 },
+    );
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(80);
+    return r;
+  };
+  const r11 = await askIn(false);
+  check(
+    `#136 ${tag} 必要証拠金の全文（${r11?.rows ?? '—'} 行）と [AI に聞く] が .panel-body の中で押せる・全文はスクロールしない`,
+    !!r11 && r11.popIn && r11.askIn && r11.hit && !r11.scrolls,
+    r11 ? `下の余り ${r11.spare}px` : '無い',
+  );
+  const r12 = await askIn(true);
+  check(
+    `#136 ${tag} 全文 12 行でも吹き出しが .panel-body の中・[AI に聞く] が押せる（全文の中だけスクロール）`,
+    !!r12 && r12.rows === 12 && r12.popIn && r12.askIn && r12.hit && r12.scrolls,
+    r12 ? `${r12.rows} 行・下の余り ${r12.spare}px` : '無い',
   );
   await ctx.close();
 }
@@ -10248,6 +10318,243 @@ async function aiSweep() {
   console.log(`AI のチャットの検査（#135）: ${aiStats.pass} / ${aiStats.total} で pass`);
 }
 
+// ---- 数字・パネルから [AI に聞く]（#136 AC4）
+const askStats = { pass: 0, total: 0 };
+const ASK_PREFIX = '［AI に聞く］';
+
+/** 指標 · テールを見せる（スマホ = ドックの指標の peek、タブレット = ドックの指標、PC = 作業台を work に） */
+async function showMetrics(page, w) {
+  if (w >= 1200) {
+    if ((await page.getAttribute('.layout', 'data-bench')) === 'ai')
+      await page.click('.top button[data-ai="top"]');
+  } else if (w <= PHONE_MAX) {
+    await setShell(page, 'metrics', 'peek');
+  } else {
+    await page.click('.dock button[data-panel="metrics"]');
+  }
+  await page.waitForSelector('section.metrics .metric-tiles', { state: 'visible', timeout: 5000 });
+  await page.waitForTimeout(120);
+}
+
+/** ボタンが見えていて窓の中・文字が切れていない（scrollWidth ≤ clientWidth） */
+const askButtonInfo = (page, sel) =>
+  page.evaluate((sel) => {
+    const els = [...document.querySelectorAll(sel)].filter((e) => e.getClientRects().length > 0);
+    const b = els[0];
+    if (!b) return { ok: false, detail: '無い / 見えない' };
+    const r = b.getBoundingClientRect();
+    const inWin =
+      r.left >= -0.5 &&
+      r.top >= -0.5 &&
+      r.right <= window.innerWidth + 0.5 &&
+      r.bottom <= window.innerHeight + 0.5;
+    const cut = b.scrollWidth > b.clientWidth + 0.5;
+    const text = (b.textContent ?? '').trim();
+    return {
+      ok: inWin && !cut && r.width > 0,
+      detail: `「${text}」 ${Math.round(r.left)},${Math.round(r.top)}–${Math.round(r.right)},${Math.round(r.bottom)}${inWin ? '' : ' 窓の外'}${cut ? ' 切れ' : ''}`,
+    };
+  }, sel);
+
+/** 押す → AI のパネルが見え、最後の user の吹き出しに want、返答（偽の SSE）が終わる */
+async function askAndWait(page, sel, want) {
+  const before = await page.$$eval('section.ai .ai-msg.user', (xs) => xs.length);
+  await page.locator(sel).first().click();
+  const shown = await page
+    .waitForSelector('section.ai .ai-foot', { state: 'visible', timeout: 5000 })
+    .then(() => true)
+    .catch(() => false);
+  await page
+    .waitForFunction(
+      (n) => document.querySelectorAll('section.ai .ai-msg.user').length > n,
+      before,
+      { timeout: 5000 },
+    )
+    .catch(() => {});
+  await page
+    .waitForSelector('section.ai .ai-progress', { state: 'detached', timeout: 15000 })
+    .catch(() => {});
+  await page.waitForTimeout(150);
+  const r = await page.evaluate(() => {
+    const users = [...document.querySelectorAll('section.ai .ai-msg.user .ai-bubble')];
+    const answers = [...document.querySelectorAll('section.ai .ai-msg.answer')];
+    return {
+      user: users.at(-1)?.textContent ?? '',
+      answer: (answers.at(-1)?.textContent ?? '').trim(),
+      error: !!answers.at(-1)?.querySelector('.ai-error'),
+      popOpen: document.querySelectorAll('.pop-wrap .popover:not([hidden])').length,
+    };
+  });
+  const ok =
+    shown &&
+    r.user.startsWith(ASK_PREFIX) &&
+    r.user.includes(want) &&
+    r.answer !== '' &&
+    !r.error &&
+    r.popOpen === 0;
+  return {
+    ok,
+    detail: `${shown ? '' : 'AI のパネルが見えない・'}吹き出し「${r.user.split('\n')[0]}」・返答 ${r.answer ? 'あり' : 'なし'}${r.error ? '・失敗' : ''}${r.popOpen ? `・吹き出しが ${r.popOpen} 個開いたまま` : ''}`,
+  };
+}
+
+function askRecord(label, ok, detail) {
+  askStats.total++;
+  if (ok) askStats.pass++;
+  else failed = true;
+  console.log(`${label}: ${ok ? 'pass' : `${detail}  ← NG`}${ok && detail ? `（${detail}）` : ''}`);
+}
+
+/**
+ * #136 AC4: 4 幅 × ダーク / ライトで、タイル（満期 最大損失）・読み取り（Δ）・テール表・IV 推移の [AI に聞く] が窓の中で
+ * 切れず、押すと AI のパネルが見え、user の吹き出しに場所の見出しが入り、偽の返答が終わる。押した後のページの縦・横
+ * スクロール 0px。AI が無効（status を enabled:false に差し替え）のときは送らずに入力欄に質問の文が入り、理由が出る
+ */
+async function aiAskSweep() {
+  for (const [w, h] of SIZES) {
+    for (const theme of ['dark', 'light']) {
+      const tag = `#136 ${theme} ${w}x${h}`;
+      const ctx = await newContext(
+        { width: w, height: h },
+        { [WORKSPACE_KEY]: twoLegs, [PREFS_KEY]: prefsText(theme) },
+        theme,
+      );
+      const page = await ctx.newPage();
+      await page.goto(pageUrl('next'));
+      await waitReady(page, 'next');
+      const steps = [
+        {
+          name: 'タイル（満期 最大損失）',
+          open: async () => {
+            await showMetrics(page, w);
+            await page.click('section.metrics .tile[data-tile="maxLoss"] .tile-btn');
+            await page.waitForTimeout(150);
+          },
+          sel: 'section.metrics .tile[data-tile="maxLoss"] button[data-ai-ask="tile.maxLoss"]',
+          want: '「満期 最大損失」',
+        },
+        {
+          name: '読み取り（Δ）',
+          open: async () => {
+            await page.click('.readout .ro[data-ro="delta"] .ro-btn');
+            await page.waitForTimeout(150);
+          },
+          sel: '.readout .ro[data-ro="delta"] button[data-ai-ask="readout.delta"]',
+          want: '損益グラフの読み取り',
+        },
+        {
+          name: 'テール表',
+          open: async () => {
+            await showMetrics(page, w);
+            await page.locator('button[data-ai-ask="tail.pnl"]').scrollIntoViewIfNeeded();
+            await page.waitForTimeout(120);
+          },
+          sel: 'section.metrics button[data-ai-ask="tail.pnl"]',
+          want: '「テール表」',
+        },
+        {
+          name: 'IV 推移',
+          open: async () => {
+            await openIv(page, w);
+            await page
+              .waitForSelector('button[data-ai-ask="iv.history"]', { timeout: 10000 })
+              .catch(() => {});
+          },
+          sel: 'section.smile button[data-ai-ask="iv.history"]',
+          want: '「ATM IV（30 日固定）」',
+        },
+      ];
+      for (const st of steps) {
+        const lbl = `${tag} ${st.name}`;
+        try {
+          await st.open();
+          const b = await askButtonInfo(page, st.sel);
+          const m0 = await measure(page);
+          askRecord(
+            `${lbl} [AI に聞く] のボタン`,
+            b.ok && m0.v === 0 && m0.h === 0,
+            `${b.detail} 縦 ${m0.v} 横 ${m0.h}`,
+          );
+          if (!b.ok) continue;
+          if (theme === 'light' && st.name !== 'タイル（満期 最大損失）') continue;
+          const r = await askAndWait(page, st.sel, st.want);
+          const m1 = await measure(page);
+          askRecord(
+            `${lbl} 押すと AI のパネルで送る`,
+            r.ok && m1.v === 0 && m1.h === 0,
+            `${r.detail} 縦 ${m1.v} 横 ${m1.h}`,
+          );
+          if (shotsDir)
+            await page.screenshot({
+              path: join(shotsDir, `ask-${w}x${h}-${theme}-${steps.indexOf(st)}.png`),
+            });
+        } catch (e) {
+          askRecord(lbl, false, `${e?.message ?? e}`.split('\n')[0]);
+        }
+      }
+      await ctx.close();
+    }
+    // AI が無効: 送らずに入力欄に質問の文・理由（ダークだけ）
+    const ctx = await newContext(
+      { width: w, height: h },
+      { [WORKSPACE_KEY]: twoLegs, [PREFS_KEY]: prefsText('dark') },
+    );
+    const page = await ctx.newPage();
+    await page.route('**/fixtures/ai/status', (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json; charset=utf-8',
+        body: JSON.stringify({
+          schema_version: 1,
+          enabled: false,
+          model: null,
+          credential: null,
+          counted: false,
+          limit_usd: null,
+          remaining_usd: null,
+          resets_at: null,
+        }),
+      }),
+    );
+    const lbl = `#136 dark ${w}x${h} AI が無効`;
+    try {
+      await page.goto(pageUrl('next'));
+      await waitReady(page, 'next');
+      // AI のパネルを一度も開かずに押す = 状態を読み終わってから判定する（#136 レビュー指摘 1。送らない）
+      await showMetrics(page, w);
+      await page.click('section.metrics .tile[data-tile="maxLoss"] .tile-btn');
+      await page.waitForTimeout(150);
+      await page.click('section.metrics button[data-ai-ask="tile.maxLoss"]');
+      await page.waitForSelector('section.ai .ai-foot', { state: 'visible', timeout: 5000 });
+      await page
+        .waitForFunction(
+          () => (document.querySelector('section.ai .ai-input textarea')?.value ?? '') !== '',
+          undefined,
+          { timeout: 5000 },
+        )
+        .catch(() => {});
+      await page.waitForTimeout(200);
+      const r = await page.evaluate(() => ({
+        value: document.querySelector('section.ai .ai-input textarea')?.value ?? '',
+        reason: document.querySelector('section.ai [data-ai="reason"]')?.textContent ?? '',
+        users: document.querySelectorAll('section.ai .ai-msg.user').length,
+      }));
+      askRecord(
+        lbl,
+        r.value.startsWith(ASK_PREFIX) &&
+          r.value.includes('満期 最大損失') &&
+          r.reason.includes('無効') &&
+          r.users === 0,
+        `入力欄「${r.value.split('\n')[0]}」・理由「${r.reason}」・吹き出し ${r.users}`,
+      );
+    } catch (e) {
+      askRecord(lbl, false, `${e?.message ?? e}`.split('\n')[0]);
+    }
+    await ctx.close();
+  }
+  console.log(`[AI に聞く] の検査（#136）: ${askStats.pass} / ${askStats.total} で pass`);
+}
+
 /**
  * #135 AC6: 進み具合（押してから表示まで < 1,000 ms・考え中 → 書いています → 完了の順）・中止・終端なし・ツールのカードと
  * [シナリオに適用]・再読み込みで会話が残る
@@ -11426,7 +11733,10 @@ try {
         { width: 1440, height: 900 },
       ])
         await aiFlows(vp);
-    else await aiSweep();
+    else {
+      await aiSweep();
+      await aiAskSweep();
+    }
   } else if (flows) await runFlows();
   else await measureAll();
 } finally {

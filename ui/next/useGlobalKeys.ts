@@ -56,6 +56,11 @@ function focusLater(sel: string): void {
   requestAnimationFrame(tick);
 }
 
+/** そのパネルの行き先へ次のフレームから focus（#136 の [AI に聞く] の後に AI のパネルへ。キー 1〜6 と同じ行き先） */
+export function focusPanelLater(panel: PanelId): void {
+  focusLater(PANEL_FOCUS[panel]);
+}
+
 /** モーダルのダイアログ（コマンドパレットも <dialog>）が開いている = すべて止める */
 function dialogNow(): boolean {
   return document.querySelector('dialog[open]') !== null;

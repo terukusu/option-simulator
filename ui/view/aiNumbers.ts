@@ -11,7 +11,8 @@
  * - 一致: 単位が合う値を、トークンの単位（円・千円・万円・億円）で割ってトークンの小数の桁に四捨五入したものが、
  *   トークンの値と絶対値で等しい。符号を書いたトークン（− / ▲ / △ / +）は向きも合うこと（言葉の「損失 617 千円」は
  *   絶対値だけ）。単位の無いトークンはどの単位の値とも照合する
- * - ignored（数えない）: 日付・時刻（2026-11-13・11/13・9:00・2026 年・2 週間）、限月（11 月限）、番号（弱点 1・行頭の 1.）、
+ * - ignored（数えない）: 日付・時刻（2026-11-13・11/13・9:00・2026 年・2 週間）、限月（11 月限）、番号（弱点 1・行頭の 1.・
+ *   文書の節「マニュアル 8.1」「設計書 5.6」。#136）、
  *   数の言葉（3 つ・2 本）、「100 円あたり」「/ 原資産 100 円」のような単位の言い方。「- 29.5 日」の空白の前の - は
  *   箇条書きの印（符号にしない）。スマイルの m（ln(K/F)）は ×100 の % としても照合する
  */
@@ -183,6 +184,24 @@ const TIME_RE = /\d{1,2}:\d{2}/g;
 const NUM_RE = /(?<![0-9A-Za-z_.,])([+\-−–▲△±×]\s?)?(\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?)/g;
 const PER_UNIT_RE = /^\s?(あたり|当たり|につき)/;
 const NUMBERING_BEFORE = /(弱点|第|No\.?)\s?$/;
+/**
+ * 文書の節の番号（#136。「マニュアル 8.1「タイル」」「設計書 5.6」「マニュアルの 10 章」= 根拠の節の示し方。値ではない）。
+ * 並べた 2 つ目以降（「マニュアル 8.1「タイル」・8.3「テール表」」「8.1、8.3」「8 章と 10 章」）も同じ（レビュー指摘 4）
+ */
+const SECTION_BEFORE =
+  /(マニュアル|設計書)\s*(の\s*)?(\d+(\.\d+)*\s*(章)?\s*(「[^」\n]*」)?\s*[・、,/と]\s*)*$/;
+/**
+ * Γ の単位の「100 円」（#136 の評価。「Γ / 100 円」「原資産が 100 円動いたとき」= 文書の単位の定義。値ではない）。
+ * 符号の無い 100 ちょうどで、直後が「円動く / 円上がる / 円下がる / 円の変化」のときだけ（値の取り違えを広く見逃さない。
+ * 「/ 100 円」は PER_BEFORE で数えない）
+ */
+const GAMMA_UNIT_AFTER = /^\s?円\s*(が|だけ)?\s*(動|上が|下が|の変化|変化)/;
+/**
+ * 乗数の比（#136 の評価。「ミニ先物換算（ラージの 10 倍）」= ラージ 1,000・ミニ 100 の決まり。値ではない）。
+ * 符号の無い 10 ちょうどで、直前が「ラージ（先物）の」、直後が「倍」のときだけ
+ */
+const MULTIPLIER_BEFORE = /ラージ(先物)?\s*の\s*$/;
+const MULTIPLIER_AFTER = /^\s?倍/;
 /** 「Γ（… / 原資産 100 円）」のような単位の言い方（直前が / ） */
 const PER_BEFORE = /\/\s*(原資産\s*)?$/;
 /** 分位の名前（#200 technicals の p10・p90）: 「下位 10%」「上位 10%」「p90」と「10〜90% の幅」の 90% は値でなく名前 */
@@ -268,6 +287,16 @@ export function checkNumbers(text: string, sources: readonly unknown[]): NumberC
       const lineStart = n.lastIndexOf('\n', start - 1) + 1;
       const before = n.slice(lineStart, start);
       if (NUMBERING_BEFORE.test(before)) reason = 'number';
+      else if (SECTION_BEFORE.test(before)) reason = 'number';
+      else if (numText === '100' && rawSign === '' && GAMMA_UNIT_AFTER.test(rest))
+        reason = 'per_unit';
+      else if (
+        numText === '10' &&
+        rawSign === '' &&
+        MULTIPLIER_BEFORE.test(before) &&
+        MULTIPLIER_AFTER.test(rest)
+      )
+        reason = 'number';
       else if (PER_BEFORE.test(before)) reason = 'per_unit';
       else if (QUANTILE_BEFORE.test(before)) reason = 'number';
       else if (QUANTILE_TOP.has(numText) && QUANTILE_RANGE.test(before)) reason = 'number';
@@ -310,6 +339,44 @@ export function checkNumbers(text: string, sources: readonly unknown[]): NumberC
     else if (t.status === 'matched') matched++;
   }
   return { tokens, unmatched, matched };
+}
+
+/** 表示の値のトークンの単位 → 照合の値のキー（classOfKey がその単位の種類に読むキー） */
+const DISPLAY_KEY: Record<TokenUnit, string> = {
+  yen: 'shown_yen',
+  thousand_yen: 'shown_yen',
+  man_yen: 'shown_yen',
+  oku_yen: 'shown_yen',
+  lots: 'shown_lots',
+  pt: 'shown_pt',
+  pct: 'shown_pct',
+  ratio: 'shown_ratio',
+  days: 'shown_days',
+  none: 'shown',
+};
+
+const UNITLESS_KEYS = ['shown', 'shown_lots', 'shown_pt', 'shown_pct', 'shown_ratio', 'shown_days'];
+
+/**
+ * 画面の表示の値（#136 の [AI に聞く] の質問の文に入れた全文・表の行）→ 照合の値。文を同じトークンの規則で読み、
+ * 数えないトークン（日付・節の番号・単位の言い方）は除く。金額は円に直し（千円 × 1,000 など）、単位はキーの名前で持つ
+ * （単位の無い数は金額・水準以外の単位でも引ける）。表示の丸めのまま（答えが同じ桁なら一致）
+ */
+export function displayedValues(text: string): Record<string, number[]> {
+  const out: Record<string, number[]> = {};
+  for (const t of checkNumbers(text, []).tokens) {
+    if (t.status === 'ignored' || !Number.isFinite(t.value)) continue;
+    const v = t.value * (SCALE[t.unit] ?? 1);
+    // 単位の無い表示の数（「Δ: −0.013 枚（ミニ −0.13）」の括弧のミニ）は前後の単位を書いていないだけなので、金額・水準
+    // 以外の単位（枚・pt・%・倍・日）でも引けるようにする。金額は単位の付いた表示だけ（千円の桁の取り違えを見逃さない）
+    const keys = t.unit === 'none' ? UNITLESS_KEYS : [DISPLAY_KEY[t.unit]];
+    for (const key of keys) {
+      const xs = out[key] ?? [];
+      xs.push(v);
+      out[key] = xs;
+    }
+  }
+  return out;
 }
 
 export interface AnswerSection {

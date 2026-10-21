@@ -38,6 +38,8 @@ SSE_TYPE = "text/event-stream; charset=utf-8"
 # 毎回は要らない手順（テクニカル・ポジションの提案）はスキル（ai/plugin/skills/。#221）に切り出し、要るときだけ読む
 # 画面の [このポジションを診断] の最初の発言（ui/view/aiChat.ts と同じ文）
 DIAGNOSE_TEXT = "このポジションを診断してください。"
+# 画面の [AI に聞く] の発言の先頭（ui/view/aiAsk.ts の ASK_PREFIX と同じ文。#136）
+ASK_PREFIX = "［AI に聞く］"
 SYSTEM_PROMPT = f"""あなたは日経225オプションの損益シミュレーターに付いた相談役です。\
 利用者はポジションを建てる前に、損益の形・弱点・\
 シナリオを検討しています。日本語で、端的に答えます。
@@ -85,6 +87,13 @@ delta_large / delta_mini は枚、days は日、*ratio は倍。null は「評�
 # 追加の質問
 - 質問に答える。数字が要ればツールを呼ぶ（1 回の質問で 4 回まで）。結論から書き、2〜6 行程度にする
 
+# 画面の値（発言が「{ASK_PREFIX}」で始まるとき）
+- 利用者が画面の値（パネルと見出し・画面の表示・説明の節）を選んで聞いている
+- 順に: (1) 何を表す値か（定義。1〜2 行）(2) なぜこの値か（どの足・条件から来ているか。precomputed かツールの数字で）\
+(3) 今のポジションにとって何を意味するか（注意点。1〜2 行）。全体で 4〜8 行
+- 「画面の表示」の値は利用者の画面の値で、そのまま引いてよい（計算し直さない・言い換えない）。\
+それ以外の数字は上の規則のまま
+
 # スキル（答える前に Skill で読む手順）
 - 先物のテクニカル（RSI・MACD・ストキャスティクス・EMA・トレンド・地合い）を聞かれたら、答える前に Skill で\
 simulator:technicals を読む
@@ -102,6 +111,7 @@ DOCS_PROMPT = """
 上限がある。前の発言で読んでいても、この発言で要るなら読み直す
 - 答えには根拠の節を「マニュアル 8.5「追証マップ」」「設計書 5.4「シナリオ（IV の 1 本の式）」」の形で示す
 - 読んだ節に書いていないことは「マニュアル・設計書には書かれていない」と言い、推測で補わない
+- 発言が「［AI に聞く］」で始まり「説明の節」が書いてあれば、その節を read_doc で読んでから答え、根拠の節を示す
 - 文書の中の Issue 番号（#123 の形）・決定の記号（K7・D11・Q2 の形）・開発の経緯は答えに書かない
 - 文書の数（定義・既定値・範囲）は節を示して書いてよい。文書の価格の例は架空の値で、今の板の値ではない
 
@@ -247,7 +257,8 @@ class AiRelay:
         reserved = budget.reserve_micro_usd(cfg.model, est, st.AI_MAX_TOKENS, st.AI_MAX_TURNS, budget.loaded_tokens())
         day = budget.jst_day(self.clock())
         charged = None
-        rec = {"kind": req.kind, "model": cfg.model, "credential": cfg.credential, "n_messages": len(req.messages),
+        rec = {"kind": req.kind, **({"topic": req.topic} if req.topic else {}), "model": cfg.model,
+               "credential": cfg.credential, "n_messages": len(req.messages),
                "request_bytes": request_bytes, "est_input_tokens": est, "tools": req.tool_names(),
                "price_checked": st.AI_PRICE_CHECKED}
         if cfg.counted:

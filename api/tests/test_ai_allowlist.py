@@ -56,6 +56,40 @@ def test_ok_diagnose_kind_and_scenario_keys():
     assert req.context["scenario"]["iv_mode"] == "relative"
 
 
+# ---- [AI に聞く]（#136 AC3）: kind ask と場所の topic ----
+
+def test_ok_ask_with_topic():
+    for topic in allowlist.ASK_TOPICS:
+        req = parse(ai_body(kind="ask", topic=topic))
+        assert req.kind == "ask" and req.topic == topic
+
+
+def test_chat_and_diagnose_have_no_topic():
+    assert parse(ai_body()).topic is None
+    assert parse(ai_body(kind="diagnose")).topic is None
+
+
+@pytest.mark.parametrize("body, path, reason", [
+    (ai_body(kind="ask"), "topic", "missing"),
+    (ai_body(kind="ask", topic="tile.unknown"), "topic", "enum"),
+    (ai_body(kind="ask", topic="満期 最大損失 −1,234 千円"), "topic", "enum"),
+    (ai_body(kind="ask", topic=["tile.maxLoss"]), "topic", "enum"),
+    (ai_body(kind="ask", topic=None), "topic", "enum"),
+    (ai_body(topic="tile.maxLoss"), "topic", "unknown_key"),
+    (ai_body(kind="diagnose", topic="tile.maxLoss"), "topic", "unknown_key"),
+], ids=["ask_without_topic", "unknown_topic", "free_text_topic", "list_topic", "null_topic", "chat_with_topic",
+        "diagnose_with_topic"])
+def test_topic_rejected(body, path, reason):
+    e = bad(body)
+    assert (e.path, e.reason) == (path, reason)
+
+
+def test_topic_not_sent_upstream():
+    req = parse(ai_body(kind="ask", topic="tile.maxLoss"))
+    sent = json.dumps(allowlist.upstream_messages(req), ensure_ascii=False)
+    assert "tile.maxLoss" not in sent and "topic" not in sent
+
+
 def update_body(update_ctx=None, extra_first=None):
     """3 件目の user（2 回目の発言）に文脈の更新を足した会話"""
     ctx = ai_context(with_precomputed=False)
