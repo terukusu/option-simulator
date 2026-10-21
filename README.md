@@ -288,7 +288,7 @@ npm run readme:shots                   # 全部（約 1 分）
 npm run readme:shots -- --only hero,phone   # 名前に含む語で一部だけ
 ```
 
-PNG で撮ってブラウザの canvas で WebP に変えます（依存を足さない）。画面を変えたら撮り直して、1 枚 300 KB・合計 3 MB を目安に収めます。
+PNG で撮ってブラウザの canvas で WebP に変えます（依存を足さない）。画面を変えたら撮り直して、1 枚 300 KB・合計 2.2 MB を目安に収めます。
 
 ## 免責
 

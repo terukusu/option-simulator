@@ -66,7 +66,7 @@ const workspace = (scenario = {}, ui = {}) =>
   });
 /** 見せたいシナリオ: 10 日後・原資産 −1,500 円・IV +4pt */
 const SCENARIO = { days: 10, dX: -1500, dSigma: 4 };
-/** 提案の画像の作業: タブ A の put の売りだけ（ヘッジの put の買いで満期の最大損失が有限になる） */
+/** 提案の画像の作業: タブ A の put の売りだけ（ヘッジの put の買いで満期の最大損失が小さくなる） */
 const putOnly = () => {
   const ws = JSON.parse(workspace(SCENARIO));
   ws.tabs[0].name = 'put 売り';
