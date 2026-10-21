@@ -8,7 +8,8 @@ redacted_thinking）/ "err429" / "err401" /
 "skill_tool"（1 回目は Skill、その後は text → simulator のツール 1 本）/ "skill_loop"（毎回 Skill）/
 "skill_unknown"（1 回目は一覧に無いスキル、その後は text）。
 文書（#137）: "doc"（1 回目は thinking → read_doc の tool_use、往復の後は text）/ "skill_doc"（1 回目に Skill と
-read_doc を並べて、その後は text）/ "doc_outside"（1 回目は許可リストの外の節 design 13 の read_doc、その後は text）。
+read_doc を並べて、その後は text）/ "doc_outside"（1 回目は許可リストの外の節 design 13 の read_doc、その後は text）/
+"doc_many"（1 回目に read_doc を DOC_MANY 本並べる = 1 要求の回数の上限を超える）。
 usage は要求ごとに変える（n 回目 = 0 始まり: input_tokens 1234 + 1000n、output_tokens 321 + 10n、cache は 100・50。
 n = 1 だけ cache_creation の内訳を付ける）。値はすべて架空。
 """
@@ -27,6 +28,7 @@ SKILL_NAME = "simulator:technicals"
 DOC_TOOL = "mcp__docs__read_doc"
 DOC_INPUT = {"file": "user-guide", "section": "8.5"}
 DOC_OUTSIDE = {"file": "design", "section": "13"}
+DOC_MANY = 7
 UNKNOWN_SKILL = "simulator:unknown"
 
 
@@ -174,9 +176,11 @@ class FakeMessagesApi:
                     skill = UNKNOWN_SKILL
                 elif api.script == "skill_doc" and used == 0:
                     skill = SKILL_NAME
-                doc = None  # この turn で読む節
+                doc = None  # この turn で読む節（list で並べる）
                 if doc_uses(messages) == 0 and api.script in ("doc", "skill_doc", "doc_outside"):
-                    doc = DOC_OUTSIDE if api.script == "doc_outside" else DOC_INPUT
+                    doc = [DOC_OUTSIDE if api.script == "doc_outside" else DOC_INPUT]
+                elif doc_uses(messages) == 0 and api.script == "doc_many":
+                    doc = [{"file": "user-guide", "section": str(k + 1)} for k in range(DOC_MANY)]
                 start_usage, delta_usage = turn_usage(n)
                 self.send_response(200)
                 self.send_header("content-type", "text/event-stream")
@@ -203,12 +207,12 @@ class FakeMessagesApi:
                         self.ev({"type": "content_block_delta", "index": i, "delta": {
                             "type": "input_json_delta", "partial_json": json.dumps({"skill": skill})}})
                         self.ev({"type": "content_block_stop", "index": i})
-                    if doc is not None:
+                    for k, d in enumerate(doc or []):
                         i += 1
                         self.ev({"type": "content_block_start", "index": i, "content_block": {
-                            "type": "tool_use", "id": f"toolu_doc_{n}", "name": DOC_TOOL, "input": {}}})
+                            "type": "tool_use", "id": f"toolu_doc_{n}_{k}", "name": DOC_TOOL, "input": {}}})
                         self.ev({"type": "content_block_delta", "index": i, "delta": {
-                            "type": "input_json_delta", "partial_json": json.dumps(doc)}})
+                            "type": "input_json_delta", "partial_json": json.dumps(d)}})
                         self.ev({"type": "content_block_stop", "index": i})
                     self.ev({"type": "message_delta", "delta": {"stop_reason": "tool_use", "stop_sequence": None},
                              "usage": delta_usage})

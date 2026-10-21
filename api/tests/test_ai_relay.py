@@ -553,8 +553,11 @@ def test_system_prompt_has_docs_toc_but_not_bodies():
     # 本文は載せない（長い節の本文の行が無い）。節の示し方・無いことは無いと言う・Issue 番号を書かない、の決まり
     body_line = next(line for line in idx.get("design", "5.10").text.splitlines()[2:] if len(line) > 80)
     assert body_line not in prompt
-    for rule in ("read_doc", "マニュアル 8.5「追証マップ」", "書かれていない", "Issue 番号"):
+    for rule in ("read_doc", "書かれていない", "Issue 番号"):
         assert rule in prompt
+    # 示し方の例の題目は目次と同じ（文書の見出しが変わったら例も直す。指摘 5）
+    for file, label, sid in (("user-guide", "マニュアル", "8.5"), ("design", "設計書", "5.4")):
+        assert f"{label} {sid}「{idx.get(file, sid).title}」" in relay.DOCS_PROMPT
     assert len(prompt.encode("utf-8")) < len(relay.SYSTEM_PROMPT.encode("utf-8")) + 8 * 1024
 
 

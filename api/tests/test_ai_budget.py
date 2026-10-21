@@ -99,7 +99,7 @@ def test_reserve_cache_miss_is_the_documented_exception():
 
 def test_reserve_long_conversation_not_rejected_at_day_start():
     # api_key / wif で本文 90k トークン（ツールの往復が数回ある長い会話）でも日の始めに上限 $3 に収まる
-    # （#137 で文書の 1 要求の上限を K に足して 約 $1.51 → 約 $1.84。ADR-0007）
+    # （#137 で文書の 1 要求の上限を K に足して 約 $1.49 → 約 $1.81。ADR-0007）
     est = budget.estimate_input_tokens("x" * 90_000)
     assert budget.reserve_micro_usd(M, est, st.AI_MAX_TOKENS, st.AI_MAX_TURNS, budget.loaded_tokens()) < 2_000_000
 

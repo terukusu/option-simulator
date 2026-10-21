@@ -815,6 +815,18 @@ def test_hook_allows_read_doc_exactly():
         assert out["continue_"] is False and out["hookSpecificOutput"]["permissionDecision"] == "deny"
 
 
+def test_hook_stops_read_doc_over_call_limit():
+    """指摘 1: 1 要求で AI_DOC_MAX_READS 回を超えた read_doc は deny + continue_=False（要求を終える）。
+    文書の索引が無い（reader なし）ときも止める"""
+    hook = agent_sdk._hook(docs.Reader(docs.index()))
+    call = {"tool_name": docs.CLI_TOOL_NAME, "tool_input": {"file": "user-guide", "section": "1"}}
+    outs = [asyncio.run(hook(call, "t", {})) for _ in range(st.AI_DOC_MAX_READS + 1)]
+    assert all(o["hookSpecificOutput"]["permissionDecision"] == "allow" for o in outs[:-1])
+    assert outs[-1]["continue_"] is False and outs[-1]["hookSpecificOutput"]["permissionDecision"] == "deny"
+    out = asyncio.run(agent_sdk._hook(None)(call, "t", {}))
+    assert out["continue_"] is False and out["hookSpecificOutput"]["permissionDecision"] == "deny"
+
+
 def test_docs_tool_handler_returns_section_and_errors():
     reader = docs.Reader(docs.index())
     t = AgentSdkGateway.docs_tool(reader)

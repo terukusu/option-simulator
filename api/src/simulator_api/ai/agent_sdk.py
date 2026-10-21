@@ -394,13 +394,19 @@ class Assembler:
                 "usage": usage, "stop_reason": self.stop_reason}
 
 
-def _hook():
+def _hook(reader: docs.Reader | None = None):
     """PreToolUse: 一覧にあるスキルの Skill は通す（CLI が SKILL.md を読む）。一覧に無い名前の Skill は deny（turn は
     続く = モデルが別の手で答える）。文書の read_doc（mcp__docs__read_doc ちょうど）は allow（中継の関数が節を返す。
-    入力の検査は関数の側）。それ以外（mcp__sim__*）は deny + continue_=False（ブラウザが実行する）"""
+    入力の検査は関数の側）。ただし 1 要求で AI_DOC_MAX_READS 回を超えた read_doc は deny + continue_=False（要求を
+    終える = 結果を上流に送らない。予約額の上界の前提。settings の説明）。それ以外（mcp__sim__*）は
+    deny + continue_=False（ブラウザが実行する）"""
 
     async def pre_tool_use(input_data, tool_use_id, context):
         if input_data.get("tool_name") == docs.CLI_TOOL_NAME:
+            if reader is None or not reader.permit():
+                return {"continue_": False,
+                        "hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
+                                               "permissionDecisionReason": "read_doc limit reached."}}
             return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "allow",
                                            "permissionDecisionReason": "read_doc runs in the relay."}}
         if input_data.get("tool_name") == SKILL_TOOL:
@@ -523,7 +529,7 @@ class AgentSdkGateway:
             include_partial_messages=True,
             verbatim_prompts=True,
             max_turns=st.AI_MAX_TURNS,
-            hooks={"PreToolUse": [HookMatcher(matcher=None, hooks=[_hook()])]},
+            hooks={"PreToolUse": [HookMatcher(matcher=None, hooks=[_hook(reader)])]},
             cli_path=self._cli_path,
             cwd=cwd,
             env=child_env(self._credential, self._secret, cfg_dir, params["max_tokens"], resume_turn, self._wif,

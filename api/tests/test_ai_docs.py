@@ -27,8 +27,10 @@ def ids(i, file):
 
 def test_index_ids_unique_and_user_guide_all_chapters(idx):
     for f in docs.FILES:
-        got = ids(idx, f.key)
-        assert len(got) == len(set(got)) and all(docs.SECTION_RE.match(x) for x in got)
+        # index() は (file, id) の辞書なので重なりを上書きで隠す → parse() の list で数える（指摘 4）
+        listed = [s.id for s in docs.parse(f, (docs.docs_dir() / f.path).read_text(encoding="utf-8"))]
+        assert len(listed) == len(set(listed)) and listed == ids(idx, f.key)
+        assert all(docs.SECTION_RE.match(x) for x in listed)
     chapters = [s.id for s in idx.sections.values() if s.file == "user-guide" and s.level == 2]
     assert chapters == [str(n) for n in range(1, 21)]
     assert idx.get("user-guide", "8.5").title == "追証マップ"
@@ -127,8 +129,20 @@ def test_large_sections_split(idx):
     for s in idx.sections.values():
         parts = s.parts()
         assert "".join(parts) == s.text
-        assert all(len(p.encode("utf-8")) <= st.AI_DOC_READ_MAX_BYTES for p in parts)
+        assert len(parts) <= docs.PART_MAX  # 後ろの part が読めない節を作らない（指摘 3）
     assert len(idx.get("design", "5.10").parts()) >= 2
+
+
+def test_every_read_fits_read_max_and_two_reads_fit_request(idx):
+    """指摘 2: 見出しの行・「続きは」の行を含めた 1 回の返りが AI_DOC_READ_MAX_BYTES 以下 → part を 2 つは必ず読める"""
+    assert 2 * st.AI_DOC_READ_MAX_BYTES <= st.AI_DOC_REQUEST_MAX_BYTES
+    for s in idx.sections.values():
+        for p in range(1, len(s.parts()) + 1):
+            text, err = docs.Reader(idx)({"file": s.file, "section": s.id, "part": p})
+            assert not err and len(text.encode("utf-8")) <= st.AI_DOC_READ_MAX_BYTES, (s.file, s.id, p)
+    r = docs.Reader(idx)
+    for p in (1, 2):
+        assert not r({"file": "design", "section": "5", "part": p})[1]
 
 
 # ---- AC2: read_doc ----
@@ -181,7 +195,7 @@ def test_read_errors_have_no_body(idx, args, want):
     r = docs.Reader(idx)
     text, err = r(args)
     assert err and want in text
-    assert "\n" not in text.strip() and len(text) < 200
+    assert "\n" not in text.strip() and len(text.encode("utf-8")) <= st.AI_DOC_ERROR_MAX_BYTES
     assert r.read == [] and r.used_bytes == 0
 
 
@@ -198,6 +212,24 @@ def test_request_byte_cap(idx):
         pytest.fail("上限に達しない")
     assert r.used_bytes == total <= st.AI_DOC_REQUEST_MAX_BYTES
     assert r.read == ["design:5.10"] + [f"design:5.10#{p}" for p in range(2, len(r.read) + 1)]
+
+
+def test_overhead_bounds_results(idx):
+    """指摘 1: 予約額の枠 AI_DOC_OVERHEAD_TOKENS が read_doc の結果の本文以外（エラーの文・tool_result の枠）の上界。
+    回数はフックが AI_DOC_MAX_READS で止める（permit）。エラーの文はどれも AI_DOC_ERROR_MAX_BYTES 以下"""
+    assert st.AI_DOC_MAX_READS * (st.AI_DOC_ERROR_MAX_BYTES + st.AI_DOC_RESULT_FRAME_BYTES) <= st.AI_DOC_OVERHEAD_TOKENS
+    r = docs.Reader(idx)
+    assert [r.permit() for _ in range(st.AI_DOC_MAX_READS + 2)] == [True] * st.AI_DOC_MAX_READS + [False, False]
+    # 上限の後のエラーの文（量・回数）も上限以下
+    big = docs.Reader(idx)
+    for p in range(1, 4):
+        big({"file": "design", "section": "5", "part": p})
+    errs = [big({"file": "design", "section": "5", "part": 4})[0]]
+    for _ in range(st.AI_DOC_MAX_READS):
+        big({"file": "user-guide", "section": "1"})
+    errs.append(big({"file": "user-guide", "section": "1"})[0])
+    for e in errs:
+        assert "上限" in e and len(e.encode("utf-8")) <= st.AI_DOC_ERROR_MAX_BYTES
 
 
 def test_request_call_cap(idx):

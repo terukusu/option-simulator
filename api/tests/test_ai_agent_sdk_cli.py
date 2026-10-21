@@ -17,6 +17,7 @@ from pathlib import Path
 import pytest
 from fake_messages_api import (
     DOC_INPUT,
+    DOC_MANY,
     DOC_TOOL,
     EXCHANGED,
     SIG,
@@ -575,6 +576,21 @@ def test_doc_outside_allowlist_returns_error_without_body(parent_creds, capsys):
     assert "無い" in _result_text(results[0])
     assert "13.1 決定事項（オーナー確定）" not in json.dumps(posts[1]["body"], ensure_ascii=False)
     assert ai_request(capsys)["docs"] == []
+
+
+def test_doc_calls_over_limit_stop_request(parent_creds, capsys):
+    """指摘 1: 1 要求で AI_DOC_MAX_READS 回を超えた read_doc はフックが deny + continue_=False で止める（結果を上流に
+    送らない = 予約額の上界の前提）。上流は 1 回だけ、SSE は done（read_doc は出ない）"""
+    assert DOC_MANY > st.AI_DOC_MAX_READS
+    with FakeMessagesApi("doc_many") as api:
+        client, _ = relay_app(gateway(api))
+        evs = sse_events(post(client, chat("全部の章を読んで")).get_data(as_text=True))
+        posts = api.posts()
+    assert len(posts) == 1
+    assert evs[-1][0] == "done" and "tool_use" not in [e for e, _ in evs]
+    assert all(b.get("type") != "tool_use" for b in evs[-1][1]["content"])
+    rec = ai_request(capsys)
+    assert len(rec["docs"]) <= st.AI_DOC_MAX_READS
 
 
 def test_doc_input_matches_fake_api():

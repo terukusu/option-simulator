@@ -81,7 +81,8 @@ class Section:
     text: str  # 見出しの行から次の同じか上の見出しの前まで（子の節を含む）
 
     def parts(self) -> list[str]:
-        return split_parts(self.text, st.AI_DOC_READ_MAX_BYTES)
+        # 見出しの行と「続きは」の行（AI_DOC_FRAME_BYTES 以下）を足しても 1 回の読みの上限に収まる大きさ
+        return split_parts(self.text, st.AI_DOC_READ_MAX_BYTES - st.AI_DOC_FRAME_BYTES)
 
 
 @dataclass(frozen=True)
@@ -227,7 +228,15 @@ class Reader:
         self._lock = threading.Lock()
         self.used_bytes = 0
         self.calls = 0
+        self.permits = 0
         self.read: list[str] = []  # 返した節（"<file>:<番号>" と part が 2 以上なら "#<part>"）
+
+    def permit(self) -> bool:
+        """フック（PreToolUse）が呼ぶ: この要求で AI_DOC_MAX_READS 回目までなら True。超えたらフックは deny +
+        continue_=False で要求を終える（呼び出しの回数 = 結果の数を有限にする。予約額の上界の前提）"""
+        with self._lock:
+            self.permits += 1
+            return self.permits <= st.AI_DOC_MAX_READS
 
     def __call__(self, args) -> tuple[str, bool]:
         """入力 → (返す文, エラーか)。エラーの文に本文を入れない"""

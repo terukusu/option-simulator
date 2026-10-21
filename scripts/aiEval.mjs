@@ -36,7 +36,7 @@ const opt = (name, def = null) => {
 const base = (process.env.AI_EVAL_BASE || 'http://127.0.0.1:8080').replace(/\/$/, '');
 const limitUsd = Number(process.env.AI_EVAL_LIMIT_USD || '6.5');
 // 1 要求の予約額の上界（中継の予約の式 budget.reserve_micro_usd。#221 で turn の上限 3・スキル・CLI が足す本文を
-// 入れた。#137 で文書の read_doc の 1 要求の上限と目次を足した: 本文 25k トークンで約 $1.25、90k で約 $1.83）
+// 入れた。#137 で文書の read_doc の 1 要求の上限と目次を足した: 本文 25k トークンで約 $1.26、90k で約 $1.81）
 const reserveUsd = 1.9;
 const repeat = Number(opt('--repeat', '1'));
 const followups = !args.includes('--no-followups');
