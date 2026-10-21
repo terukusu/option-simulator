@@ -67,6 +67,7 @@ import type { MarketAdd } from './market/BoardMonth';
 import { FutHistory } from './market/FutHistory';
 import { IvHistory } from './market/IvHistory';
 import { PanelHead } from './PanelHead';
+import { useAiAskHandler } from './parts/aiAsk';
 import { Palette } from './parts/Palette';
 import { TermCard } from './parts/TermCard';
 import { Toasts, useToasts } from './parts/Toast';
@@ -84,7 +85,7 @@ import { Shell } from './Shell';
 import { TopBar } from './TopBar';
 import { ShareConfirm } from './top/ShareConfirm';
 import { ShareUrlDialog } from './top/ShareUrlDialog';
-import { type GlobalKeysCtx, runGlobalKey, useGlobalKeys } from './useGlobalKeys';
+import { focusPanelLater, type GlobalKeysCtx, runGlobalKey, useGlobalKeys } from './useGlobalKeys';
 import { usePrefs } from './usePrefs';
 import { useTheme } from './useTheme';
 
@@ -122,6 +123,7 @@ import { useTheme } from './useTheme';
  * #135 で AI のチャット（regions/AiChat.tsx の AiPanel。会話の状態は AiPanel の中の useAiChat）を入れた。ツールの環境は
  * 送るときに今の state と端末の証拠金の設定から作る（aiEnvFromState）。口は API のときは /api/ai、dev の合成の板は
  * dev だけ /fixtures/ai（偽の SSE）。PC は作業台の列の入れ替え（ShellState.bench・トップバーの [AI]・キー 6）。
+ * #136 で数字・パネルの [AI に聞く]（parts/AskAi.tsx → parts/aiAsk.ts の口 → AI のパネルを開いて AiPanelApi.ask）。
  */
 const NO_IND_KINDS: readonly IndKind[] = [];
 
@@ -338,6 +340,13 @@ export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
     [dispatch, push],
   );
   const onAi = useCallback(() => send({ type: 'bench' }), []);
+  // [AI に聞く]（#136）: AI のパネルを見せて（PC は作業台を AI に）その値の質問を送る（パレットの診断と同じ口）
+  useAiAskHandler((a) => {
+    send({ type: 'open', panel: 'ai', tier });
+    aiApi.current?.ask(a);
+    // 押したボタン（閉じた吹き出しの中）からフォーカスを AI のパネルへ（キー 6 と同じ行き先。キーボードで続けて読める）
+    focusPanelLater('ai');
+  });
   const onCloseTab = useCallback(
     (id: number) => {
       const action = restoreTabAction(stateRef.current, id);

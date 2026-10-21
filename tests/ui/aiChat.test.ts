@@ -11,6 +11,7 @@ import {
   type AiGate,
   aiChatReduce,
   aiErrorText,
+  askPlan,
   atLimit,
   chatItems,
   DIAGNOSE_TEXT,
@@ -309,6 +310,83 @@ describe('保存（sessionStorage の 1 キー）', () => {
     for (const t of [ws, saved]) {
       expect(t).not.toMatch(/"ai[A-Za-z_]*"|optsim\.ai|"messages"/);
     }
+  });
+});
+
+describe('#136 AC2 [AI に聞く]（kind ask と場所の topic）', () => {
+  const ASK = '［AI に聞く］指標 · テール ›「満期 最大損失」';
+  const toolUse: AiChatAction = ev({
+    type: 'done',
+    stop_reason: 'tool_use',
+    content: [{ type: 'tool_use', id: 't1', name: 'tail_table', input: {} }],
+    remaining_usd: 2.2,
+  });
+  it('ask の要求は kind ask と topic を持ち、ツールの往復の後の要求でも保つ', () => {
+    let s = run(
+      first,
+      { type: 'begin', kind: 'ask', text: ASK, now: 2000, topic: 'tile.maxLoss' },
+      { type: 'send', context: CTX(0), key: 'k0' },
+    );
+    expect(requestOf(s)).toMatchObject({ kind: 'ask', topic: 'tile.maxLoss' });
+    s = run(s, toolUse, {
+      type: 'toolResults',
+      blocks: [
+        {
+          type: 'tool_result',
+          tool_use_id: 't1',
+          content: [{ type: 'text', text: '{"rows":[]}' }],
+        },
+      ],
+    });
+    expect(requestOf(s)).toMatchObject({ kind: 'ask', topic: 'tile.maxLoss' });
+  });
+
+  it('chat・diagnose の要求には topic が無い（begin に付けても落とす）', () => {
+    const c = run(
+      first,
+      { type: 'begin', kind: 'chat', text: 'x', now: 2000, topic: 'tile.maxLoss' },
+      { type: 'send', context: CTX(0), key: 'k0' },
+    );
+    expect(requestOf(c)).not.toHaveProperty('topic');
+    const d = run(
+      INITIAL_AI_CHAT,
+      { type: 'begin', kind: 'diagnose', text: DIAGNOSE_TEXT, now: 1 },
+      { type: 'send', context: CTX(0), key: 'k0' },
+    );
+    expect(requestOf(d)).not.toHaveProperty('topic');
+  });
+
+  it('失敗の後の [もう一度] の材料（failed）に kind と topic が残る', () => {
+    const f = run(
+      first,
+      { type: 'begin', kind: 'ask', text: ASK, now: 2000, topic: 'tail.pnl' },
+      { type: 'send', context: CTX(0), key: 'k0' },
+      ev({ type: 'error', code: 'timeout' }),
+    );
+    expect(f.failed).toMatchObject({ kind: 'ask', topic: 'tail.pnl', userText: ASK });
+    // 履歴は戻り、表示は user の吹き出しに質問の文
+    expect(f.messages).toEqual(first.messages);
+    expect(chatItems(f).find((i) => i.key === 'failed-user')).toMatchObject({ text: ASK });
+  });
+
+  it('askPlan: 送れるなら send、送れない理由があれば入力欄に入れる（理由つき）', () => {
+    expect(askPlan(INITIAL_AI_CHAT, GATE)).toBe('send');
+    // 足 0 本でも質問は送れる（[このポジションを診断] と違う）
+    expect(askPlan(INITIAL_AI_CHAT, { ...GATE, legCount: 0 })).toBe('send');
+    expect(askPlan(INITIAL_AI_CHAT, { ...GATE, status: { ...STATUS, enabled: false } })).toEqual({
+      draft: 'AI は無効です（管理者の設定）',
+    });
+    expect(askPlan(INITIAL_AI_CHAT, { ...GATE, status: { ...STATUS, remaining_usd: 0 } })).toEqual({
+      draft: '今日の上限に達しました（日付が変わると戻ります）',
+    });
+    expect(askPlan(INITIAL_AI_CHAT, { ...GATE, hasChain: false })).toEqual({
+      draft: '板がありません（板を読んでから送ってください）',
+    });
+    const sending = run(INITIAL_AI_CHAT, { type: 'begin', kind: 'chat', text: 'x', now: 1 });
+    expect(askPlan(sending, GATE)).toEqual({ draft: '送信中です' });
+    expect(askPlan(INITIAL_AI_CHAT, { ...GATE, status: { error: 'network' } })).toMatchObject({
+      draft: expect.stringContaining('読めません'),
+    });
   });
 });
 

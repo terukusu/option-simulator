@@ -5,6 +5,7 @@ import type { Scenario } from '../../../model';
 import type { Domain } from '../../chart/scale';
 import { pure } from '../../components/pure';
 import type { IvView } from '../../components/useIvHistory';
+import { askIvHistory } from '../../view/aiAsk';
 import { HINT_TERMS } from '../../view/glossary';
 import {
   fmtIvPt,
@@ -24,6 +25,7 @@ import {
 } from '../../view/ivHistory';
 import { type IvLoadState, ivInProgress, ivLoadView } from '../../view/ivLoad';
 import { PanelHead } from '../PanelHead';
+import { AskAi } from '../parts/AskAi';
 import { Popover } from '../parts/Popover';
 import { Seg } from '../parts/Seg';
 import { TermLinks } from '../parts/TermLinks';
@@ -89,7 +91,17 @@ function IvHistoryView(p: IvHistoryProps) {
   // 右端の足が進行中（表の作り直しの中。立会の外・週末で表が止まっていれば確定として描く）
   const rightLoaded = ivInProgress(entry);
   // 読み取りは十字線の足が表示範囲の内のときだけその足（外へパンしたら最新の足 = 十字線と一緒に外す。#227）
-  const ro = ivReadout(bars, tf, ivCursorShown(cursor, bars.length, viewport), rightLoaded);
+  const shown = ivCursorShown(cursor, bars.length, viewport);
+  const ro = ivReadout(bars, tf, shown, rightLoaded);
+  // [AI に聞く]（#136）: 読み取りの足・今・シナリオの水準（押したときに作る）
+  const makeAsk = () =>
+    askIvHistory({
+      tfLabel: IV_TFS.find((x) => x.value === tf)?.label ?? tf,
+      readout: ro,
+      cursor: shown !== null,
+      now: nowPt ? fmtIvPt(nowPt.iv) : null,
+      scenario: level !== null ? fmtIvPt(level) : null,
+    });
   const status = !entry
     ? failed
       ? 'failed'
@@ -116,6 +128,9 @@ function IvHistoryView(p: IvHistoryProps) {
           <Seg label="足" value={tf} options={IV_TFS} onChange={p.onTf} />
           <Seg label="表示の形" value={view.mode} options={IV_MODES} onChange={p.onMode} />
           <span class="spacer" />
+          {bars.length > 0 && (
+            <AskAi topic="iv.history" label="ATM IV（30 日固定）" make={makeAsk} short />
+          )}
           <button
             type="button"
             class="btn ghost icon sm iv-refresh"

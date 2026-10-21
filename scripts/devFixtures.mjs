@@ -472,6 +472,16 @@ export function synthAiReply(body) {
     ].join('\n');
     return { thinking: '事前計算のテール表と格子を見る', text, stop: 'end_turn' };
   }
+  if (body?.kind === 'ask') {
+    // [AI に聞く]（#136）: 質問の文の見出しと説明の節を引くだけの架空の文（ツールを呼ばない）
+    const title = /›「(.+?)」\n/.exec(userText)?.[1] ?? '—';
+    const doc = /説明の節: ([^・\n]+)/.exec(userText)?.[1] ?? 'マニュアル';
+    const text = [
+      `「${title}」は、今のポジションとシナリオから simulator が計算した値です（${doc}）。`,
+      'どの足・どの条件から来ているかは、指標 · テールの内訳とテール表で確かめられます。',
+    ].join('\n');
+    return { thinking: '説明の節を読む', text, stop: 'end_turn' };
+  }
   if (userText.includes('ヘッジ')) {
     // ポジションの提案（#139）: 行使価格は simulator に選ばせる（|Δ| 0.05 の put の買いを今のタブに足す）
     return {

@@ -11,7 +11,8 @@
  * - 一致: 単位が合う値を、トークンの単位（円・千円・万円・億円）で割ってトークンの小数の桁に四捨五入したものが、
  *   トークンの値と絶対値で等しい。符号を書いたトークン（− / ▲ / △ / +）は向きも合うこと（言葉の「損失 617 千円」は
  *   絶対値だけ）。単位の無いトークンはどの単位の値とも照合する
- * - ignored（数えない）: 日付・時刻（2026-11-13・11/13・9:00・2026 年・2 週間）、限月（11 月限）、番号（弱点 1・行頭の 1.）、
+ * - ignored（数えない）: 日付・時刻（2026-11-13・11/13・9:00・2026 年・2 週間）、限月（11 月限）、番号（弱点 1・行頭の 1.・
+ *   文書の節「マニュアル 8.1」「設計書 5.6」。#136）、
  *   数の言葉（3 つ・2 本）、「100 円あたり」「/ 原資産 100 円」のような単位の言い方。「- 29.5 日」の空白の前の - は
  *   箇条書きの印（符号にしない）。スマイルの m（ln(K/F)）は ×100 の % としても照合する
  */
@@ -183,6 +184,8 @@ const TIME_RE = /\d{1,2}:\d{2}/g;
 const NUM_RE = /(?<![0-9A-Za-z_.,])([+\-−–▲△±×]\s?)?(\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?)/g;
 const PER_UNIT_RE = /^\s?(あたり|当たり|につき)/;
 const NUMBERING_BEFORE = /(弱点|第|No\.?)\s?$/;
+/** 文書の節の番号（#136。「マニュアル 8.1「タイル」」「設計書 5.6」「マニュアルの 10 章」= 根拠の節の示し方。値ではない） */
+const SECTION_BEFORE = /(マニュアル|設計書)\s*(の\s*)?$/;
 /** 「Γ（… / 原資産 100 円）」のような単位の言い方（直前が / ） */
 const PER_BEFORE = /\/\s*(原資産\s*)?$/;
 /** 分位の名前（#200 technicals の p10・p90）: 「下位 10%」「上位 10%」「p90」と「10〜90% の幅」の 90% は値でなく名前 */
@@ -268,6 +271,7 @@ export function checkNumbers(text: string, sources: readonly unknown[]): NumberC
       const lineStart = n.lastIndexOf('\n', start - 1) + 1;
       const before = n.slice(lineStart, start);
       if (NUMBERING_BEFORE.test(before)) reason = 'number';
+      else if (SECTION_BEFORE.test(before)) reason = 'number';
       else if (PER_BEFORE.test(before)) reason = 'per_unit';
       else if (QUANTILE_BEFORE.test(before)) reason = 'number';
       else if (QUANTILE_TOP.has(numText) && QUANTILE_RANGE.test(before)) reason = 'number';

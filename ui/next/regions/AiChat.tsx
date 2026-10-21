@@ -3,9 +3,11 @@ import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import type { AiStatus } from '../../../data/aiStream';
 import { pure } from '../../components/pure';
 import { type AiChatController, useAiChat } from '../../components/useAiChat';
+import type { AiAsk } from '../../view/aiAsk';
 import {
   type AiGate,
   aiErrorText,
+  askPlan,
   type ChatItem,
   chatItems,
   diagnoseBlocked,
@@ -45,8 +47,17 @@ export type AiProposeApply = (input: Record<string, unknown>, result: unknown) =
 /** パレット（NextApp）が読む口（AiPanel が描くたびに入れる） */
 export interface AiPanelApi {
   diagnose: () => void;
+  /** [AI に聞く]（#136）: 送れるなら送る、送れない理由があれば入力欄に入れる（askPlan） */
+  ask: (a: AiAsk) => void;
   /** パレットの [このポジションを診断] が押せない理由（状態をまだ読んでいなければ押せる扱い = 開いてから読む） */
   paletteReason: string | null;
+}
+
+/** 入力欄に入れた [AI に聞く] の質問（#136。n が変わったら入れる。入れた文のまま送れば ask + topic） */
+export interface AiDraft {
+  text: string;
+  topic: string;
+  n: number;
 }
 
 /** 状態をまだ読んでいないときのパレットの判定（押せる扱い。中継の 503 / 429 は返答の行に出る） */
@@ -82,9 +93,16 @@ function AiPanelView(p: {
 }) {
   const chat = useAiChat(p.visible, p.base, p.env, p.tech);
   const gate = { hasChain: p.hasChain, legCount: p.legCount };
+  const [draft, setDraft] = useState<AiDraft | null>(null);
+  const known = { ...gate, status: chat.status ?? UNKNOWN_STATUS };
   p.apiRef.current = {
     diagnose: chat.diagnose,
-    paletteReason: diagnoseBlocked(chat.state, { ...gate, status: chat.status ?? UNKNOWN_STATUS }),
+    ask: (a) => {
+      const plan = askPlan(chat.state, known);
+      if (plan === 'send') chat.ask(a.text, a.topic);
+      else setDraft((d) => ({ text: a.text, topic: a.topic, n: (d?.n ?? 0) + 1 }));
+    },
+    paletteReason: diagnoseBlocked(chat.state, known),
   };
   return (
     <AiChat
@@ -95,6 +113,7 @@ function AiPanelView(p: {
       onDisclaimerSeen={p.onDisclaimerSeen}
       onApplyScenario={p.onApplyScenario}
       onApplyProposal={p.onApplyProposal}
+      draft={draft}
     />
   );
 }
@@ -115,6 +134,8 @@ export function AiChat(p: {
   onDisclaimerSeen: () => void;
   onApplyScenario: (s: AiApply) => void;
   onApplyProposal: AiProposeApply;
+  /** [AI に聞く] で送れなかった質問（#136。入力欄に入れる。フォーカスは動かさない = スマホでキーボードを出さない） */
+  draft?: AiDraft | null;
 }) {
   const { chat } = p;
   const { state, status } = chat;
@@ -124,9 +145,22 @@ export function AiChat(p: {
   const items = useMemo(() => chatItems(state), [state]);
   const sources = useMemo(() => numberSources(state), [state.context, state.messages]);
   const [text, setText] = useState('');
+  // 入力欄に入れた [AI に聞く] の質問（#136）。入れた文のまま送れば ask + topic、書き換えたら chat
+  const draftRef = useRef<AiDraft | null>(null);
+  const draft = p.draft ?? null;
+  useEffect(() => {
+    if (!draft) return;
+    draftRef.current = draft;
+    setText(draft.text);
+  }, [draft]);
   const logRef = useRef<HTMLDivElement>(null);
   // 新しい項目・流れの文で末尾へ（利用者が上へ戻して読んでいるときは動かさない）
   const stick = useRef(true);
+  // 新しい発言（パレットの診断・[AI に聞く] を含む）を始めたら末尾へ
+  const startedAt = state.turn?.startedAt;
+  useEffect(() => {
+    if (startedAt !== undefined) stick.current = true;
+  }, [startedAt]);
   useEffect(() => {
     const el = logRef.current;
     if (el && stick.current) el.scrollTop = el.scrollHeight;
@@ -138,7 +172,10 @@ export function AiChat(p: {
   const turn = state.turn;
   const submit = () => {
     if (sendReason !== null || text.trim() === '') return;
-    chat.send(text);
+    const d = draftRef.current;
+    if (d && text === d.text) chat.ask(text, d.topic);
+    else chat.send(text);
+    draftRef.current = null;
     setText('');
     stick.current = true;
   };

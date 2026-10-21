@@ -1,4 +1,6 @@
+import { askReadout, READOUT_TOPIC } from '../../view/aiAsk';
 import type { BigReadoutItem } from '../../view/stage';
+import { AskAi } from '../parts/AskAi';
 import { FullText } from '../parts/FullText';
 import { Popover } from '../parts/Popover';
 
@@ -30,12 +32,23 @@ function Body({ it, inline }: { it: BigReadoutItem; inline: boolean }) {
   );
 }
 
+/** 全文の末尾の [AI に聞く]（#136。場所の無い項目は出さない） */
+function ReadoutAsk({ it }: { it: BigReadoutItem }) {
+  const topic = READOUT_TOPIC[it.key];
+  if (!topic) return null;
+  return (
+    <div class="pop-ask">
+      <AskAi topic={topic} label={it.label} make={() => askReadout(it)} />
+    </div>
+  );
+}
+
 /**
  * 読み取り（大きな数字。docs/ui-redesign.md §2・§5・§5.2。#82）。項目と文字列は ui/view/stage.ts の bigReadout。
  * 出す個数は舞台の幅のコンテナクエリ（< 480px は base の 3 つ、480〜599px は + x1、≥ 600px は + x2）。
  * 値は折り返さず切らない、見出し・副題は省略記号。ドラッグ中に読み上げが続くので aria-live は付けない。
  * 全文（full）のある項目はタップ / Enter / Space で全文のポップオーバー（上に開く。#107）。
- * mini（スマホでシートを全開にした舞台）は押せない（§4.1「ミニは操作を受けない」）。
+ * mini（スマホでシートを全開にした舞台）は押せない（§4.1「ミニは操作を受けない」）。全文の末尾に [AI に聞く]（#136）。
  */
 export function BigReadout({
   items,
@@ -59,6 +72,7 @@ export function BigReadout({
                 button={<Body it={it} inline />}
               >
                 <FullText rows={it.full} />
+                <ReadoutAsk it={it} />
               </Popover>
             ) : (
               <Body it={it} inline={false} />

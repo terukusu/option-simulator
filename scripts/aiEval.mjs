@@ -8,10 +8,11 @@
 // 環境変数（このスクリプトは読まない・出さない）。手順は api/README.md「AI の評価」。
 //
 //   npm run ai:eval                          10 通りの診断 + 追加の質問 2 件 + テクニカルの質問 4 件（#200）+ 提案の質問 3 件（#139）
-//                                            + 文書の質問 7 件（#137）
+//                                            + 文書の質問 7 件（#137）+ [AI に聞く] 5 件（#136）
 //   npm run ai:eval -- --tech-only           テクニカルの質問 4 件だけ（#206 で EMA の質問を足した）
 //   npm run ai:eval -- --propose-only        ポジションの提案の質問 3 件だけ（#139）
 //   npm run ai:eval -- --docs-only           文書（マニュアル・設計書）の質問 7 件だけ（#137）
+//   npm run ai:eval -- --ask-only            数字・パネルから [AI に聞く] の 5 件だけ（#136。画面と同じ表示モデルから質問を作る）
 //   npm run ai:eval -- --cases put_sell,calendar --repeat 2 --no-followups
 //
 // 費用の上限: 累計の台帳 fixtures/local/ai_eval/ledger.json（gitignore）で AI_EVAL_LIMIT_USD（既定 6.5）を超える前に
@@ -76,7 +77,8 @@ export const CAVEAT_RE =
 const techOnly = args.includes('--tech-only');
 const proposeOnly = args.includes('--propose-only');
 const docsOnly = args.includes('--docs-only');
-const anyOnly = techOnly || proposeOnly || docsOnly;
+const askOnly = args.includes('--ask-only');
+const anyOnly = techOnly || proposeOnly || docsOnly || askOnly;
 
 // ポジションの提案の質問（#139）: 候補のツール → propose_position が呼ばれる・提案が板の検査を通る（error でない）・
 // カードの表示モデルができる・押した時点の反映の純関数で足が作れる・照合の不一致 0。floor があれば後の最大損失 ≥ floor
@@ -139,6 +141,23 @@ const DOC_QUESTIONS = [
   },
   { kind: 'absent', text: '損益グラフを PNG 画像で保存するボタンはどこ？', expect: null },
 ];
+// [AI に聞く]（#136）: 画面と同じ表示モデル（metricsPanel・bigReadout・ivReadout）から質問の文を作り、kind ask と場所の
+// topic で送る。判定: 節を示す・経緯を書かない・想定の節（ASK_DOCS のどれか）を read_doc で読む（ログがあるとき）・ログの
+// kind と topic・タイル / 読み取り / テール表は照合の不一致 0（IV 推移の値はツールに無いので不一致は数えるが失敗にしない）
+const ASK_QUESTIONS = [
+  { case: 'put_sell', where: 'tile', key: 'maxLoss' },
+  { case: 'iron_condor', where: 'tile', key: 'greeks' },
+  { case: 'strangle_sell', where: 'readout', key: 'delta' },
+  { case: 'put_sell', where: 'tail' },
+  { case: 'put_sell', where: 'iv' },
+];
+/** IV 推移の問の架空の足（%。1 時間足 3 本）と今・シナリオの水準 */
+const ASK_IV_BARS = [
+  { t: 1_760_000_000, o: 19.8, h: 20.6, l: 19.5, c: 20.4 },
+  { t: 1_760_003_600, o: 20.4, h: 21.9, l: 20.2, c: 21.7 },
+  { t: 1_760_007_200, o: 21.7, h: 22.3, l: 21.1, c: 21.4 },
+];
+
 /** 節を示す言い回し（「マニュアル 8.5「…」」「設計書 5.4」「マニュアル 10 章」） */
 export const CITE_RE = /(マニュアル|設計書)\s*(の\s*)?[0-9]+(\.[0-9]+)*/;
 /** 開発の経緯（Issue 番号・決定の記号）。答えに出さない */
@@ -157,6 +176,12 @@ const numMod = await load('ui/view/aiNumbers.ts');
 const stream = await load('data/aiStream.ts');
 const synthFut = await load('scripts/synthFutBars.ts');
 const proposeMod = await load('ui/view/aiPropose.ts');
+const askMod = await load('ui/view/aiAsk.ts');
+const metricsMod = await load('ui/view/metrics.ts');
+const panelMod = await load('ui/view/metricsPanel.ts');
+const readoutMod = await load('ui/view/readout.ts');
+const stageMod = await load('ui/view/stage.ts');
+const ivMod = await load('ui/view/ivHistory.ts');
 
 const latest = JSON.parse(readFileSync(join(root, 'fixtures', 'synthetic', 'latest.json'), 'utf8'));
 const want = opt('--cases');
@@ -205,10 +230,16 @@ console.log(`台帳の累計 $${ledger.total_usd.toFixed(4)} / 上限 $${limitUs
 let lastRemaining = status.remaining_usd;
 
 /** 1 回の発言（ツールの往復を含む）。画面の useAiChat と同じ順（begin → 文脈 → send → 要求 → ツール → 要求…） */
-async function turn(chat, env, kind, text) {
+async function turn(chat, env, kind, text, topic) {
   const run = { requests: 0, firstTextMs: null, totalMs: 0, stop: null, error: null, costUsd: 0 };
   const t0 = performance.now();
-  let s = chatMod.aiChatReduce(chat, { type: 'begin', kind, text, now: Date.now() });
+  let s = chatMod.aiChatReduce(chat, {
+    type: 'begin',
+    kind,
+    text,
+    now: Date.now(),
+    ...(topic !== undefined && { topic }),
+  });
   const context = ctxMod.buildAiContext(env);
   s = chatMod.aiChatReduce(s, { type: 'send', context, key: ctxMod.contextKey(context) });
   for (;;) {
@@ -515,6 +546,90 @@ for (const [qi, q] of (anyOnly && !docsOnly ? [] : DOC_QUESTIONS).entries()) {
   );
 }
 
+// ---- [AI に聞く]（#136）: 新しい会話で 1 問ずつ。質問の文は画面と同じ表示モデルから作る
+for (const [qi, q] of (anyOnly && !askOnly ? [] : ASK_QUESTIONS).entries()) {
+  const c = cases.AI_EVAL_CASES.find((x) => x.name === q.case);
+  const st = cases.caseState(latest, c);
+  const env = ctxMod.aiEnvFromState(st, cases.caseMargin(c));
+  const m = metricsMod.metricsModel({ base: env.base, scenario: env.scenario, unit: 'auto' });
+  const view = panelMod.metricsPanel(m, st.feePerLot);
+  let ask = null;
+  if (q.where === 'tile') {
+    const t = view.tiles.find((x) => x.key === q.key);
+    ask = t ? askMod.askTile(t, view.unitSub) : null;
+  } else if (q.where === 'readout') {
+    const r = readoutMod.readoutModel({ base: env.base, metrics: m, scenario: env.scenario });
+    const items = stageMod.bigReadout(
+      r,
+      m.premium,
+      env.base?.ctx.evalTime ?? null,
+      env.scenario.dSigma,
+    );
+    const it = items.find((x) => x.key === q.key);
+    ask = it ? askMod.askReadout(it) : null;
+  } else if (q.where === 'tail') {
+    ask = askMod.askTail(view);
+  } else {
+    ask = askMod.askIvHistory({
+      tfLabel: '1 時間足',
+      readout: ivMod.ivReadout(ASK_IV_BARS, '1h', null, false),
+      cursor: false,
+      now: ivMod.fmtIvPt(21.52),
+      scenario: ivMod.fmtIvPt(26.52),
+    });
+  }
+  if (!ask) {
+    console.log(`FAIL  [AI に聞く] ${qi + 1}（${q.where}）: 質問を作れない`);
+    rows.push({ case: q.case, kind: 'ask', rep: 0, pass: false, unmatched: [], costUsd: 0 });
+    continue;
+  }
+  const before = relayRecords()?.length ?? null;
+  const r = await turn(chatMod.INITIAL_AI_CHAT, env, 'ask', ask.text, ask.topic);
+  const t = answerOf(r.chat);
+  const recs = before === null ? null : (relayRecords() ?? []).slice(before);
+  const read = recs ? recs.flatMap((x) => (Array.isArray(x.docs) ? x.docs : [])) : null;
+  const readIds = read ? read.map((x) => x.replace(/#[0-9]+$/, '')) : null;
+  const expect = askMod.ASK_DOCS[ask.topic].map((d) => `${d.file}:${d.section}`);
+  const hit = readIds ? expect.some((e) => readIds.includes(e)) : null;
+  const logged = recs ? recs.some((x) => x.kind === 'ask' && x.topic === ask.topic) : null;
+  const ck = numMod.checkNumbers(t, chatMod.numberSources(r.chat));
+  const un = ck.tokens.filter((x) => x.status === 'unmatched').map((x) => x.raw);
+  const cited = CITE_RE.test(t);
+  const history = t.match(HISTORY_RE)?.[0] ?? null;
+  const strict = q.where !== 'iv';
+  const ok =
+    !r.run.error &&
+    cited &&
+    !history &&
+    hit !== false &&
+    logged !== false &&
+    (!strict || ck.unmatched === 0);
+  rows.push({
+    case: q.case,
+    kind: 'ask',
+    rep: 0,
+    pass: ok,
+    topic: ask.topic,
+    docs: read,
+    hit,
+    logged,
+    cited,
+    history,
+    matchedTotal: ck.matched,
+    unmatched: strict ? un : [],
+    unmatched_iv: strict ? [] : un,
+    chars: t.length,
+    ...r.run,
+  });
+  writeFileSync(
+    join(outDir, `ask-${qi + 1}-${ask.topic}.md`),
+    `# [AI に聞く]\n\n${ask.text}\n\n---\n\n${t}\n`,
+  );
+  console.log(
+    `${ok ? 'pass' : 'FAIL'}  [AI に聞く] ${qi + 1}（${ask.topic}）: 読んだ節 ${read === null ? '—（中継のログなし）' : read.join(',') || 'なし'}${hit === null ? '' : `・想定の節 ${hit ? 'あり' : 'なし'}`}${logged === null ? '' : `・ログの kind / topic ${logged ? 'あり' : 'なし'}`}・節の明示 ${cited ? 'あり' : 'なし'}・経緯 ${history ?? 'なし'}・一致 ${ck.matched}・不一致 ${un.length}${un.length ? `［${un.join('、')}］` : ''}${strict ? '' : '（IV の値は数えない）'}・往復 ${r.run.requests}・${r.run.stop ?? r.run.error}・完了 ${(r.run.totalMs / 1000).toFixed(1)} 秒`,
+  );
+}
+
 /** 中継のログ（標準出力の JSON 行）の ai_request。ログが無ければ null */
 function relayRecords() {
   if (!relayLog) return null;
@@ -583,6 +698,7 @@ const fus = rows.filter((r) => r.kind === 'followup');
 const techs = rows.filter((r) => r.kind === 'technicals');
 const proposes = rows.filter((r) => r.kind === 'propose');
 const docRows = rows.filter((r) => r.kind === 'docs');
+const askRows = rows.filter((r) => r.kind === 'ask');
 const summary = {
   model: status.model,
   credential: status.credential,
@@ -592,6 +708,7 @@ const summary = {
   technicals: { pass: techs.filter((r) => r.pass).length, total: techs.length },
   propose: { pass: proposes.filter((r) => r.pass).length, total: proposes.length },
   docs: { pass: docRows.filter((r) => r.pass).length, total: docRows.length },
+  ask: { pass: askRows.filter((r) => r.pass).length, total: askRows.length },
   // 文書の質問の不一致（文書の値）は数えない（照合の対象外。#137）
   unmatched_total: rows
     .filter((r) => r.kind !== 'docs')
@@ -608,5 +725,6 @@ const ok =
   summary.followup.pass === summary.followup.total &&
   summary.technicals.pass === summary.technicals.total &&
   summary.propose.pass === summary.propose.total &&
-  summary.docs.pass === summary.docs.total;
+  summary.docs.pass === summary.docs.total &&
+  summary.ask.pass === summary.ask.total;
 process.exit(ok ? 0 : 1);

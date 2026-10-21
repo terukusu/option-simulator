@@ -164,6 +164,24 @@ describe('#135 評価で見つけた書き方', () => {
   });
 });
 
+describe('#136 文書の節の番号', () => {
+  it('「マニュアル 8.1」「設計書 5.6」「マニュアルの 10 章」の番号は数えない（値は今どおり照合）', () => {
+    const r = checkNumbers(
+      '根拠はマニュアル 8.1「タイル」と設計書 5.6.1「単位」、マニュアルの 10 章。値は 1,235 千円',
+      [{ pnl_yen: -1_234_567 }],
+    );
+    const st = r.tokens.map((t) => [t.raw, t.status, t.reason ?? null]);
+    expect(st).toEqual([
+      ['8.1', 'ignored', 'number'],
+      ['5.6', 'ignored', 'number'],
+      ['10', 'ignored', 'number'],
+      ['1,235 千円', 'matched', null],
+    ]);
+    // 文書の名前の無い数は今どおり照合する
+    expect(checkNumbers('8.1 の値', []).unmatched).toBe(1);
+  });
+});
+
 describe('sectionsOf', () => {
   it('## 弱点 の節ごとに照合が一致した数の数', () => {
     const text = [

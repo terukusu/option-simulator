@@ -16,8 +16,8 @@
 
 export const AI_SCHEMA_VERSION = 1;
 
-/** 定型の種類（diagnose = [このポジションを診断]。#135） */
-export type AiKind = 'chat' | 'diagnose';
+/** 定型の種類（diagnose = [このポジションを診断]。#135。ask = 数字・パネルから [AI に聞く]。#136） */
+export type AiKind = 'chat' | 'diagnose' | 'ask';
 
 export type AiUserBlock =
   | { type: 'text'; text: string }
@@ -93,6 +93,11 @@ export interface AiRequest {
   kind: AiKind;
   context: AiContext;
   messages: AiMessage[];
+  /**
+   * [AI に聞く] の場所（#136。kind が ask のときだけ。ui/view/aiAsk.ts の AI_ASK_TOPICS）。中継はログ ai_request に
+   * 出すだけで Anthropic には送らない
+   */
+  topic?: string;
 }
 
 /** 中継のイベント（知らないイベント・壊れた data は `unknown`） */

@@ -51,6 +51,8 @@ export const PHASE_LABEL: Record<AiPhase, string> = {
 export interface AiTurn {
   kind: AiKind;
   userText: string;
+  /** [AI に聞く] の場所（#136。kind が ask のときだけ。要求の topic） */
+  topic?: string;
   phase: AiPhase;
   /** 押した時刻（ms。呼び出し側の時計） */
   startedAt: number;
@@ -68,6 +70,8 @@ export interface AiTurn {
 export interface AiFailed {
   kind: AiKind;
   userText: string;
+  /** [もう一度] で同じ場所として送り直す（#136） */
+  topic?: string;
   partial: string;
   code: string;
   remainingUsd: number | null;
@@ -98,7 +102,7 @@ export const INITIAL_AI_CHAT: AiChatState = {
 };
 
 export type AiChatAction =
-  | { type: 'begin'; kind: AiKind; text: string; now: number }
+  | { type: 'begin'; kind: AiKind; text: string; now: number; topic?: string }
   | { type: 'send'; context: AiContext; key: string }
   | { type: 'event'; event: AiEvent }
   | { type: 'toolResults'; blocks: AiUserBlock[] }
@@ -117,7 +121,14 @@ function fail(s: AiChatState, code: string, remainingUsd: number | null = null):
     lastKey: t.prev.lastKey,
     messages: s.messages.slice(0, t.prev.length),
     turn: null,
-    failed: { kind: t.kind, userText: t.userText, partial: t.text, code, remainingUsd },
+    failed: {
+      kind: t.kind,
+      userText: t.userText,
+      ...(t.topic !== undefined && { topic: t.topic }),
+      partial: t.text,
+      code,
+      remainingUsd,
+    },
     stop: null,
   };
 }
@@ -187,6 +198,8 @@ export function aiChatReduce(s: AiChatState, a: AiChatAction): AiChatState {
         turn: {
           kind: a.kind,
           userText: a.text,
+          // topic は ask のときだけ（chat・diagnose に付けると中継が 400）
+          ...(a.kind === 'ask' && a.topic !== undefined && { topic: a.topic }),
           phase: 'computing',
           startedAt: a.now,
           thinking: '',
@@ -243,10 +256,17 @@ export function aiChatReduce(s: AiChatState, a: AiChatAction): AiChatState {
   }
 }
 
-/** 今の turn の要求の本文（turn が無い・文脈が無ければ null） */
+/** 今の turn の要求の本文（turn が無い・文脈が無ければ null）。ask は場所の topic を付ける（#136） */
 export function requestOf(s: AiChatState): AiRequest | null {
   if (!s.turn || s.context === null) return null;
-  return { schema_version: 1, kind: s.turn.kind, context: s.context, messages: s.messages };
+  const body: AiRequest = {
+    schema_version: 1,
+    kind: s.turn.kind,
+    context: s.context,
+    messages: s.messages,
+  };
+  if (s.turn.kind === 'ask' && s.turn.topic !== undefined) body.topic = s.turn.topic;
+  return body;
 }
 
 /** 最後の assistant の tool_use の block */
@@ -351,6 +371,16 @@ function commonBlocked(s: AiChatState, g: AiGate): string | null {
   if (s.turn) return '送信中です';
   if (atLimit(s)) return '会話が長くなりました。[新しい会話] で始めてください';
   return null;
+}
+
+/**
+ * [AI に聞く]（#136）を押したときの扱い: 送れるなら send、送れない理由（sendBlocked）があれば送らずに入力欄に入れる
+ * （draft。理由は足元の既存の行に出る）。状態をまだ読んでいなければ押せる扱い（呼び出し側が UNKNOWN_STATUS を渡す。
+ * 中継の 503 / 429 は返答の行に出る = パレットの診断と同じ）
+ */
+export function askPlan(s: AiChatState, g: AiGate): 'send' | { draft: string } {
+  const reason = sendBlocked(s, g);
+  return reason === null ? 'send' : { draft: reason };
 }
 
 /** 今日の残りの表示（数えない資格情報は「数えない」） */

@@ -19,6 +19,11 @@ export function openOverlayId(): string | null {
   return openId;
 }
 
+/** 開いているメニュー / ポップオーバーを閉じる（#136。吹き出しの中の [AI に聞く] を押した後） */
+export function closeOverlay(): void {
+  setOpenId(null);
+}
+
 export function useOverlay(id: string): { open: boolean; setOpen: (open: boolean) => void } {
   const [open, setLocal] = useState(openId === id);
   useEffect(() => {
