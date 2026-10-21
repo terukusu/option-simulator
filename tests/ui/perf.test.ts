@@ -1975,4 +1975,27 @@ describe('性能（#135 AI の事前計算と返答の描き直し）', () => {
       { warmup: 5, runs: 30 },
     );
   });
+
+  it(`表と用語を含む返答（約 1,200 字）の answerModel が ${BUDGET_MS} ms 以内（30 回の最小値。#232・#234）`, () => {
+    const ctx = buildAiContext(e);
+    const para = 'IV が上がると Δσ と β の分だけ損が膨らみ、必要証拠金も増えて追証の線に近づく。';
+    const table = [
+      '| 足 | 今の建値 | 今の板で建てた場合の建値 |',
+      '|---|---|---|',
+      ...Array.from(
+        { length: 4 },
+        () => '| P 62,000 の売り（IV の高い足） | 125 円 | −1,234 千円 |',
+      ),
+    ].join('\n');
+    const text = Array.from(
+      { length: 4 },
+      (_, i) => `## 弱点 ${i + 1}: 見出し\n${para}\n${table}\n${para}`,
+    ).join('\n');
+    expect(text.length).toBeGreaterThan(1000);
+    expectWithinBudget(
+      '#232・#234 表と用語を含む返答の answerModel',
+      () => answerModel(text, [ctx], true).length,
+      { warmup: 5, runs: 30 },
+    );
+  });
 });
