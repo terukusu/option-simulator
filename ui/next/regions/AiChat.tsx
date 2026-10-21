@@ -3,6 +3,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/ho
 import type { AiStatus } from '../../../data/aiStream';
 import { pure } from '../../components/pure';
 import { type AiChatController, useAiChat } from '../../components/useAiChat';
+import { downloadText } from '../../download';
 import type { AiAsk } from '../../view/aiAsk';
 import {
   type AiGate,
@@ -21,6 +22,17 @@ import {
   remainingText,
   sendBlocked,
 } from '../../view/aiChat';
+import {
+  AI_EVAL_KEEP_LABEL,
+  AI_EVAL_NOTE_PROMPT,
+  type AiEvalSource,
+  aiEvalCase,
+  aiEvalFileName,
+  answerAt,
+  keepFailText,
+  keepKeys,
+  usedTools,
+} from '../../view/aiEvalCase';
 import type { IvStatsData } from '../../view/aiIvStats';
 import { AI_PRESETS, presetBlocked } from '../../view/aiPresets';
 import { proposalCard } from '../../view/aiPropose';
@@ -93,6 +105,8 @@ function AiPanelView(p: {
   visible: boolean;
   base: string;
   env: () => AiToolEnv | null;
+  /** 評価に残す（#159）の文脈の作り直しの材料（板が無ければ null） */
+  evalSource?: () => AiEvalSource | null;
   /** technicals のツールの先物の足の読み込み（#200。NextApp が口を決める） */
   tech?: () => Promise<TechnicalsData>;
   /** iv_stats のツールの日次の値と今の IV の読み込み（#138・#158。NextApp が口を決める） */
@@ -106,7 +120,7 @@ function AiPanelView(p: {
   onApplyProposal: AiProposeApply;
   apiRef: { current: AiPanelApi | null };
 }) {
-  const chat = useAiChat(p.visible, p.base, p.env, p.tech, p.ivStats);
+  const chat = useAiChat(p.visible, p.base, p.env, p.tech, p.ivStats, p.evalSource);
   const gate = { hasChain: p.hasChain, legCount: p.legCount };
   const [draft, setDraft] = useState<AiDraft | null>(null);
   const known = { ...gate, status: chat.status ?? UNKNOWN_STATUS };
@@ -123,6 +137,51 @@ function AiPanelView(p: {
     pending.current = null;
     decide(a, askPlan(chat.state, { ...gate, status: chat.status }));
   }, [chat.status]);
+  // 評価に残す（#159）: 押した返答までの会話を JSON ファイルに保存する（ダウンロードだけ。サーバーに送らない）。
+  // 会話で technicals / iv_stats を呼んでいたら、その材料（読み込みの 10 分の覚え）も入れる
+  // 材料は、その発言を送ったときの控え（useAiChat）。控えが無ければ（再読み込みで戻した会話）押した時点の画面。
+  // 先物の足・IV の日次の値は、控えに無く会話で呼んでいたら読み直す。残せないときは理由を足元に短く出す
+  const [keepNote, setKeepNote] = useState<string | null>(null);
+  const keep = async (key: string) => {
+    try {
+      const st = chat.state;
+      const at = answerAt(key);
+      const src = (at ? chat.evalSourceAt(at.i) : null) ?? p.evalSource?.() ?? null;
+      if (!src) {
+        setKeepNote(keepFailText('板がありません'));
+        return;
+      }
+      const log = chat.turnLog();
+      const note = window.prompt(AI_EVAL_NOTE_PROMPT, '');
+      if (note === null) return;
+      const used = usedTools(st.messages.slice(0, (at?.i ?? -1) + 1));
+      const [technicals, ivStats] = await Promise.all([
+        used.has('technicals') && !src.technicals && p.tech ? p.tech().catch(() => null) : null,
+        used.has('iv_stats') && !src.iv_stats && p.ivStats ? p.ivStats().catch(() => null) : null,
+      ]);
+      const now = Date.now();
+      const doc = aiEvalCase({
+        chat: st,
+        answerKey: key,
+        source: {
+          ...src,
+          ...(technicals && { technicals }),
+          ...(ivStats && { iv_stats: ivStats }),
+        },
+        note: note.trim(),
+        now,
+        log,
+      });
+      if (!doc) {
+        setKeepNote(keepFailText('この返答は残せません'));
+        return;
+      }
+      downloadText(`${JSON.stringify(doc, null, 1)}\n`, aiEvalFileName(now));
+      setKeepNote(null);
+    } catch {
+      setKeepNote(keepFailText('ファイルを作れませんでした'));
+    }
+  };
   p.apiRef.current = {
     diagnose: chat.diagnose,
     ask: (a) => decide(a, askPlan(chat.state, { ...gate, status: chat.status })),
@@ -138,6 +197,8 @@ function AiPanelView(p: {
       onApplyScenario={p.onApplyScenario}
       onApplyProposal={p.onApplyProposal}
       draft={draft}
+      {...(p.evalSource && { onKeep: (key: string) => void keep(key) })}
+      keepNote={keepNote}
     />
   );
 }
@@ -160,6 +221,10 @@ export function AiChat(p: {
   onApplyProposal: AiProposeApply;
   /** [AI に聞く] で送れなかった質問（#136。入力欄に入れる。フォーカスは動かさない = スマホでキーボードを出さない） */
   draft?: AiDraft | null;
+  /** 返答の行の [評価に残す]（#159。返答の行の key） */
+  onKeep?: (key: string) => void;
+  /** 評価に残せなかった理由（#159） */
+  keepNote?: string | null;
 }) {
   const { chat } = p;
   const { state, status } = chat;
@@ -169,6 +234,7 @@ export function AiChat(p: {
   const reason = footReason(state, gate);
   const items = useMemo(() => chatItems(state), [state]);
   const sources = useMemo(() => numberSources(state), [state.context, state.messages]);
+  const keepable = useMemo(() => keepKeys(state), [state.messages, state.turn === null]);
   const [text, setText] = useState('');
   const textRef = useRef(text);
   textRef.current = text;
@@ -260,6 +326,7 @@ export function AiChat(p: {
               onPropose={p.onApplyProposal}
               onRetry={chat.retry}
               canRetry={sendReason === null}
+              {...(p.onKeep && keepable.has(it.key) && { onKeep: p.onKeep })}
             />
           ))}
         </div>
@@ -275,6 +342,11 @@ export function AiChat(p: {
         {reason !== null && (
           <p class="ai-reason" data-ai="reason">
             {reason}
+          </p>
+        )}
+        {p.keepNote && (
+          <p class="ai-reason" data-ai="keep-note">
+            {p.keepNote}
           </p>
         )}
         {kept && (
@@ -382,6 +454,7 @@ function ChatRow(p: {
   onPropose: AiProposeApply;
   onRetry: () => void;
   canRetry: boolean;
+  onKeep?: (key: string) => void;
 }) {
   const it = p.item;
   switch (it.kind) {
@@ -403,6 +476,11 @@ function ChatRow(p: {
       return (
         <div class="ai-msg answer" data-ai-live={it.live ? 'true' : undefined}>
           {it.text !== '' && <AnswerText text={it.text} sources={p.sources} live={it.live} />}
+          {p.onKeep && (
+            <button type="button" class="ai-keep" data-ai="keep" onClick={() => p.onKeep?.(it.key)}>
+              {AI_EVAL_KEEP_LABEL}
+            </button>
+          )}
           {it.failed !== null && (
             <p class="ai-error" data-ai="error" data-code={it.failed}>
               {aiErrorText(it.failed, it.remainingUsd ?? null)}

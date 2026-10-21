@@ -17,6 +17,8 @@
 //   npm run ai:eval -- --ask-only            数字・パネルから [AI に聞く] の 5 件だけ（#136。画面と同じ表示モデルから質問を作る）
 //   npm run ai:eval -- --profile-only        自分の前提（設定の欄）つきの質問 2 件だけ（#156）
 //   npm run ai:eval -- --preset-only         定型の質問のチップ 7 件だけ（#140。6 つ + 足 0 本の板の前提。画面と同じ文 = ui/view/aiPresets.ts を kind preset で）
+//   npm run ai:eval -- --saved               画面の [評価に残す] で保存した会話（fixtures/local/ai_eval/cases/*.json。#159）だけ。
+//                                            ファイルの材料で同じ文脈を作り直し、発言の列を順に送り直す。不一致 0・エラー 0 で合格
 //   npm run ai:eval -- --cases put_sell,calendar --repeat 2 --no-followups
 //
 // 費用の上限: 累計の台帳 fixtures/local/ai_eval/ledger.json（gitignore）で AI_EVAL_LIMIT_USD（既定 6.5）を超える前に
@@ -27,7 +29,7 @@
 // も集める（ログに会話の本文・鍵は出ない = relay.py）。
 // 返答の全文は fixtures/local/ai_eval/<時刻>/ にだけ書く（コミットしない）。標準出力は要約（架空の値）。
 
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { runnerImport } from 'vite';
@@ -105,8 +107,16 @@ const docsOnly = args.includes('--docs-only');
 const askOnly = args.includes('--ask-only');
 const presetOnly = args.includes('--preset-only');
 const profileOnly = args.includes('--profile-only');
+const savedOnly = args.includes('--saved');
 const anyOnly =
-  techOnly || proposeOnly || docsOnly || askOnly || ivOnly || presetOnly || profileOnly;
+  techOnly ||
+  proposeOnly ||
+  docsOnly ||
+  askOnly ||
+  ivOnly ||
+  presetOnly ||
+  profileOnly ||
+  savedOnly;
 
 // 自分の前提つきの質問（#156）: 文脈の profile に架空の前提を入れて送る。判定: 前提の方針が答えに出る（mentions）・
 // 照合の不一致 0（前提の数は照合の出所 = 画面と同じ numberSources）・前提の数をツールの入力にしない（misuse = ツールの
@@ -261,6 +271,7 @@ const panelMod = await load('ui/view/metricsPanel.ts');
 const readoutMod = await load('ui/view/readout.ts');
 const stageMod = await load('ui/view/stage.ts');
 const ivMod = await load('ui/view/ivHistory.ts');
+const evalCaseMod = await load('ui/view/aiEvalCase.ts');
 
 const latest = JSON.parse(readFileSync(join(root, 'fixtures', 'synthetic', 'latest.json'), 'utf8'));
 const want = opt('--cases');
@@ -874,6 +885,109 @@ function relayRecords() {
   }
 }
 
+// ---- 保存した会話（#159）: 画面の [評価に残す] のファイル（実データを含むので fixtures/local/ だけ）。期待の答えは持たない。
+// ファイルの材料で文脈を作り直し（画面と同じ関数）、発言の列を新しい会話で順に送り直す。判定: エラーなし・最後の返答の
+// 照合の不一致 0。文脈の指紋が保存の文脈と違えば「文脈 違う」と出す（画面・計算のコードが変わった。送りはする）
+const casesDir = join(root, 'fixtures', 'local', 'ai_eval', 'cases');
+const savedFiles = (() => {
+  if (!savedOnly) return [];
+  try {
+    return readdirSync(casesDir)
+      .filter((f) => f.endsWith('.json'))
+      .sort();
+  } catch {
+    return [];
+  }
+})();
+if (savedOnly && savedFiles.length === 0) {
+  console.error(
+    '保存した会話が無い（fixtures/local/ai_eval/cases/*.json。手順は api/README.md「AI の評価」）',
+  );
+  process.exit(2);
+}
+for (const f of savedFiles) {
+  const name = f.replace(/\.json$/, '');
+  let doc = null;
+  let env = null;
+  try {
+    doc = evalCaseMod.readAiEvalCase(JSON.parse(readFileSync(join(casesDir, f), 'utf8')));
+    if (doc) env = evalCaseMod.aiEnvFromCase(doc.source);
+  } catch (e) {
+    console.error(`  ${f}: ${e?.message}`);
+  }
+  if (!doc || !env) {
+    rows.push({
+      case: name,
+      kind: 'saved',
+      rep: 0,
+      pass: false,
+      error: 'invalid',
+      unmatched: [],
+      costUsd: 0,
+    });
+    console.log(`FAIL  保存 ${name}: 読めない（形・版・板・ポジション）`);
+    continue;
+  }
+  const sameContext =
+    doc.context === null
+      ? null
+      : ctxMod.contextKey(ctxMod.buildAiContext(env)) === ctxMod.contextKey(doc.context);
+  let chat = chatMod.INITIAL_AI_CHAT;
+  const runs = [];
+  // ツールの実行などの例外は件の失敗（error exception）にして次の件へ（1 件で全体を止めない）
+  let thrown = null;
+  for (const t of doc.turns) {
+    try {
+      const r = await turn(chat, env, t.kind, t.text, t.topic);
+      chat = r.chat;
+      runs.push(r.run);
+      if (r.run.error) break;
+    } catch (e) {
+      thrown = 'exception';
+      console.error(`  ${f}: ${e?.message}`);
+      break;
+    }
+  }
+  const t = answerOf(chat);
+  const ck = numMod.checkNumbers(t, chatMod.numberSources(chat));
+  const un = ck.tokens.filter((x) => x.status === 'unmatched').map((x) => x.raw);
+  const tools = chat.messages
+    .flatMap((m) => (m.role === 'assistant' ? m.content : []))
+    .filter((b) => b.type === 'tool_use')
+    .map((b) => b.name);
+  const error = thrown ?? runs.find((r) => r.error)?.error ?? null;
+  const note = evalCaseMod.noteLine(doc.note);
+  const requests = runs.reduce((n, r) => n + r.requests, 0);
+  const totalMs = runs.reduce((n, r) => n + r.totalMs, 0);
+  const ok = !error && runs.length === doc.turns.length && ck.unmatched === 0;
+  rows.push({
+    case: name,
+    kind: 'saved',
+    rep: 0,
+    pass: ok,
+    note,
+    turns: doc.turns.length,
+    same_context: sameContext,
+    tools,
+    matchedTotal: ck.matched,
+    unmatched: un,
+    saved_unmatched: doc.answer.unmatched,
+    chars: t.length,
+    requests,
+    totalMs,
+    stop: runs.at(-1)?.stop ?? null,
+    error,
+    costUsd: runs.reduce((n, r) => n + r.costUsd, 0),
+  });
+  writeFileSync(
+    join(outDir, `saved-${name}.md`),
+    `# 保存した会話: ${name}\n\nメモ: ${note || '—'}\n\n## 保存したときの返答（不一致 ${doc.answer.unmatched.length}）\n\n${doc.answer.text}\n\n## 今の返答\n\n${t}\n`,
+  );
+  console.log(
+    `${ok ? 'pass' : 'FAIL'}  保存 ${name}: 発言 ${doc.turns.length}・文脈 ${sameContext === null ? '—' : sameContext ? '同じ' : '違う'}・ツール ${tools.join(',') || 'なし'}・一致 ${ck.matched}・不一致 ${un.length}${un.length ? `［${un.join('、')}］` : ''}（保存のとき ${doc.answer.unmatched.length}）・往復 ${requests}・${error ?? runs.at(-1)?.stop ?? '—'}・完了 ${(totalMs / 1000).toFixed(1)} 秒${note ? `・メモ「${note}」` : ''}`,
+  );
+}
+
 // ---- 中継のログ（任意）: ai_request の概算費用・トークン・落とした block
 let relay = null;
 if (relayLog) {
@@ -927,6 +1041,7 @@ const docRows = rows.filter((r) => r.kind === 'docs');
 const askRows = rows.filter((r) => r.kind === 'ask');
 const presetRows = rows.filter((r) => r.kind === 'preset');
 const profileRows = rows.filter((r) => r.kind === 'profile');
+const savedRows = rows.filter((r) => r.kind === 'saved');
 const summary = {
   model: status.model,
   credential: status.credential,
@@ -940,6 +1055,7 @@ const summary = {
   ask: { pass: askRows.filter((r) => r.pass).length, total: askRows.length },
   preset: { pass: presetRows.filter((r) => r.pass).length, total: presetRows.length },
   profile: { pass: profileRows.filter((r) => r.pass).length, total: profileRows.length },
+  saved: { pass: savedRows.filter((r) => r.pass).length, total: savedRows.length },
   // 文書の質問の不一致（文書の値）は数えない（照合の対象外。#137）
   unmatched_total: rows
     .filter((r) => r.kind !== 'docs')
@@ -960,5 +1076,6 @@ const ok =
   summary.docs.pass === summary.docs.total &&
   summary.ask.pass === summary.ask.total &&
   summary.preset.pass === summary.preset.total &&
-  summary.profile.pass === summary.profile.total;
+  summary.profile.pass === summary.profile.total &&
+  summary.saved.pass === summary.saved.total;
 process.exit(ok ? 0 : 1);

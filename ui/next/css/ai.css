@@ -277,6 +277,25 @@ section.ai .ai-body {
   overflow-wrap: anywhere;
 }
 
+/* 返答の行の末尾の [評価に残す]（#159。目立たせない小さな文字ボタン。右寄せ・当たりは高さ 24px） */
+.ai-keep {
+  display: block;
+  min-height: 24px;
+  margin: 2px 0 0 auto;
+  padding: 0 var(--sp-1);
+  border: 0;
+  background: none;
+  color: var(--ink-3);
+  font: inherit;
+  font-size: var(--fs-xs);
+  cursor: pointer;
+}
+
+.ai-keep:hover {
+  color: var(--ink-2);
+  text-decoration: underline;
+}
+
 /* ===== 足元 ===== */
 .ai-foot {
   display: flex;

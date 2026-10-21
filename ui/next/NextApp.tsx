@@ -20,6 +20,7 @@ import type { PrefsRead } from '../prefs';
 import { shareSupported } from '../share';
 import { legAtStrike, MAX_TABS, restoreTabAction } from '../state';
 import { aiEnvFromState } from '../view/aiContext';
+import { aiEvalSource } from '../view/aiEvalCase';
 import {
   NEW_TAB_UNDO_TEXT,
   newTabFullText,
@@ -264,6 +265,11 @@ export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
   profileRef.current = userPrefs.prefs.aiProfile;
   const aiEnv = useCallback(
     () => aiEnvFromState(stateRef.current, marginRef.current, profileRef.current),
+    [],
+  );
+  // 評価に残す（#159）: 押した時点の state・証拠金の設定・前提から文脈の作り直しの材料を作る（ダウンロードだけ）
+  const aiEvalSrc = useCallback(
+    () => aiEvalSource(stateRef.current, marginRef.current, profileRef.current, Date.now()),
     [],
   );
   // technicals のツール（#200）: 先物推移と同じ口から日足・1 時間足を読む（呼ばれたときだけ・10 分覚える）
@@ -802,6 +808,7 @@ export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
             visible={aiVisible(shell, tier)}
             base={aiBase}
             env={aiEnv}
+            evalSource={aiEvalSrc}
             tech={aiTech}
             ivStats={aiIvStats}
             hasChain={chain !== null}

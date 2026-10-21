@@ -36,6 +36,14 @@ import {
   toolResultBlocks,
 } from '../view/aiChat';
 import { buildAiContext, contextKey } from '../view/aiContext';
+import {
+  type AiEvalSource,
+  type AiSourceLog,
+  type AiTurnLog,
+  recordSource,
+  sourceAt,
+  withToolData,
+} from '../view/aiEvalCase';
 import type { IvStatsData } from '../view/aiIvStats';
 import type { AiPreset } from '../view/aiPresets';
 import type { TechnicalsData } from '../view/aiTechnicals';
@@ -64,6 +72,13 @@ export interface AiChatController {
   retry: () => void;
   abort: () => void;
   reset: () => void;
+  /** 送った発言の文 → kind・topic の控え（#159 の評価に残す。messages は kind を持たない。[新しい会話] で消す） */
+  turnLog: () => AiTurnLog;
+  /**
+   * 押した返答の message の位置 → その発言を送ったときの材料（#159。送るたびに控える = 会話の後に画面を変えても同じ
+   * 文脈で作り直せる。控えはメモリだけ。再読み込みで戻した会話は null）
+   */
+  evalSourceAt: (i: number) => AiEvalSource | null;
 }
 
 const isAbort = (e: unknown) => e instanceof Error && e.name === 'AbortError';
@@ -78,6 +93,7 @@ export function useAiChat(
   env: () => AiToolEnv | null,
   tech?: () => Promise<TechnicalsData>,
   ivStats?: () => Promise<IvStatsData>,
+  evalSource?: () => AiEvalSource | null,
 ): AiChatController {
   const storage = useRef<Storage | null | undefined>(undefined);
   if (storage.current === undefined) storage.current = sessionStore();
@@ -101,6 +117,10 @@ export function useAiChat(
   const frame = useRef<number | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const savedMessages = useRef(stateRef.current.messages);
+  const logRef = useRef(new Map<string, { kind: AiKind; topic?: string }>());
+  const sourceLogRef = useRef<AiSourceLog>([]);
+  const evalSourceRef = useRef(evalSource);
+  evalSourceRef.current = evalSource;
 
   const persist = useCallback((s: AiChatState) => {
     if (s.messages === savedMessages.current) return;
@@ -203,6 +223,7 @@ export function useAiChat(
       // 読んでいる間に状態が変わった（新しい会話・別の turn）ならツールを返さない
       const s = stateRef.current as AiChatState;
       if (s !== s0) break;
+      sourceLogRef.current = withToolData(sourceLogRef.current, technicals, ivStatsData);
       const e = envRef.current();
       const blocks = toolResultBlocks(s, (name, input) =>
         e ? runTool(name, input, { ...e, technicals, ivStats: ivStatsData }) : { error: 'no_legs' },
@@ -224,6 +245,7 @@ export function useAiChat(
         ...(topic !== undefined && { topic }),
       });
       if (!(stateRef.current as AiChatState).turn) return;
+      logRef.current.set(text, { kind, ...(topic !== undefined && { topic }) });
       // 「計算中」を描いてから計算する（同じタスクで計算すると表示が計算の後になる）
       setTimeout(() => {
         const e = envRef.current();
@@ -233,6 +255,12 @@ export function useAiChat(
         }
         const context = buildAiContext(e);
         apply({ type: 'send', context, key: contextKey(context) });
+        // 送ったときの材料を控える（#159。板は同じ参照・ポジションの文書は小さい）
+        const src = evalSourceRef.current?.();
+        if (src) {
+          const at = (stateRef.current as AiChatState).messages.length - 1;
+          sourceLogRef.current = recordSource(sourceLogRef.current, at, src);
+        }
         void request();
       }, 0);
     },
@@ -262,8 +290,12 @@ export function useAiChat(
   const abort = useCallback(() => abortRef.current?.abort(), []);
   const reset = useCallback(() => {
     abortRef.current?.abort();
+    logRef.current = new Map();
+    sourceLogRef.current = [];
     apply({ type: 'reset' });
   }, [apply]);
+  const turnLog = useCallback((): AiTurnLog => logRef.current, []);
+  const evalSourceAt = useCallback((i: number) => sourceAt(sourceLogRef.current, i), []);
 
   useEffect(
     () => () => {
@@ -273,5 +305,17 @@ export function useAiChat(
     [],
   );
 
-  return { state, status, diagnose, send, ask, preset, retry, abort, reset };
+  return {
+    state,
+    status,
+    diagnose,
+    send,
+    ask,
+    preset,
+    retry,
+    abort,
+    reset,
+    turnLog,
+    evalSourceAt,
+  };
 }
