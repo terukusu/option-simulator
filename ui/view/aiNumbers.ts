@@ -205,6 +205,19 @@ const SAME_SECTION_AFTER = /^\s*(章|「|[）)])/;
  */
 const BAND_AFTER = /^台/;
 /**
+ * 範囲「+1,254〜1,275 千円」「3〜5 日」「A から B 円」（#240 の評価）: 単位の無い前の数に、範囲の後ろの数の単位を当てる
+ * （「〜」「~」「から」の直後に数が続くときだけ）
+ */
+const RANGE_AFTER =
+  /^\s*(〜|~|～|から)\s*([+\-−–▲△]\s?)?(\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?)/;
+/**
+ * 方法・時期の言い方の「1 日」（#240 の評価）: 「1 日ずつずらして（重ねて数える）」= iv_stats の組の作り方、
+ * 「SQ の 1 日前」= SQ の前日。符号の無い 1 ちょうどで、この形のときだけ（ほかの 1 日は数える）
+ */
+const ONE_DAY_METHOD_AFTER = /^\s?日\s*ずつ\s*ずら/;
+const SQ_BEFORE = /SQ\s*(日\s*)?の\s*$/;
+const DAY_BEFORE_AFTER = /^\s?日\s*前/;
+/**
  * Γ の単位の「100 円」（#136 の評価。「Γ / 100 円」「原資産が 100 円動いたとき」= 文書の単位の定義。値ではない）。
  * 符号の無い 100 ちょうどで、直後が「円動く / 円上がる / 円下がる / 円の変化」のときだけ（値の取り違えを広く見逃さない。
  * 「/ 100 円」は PER_BEFORE で数えない）
@@ -312,7 +325,24 @@ export function checkNumbers(text: string, sources: readonly unknown[]): NumberC
     let end = numEnd;
     let unit: TokenUnit = signText === '×' ? 'ratio' : 'none';
     let reason: IgnoreReason | undefined;
-    if (u && unitOf !== undefined) {
+    // 範囲の前の数（単位なし）は後ろの数の単位
+    let rangeUnit: TokenUnit | IgnoreReason | undefined;
+    if (!(u && unitOf !== undefined)) {
+      const r = RANGE_AFTER.exec(rest);
+      const u2 = r ? UNIT_RE.exec(rest.slice(r[0].length)) : null;
+      const k2 = u2?.[1];
+      rangeUnit = k2 !== undefined ? UNIT_OF[k2] : undefined;
+    }
+    if (rangeUnit !== undefined) {
+      if (
+        rangeUnit === 'date' ||
+        rangeUnit === 'month' ||
+        rangeUnit === 'count' ||
+        rangeUnit === 'time'
+      )
+        reason = rangeUnit;
+      else unit = rangeUnit as TokenUnit;
+    } else if (u && unitOf !== undefined) {
       if (unitOf === 'date' || unitOf === 'month' || unitOf === 'count' || unitOf === 'time') {
         reason = unitOf;
       } else {
@@ -329,6 +359,15 @@ export function checkNumbers(text: string, sources: readonly unknown[]): NumberC
       else if (SECTION_BEFORE.test(before)) reason = 'number';
       else if (rawSign === '' && SAME_SECTION_BEFORE.test(before) && SAME_SECTION_AFTER.test(rest))
         reason = 'number';
+      else if (numText === '1' && signText === '' && ONE_DAY_METHOD_AFTER.test(rest))
+        reason = 'number';
+      else if (
+        numText === '1' &&
+        signText === '' &&
+        SQ_BEFORE.test(before) &&
+        DAY_BEFORE_AFTER.test(rest)
+      )
+        reason = 'date';
       else if (numText === '100' && rawSign === '' && GAMMA_UNIT_AFTER.test(rest))
         reason = 'per_unit';
       else if (

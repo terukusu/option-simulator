@@ -333,3 +333,44 @@ describe('#240 評価で見つけた書き方', () => {
     expect(checkNumbers('同値 10.7）', []).unmatched).toBe(1);
   });
 });
+
+describe('#240 評価で見つけた書き方（2）', () => {
+  const SRC = [{ scenario_grid: { pnl_yen: [1254321, 1275432] }, changes: [{ days: 5 }] }];
+  const st = (text: string, src: unknown[] = SRC) =>
+    checkNumbers(text, src).tokens.map((t) => [t.raw, t.status, t.reason]);
+
+  it('範囲「A〜B 千円」「A から B 千円」の前の数 A に後ろの単位を当てる', () => {
+    expect(st('SQ の前日に約 +1,254〜1,275 千円です')).toEqual([
+      ['+1,254', 'matched', undefined],
+      ['1,275 千円', 'matched', undefined],
+    ]);
+    expect(st('1,254 から 1,275 千円')).toEqual([
+      ['1,254', 'matched', undefined],
+      ['1,275 千円', 'matched', undefined],
+    ]);
+    // 前の数の値が違えば不一致（千円で照合する）
+    expect(st('+1,200〜1,275 千円')[0]).toEqual(['+1,200', 'unmatched', undefined]);
+    // 後ろが数の言葉（つ・本）なら前も数えない、日なら日で照合
+    expect(st('2〜3 つ')).toEqual([
+      ['2', 'ignored', 'count'],
+      ['3', 'ignored', 'count'],
+    ]);
+    expect(st('3〜5 日')).toEqual([
+      ['3', 'unmatched', undefined],
+      ['5 日', 'matched', undefined],
+    ]);
+    // 範囲でない並び（「、」）は今どおり単位なし
+    expect(st('1,254、1,275 千円')[0]).toEqual(['1,254', 'unmatched', undefined]);
+  });
+
+  it('「1 日ずつずらして」「SQ の 1 日前」の 1 日は数えない。ほかの 1 日は数える', () => {
+    expect(st('組は 1 日ずつずらして重ねて数えている', [])).toEqual([
+      ['1 日', 'ignored', 'number'],
+    ]);
+    expect(st('SQ の 1 日前に損益分岐点にいると', [])).toEqual([['1 日', 'ignored', 'date']]);
+    expect(checkNumbers('1 日で −3%', []).tokens[0]?.status).toBe('unmatched');
+    expect(checkNumbers('2 日ずつずらして', []).tokens[0]?.status).toBe('unmatched');
+    expect(checkNumbers('SQ の 2 日前', []).tokens[0]?.status).toBe('unmatched');
+    expect(checkNumbers('1 日ずつ減る', []).tokens[0]?.status).toBe('unmatched');
+  });
+});
