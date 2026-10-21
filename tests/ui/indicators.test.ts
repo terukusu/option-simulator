@@ -169,25 +169,25 @@ describe('#207 価格と段の配置（futPaneLayout）', () => {
     expect(l.panes.map((s) => s.h)).toEqual([120, IND_PANE_H, IND_PANE_H]);
     expect(l.priceH).toBe(600 - 120 - 2 * IND_PANE_H);
   });
-  it('段の和が「枠 − 価格の下限 80px」を超えたら比で縮め、段の下限は 28px（#200 の縮み方と同じ）', () => {
+  it('段の和が「枠 − 価格の下限 56px」を超えたら比で縮め、段の下限は 24px（#200 の縮み方と同じ）', () => {
     const l = futPaneLayout({ stackH: 200, kinds: ['rsi', 'macd', 'stoch'], max: null });
-    expect(l.panes.map((s) => s.h)).toEqual([40, 40, 40]);
+    expect(l.panes.map((s) => s.h)).toEqual([48, 48, 48]);
     expect(l.priceH).toBe(FUT_PRICE_MIN_H);
     expect(l.hidden).toEqual([]);
   });
-  it('価格が先: 下限（価格 80px + 段 28px × 数）が入らなければ後ろの段から隠す。和は枠を超えない（#207 はみ出し）', () => {
+  it('価格が先: 下限（価格 56px + 段 24px × 数）が入らなければ後ろの段から隠す。和は枠を超えない（#207 はみ出し）', () => {
     const kinds = ['rsi', 'macd', 'stoch'] as const;
-    const fit3 = futPaneLayout({ stackH: 164, kinds, max: null });
-    expect(fit3.panes.map((s) => s.h)).toEqual([28, 28, 28]);
-    expect(fit3.priceH).toBe(80);
-    const two = futPaneLayout({ stackH: 150, kinds, max: null });
+    const fit3 = futPaneLayout({ stackH: 128, kinds, max: null });
+    expect(fit3.panes.map((s) => s.h)).toEqual([24, 24, 24]);
+    expect(fit3.priceH).toBe(56);
+    const two = futPaneLayout({ stackH: 120, kinds, max: null });
     expect(two.panes.map((s) => s.kind)).toEqual(['rsi', 'macd']);
     expect(two.hidden).toEqual(['stoch']);
-    expect(two.priceH + two.panes.reduce((a, s) => a + s.h, 0)).toBeLessThanOrEqual(150);
-    const tiny = futPaneLayout({ stackH: 100, kinds, max: null });
+    expect(two.priceH + two.panes.reduce((a, s) => a + s.h, 0)).toBeLessThanOrEqual(120);
+    const tiny = futPaneLayout({ stackH: 70, kinds, max: null });
     expect(tiny.panes).toEqual([]);
     expect(tiny.hidden).toEqual(['rsi', 'macd', 'stoch']);
-    expect(tiny.priceH).toBe(100);
+    expect(tiny.priceH).toBe(70);
     // 覚えた高さが大きくても和は枠の中（下限を守って残りを比で分ける）
     for (const stackH of [130, 164, 200, 260, 333, 500]) {
       const l = futPaneLayout({ stackH, kinds, heights: { rsi: 400, macd: 30 }, max: null });
@@ -218,15 +218,15 @@ describe('#207 価格と段の配置（futPaneLayout）', () => {
 
 describe('#207 境目のドラッグ（futPaneDrag）', () => {
   const start = futPaneLayout({ stackH: 400, kinds: ['rsi', 'macd', 'stoch'], max: null });
-  it('境目 0（価格 | 1 段目）: 上へ動かすと 1 段目が高くなり、価格の下限 80px で止まる', () => {
+  it('境目 0（価格 | 1 段目）: 上へ動かすと 1 段目が高くなり、価格の下限 56px で止まる', () => {
     expect(futPaneDrag(start, 0, -40, 400)).toEqual({ rsi: 96, macd: 56, stoch: 56 });
     expect(futPaneDrag(start, 0, -1000, 400).rsi).toBe(400 - FUT_PRICE_MIN_H - 2 * 56);
     expect(futPaneDrag(start, 0, 1000, 400).rsi).toBe(IND_PANE_MIN_H);
   });
-  it('境目 i（段 i−1 | 段 i）: 2 段の和を保ち、どちらも 28px で止まる', () => {
+  it('境目 i（段 i−1 | 段 i）: 2 段の和を保ち、どちらも 24px で止まる', () => {
     expect(futPaneDrag(start, 1, 20, 400)).toEqual({ rsi: 76, macd: 36, stoch: 56 });
-    expect(futPaneDrag(start, 2, -100, 400)).toEqual({ rsi: 56, macd: 28, stoch: 84 });
-    expect(futPaneDrag(start, 1, 100, 400)).toEqual({ rsi: 84, macd: 28, stoch: 56 });
+    expect(futPaneDrag(start, 2, -100, 400)).toEqual({ rsi: 56, macd: 24, stoch: 88 });
+    expect(futPaneDrag(start, 1, 100, 400)).toEqual({ rsi: 88, macd: 24, stoch: 56 });
   });
   it('移動量は整数に丸める・NaN は 0', () => {
     expect(futPaneDrag(start, 1, 3.6, 400).rsi).toBe(60);
@@ -236,7 +236,7 @@ describe('#207 境目のドラッグ（futPaneDrag）', () => {
 
 /**
  * #207 再レビュー B2: 縦に狭くて縮めて描いているとき（枠 200・240、段 3 つ）も、ドラッグ中の配置は押したときに描いて
- * いた高さ + 境目の両側の変化 = 指に 1:1（触っていない段は変わらない。価格の下限 80px で止まる）。離したときの保存の値
+ * いた高さ + 境目の両側の変化 = 指に 1:1（触っていない段は変わらない。価格の下限 56px で止まる）。離したときの保存の値
  * （futPaneSave）で描き直すと、離したときに描いていた高さと同じ
  */
 describe('#207 縮めて描いているときのドラッグ（1:1）と保存の値の描き直し', () => {
@@ -261,7 +261,7 @@ describe('#207 縮めて描いているときのドラッグ（1:1）と保存�
           const h1 = during.panes.map((s) => s.h);
           expect(during.panes.map((s) => s.kind)).toEqual(before.panes.map((s) => s.kind));
           if (border === 0) {
-            // 1 段目が −dy（上へ = 高く）。価格の下限 80px で止まる。触っていない段は同じ
+            // 1 段目が −dy（上へ = 高く）。価格の下限 56px で止まる。触っていない段は同じ
             const room = before.priceH - FUT_PRICE_MIN_H;
             const want =
               dy > 0 ? -Math.min(dy, (h0[0] ?? 0) - IND_PANE_MIN_H) : Math.min(-dy, room);
@@ -269,7 +269,7 @@ describe('#207 縮めて描いているときのドラッグ（1:1）と保存�
             expect(during.priceH - before.priceH).toBe(-want || 0);
             expect(h1.slice(1)).toEqual(h0.slice(1));
           } else {
-            // 段の下限 28px で止まる（覚えた高さ ありの枠 200 は MACD が 37px なので +10 は +9 で止まる）
+            // 段の下限 24px で止まる
             const m = Math.min(
               Math.max(dy, IND_PANE_MIN_H - (h0[0] ?? 0)),
               (h0[1] ?? 0) - IND_PANE_MIN_H,
@@ -294,7 +294,7 @@ describe('#207 縮めて描いているときのドラッグ（1:1）と保存�
           if (!stored)
             expect(
               Math.abs((h1[border === 0 ? 0 : 1] ?? 0) - (h0[border === 0 ? 0 : 1] ?? 0)),
-            ).toBe(border === 0 && dy < 0 ? 0 : 10);
+            ).toBe(border === 0 && dy < 0 ? Math.min(10, before.priceH - FUT_PRICE_MIN_H) : 10);
         });
       }
     }
@@ -344,15 +344,15 @@ describe('#207 当たり判定（futPaneAt・futSplitAt）', () => {
     expect(futSplitAt(l, 85, false)).toBe(1);
     expect(futSplitAt(l, 86, false)).toBeNull();
   });
-  it('28px の段でも ±10px（帯は段に重なる。帯の外 = 段の真ん中は十字線）・近い境目が先・最大化中は無し', () => {
-    const low = futPaneLayout({ stackH: 164, kinds: ['rsi', 'macd', 'stoch'], max: null });
-    expect(low.panes.map((s) => s.h)).toEqual([28, 28, 28]);
+  it('24px の段でも ±10px（帯は段に重なる。帯の外 = 段の真ん中は十字線）・近い境目が先・最大化中は無し', () => {
+    const low = futPaneLayout({ stackH: 128, kinds: ['rsi', 'macd', 'stoch'], max: null });
+    expect(low.panes.map((s) => s.h)).toEqual([24, 24, 24]);
     expect(futSplitAt(low, -10, true)).toBe(0);
     expect(futSplitAt(low, 10, true)).toBe(0);
-    expect(futSplitAt(low, 14, true)).toBeNull();
-    expect(futSplitAt(low, 18, true)).toBe(1);
-    expect(futSplitAt(low, 38, true)).toBe(1);
-    expect(futSplitAt(low, 46, true)).toBe(2);
+    expect(futSplitAt(low, 12, true)).toBeNull();
+    expect(futSplitAt(low, 14, true)).toBe(1);
+    expect(futSplitAt(low, 34, true)).toBe(1);
+    expect(futSplitAt(low, 38, true)).toBe(2);
     const max = futPaneLayout({ stackH: 300, kinds: ['rsi', 'macd'], max: 'rsi' });
     expect(futSplitAt(max, 0, true)).toBeNull();
   });

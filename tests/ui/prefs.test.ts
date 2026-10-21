@@ -463,7 +463,7 @@ describe('#207 先物推移の指標の段の高さ（fut_pane_h_*）', () => {
   });
   it('不正（範囲外・小数・文字列）は段ごとに既定（読まない・書かない）。ほかの設定は残る', () => {
     const read = readPrefs(
-      `{"schema_version":1,"theme":"light",${M0_JSON},"fut_pane_h_rsi":27,"fut_pane_h_macd":70.5,"fut_pane_h_stoch":"80"}`,
+      `{"schema_version":1,"theme":"light",${M0_JSON},"fut_pane_h_rsi":23,"fut_pane_h_macd":70.5,"fut_pane_h_stoch":"80"}`,
     );
     expect(read.prefs.theme).toBe('light');
     expect(read.prefs.futPaneH).toBeUndefined();
