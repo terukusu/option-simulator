@@ -34,7 +34,7 @@ import {
   indReadout,
   indSplitLabel,
 } from '../../view/indicators';
-import { IV_MIN_BARS, ivFullDomain, ivIndexAt } from '../../view/ivHistory';
+import { IV_MIN_BARS, ivFullDomain, ivIndexAt, ivKeyStep } from '../../view/ivHistory';
 
 export type { IndPaneCursor } from '../../view/indicators';
 
@@ -53,8 +53,10 @@ export interface IndicatorPanesProps {
   stackH: number;
   /** 左の余白（本。価格の描画域と同じ全域を作る） */
   leftSlack: number;
-  /** 段の上の十字線（無ければ縦線だけ = 価格の上のカーソル） */
+  /** 段の上の十字線（無ければ縦線だけ = 価格の上のカーソル。十字線の足が表示範囲の外なら null） */
   paneCursor: IndPaneCursor | null;
+  /** タッチで段に置いた十字線があるか（表示範囲の外でも true = futCursorView の paneTouch。#227） */
+  paneTouch: boolean;
   onViewport: (v: Domain | null) => void;
   /** カーソルの足（null = 外す）。pane = 触っている段と段の座標の高さ（無ければ縦線だけ） */
   onCursor: (i: number | null, at?: IndPaneCursor | null) => void;
@@ -226,7 +228,8 @@ function IndicatorPanesView(p: IndicatorPanesProps) {
     range,
     disabled: n === 0,
     onViewport: (v) => {
-      if (v === null && pc?.touch) p.onCursor(null);
+      // 初期表示（R）でタッチの段の十字線を消す（表示範囲の外 = 描いていない十字線も。#227: paneTouch は生のカーソル）
+      if (v === null && p.paneTouch) p.onCursor(null);
       p.onViewport(v);
     },
     // タッチのタップ（#217 の共通の規則。#207 の長押しをやめた）: 出ていなければ置く、出ていれば消す。マウスのクリックは外す
@@ -260,8 +263,8 @@ function IndicatorPanesView(p: IndicatorPanesProps) {
         return k !== undefined;
       }
       if (key !== ',' && key !== '.') return false;
-      const from = p.cursor ?? n - 1;
-      p.onCursor(Math.min(Math.max(from + (key === ',' ? -1 : 1), 0), n - 1), pc);
+      // 始点は表示範囲の中の足（価格と同じ = ivKeyStep。#227）
+      p.onCursor(ivKeyStep(p.cursor, n, viewport, key === ',' ? -1 : 1), pc);
       return true;
     },
   });

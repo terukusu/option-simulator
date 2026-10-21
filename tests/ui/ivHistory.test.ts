@@ -18,6 +18,7 @@ import {
   ivFullDomain,
   ivIndexAt,
   ivKeepOf,
+  ivKeyStep,
   ivNowPoint,
   ivNowValue,
   ivReadout,
@@ -792,5 +793,22 @@ describe('#227 AC2: 十字線の足が表示範囲の内か（ivCursorBar・ivCu
       }
     }
     expect(outside).toBeGreaterThan(200);
+  });
+});
+
+describe('#227: , . の始点（ivKeyStep）は価格・段とも表示範囲の中の足', () => {
+  it('十字線の足が内ならそこから 1 本、外・無いなら表示範囲の右端の足から', () => {
+    const v: [number, number] = [20.5, 60.4];
+    expect(ivKeyStep(40, 80, v, 1)).toBe(41);
+    expect(ivKeyStep(40, 80, v, -1)).toBe(39);
+    // 外の足（70）・カーソルなしは右端の足（60）から
+    expect(ivKeyStep(70, 80, v, -1)).toBe(59);
+    expect(ivKeyStep(5, 80, v, 1)).toBe(61);
+    expect(ivKeyStep(null, 80, v, -1)).toBe(59);
+    // 表示範囲が足の並びの右の外まで（初期表示の右の余白）なら最新の足から。端で止める
+    expect(ivKeyStep(null, 80, [40, 85], -1)).toBe(78);
+    expect(ivKeyStep(null, 80, [40, 85], 1)).toBe(79);
+    expect(ivKeyStep(0, 80, [-3, 30], -1)).toBe(0);
+    expect(ivKeyStep(null, 0, v, 1)).toBeNull();
   });
 });

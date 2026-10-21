@@ -881,6 +881,22 @@ export function ivCursorShown(cursor: number | null, n: number, viewport: Domain
   return ivCursorBar(cursor, n, viewport) === null ? null : cursor;
 }
 
+/**
+ * , . のキーで 1 本ずつ読む（#227。価格・段で同じ）: 始点は表示範囲の中の足 = 十字線の足（ivCursorBar）、無い・外なら
+ * 表示範囲の右端の足（足の並びの外なら最新の足）。dir = −1（,）/ +1（.）。足 0 本なら null
+ */
+export function ivKeyStep(
+  cursor: number | null,
+  n: number,
+  viewport: Domain,
+  dir: -1 | 1,
+): number | null {
+  if (n === 0) return null;
+  const right = Math.min(Math.max(Math.floor(viewport[1]), 0), n - 1);
+  const from = ivCursorBar(cursor, n, viewport) ?? right;
+  return Math.min(Math.max(from + dir, 0), n - 1);
+}
+
 /** 画素（要素の座標）→ 足の index（範囲の外は端の足） */
 export function ivIndexAt(x: number, viewport: Domain, range: Domain, n: number): number | null {
   if (n === 0) return null;

@@ -15,6 +15,7 @@ import {
   type PnlCursor,
   pnlCrosshair,
   pnlCursorAt,
+  pnlTapCursor,
 } from '../../view/pnlCrosshair';
 import {
   parseCssColor,
@@ -322,12 +323,8 @@ export function PnlPlot(p: {
     // ×・交点の上）は消す（移さない。次のタップでまた置く）
     onTap: (x: number, y: number) => {
       if (!crossOn || pointerType.current === 'mouse') return;
-      if (cursor?.pinned) {
-        setCursor(null);
-        return;
-      }
-      const at = pnlCursorAt(model, x + ox, y + frame.offsetY, false);
-      setCursor(at ? { ...at, pinned: true } : null);
+      // 「置いてある」は描いている十字線（表示範囲の外へパンした十字線は置き直す。#227）
+      setCursor(pnlTapCursor(model, !!cursor?.pinned && cross !== null, x + ox, y + frame.offsetY));
     },
     ...(crossOn && cursor?.pinned && cross && cross.py !== null
       ? {

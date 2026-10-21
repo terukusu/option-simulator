@@ -12,6 +12,7 @@ import {
   smileCurveIv,
   smileDotCursor,
   smileModel,
+  smileTapCursor,
 } from '../../ui/view/smile';
 import { fixture } from '../support/fixtures';
 
@@ -146,5 +147,32 @@ describe('タッチのタップの十字線（#217 の共通の規則）', () =>
     expect(smileDotCursor(m, -1, true)).toBeNull();
     const xh = smileCrosshair(m, c, 300, 220);
     expect(xh?.xTag.text).toBe(smileCrossXText('k', mid.x));
+  });
+});
+
+describe('#227: タッチのタップ（smileTapCursor）。表示範囲の外の十字線は「出ていない」ので置く', () => {
+  it('点の外: 描いている十字線があれば消す、表示範囲の外（描いていない）ならその位置に置く。点は吸着', () => {
+    const m = smileModel(month, 'B', 'k');
+    const zoomed = smileModel(month, 'B', 'k', [m.domain[0], (m.domain[0] + m.domain[1]) / 2]);
+    const w = 300;
+    const h = 220;
+    const old = { x: m.domain[1] - 1, iv: 20, touch: true };
+    // 拡大で表示範囲の外 → smileCrosshair は null（描いていない）
+    expect(smileCrosshair(zoomed, old, w, h)).toBeNull();
+    const tap = { onDot: false, k: null, x: 150, y: 100, width: w, height: h };
+    const placed = smileTapCursor(zoomed, {
+      ...tap,
+      shown: smileCrosshair(zoomed, old, w, h) !== null,
+    });
+    expect(placed).toEqual(smileCursorAt(zoomed, 150, 100, w, h, true, false));
+    expect(placed).not.toBeNull();
+    // 描いている → 消す
+    expect(smileTapCursor(zoomed, { ...tap, shown: true })).toBeNull();
+    // 点のタップは選択の点に吸着・解除で消す（描いているかによらない）
+    const k = zoomed.strikeXs[0]?.k ?? 0;
+    expect(smileTapCursor(zoomed, { ...tap, onDot: true, k, shown: true })).toEqual(
+      smileDotCursor(zoomed, k, true),
+    );
+    expect(smileTapCursor(zoomed, { ...tap, onDot: true, k: null, shown: false })).toBeNull();
   });
 });

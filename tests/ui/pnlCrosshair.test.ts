@@ -18,6 +18,7 @@ import {
   type PnlCursor,
   pnlCrosshair,
   pnlCursorAt,
+  pnlTapCursor,
 } from '../../ui/view/pnlCrosshair';
 import { labelWidth } from '../../ui/view/scenarioMarks';
 import { M1, M2, makeMarket } from '../support/market';
@@ -361,5 +362,27 @@ describe('画素 → 値・読み取りのタップ（#201）', () => {
     const c = pnlCursorAt(chart, plot.left - 50, plot.top - 50, true);
     expect(c?.x).toBeCloseTo(chart.domain[0], 6);
     expect(c?.y).toBeCloseTo(chart.yDomain[1], 6);
+  });
+});
+
+describe('#227: タッチのタップ（pnlTapCursor）。表示範囲の外の十字線は「出ていない」ので置く', () => {
+  it('描いている十字線があれば消す、表示範囲の外へパンした十字線ならタップした位置に置く', () => {
+    const chart = chartOf(SC, 900, 420);
+    const { plot } = chart;
+    const cursor: PnlCursor = { x: x0, y: midY(chart), pinned: true };
+    const sx = plot.left + plot.width * 0.25;
+    const sy = plot.top + plot.height * 0.4;
+    // 表示範囲の中: 描いている → 消す
+    expect(crossOf(chart, cursor, 900, 420)).not.toBeNull();
+    expect(pnlTapCursor(chart, crossOf(chart, cursor, 900, 420) !== null, sx, sy)).toBeNull();
+    // 右へパンして X₀ が表示範囲の外 → 描いていない → 置く（押した位置の値・pinned）
+    const w = chart.domain[1] - chart.domain[0];
+    const panned = chartOf(SC, 900, 420, [x0 + w * 0.6, x0 + w * 1.6]);
+    expect(crossOf(panned, cursor, 900, 420)).toBeNull();
+    const placed = pnlTapCursor(panned, crossOf(panned, cursor, 900, 420) !== null, sx, sy);
+    const at = pnlCursorAt(panned, sx, sy, false);
+    expect(placed).toEqual({ x: at?.x, y: at?.y, pinned: true });
+    // 描画域の外のタップは置かない
+    expect(pnlTapCursor(panned, false, plot.left - 5, sy)).toBeNull();
   });
 });

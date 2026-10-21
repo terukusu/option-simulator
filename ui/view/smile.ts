@@ -11,7 +11,13 @@
 import type { ChainMonth, StrikeInfo } from '../../data';
 import { type AtmBasis, normCdf, type OptionType } from '../../model';
 import { clipSegment, type Domain, extent, linear, padDomain } from '../chart/scale';
-import { type CrossTagBox, crossFloatBottom, crossTagX, crossTagY } from './crosshair';
+import {
+  type CrossTagBox,
+  crossFloatBottom,
+  crossTagX,
+  crossTagY,
+  crossTapAction,
+} from './crosshair';
 import { fmtNum } from './format';
 
 export type SmileAxis = 'k' | 'moneyness' | 'delta';
@@ -497,6 +503,29 @@ export function smileCrosshair(
       anchor: leftSide ? 'start' : 'end',
     },
   };
+}
+
+/**
+ * タッチのタップの後のカーソル（#217・#227。§4.1 の共通の規則）: 点のタップ（onDot）は選択 + その点に吸着（解除 = k が null
+ * なら消す）。点の外は、描いている十字線（shown = smileCrosshair が null でない）があれば消す、無ければ（無い・表示範囲の外）
+ * その位置に置く
+ */
+export function smileTapCursor(
+  model: SmileModel,
+  p: {
+    shown: boolean;
+    onDot: boolean;
+    k: number | null;
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  },
+): SmileCursor | null {
+  if (p.onDot) return p.k === null ? null : smileDotCursor(model, p.k, true);
+  return crossTapAction(p.shown) === 'hide'
+    ? null
+    : smileCursorAt(model, p.x, p.y, p.width, p.height, true, false);
 }
 
 /** 画素（要素の座標）→ カーソル（値の座標）。描画域の外は null（ホバー）、clamp なら端へ寄せる（交点のドラッグ） */

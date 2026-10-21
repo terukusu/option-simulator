@@ -10846,6 +10846,34 @@ async function pnlCrossTouchFlow() {
     !!xb && st3?.lines === 0 && st3.tags.length === 0,
     `${st3?.lines} 本`,
   );
+  // #227: 置いた十字線をパンで表示範囲の外へ出した後のタップは「出ていない」ので置く（§4.1 の共通の規則）。ダブルタップで戻す
+  await tapAt(at(0.3, 0.45));
+  const pa = at(0.08, 0.75);
+  const pdx = Math.round(plot.w * 0.8);
+  await touch('touchStart', [{ ...pa, id: 0 }]);
+  for (let i = 1; i <= 12; i++) {
+    await touch('touchMove', [{ x: Math.round(pa.x + (pdx * i) / 12), y: pa.y, id: 0 }]);
+    await page.waitForTimeout(20);
+  }
+  await touch('touchEnd', []);
+  await page.waitForTimeout(350);
+  const stOut = await pnlCrossState(page);
+  await tapAt(at(0.5, 0.3));
+  const stPut = await pnlCrossState(page);
+  const dtr = at(0.6, 0.3);
+  for (let k = 0; k < 2; k++) {
+    await touch('touchStart', [{ ...dtr, id: 0 }]);
+    await page.waitForTimeout(30);
+    await touch('touchEnd', []);
+    await page.waitForTimeout(80);
+  }
+  await page.waitForTimeout(400);
+  const stReset = await pnlCrossState(page);
+  check(
+    `#227 ${tag} 十字線をパンで表示範囲の外へ（線 0 本）→ タップで置く（2 本）→ ダブルタップで消える`,
+    stOut?.lines === 0 && stPut?.lines === 2 && stReset?.lines === 0,
+    `外 ${stOut?.lines} 本・タップ ${stPut?.lines} 本・ダブルタップ ${stReset?.lines} 本`,
+  );
   // (d) 長押しでシナリオ点（十字線は出ない）
   const h0 = st3?.handleX ?? null;
   const b = at(0.7, 0.5);

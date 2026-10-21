@@ -320,6 +320,7 @@ function FutHistoryView(p: FutHistoryProps) {
               stackH={stackH}
               leftSlack={p.leftSlack}
               paneCursor={paneCursor}
+              paneTouch={cv.paneTouch}
               onViewport={p.onViewport}
               onCursor={onPaneCursor}
               onMax={onMax}

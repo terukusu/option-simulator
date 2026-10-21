@@ -15,6 +15,7 @@ import {
   ivCrosshair,
   ivFullDomain,
   ivIndexAt,
+  ivKeyStep,
 } from '../../view/ivHistory';
 import { useSize } from '../useSize';
 
@@ -172,9 +173,8 @@ function IvPlotView(p: IvPlotProps) {
       : {}),
     onScrubKey: (key) => {
       if (key !== ',' && key !== '.') return false;
-      const from = cursor ?? n - 1;
-      // 横線の高さは保つ（キーだけで置いたときは最初の足の終値の高さから）
-      onCursor(Math.min(Math.max(from + (key === ',' ? -1 : 1), 0), n - 1), cursorY ?? cross?.y);
+      // 始点は表示範囲の中の足（段と同じ = ivKeyStep。#227）。横線の高さは保つ（キーだけで置いたときは最初の足の終値の高さから）
+      onCursor(ivKeyStep(cursor, n, viewport, key === ',' ? -1 : 1), cursorY ?? cross?.y);
       return true;
     },
   });

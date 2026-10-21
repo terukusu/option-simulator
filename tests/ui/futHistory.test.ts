@@ -397,6 +397,7 @@ describe('#227 AC2: 先物推移のカーソル（futCursorView）', () => {
       cursorY: 80,
       crossH: true,
       pane: null,
+      paneTouch: false,
     });
     expect(futCursorView({ ...cur, i: 70 }, 80, v)).toEqual({
       plot: 70,
@@ -404,6 +405,7 @@ describe('#227 AC2: 先物推移のカーソル（futCursorView）', () => {
       cursorY: null,
       crossH: false,
       pane: null,
+      paneTouch: false,
     });
   });
   it('段の上: 内なら段の十字線、外（パン・拡大）なら段の十字線なし・読み取りは最新の足と同じ', () => {
@@ -414,12 +416,15 @@ describe('#227 AC2: 先物推移のカーソル（futCursorView）', () => {
       cursorY: null,
       crossH: false,
       pane: { pane: 'rsi', y: 12, touch: true },
+      paneTouch: true,
     });
     for (const i of [0, 19, 61, 79]) {
       const cv = futCursorView({ ...cur, i }, 80, v);
       expect(cv.shown).toBeNull();
       expect(cv.pane).toBeNull();
       expect(cv.plot).toBe(i);
+      // 外でもタッチの段の十字線はある（初期表示 = R で消す）
+      expect(cv.paneTouch).toBe(true);
     }
     // 読み取り（始 / 高 / 安 / 終・EMA）はカーソルなしと同じ
     const bars: FutBar[] = Array.from({ length: 80 }, (_, i) => ({
@@ -436,12 +441,17 @@ describe('#227 AC2: 先物推移のカーソル（futCursorView）', () => {
   it('縦線だけ（段の上で高さが無い）・カーソルなし', () => {
     expect(futCursorView({ i: 30, y: null, pane: 'macd', touch: false }, 80, v).pane).toBeNull();
     expect(futCursorView({ i: 30, y: null, pane: null, touch: false }, 80, v).shown).toBe(30);
+    expect(futCursorView({ i: 30, y: 12, pane: 'rsi', touch: false }, 80, v).paneTouch).toBe(false);
+    expect(futCursorView({ i: 30, y: 12, pane: 'price', touch: true }, 80, v).paneTouch).toBe(
+      false,
+    );
     expect(futCursorView(null, 80, v)).toEqual({
       plot: null,
       shown: null,
       cursorY: null,
       crossH: false,
       pane: null,
+      paneTouch: false,
     });
   });
 });

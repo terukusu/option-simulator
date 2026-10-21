@@ -186,6 +186,8 @@ export interface FutCursorView {
   crossH: boolean;
   /** 段の十字線（段の上のときだけ。表示範囲の外なら null） */
   pane: IndPaneCursor | null;
+  /** タッチで段に置いた十字線があるか（表示範囲の外でも。初期表示 = R で消すのに使う） */
+  paneTouch: boolean;
 }
 
 /**
@@ -194,7 +196,8 @@ export interface FutCursorView {
  * パン・拡大したら十字線を描かず読み取りは最新の足、戻せばまた出る（カーソルは値の座標に残る）
  */
 export function futCursorView(cur: FutCursor | null, n: number, viewport: Domain): FutCursorView {
-  if (!cur) return { plot: null, shown: null, cursorY: null, crossH: false, pane: null };
+  if (!cur)
+    return { plot: null, shown: null, cursorY: null, crossH: false, pane: null, paneTouch: false };
   const shown = ivCursorShown(cur.i, n, viewport);
   const { pane, y } = cur;
   const on = shown !== null;
@@ -206,6 +209,7 @@ export function futCursorView(cur: FutCursor | null, n: number, viewport: Domain
     crossH: price,
     pane:
       on && pane !== null && pane !== 'price' && y !== null ? { pane, y, touch: cur.touch } : null,
+    paneTouch: cur.touch && pane !== null && pane !== 'price',
   };
 }
 
