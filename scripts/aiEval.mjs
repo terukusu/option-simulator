@@ -15,7 +15,8 @@
 // 費用の上限: 累計の台帳 fixtures/local/ai_eval/ledger.json（gitignore）で AI_EVAL_LIMIT_USD（既定 6.5）を超える前に
 // 止める。費用は中継の今日の残り（remaining_usd）の前の値との差（数える資格情報。要求は直列）か、数えない資格情報
 // （OAuth）は 0。
-// AI_EVAL_RELAY_LOG に中継のログ（標準出力の JSON 行）を指定すると ai_request の cost_usd_est・トークン量・dropped_blocks
+// AI_EVAL_RELAY_LOG に中継のログ（標準出力の JSON 行）を指定すると ai_request の cost_usd_est・トークン量・dropped_blocks・
+// 読んだスキル（skills）・turn の数
 // も集める（ログに会話の本文・鍵は出ない = relay.py）。
 // 返答の全文は fixtures/local/ai_eval/<時刻>/ にだけ書く（コミットしない）。標準出力は要約（架空の値）。
 
@@ -32,7 +33,9 @@ const opt = (name, def = null) => {
 };
 const base = (process.env.AI_EVAL_BASE || 'http://127.0.0.1:8080').replace(/\/$/, '');
 const limitUsd = Number(process.env.AI_EVAL_LIMIT_USD || '6.5');
-const reserveUsd = 0.2; // 1 要求の予約額の上界（中継の予約の式。max_tokens 8000 × 出力単価 + 入力）
+// 1 要求の予約額の上界（中継の予約の式 budget.reserve_micro_usd。#221 で turn の上限 3 とスキルを入れた: 入力 25k
+// トークンで約 $1.4）
+const reserveUsd = 1.5;
 const repeat = Number(opt('--repeat', '1'));
 const followups = !args.includes('--no-followups');
 const relayLog = process.env.AI_EVAL_RELAY_LOG || null;
@@ -452,6 +455,11 @@ if (relayLog) {
       first_text_ms_p50: p50(sorted('first_text_ms')),
       total_ms_p50: p50(sorted('total_ms')),
       errors: recs.filter((r) => r.error).map((r) => r.error),
+      // 読んだスキルの名前ごとの回数と turn の数（#221）
+      skills: recs
+        .flatMap((r) => (Array.isArray(r.skills) ? r.skills : []))
+        .reduce((m, n) => ({ ...m, [n]: (m[n] ?? 0) + 1 }), {}),
+      turns_p50: p50(sorted('turns')),
     };
   } catch (e) {
     console.error(`中継のログを読めない: ${e?.message}`);

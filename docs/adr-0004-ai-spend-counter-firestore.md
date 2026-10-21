@@ -1,6 +1,6 @@
 # ADR-0004: AI の費用の 1 日上限は Firestore の名前つき DB で数える
 
-- 状態: 採択
+- 状態: 採択。予約額の式は [ADR-0006](adr-0006-ai-agent-sdk-only-and-skills.md)（#221）で改めた（1 要求で上流を最大 `AI_MAX_TURNS` 回呼ぶ・スキルの大きさ・書き込みの単価は 5 分と 1 時間の大きい方）
 - 日付: 2026-10-19
 - 関連: #134・EPIC #141、`docs/ai-advisor.md` 論点 3、`docs/design.md` 13.1 K15・13.4「AI の中継」・付録 B、`infra/README.md`「AI の費用の計上（Firestore）」、[ADR-0001](adr-0001-ai-credentials-secret-manager.md)
 

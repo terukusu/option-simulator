@@ -36,10 +36,33 @@ def test_estimate_not_below_dense_json():
 
 
 def test_reserve():
-    # 入力 10,000 × $5/M + 8,000 × $20/M = 0.05 + 0.16 = $0.21
-    assert budget.reserve_micro_usd(M, 10_000, 8000) == 210_000
-    assert budget.reserve_micro_usd(M, 1, 0) == 5  # 切り上げ（5 µUSD ちょうど）
+    # 1 turn: 入力 10,000 × $8/M（書き込みの単価は 5 分 $5 と 1 時間 $8 の大きい方。#221）+ 8,000 × $20/M
+    # = 0.08 + 0.16 = $0.24
+    assert budget.reserve_micro_usd(M, 10_000, 8000) == 240_000
+    assert budget.reserve_micro_usd(M, 1, 0) == 8  # 切り上げ（8 µUSD ちょうど）
     assert budget.reserve_micro_usd(M, 0, 1) == 20
+
+
+def test_reserve_covers_turns_and_skills():
+    # #221: T = 3 turn、E = 25,000、M = 8,000、K = 5,000 の手計算
+    #   turn 0: 入力 25,000、turn 1: 25,000 + 13,000 = 38,000、turn 2: 51,000 → 入力の和 114,000 × $8/M = $0.912
+    #   出力 3 × 8,000 × $20/M = $0.48 → $1.392
+    assert budget.reserve_micro_usd(M, 25_000, 8000, 3, 5_000) == 1_392_000
+    assert budget.reserve_micro_usd(M, 25_000, 8000, 1, 5_000) == budget.reserve_micro_usd(M, 25_000, 8000)
+    # 各 turn で入力を全部 1 時間の書き込み・出力を max_tokens まで・毎回スキルを読んだ最悪の実額を下回らない
+    est, k, mt = 12_345, budget.skill_tokens(), 8000
+    worst = {"input_tokens": 0, "output_tokens": 0, "cache_creation_input_tokens": 0,
+             "cache_creation": {"ephemeral_1h_input_tokens": 0}}
+    for i in range(st.AI_MAX_TURNS):
+        n = est + i * (mt + k)
+        worst["cache_creation_input_tokens"] += n
+        worst["cache_creation"]["ephemeral_1h_input_tokens"] += n
+        worst["output_tokens"] += mt
+    assert budget.reserve_micro_usd(M, est, mt, st.AI_MAX_TURNS, k) >= budget.cost_micro_usd(M, worst)
+    # スキルの上界は SKILL.md の合計のバイト数 + 余裕
+    from simulator_api.ai import skills
+
+    assert budget.skill_tokens() == skills.total_bytes() + st.AI_SKILL_OVERHEAD_TOKENS
 
 
 def test_cost():
@@ -56,9 +79,11 @@ def test_cost():
 
 
 def test_reserve_covers_worst_cost():
-    # 予約 ≥ 見積もりどおりの入力を全部 5 分の書き込み・出力を max_tokens まで使ったときの実額
+    # 予約 ≥ 見積もりどおりの入力を全部書き込み（5 分 / 1 時間）・出力を max_tokens まで使ったときの実額
     est = 12_345
     worst = {"input_tokens": 0, "cache_creation_input_tokens": est, "output_tokens": 8000}
+    assert budget.reserve_micro_usd(M, est, 8000) >= budget.cost_micro_usd(M, worst)
+    worst["cache_creation"] = {"ephemeral_1h_input_tokens": est}
     assert budget.reserve_micro_usd(M, est, 8000) >= budget.cost_micro_usd(M, worst)
 
 

@@ -1,8 +1,11 @@
 """費用の 1 日上限（K15・docs/ai-advisor.md 論点 3）。金額は整数の µUSD（1e-6 USD。浮動小数の境界を避ける）。
 
-- 予約 = 送る前にその要求の最大額を先に計上する: 入力の見積もり（トークン数の上界）× 5 分のキャッシュ書き込みの単価
-  （入力の 1.25 倍。自動の prompt caching は初回に前置き全体をこの単価で書くので、入力の単価の中の最大を使う）
-  + max_tokens × 出力の単価。計上額 + 予約額 ≤ 上限 のときだけ送る
+- 予約 = 送る前にその要求の最大額を先に計上する。1 要求で上流を最大 T = AI_MAX_TURNS 回呼ぶ（Skill の turn。#221）ので
+  turn ごとの上界の和: Σ_{i=0}^{T−1} [(E + i·(M + K)) × 書き込みの単価 + M × 出力の単価]
+  （E = 入力の見積もり（トークン数の上界）、M = max_tokens、K = 1 回に読むスキルの上界。turn i の入力は最初の入力 +
+  それまでの turn の出力（≤ M）と読んだスキル（≤ K）を超えない）。書き込みの単価は 5 分と 1 時間の大きい方（CLI は
+  前置きを prompt caching で書き、資格情報によって 1 時間の TTL を付ける。入力の単価の中の最大）。
+  計上額 + 予約額 ≤ 上限 のときだけ送る
 - 精算: 終わったら usage × 料金表の実額との差を足し引きする。途中で切れたら精算しない（予約額のまま = 多めに数える）
 - 日は JST の日付（0:00 JST に戻る）
 """
@@ -30,9 +33,20 @@ def estimate_input_tokens(text: str) -> int:
     return len(text.encode("utf-8")) + st.AI_INPUT_OVERHEAD_TOKENS
 
 
-def reserve_micro_usd(model: str, est_input_tokens: int, max_tokens: int) -> int:
+def skill_tokens() -> int:
+    """1 回に読むスキルの上界 K（トークン）: SKILL.md の合計のバイト数（トークン数 ≤ バイト数）+ 枠の余裕"""
+    from . import skills
+
+    return skills.total_bytes() + st.AI_SKILL_OVERHEAD_TOKENS
+
+
+def reserve_micro_usd(model: str, est_input_tokens: int, max_tokens: int, turns: int = 1,
+                      skill_tokens: int = 0) -> int:
+    """予約額（µUSD）= Σ_{i=0}^{turns−1} [(E + i·(M + K)) × 書き込みの単価 + M × 出力の単価]"""
     p = st.AI_PRICES[model]
-    return _ceil_div(est_input_tokens * p["cache_write_5m"] + max_tokens * p["output"], MTOK)
+    write = max(p["cache_write_5m"], p["cache_write_1h"])
+    inputs = turns * est_input_tokens + (max_tokens + skill_tokens) * turns * (turns - 1) // 2
+    return _ceil_div(inputs * write + turns * max_tokens * p["output"], MTOK)
 
 
 def cost_micro_usd(model: str, usage: dict) -> int:

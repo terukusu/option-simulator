@@ -34,7 +34,7 @@ def reserved_for(body, cfg=None) -> int:
     cfg = cfg or ai_settings()
     params = relay.build_params(allowlist.parse_request(json.dumps(body, ensure_ascii=False).encode(), REG), cfg, REG)
     return budget.reserve_micro_usd(cfg.model, budget.estimate_input_tokens(relay.params_text(params)),
-                                    st.AI_MAX_TOKENS)
+                                    st.AI_MAX_TOKENS, st.AI_MAX_TURNS, budget.skill_tokens())
 
 
 def logs(capsys, event=None):
@@ -207,7 +207,8 @@ def test_no_final_keeps_reservation():
 
 def test_client_disconnect_keeps_reservation_and_releases_slot(capsys):
     gate = threading.Event()
-    client, gw, store, _ = ai_app(gateway=FakeGateway(gate=gate))
+    # 予約額（AI_MAX_TURNS の上界。#221）の 3 本分が入る上限にする（ここで見るのは同時の本数の枠）
+    client, gw, store, _ = ai_app(gateway=FakeGateway(gate=gate), limit_micro=10_000_000)
     res = post(client, ai_body(), buffered=False)
     it = iter(res.response)
     assert next(it).startswith(b"event: accepted")
@@ -222,7 +223,7 @@ def test_client_disconnect_keeps_reservation_and_releases_slot(capsys):
 
 
 def test_closed_before_start_releases_slot(capsys):
-    client, gw, store, _ = ai_app()
+    client, gw, store, _ = ai_app(limit_micro=10_000_000)  # 予約額の 3 本分（#221。見るのは枠）
     for _ in range(3):
         res = post(client, ai_body(), buffered=False)
         assert res.status_code == 200
@@ -498,3 +499,40 @@ def test_diagnose_kind_logged_and_tools_registered(capsys):
     assert rec["kind"] == "diagnose" and rec.get("error") is None
     assert [t["name"] for t in gw.calls[0]["tools"]] == sorted(REGISTRY)
     assert relay.DIAGNOSE_TEXT in relay.SYSTEM_PROMPT
+
+
+# ---- スキル（#221 AC9・AC6） ----
+
+def test_system_prompt_has_no_moved_sections():
+    from simulator_api.ai import skills
+
+    # テクニカル・ポジションの提案の節はスキル（SKILL.md）に移した。system には読む案内だけが残る
+    for heading in ("# テクニカル", "# ポジションの提案"):
+        assert heading not in relay.SYSTEM_PROMPT
+    for name in skills.ENABLED:
+        assert name in relay.SYSTEM_PROMPT
+    # 移した本文は SKILL.md にある（中身は変えていない: 見出しで照合）
+    assert "# テクニカル（technicals）" in skills.skill_path("technicals").read_text(encoding="utf-8")
+    assert "# ポジションの提案（" in skills.skill_path("proposals").read_text(encoding="utf-8")
+
+
+def test_ai_request_logs_skills_and_turns(capsys):
+    script = [{"type": "meta", "spawn_ms": 12},
+              {"type": "thinking", "text": "読む"},
+              {"type": "meta", "skills": ["simulator:technicals", 3], "turns": 2},
+              {"type": "text", "text": "答え"}]
+    client, _, _, _ = ai_app(gateway=FakeGateway(script=script))
+    events = sse_events(post(client, ai_body()).get_data(as_text=True))
+    assert "meta" not in [e for e, _ in events]  # meta は SSE に出さない
+    rec = logs(capsys, "ai_request")[0]
+    assert rec["skills"] == ["simulator:technicals"] and rec["turns"] == 2 and rec["spawn_ms"] == 12
+
+
+def test_reserve_counts_max_turns_and_skills():
+    # 予約額は AI_MAX_TURNS の turn とスキルの大きさを入れた上界（1 turn の式より大きい）
+    body = ai_body()
+    cfg = ai_settings()
+    params = relay.build_params(allowlist.parse_request(json.dumps(body, ensure_ascii=False).encode(), REG), cfg, REG)
+    est = budget.estimate_input_tokens(relay.params_text(params))
+    assert reserved_for(body) > budget.reserve_micro_usd(cfg.model, est, st.AI_MAX_TOKENS)
+    assert st.AI_MAX_TURNS == 3

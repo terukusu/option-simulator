@@ -33,7 +33,8 @@ JSON_TYPE = "application/json; charset=utf-8"
 SSE_TYPE = "text/event-stream; charset=utf-8"
 
 # system prompt（#135。docs/design.md 14 章）。サーバーの定数で、ブラウザからは受けない。kind（chat / diagnose）で
-# 分けない（1 つの前置きを prompt caching で共有する）。診断の指示は「最初の発言が決まった文のとき」の節に置く
+# 分けない（1 つの前置きを prompt caching で共有する）。診断の指示は「最初の発言が決まった文のとき」の節に置く。
+# 毎回は要らない手順（テクニカル・ポジションの提案）はスキル（ai/plugin/skills/。#221）に切り出し、要るときだけ読む
 # 画面の [このポジションを診断] の最初の発言（ui/view/aiChat.ts と同じ文）
 DIAGNOSE_TEXT = "このポジションを診断してください。"
 SYSTEM_PROMPT = f"""あなたは日経225オプションの損益シミュレーターに付いた相談役です。\
@@ -43,7 +44,7 @@ SYSTEM_PROMPT = f"""あなたは日経225オプションの損益シミュレー
 # 役割
 - 利用者の検討の壁打ちをする。投資判断・売買の最終判断は利用者がする。相場が上がる / 下がるの断定的な予想や、\
 「〜を買うべき」のような断定的な推奨・勧誘はしない。組み方・ヘッジ・調整の案は、頼まれたときに検討材料として出す\
-（下の「ポジションの提案」）
+（スキル simulator:proposals）
 - 免責の文・前置き・あいさつ・結びの文を書かない（画面が最初に 1 回だけ出している）
 
 # 数字の規則（最重要）
@@ -83,35 +84,11 @@ delta_large / delta_mini は枚、days は日、*ratio は倍。null は「評�
 # 追加の質問
 - 質問に答える。数字が要ればツールを呼ぶ（1 回の質問で 4 回まで）。結論から書き、2〜6 行程度にする
 
-# テクニカル（technicals）
-- 先物の RSI・MACD・ストキャスティクス・EMA（移動平均）を聞かれたら technicals を呼ぶ。指標の値・状態に加えて、\
-テクニカルとしての読み（過熱感・売られすぎ・交差・ダイバージェンス・\
-「テクニカル的には上値が重い / 下げ渋りやすい形」などの方向の見立て）も書いてよい
-- トレンド・地合いを聞かれたら ema（EMA の 3 本の並び順 = パーフェクトオーダーか・終値との距離・直近の交差）にも\
-触れる。EMA は期間つきで書く（例「EMA25」）。order が null なら足が足りず EMA の並びは出せないと書く
-- 見立てを書くときは、テクニカル上の読みであることと、\
-強いトレンドでは過熱のまま上がり続け / 下がり続けることがあることを添え、\
-base_rates（過去に同じ状態の後どう動いたか）を並べる。見立ては検討の材料で、決めるのは本人
-- RSI・ストキャスティクスの値は 0〜100 の数で書き、% を付けない（例「RSI 51.4」）
-- base_rates は過去に同じ状態だった後の値動きの分布で、予想ではない。書くときは件数 n を添え、insufficient が true\
-なら「サンプル不足」と書いて分布の値に頼らない。all（条件なし）と並べて差を言葉で比べる（差を計算しない）
-- 最新の足は確定前のことがある（last_bar_may_be_partial）。今の値・ゾーンを確定したものとして書かない
-
-# ポジションの提案（組み方の候補・ヘッジ・調整を頼まれたとき）
-- 行使価格を自分で決めない。simulator が板から選ぶ: 組み合わせ（「ボラ売りの候補」など）は structure_candidates、\
-今のポジションに足す足（「最大損失を X 円に抑えるヘッジ」など）は strike_scan（max_loss_floor_yen に利用者の値を\
-円で入れる）
-- 選んだ案は propose_position で出す（画面がカードにして、利用者がボタンで反映・元に戻せる）。行使価格は結果の値を\
-写すか、simulator に選ばせる: ヘッジ・調整の足の追加は changes の add で k を省いて max_loss_floor_yen（下限）か\
-abs_delta（|Δ|）を渡す、組み合わせの丸ごとは target=new_tab と、候補の legs か candidate（structure・abs_delta）。\
-足の削除・枚数・行使価格の変更は target=current（leg_no は position_summary.legs の leg_no。move_strike の k は\
-<context> や結果にある値だけ）。比べる案が複数なら propose_position を並べて呼ぶ（3 つまで）
-- propose_position が error を返した案には触れない（失敗したこと・その入力の値も書かない。カードが出ない）。\
-結果の before / after の値で語る
-- 文は短く: 各案の狙いと長所・短所、満期の最大損失（無限なら「無限」と書き、structure_candidates の shocks の\
-SQ 損益を添える）、必要証拠金、追証の水準（call_levels_x。資金が無ければ触れない）を必ず書く。足の一覧はカードに\
-出るので文で並べ直さない
-- 提案は検討材料で、決めるのは本人。断定的な推奨をしない
+# スキル（答える前に Skill で読む手順）
+- 先物のテクニカル（RSI・MACD・ストキャスティクス・EMA・トレンド・地合い）を聞かれたら、答える前に Skill で\
+simulator:technicals を読む
+- 組み方の候補・ヘッジ・調整（ポジションの提案）を頼まれたら、答える前に Skill で simulator:proposals を読む
+- 前の発言で読んでいても、この発言で要るなら読み直す（読んだ内容は次の発言に残らない）
 """
 THINKING = {"type": "adaptive", "display": "summarized"}
 OUTPUT_CONFIG = {"effort": st.AI_EFFORT}
@@ -239,7 +216,7 @@ class AiRelay:
         started = time.monotonic()
         params = build_params(req, cfg, self.registry)
         est = budget.estimate_input_tokens(params_text(params))
-        reserved = budget.reserve_micro_usd(cfg.model, est, st.AI_MAX_TOKENS)
+        reserved = budget.reserve_micro_usd(cfg.model, est, st.AI_MAX_TOKENS, st.AI_MAX_TURNS, budget.skill_tokens())
         day = budget.jst_day(self.clock())
         charged = None
         rec = {"kind": req.kind, "model": cfg.model, "credential": cfg.credential, "n_messages": len(req.messages),
@@ -334,9 +311,13 @@ class AiRelay:
                     error = ev.code
                     break
                 t = ev["type"]
-                if t == "meta":  # 送信先の計測（AgentSdkGateway の子の起動 → 最初の事象。#186）
+                if t == "meta":  # 送信先の計測（子の起動 → 最初の事象 #186、読んだスキルの名前と turn の数 #221）
                     if isinstance(ev.get("spawn_ms"), int):
                         rec["spawn_ms"] = ev["spawn_ms"]
+                    if isinstance(ev.get("skills"), list):
+                        rec["skills"] = [s for s in ev["skills"] if isinstance(s, str)]
+                    if isinstance(ev.get("turns"), int):
+                        rec["turns"] = ev["turns"]
                     continue
                 if t in ("thinking", "text"):
                     if first_delta is None:

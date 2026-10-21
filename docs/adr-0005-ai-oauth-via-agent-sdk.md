@@ -1,6 +1,6 @@
 # ADR-0005: `AI_CREDENTIAL=oauth_token` は Claude Agent SDK（同梱の CLI）を送信路にする
 
-- 状態: 採択（2026-10-19）
+- 状態: 採択（2026-10-19）。**一部改訂: [ADR-0006](adr-0006-ai-agent-sdk-only-and-skills.md)（#221、2026-10-21）** = `api_key`・`wif` も同じ送信路に一本化（`anthropic` SDK と `AnthropicGateway` を消した）、`tools=["Skill"]`・`skills`・`plugins` でスキルを読む、`max_turns=1` → `AI_MAX_TURNS`（3）、子の資格情報は CLI が読む変数を全部空で上書きして選んだ種類だけ。下の本文は #186 の時点の記録
 - 日付: 2026-10-19
 - 関連: #186・#133・#134・#135・#184・EPIC #141、[ADR-0001](adr-0001-ai-credentials-secret-manager.md)（追補 #186）、`docs/design.md` 13.1 K15・13.4「AI の中継」・14 章・付録 B、`docs/ai-advisor.md` 論点 2・7
 - 版: `claude-agent-sdk==0.2.160`（`uv.lock` で固定。`exclude-newer = 2026-09-28` の範囲の最新）、同梱の Claude Code CLI **2.1.283**（`claude_agent_sdk/_cli_version.py`）

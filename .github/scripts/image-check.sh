@@ -21,10 +21,21 @@ fail() { echo "NG: $*" >&2; exit 1; }
 # 1. gunicorn と同じ simulator_api.app:app を作れること（設定の検証。GCP_PROJECT はダミー。BigQuery のクライアントは遅延生成）
 docker run --rm -e GCP_PROJECT=example-project "$img" python -c 'from simulator_api.app import app; assert app.name'
 echo "ok: import"
-# AI の中継の SDK（anthropic。#134）を import できること（AI は無効のまま。Anthropic には触れない）
-docker run --rm "$img" python -c 'import anthropic; print(anthropic.__version__)'
-echo "ok: import anthropic"
-# AI_CREDENTIAL=oauth_token の送信路（claude-agent-sdk。#186）: import でき、同梱の CLI が非 root・ネットワークなしで
+# AI の中継の送信路は claude-agent-sdk だけ（#221・ADR-0006）: anthropic（Messages API の直接呼び出しの SDK）が入っていない
+docker run --rm "$img" python -c 'import importlib.util, sys; sys.exit(importlib.util.find_spec("anthropic") is not None)' \
+  || fail "イメージに anthropic が入っている（#221 で外した依存）"
+echo "ok: anthropic なし"
+# AI のスキル（#221）: パッケージの中のプラグイン（.claude-plugin/plugin.json と一覧の各 SKILL.md）がイメージにあり、
+# 実行のユーザー（非 root）が読めること
+docker run --rm "$img" python -c '
+from simulator_api.ai import skills
+import json
+assert json.loads((skills.PLUGIN_DIR / ".claude-plugin" / "plugin.json").read_text())["name"] == skills.PLUGIN_NAME
+for n in skills.NAMES:
+    assert skills.skill_path(n).read_text(encoding="utf-8").startswith("---\n"), n
+print(len(skills.NAMES))' > "$work/skills.n" || fail "イメージに AI のスキルのファイルが無い・読めない"
+echo "ok: AI のスキル $(cat "$work/skills.n") 本（${img} の simulator_api/ai/plugin）"
+# 送信路（claude-agent-sdk。#186・#221）: import でき、同梱の CLI が非 root・ネットワークなしで
 # --version に答え、その版が SDK の同梱の版（_cli_version）と同じこと（Anthropic には触れない）
 want=$(docker run --rm "$img" python -c 'from claude_agent_sdk._cli_version import __cli_version__; print(__cli_version__)')
 got=$(docker run --rm --network none -e CLAUDE_CONFIG_DIR=/tmp/claude-version-check --entrypoint sh "$img" -c \

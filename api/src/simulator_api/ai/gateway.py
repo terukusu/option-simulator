@@ -1,25 +1,21 @@
-"""Anthropic の送信先。SDK の薄い包み（AnthropicGateway）と偽の送信先（FakeGateway: AI_CREDENTIAL=fake・テスト）。
+"""AI の送信先の共通の部品と偽の送信先（FakeGateway: AI_CREDENTIAL=fake・テスト）。本物の送信先は
+agent_sdk.AgentSdkGateway（Claude Agent SDK = 同梱の CLI。oauth_token・api_key・wif のすべて。#221・ADR-0006）。
 
 stream(params, cancel) は次の事象（dict）を順に返す:
   {"type": "thinking", "text"} / {"type": "text", "text"} /
   {"type": "tool_use", "id", "name", "input"}（block の終わり）/
   {"type": "final", "content": [block…], "usage": {…}, "stop_reason"}（最後に 1 回）
+  （送信先の計測 {"type": "meta", …} を挟んでよい。中継はログに載せるだけ）
 失敗は UpstreamError(code, status, error_type)。code は列挙、status は HTTP の状態、error_type は例外の型名だけ
-（SDK の例外の本文は要求・応答の一部や鍵の断片を含みうるので持ち出さない）。
+（例外の本文は要求・応答の一部や鍵の断片を含みうるので持ち出さない）。
 
-資格情報は中継が選んだ種類の 1 つだけを明示で渡す（SDK は明示の引数があると環境変数を読まない。キーとトークンが
-両方あると X-Api-Key と Authorization の両方を送る）。api_key → Anthropic(api_key=…)、
-oauth_token → Anthropic(auth_token=…, anthropic-beta)（中継の既定の組み立てでは使わない。oauth_token の送信先は
-agent_sdk.AgentSdkGateway = Claude Agent SDK 経由。#186）、
-wif → Anthropic(credentials=WorkloadIdentityCredentials(…))（#184。ID トークンはメタデータサーバーから。
-交換したトークンは SDK の TokenCache が持ち、期限の前に交換し直す。Bearer と anthropic-beta は SDK が付ける）。
-max_retries=0（途中まで流した後の再試行で二重に流さない・締め切りを読める）。
+ここに残すもの: UpstreamError、SDK のログの置き換え（quiet_sdk_logs）、WIF の Google の ID トークン
+（metadata_identity_token。中継が要求ごとに取り、CLI に渡す）、FakeGateway。
 """
 
 import logging
 import threading
 import urllib.request
-from collections.abc import Callable, Iterator
 
 from .. import settings as st
 
@@ -33,9 +29,8 @@ class UpstreamError(Exception):
 
 
 class _SdkLogBridge(logging.Handler):
-    """SDK（logger "anthropic"・"claude_agent_sdk" 以下）の WARNING 以上を、本文なしの構造化ログ ai_sdk_warning に
-    置き換える。
-    SDK の文言は交換の失敗の本文（上流のメッセージ。assertion を含みうる）を含むので出さない。
+    """SDK（logger "claude_agent_sdk" 以下）の WARNING 以上を、本文なしの構造化ログ ai_sdk_warning に置き換える。
+    SDK の文言は上流のメッセージ・CLI の出力の一部を含みうるので出さない。
     出すのは logger の名前・レベル・引数の中の例外の型名と状態だけ"""
 
     def emit(self, record: logging.LogRecord) -> None:
@@ -57,10 +52,8 @@ class _SdkLogBridge(logging.Handler):
 _sdk_log_lock = threading.Lock()
 
 
-def quiet_sdk_logs(name: str = "anthropic") -> None:
-    """logger name（"anthropic"・"claude_agent_sdk"）を親（root・Python の lastResort = stderr）に流さず、
-    _SdkLogBridge だけに渡す（何度呼んでもよい）。
-    例: TokenCache の期限前の交換が失敗すると、SDK は WARNING に交換の失敗の本文を書く"""
+def quiet_sdk_logs(name: str = "claude_agent_sdk") -> None:
+    """logger name を親（root・Python の lastResort = stderr）に流さず、_SdkLogBridge だけに渡す（何度呼んでもよい）"""
     sdk = logging.getLogger(name)
     with _sdk_log_lock:
         if not any(isinstance(h, _SdkLogBridge) for h in sdk.handlers):
@@ -93,126 +86,6 @@ def metadata_identity_token(opener=None) -> str:
     if len(raw) > st.AI_IDENTITY_TOKEN_MAX_BYTES or token.count(".") != 2 or " " in token:
         raise IdentityTokenError("not_jwt")
     return token
-
-
-def classify(e: Exception) -> UpstreamError:
-    """SDK の例外 → UpstreamError（型と状態だけ）"""
-    import anthropic
-
-    name = type(e).__name__
-    status = getattr(e, "status_code", None)
-    if isinstance(e, anthropic.WorkloadIdentityError):  # WIF の交換（POST /v1/oauth/token）の失敗。401 はルールの不一致
-        if status in (401, 403):
-            return UpstreamError("upstream_auth", status, name)
-        return UpstreamError("upstream_unavailable", status if isinstance(status, int) else None, name)
-    if isinstance(e, anthropic.APIConnectionError):  # APITimeoutError を含む
-        if isinstance(e.__cause__, IdentityTokenError):  # SDK は ID トークンの関数の例外を接続の失敗に包む
-            return UpstreamError("upstream_auth", None, "IdentityTokenError")
-        return UpstreamError("upstream_unavailable", None, name)
-    if isinstance(e, (anthropic.AuthenticationError, anthropic.PermissionDeniedError)):
-        return UpstreamError("upstream_auth", status, name)
-    if isinstance(e, anthropic.RateLimitError):
-        return UpstreamError("upstream_rate_limited", status, name)
-    if isinstance(e, anthropic.OverloadedError):
-        return UpstreamError("upstream_overloaded", status, name)
-    if isinstance(e, anthropic.APIStatusError) and status is not None and 400 <= status < 500:
-        return UpstreamError("upstream_bad_request", status, name)
-    return UpstreamError("upstream_unavailable", status if isinstance(status, int) else None, name)
-
-
-def client_kwargs(credential: str, secret: str | None, wif: st.WifIds | None = None,
-                  identity_token: Callable[[], str] | None = None, exchange_http_client=None) -> dict:
-    """SDK のコンストラクタの引数（選んだ種類の 1 つだけ）。exchange_http_client は WIF の交換の送信先（テスト用。
-    省略時は中継のタイムアウトの httpx2.Client）"""
-    import anthropic
-    import httpx2
-
-    kw: dict = {"max_retries": 0,
-                "timeout": anthropic.Timeout(st.AI_READ_TIMEOUT_SECONDS, connect=st.AI_CONNECT_TIMEOUT_SECONDS)}
-    if credential == "api_key":
-        kw["api_key"] = secret
-    elif credential == "oauth_token":
-        kw["auth_token"] = secret
-        kw["default_headers"] = {"anthropic-beta": st.AI_OAUTH_BETA}
-    elif credential == "wif":
-        if wif is None:
-            raise ValueError("wif")
-        opt = {k: v for k, v in (("service_account_id", wif.service_account_id),
-                                 ("workspace_id", wif.workspace_id)) if v is not None}
-        # 交換の送信先。SDK の既定（30 秒）では 401 の交換し直しを含めて締め切りを越えうるので短くする
-        opt["http_client"] = exchange_http_client or httpx2.Client(
-            timeout=httpx2.Timeout(st.AI_TOKEN_EXCHANGE_TIMEOUT_SECONDS, connect=st.AI_CONNECT_TIMEOUT_SECONDS))
-        kw["credentials"] = anthropic.WorkloadIdentityCredentials(
-            identity_token_provider=identity_token or metadata_identity_token,
-            federation_rule_id=wif.federation_rule_id, organization_id=wif.organization_id, **opt)
-    else:
-        raise ValueError("credential")
-    return kw
-
-
-class AnthropicGateway:
-    def __init__(self, credential: str, secret: str | None, factory=None, wif: st.WifIds | None = None,
-                 identity_token: Callable[[], str] | None = None, exchange_http_client=None):
-        self._credential = credential
-        self._secret = secret
-        self._wif = wif
-        self._identity_token = identity_token  # テスト用: 偽の ID トークン（省略時はメタデータサーバー）
-        self._exchange_http_client = exchange_http_client  # テスト用: WIF の交換の送信先
-        self._factory = factory  # テスト用: kwargs -> client（省略時は anthropic.Anthropic）
-        self._client = None
-        self._lock = threading.Lock()
-        quiet_sdk_logs()
-
-    def __repr__(self) -> str:  # 鍵・WIF の ID を repr に出さない
-        return f"AnthropicGateway(credential={self._credential!r})"
-
-    def client(self):
-        with self._lock:
-            if self._client is None:
-                factory = self._factory
-                if factory is None:
-                    import anthropic
-
-                    factory = anthropic.Anthropic
-                self._client = factory(**client_kwargs(self._credential, self._secret, self._wif,
-                                                       self._identity_token, self._exchange_http_client))
-            return self._client
-
-    def warm(self) -> None:
-        """import（pydantic など重い）とクライアントの組み立てを先に済ませる。失敗は最初の要求で出る"""
-        try:
-            self.client()
-        except Exception:
-            pass
-
-    def start_warm(self) -> threading.Thread:
-        thread = threading.Thread(target=self.warm, name="ai-warm", daemon=True)
-        thread.start()
-        return thread
-
-    def stream(self, params: dict, cancel: threading.Event) -> Iterator[dict]:
-        try:
-            client = self.client()
-            with client.messages.stream(**params) as s:
-                for ev in s:
-                    if cancel.is_set():
-                        return
-                    t = ev.type
-                    if t == "thinking":
-                        yield {"type": "thinking", "text": ev.thinking}
-                    elif t == "text":
-                        yield {"type": "text", "text": ev.text}
-                    elif t == "content_block_stop" and getattr(ev.content_block, "type", None) == "tool_use":
-                        b = ev.content_block
-                        yield {"type": "tool_use", "id": b.id, "name": b.name, "input": b.input}
-                final = s.get_final_message()
-            usage = final.usage.model_dump(mode="json", exclude_none=True) if final.usage is not None else {}
-            yield {"type": "final", "content": [b.model_dump(mode="json", exclude_none=True) for b in final.content],
-                   "usage": usage, "stop_reason": final.stop_reason}
-        except UpstreamError:
-            raise
-        except Exception as e:
-            raise classify(e) from None
 
 
 class FakeGateway:
