@@ -4970,6 +4970,71 @@ async function marginFull360() {
     res.length === 2 && res.every((r) => r.ok),
     res.map((r) => r.detail).join('・'),
   );
+  // #136 レビュー指摘 5: 全文の末尾の [AI に聞く] も .panel-body の中で押せる。全文を 12 行（FULL_MAX_ROWS）にしても
+  // 吹き出しが .panel-body に収まり（全文の中だけが縦にスクロール）、ボタンが見えて押せる。11 行以下は全文がスクロールしない
+  const askIn = async (rows12) => {
+    const sel = `${M} .tile[data-tile="margin"] .tile-btn`;
+    await page.click(sel);
+    await page.waitForTimeout(120);
+    const r = await page.evaluate(
+      ({ sel, rows12 }) => {
+        const wrap = document.querySelector(sel)?.closest('.pop-wrap');
+        const pop = wrap?.querySelector('.popover');
+        const full = pop?.querySelector('.full');
+        const ask = pop?.querySelector('button[data-ai-ask]');
+        const host = wrap?.closest('.panel-body');
+        if (!pop || !full || !ask || !host) return null;
+        if (rows12) {
+          // 足りない行を同じ形の span で足して 12 行にする（描き直しの前に測る）
+          const n = full.querySelectorAll(':scope > span').length / 2;
+          for (let i = n; i < 12; i++) {
+            const k = document.createElement('span');
+            k.className = 'fk';
+            k.textContent = '検査の行';
+            const v = document.createElement('span');
+            v.className = 'fv';
+            v.textContent = '−1,234 千円';
+            full.append(k, v);
+          }
+        }
+        const rows = full.querySelectorAll(':scope > span').length / 2;
+        const within = (q, h) =>
+          q.top >= h.top - 0.5 &&
+          q.bottom <= h.bottom + 0.5 &&
+          q.left >= h.left - 0.5 &&
+          q.right <= h.right + 0.5;
+        const p = pop.getBoundingClientRect();
+        const h = host.getBoundingClientRect();
+        const a = ask.getBoundingClientRect();
+        const cx = (a.left + a.right) / 2;
+        const cy = (a.top + a.bottom) / 2;
+        return {
+          rows,
+          popIn: within(p, h),
+          askIn: within(a, h),
+          hit: document.elementFromPoint(cx, cy)?.closest('button') === ask,
+          scrolls: full.scrollHeight > full.clientHeight + 1,
+          spare: Math.round(h.bottom - p.bottom),
+        };
+      },
+      { sel, rows12 },
+    );
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(80);
+    return r;
+  };
+  const r11 = await askIn(false);
+  check(
+    `#136 ${tag} 必要証拠金の全文（${r11?.rows ?? '—'} 行）と [AI に聞く] が .panel-body の中で押せる・全文はスクロールしない`,
+    !!r11 && r11.popIn && r11.askIn && r11.hit && !r11.scrolls,
+    r11 ? `下の余り ${r11.spare}px` : '無い',
+  );
+  const r12 = await askIn(true);
+  check(
+    `#136 ${tag} 全文 12 行でも吹き出しが .panel-body の中・[AI に聞く] が押せる（全文の中だけスクロール）`,
+    !!r12 && r12.rows === 12 && r12.popIn && r12.askIn && r12.hit && r12.scrolls,
+    r12 ? `${r12.rows} 行・下の余り ${r12.spare}px` : '無い',
+  );
   await ctx.close();
 }
 
@@ -10455,21 +10520,19 @@ async function aiAskSweep() {
     try {
       await page.goto(pageUrl('next'));
       await waitReady(page, 'next');
-      // 状態を一度読ませる（開いて閉じる）。読んでいない間は押せる扱い = 中継の 503 が返答の行に出る
-      await openAi(page, w);
-      await page.waitForFunction(
-        () =>
-          (document.querySelector('section.ai [data-ai="reason"]')?.textContent ?? '').includes(
-            '無効',
-          ),
-        undefined,
-        { timeout: 5000 },
-      );
+      // AI のパネルを一度も開かずに押す = 状態を読み終わってから判定する（#136 レビュー指摘 1。送らない）
       await showMetrics(page, w);
       await page.click('section.metrics .tile[data-tile="maxLoss"] .tile-btn');
       await page.waitForTimeout(150);
       await page.click('section.metrics button[data-ai-ask="tile.maxLoss"]');
       await page.waitForSelector('section.ai .ai-foot', { state: 'visible', timeout: 5000 });
+      await page
+        .waitForFunction(
+          () => (document.querySelector('section.ai .ai-input textarea')?.value ?? '') !== '',
+          undefined,
+          { timeout: 5000 },
+        )
+        .catch(() => {});
       await page.waitForTimeout(200);
       const r = await page.evaluate(() => ({
         value: document.querySelector('section.ai .ai-input textarea')?.value ?? '',

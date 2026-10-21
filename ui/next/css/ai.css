@@ -289,19 +289,26 @@ section.ai .ai-body {
 
 /*
  * [AI に聞く]（#136。ui/next/parts/AskAi.tsx）: 全文の吹き出しの末尾（区切りの線の下・右寄せ）、表の見出しの行・IV 推移の
- * ツールの行のボタン。吹き出しの中は低いボタン（#161 の最も長い全文 = 必要証拠金 11 行 + ボタンが 360×780 の「指標」peek の
- * .panel-body に入る）
+ * ツールの行のボタン。吹き出しの中は低いボタン。タイルの全文は 11 行を超えたら全文の中だけを縦にスクロールし、ボタンは
+ * 常に吹き出しの下に見える（360×780 の「指標」peek の .panel-body 273px に、全文 12 行でも吹き出しが収まる。#161・
+ * レビュー指摘 5）
  */
 .pop-ask {
   display: flex;
   justify-content: flex-end;
-  margin-top: 6px;
-  padding-top: 6px;
+  margin-top: 4px;
+  padding-top: 4px;
   border-top: 1px solid var(--line);
 }
 
 .pop-ask .btn.sm {
   height: 22px;
+}
+
+.tile .popover .full {
+  max-height: calc(11lh + 20px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .ai-ask {

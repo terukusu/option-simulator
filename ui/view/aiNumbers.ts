@@ -184,8 +184,18 @@ const TIME_RE = /\d{1,2}:\d{2}/g;
 const NUM_RE = /(?<![0-9A-Za-z_.,])([+\-−–▲△±×]\s?)?(\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?)/g;
 const PER_UNIT_RE = /^\s?(あたり|当たり|につき)/;
 const NUMBERING_BEFORE = /(弱点|第|No\.?)\s?$/;
-/** 文書の節の番号（#136。「マニュアル 8.1「タイル」」「設計書 5.6」「マニュアルの 10 章」= 根拠の節の示し方。値ではない） */
-const SECTION_BEFORE = /(マニュアル|設計書)\s*(の\s*)?$/;
+/**
+ * 文書の節の番号（#136。「マニュアル 8.1「タイル」」「設計書 5.6」「マニュアルの 10 章」= 根拠の節の示し方。値ではない）。
+ * 並べた 2 つ目以降（「マニュアル 8.1「タイル」・8.3「テール表」」「8.1、8.3」「8 章と 10 章」）も同じ（レビュー指摘 4）
+ */
+const SECTION_BEFORE =
+  /(マニュアル|設計書)\s*(の\s*)?(\d+(\.\d+)*\s*(章)?\s*(「[^」\n]*」)?\s*[・、,/と]\s*)*$/;
+/**
+ * Γ の単位の「100 円」（#136 の評価。「Γ / 100 円」「原資産が 100 円動いたとき」= 文書の単位の定義。値ではない）。
+ * 符号の無い 100 ちょうどで、直後が「円動く / 円上がる / 円下がる / 円の変化」のときだけ（値の取り違えを広く見逃さない。
+ * 「/ 100 円」は PER_BEFORE で数えない）
+ */
+const GAMMA_UNIT_AFTER = /^\s?円\s*(が|だけ)?\s*(動|上が|下が|の変化|変化)/;
 /** 「Γ（… / 原資産 100 円）」のような単位の言い方（直前が / ） */
 const PER_BEFORE = /\/\s*(原資産\s*)?$/;
 /** 分位の名前（#200 technicals の p10・p90）: 「下位 10%」「上位 10%」「p90」と「10〜90% の幅」の 90% は値でなく名前 */
@@ -272,6 +282,8 @@ export function checkNumbers(text: string, sources: readonly unknown[]): NumberC
       const before = n.slice(lineStart, start);
       if (NUMBERING_BEFORE.test(before)) reason = 'number';
       else if (SECTION_BEFORE.test(before)) reason = 'number';
+      else if (numText === '100' && rawSign === '' && GAMMA_UNIT_AFTER.test(rest))
+        reason = 'per_unit';
       else if (PER_BEFORE.test(before)) reason = 'per_unit';
       else if (QUANTILE_BEFORE.test(before)) reason = 'number';
       else if (QUANTILE_TOP.has(numText) && QUANTILE_RANGE.test(before)) reason = 'number';

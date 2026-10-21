@@ -180,6 +180,36 @@ describe('#136 文書の節の番号', () => {
     // 文書の名前の無い数は今どおり照合する
     expect(checkNumbers('8.1 の値', []).unmatched).toBe(1);
   });
+
+  it('レビュー指摘 4: 並べた 2 つ目以降の節の番号も数えない（「・」「、」「と」）', () => {
+    const r = checkNumbers(
+      'マニュアル 8.1「タイル」・8.3「テール表」と設計書 5.6、5.10。マニュアル 8 章と 10 章',
+      [],
+    );
+    expect(r.unmatched).toBe(0);
+    expect(r.tokens.every((t) => t.status === 'ignored' && t.reason === 'number')).toBe(true);
+    // 節の並びの後の値は今どおり照合する（「マニュアル 8.1 によると 1,235 千円」）
+    const v = checkNumbers('マニュアル 8.1 によると損失は 1,235 千円', [{ pnl_yen: -1_234_567 }]);
+    expect(v.tokens.map((t) => t.status)).toEqual(['ignored', 'matched']);
+    expect(checkNumbers('マニュアル 8.1 によると損失は 999 千円', []).unmatched).toBe(1);
+  });
+
+  it('Γ の単位の 100 円（「/ 100 円」「/100円」「100 円動いた」）は数えない。ほかの 100 円は照合する', () => {
+    const src = [{ gamma_per_100: 0.012 }];
+    for (const t of [
+      'Γ は +0.012 / 100 円です',
+      'Γ は +0.012/100円',
+      '原資産が 100 円動いたときの Δ の変化',
+      '原資産が 100 円上がると',
+      '100 円の変化あたり',
+    ]) {
+      expect(checkNumbers(t, src).unmatched, t).toBe(0);
+    }
+    // 符号つき・100 以外・動きの言葉が無い 100 円は数える（本物の値の取り違えは見逃さない）
+    expect(checkNumbers('損益は −100 円動いた', []).unmatched).toBe(1);
+    expect(checkNumbers('原資産が 200 円動いたとき', []).unmatched).toBe(1);
+    expect(checkNumbers('損益は 100 円です', []).unmatched).toBe(1);
+  });
 });
 
 describe('sectionsOf', () => {

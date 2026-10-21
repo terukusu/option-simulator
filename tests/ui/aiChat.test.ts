@@ -11,6 +11,7 @@ import {
   type AiGate,
   aiChatReduce,
   aiErrorText,
+  applyDraft,
   askPlan,
   atLimit,
   chatItems,
@@ -18,6 +19,7 @@ import {
   decodeAiChat,
   diagnoseBlocked,
   encodeAiChat,
+  footReason,
   INITIAL_AI_CHAT,
   MAX_MESSAGES,
   MAX_TOOL_ROUNDS,
@@ -387,6 +389,38 @@ describe('#136 AC2 [AI に聞く]（kind ask と場所の topic）', () => {
     expect(askPlan(INITIAL_AI_CHAT, { ...GATE, status: { error: 'network' } })).toMatchObject({
       draft: expect.stringContaining('読めません'),
     });
+  });
+
+  it('レビュー指摘 1: 状態をまだ読んでいなければ wait（送らない）。ほかの理由があればそれで入力欄へ', () => {
+    expect(askPlan(INITIAL_AI_CHAT, { ...GATE, status: null })).toBe('wait');
+    expect(askPlan(INITIAL_AI_CHAT, { ...GATE, status: null, hasChain: false })).toEqual({
+      draft: '板がありません（板を読んでから送ってください）',
+    });
+    const sending = run(INITIAL_AI_CHAT, { type: 'begin', kind: 'chat', text: 'x', now: 1 });
+    expect(askPlan(sending, { ...GATE, status: null })).toEqual({ draft: '送信中です' });
+    // 読み終わった後の判定（無効・上限は送らない）
+    expect(askPlan(INITIAL_AI_CHAT, { ...GATE, status: { ...STATUS, enabled: false } })).not.toBe(
+      'send',
+    );
+  });
+
+  it('レビュー指摘 2: 書きかけの文は上書きしない（空・前に入れた質問のまま・同じ文なら入れる）', () => {
+    expect(applyDraft('', null, 'Q1')).toBe('set');
+    expect(applyDraft('  \n', null, 'Q1')).toBe('set');
+    expect(applyDraft('Q1', 'Q1', 'Q2')).toBe('set');
+    expect(applyDraft('Q2', null, 'Q2')).toBe('set');
+    expect(applyDraft('打ちかけ', null, 'Q1')).toBe('keep');
+    expect(applyDraft('Q1 に足した', 'Q1', 'Q2')).toBe('keep');
+  });
+
+  it('レビュー指摘 3: 足元の理由は送信の理由（送信中も）、無ければ診断だけの理由', () => {
+    expect(footReason(INITIAL_AI_CHAT, GATE)).toBeNull();
+    const sending = run(INITIAL_AI_CHAT, { type: 'begin', kind: 'chat', text: 'x', now: 1 });
+    expect(footReason(sending, GATE)).toBe('送信中です');
+    expect(footReason(INITIAL_AI_CHAT, { ...GATE, hasChain: false })).toBe(
+      '板がありません（板を読んでから送ってください）',
+    );
+    expect(footReason(INITIAL_AI_CHAT, { ...GATE, legCount: 0 })).toContain('足がありません');
   });
 });
 

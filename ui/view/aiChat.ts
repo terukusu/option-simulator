@@ -373,14 +373,54 @@ function commonBlocked(s: AiChatState, g: AiGate): string | null {
   return null;
 }
 
+/** 状態を読めたとして判定するための値（askPlan の「待つ」の判定だけに使う） */
+const STATUS_READY: AiStatus = {
+  schema_version: 1,
+  enabled: true,
+  model: null,
+  credential: null,
+  counted: false,
+  limit_usd: null,
+  remaining_usd: null,
+  resets_at: null,
+};
+
 /**
  * [AI に聞く]（#136）を押したときの扱い: 送れるなら send、送れない理由（sendBlocked）があれば送らずに入力欄に入れる
- * （draft。理由は足元の既存の行に出る）。状態をまだ読んでいなければ押せる扱い（呼び出し側が UNKNOWN_STATUS を渡す。
- * 中継の 503 / 429 は返答の行に出る = パレットの診断と同じ）
+ * （draft。理由は足元の行に出る）。AI の状態をまだ読んでいない（status = null）ときは、ほかに理由が無ければ wait
+ * （読み終わってからもう一度判定する = 無効・今日の上限なら送らない。#136 レビュー指摘 1）
  */
-export function askPlan(s: AiChatState, g: AiGate): 'send' | { draft: string } {
+export function askPlan(s: AiChatState, g: AiGate): 'send' | 'wait' | { draft: string } {
+  if (g.status === null) {
+    const other = sendBlocked(s, { ...g, status: STATUS_READY });
+    return other === null ? 'wait' : { draft: other };
+  }
   const reason = sendBlocked(s, g);
   return reason === null ? 'send' : { draft: reason };
+}
+
+/**
+ * 送れなかった [AI に聞く] の質問を入力欄に入れるか（#136 レビュー指摘 2）: 入力欄が空か、前に入れた質問のまま
+ * （利用者が書き換えていない）なら入れる。書きかけの文があれば入れずに残す（keep。上書きで書きかけを消さない）
+ */
+export function applyDraft(
+  current: string,
+  prevDraft: string | null,
+  next: string,
+): 'set' | 'keep' {
+  return current.trim() === '' || current === prevDraft || current === next ? 'set' : 'keep';
+}
+
+/** 書きかけの文を残したときの知らせ（足元の行） */
+export const DRAFT_KEPT_TEXT =
+  '入力欄に書きかけの文があるので、[AI に聞く] の質問は入れていません。消してからもう一度押してください';
+
+/**
+ * 足元の理由の行（#136 レビュー指摘 3）: 送れない理由（sendBlocked。送信中も出す）、無ければ [このポジションを診断]
+ * だけが押せない理由（足が無いなど）。どちらも無ければ null
+ */
+export function footReason(s: AiChatState, g: AiGate): string | null {
+  return sendBlocked(s, g) ?? diagnoseBlocked(s, g);
 }
 
 /** 今日の残りの表示（数えない資格情報は「数えない」） */

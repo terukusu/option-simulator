@@ -7,10 +7,13 @@ import type { AiAsk } from '../../view/aiAsk';
 import {
   type AiGate,
   aiErrorText,
+  applyDraft,
   askPlan,
   type ChatItem,
   chatItems,
+  DRAFT_KEPT_TEXT,
   diagnoseBlocked,
+  footReason,
   MAX_USER_TEXT,
   nearLimit,
   numberSources,
@@ -95,13 +98,22 @@ function AiPanelView(p: {
   const gate = { hasChain: p.hasChain, legCount: p.legCount };
   const [draft, setDraft] = useState<AiDraft | null>(null);
   const known = { ...gate, status: chat.status ?? UNKNOWN_STATUS };
+  // AI の状態を読み終わるまで待っている [AI に聞く]（#136 レビュー指摘 1。読めたら判定し直す）
+  const pending = useRef<AiAsk | null>(null);
+  const decide = (a: AiAsk, plan: ReturnType<typeof askPlan>) => {
+    if (plan === 'send') chat.ask(a.text, a.topic);
+    else if (plan === 'wait') pending.current = a;
+    else setDraft((d) => ({ text: a.text, topic: a.topic, n: (d?.n ?? 0) + 1 }));
+  };
+  useEffect(() => {
+    const a = pending.current;
+    if (!a || chat.status === null) return;
+    pending.current = null;
+    decide(a, askPlan(chat.state, { ...gate, status: chat.status }));
+  }, [chat.status]);
   p.apiRef.current = {
     diagnose: chat.diagnose,
-    ask: (a) => {
-      const plan = askPlan(chat.state, known);
-      if (plan === 'send') chat.ask(a.text, a.topic);
-      else setDraft((d) => ({ text: a.text, topic: a.topic, n: (d?.n ?? 0) + 1 }));
-    },
+    ask: (a) => decide(a, askPlan(chat.state, { ...gate, status: chat.status })),
     paletteReason: diagnoseBlocked(chat.state, known),
   };
   return (
@@ -142,15 +154,25 @@ export function AiChat(p: {
   const gate: AiGate = { ...p.gate, status };
   const diagnoseReason = diagnoseBlocked(state, gate);
   const sendReason = sendBlocked(state, gate);
+  const reason = footReason(state, gate);
   const items = useMemo(() => chatItems(state), [state]);
   const sources = useMemo(() => numberSources(state), [state.context, state.messages]);
   const [text, setText] = useState('');
-  // 入力欄に入れた [AI に聞く] の質問（#136）。入れた文のまま送れば ask + topic、書き換えたら chat
+  const textRef = useRef(text);
+  textRef.current = text;
+  // 入力欄に入れた [AI に聞く] の質問（#136）。入れた文のまま送れば ask + topic、書き換えたら chat。
+  // 書きかけの文があれば上書きせずに知らせる（レビュー指摘 2）
   const draftRef = useRef<AiDraft | null>(null);
+  const [kept, setKept] = useState(false);
   const draft = p.draft ?? null;
   useEffect(() => {
     if (!draft) return;
+    if (applyDraft(textRef.current, draftRef.current?.text ?? null, draft.text) === 'keep') {
+      setKept(true);
+      return;
+    }
     draftRef.current = draft;
+    setKept(false);
     setText(draft.text);
   }, [draft]);
   const logRef = useRef<HTMLDivElement>(null);
@@ -176,6 +198,7 @@ export function AiChat(p: {
     if (d && text === d.text) chat.ask(text, d.topic);
     else chat.send(text);
     draftRef.current = null;
+    setKept(false);
     setText('');
     stick.current = true;
   };
@@ -237,9 +260,14 @@ export function AiChat(p: {
       </div>
       <div class="ai-foot">
         {turn && <Progress phase={turn.phase} startedAt={turn.startedAt} onAbort={chat.abort} />}
-        {!turn && diagnoseReason !== null && (
+        {reason !== null && (
           <p class="ai-reason" data-ai="reason">
-            {diagnoseReason}
+            {reason}
+          </p>
+        )}
+        {kept && (
+          <p class="ai-reason" data-ai="kept">
+            {DRAFT_KEPT_TEXT}
           </p>
         )}
         <div class="ai-actions">
@@ -270,7 +298,10 @@ export function AiChat(p: {
             value={text}
             aria-label="AI への質問"
             placeholder="質問（Enter で送信・Shift+Enter で改行）"
-            onInput={(e) => setText(e.currentTarget.value)}
+            onInput={(e) => {
+              setText(e.currentTarget.value);
+              if (e.currentTarget.value.trim() === '') setKept(false);
+            }}
             onKeyDown={(e) => {
               if (e.key !== 'Enter' || e.shiftKey || e.isComposing || e.keyCode === 229) return;
               e.preventDefault();
