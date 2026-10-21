@@ -196,6 +196,12 @@ const SECTION_BEFORE =
  * 「/ 100 円」は PER_BEFORE で数えない）
  */
 const GAMMA_UNIT_AFTER = /^\s?円\s*(が|だけ)?\s*(動|上が|下が|の変化|変化)/;
+/**
+ * 乗数の比（#136 の評価。「ミニ先物換算（ラージの 10 倍）」= ラージ 1,000・ミニ 100 の決まり。値ではない）。
+ * 符号の無い 10 ちょうどで、直前が「ラージ（先物）の」、直後が「倍」のときだけ
+ */
+const MULTIPLIER_BEFORE = /ラージ(先物)?\s*の\s*$/;
+const MULTIPLIER_AFTER = /^\s?倍/;
 /** 「Γ（… / 原資産 100 円）」のような単位の言い方（直前が / ） */
 const PER_BEFORE = /\/\s*(原資産\s*)?$/;
 /** 分位の名前（#200 technicals の p10・p90）: 「下位 10%」「上位 10%」「p90」と「10〜90% の幅」の 90% は値でなく名前 */
@@ -284,6 +290,13 @@ export function checkNumbers(text: string, sources: readonly unknown[]): NumberC
       else if (SECTION_BEFORE.test(before)) reason = 'number';
       else if (numText === '100' && rawSign === '' && GAMMA_UNIT_AFTER.test(rest))
         reason = 'per_unit';
+      else if (
+        numText === '10' &&
+        rawSign === '' &&
+        MULTIPLIER_BEFORE.test(before) &&
+        MULTIPLIER_AFTER.test(rest)
+      )
+        reason = 'number';
       else if (PER_BEFORE.test(before)) reason = 'per_unit';
       else if (QUANTILE_BEFORE.test(before)) reason = 'number';
       else if (QUANTILE_TOP.has(numText) && QUANTILE_RANGE.test(before)) reason = 'number';

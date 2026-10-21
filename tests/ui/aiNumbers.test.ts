@@ -210,6 +210,17 @@ describe('#136 文書の節の番号', () => {
     expect(checkNumbers('原資産が 200 円動いたとき', []).unmatched).toBe(1);
     expect(checkNumbers('損益は 100 円です', []).unmatched).toBe(1);
   });
+
+  it('乗数の比（「ミニ先物換算（ラージの 10 倍）」）は数えない。ほかの 10 倍は照合する', () => {
+    for (const t of [
+      '括弧にミニ先物換算（ラージの 10 倍）を添えます',
+      'ミニはラージ先物の10倍の枚数',
+    ]) {
+      expect(checkNumbers(t, []).unmatched, t).toBe(0);
+    }
+    expect(checkNumbers('損失は 10 倍になります', []).unmatched).toBe(1);
+    expect(checkNumbers('ラージの 20 倍', []).unmatched).toBe(1);
+  });
 });
 
 describe('sectionsOf', () => {
