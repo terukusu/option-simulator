@@ -8,12 +8,12 @@
 // 環境変数（このスクリプトは読まない・出さない）。手順は api/README.md「AI の評価」。
 //
 //   npm run ai:eval                          10 通りの診断 + 追加の質問 2 件 + テクニカルの質問 4 件（#200）+ 提案の質問 3 件（#139）
-//                                            + 文書の質問 7 件（#137）+ [AI に聞く] 5 件（#136）+ IV の統計の質問 3 件（#138・#158）
+//                                            + 文書の質問 14 件（#137・#240）+ [AI に聞く] 5 件（#136）+ IV の統計の質問 3 件（#138・#158）
 //                                            + 定型の質問 7 件（#140）+ 自分の前提つきの質問 2 件（#156）
 //   npm run ai:eval -- --tech-only           テクニカルの質問 4 件だけ（#206 で EMA の質問を足した）
 //   npm run ai:eval -- --iv-only             IV の統計の質問 3 件だけ（#138・#158。iv_stats）
 //   npm run ai:eval -- --propose-only        ポジションの提案の質問 3 件だけ（#139）
-//   npm run ai:eval -- --docs-only           文書（マニュアル・設計書）の質問 7 件だけ（#137）
+//   npm run ai:eval -- --docs-only           文書（マニュアル・設計書）の質問 14 件だけ（#137・#240。計算の前提 10）
 //   npm run ai:eval -- --ask-only            数字・パネルから [AI に聞く] の 5 件だけ（#136。画面と同じ表示モデルから質問を作る）
 //   npm run ai:eval -- --profile-only        自分の前提（設定の欄）つきの質問 2 件だけ（#156）
 //   npm run ai:eval -- --preset-only         定型の質問のチップ 7 件だけ（#140。6 つ + 足 0 本の板の前提。画面と同じ文 = ui/view/aiPresets.ts を kind preset で）
@@ -27,7 +27,9 @@
 // AI_EVAL_RELAY_LOG に中継のログ（標準出力の JSON 行）を指定すると ai_request の cost_usd_est・トークン量・dropped_blocks・
 // 読んだスキル（skills）・turn の数
 // も集める（ログに会話の本文・鍵は出ない = relay.py）。
-// 返答の全文は fixtures/local/ai_eval/<時刻>/ にだけ書く（コミットしない）。標準出力は要約（架空の値）。
+// 返答の全文は fixtures/local/ai_eval/<時刻>/ にだけ書く（コミットしない）。標準出力は要約（架空の値）と、同じモードの
+// 前回の実行（fixtures/local/ai_eval/<時刻>/summary.json）との差（正答・数値の一致 / 不一致の件数・問ごとの pass ↔ FAIL。
+// #240。選び方は scripts/aiEvalDiff.ts）。
 
 import { mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
@@ -164,43 +166,11 @@ const PROPOSE_QUESTIONS = [
   },
 ];
 
-// 文書の質問（#137）: 中継の read_doc でマニュアル・設計書の節を読み、節を示して答えるか（計算の前提 3・操作の案内 3）、
-// 文書に無いことを無いと言うか（1）。expect は読んでほしい節（どれか 1 つ。中継のログがあるときだけ判定）。
-// 判定: 節を示す（「マニュアル 8.5」「設計書 5.4」の形）・Issue 番号（#123）と決定の記号（K7 など）を書かない・
-// absent は「書かれていない」の言い回し。文書の値は照合できない数字になるので不一致は数えるが失敗にしない
-const DOC_QUESTIONS = [
-  {
-    kind: 'premise',
-    text: 'β と IV の平行移動 Δσ はどう組み合わさって効くの？急落のプリセットで ATM の IV はどうなる？',
-    expect: ['design:5.4', 'user-guide:6', 'user-guide:6.2', 'user-guide:6.4', 'user-guide:16.1'],
-  },
-  {
-    kind: 'premise',
-    text: 'IV 推移の「30 日固定」の ATM IV って何？どうやって求めているの？',
-    expect: ['user-guide:10', 'user-guide:10.4', 'user-guide:10.5'],
-  },
-  {
-    kind: 'premise',
-    text: '必要証拠金（概算）はどうやって計算しているの？実際の証拠金と違うことはある？',
-    expect: ['user-guide:8', 'user-guide:8.4', 'user-guide:13.2.1', 'design:5.10'],
-  },
-  {
-    kind: 'howto',
-    text: '追証マップの点は何を表している？',
-    expect: ['user-guide:8', 'user-guide:8.5', 'design:5.11'],
-  },
-  {
-    kind: 'howto',
-    text: '先物推移の指標の段の高さを元に戻すには？',
-    expect: ['user-guide:10', 'user-guide:10.9', 'user-guide:14.4'],
-  },
-  {
-    kind: 'howto',
-    text: '今のポジションを別の端末で開くにはどうすればいい？',
-    expect: ['user-guide:11', 'user-guide:11.2', 'user-guide:11.3'],
-  },
-  { kind: 'absent', text: '損益グラフを PNG 画像で保存するボタンはどこ？', expect: null },
-];
+// 文書の質問（#137・#240）: 問は scripts/aiEvalDocs.ts（計算の前提 10・操作の案内 3・文書に無いこと 1）。中継の read_doc で
+// マニュアル・設計書の節を読み、節を示して答えるか、文書に無いことを無いと言うか。expect は読んでほしい節（どれか 1 つ。
+// 中継のログがあるときだけ判定）。判定: 節を示す（「マニュアル 8.5」「設計書 5.4」の形）・Issue 番号（#123）と決定の
+// 記号（K7 など）を書かない・absent は「書かれていない」の言い回し。文書の値は照合できない数字になるので不一致は数えるが
+// 失敗にしない。内容が節と矛盾しないかは返答の全文ファイルに想定の節と答えの要点（points）を並べて人が見比べる
 // [AI に聞く]（#136）: 画面と同じ表示モデル（metricsPanel・bigReadout・ivReadout）から質問の文を作り、kind ask と場所の
 // topic で送る。判定: 節を示す・経緯を書かない・想定の節（ASK_DOCS のどれか）を read_doc で読む（ログがあるとき）・ログの
 // kind と topic・照合の不一致 0（照合の出所は画面と同じ numberSources = 質問に入れた表示の値と β の 1% あたりを含む）
@@ -272,6 +242,8 @@ const readoutMod = await load('ui/view/readout.ts');
 const stageMod = await load('ui/view/stage.ts');
 const ivMod = await load('ui/view/ivHistory.ts');
 const evalCaseMod = await load('ui/view/aiEvalCase.ts');
+const { DOC_QUESTIONS } = await load('scripts/aiEvalDocs.ts');
+const diffMod = await load('scripts/aiEvalDiff.ts');
 
 const latest = JSON.parse(readFileSync(join(root, 'fixtures', 'synthetic', 'latest.json'), 'utf8'));
 const want = opt('--cases');
@@ -658,6 +630,7 @@ for (const [qi, q] of (anyOnly && !docsOnly ? [] : DOC_QUESTIONS).entries()) {
   rows.push({
     case: c.name,
     kind: 'docs',
+    id: `docs:${q.id}`,
     rep: 0,
     pass: ok,
     question: q.kind,
@@ -670,9 +643,13 @@ for (const [qi, q] of (anyOnly && !docsOnly ? [] : DOC_QUESTIONS).entries()) {
     chars: t.length,
     ...r.run,
   });
-  writeFileSync(join(outDir, `docs-${qi + 1}-${q.kind}.md`), `# 文書: ${q.text}\n\n${t}\n`);
+  // 人の照合用（EPIC #141 の終了条件 7）: 想定の節と答えの要点を返答と並べる
+  writeFileSync(
+    join(outDir, `docs-${qi + 1}-${q.id}.md`),
+    `# 文書: ${q.text}\n\n種類: ${q.kind}・想定の節: ${q.expect?.join(', ') ?? '—（文書に無い）'}\n\n答えの要点: ${q.points}\n\n## 返答\n\n${t}\n`,
+  );
   console.log(
-    `${ok ? 'pass' : 'FAIL'}  文書 ${qi + 1}（${q.kind}）: 読んだ節 ${read === null ? '—（中継のログなし）' : read.join(',') || 'なし'}${hit === null ? '' : `・想定の節 ${hit ? 'あり' : 'なし'}`}・節の明示 ${cited ? 'あり' : 'なし'}${q.kind === 'absent' ? `・無いと言う ${absent ? 'あり' : 'なし'}` : ''}・経緯 ${history ?? 'なし'}・照合できない数字 ${un.length}・往復 ${r.run.requests}・${r.run.stop ?? r.run.error}・完了 ${(r.run.totalMs / 1000).toFixed(1)} 秒`,
+    `${ok ? 'pass' : 'FAIL'}  文書 ${qi + 1}（${q.kind}・${q.id}）: 読んだ節 ${read === null ? '—（中継のログなし）' : read.join(',') || 'なし'}${hit === null ? '' : `・想定の節 ${hit ? 'あり' : 'なし'}`}・節の明示 ${cited ? 'あり' : 'なし'}${q.kind === 'absent' ? `・無いと言う ${absent ? 'あり' : 'なし'}` : ''}・経緯 ${history ?? 'なし'}・照合できない数字 ${un.length}・往復 ${r.run.requests}・${r.run.stop ?? r.run.error}・完了 ${(r.run.totalMs / 1000).toFixed(1)} 秒`,
   );
 }
 
@@ -1042,7 +1019,28 @@ const askRows = rows.filter((r) => r.kind === 'ask');
 const presetRows = rows.filter((r) => r.kind === 'preset');
 const profileRows = rows.filter((r) => r.kind === 'profile');
 const savedRows = rows.filter((r) => r.kind === 'saved');
+const mode = diffMod.evalMode(args);
+// 前回の実行（同じモード・偽の送信先かどうかが同じ。#240）
+const aiEvalDir = dirname(outDir);
+const previous = diffMod.pickPrevious(
+  readdirSync(aiEvalDir, { withFileTypes: true })
+    .filter((d) => d.isDirectory() && d.name !== 'cases' && d.name !== stamp)
+    .map((d) => {
+      try {
+        return {
+          dir: d.name,
+          file: JSON.parse(readFileSync(join(aiEvalDir, d.name, 'summary.json'), 'utf8')),
+        };
+      } catch {
+        return { dir: d.name, file: null };
+      }
+    }),
+  { dir: stamp, mode, fake: status.credential === 'fake' },
+);
+const counts = diffMod.runCounts(rows);
 const summary = {
+  mode,
+  previous: previous?.dir ?? null,
   model: status.model,
   credential: status.credential,
   counted: status.counted,
@@ -1060,12 +1058,19 @@ const summary = {
   unmatched_total: rows
     .filter((r) => r.kind !== 'docs')
     .reduce((n, r) => n + r.unmatched.length, 0),
+  matched_total: counts.matched,
   cost_usd: Number(rows.reduce((n, r) => n + r.costUsd, 0).toFixed(4)),
   ledger_total_usd: Number(ledger.total_usd.toFixed(4)),
   relay,
 };
 writeFileSync(join(outDir, 'summary.json'), `${JSON.stringify({ summary, rows }, null, 1)}\n`);
 console.log(JSON.stringify(summary, null, 1));
+for (const line of diffMod.formatDiff(
+  mode,
+  previous?.dir ?? null,
+  previous ? diffMod.diffRuns(previous.file.rows, rows) : null,
+))
+  console.log(line);
 console.log(`返答の全文: fixtures/local/ai_eval/${stamp}/（コミットしない）`);
 const ok =
   summary.diagnose.pass === summary.diagnose.total &&

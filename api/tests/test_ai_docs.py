@@ -2,6 +2,7 @@
 
 import random
 import re
+from pathlib import Path
 
 import pytest
 
@@ -267,3 +268,13 @@ def test_docs_dir_env_and_missing(monkeypatch, tmp_path, capsys):
         monkeypatch.delenv(st.AI_DOCS_DIR_ENV)
         docs.index.cache_clear()
     assert docs.docs_dir() == docs.REPO_DOCS and docs.index() is not None
+
+
+# ---- #240: 評価の文書の質問（scripts/aiEvalDocs.ts）の想定の節が索引にある（節の番号が変わって黙って外れない） ----
+
+def test_eval_doc_questions_expect_sections_exist(idx):
+    src = (Path(__file__).resolve().parents[2] / "scripts" / "aiEvalDocs.ts").read_text(encoding="utf-8")
+    expects = re.findall(r"'(user-guide|design):([0-9]+(?:\.[0-9]+)*)'", src)
+    assert len(expects) >= 10
+    missing = [f"{f}:{s}" for f, s in expects if idx.get(f, s) is None]
+    assert missing == []
