@@ -463,9 +463,10 @@ describe('#136 照合の出所: [AI に聞く] の質問の表示の値・β の
     // 単位の無い表示の数を金額としては引かない
     expect(checkNumbers('損益は 21.40 千円', src).unmatched).toBe(1);
   });
-  it('同じ文でも [AI に聞く] の質問でなければ出所にしない（その会話の質問だけ）', () => {
+  it('#140: ふつうの質問の文の数もその会話の出所にする。ほかの会話の質問は出所にしない', () => {
     const plain = ASK_Q.replace('［AI に聞く］', '');
-    expect(checkNumbers(ANSWER, numberSources(conv('chat', plain))).unmatched).toBeGreaterThan(0);
+    expect(checkNumbers(ANSWER, numberSources(conv('chat', plain))).unmatched).toBe(0);
+    expect(checkNumbers(ANSWER, numberSources(conv('chat', 'x'))).unmatched).toBeGreaterThan(0);
     // 質問の値と違う数は今どおり不一致
     expect(checkNumbers('Θ は +13 千円 / 日', numberSources(conv('ask', ASK_Q))).unmatched).toBe(1);
   });
@@ -627,5 +628,49 @@ describe('#140 AC2 定型の質問（kind preset と定型の ID）', () => {
     );
     expect(presetBlocked(INITIAL_AI_CHAT, noLegs, board)).toBeNull();
     expect(presetBlocked(sending, GATE, board)).toBe('送信中です');
+  });
+});
+
+describe('#140 照合の出所: 利用者の発言の数と AI のツールの入力の値（その会話の中だけ）', () => {
+  const toolUse = (input: Record<string, unknown>): AiChatAction =>
+    ev({
+      type: 'done',
+      stop_reason: 'tool_use',
+      content: [{ type: 'tool_use', id: 'p1', name: 'propose_position', input }],
+      remaining_usd: 2.2,
+    });
+  const withTool = (text: string) =>
+    run(
+      INITIAL_AI_CHAT,
+      { type: 'begin', kind: 'chat', text, now: 1 },
+      { type: 'send', context: CTX(0), key: 'k0' },
+      toolUse({
+        target: 'current',
+        changes: [{ action: 'add', type: 'P', side: 'buy', max_loss_floor_yen: -3_000_000 }],
+      }),
+      {
+        type: 'toolResults',
+        blocks: [
+          { type: 'tool_result', tool_use_id: 'p1', content: [{ type: 'text', text: '{}' }] },
+        ],
+      },
+    );
+  it('AI が渡した上限（max_loss_floor_yen）と質問の上限は一致、違う金額・単位の取り違えは数える', () => {
+    const src = numberSources(withTool('最大損失を −1,000 千円に抑えるヘッジの足を足して。'));
+    const r = checkNumbers('## 案 1: −1,000 千円以内\n## 案 2: −3,000 千円以内', src);
+    expect(r.unmatched).toBe(0);
+    expect(r.matched).toBe(2);
+    expect(checkNumbers('−2,000 千円以内', src).unmatched).toBe(1);
+    expect(checkNumbers('−3,000 円以内', src).unmatched).toBe(1);
+  });
+  it('ほかの会話（ツールも質問も無い）では出所にならない', () => {
+    const src = numberSources(
+      run(
+        INITIAL_AI_CHAT,
+        { type: 'begin', kind: 'chat', text: '弱点は？', now: 1 },
+        { type: 'send', context: CTX(0), key: 'k0' },
+      ),
+    );
+    expect(checkNumbers('−1,000 千円・−3,000 千円', src).unmatched).toBe(2);
   });
 });

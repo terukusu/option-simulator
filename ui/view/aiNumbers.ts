@@ -183,7 +183,8 @@ const DATE_RE =
 const TIME_RE = /\d{1,2}:\d{2}/g;
 const NUM_RE = /(?<![0-9A-Za-z_.,])([+\-−–▲△±×]\s?)?(\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?)/g;
 const PER_UNIT_RE = /^\s?(あたり|当たり|につき)/;
-const NUMBERING_BEFORE = /(弱点|第|No\.?)\s?$/;
+// 番号（「弱点 1」「第 2」。#140: 定型の見出し「反論 1」「案 1」）
+const NUMBERING_BEFORE = /(弱点|反論|案|第|No\.?)\s?$/;
 /**
  * 文書の節の番号（#136。「マニュアル 8.1「タイル」」「設計書 5.6」「マニュアルの 10 章」= 根拠の節の示し方。値ではない）。
  * 並べた 2 つ目以降（「マニュアル 8.1「タイル」・8.3「テール表」」「8.1、8.3」「8 章と 10 章」）も同じ（レビュー指摘 4）
@@ -214,10 +215,13 @@ const QUANTILE_LOW = new Set(['5', '10', '25']);
 const QUANTILE_POINT_AFTER = /^\s*[%％]\s*点/;
 const QUANTILE_ANY = new Set(['5', '10', '25', '50', '75', '90', '95']);
 /**
- * 戻し方の名前（#140。iv_stats の days_to_90pct・not_retraced_90pct = 「9 割戻し」）: 符号の無い 9 ちょうどで、直後が
- * 「割戻し」「割（は / が / まで）戻」のときだけ（値ではなく指標の名前。「9 割」の値の取り違えを広く見逃さない）
+ * 戻し方の名前（#140。iv_stats の days_to_90pct・not_retraced_90pct = 「9 割戻し」）: 符号の無い 9 ちょうど（箇条書きの
+ * 「- 」は符号でない）で、直後が「割戻し」「割（は / が / まで / までは）（まだ）戻」のときだけ（値ではなく指標の名前。
+ * 「9 割」の値の取り違えを広く見逃さない）
  */
-const RETRACE_AFTER = /^\s*割\s*(は|が|まで)?\s*戻/;
+const RETRACE_AFTER = /^\s*割\s*(は|が|まで\s*は|まで)?\s*(まだ\s*)?戻/;
+/** 固有名の一部（#140）: 「日経225」「日経 225」の 225（指数の名前。値ではない） */
+const NAME_BEFORE_225 = /日経\s*$/;
 
 function matches(
   t: { value: number; decimals: number; unit: TokenUnit; signed: number },
@@ -302,7 +306,9 @@ export function checkNumbers(text: string, sources: readonly unknown[]): NumberC
         MULTIPLIER_AFTER.test(rest)
       )
         reason = 'number';
-      else if (numText === '9' && rawSign === '' && RETRACE_AFTER.test(rest)) reason = 'number';
+      else if (numText === '9' && signText === '' && RETRACE_AFTER.test(rest)) reason = 'number';
+      else if (numText === '225' && signText === '' && NAME_BEFORE_225.test(before))
+        reason = 'number';
       else if (PER_BEFORE.test(before)) reason = 'per_unit';
       else if (QUANTILE_BEFORE.test(before)) reason = 'number';
       else if (QUANTILE_TOP.has(numText) && QUANTILE_RANGE.test(before)) reason = 'number';

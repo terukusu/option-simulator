@@ -65,6 +65,27 @@ describe('checkNumbers', () => {
     expect(checkNumbers('勝率は 9 割です', src).unmatched).toBe(1);
     expect(checkNumbers('+9 割戻し', src).unmatched).toBe(1);
     expect(checkNumbers('19 割戻し', src).unmatched).toBe(1);
+    // 箇条書きの「- 」の後・「まではまだ」・空白なし・「戻らなかった」も名前（本物の評価で出た言い方）
+    expect(
+      checkNumbers(
+        '- 9 割戻しまで: 中央値 12 日\n- 9割戻し: 中央値 12 日\n9 割まではまだ戻っていません。9 割まで戻らなかった。9 割戻らないうちに',
+        src,
+      ).unmatched,
+    ).toBe(0);
+    expect(checkNumbers('−9 割戻し', src).unmatched).toBe(1);
+  });
+  it('#140: 月 / 日の日付（9/28・9/16・10/07）と「日経225」の 225 は数えない（ほかの 225 は数える）', () => {
+    const r = checkNumbers('9/28 に始まり 10/05 に山。9/16 の終値から。日経225 先物と日経 225', []);
+    expect(r.unmatched).toBe(0);
+    expect(r.tokens.filter((t) => t.reason === 'date').map((t) => t.raw)).toEqual([
+      '9/28',
+      '10/05',
+      '9/16',
+    ]);
+    expect(checkNumbers('行使価格 225 円', []).unmatched).toBe(1);
+    // 定型の見出しの番号（反論 1・案 2）は番号
+    expect(checkNumbers('## 反論 1: 受取が小さい\n## 案 2: 下を買う', []).unmatched).toBe(0);
+    expect(checkNumbers('日経 +225 円', []).unmatched).toBe(1);
   });
   it('円・千円・万円への丸め（四捨五入。境界）', () => {
     expect(statusOf('最大損失は -617,234 円')).toEqual(['matched']);

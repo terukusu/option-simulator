@@ -22,7 +22,6 @@ import type {
   AiStatus,
   AiUserBlock,
 } from '../../data/aiStream';
-import { ASK_PREFIX } from './aiAsk';
 import { displayedValues } from './aiNumbers';
 
 export const AI_SESSION_KEY = 'optsim.ai.v1';
@@ -605,18 +604,24 @@ function betaSource(c: AiContext): unknown[] {
 
 /**
  * 照合の値（最初の文脈・文脈の更新・ツールの結果）。#136: その会話の [AI に聞く] の質問の文（ASK_PREFIX で始まる
- * 利用者の発言）に入れた画面の表示の値と、シナリオの β の 1% あたりの pt も足す
+ * 利用者の発言）に入れた画面の表示の値と、シナリオの β の 1% あたりの pt も足す。#140: その会話の利用者の発言の文の数
+ * （「最大損失を −1,000 千円に抑える」など。表示の値と同じ読み方）と、AI がツールに渡した入力の値（propose_position の
+ * max_loss_floor_yen など。キーの名前で単位）も足す（ほかの会話の値は足さない）
  */
 export function numberSources(s: AiChatState): unknown[] {
   const out: unknown[] = [];
   if (s.context) out.push(s.context, ...betaSource(s.context));
   for (const m of s.messages) {
-    if (m.role !== 'user') continue;
+    if (m.role === 'assistant') {
+      for (const b of m.content) if (b.type === 'tool_use') out.push(b.input);
+      continue;
+    }
     for (const b of m.content) {
       if (b.type === 'context_update') out.push(b.context, ...betaSource(b.context));
       else if (b.type === 'tool_result') out.push(parseJson(b.content[0].text));
-      else if (b.type === 'text' && b.text.startsWith(ASK_PREFIX)) {
-        out.push(displayedValues(b.text));
+      else if (b.type === 'text') {
+        const shown = displayedValues(b.text);
+        if (Object.keys(shown).length > 0) out.push(shown);
       }
     }
   }
