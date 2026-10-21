@@ -1,16 +1,15 @@
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks';
-import { LONG_PRESS_MS } from '../../chart/gesture';
 import {
   initialPress,
   type PressResult,
   pressCancel,
   pressDown,
-  pressLong,
   pressMove,
   pressUp,
 } from '../../chart/press';
 import type { AtmMovesCtl } from '../../components/useAtmMoves';
 import type { HoldMapCtl } from '../../components/useHoldMap';
+import { CROSS_TOUCH_GRAB_PX, crossTapAction } from '../../view/crosshair';
 import {
   HOLD_MAP_CAPTION,
   HOLD_MAP_PLOT_LABEL,
@@ -74,8 +73,9 @@ function HoldMapPlotView({
   const axes = result?.axes ?? null;
   const dxX = axes && width > 60 ? holdMapDxX(axes, width, hold.dXRatio) : null;
   const mark = plot && axes ? holdMapSelMark(sel, plot, axes) : null;
-  // 十字線（#217。docs/ui-redesign.md §4.1）: マウスのホバー・タッチの長押し（ドラッグで動かす・離しても残る・タップで消す）。
-  // 位置は要素の座標の画素で持ち、マスの中心に吸着して描く（holdMapCrosshair）
+  // 十字線（#217。docs/ui-redesign.md §4.1 の共通の規則）: マウスのホバー、タッチのタップ（出ていなければ置く・出ていれば消す。
+  // マス・点の選択は今のまま）、交点の ±14px をつかんでドラッグ（その間はページを止める）。位置は要素の座標の画素で持ち、
+  // マスの中心に吸着して描く（holdMapCrosshair）
   const [hover, setHover] = useState<{ x: number; y: number; touch: boolean } | null>(null);
   const xh = useMemo(
     () =>
@@ -86,20 +86,10 @@ function HoldMapPlotView({
   );
   const readout = xh ? xh.readout : holdMapReadout(sel, result, moves, unit);
   const press = useRef(initialPress());
-  const last = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
-  const longTimer = useRef(0);
-  /** 長押しで十字線にした押下の後の click を選択に使わない（時刻） */
-  const swallowUntil = useRef(0);
   const lastTouch = useRef(false);
   const hoverFrame = useRef(0);
   const hoverAt = useRef<{ x: number; y: number } | null>(null);
-  useEffect(
-    () => () => {
-      clearTimeout(longTimer.current);
-      cancelAnimationFrame(hoverFrame.current);
-    },
-    [],
-  );
+  useEffect(() => () => cancelAnimationFrame(hoverFrame.current), []);
   const local = (e: PointerEvent | MouseEvent) => {
     const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
     return { x: e.clientX - r.left, y: e.clientY - r.top };
@@ -107,14 +97,13 @@ function HoldMapPlotView({
   const applyPress = (res: PressResult) => {
     press.current = res.state;
     if (res.cross) setHover({ ...res.cross, touch: true });
-    // 長押しの押下を離した直後に来る click だけ（同じ押下の click は離してすぐ。次のタップは捨てない）
-    if (res.swallowClick) swallowUntil.current = performance.now() + 120;
-    if (res.state.mode !== 'pending') {
-      clearTimeout(longTimer.current);
-      longTimer.current = 0;
+    if (res.tap && plot && axes) {
+      const t = res.tap;
+      setSel(holdMapPick(plot, axes, t.x, t.y));
+      setHover(crossTapAction(xh !== null) === 'hide' ? null : { ...t, touch: true });
     }
   };
-  // 長押しの十字線の間はページ・シートを動かさない（touchmove の preventDefault。スクロールが始まる前なので効く）
+  // 交点をつかんでいる間はページ・シートを動かさない（touchmove の preventDefault。押した直後 = スクロールが始まる前なので効く）
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
@@ -140,31 +129,27 @@ function HoldMapPlotView({
   const late = lateRef.current === true;
   const onClick = (e: MouseEvent) => {
     if (!plot || !axes) return;
-    if (performance.now() < swallowUntil.current) return;
-    // タッチのタップは十字線を消す（選択は今のまま。マウスのクリックはホバーの十字線のまま）
-    if (lastTouch.current) setHover(null);
+    // タッチのタップは pointer の状態機械が扱う（click は使わない）。マウスのクリックは選択だけ（ホバーの十字線のまま）
+    if (lastTouch.current) return;
     const at = local(e);
     setSel(holdMapPick(plot, axes, at.x, at.y));
   };
   const onPointerDown = (e: PointerEvent) => {
     lastTouch.current = e.pointerType !== 'mouse';
     if (e.pointerType === 'mouse' || !plot) return;
-    const at = local(e);
-    last.current = at;
-    applyPress(pressDown(press.current, { id: e.pointerId, ...at, t: e.timeStamp }));
-    if (press.current.mode === 'pending') {
-      clearTimeout(longTimer.current);
-      longTimer.current = window.setTimeout(() => {
-        longTimer.current = 0;
-        applyPress(pressLong(press.current, performance.now(), last.current));
-        if (press.current.mode === 'cross') navigator.vibrate?.(8);
-      }, LONG_PRESS_MS);
-    }
+    const grab = hover?.touch && xh ? { x: xh.x, y: xh.y } : null;
+    applyPress(
+      pressDown(
+        press.current,
+        { id: e.pointerId, ...local(e), t: e.timeStamp },
+        grab,
+        CROSS_TOUCH_GRAB_PX,
+      ),
+    );
   };
   const onPointerMove = (e: PointerEvent) => {
     const at = local(e);
     if (e.pointerType !== 'mouse') {
-      last.current = at;
       applyPress(pressMove(press.current, { id: e.pointerId, ...at, t: e.timeStamp }));
       return;
     }
@@ -180,8 +165,7 @@ function HoldMapPlotView({
   };
   const onPointerEnd = (e: PointerEvent) => {
     if (e.pointerType === 'mouse') return;
-    const at = local(e);
-    const sample = { id: e.pointerId, ...at, t: e.timeStamp };
+    const sample = { id: e.pointerId, ...local(e), t: e.timeStamp };
     applyPress(
       e.type === 'pointercancel'
         ? pressCancel(press.current, sample)
@@ -204,6 +188,8 @@ function HoldMapPlotView({
     }
     const next = holdMapStep(sel, axes, e.key);
     if (next) {
+      // キーで選んだマスの 1 行を出す（ホバー・タップの十字線の 1 行より先に）
+      setHover(null);
       setSel(next);
       e.preventDefault();
     }

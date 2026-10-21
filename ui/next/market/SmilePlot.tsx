@@ -5,11 +5,13 @@ import { type Domain, fitTicks, linear, niceTicks } from '../../chart/scale';
 import { pure } from '../../components/pure';
 import { useChartGestures } from '../../components/useChartGestures';
 import type { Action } from '../../state';
+import { CROSS_TOUCH_GRAB_PX, crossTapAction } from '../../view/crosshair';
 import { fmtNum } from '../../view/format';
 import {
   AXIS_LABEL,
   axisTickLabel,
   axisValue,
+  pickStrike,
   SCRUB_KEY_STEPS,
   SMILE_MARGIN,
   type SmileAxis,
@@ -17,6 +19,7 @@ import {
   scrubStrike,
   smileCrosshair,
   smileCursorAt,
+  smileDotCursor,
   smileMarkX,
   smileModel,
   stepStrike,
@@ -45,8 +48,9 @@ export interface SmilePlotProps {
 /**
  * 限月 1 つのスマイルの描画域（#85。旧 Smile の描画と useChartGestures の設定を写した）。高さは残りの高さ（useSize）。
  * 縦線: ATM = .atm（--handle の破線）、シナリオ ATM = .atm2（--pin2 の点線）、選択 = .sel（--ink）+ 上端の K のラベル。
- * 十字線（#217。docs/ui-redesign.md §4.1 の共通の規則）: PC のホバー・タッチの長押し（今の選択のスクラブと同時。離しても残る）で
- * 出し、タッチのタップ（選択は今のまま）で消す。カーソルは値の座標のローカル state（smileCrosshair）。横軸を替えたら消す。
+ * 十字線（#217。docs/ui-redesign.md §4.1 の共通の規則）: PC のホバー、タッチのタップ（点のタップは選択 + 点に吸着、点の外は
+ * 置く / 消す。交点の ±14px をつかんで動かす）。長押しは今のまま選択のスクラブ。カーソルは値の座標のローカル state
+ * （smileCrosshair）。横軸を替えたら・ダブルタップで消す。
  */
 function SmilePlotView(p: SmilePlotProps) {
   const { month, active, basis, axis, viewport, pick, scenarioAtmK, dispatch } = p;
@@ -79,7 +83,7 @@ function SmilePlotView(p: SmilePlotProps) {
     pickX !== null && Number.isFinite(pickX) && pickX >= model.domain[0] && pickX <= model.domain[1]
       ? sx(pickX)
       : null;
-  /** 十字線のカーソル（値の座標。#217）と指 / マウスの位置（長押しの scrub は x だけを返すので控える） */
+  /** 十字線のカーソル（値の座標。#217）と指 / マウスの位置（タッチ・マウスの区別） */
   const [cursor, setCursor] = useState<SmileCursor | null>(null);
   const ptr = useRef<{ y: number; touch: boolean }>({ y: 0, touch: false });
   const hoverFrame = useRef(0);
@@ -103,18 +107,38 @@ function SmilePlotView(p: SmilePlotProps) {
     minWidth: model.minWidth,
     range,
     disabled: model.empty || !active,
-    onViewport: (v) => dispatch({ type: 'setViewport', viewport: v }),
-    onTap: (x) => {
-      // タッチのタップは十字線を消す（マウスのクリックはホバーの十字線のまま）
-      if (ptr.current.touch) setCursor(null);
+    onViewport: (v) => {
+      // ダブルタップ・R の初期表示ではタッチの十字線も消す（ダブルタップの 1 回目で置いた十字線を残さない。#217）
+      if (v === null) setCursor((c) => (c?.touch ? null : c));
+      dispatch({ type: 'setViewport', viewport: v });
+    },
+    onTap: (x, y) => {
       const k = tapStrike(model, x, range, pick);
       dispatch({ type: 'pickSmile', pick: k === null ? null : { monthId: month.id, k } });
+      // マウスのクリックは選択だけ（ホバーの十字線のまま）
+      if (!ptr.current.touch) return;
+      // タッチ（#217 の共通の規則）: 点のタップは選択（今のまま）+ 十字線をその点に。解除したら消す。点の外は
+      // 出ていなければ置く・出ていれば消す
+      if (pickStrike(model, x, range) !== null) {
+        setCursor(k === null ? null : smileDotCursor(model, k, true));
+        return;
+      }
+      setCursor(
+        crossTapAction(cursor !== null) === 'hide'
+          ? null
+          : smileCursorAt(model, x, y, w, h, true, false),
+      );
     },
+    ...(cursor?.touch && xh
+      ? {
+          cross: { pointPx: { x: xh.px, y: xh.py }, grabPx: CROSS_TOUCH_GRAB_PX },
+          onCross: (x: number, y: number) =>
+            setCursor(smileCursorAt(model, x, y, w, h, true, true)),
+        }
+      : {}),
+    // 長押し（今のまま）: 選択を最寄りの点へ切り替える
     scrub: { linePx: null },
-    onScrub: (x) => {
-      select(scrubStrike(model, x, range));
-      setCursor(smileCursorAt(model, x, ptr.current.y, w, h, ptr.current.touch, true));
-    },
+    onScrub: (x) => select(scrubStrike(model, x, range)),
     onScrubKey: (key) => {
       const steps = SCRUB_KEY_STEPS[key];
       if (steps === undefined) return false;

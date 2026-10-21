@@ -142,7 +142,7 @@
 //                                          ツールのカードと [シナリオに適用] → [元に戻す]・提案のカードと [今のタブに適用] →
 //                                          [元に戻す]（#139）・再読み込みで会話が残る（sessionStorage）
 //   --ai                                   #135 の項目だけ（既定の検査・--flows とも。手元の確かめ用）
-//   --cross                                #217 の十字線の項目だけ（既定の検査・--flows とも。手元の確かめ用）
+//   --cross                                #217 の十字線の項目だけ（既定の検査・--flows とも。--flows は #201・#130・#207 のタッチの流れも。手元の確かめ用）
 //   --url <base>                           dev サーバーを起こさず、その URL を使う（例 http://127.0.0.1:5173/?parts）
 //   --dom <file>                           body の下の要素の tag.class の並びを書き出す（DOM の変化の比較用）
 //   --shots <dir>                          スクリーンショットを書く（合成の板だけ。リポジトリに入れない）
@@ -3250,7 +3250,7 @@ async function runFlows() {
   // #201 損益グラフの十字線（PC のホバー・タッチのタップ / 交点のドラッグ / 読み取りの箱のタップで移る / × で消す・長押しとパンは今のまま）
   await pnlCrossFlows(pc);
   await pnlCrossTouchFlow();
-  // #217 スマイル・追証マップの長押しの十字線（タッチ 360 / 1440）・面はタッチで出さない
+  // #217 スマイル・追証マップのタップの十字線（タッチ 360 / 1440）・面はタッチで出さない
   for (const vp of [
     { width: 360, height: 780 },
     { width: 1440, height: 900 },
@@ -9381,19 +9381,19 @@ async function futPaneTouchFlow() {
   const sheet0 = await sheet();
   const st0 = await paneState(page);
   const midX = Math.round(st0.paneX + st0.paneW * 0.6);
-  // (a) RSI の段の長押し（段の座標 30px）
+  // (a) RSI の段のタップ（段の座標 30px。#217 で長押しからタップに）
   const a = { x: midX, y: Math.round(st0.paneTop[0] + 30) };
   await touch('touchStart', [{ ...a, id: 0 }]);
-  await page.waitForTimeout(600);
-  const st1 = await paneState(page);
+  await page.waitForTimeout(40);
   await touch('touchEnd', []);
-  await page.waitForTimeout(120);
+  await page.waitForTimeout(400);
+  const st1 = await paneState(page);
   const fb = st1.floatBox;
   const awayFromFinger =
     fb !== null &&
     !(a.y >= fb.top - 8 && a.y <= fb.bottom + 8 && a.x >= fb.left && a.x <= fb.right);
   check(
-    `#207 AC5・AC6 ${tag} RSI の段の長押しで段の十字線（横線 = 指の高さ・札 = その高さの値）・価格は縦線と横軸の札だけ・浮いた読み取りは指から離れた所`,
+    `#207 AC5・AC6 #217 ${tag} RSI の段のタップで段の十字線（横線 = 指の高さ・札 = その高さの値）・価格は縦線と横軸の札だけ・浮いた読み取りは指から離れた所`,
     st1.cross === 1 &&
       st1.crossKind === 'rsi' &&
       st1.hy !== null &&
@@ -9406,11 +9406,42 @@ async function futPaneTouchFlow() {
       awayFromFinger,
     `十字線 ${st1.cross}・y ${st1.hy}・札 ${st1.tag}・価格 縦 ${st1.priceV} 横 ${st1.priceH}・浮き「${st1.float}」${fb ? ` ${Math.round(fb.top)}〜${Math.round(fb.bottom)}px` : ''}・指 ${a.y}px`,
   );
-  // タップで消す → (b) 長押しの前に 6px 以上動かす = パン
-  await touch('touchStart', [{ ...a, id: 0 }]);
+  // #217: 交点を押してドラッグで動く（パンしない）→ ほかの所のタップで消える（移らない）→ 長押しでは出ない
+  const xt0 = st1.xTick;
+  await touch('touchStart', [{ x: a.x + 3, y: a.y + 2, id: 0 }]);
+  for (let i = 1; i <= 4; i++) {
+    await touch('touchMove', [{ x: a.x + 3 - i * 10, y: a.y + 2 + i * 2, id: 0 }]);
+    await page.waitForTimeout(25);
+  }
+  await page.waitForTimeout(120);
+  const stG = await paneState(page);
+  await touch('touchEnd', []);
+  await page.waitForTimeout(400);
+  check(
+    `#217 ${tag} 段の十字線の交点を押して左へ 40px・下へ 8px ドラッグで付いて動く（パンしない）`,
+    stG.cross === 1 &&
+      stG.hy !== null &&
+      Math.abs(stG.hy - (st1.hy ?? 0) - 8) <= 1.5 &&
+      stG.time !== st1.time &&
+      stG.xTick === xt0,
+    `y ${st1.hy} → ${stG.hy}・時刻 ${st1.time} → ${stG.time}・目盛り ${xt0} → ${stG.xTick}`,
+  );
+  await touch('touchStart', [{ x: midX - 80, y: Math.round(st0.paneTop[0] + 12), id: 0 }]);
   await page.waitForTimeout(40);
   await touch('touchEnd', []);
   await page.waitForTimeout(400);
+  const stH = await paneState(page);
+  await touch('touchStart', [{ ...a, id: 0 }]);
+  await page.waitForTimeout(650);
+  await touch('touchEnd', []);
+  await page.waitForTimeout(400);
+  const stL = await paneState(page);
+  check(
+    `#217 ${tag} 段の十字線はほかの所のタップで消え（移らない）、長押しでは出ない`,
+    stH.cross === 0 && stH.priceV === 0 && stL.cross === 0,
+    `タップの後 ${stH.cross}・長押しの後 ${stL.cross}`,
+  );
+  // (b) すぐ 6px 以上動かす = パン
   const before = await paneState(page);
   await touch('touchStart', [{ ...a, id: 0 }]);
   for (let i = 1; i <= 6; i++) {
@@ -9422,7 +9453,7 @@ async function futPaneTouchFlow() {
   await touch('touchEnd', []);
   await page.waitForTimeout(300);
   check(
-    `#207 AC6 ${tag} 長押しの前に 6px 以上動かすとパン（十字線なし・横軸が動く）`,
+    `#207 AC6 ${tag} 6px 以上動かすとパン（十字線なし・横軸が動く）`,
     before.cross === 0 && mid.cross === 0 && mid.priceV === 0 && mid.xTick !== before.xTick,
     `十字線 ${before.cross} → ${mid.cross}・目盛り ${before.xTick} → ${mid.xTick}`,
   );
@@ -9490,8 +9521,10 @@ async function futPaneTouchFlow() {
   const sheet1 = await sheet();
   const sy = await page.evaluate(() => window.scrollY);
   check(
-    `#207 AC4 ${tag} MACD の段のダブルタップで最大化（段 1 つ・価格なし・枠の全部）、もう一度で戻す。シート・ページは動かない`,
+    `#207 AC4 #217 ${tag} MACD の段のダブルタップで最大化（段 1 つ・価格なし・枠の全部）、もう一度で戻す（1 回目のタップの十字線は残らない）。シート・ページは動かない`,
     st4.kinds.join(',') === 'macd' &&
+      st4.cross === 0 &&
+      st5.cross === 0 &&
       st4.wrapH === null &&
       Math.abs((st4.paneH[0] ?? 0) - st4.stackH) <= 1 &&
       st5.kinds.join(',') === 'rsi,macd,stoch' &&
@@ -9570,7 +9603,10 @@ async function futPanePeekTouchFlow(vp) {
   }
 }
 
-/** 390×844 のタッチ（CDP）: 長押し 500ms で十字線・札、横に動かすと時刻が変わる、離してタップで消える。ページ・シートは動かない */
+/**
+ * 390×844 のタッチ（CDP。#217 の共通の規則）: タップで十字線・札 → 交点のドラッグで時刻が変わる → ほかの所のタップで消える →
+ * 長押しでは出ない → ダブルタップの後に残らない。ページ・シートは動かない
+ */
 async function ivCrossTouchFlow() {
   const tag = '390x844 touch';
   const ctx = await touchContext({ [WORKSPACE_KEY]: twoLegs });
@@ -9596,12 +9632,21 @@ async function ivCrossTouchFlow() {
   const cdp = await ctx.newCDPSession(page);
   const touch = (type, touchPoints) => cdp.send('Input.dispatchTouchEvent', { type, touchPoints });
   const a = { x: Math.round(box.x + box.width * 0.6), y: Math.round(box.y + box.height * 0.45) };
-  await touch('touchStart', [{ ...a, id: 0 }]);
-  await page.waitForTimeout(500);
-  await page.waitForTimeout(80);
+  const tapAt = async (pt) => {
+    await touch('touchStart', [{ ...pt, id: 0 }]);
+    await page.waitForTimeout(40);
+    await touch('touchEnd', []);
+    await page.waitForTimeout(400);
+  };
+  // (a) タップで置く（#217 で長押しからタップに）
+  await tapAt(a);
   const st1 = await ivCrossState(page);
+  // (b) 交点を押してドラッグで動く（パンしない）
+  const cx = Math.round((st1?.left ?? 0) + (st1?.vx ?? 0));
+  const cy = Math.round((st1?.top ?? 0) + (st1?.hy ?? 0));
+  await touch('touchStart', [{ x: cx + 2, y: cy + 2, id: 0 }]);
   for (let i = 1; i <= 6; i++) {
-    await touch('touchMove', [{ x: a.x - i * 10, y: a.y + i * 5, id: 0 }]);
+    await touch('touchMove', [{ x: cx + 2 - i * 10, y: cy + 2 + i * 5, id: 0 }]);
     await page.waitForTimeout(20);
   }
   await page.waitForTimeout(120);
@@ -9610,16 +9655,27 @@ async function ivCrossTouchFlow() {
   await touch('touchEnd', []);
   await page.waitForTimeout(150);
   const st3 = await ivCrossState(page);
-  // タップ（押してすぐ離す）で消える
-  await touch('touchStart', [{ ...a, id: 0 }]);
-  await page.waitForTimeout(40);
-  await touch('touchEnd', []);
-  await page.waitForTimeout(200);
+  // (c) ほかの所のタップで消える（移らない）
+  await tapAt({ x: a.x - 120, y: a.y - 20 });
   const st4 = await ivCrossState(page);
   const s2 = await shell();
+  // (d) 長押しでは出ない、(e) ダブルタップ（初期表示）の後に十字線が残らない
+  await touch('touchStart', [{ ...a, id: 0 }]);
+  await page.waitForTimeout(650);
+  await touch('touchEnd', []);
+  await page.waitForTimeout(400);
+  const st5 = await ivCrossState(page);
+  for (let k = 0; k < 2; k++) {
+    await touch('touchStart', [{ ...a, id: 0 }]);
+    await page.waitForTimeout(30);
+    await touch('touchEnd', []);
+    await page.waitForTimeout(80);
+  }
+  await page.waitForTimeout(400);
+  const st6 = await ivCrossState(page);
   const yAt = (st, y) => st && st.hy !== null && Math.abs(st.hy - (y - st.top)) <= 0.6;
   check(
-    `#130 AC-7(b) ${tag} 500ms の長押しで十字線 2 本・札 2 個、横の札 = 読み取りの時刻、横線 = 指の高さ、縦の札 = その高さの IV`,
+    `#130 AC-7(b) #217 ${tag} タップで十字線 2 本・札 2 個、横の札 = 読み取りの時刻、横線 = 指の高さ、縦の札 = その高さの IV`,
     st1?.lines === 2 &&
       st1.tags.length === 2 &&
       st1.tags.every((t) => t.inside) &&
@@ -9631,16 +9687,17 @@ async function ivCrossTouchFlow() {
       : '',
   );
   check(
-    `#130 AC-7(b) ${tag} そのまま左へ 60px・下へ 30px 動かすと札の時刻と縦の札が変わり、読み取りと一致`,
+    `#130 AC-7(b) #217 ${tag} 交点を押して左へ 60px・下へ 30px ドラッグで札の時刻と縦の札が変わり、読み取りと一致`,
     st2?.lines === 2 &&
       st2.xTag !== st1?.xTag &&
       st2.xTag === st2.time &&
       st2.yTag !== st1?.yTag &&
-      yAt(st2, a.y + 30),
-    `${st1?.xTag} → ${st2?.xTag}・${st1?.yTag} → ${st2?.yTag}`,
+      st2.hy !== null &&
+      Math.abs(st2.hy - (st1?.hy ?? 0) - 30) <= 1.5,
+    `${st1?.xTag} → ${st2?.xTag}・${st1?.yTag} → ${st2?.yTag}・y ${st1?.hy} → ${st2?.hy}`,
   );
   check(
-    `#130 AC-7(b) ${tag} 離しても残り、タップで消える。長押しの間ページ・シート・.panel-body が動かない`,
+    `#130 AC-7(b) #217 ${tag} 離しても残り、ほかの所のタップで消える。ドラッグの間ページ・シート・.panel-body が動かない`,
     st3?.lines === 2 &&
       st4?.lines === 0 &&
       st4.tags.length === 0 &&
@@ -9650,6 +9707,11 @@ async function ivCrossTouchFlow() {
       s2.sheet === s0.sheet &&
       s2.sy === 0,
     `離した後 ${st3?.lines} 本・タップ後 ${st4?.lines} 本・シート ${s0.sheet}→${s1.sheet}→${s2.sheet}・scrollTop ${s0.body}→${s1.body}・scrollY ${s1.sy}`,
+  );
+  check(
+    `#217 ${tag} IV 推移: 長押しでは十字線を出さない、ダブルタップ（初期表示）の後に 1 回目のタップの十字線が残らない`,
+    st5?.lines === 0 && st6?.lines === 0,
+    `長押し ${st5?.lines} 本・ダブルタップ ${st6?.lines} 本`,
   );
   if (shotsDir) await page.screenshot({ path: join(shotsDir, `flows-iv-cross-${tag}.png`) });
   await ctx.close();
@@ -10548,7 +10610,8 @@ async function pnlCrossFlows(vp) {
 
 /**
  * 390×844 のタッチ（CDP。#201 AC-5）: タップで十字線（× あり）→ 交点をドラッグで動く（ページ・シートは動かない）→
- * 読み取りの箱（× 以外）のタップで移る → × のタップで消える → 長押しでシナリオ点・すぐのドラッグでパン（十字線は出ない）・描画域の外のタップで消える
+ * 置いてある間のタップ（読み取りの箱の上）で消える（#217。移さない）→ また置いて × のタップで消える → 長押しでシナリオ点・
+ * すぐのドラッグでパン（十字線は出ない）・描画域の外のタップで消える → ダブルタップの後に十字線が残らない
  */
 async function pnlCrossTouchFlow() {
   const tag = '390x844 touch';
@@ -10634,10 +10697,12 @@ async function pnlCrossTouchFlow() {
   if (rb) await tapAt(rb);
   const stMoved = await pnlCrossState(page);
   check(
-    `#201 ${tag} 読み取りの箱（× 以外）のタップで十字線がそこへ移る（消えない）`,
-    !!rb && stMoved?.lines === 2 && Math.abs((stMoved.vx ?? 0) - (rb.x - stMoved.left)) <= 6,
-    `${stMoved?.lines} 本・縦線 x ${stMoved?.vx}（指 ${rb ? rb.x - (stMoved?.left ?? 0) : '-'}）`,
+    `#201 #217 ${tag} 置いてある間のタップ（読み取りの箱の上）は十字線を消す（移さない）`,
+    !!rb && stMoved?.lines === 0,
+    `${stMoved?.lines} 本`,
   );
+  // 次のタップでまた置き、× のタップで消える
+  await tapAt(at(0.3, 0.45));
   const xb = await center('section.stage .chart .xh-close');
   if (xb) await tapAt(xb);
   const st3 = await pnlCrossState(page);
@@ -10694,6 +10759,21 @@ async function pnlCrossTouchFlow() {
     `#201 ${tag} 置き直した十字線は描画域の外（横の目盛りの行）のタップで消える。ページ・シートは動かない`,
     st6?.lines === 2 && st7?.lines === 0 && s2.sheet === s0.sheet && s2.sy === 0,
     `${st6?.lines} 本 → ${st7?.lines} 本・シート ${s0.sheet}→${s2.sheet}・scrollY ${s2.sy}`,
+  );
+  // (g) #217: ダブルタップ（表示のリセット）の 1 回目で置いた十字線は残らない
+  const dt = at(0.55, 0.35);
+  for (let k = 0; k < 2; k++) {
+    await touch('touchStart', [{ ...dt, id: 0 }]);
+    await page.waitForTimeout(30);
+    await touch('touchEnd', []);
+    await page.waitForTimeout(80);
+  }
+  await page.waitForTimeout(400);
+  const st8 = await pnlCrossState(page);
+  check(
+    `#217 ${tag} 損益グラフのダブルタップの後に十字線が残らない`,
+    st8?.lines === 0,
+    `${st8?.lines} 本`,
   );
   await ctx.close();
 }
@@ -10923,8 +11003,9 @@ async function cross217All() {
 }
 
 /**
- * --flows（#217 AC-5）: タッチ（CDP。360×780・1440×900）でスマイル・追証マップの長押しで十字線（横線 = 指の高さ / マスの中心）→
- * ドラッグで付いて動く（ページ・シート・枠が動かない）→ 離しても残る → タップで消える（選択は今のまま）。すぐのドラッグでは出ない。
+ * --flows（#217 AC-5）: タッチ（CDP。360×780・1440×900）でスマイル・追証マップのタップで十字線（スマイルは点の選択 + 点に吸着、
+ * 追証マップはマスの中心）→ 交点のドラッグで付いて動く（ページ・シート・枠が動かない）→ ほかの所のタップで消える（スマイルは別の点の
+ * タップで選択と十字線が移り、十字線の点のタップで解除と一緒に消える）→ すぐのドラッグ・長押しでは出ない → ダブルタップの後に残らない。
  * 面はタッチの押下で十字線を出さない（点をつかむ）
  */
 async function cross217TouchFlows(vp) {
@@ -10984,23 +11065,34 @@ async function cross217TouchFlows(vp) {
       continue;
     }
     const s0 = await scrolls();
-    // (a) 長押しで出る
+    const tapAt = async (pt) => {
+      await touch('touchStart', [{ ...pt, id: 0 }]);
+      await page.waitForTimeout(40);
+      await touch('touchEnd', []);
+      await page.waitForTimeout(400);
+    };
+    const smile = chart === 'smile';
+    // (a) タップで置く（スマイルは点のタップ = 選択 + 点に吸着、追証マップはマスの中心）
     const a = at(0.35, 0.45);
-    await touch('touchStart', [{ ...a, id: 0 }]);
-    await page.waitForTimeout(560);
+    await tapAt(a);
     const st1 = await xcState(page, host);
-    const bad1 = xcOk(st1, chart === 'smile');
-    const tol = chart === 'smile' ? 1 : plot.h / 8;
+    const ro1 = (await readout()) ?? '';
+    const bad1 = xcOk(st1, smile);
+    const tol = plot.h / 8;
     check(
-      `#217 ${tag} ${chart}: 長押しで十字線 2 本・札 2 個、横線 = 指の高さ（${chart === 'hold' ? 'マスの中心' : '吸着しない'}）`,
+      `#217 ${tag} ${chart}: タップで十字線 2 本・札 2 個${smile ? '・点を選ぶ（操作行に put / call）・縦線 = 点' : '・横線 = マスの中心'}`,
       bad1.length === 0 &&
-        st1?.hy !== null &&
-        Math.abs((st1?.hy ?? 0) - (a.y - (st1?.top ?? 0))) <= tol,
-      `${xcDesc(st1)}${bad1.length ? `・${bad1.join('・')}` : ''}`,
+        (smile
+          ? /put|call/.test(ro1) && Math.abs((st1?.vx ?? 0) - (a.x - (st1?.left ?? 0))) <= 13
+          : st1?.hy !== null && Math.abs((st1?.hy ?? 0) - (a.y - (st1?.top ?? 0))) <= tol),
+      `${xcDesc(st1)}${bad1.length ? `・${bad1.join('・')}` : ''}・操作行「${ro1.slice(0, 30)}」`,
     );
-    // (b) 離さずにドラッグで付いて動く（ページ・シート・枠は動かない）
+    // (b) 交点を押して右へ 60px・下へ 24px ドラッグで付いて動く（パン・スクロールしない）
+    const cx = Math.round((st1?.left ?? 0) + (st1?.vx ?? 0));
+    const cy = Math.round((st1?.top ?? 0) + (st1?.hy ?? 0));
+    await touch('touchStart', [{ x: cx + 2, y: cy + 2, id: 0 }]);
     for (let i = 1; i <= 6; i++) {
-      await touch('touchMove', [{ x: a.x + i * 10, y: a.y + i * 4, id: 0 }]);
+      await touch('touchMove', [{ x: cx + 2 + i * 10, y: cy + 2 + i * 4, id: 0 }]);
       await page.waitForTimeout(25);
     }
     await page.waitForTimeout(120);
@@ -11011,9 +11103,9 @@ async function cross217TouchFlows(vp) {
     const st3 = await xcState(page, host);
     const moved = Math.abs((st2?.vx ?? 0) - (st1?.vx ?? 0));
     check(
-      `#217 ${tag} ${chart}: 右へ 60px・下へ 24px ドラッグで縦線が付いて動き、離しても残る。ページ・シート・枠は動かない`,
+      `#217 ${tag} ${chart}: 交点を押して右へ 60px・下へ 24px ドラッグで付いて動き、離しても残る。ページ・シート・枠は動かない`,
       st2?.lines === 2 &&
-        moved >= (chart === 'smile' ? 55 : 30) &&
+        moved >= (smile ? 55 : 30) &&
         moved <= 66 &&
         st3?.lines === 2 &&
         s1.sy === s0.sy &&
@@ -11021,35 +11113,76 @@ async function cross217TouchFlows(vp) {
         Math.abs(s1.host - s0.host) <= 1,
       `x ${st1?.vx} → ${st2?.vx}・離して ${st3?.lines} 本・scrollY ${s0.sy}→${s1.sy}・枠 ${s0.host}→${s1.host}`,
     );
-    const roHeld = (await readout()) ?? '';
-    // (c) タップで消える（選択は今のまま = スマイルは点、追証マップはマスの 1 行）
-    const b = at(0.6, 0.5);
-    await touch('touchStart', [{ ...b, id: 0 }]);
-    await page.waitForTimeout(40);
-    await touch('touchEnd', []);
-    await page.waitForTimeout(400);
-    const st4 = await xcState(page, host);
-    const ro = (await readout()) ?? '';
+    // (c) ほかの所のタップで消える（移らない）。スマイルは点のタップが選択なので、別の点のタップで選択と十字線が移り、
+    // 十字線の点のタップ = 選択の解除で消える
+    let st4;
+    let ro = '';
+    if (smile) {
+      await tapAt(at(0.6, 0.5));
+      const sMove = await xcState(page, host);
+      const roMove = (await readout()) ?? '';
+      check(
+        `#217 ${tag} smile: 別の点のタップで選択が変わり、十字線はその点へ`,
+        sMove?.lines === 2 && roMove !== ro1 && /put|call/.test(roMove),
+        `${sMove?.lines} 本・操作行「${roMove.slice(0, 24)}」`,
+      );
+      await tapAt({
+        x: Math.round((sMove?.left ?? 0) + (sMove?.vx ?? 0)),
+        y: Math.round((sMove?.top ?? 0) + (sMove?.hy ?? 0)),
+      });
+      st4 = await xcState(page, host);
+      ro = (await readout()) ?? '';
+    } else {
+      await tapAt(at(0.75, 0.2));
+      st4 = await xcState(page, host);
+      ro = (await readout()) ?? '';
+    }
     check(
-      `#217 ${tag} ${chart}: タップで十字線 0 本、タップの選択は今のまま`,
-      st4?.lines === 0 && (chart === 'smile' ? /put|call/.test(ro) : ro.startsWith('原資産')),
-      `線 ${st4?.lines} 本・読み取り「${ro.slice(0, 40)}」（長押し中「${roHeld.slice(0, 40)}」）`,
+      `#217 ${tag} ${chart}: ${smile ? '十字線の点のタップで選択の解除と一緒に消える' : 'ほかの所のタップで消える（移らない）・マスの選択は今のまま'}`,
+      st4?.lines === 0 && (smile ? !/put|call/.test(ro) : ro.startsWith('原資産')),
+      `線 ${st4?.lines} 本・読み取り「${ro.slice(0, 40)}」`,
     );
-    // (d) すぐのドラッグでは出ない
+    // (d) すぐのドラッグ（スマイルはパン・追証マップはスクロール）では出ない
     const c = at(0.5, 0.6);
     await touch('touchStart', [{ ...c, id: 0 }]);
     for (let i = 1; i <= 6; i++) {
       await touch('touchMove', [{ x: c.x + i * 12, y: c.y, id: 0 }]);
       await page.waitForTimeout(16);
     }
-    await page.waitForTimeout(500);
-    const st5 = await xcState(page, host);
     await touch('touchEnd', []);
-    await page.waitForTimeout(150);
+    await page.waitForTimeout(400);
+    const st5 = await xcState(page, host);
     check(
-      `#217 ${tag} ${chart}: 長押しの前に 6px 動かすと十字線は出ない`,
+      `#217 ${tag} ${chart}: すぐのドラッグでは十字線は出ない`,
       st5?.lines === 0,
       `線 ${st5?.lines} 本`,
+    );
+    // (e) 長押しは今のまま（スマイル = 選択のスクラブ、追証マップ = 何もしない）で十字線は出ない
+    await touch('touchStart', [{ ...a, id: 0 }]);
+    await page.waitForTimeout(650);
+    await touch('touchEnd', []);
+    await page.waitForTimeout(400);
+    const st6 = await xcState(page, host);
+    const ro6 = (await readout()) ?? '';
+    check(
+      `#217 ${tag} ${chart}: 長押しでは十字線を出さない${smile ? '（選択は長押しで最寄りの点へ = 今のまま）' : ''}`,
+      st6?.lines === 0 && (!smile || /put|call/.test(ro6)),
+      `線 ${st6?.lines} 本・読み取り「${ro6.slice(0, 24)}」`,
+    );
+    // (f) ダブルタップの後に 1 回目のタップの十字線が残らない
+    const d = at(0.45, 0.3);
+    for (let k = 0; k < 2; k++) {
+      await touch('touchStart', [{ ...d, id: 0 }]);
+      await page.waitForTimeout(30);
+      await touch('touchEnd', []);
+      await page.waitForTimeout(80);
+    }
+    await page.waitForTimeout(400);
+    const st7 = await xcState(page, host);
+    check(
+      `#217 ${tag} ${chart}: ダブルタップの後に十字線が残らない`,
+      st7?.lines === 0,
+      `線 ${st7?.lines} 本`,
     );
     if (shotsDir)
       await page.screenshot({ path: join(shotsDir, `flows-cross217-${chart}-${tag}.png`) });
@@ -11061,13 +11194,17 @@ async function cross217TouchFlows(vp) {
 console.log(`URL: ${pageUrl(mode)}`);
 try {
   if (crossOnly && !parts) {
-    if (flows)
+    if (flows) {
+      // #217 で操作を変えたタッチの流れ（損益グラフ・IV 推移・先物推移の段）も
+      await pnlCrossTouchFlow();
+      await ivCrossTouchFlow();
+      await futPaneTouchFlow();
       for (const vp of [
         { width: 360, height: 780 },
         { width: 1440, height: 900 },
       ])
         await cross217TouchFlows(vp);
-    else {
+    } else {
       await cross217All();
       console.log(
         `十字線（スマイル・追証マップ・面）の検査（#217）: ${cross217Stats.pass} / ${cross217Stats.total} 状態で pass`,

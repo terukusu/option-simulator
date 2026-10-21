@@ -1,8 +1,9 @@
-import { useId, useMemo, useRef } from 'preact/hooks';
+import { useEffect, useId, useMemo, useRef, useState } from 'preact/hooks';
 import type { IvBar } from '../../../data';
 import type { Domain } from '../../chart/scale';
 import { pure } from '../../components/pure';
 import { useChartGestures } from '../../components/useChartGestures';
+import { CROSS_TOUCH_GRAB_PX, crossTapAction } from '../../view/crosshair';
 import {
   IV_MIN_BARS,
   IV_PLOT_LABEL,
@@ -66,7 +67,7 @@ export interface IvPlotProps {
 
 /**
  * IV 推移の描画域（#79。自前の SVG。docs/ui-redesign.md §4.7）。座標は ui/view/ivHistory.ts の ivChartModel、
- * 拡大・パン・ピンチ・ホイール・キーは useChartGestures（スマイル・損益グラフと共用）。PC のホバー・タッチの長押しで
+ * 拡大・パン・ピンチ・ホイール・キーは useChartGestures（スマイル・損益グラフと共用）。PC のホバー・タッチのタップ（#217。交点をつかんで動かす）で
  * カーソルの足を選ぶ（読み取りの 1 行と十字線・軸の札 = ivCrosshair。#130）。高さは残りの高さ（useSize）。色は CSS のクラスだけ（style 属性なし）。
  */
 function IvPlotView(p: IvPlotProps) {
@@ -126,11 +127,19 @@ function IvPlotView(p: IvPlotProps) {
   const clipId = `iv-clip-${useId().replace(/[^\w-]/g, '')}`;
   const full = ivFullDomain(n, p.leftSlack);
   const indexAt = (x: number) => ivIndexAt(x, viewport, range, n);
-  // 指 / マウスの縦の位置（要素の座標）。長押し・ドラッグの scrub は x だけを返すので、押下・移動のたびにここで控える
+  // 指 / マウスの縦の位置（要素の座標）と種類（タップは位置を返すが、マウスのクリックは十字線を置かない）
   const pointerY = useRef<number | null>(null);
+  const touch = useRef(false);
   const trackY = (e: PointerEvent) => {
     pointerY.current = e.clientY - (e.currentTarget as HTMLElement).getBoundingClientRect().top;
+    touch.current = e.pointerType !== 'mouse';
   };
+  // タッチのタップで置いた十字線（#217 の共通の規則）: 交点の ±14px をつかんで動かす。カーソルが外れたら終わる
+  const [pinned, setPinned] = useState(false);
+  useEffect(() => {
+    if (cursor === null) setPinned(false);
+  }, [cursor]);
+  const grab = pinned && cross && p.crossH !== false;
 
   useChartGestures(ref, {
     viewport,
@@ -138,10 +147,28 @@ function IvPlotView(p: IvPlotProps) {
     minWidth: Math.min(IV_MIN_BARS, full[1] - full[0]),
     range,
     disabled: n === 0,
-    onViewport: p.onViewport,
-    onTap: () => onCursor(null),
-    scrub: { linePx: null },
-    onScrub: (x) => onCursor(indexAt(x), pointerY.current),
+    onViewport: (v) => {
+      // ダブルタップ・R の初期表示では十字線も消す（ダブルタップの 1 回目で置いた十字線を残さない。#217）
+      if (v === null && pinned) onCursor(null);
+      p.onViewport(v);
+    },
+    // タッチのタップ（#217 の共通の規則）: 出ていなければ置く、出ていれば消す。マウスのクリックは今のまま外す（動かせばまた出る）
+    onTap: (x, y) => {
+      if (!touch.current || crossTapAction(cursor !== null) === 'hide') {
+        onCursor(null);
+        return;
+      }
+      if (x < range[0] || x > range[1]) return;
+      setPinned(true);
+      onCursor(indexAt(x), y);
+    },
+    ...(grab
+      ? {
+          cross: { pointPx: { x: cross.x, y: cross.y }, grabPx: CROSS_TOUCH_GRAB_PX },
+          onCross: (x: number, y: number) =>
+            onCursor(indexAt(Math.min(Math.max(x, range[0]), range[1])), y),
+        }
+      : {}),
     onScrubKey: (key) => {
       if (key !== ',' && key !== '.') return false;
       const from = cursor ?? n - 1;

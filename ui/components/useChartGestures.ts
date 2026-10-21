@@ -15,7 +15,8 @@
  * - 面モード（#88 段 B）: surface を渡すと 1 本目の押下ですぐ面の点をつかむ。onSurfaceStart（同期。最初の onSurface
  *   より前）→ onSurface(x, y)（1 フレーム 1 回）→ onSurfaceEnd（同期。最後の位置は次のフレームで流す）。2 本目の指・
  *   cancel は未反映の位置を捨てて onSurfaceCancel。リセット（ダブルタップ・dblclick・R）の前に未反映の位置を流す
- * - 十字線（#201）: cross を渡すと交点の ±grabPx の押下ですぐつかみ、onCross(x, y)（1 フレーム 1 回）に位置を渡す
+ * - 十字線（#201・#217）: cross を渡すと交点の ±grabPx の押下ですぐつかみ、onCross(x, y)（1 フレーム 1 回）に位置を渡す。
+ *   動かさずに離した短い押下は onTap（#217。十字線を消す）
  * - onDouble（#207。先物推移の指標の段）: 渡すとダブルタップ / ダブルクリックを初期表示に戻す代わりに onDouble(x, y)
  *   （離した位置。要素の座標）に渡す（段の最大化）。マウスは dblclick だけで拾い（OS のダブルクリックの間隔）、タッチ・ペンは
  *   状態機械のダブルタップで拾う（マウスで両方を拾うと 2 回効く = 戻ってしまう）。R キーは今のまま初期表示
@@ -345,10 +346,10 @@ export function useChartGestures(ref: RefObject<HTMLElement>, opts: ChartGesture
       reset();
     };
 
-    // 長押しで OS のメニュー（Android Chrome の長押しメニュー・右クリック）を出さない（損益グラフだけ）
+    // 長押しで OS のメニュー（Android Chrome の長押しメニュー・右クリック）を出さない（グラフの上はどれも。#217 で IV 推移・
+    // 段が長押しを使わなくなっても、長押しのメニューは出さないまま）
     const onContextMenu = (e: Event) => {
-      const o = optsRef.current;
-      if ((o.scrub || o.markers || o.surface) && !o.disabled) e.preventDefault();
+      if (!optsRef.current.disabled) e.preventDefault();
     };
 
     el.addEventListener('pointerdown', onDown);

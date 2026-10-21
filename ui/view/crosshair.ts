@@ -62,3 +62,14 @@ export function crossTagY(
 export function crossFloatBottom(fingerY: number, height: number): boolean {
   return height > 0 && fingerY < height * CROSS_FLOAT_TOP_RATIO;
 }
+
+/** 交点をつかむ距離（px。損益グラフの CROSS_GRAB_PX と同じ。#217 の共通の規則） */
+export const CROSS_TOUCH_GRAB_PX = 14;
+
+/**
+ * タッチのタップの十字線（#217 の共通の規則）: 出ていなければ置く、出ていれば消す（移さない。次のタップでまた置く）。
+ * 交点の ±14px の押下はつかむ（gesture.ts の cross）ので、ここに来るのはそれ以外のタップと交点の上の短いタップ
+ */
+export function crossTapAction(shown: boolean): 'place' | 'hide' {
+  return shown ? 'hide' : 'place';
+}

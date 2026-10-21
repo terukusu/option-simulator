@@ -463,18 +463,61 @@ describe('十字線の交点をつかむ cross（#201）', () => {
     expect(play([['down', 1, 711, 0, 111]], cross(700, 100)).state.mode).toBe('pending');
   });
 
-  it('動かさずに離しても tap・reset を出さない', () => {
+  it('#217: 動かさずに 500ms 未満で離すと tap（十字線を消す）。動かした・長い押下は tap なし', () => {
+    const r = play(
+      [
+        ['down', 1, 704, 0, 103],
+        ['up', 1, 704, 50, 103],
+      ],
+      cross(700, 100),
+    );
+    expect(collect(r, 'tap')).toEqual([{ x: 704, y: 103 }]);
+    expect(collect(r, 'cross')).toEqual([]);
+    expect(r.state.lastTap).toEqual({ x: 704, y: 103, t: 50 });
+    const moved = play(
+      [
+        ['down', 1, 700, 0, 100],
+        ['move', 1, 700 + TAP_MOVE_PX + 2, 30, 100],
+        ['move', 1, 701, 60, 100],
+        ['up', 1, 701, 90, 100],
+      ],
+      cross(700, 100),
+    );
+    expect(collect(moved, 'tap')).toEqual([]);
+    const slow = play(
+      [
+        ['down', 1, 700, 0, 100],
+        ['up', 1, 700, 600, 100],
+      ],
+      cross(700, 100),
+    );
+    expect(collect(slow, 'tap')).toEqual([]);
+  });
+
+  it('#217: ダブルタップの 2 回目は交点をつかまず reset（1 回目のタップで置いた十字線の上でも）', () => {
+    // 1 回目は交点の外のタップ（置く）、2 回目は置いた交点の上 = cross ではなく pending → reset
     const r = play(
       [
         ['down', 1, 700, 0, 100],
         ['up', 1, 700, 50, 100],
-        ['down', 2, 700, 120, 100],
-        ['up', 2, 700, 160, 100],
+        ['down', 2, 703, 150, 102],
+        ['up', 2, 703, 190, 102],
       ],
-      cross(700, 100),
+      cross(703, 102),
     );
-    expect(collect(r, 'tap')).toEqual([]);
-    expect(collect(r, 'reset')).toEqual([]);
+    expect(r.results[2]?.state.mode).toBe('pending');
+    expect(collect(r, 'reset')).toEqual([true]);
+    expect(collect(r, 'tap')).toHaveLength(1);
+    // 間が空いた 2 回目（300ms 超）は交点をつかむ
+    const late = play(
+      [
+        ['down', 1, 700, 0, 100],
+        ['up', 1, 700, 50, 100],
+        ['down', 2, 703, 400, 102],
+      ],
+      cross(703, 102),
+    );
+    expect(late.state.mode).toBe('cross');
   });
 
   it('足マーカーが先、交点がハンドルより先', () => {

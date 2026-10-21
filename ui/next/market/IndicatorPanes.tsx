@@ -14,6 +14,7 @@ import {
 } from '../../chart/split';
 import { pure } from '../../components/pure';
 import { useChartGestures } from '../../components/useChartGestures';
+import { CROSS_TOUCH_GRAB_PX, crossTapAction } from '../../view/crosshair';
 import {
   type FutPaneLayout,
   futPaneAt,
@@ -157,7 +158,7 @@ const SPLIT_KEY_PX = 8;
  * 先物推移の指標の段（#200・#207。docs/ui-redesign.md §4.8）。座標は ui/view/indicators.ts の indPaneModel、値は
  * model/technicals.ts（AI のツール technicals と同じ計算）。価格の描画域（IvPlot）と同じ表示範囲・横の画素範囲。
  * #207: 段の高さは配置（futPaneLayout）の値を svg の height 属性で描く（style 属性なし）。段の前に境目（role="separator"）、
- * 段の枠に useChartGestures（パン・ピンチ・ホイール・キー・長押し / ホバーの十字線・ダブルタップで最大化）。
+ * 段の枠に useChartGestures（パン・ピンチ・ホイール・キー・タップ / ホバーの十字線・ダブルタップで最大化）。
  * 色は CSS のクラスだけ。線の太さ（#214）は設定の値を stroke-width 属性で描く。
  */
 function IndicatorPanesView(p: IndicatorPanesProps) {
@@ -192,7 +193,7 @@ function IndicatorPanesView(p: IndicatorPanesProps) {
   const range: Domain = models[0]?.range ?? [p.marginLeft, width];
   const full = ivFullDomain(n, p.leftSlack);
   const indexAt = (x: number) => ivIndexAt(x, viewport, range, n);
-  // 指 / マウスの位置（段の枠の座標）と種類。長押しの scrub は x だけを返すので押下・移動のたびに控える
+  // 指 / マウスの位置（段の枠の座標）と種類。タップ・マウスの区別に押下・移動のたびに控える
   const ptr = useRef<{ y: number; touch: boolean }>({ y: 0, touch: false });
   const track = (e: PointerEvent) => {
     ptr.current = {
@@ -205,18 +206,43 @@ function IndicatorPanesView(p: IndicatorPanesProps) {
     return slot ? { pane: slot.kind, y: y - slot.top, touch } : null;
   };
 
+  // タッチのタップで置いた段の十字線の交点（段の枠の座標。#217 の共通の規則 = 交点の ±14px をつかんで動かす）
+  const ci = pc?.touch ? models.findIndex((m) => m.kind === pc.pane) : -1;
+  const cSlot = ci >= 0 ? layout.panes[ci] : undefined;
+  const cX = ci >= 0 ? (readouts[ci]?.cursorX ?? null) : null;
+  const cY = ci >= 0 ? (crosses[ci]?.y ?? null) : null;
+  const grabAt = cSlot && cX !== null && cY !== null ? { x: cX, y: cSlot.top + cY } : null;
+
   useChartGestures(ref, {
     viewport,
     full,
     minWidth: Math.min(IV_MIN_BARS, full[1] - full[0]),
     range,
     disabled: n === 0,
-    onViewport: p.onViewport,
-    onTap: () => p.onCursor(null),
-    scrub: { linePx: null },
-    onScrub: (x) => p.onCursor(indexAt(x), at(ptr.current.y, ptr.current.touch)),
-    // 境目の帯の上の dblclick は、価格と段を包む枠の捕捉の段階で止める（下の useEffect）
+    onViewport: (v) => {
+      if (v === null && pc?.touch) p.onCursor(null);
+      p.onViewport(v);
+    },
+    // タッチのタップ（#217 の共通の規則。#207 の長押しをやめた）: 出ていなければ置く、出ていれば消す。マウスのクリックは外す
+    onTap: (x, y) => {
+      if (!ptr.current.touch || crossTapAction(p.cursor !== null) === 'hide') {
+        p.onCursor(null);
+        return;
+      }
+      if (x < range[0] || x > range[1]) return;
+      p.onCursor(indexAt(x), at(y, true));
+    },
+    ...(grabAt
+      ? {
+          cross: { pointPx: grabAt, grabPx: CROSS_TOUCH_GRAB_PX },
+          onCross: (x: number, y: number) =>
+            p.onCursor(indexAt(Math.min(Math.max(x, range[0]), range[1])), at(y, true)),
+        }
+      : {}),
+    // 境目の帯の上の dblclick は、価格と段を包む枠の捕捉の段階で止める（下の useEffect）。ダブルタップの 1 回目で置いた
+    // 十字線は残さない（#217）
     onDouble: (_x, y) => {
+      if (pc?.touch) p.onCursor(null);
       const slot = futPaneAt(layout, y);
       if (slot) p.onMax(slot.kind);
     },
@@ -401,7 +427,7 @@ function IndicatorPanesView(p: IndicatorPanesProps) {
       ref={ref}
       tabIndex={n === 0 || layout.panes.length === 0 ? -1 : 0}
       role="application"
-      aria-label="指標の段（矢印でパン・+ − で拡大・, . で足を読む・Enter で段を最大化 / 戻す）"
+      aria-label="指標の段（マウスを載せる・タップで十字線、矢印でパン・+ − で拡大・, . で足を読む・Enter で段を最大化 / 戻す）"
       onPointerDown={track}
       onPointerMove={(e) => {
         track(e);

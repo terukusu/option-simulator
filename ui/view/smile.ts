@@ -399,7 +399,7 @@ export function axisTickLabel(axis: SmileAxis, v: number): string {
 /** 描画域の余白（px。market/SmilePlot.tsx の描画と十字線の座標で共用） */
 export const SMILE_MARGIN = { left: 38, right: 22, top: 14, bottom: 24 } as const;
 
-/** 十字線のカーソル（値の座標: x = 横軸の値、iv = IV %）。touch = タッチの長押しで出した（読み取りを指から離す） */
+/** 十字線のカーソル（値の座標: x = 横軸の値、iv = IV %）。touch = タッチのタップで出した（読み取りを指から離す） */
 export interface SmileCursor {
   x: number;
   iv: number;
@@ -497,7 +497,7 @@ export function smileCrosshair(
   };
 }
 
-/** 画素（要素の座標）→ カーソル（値の座標）。描画域の外は null（ホバー）、clamp なら端へ寄せる（長押しのドラッグ） */
+/** 画素（要素の座標）→ カーソル（値の座標）。描画域の外は null（ホバー）、clamp なら端へ寄せる（交点のドラッグ） */
 export function smileCursorAt(
   model: SmileModel,
   x: number,
@@ -521,4 +521,19 @@ export function smileCursorAt(
     iv: linear([bottom, top], model.yDomain)(cy),
     touch,
   };
+}
+
+/**
+ * 点に吸着したカーソル（#217: タッチのタップで点を選んだとき）: 横軸 = その行使価格の横軸の値、IV = mid の点（無ければ
+ * × の点、それも無ければ曲線）の IV。表示範囲に点が無ければ null
+ */
+export function smileDotCursor(model: SmileModel, k: number, touch: boolean): SmileCursor | null {
+  const s = model.strikeXs.find((q) => q.k === k);
+  if (!s) return null;
+  const iv =
+    model.points.find((q) => q.k === k && q.kind === 'mid')?.iv ??
+    model.unstable.find((q) => q.k === k)?.iv ??
+    model.points.find((q) => q.k === k)?.iv ??
+    smileCurveIv(model, s.x);
+  return iv === null || iv === undefined ? null : { x: s.x, iv, touch };
 }

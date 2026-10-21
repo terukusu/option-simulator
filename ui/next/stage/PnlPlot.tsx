@@ -11,7 +11,6 @@ import type { PinLabel } from '../../view/pins';
 import { type PnlBase, type PnlChartModel, Y_UNIT_LABEL } from '../../view/pnlChart';
 import {
   CROSS_GRAB_PX,
-  inCrossClose,
   markLabelBox,
   type PnlCursor,
   pnlCrosshair,
@@ -54,7 +53,7 @@ const STAGE_GRAB_PX = 14;
 const KIND_CLASS = { expiry: 'expiry', date: 'date', today: 'today' } as const;
 
 const LINE_LABEL =
-  '損益グラフ（マウスを載せる・タップで十字線（タップで置いた十字線は交点をドラッグで動かし、読み取りの × のタップで消す）、ドラッグでパン、ホイール・ピンチで拡大、ダブルクリックでリセット、ハンドルをつかむか長押しして左右にドラッグでシナリオ点 ΔX、足のマーカーで足を選ぶ・長押しして横にドラッグで行使価格。キー: ← / → ΔX ∓100 円（Shift で 1,000 円）、↑ / ↓ Δσ ±0.5pt、[ / ] 経過日数 ∓1 日、0 シナリオを 0 に、+ / − 拡大縮小、R リセット）';
+  '損益グラフ（マウスを載せる・タップで十字線（置いた十字線は交点をドラッグで動かし、ほかの所のタップ・読み取りの × で消す）、ドラッグでパン、ホイール・ピンチで拡大、ダブルクリックでリセット、ハンドルをつかむか長押しして左右にドラッグでシナリオ点 ΔX、足のマーカーで足を選ぶ・長押しして横にドラッグで行使価格。キー: ← / → ΔX ∓100 円（Shift で 1,000 円）、↑ / ↓ Δσ ±0.5pt、[ / ] 経過日数 ∓1 日、0 シナリオを 0 に、+ / − 拡大縮小、R リセット）';
 const SURFACE_LABEL =
   '損益の面（横 原資産・縦 経過日数・色 損益。マウスを載せると十字線（X・経過日数・損益）、描画域を押してドラッグでシナリオ点の ΔX と経過日数 d を同時に動かす、2 本指・横ホイールでパン、ホイール・ピンチで拡大、ダブルクリック / ダブルタップでリセット、足のマーカーで足を選ぶ・長押しして横にドラッグで行使価格。キー: ← / → ΔX ∓100 円（Shift で 1,000 円）、↑ / ↓ Δσ ±0.5pt、[ / ] 経過日数 ∓1 日、0 シナリオを 0 に、+ / − 拡大縮小、R リセット）';
 
@@ -73,8 +72,8 @@ function readSurfaceColors(): SurfaceColors | null {
  * 面モード（#88 段 B）: 描画域を押すとすぐ面の点をつかみ、位置 → (ΔX, d) を 1 フレーム 1 回の setScenario に入れる
  * （surfaceDragPatch）。2 本目の指・cancel は押す前の値に戻す。つかんでいる間は .live。
  * 十字線（#201。線モードだけ）: カーソルは値の座標のローカル state（pnlCrosshair）。マウスのホバーで置き外れて消す、
- * タッチ・ペンのタップで置く（pinned。交点の ±14px をドラッグで動かす = gesture の cross、読み取りの ×・描画域の外の
- * タップ・ダブルタップ（リセット）で消す）。面・ミニ・空では消す。
+ * タッチ・ペンのタップで置く（pinned。交点の ±14px をドラッグで動かす = gesture の cross、置いてある間のタップ（どこでも・
+ * 読み取りの ×）・ダブルタップ（リセット）で消す = #217 の共通の規則）。面・ミニ・空では消す。
  * 面の十字線（#217）: マウスのホバーだけ（X 10 円・d 1 日の格子・損益 = surfaceCrosshair）。点をつかんでいる間・線へ切り替えたら消す。
  */
 export function PnlPlot(p: {
@@ -318,10 +317,11 @@ export function PnlPlot(p: {
       if (v === null) setCursor(null);
       dispatch({ type: 'setPnlViewport', viewport: v });
     },
-    // 十字線（#201。線モード）: タッチ・ペンのタップで置く / 移す。読み取りの ×・描画域の外のタップで消す
+    // 十字線（#201・#217 の共通の規則。線モード）: タッチ・ペンのタップで置く。置いてある間のタップ（描画域の中・外・読み取りの
+    // ×・交点の上）は消す（移さない。次のタップでまた置く）
     onTap: (x: number, y: number) => {
       if (!crossOn || pointerType.current === 'mouse') return;
-      if (cursor?.pinned && inCrossClose(cross, x + ox, y + frame.offsetY)) {
+      if (cursor?.pinned) {
         setCursor(null);
         return;
       }

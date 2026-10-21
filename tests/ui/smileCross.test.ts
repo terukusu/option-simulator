@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { normalizeChain } from '../../data';
 import { linear } from '../../ui/chart/scale';
+import { crossTapAction } from '../../ui/view/crosshair';
 import { IV_TAG_H } from '../../ui/view/ivHistory';
 import {
   SMILE_MARGIN,
@@ -9,6 +10,7 @@ import {
   smileCrossXText,
   smileCursorAt,
   smileCurveIv,
+  smileDotCursor,
   smileModel,
 } from '../../ui/view/smile';
 import { fixture } from '../support/fixtures';
@@ -117,5 +119,23 @@ describe('スマイルの十字線（#217）', () => {
     expect(smileCrossXText('moneyness', -0.05)).toBe('−5.00%');
     expect(smileCrossXText('delta', 0.2534)).toBe('P 0.253');
     expect(smileCrossXText('delta', 0.75)).toBe('C 0.250');
+  });
+});
+
+describe('タッチのタップの十字線（#217 の共通の規則）', () => {
+  it('crossTapAction: 出ていなければ置く、出ていれば消す（移さない）', () => {
+    expect(crossTapAction(false)).toBe('place');
+    expect(crossTapAction(true)).toBe('hide');
+  });
+
+  it('smileDotCursor: 点のタップは点に吸着（横軸 = その行使価格、IV = mid の点）、表示範囲に無い点は null', () => {
+    const m = smileModel(month, 'B', 'k');
+    const mid = m.points.find((q) => q.kind === 'mid');
+    if (!mid) throw new Error('mid の点が無い');
+    const c = smileDotCursor(m, mid.k, true);
+    expect(c).toEqual({ x: mid.x, iv: mid.iv, touch: true });
+    expect(smileDotCursor(m, -1, true)).toBeNull();
+    const xh = smileCrosshair(m, c, 300, 220);
+    expect(xh?.xTag.text).toBe(smileCrossXText('k', mid.x));
   });
 });
