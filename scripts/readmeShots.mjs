@@ -1,7 +1,8 @@
 // README のスクリーンショット（`npm run readme:shots`。#160）。Chromium（Playwright）で画面を開き、docs/images/ に
-// WebP で書く。板は dev サーバーの合成の板（fixtures/synthetic/ の latest。Black-76 から作った架空の値）、IV 推移と
-// 追証マップの過去の点は dev サーバーの合成の応答（scripts/devFixtures.mjs）だけを使う。本番・API・BigQuery には
-// 触れない。資金（capital_yen）などの設定値も架空の値。
+// WebP で書く。板は dev サーバーの合成の板（fixtures/synthetic/ の latest。Black-76 から作った架空の値）、IV 推移・
+// 先物推移・追証マップの過去の点・AI の返答（診断・シナリオの評価・提案・テクニカル。偽の SSE）は dev サーバーの合成の
+// 応答（scripts/devFixtures.mjs）だけを使う。本番・API・BigQuery・Anthropic には触れない。資金（capital_yen）などの
+// 設定値も架空の値。
 //
 // 前提: `npm ci` の後に一度 `npx playwright install chromium`（scripts/uiCheck.mjs と同じ）。
 //
@@ -65,6 +66,13 @@ const workspace = (scenario = {}, ui = {}) =>
   });
 /** 見せたいシナリオ: 10 日後・原資産 −1,500 円・IV +4pt */
 const SCENARIO = { days: 10, dX: -1500, dSigma: 4 };
+/** 提案の画像の作業: タブ A の put の売りだけ（ヘッジの put の買いで満期の最大損失が有限になる） */
+const putOnly = () => {
+  const ws = JSON.parse(workspace(SCENARIO));
+  ws.tabs[0].name = 'put 売り';
+  ws.tabs[0].position.legs = ws.tabs[0].position.legs.filter((l) => l.leg.type === 'put');
+  return JSON.stringify(ws);
+};
 const prefs = (theme, capital = CAPITAL) =>
   JSON.stringify({ schema_version: 1, theme, ...(capital ? { capital_yen: capital } : {}) });
 
@@ -210,6 +218,28 @@ async function composite(pngs, theme) {
   return png;
 }
 
+/** AI のパネルを開く（初めての注意書きは閉じる）。返答は dev サーバーの偽の SSE（Anthropic を呼ばない） */
+async function openAi(opts) {
+  const o = await open(opts);
+  const { page } = o;
+  if ((await page.getAttribute('.layout', 'data-bench')) !== 'ai') {
+    await page.click('.top button[data-ai="top"]');
+  }
+  await page.waitForSelector('section.ai .ai-foot', { state: 'visible', timeout: 5000 });
+  const close = page.locator('section.ai [data-ai="disclaimer"] button');
+  if (await close.count()) await close.click();
+  return o;
+}
+/** AI に質問を送り、返答が終わるまで待つ */
+async function ask(page, text) {
+  await page.fill('section.ai .ai-input textarea', text);
+  await page.press('section.ai .ai-input textarea', 'Enter');
+  await page
+    .waitForSelector('section.ai .ai-progress', { state: 'attached', timeout: 5000 })
+    .catch(() => {});
+  await page.waitForSelector('section.ai .ai-progress', { state: 'detached', timeout: 15000 });
+}
+
 // ---- 撮るもの
 const PC = { w: 1440, h: 900, dpr: 1.5 };
 /** 要素だけを切り出す撮影（細かい所が読めるように DPR 2） */
@@ -221,6 +251,15 @@ const shots = {
   async hero() {
     const { ctx, page } = await open({ ...PC, theme: 'dark' });
     await save('hero', await page.screenshot());
+    await ctx.close();
+  },
+  // 損益グラフの十字線（PC はマウスを載せると出る。#201・#217）。ライト
+  async 'stage-cross'() {
+    const { ctx, page } = await open({ ...PC_CROP, theme: 'light' });
+    const b = await page.locator('.chart:not(.mini)').boundingBox();
+    await page.mouse.move(b.x + b.width * 0.3, b.y + b.height * 0.62);
+    await page.waitForTimeout(400);
+    await save('stage-cross', await shotEl(page, 'section.stage'));
     await ctx.close();
   },
   // 損益グラフ: ピン（今の線を残す + ヘッジ案を重ねる）。ライト
@@ -260,6 +299,10 @@ const shots = {
     const { ctx, page } = await open({ ...PC_CROP, theme: 'dark' });
     await page.click('.stage-head .seg button:has-text("面")');
     await page.waitForTimeout(800);
+    // 面の十字線（PC のホバー。#217）: 原資産・経過日数の札とその点の損益
+    const b = await page.locator('section.stage .chart:not(.mini)').boundingBox();
+    await page.mouse.move(b.x + b.width * 0.36, b.y + b.height * 0.4);
+    await page.waitForTimeout(400);
     await save('stage-surface', await shotEl(page, 'section.stage'));
     await ctx.close();
   },
@@ -341,9 +384,10 @@ const shots = {
     await save('iv-history', await shotEl(page, 'section.smile'));
     await ctx.close();
   },
-  // 先物推移（日足のローソク足・限月交代の点線と札・十字線。#190）
+  // 先物推移（日足のローソク足・EMA の 3 本・RSI / MACD / SO の段・限月交代の点線と札・十字線。#190・#200・#206）
   async 'fut-history'() {
-    const { ctx, page } = await open({ ...PC_CROP, theme: 'dark' });
+    // 左の列は幅の 30%。横に広い画面で開き、チャートを横長に撮る
+    const { ctx, page } = await open({ w: 2400, h: 1000, dpr: 1.5, theme: 'dark' });
     await page.click('section.board .panel-head .seg button:text-is("先物")');
     await page.waitForSelector('section.smile .iv-wrap svg', { timeout: 15000 });
     await page.click('section.smile .iv-tools button[aria-label="日足"]');
@@ -352,9 +396,13 @@ const shots = {
     await page.focus('section.smile .iv-wrap');
     await page.keyboard.press('r');
     await page.waitForSelector('section.smile .fut-roll', { state: 'attached', timeout: 15000 });
+    for (const k of ['RSI', 'MACD', 'SO']) {
+      await page.click(`section.smile .ind-toggles button:text-is("${k}")`);
+    }
+    await page.waitForSelector('section.smile .ind-pane.stoch', { timeout: 15000 });
     await page.waitForTimeout(600);
     const b = await page.locator('section.smile .iv-wrap').boundingBox();
-    await page.mouse.move(b.x + b.width * 0.75, b.y + b.height * 0.45);
+    await page.mouse.move(b.x + b.width * 0.75, b.y + b.height * 0.2);
     await page.waitForTimeout(300);
     await save('fut-history', await shotEl(page, 'section.smile'));
     await ctx.close();
@@ -381,24 +429,50 @@ const shots = {
     await save('term-card', await page.screenshot());
     await ctx.close();
   },
+  // 設定のテクニカル指標（期間・EMA の線・段の線。#205・#214）
+  async 'settings-tech'() {
+    const { ctx, page } = await open({ ...PC_CROP, theme: 'dark' });
+    await page.click('button[aria-label="メニュー"]');
+    await page.click('header.top > .menu-wrap [role="menuitem"]:has-text("設定…")');
+    await page.waitForSelector('dialog.sheet.settings[open] .set-tech');
+    await page.evaluate(() => {
+      const t = document.querySelector('dialog.sheet.settings[open] .set-tech');
+      t?.scrollIntoView({ block: 'center' });
+    });
+    await page.waitForTimeout(300);
+    await save('settings-tech', await shotEl(page, 'dialog.sheet.settings[open] .set-tech', 12));
+    await ctx.close();
+  },
   // AI に相談: [このポジションを診断] の返答と、続けた質問のシナリオの評価のカード。返答は dev サーバーの偽の SSE
   // （scripts/devFixtures.mjs の /fixtures/ai。Anthropic を呼ばない）で、数字は合成の板からの計算の値
   async ai() {
-    const { ctx, page } = await open({ ...PC, theme: 'dark' });
-    if ((await page.getAttribute('.layout', 'data-bench')) !== 'ai') {
-      await page.click('.top button[data-ai="top"]');
-    }
-    await page.waitForSelector('section.ai .ai-foot', { state: 'visible', timeout: 5000 });
-    const close = page.locator('section.ai [data-ai="disclaimer"] button');
-    if (await close.count()) await close.click();
+    const { ctx, page } = await openAi({ ...PC, theme: 'dark' });
     await page.click('section.ai button[data-ai="diagnose"]');
     await page.waitForSelector('section.ai .ai-progress', { state: 'detached', timeout: 15000 });
-    await page.fill('section.ai .ai-input textarea', '−6% で 3 日後、IV +5pt ならどうなる？');
-    await page.press('section.ai .ai-input textarea', 'Enter');
-    await page.waitForSelector('section.ai .ai-progress', { state: 'detached', timeout: 15000 });
+    await ask(page, '−6% で 3 日後、IV +5pt ならどうなる？');
     await page.waitForSelector('section.ai .ai-tool button[data-ai="apply"]', { timeout: 15000 });
     await page.waitForTimeout(400);
     await save('ai', await page.screenshot());
+    await ctx.close();
+  },
+  // AI のポジションの提案（#139）: 「ヘッジ」を含む質問 → 偽の SSE の propose_position → 提案のカード
+  async 'ai-propose'() {
+    const { ctx, page } = await openAi({ ...PC_CROP, h: 640, theme: 'light', ws: putOnly() });
+    await ask(page, '最大損失を抑えるヘッジの足を足して');
+    await page.waitForSelector('section.ai .ai-prop button[data-ai="propose"]', { timeout: 15000 });
+    await page.waitForTimeout(400);
+    await save('ai-propose', await shotEl(page, 'section.ai'));
+    await ctx.close();
+  },
+  // AI のテクニカルの読み（#200・#206）: 「RSI」を含む質問 → 偽の SSE の technicals → ツールのカードと返答
+  async 'ai-tech'() {
+    const { ctx, page } = await openAi({ ...PC_CROP, h: 560, theme: 'dark' });
+    await ask(page, '日足の RSI は？');
+    await page.waitForSelector('section.ai .ai-tool[data-ai-tool="technicals"]', {
+      timeout: 15000,
+    });
+    await page.waitForTimeout(400);
+    await save('ai-tech', await shotEl(page, 'section.ai'));
     await ctx.close();
   },
   // スマホ: ドックとシート（ダーク 3 台）
@@ -416,19 +490,27 @@ const shots = {
     }
     await save('phone-dark', await composite(pngs, 'dark'));
   },
-  // スマホ: 板・スマイル・IV 推移（ライト 3 台）
+  // スマホ: 板・スマイル・先物推移（RSI・MACD の段。ライト 3 台）
   async 'phone-light'() {
     const pngs = [];
-    for (const step of ['board', 'smile', 'iv']) {
+    for (const step of ['board', 'smile', 'fut']) {
       const { ctx, page } = await open({ ...PHONE, theme: 'light' });
       if (step === 'board') await setShell(page, 'board', 'full');
       else {
         await setShell(page, 'smile', 'full');
         const seg = page.locator(
-          `section.smile .panel-head .seg button:has-text("${step === 'iv' ? 'IV 推移' : 'スマイル'}")`,
+          `section.smile .panel-head .seg button:text-is("${step === 'fut' ? '先物' : 'スマイル'}")`,
         );
         if ((await seg.getAttribute('aria-pressed')) !== 'true') await seg.click();
         await page.waitForTimeout(800);
+        if (step === 'fut') {
+          await page.waitForSelector('section.smile .iv-wrap svg', { timeout: 15000 });
+          for (const k of ['RSI', 'MACD']) {
+            await page.click(`section.smile .ind-toggles button:text-is("${k}")`);
+          }
+          await page.waitForSelector('section.smile .ind-pane.macd', { timeout: 15000 });
+          await page.waitForTimeout(600);
+        }
       }
       pngs.push(await page.screenshot());
       await ctx.close();

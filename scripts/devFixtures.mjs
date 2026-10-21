@@ -434,7 +434,8 @@ export function synthAiReply(body) {
       // technicals（#200）の結果: 日足の RSI と基準率の件数だけを引く（架空の値）
       const f = r.frames[0] ?? {};
       const br = f.base_rates?.rsi ?? f.base_rates?.all ?? {};
-      const text = `${f.tf ?? '—'} の RSI は ${f.rsi?.rsi ?? '—'} です。同じ状態の後の ${f.horizon_bars ?? '—'} 本先は中央値 ${br.median_pct ?? '—'}%（件数 ${br.n ?? '—'}${br.insufficient ? '・サンプル不足' : ''}）で、予想ではなく材料です。`;
+      const tf = { weekly: '週足', daily: '日足', '4h': '4 時間足' }[f.tf] ?? f.tf ?? '—';
+      const text = `${tf}の RSI は ${f.rsi?.rsi ?? '—'} です。過去に同じ状態だった後の ${f.horizon_bars ?? '—'} 本先は、中央値 ${pct(br.median_pct)}・下位 10% ${pct(br.p10_pct)}・上位 10% ${pct(br.p90_pct)}（件数 ${br.n ?? '—'}${br.insufficient ? '・サンプル不足' : ''}）で、予想ではなく材料です。`;
       return { thinking: 'ツールの結果を読む', text, stop: 'end_turn' };
     }
     if (r?.after && Array.isArray(r?.diff)) {
