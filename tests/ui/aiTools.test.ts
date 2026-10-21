@@ -211,7 +211,7 @@ describe('ツールの境界', () => {
     expect(
       toolCard('iv_stats', {}, { data: { iv_now_pct: 20, now_source: 'daily_close' } }, false)
         .lines,
-    ).toEqual(['IV 20.0%（前日の終値）']);
+    ).toEqual(['IV 20.0%（最後の確定日の終値）']);
     const sm = run(e, 'smile_position');
     expect(sm.expiries.length).toBe(2);
     expect(sm.legs).toEqual([]);

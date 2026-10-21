@@ -160,6 +160,26 @@ describe('スパイクの回復', () => {
   });
 });
 
+describe('9 割戻しの探索は次の回の起点の前まで', () => {
+  it('9 割戻す前に次のスパイクが来たら null（次の回の後の下げを前の回の戻りに数えない）', () => {
+    const iv: number[] = Array(12).fill(10);
+    // 1 回目: 起点・山 20（base 10）、半分戻し 14（≤ 15）、9 割戻し（≤ 11）の前に 2 回目。12.5 は次の起点（≥ 13）に届かない
+    const s1 = iv.length;
+    iv.push(20, 14, 12.5, 12.5);
+    // 2 回目: 直前 10 行の最小 12.5 → 起点 26（≥ 16.25）、その後 10 まで下がる（ここで 1 回目の 9 割戻しの水準も下回る）
+    for (let i = 0; i < 6; i++) iv.push(12.5);
+    const s2 = iv.length;
+    iv.push(26, 17, 10);
+    const eps = ivSpikes(iv, 0.3);
+    expect(eps.map((e) => [e.start, e.half, e.retrace90])).toEqual([
+      [s1, s1 + 1, null],
+      [s2, s2 + 1, s2 + 2],
+    ]);
+    // 上限が無ければ s2 + 2（10）を 1 回目の 9 割戻しに数えていた
+    expect(iv[s2 + 2]).toBeLessThanOrEqual(10 + 0.1 * (20 - 10));
+  });
+});
+
 describe('β の回復', () => {
   it('下げ・上げで傾きの違う合成の 2 日の動き（雑音つき）から β を ±0.05 で回復する', () => {
     for (const [bd, bu, seed] of [

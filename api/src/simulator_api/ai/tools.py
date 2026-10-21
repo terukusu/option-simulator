@@ -226,7 +226,8 @@ IV_LEVEL = Obj({
     "windows": Arr(Obj({"window": IV_WINDOW, "n": COUNT, "percentile_pct": PCT, "min_pct": PCT, "p10_pct": PCT,
                         "p25_pct": PCT, "p50_pct": PCT, "p75_pct": PCT, "p90_pct": PCT, "max_pct": PCT}),
                    3, fixed=True),
-    "changes": Arr(Obj({"days": Num(1, 20, integer=True), "iv_change_pt": PT, "iv_change_pct": PCT,
+    "changes": Arr(Obj({"days": Num(1, 20, integer=True), "from_d": Nullable(DATE), "iv_change_pt": PT,
+                        "iv_change_pct": PCT,
                         "percentile_pct": PCT, "n": COUNT}), 3, fixed=True),
 })
 IV_SPIKES = Obj({
@@ -235,7 +236,8 @@ IV_SPIKES = Obj({
     "now_rise_from_low_pct": PCT,
     "now_in_spike": Bool(),
     "n": COUNT,
-    "summary": Obj({"days_to_peak": DIST_DAYS, "days_to_half": DIST_DAYS, "days_to_90pct": DIST_DAYS}),
+    "summary": Obj({"days_to_peak": DIST_DAYS, "days_to_half": DIST_DAYS, "days_to_90pct": DIST_DAYS,
+                    "not_retraced_90pct": COUNT}),
     "after_peak": Arr(Obj({"days": Num(1, 100, integer=True), "n": COUNT, "median_pct": PCT, "p10_pct": PCT,
                            "p90_pct": PCT, "insufficient": Bool()}), 3, fixed=True),
     "recent": Arr(Obj({"start_d": DATE, "base_pct": PCT, "trigger_pct": PCT, "peak_d": DATE, "peak_pct": PCT,
@@ -268,7 +270,8 @@ IV_HV = Obj({
 })
 IV_STATS = Obj({
     "data": Obj({"first_d": DATE, "last_d": DATE, "n_days": COUNT, "last_close_pct": PCT,
-                 "now_source": Enum(("intraday", "daily_close")), "now_at": TIME_JST, "iv_now_pct": PCT}),
+                 "now_source": Enum(("intraday", "daily_close")), "now_at": TIME_JST, "iv_now_pct": PCT,
+                 "provisional_closes": Arr(Obj({"d": DATE, "iv_pct": PCT}), 5)}),
     "level": IV_LEVEL,
     "spikes": IV_SPIKES,
     "moves": IV_MOVES,
@@ -500,15 +503,18 @@ REGISTRY: Registry = {t.name: t for t in (
     _spec("iv_stats",
           "IV（日経225 オプションの 30 日固定の ATM IV。IV 推移の画面と同じ値）の過去の統計と、原資産の動きとの関係"
           "（画面の追証マップの過去の点と同じ日次の値。取引日の日中の終値、全期間）。"
-          "data = 期間・今の IV（now_source: intraday = 今の値、daily_close = 前日の終値で代えた）。"
+          "data = 期間・今の IV（now_source: intraday = 今の値、daily_close = 今の値が読めず最後の確定日 last_d の"
+          "終値で代えた）・provisional_closes = まだ確定していない日（夕方・夜間の当日）の終値を 1 時間足で近似した値。"
           "level = 今の IV の分位（1y / 3y / all の日次の終値の中で今以下の割合 percentile_pct）と分布、"
-          "1・5・20 取引日前からの変化（pt・%）とその変化の過去の中での分位。"
+          "1・5・20 取引日前（起点の日 from_d）からの変化（pt・%）とその変化の過去の中での分位。"
           "spikes = 直近 10 取引日の最低から rise_threshold_pct 以上の上昇を起点にした過去のスパイク: 山までの日数・"
-          "半分戻し（days_to_half）・9 割戻し（days_to_90pct）までの日数（山から数える。データのある取引日）の分布、"
+          "半分戻し（days_to_half）・9 割戻し（days_to_90pct。次のスパイクの起点の前まで）までの日数（山から数える。"
+          "データのある取引日）の分布と、9 割は戻らなかった回の数（not_retraced_90pct。9 割戻しの分布に入らない）、"
           "山から 5・10・20 取引日後の IV の変化（%）、新しい順の最大 8 回（ongoing = 戻し切っていない）、"
           "今がスパイクの中か（now_in_spike）。"
           "moves = 2 営業日の原資産（同じ限月のフォワード）の変化の分布と、変化の区分ごとの IV の変化"
-          "（% と pt。区分は dx_from_pct 以上 dx_to_pct 未満）、直近の 2 日、β の実測（down_pt / up_pt / all_pt = "
+          "（% と pt。区分の境ちょうどは大きさの大きい側 = −8% ちょうどは −8% 以下、+5% ちょうどは +5% 以上、"
+          "−1〜+1 は両端を含まない）、直近の 2 日、β の実測（down_pt / up_pt / all_pt = "
           "原資産 1% の下げあたりの IV の上昇 pt。シナリオの β と同じ向き。全期間と直近 1 年）。組は日をずらして"
           "重なる（overlapping）。"
           "hv = 実現ボラ（HV。1 営業日の対数変化の 5・20・60 本、年 245 取引日）と、同じ日の IV − HV（pt）、"

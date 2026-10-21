@@ -7,7 +7,8 @@
  * - スパイク（ivSpikes）: 日次の終値の列 iv。low_i = 直前 lookback 行の最小（行が足りない i は候補にしない）。
  *   iv[i] ≥ low_i × (1 + rise) の最初の i が起点（起点の最低 b = low_i）。i から先で走る最高 p を更新し、
  *   iv[j] ≤ b + 0.5(p − b) の最初の j が半分戻し（山 = それまでの最高の行。同じ値なら最初）。その後
- *   iv ≤ b + 0.1(p − b) の最初の行が 9 割戻し（無ければ null）。次の起点は半分戻しの次の行から探す。
+ *   iv ≤ b + 0.1(p − b) の最初の行が 9 割戻し（次の回の起点より前に無ければ null = 9 割は戻らないまま次の
+ *   スパイクが来た。最後の回は列の終わりまで）。次の起点は半分戻しの次の行から探す。
  *   半分戻しが無いまま列が終われば ongoing（山は今までの最高）。日数は行の差（データのある取引日で数える）
  * - β（ivBeta）: 組 (x = 原資産の変化 %, y = IV の変化 pt) の最小二乗の傾き s の −s（シナリオの β と同じ向き =
  *   下げで IV が上がると正。docs/design.md 5.4）。下げ（dx < 0）・上げ（dx > 0）・全体
@@ -80,7 +81,7 @@ export interface IvSpike {
   peak: number;
   /** 半分戻しの行（ongoing なら null） */
   half: number | null;
-  /** 9 割戻しの行（無ければ null） */
+  /** 9 割戻しの行（次の回の起点より前・列の中に無ければ null） */
   retrace90: number | null;
   /** 半分戻しが無いまま列が終わった */
   ongoing: boolean;
@@ -143,6 +144,11 @@ export function ivSpikes(
     out.push({ start: i, base: low, peak, half, retrace90, ongoing: half === null });
     if (half === null) break;
     i = half + 1;
+  }
+  // 9 割戻しの探索は次の回の起点の前まで（次のスパイクの下げを前の回の戻りに数えない）
+  for (let k = 0; k + 1 < out.length; k++) {
+    const e = out[k] as IvSpike;
+    if (e.retrace90 !== null && e.retrace90 >= (out[k + 1] as IvSpike).start) e.retrace90 = null;
   }
   return out;
 }

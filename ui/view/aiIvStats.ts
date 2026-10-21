@@ -7,15 +7,21 @@
  *
  * - データ: ui/components/ivStatsData.ts が /api/atm_daily（全期間）と /api/atm_iv の 1 時間足の右端（今の値）を読んで渡す。
  *   新しいクエリは無い。生の日次の列は返さない（要約の数字だけ）
- * - 今の値（data.now）: 1 時間足の最後の足の終値が最後の日次の終値より後なら intraday、無い・前なら最後の日次の終値
- *   （daily_close）
+ * - 今の値（data.now）: 1 時間足の最後の足の終値（時刻は値の時刻 = 応答の lastAt）が最後の日次の終値より後なら
+ *   intraday、無い・前なら最後の確定日（last_d）の終値（daily_close）
+ * - まだ確定していない日の終値（provisionalCloses）: /api/atm_daily に日 D が入るのは翌日 8:00 以降なので、D の日中が
+ *   終わった後（D 15:00 以降）から翌 8:00 まで（夕方・夜間）は D の終値が日次に無い。その間は 1 時間足の D の
+ *   9 時〜14 時台の最後の足の終値で D の終値を近似して起点の列に足す（JPX の取引日では夜間は D の翌取引日に属するので、
+ *   「1 取引日前」の起点は D の終値）。分布（分位・スパイクの検出・2 日の動き・HV）は確定した日だけで作る
  * - 窓: 最後の日次の日から暦日 365 日（1y）・1,095 日（3y）・全期間（all）。d > 最後の日 − 暦日
- * - 変化（level.changes）: 今 − k 行前の日次の終値（intraday なら k = 1 は最後の終値から、daily_close なら最後の終値の
- *   k 行前から）。分位は日次の終値の k 行差の全期間の分布の中で
+ * - 変化（level.changes）: 今 − k 取引日前の終値（起点の日 from_d。intraday なら確定した日 + 近似の日の列の最後が
+ *   1 取引日前、daily_close なら最後の確定日の k 行前）。分位は確定した日次の終値の k 行差の全期間の分布の中で
  * - スパイク: model/ivStats.ts の ivSpikes（直近 10 取引日の最低から spike_rise_pct 以上の上昇が起点）。日数はデータの
  *   ある取引日の行で数える。今がスパイクの中か = 今の値の直近 10 本の終値の最低からの上昇がしきい値以上、または最後の回が
  *   戻し切っていない（ongoing）
- * - 2 日の動き: 区分は dx_from_pct ≤ 変化 < dx_to_pct（開いた端は null）。組は日をずらして重なる（overlapping）
+ * - 2 日の動き: 区分は変化の大きさで分け、境ちょうどは大きい側に入れる（下げ: −8% 以下・−8〜−5%（−5% を含む）・…・
+ *   −3〜−1%（−1% を含む）、−1% より大きく +1% 未満、上げ: +1%（含む）〜+3%・…・+5% 以上。開いた端は null）。組は日を
+ *   ずらして重なる（overlapping）
  * - β: 2 日の IV の変化（pt）を原資産の変化（%）に回帰した傾きの符号反転（シナリオの β と同じ向き・単位）
  * - HV: 1 営業日の対数変化（同じ限月どうし）の最後の 5・20・60 本、年 245 取引日。IV − HV はその最後の組の日（as_of_d）の
  *   日次の終値 − HV（今の値ではない = 同じ日どうし）
@@ -43,6 +49,8 @@ import { fin, r1, r2, round } from './aiRound';
 export interface IvStatsData {
   days: readonly AtmDailyDay[];
   now: { t: number; iv: number } | null;
+  /** 1 時間足の右端（足の始まり t と終値 c。まだ確定していない日の終値の近似に使う。無ければ近似しない） */
+  hourly?: readonly { t: number; c: number }[];
 }
 
 export const IV_SECTIONS = ['level', 'spikes', 'moves', 'hv'] as const;
@@ -77,6 +85,40 @@ function jstText(t: number): string {
   const d = new Date((t + JST_S) * 1000);
   return `${d.getUTCFullYear()}-${pad2(d.getUTCMonth() + 1)}-${pad2(d.getUTCDate())} ${pad2(d.getUTCHours())}:${pad2(d.getUTCMinutes())}`;
 }
+/** UNIX 秒 → JST の日付と時（0〜23） */
+function jstDayHour(t: number): { d: string; h: number } {
+  const x = new Date((t + JST_S) * 1000);
+  return { d: x.toISOString().slice(0, 10), h: x.getUTCHours() };
+}
+/** 日中の終わり（JST 15:00）。D の終値を近似してよいのは now がこれ以後のとき */
+const DAY_CLOSE_HOUR = 15;
+/** 近似に使う足の始まりの時（JST。9 時〜14 時台 = 日次の終値の窓 9:00〜15:00 の中の足） */
+const DAY_BAR_HOURS = [9, 14] as const;
+
+/**
+ * まだ確定していない日の終値の近似（last_d より後で、日中が終わった日 D ごとに 1 時間足の 9〜14 時台の最後の足の終値）。
+ * now が D 15:00 JST より前の日（今が日中の D）は入れない。d の昇順
+ */
+export function provisionalCloses(
+  lastD: string,
+  hourly: readonly { t: number; c: number }[],
+  nowT: number,
+): { d: string; iv: number }[] {
+  const byDay = new Map<string, { t: number; c: number }>();
+  for (const b of hourly) {
+    if (!fin(b.t) || !fin(b.c) || !(b.c > 0)) continue;
+    const { d, h } = jstDayHour(b.t);
+    if (d <= lastD || h < DAY_BAR_HOURS[0] || h > DAY_BAR_HOURS[1]) continue;
+    const closeT = Date.parse(`${d}T00:00:00Z`) / 1000 - JST_S + DAY_CLOSE_HOUR * 3600;
+    if (nowT < closeT) continue;
+    const prev = byDay.get(d);
+    if (!prev || b.t > prev.t) byDay.set(d, b);
+  }
+  return [...byDay.entries()]
+    .sort(([a], [b]) => (a < b ? -1 : 1))
+    .map(([d, b]) => ({ d, iv: b.c }));
+}
+
 /** 日付の k 暦日前（YYYY-MM-DD） */
 function daysBefore(d: string, k: number): string {
   return new Date(Date.parse(`${d}T00:00:00Z`) - k * 86_400_000).toISOString().slice(0, 10);
@@ -86,15 +128,27 @@ interface Now {
   iv: number;
   source: 'intraday' | 'daily_close';
   t: number;
+  /** 起点の列（確定した日 + intraday なら近似の日） */
+  base: { d: string; iv: number }[];
+  /** 近似した日 */
+  provisional: { d: string; iv: number }[];
 }
 
 function nowOf(data: IvStatsData): Now {
   const last = data.days[data.days.length - 1] as AtmDailyDay;
   const n = data.now;
+  const settled = data.days.map((x) => ({ d: x.d, iv: x.iv }));
   if (n && fin(n.iv) && n.iv > 0 && fin(n.t) && n.t > last.t) {
-    return { iv: n.iv, source: 'intraday', t: n.t };
+    const provisional = provisionalCloses(last.d, data.hourly ?? [], n.t);
+    return {
+      iv: n.iv,
+      source: 'intraday',
+      t: n.t,
+      base: [...settled, ...provisional],
+      provisional,
+    };
   }
-  return { iv: last.iv, source: 'daily_close', t: last.t };
+  return { iv: last.iv, source: 'daily_close', t: last.t, base: settled, provisional: [] };
 }
 
 function level(data: IvStatsData, now: Now): R {
@@ -119,17 +173,20 @@ function level(data: IvStatsData, now: Now): R {
     };
   });
   const iv = days.map((x) => x.iv);
-  // 今が日中なら最後の終値が 1 行前（k = 1）、終値なら最後の終値の k 行前
+  // 起点の列: intraday なら最後（確定した日か近似の日）が 1 取引日前、終値なら最後の終値の k 行前
   const offset = now.source === 'intraday' ? 0 : 1;
+  const nb = now.base.length;
   const changes = IV_CHANGE_DAYS.map((k) => {
-    const i = n - offset - k;
-    const base = i >= 0 ? (iv[i] as number) : null;
+    const i = nb - offset - k;
+    const from = i >= 0 ? now.base[i] : undefined;
+    const base = from ? from.iv : null;
     const hist: number[] = [];
     for (let j = k; j < n; j++) hist.push((iv[j] as number) - (iv[j - k] as number));
     const sorted = sortedFinite(hist);
     const pt = base === null ? null : now.iv - base;
     return {
       days: k,
+      from_d: from ? from.d : null,
       iv_change_pt: r1(pt),
       iv_change_pct: base === null ? null : r1(pctOf(now.iv / base)),
       percentile_pct: pt === null ? null : r1(percentileRank(sorted, pt)),
@@ -157,8 +214,13 @@ function spikes(data: IvStatsData, now: Now, risePct: number): R {
   const n = iv.length;
   const rise = risePct / 100;
   const eps = ivSpikes(iv, rise, SPIKE_LOOKBACK);
-  // 今の値の直近の最低（今が日中なら最後の 10 本の終値、終値なら最後の終値の前の 10 本）
-  const low = lowBefore(iv, now.source === 'intraday' ? n : n - 1, SPIKE_LOOKBACK);
+  // 今の値の直近の最低（今が日中なら起点の列の最後の 10 本 = 近似の日を含む、終値なら最後の終値の前の 10 本）
+  const baseIv = now.base.map((x) => x.iv);
+  const low = lowBefore(
+    baseIv,
+    now.source === 'intraday' ? baseIv.length : baseIv.length - 1,
+    SPIKE_LOOKBACK,
+  );
   const nowRise = low !== null && low > 0 ? pctOf(now.iv / low) : null;
   const done = eps.filter((e) => !e.ongoing);
   const lastEp = eps[eps.length - 1];
@@ -208,16 +270,23 @@ function spikes(data: IvStatsData, now: Now, risePct: number): R {
         'days',
         SPIKE_MIN_N,
       ),
+      // 半分は戻したが 9 割は戻らないまま次のスパイクが来た・列が終わった回（days_to_90pct の分布に入らない）
+      not_retraced_90pct: done.filter((e) => e.retrace90 === null).length,
     },
     after_peak: afterPeak,
     recent,
   };
 }
 
-/** 区分の番号（0〜7。dx_from_pct ≤ dxPct < dx_to_pct） */
+/** 区分の番号（0〜7。境ちょうどは大きさの大きい側 = −8 は 0、−1 は 3、+1 は 5、+5 は 7） */
 export function moveBucket(dxPct: number): number {
+  // 境ちょうどは大きい側（下げの境 e < 0 は dx ≤ e で下の区分、上げの境は dx ≥ e で上の区分）
   let i = 0;
-  while (i < MOVE_EDGES.length && dxPct >= (MOVE_EDGES[i] as number)) i++;
+  while (i < MOVE_EDGES.length) {
+    const e = MOVE_EDGES[i] as number;
+    if (e < 0 ? dxPct <= e : dxPct < e) break;
+    i++;
+  }
   return i;
 }
 
@@ -355,6 +424,7 @@ export function ivStatsTool(
       now_source: now.source,
       now_at: jstText(now.t),
       iv_now_pct: r1(now.iv),
+      provisional_closes: now.provisional.map((x) => ({ d: x.d, iv_pct: r1(x.iv) })),
     },
   };
   if (secs.includes('level')) out.level = level(data, now);

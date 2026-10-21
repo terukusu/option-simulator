@@ -3859,8 +3859,14 @@
       "n_days": 650,
       "last_close_pct": 20.1,
       "now_source": "intraday",
-      "now_at": "2026-10-13 20:00",
-      "iv_now_pct": 19.6
+      "now_at": "2026-10-13 20:41",
+      "iv_now_pct": 19.6,
+      "provisional_closes": [
+       {
+        "d": "2026-10-13",
+        "iv_pct": 19.1
+       }
+      ]
      },
      "level": {
       "windows": [
@@ -3904,23 +3910,26 @@
       "changes": [
        {
         "days": 1,
-        "iv_change_pt": -0.5,
-        "iv_change_pct": -2.3,
-        "percentile_pct": 36.8,
+        "from_d": "2026-10-13",
+        "iv_change_pt": 0.5,
+        "iv_change_pct": 2.5,
+        "percentile_pct": 71.8,
         "n": 649
        },
        {
         "days": 5,
-        "iv_change_pt": -2.9,
-        "iv_change_pct": -13,
-        "percentile_pct": 9.1,
+        "from_d": "2026-10-07",
+        "iv_change_pt": -1.8,
+        "iv_change_pct": -8.4,
+        "percentile_pct": 20.6,
         "n": 645
        },
        {
         "days": 20,
-        "iv_change_pt": 1.8,
-        "iv_change_pct": 10.3,
-        "percentile_pct": 73,
+        "from_d": "2026-09-16",
+        "iv_change_pt": 1.7,
+        "iv_change_pct": 9.7,
+        "percentile_pct": 72.1,
         "n": 630
        }
       ]
@@ -3928,7 +3937,7 @@
      "spikes": {
       "rise_threshold_pct": 30,
       "lookback_days": 10,
-      "now_rise_from_low_pct": -2.3,
+      "now_rise_from_low_pct": 2.5,
       "now_in_spike": false,
       "n": 14,
       "summary": {
@@ -3947,12 +3956,13 @@
         "insufficient": false
        },
        "days_to_90pct": {
-        "n": 12,
-        "median_days": 23,
+        "n": 10,
+        "median_days": 15,
         "p10_days": 6,
-        "p90_days": 71,
+        "p90_days": 48,
         "insufficient": false
-       }
+       },
+       "not_retraced_90pct": 4
       },
       "after_peak": [
        {
@@ -4017,7 +4027,7 @@
         "days_to_peak": 5,
         "half_d": "2026-08-10",
         "days_to_half": 6,
-        "days_to_90pct": 32,
+        "days_to_90pct": null,
         "ongoing": false
        },
        {
@@ -4082,7 +4092,7 @@
         "days_to_peak": 0,
         "half_d": "2025-12-04",
         "days_to_half": 3,
-        "days_to_90pct": 89,
+        "days_to_90pct": null,
         "ongoing": false
        }
       ]
@@ -4251,13 +4261,19 @@
       "n_days": 650,
       "last_close_pct": 20.1,
       "now_source": "intraday",
-      "now_at": "2026-10-13 20:00",
-      "iv_now_pct": 19.6
+      "now_at": "2026-10-13 20:41",
+      "iv_now_pct": 19.6,
+      "provisional_closes": [
+       {
+        "d": "2026-10-13",
+        "iv_pct": 19.1
+       }
+      ]
      },
      "spikes": {
       "rise_threshold_pct": 20,
       "lookback_days": 10,
-      "now_rise_from_low_pct": -2.3,
+      "now_rise_from_low_pct": 2.5,
       "now_in_spike": false,
       "n": 26,
       "summary": {
@@ -4276,12 +4292,13 @@
         "insufficient": false
        },
        "days_to_90pct": {
-        "n": 24,
-        "median_days": 17,
+        "n": 15,
+        "median_days": 9,
         "p10_days": 6,
-        "p90_days": 85,
+        "p90_days": 23,
         "insufficient": false
-       }
+       },
+       "not_retraced_90pct": 11
       },
       "after_peak": [
        {
@@ -4346,7 +4363,7 @@
         "days_to_peak": 6,
         "half_d": "2026-08-10",
         "days_to_half": 6,
-        "days_to_90pct": 32,
+        "days_to_90pct": null,
         "ongoing": false
        },
        {
@@ -4432,8 +4449,14 @@
       "n_days": 650,
       "last_close_pct": 20.1,
       "now_source": "intraday",
-      "now_at": "2026-10-13 20:00",
-      "iv_now_pct": 19.6
+      "now_at": "2026-10-13 20:41",
+      "iv_now_pct": 19.6,
+      "provisional_closes": [
+       {
+        "d": "2026-10-13",
+        "iv_pct": 19.1
+       }
+      ]
      },
      "moves": {
       "horizon_days": 2,
@@ -4599,7 +4622,8 @@
       "last_close_pct": 20.1,
       "now_source": "daily_close",
       "now_at": "2026-10-12 15:00",
-      "iv_now_pct": 20.1
+      "iv_now_pct": 20.1,
+      "provisional_closes": []
      },
      "level": {
       "windows": [
@@ -4643,6 +4667,7 @@
       "changes": [
        {
         "days": 1,
+        "from_d": "2026-10-09",
         "iv_change_pt": -1.9,
         "iv_change_pct": -8.8,
         "percentile_pct": 2,
@@ -4650,6 +4675,7 @@
        },
        {
         "days": 5,
+        "from_d": "2026-10-05",
         "iv_change_pt": -4.2,
         "iv_change_pct": -17.4,
         "percentile_pct": 2.8,
@@ -4657,6 +4683,7 @@
        },
        {
         "days": 20,
+        "from_d": "2026-09-14",
         "iv_change_pt": 1.4,
         "iv_change_pct": 7.4,
         "percentile_pct": 67.9,

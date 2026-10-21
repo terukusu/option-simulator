@@ -55,7 +55,13 @@ export function synthIvStatsData(withNow = true): IvStatsData {
   if (!daily.ok) throw new Error('合成の日次の値が検証に通らない');
   const iv = validateAtmIvJson(synthAtmIv('1h', null, SYNTH_IV_NOW), '1h');
   if (!iv.ok) throw new Error('合成の IV 推移が検証に通らない');
-  return { days: daily.value.days, now: withNow ? ivNowOf(iv.value) : null };
+  return withNow
+    ? {
+        days: daily.value.days,
+        now: ivNowOf(iv.value),
+        hourly: iv.value.bars.map((b) => ({ t: b.t, c: b.c })),
+      }
+    : { days: daily.value.days, now: null };
 }
 
 function fail(): never {

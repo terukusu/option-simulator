@@ -3,7 +3,8 @@
  *
  * - 読むのはツールが呼ばれたとき（useAiChat が tool_use に iv_stats を見たとき）だけ。ポーリングしない
  * - 既存の口だけ: 日次の値 `/api/atm_daily`（追証マップの過去の点と同じ要求。パラメータなし = サーバーのキャッシュを共有）と、
- *   今の IV として `/api/atm_iv?tf=1h`（範囲なし = IV 推移の画面の既定の右端と同じ要求）の最後の足の終値。新しいクエリは無い
+ *   今の IV として `/api/atm_iv?tf=1h`（範囲なし = IV 推移の画面の既定の右端と同じ要求）の最後の足の終値（時刻は値の
+ *   時刻 = 応答の lastAt。足の中に無ければ足の始まり）。1 時間足はまだ確定していない日の終値の近似にも渡す。新しいクエリは無い
  * - 口の組ごとに IV_STATS_CACHE_MS（10 分）覚える。日次が読めなければ失敗（ツールは no_data。失敗は覚えない）。今の IV が
  *   読めなければ now = null（ツールは最後の日次の終値で代える）
  */
@@ -26,10 +27,15 @@ const DEFAULT_LOADERS: IvStatsLoaders = {
 
 const cache = new Map<string, { at: number; value: Promise<IvStatsData> }>();
 
-/** 1 時間足の最後の足の終値（無ければ null） */
+const HOUR_S = 3600;
+
+/** 1 時間足の最後の足の終値と、その値の時刻（lastAt が最後の足の中ならそれ、無ければ足の始まり。無ければ null） */
 export function ivNowOf(d: AtmIvData): { t: number; iv: number } | null {
   const b = d.bars[d.bars.length - 1];
-  return b ? { t: b.t, iv: b.c } : null;
+  if (!b) return null;
+  const at = d.lastAt;
+  const t = at !== null && at >= b.t && at < b.t + HOUR_S ? at : b.t;
+  return { t, iv: b.c };
 }
 
 /** ツールのデータ。now は覚えの期限の判定だけに使う */
@@ -44,8 +50,15 @@ export function loadIvStatsData(
   if (hit && now - hit.at < IV_STATS_CACHE_MS) return hit.value;
   const value = Promise.all([
     loaders.daily(dailyEndpoint),
-    loaders.iv(ivEndpoint).then(ivNowOf, () => null),
-  ]).then(([daily, ivNow]) => ({ days: daily.days, now: ivNow }));
+    loaders.iv(ivEndpoint).then(
+      (d) => d,
+      () => null,
+    ),
+  ]).then(([daily, iv]) => ({
+    days: daily.days,
+    now: iv ? ivNowOf(iv) : null,
+    hourly: iv ? iv.bars.map((b) => ({ t: b.t, c: b.c })) : [],
+  }));
   cache.set(key, { at: now, value });
   value.catch(() => {
     if (cache.get(key)?.value === value) cache.delete(key);

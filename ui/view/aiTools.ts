@@ -595,7 +595,7 @@ export function toolCard(
       const y1 = (Array.isArray(obj(r.level).windows) ? (obj(r.level).windows as unknown[]) : [])
         .map(obj)
         .find((w) => w.window === '1y');
-      const head = `IV ${fmtNum(num(d.iv_now_pct), 1)}%（${d.now_source === 'intraday' ? '今' : '前日の終値'}）`;
+      const head = `IV ${fmtNum(num(d.iv_now_pct), 1)}%（${d.now_source === 'intraday' ? '今' : '最後の確定日の終値'}）`;
       lines.push(y1 ? `${head} · 1 年の分位 ${fmtNum(num(y1.percentile_pct), 1)}%` : head);
       const hv = obj(r.hv);
       const hv20 = (Array.isArray(hv.windows) ? hv.windows : [])

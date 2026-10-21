@@ -17,6 +17,7 @@ import {
 } from '../../ui/view/aiIvStats';
 
 const NONE = new Set<string>();
+// biome-ignore lint/suspicious/noExplicitAny: 結果の JSON を添字で読む（形は pytest が tools.py の形で検査する）
 type R = Record<string, any>;
 
 /** 平日だけの日次の値（2025-01-06（月）から n 日。限月は替わらない。架空の値） */
@@ -159,6 +160,7 @@ describe('今の値と水準', () => {
     // 1 日: 24.5 − 29 = −4.5pt（−15.5%）。過去の 1 日の変化は全部 +1 → 分位 0
     expect(r.level.changes[0]).toEqual({
       days: 1,
+      from_d: last.d,
       iv_change_pt: -4.5,
       iv_change_pct: -15.5,
       percentile_pct: 0,
@@ -167,6 +169,7 @@ describe('今の値と水準', () => {
     // 20 日: 最初の行（10）から +14.5pt。過去の 20 行差は 0 件 → 分位 null
     expect(r.level.changes[2]).toEqual({
       days: 20,
+      from_d: days[0]?.d,
       iv_change_pt: 14.5,
       iv_change_pct: 145,
       percentile_pct: null,
@@ -205,13 +208,38 @@ describe('今の値と水準', () => {
 });
 
 describe('2 日の動き・HV', () => {
-  it('区分の境（dx_from_pct ≤ 変化 < dx_to_pct）', () => {
-    expect(moveBucket(-8.01)).toBe(0);
-    expect(moveBucket(-8)).toBe(1);
-    expect(moveBucket(-0.5)).toBe(4);
-    expect(moveBucket(1)).toBe(5);
-    expect(moveBucket(5)).toBe(7);
-    expect(moveBucket(12)).toBe(7);
+  it('区分の境ちょうどは大きさの大きい側（−8% は −8% 以下、+5% は +5% 以上、±1 の内側は両端を含まない）', () => {
+    const cases: [number, number][] = [
+      [-12, 0],
+      [-8, 0],
+      [-7.99, 1],
+      [-5, 1],
+      [-4.99, 2],
+      [-3, 2],
+      [-1, 3],
+      [-0.99, 4],
+      [0, 4],
+      [0.99, 4],
+      [1, 5],
+      [2.99, 5],
+      [3, 6],
+      [4.99, 6],
+      [5, 7],
+      [12, 7],
+    ];
+    for (const [dx, b] of cases) expect([dx, moveBucket(dx)]).toEqual([dx, b]);
+    // 境の値（dx_from_pct / dx_to_pct）は区分の番号の順
+    const r = ivStatsTool(synth(), NONE, { sections: ['moves'] }) as R;
+    expect(r.moves.buckets.map((x: R) => [x.dx_from_pct, x.dx_to_pct])).toEqual([
+      [null, -8],
+      [-8, -5],
+      [-5, -3],
+      [-3, -1],
+      [-1, 1],
+      [1, 3],
+      [3, 5],
+      [5, null],
+    ]);
   });
 
   it('既知の 2 日の動きの区分・最新・件数の少ない区分の印', () => {
@@ -284,6 +312,7 @@ describe('2 日の動き・HV', () => {
       days_to_90pct: 2,
       ongoing: false,
     });
+    expect(r.spikes.summary.not_retraced_90pct).toBe(0);
     expect(r.spikes.summary.days_to_half).toMatchObject({
       n: 1,
       median_days: 1,
@@ -334,5 +363,74 @@ describe('dev の偽の AI（scripts/devFixtures.mjs。Anthropic を呼ばない
     expect(reply.text).toContain(`${result.level.windows[0].percentile_pct}%`);
     expect(reply.text).toContain(`${result.spikes.summary.days_to_half.n} 回`);
     expect(reply.text).toContain('予想ではなく材料');
+  });
+});
+
+describe('まだ確定していない日（夕方・夜間）', () => {
+  // 確定した日は 2025-01-06（月）〜 2025-01-10（金）の 5 日（IV 20〜24）。D = 2025-01-13（月）はまだ日次に無い
+  const days = weekdays(
+    5,
+    (i) => 20 + i,
+    () => 30000,
+  );
+  const D = '2025-01-13';
+  /** JST の D の h 時の UNIX 秒 */
+  const at = (h: number, m = 0) =>
+    Date.parse(`${D}T00:00:00Z`) / 1000 - 9 * 3600 + h * 3600 + m * 60;
+  // D の 1 時間足: 日中 9〜14 時台（14 時台の終値 30）、15 時台、夜間 17・20 時台（架空の値）
+  const hourly = [
+    { t: at(9), c: 26 },
+    { t: at(13), c: 28 },
+    { t: at(14), c: 30 },
+    { t: at(15), c: 31 },
+    { t: at(17), c: 32 },
+    { t: at(20), c: 33 },
+  ];
+
+  it('D 15:00 以降の今（夜間）は、1 取引日前の起点が D の終値（14 時台の足の終値で近似）', () => {
+    const r = ivStatsTool({ days, now: { t: at(20, 30), iv: 33 }, hourly }, NONE, {
+      sections: ['level', 'spikes'],
+    }) as R;
+    expect(r.data.now_source).toBe('intraday');
+    expect(r.data.provisional_closes).toEqual([{ d: D, iv_pct: 30 }]);
+    expect(r.level.changes[0]).toMatchObject({
+      days: 1,
+      from_d: D,
+      iv_change_pt: 3,
+      iv_change_pct: 10,
+    });
+    // 5 取引日前 = D の 4 取引日前（確定した 2 日目 = 21）
+    expect(r.level.changes[1]).toMatchObject({ days: 5, from_d: days[1]?.d, iv_change_pt: 12 });
+    // 分布は確定した日だけ（n は 5 日）
+    expect(r.level.windows[2].n).toBe(5);
+  });
+
+  it('翌朝 8:00 前（日次に D が入る前）も同じ起点', () => {
+    const r = ivStatsTool({ days, now: { t: at(24 + 6), iv: 33 }, hourly }, NONE, {
+      sections: ['level'],
+    }) as R;
+    expect(r.level.changes[0]).toMatchObject({ from_d: D, iv_change_pt: 3 });
+  });
+
+  it('D の日中（15:00 より前）の今は近似しない（起点は前の取引日の終値）', () => {
+    const r = ivStatsTool(
+      { days, now: { t: at(11, 30), iv: 27 }, hourly: hourly.slice(0, 1) },
+      NONE,
+      {
+        sections: ['level'],
+      },
+    ) as R;
+    expect(r.data.provisional_closes).toEqual([]);
+    expect(r.level.changes[0]).toMatchObject({ from_d: days[4]?.d, iv_change_pt: 3 });
+  });
+
+  it('今の値が無いときは近似しない（最後の確定日の終値）・1 時間足が無ければ近似しない', () => {
+    const r = ivStatsTool({ days, now: null, hourly }, NONE, { sections: ['level'] }) as R;
+    expect(r.data).toMatchObject({ now_source: 'daily_close', provisional_closes: [] });
+    expect(r.level.changes[0]).toMatchObject({ from_d: days[3]?.d, iv_change_pt: 1 });
+    const r2 = ivStatsTool({ days, now: { t: at(20), iv: 33 } }, NONE, {
+      sections: ['level'],
+    }) as R;
+    expect(r2.level.changes[0]).toMatchObject({ from_d: days[4]?.d, iv_change_pt: 9 });
   });
 });
