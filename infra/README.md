@@ -451,6 +451,8 @@ gcloud logging read 'resource.type="cloud_run_revision" AND resource.labels.serv
 | SA・ルールを止めたい | Claude Console で federation rule を無効化・削除する（交換したトークンはルールの `token_lifetime_seconds` で切れる）→ `AI_CREDENTIAL=none` で deploy |
 | 撤去 | `AI_CREDENTIAL=none` で deploy → `gh variable delete ANTHROPIC_FEDERATION_RULE_ID`（他の 3 つも）→ Console でルール・サービスアカウントを削除 |
 
+本番の traffic を動かさずに `wif` を試す（traffic 0 のタグ付きリビジョン。`--to-latest` を使わない戻し方とドリフトの消し方を含む）手順は `docs/adr-0006-ai-agent-sdk-only-and-skills.md` の「確かめ方（デプロイ後。W2）」。
+
 **注意**: サブスクリプションの OAuth トークンをこのアプリから使ってよいかは Anthropic の規約（Claude Code の Legal and compliance の「Authentication and credential use」）を利用者が確かめる。製品・サービスとして提供する場合は API キーを使う。
 
 ## AI の費用の計上（Firestore）

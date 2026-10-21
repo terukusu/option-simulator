@@ -207,8 +207,7 @@ def test_no_final_keeps_reservation():
 
 def test_client_disconnect_keeps_reservation_and_releases_slot(capsys):
     gate = threading.Event()
-    # 予約額（AI_MAX_TURNS の上界。#221）の 3 本分が入る上限にする（ここで見るのは同時の本数の枠）
-    client, gw, store, _ = ai_app(gateway=FakeGateway(gate=gate), limit_micro=10_000_000)
+    client, gw, store, _ = ai_app(gateway=FakeGateway(gate=gate))
     res = post(client, ai_body(), buffered=False)
     it = iter(res.response)
     assert next(it).startswith(b"event: accepted")
@@ -223,7 +222,7 @@ def test_client_disconnect_keeps_reservation_and_releases_slot(capsys):
 
 
 def test_closed_before_start_releases_slot(capsys):
-    client, gw, store, _ = ai_app(limit_micro=10_000_000)  # 予約額の 3 本分（#221。見るのは枠）
+    client, gw, store, _ = ai_app()
     for _ in range(3):
         res = post(client, ai_body(), buffered=False)
         assert res.status_code == 200

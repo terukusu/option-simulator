@@ -61,7 +61,7 @@ def parent_creds(monkeypatch, tmp_path):
     """親の環境に CLI が読む全種類の資格情報・送信先の選択（ダミー）を置く（Cloud Run の ANTHROPIC_AUTH_TOKEN を
     真似る。#221 AC7: WIF の ID・プロファイル・Bedrock / Vertex の切り替えも）。
     一時ディレクトリを tmp_path に寄せ、テストの後に子（CLI）と要求ごとの一時ディレクトリが残らないことを確かめる"""
-    for k in agent_sdk.CREDENTIAL_ENV:
+    for k in agent_sdk.CREDENTIAL_ENV + agent_sdk.ROUTING_ENV:  # 送信先・転送・証明書の変数も（#221 N4）
         monkeypatch.setenv(k, PARENT)
     monkeypatch.setenv("CLAUDE_AGENT_SDK_SKIP_VERSION_CHECK", "1")
     monkeypatch.setattr(tempfile, "tempdir", str(tmp_path))
@@ -400,3 +400,96 @@ def test_wif_exchange_failure_classified(parent_creds, capsys, status, code):
     rec = [r for r in log_records(out) if r.get("event") == "ai_request"][0]
     assert rec["upstream_status"] == status and rec["error_type"] == "token_exchange"
     assert "Token exchange failed" not in out and FAKE_ID_TOKEN not in out
+
+
+# ---- CLI の要求の形（予約額の上界の前提。#221 N2・N3） ----
+
+def _bytes(x) -> int:
+    return len(json.dumps(x, ensure_ascii=False, separators=(",", ":")).encode())
+
+
+def _norm(messages: list[dict]) -> list[dict]:
+    """content を block の list にそろえ cache_control を除く（キャッシュの前置きの比較用）"""
+    out = []
+    for m in messages:
+        c = m["content"]
+        if isinstance(c, str):
+            c = [{"type": "text", "text": c}]
+        out.append({"role": m["role"], "content": [{k: v for k, v in b.items() if k != "cache_control"} for b in c]})
+    return out
+
+
+def _strip_cc(blocks):
+    return [{k: v for k, v in b.items() if k != "cache_control"} for b in blocks]
+
+
+@pytest.mark.parametrize("history", [False, True])
+def test_cli_overhead_and_cache_prefix_for_reserve(parent_creds, history):
+    """予約額（budget.reserve_micro_usd）の前提を CLI の要求の形で固定する:
+    1. CLI が足す本文（system の先頭・Skill の定義・環境の message）は AI_CLI_OVERHEAD_TOKENS 以下 = 見積もり E に入る
+    2. 各要求の最後の message に cache_control が付き、次の turn の要求は前の turn の要求をそのまま前置きに持つ
+       （system・tools は同じ）= 前の turn の要求はキャッシュの読み出しになる
+    3. turn ごとに増える分（前の出力を除く）は Skill の本文と枠 = K（skill_tokens）以下"""
+    msgs = _full_history() if history else [{"role": "user", "content": [{"type": "text", "text": "RSI は？"}]}]
+    p = built(msgs)
+    with FakeMessagesApi("skill") as api:
+        list(gateway(api).stream(p, threading.Event()))
+        posts = [r["body"] for r in api.posts()]
+    assert len(posts) == 2
+    sent = [_bytes({k: b.get(k) for k in ("system", "tools", "messages")}) for b in posts]
+    base = len(relay.params_text(p).encode())
+    assert sent[0] - base <= st.AI_CLI_OVERHEAD_TOKENS
+    assert budget.estimate_input_tokens(relay.params_text(p)) >= sent[0] + st.AI_INPUT_OVERHEAD_TOKENS
+    for b in posts:
+        last = b["messages"][-1]["content"]
+        assert isinstance(last, list) and "cache_control" in last[-1]
+    first, second = posts
+    assert _strip_cc(first["system"]) == _strip_cc(second["system"])
+    assert [t["name"] for t in first["tools"]] == [t["name"] for t in second["tools"]]
+    n0 = _norm(first["messages"])
+    assert _norm(second["messages"])[:len(n0)] == n0
+    added = _norm(second["messages"])[len(n0):]
+    out_bytes = sum(_bytes(m) for m in added if m["role"] == "assistant")
+    assert sent[1] - sent[0] - out_bytes <= budget.skill_tokens()
+
+
+def test_parent_base_url_does_not_redirect(parent_creds, monkeypatch):
+    """親の ANTHROPIC_BASE_URL（別の宛先）は子に渡らない（中継が空で上書き。テストの extra_env だけが効く）"""
+    with FakeMessagesApi("text") as decoy, FakeMessagesApi("text") as api:
+        monkeypatch.setenv("ANTHROPIC_BASE_URL", decoy.base_url)
+        monkeypatch.setenv("CLAUDE_CODE_API_BASE_URL", decoy.base_url)
+        evs = list(gateway(api).stream(built(_full_history()[:1]), threading.Event()))
+        assert evs[-1]["type"] == "final" and len(api.posts()) == 1
+        assert decoy.requests == []
+
+
+def test_empty_routing_env_falls_back_to_default_host(parent_creds):
+    """送信先の変数を全部空にしても CLI は既定の api.anthropic.com に送る（本番の形）。127.0.0.1 の受け口を
+    HTTPS_PROXY にして CONNECT の宛先だけを見る（502 を返すので Anthropic には届かない。TLS も始まらない）"""
+    import socket
+
+    seen: list[str] = []
+    srv = socket.socket()
+    srv.bind(("127.0.0.1", 0))
+    srv.listen(8)
+    srv.settimeout(30)
+
+    def loop():
+        while True:
+            try:
+                c, _ = srv.accept()
+            except OSError:
+                return
+            with c:
+                seen.append(c.recv(4096).split(b"\r\n")[0].decode(errors="replace"))
+                c.sendall(b"HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\n\r\n")
+
+    threading.Thread(target=loop, daemon=True).start()
+    proxy = f"http://127.0.0.1:{srv.getsockname()[1]}"
+    gw = AgentSdkGateway(DUMMY, extra_env={"HTTPS_PROXY": proxy, "HTTP_PROXY": proxy, "NO_PROXY": ""})
+    try:
+        with pytest.raises(UpstreamError):
+            list(gw.stream(built(_full_history()[:1]), threading.Event()))
+    finally:
+        srv.close()
+    assert seen and set(seen) == {"CONNECT api.anthropic.com:443 HTTP/1.1"}

@@ -67,6 +67,7 @@ CANCEL_POLL_SECONDS = 0.05
 USAGE_KEYS = ("input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens", "output_tokens")
 CACHE_CREATION_KEYS = ("ephemeral_5m_input_tokens", "ephemeral_1h_input_tokens")
 DENY_REASON = "The browser runs this tool and returns tool_result in the next request."
+_DONE = object()  # 事象の queue の終わりの印
 SKILL_TOOL = "Skill"  # CLI の組み込みのツール（入力は {"skill": "<プラグイン>:<スキル>", "args"?}）
 SKILL_DENY_REASON = "This skill is not available."
 # CLI が資格情報・送信先（プロバイダ）の選択として読む変数（同梱の CLI 2.1.283 の文字列から）。子には全部を空で渡し、
@@ -82,6 +83,16 @@ CREDENTIAL_ENV = (
     "CLAUDE_CODE_USE_ANTHROPIC_GOOGLE_CLOUD", "CLAUDE_CODE_USE_ANTHROPIC_AWS", "ANTHROPIC_FOUNDRY_API_KEY",
     "ANTHROPIC_FOUNDRY_AUTH_TOKEN", "ANTHROPIC_AWS_API_KEY",
 )
+# CLI が読む送信先・転送・クライアント証明書の変数（同梱の CLI 2.1.283 の文字列から）。親に残っていると、選んだ
+# 資格情報が別の宛先に送られうるので子には空で渡す（空なら CLI は既定の api.anthropic.com に送る =
+# tests/test_ai_agent_sdk_cli.py）。テストの extra_env（偽の送信先の ANTHROPIC_BASE_URL）はこの後に重ねる
+ROUTING_ENV = (
+    "ANTHROPIC_BASE_URL", "ANTHROPIC_API_HOST", "ANTHROPIC_UNIX_SOCKET", "CLAUDE_CODE_API_BASE_URL",
+    "CLAUDE_CODE_CUSTOM_OAUTH_URL", "CLAUDE_CODE_PROXY_URL", "CLAUDE_CODE_CLIENT_CERT", "CLAUDE_CODE_CLIENT_KEY",
+    "CLAUDE_CODE_CLIENT_KEY_PASSPHRASE", "ANTHROPIC_BEDROCK_BASE_URL", "ANTHROPIC_BEDROCK_MANTLE_BASE_URL",
+    "ANTHROPIC_VERTEX_BASE_URL", "ANTHROPIC_FOUNDRY_BASE_URL", "ANTHROPIC_AWS_BASE_URL",
+    "ANTHROPIC_GOOGLE_CLOUD_BASE_URL",
+)
 CREDENTIALS = ("oauth_token", "api_key", "wif")
 # WIF の交換（POST /v1/oauth/token）の失敗。CLI は状態を api_error_status に入れず、AssistantMessage の文
 # （error="unknown"）にだけ書くので、文から状態の 3 桁だけを取る（文はログ・応答に出さない。CLI 2.1.283 の文言。
@@ -95,7 +106,6 @@ def exchange_failure_status(content) -> int | None:
         if m:
             return int(m.group(1))
     return None
-_DONE = object()
 
 
 def to_cli_name(name: str) -> str:
@@ -211,8 +221,9 @@ def child_env(credential: str, secret: str | None, config_dir: str, max_tokens: 
               wif: st.WifIds | None = None, identity_token: str | None = None,
               extra: dict[str, str] | None = None) -> dict[str, str]:
     """子の環境（親の環境に重なる）。資格情報は選んだ種類のものだけ（他は空で上書き = CLI は未設定として扱う。
-    spike S5）。extra はテスト用（ANTHROPIC_BASE_URL を偽の送信先に）"""
+    spike S5）。送信先・転送の変数（ROUTING_ENV）も空。extra はテスト用（ANTHROPIC_BASE_URL を偽の送信先に）"""
     env = {
+        **dict.fromkeys(ROUTING_ENV, ""),
         **credential_env(credential, secret, wif, identity_token),
         "CLAUDE_CONFIG_DIR": config_dir,
         # WIF の交換したトークンのキャッシュ・プロファイルの置き場所（要求ごとの一時ディレクトリ = 要求の間で持たない）

@@ -133,6 +133,11 @@ AI_RATE_PER_MINUTE = 10  # インスタンスごとの 1 分の回数
 # 上界。ASCII 1 字 = 1、日本語 1 字 = 3）。OVERHEAD は本文に見えない分（message の区切り・ツールを使うときの
 # system prompt など。数百トークン）の余裕
 AI_INPUT_OVERHEAD_TOKENS = 2000
+# CLI（Claude Agent SDK の同梱の CLI。#221）が送る本文に足す分: system の先頭の 2 block（約 135 B）・Skill の
+# ツールの定義（約 1.8 KB）・role=system の環境の message（cwd・OS・モデル名・スキルの一覧。約 1.0 KB）。
+# CLI 2.1.283 の実測で、送った本文（system・tools・messages の UTF-8）− 中継の本文 = 2,843〜2,884 B
+# （tests/test_ai_agent_sdk_cli.py がこの値以下であることを固定する）。見積もり E に足す
+AI_CLI_OVERHEAD_TOKENS = 4000
 AI_FIRESTORE_DATABASE = "simulator-ai"  # 日の計上の置き場所（Firestore の名前つき DB。infra/bootstrap/ai_budget.tf）
 AI_FIRESTORE_COLLECTION = "ai_spend"
 AI_FIRESTORE_TIMEOUT_SECONDS = 5.0

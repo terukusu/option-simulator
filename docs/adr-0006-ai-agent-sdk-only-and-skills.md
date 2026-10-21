@@ -49,7 +49,7 @@
 8. 複数 turn: `max_turns = AI_MAX_TURNS = 3`（Skill 2 回 + 答え）。超えたら `error_max_turns` → SSE は `error: upstream_unavailable`（code の列挙・画面は変えない）。事象は message ごとに組み立て直し、`Skill` の tool_use は SSE に出さず `done` の content にも入れない。`done` の content と `stop_reason` は **最後の message** のもの（Skill の turn で流れた thinking / text は SSE に流れるが、画面は `done` の content で置き換える）
 9. Skill の往復は履歴に残さない: 中継は状態を持たず、ブラウザの履歴・許可リスト・SSE の形を変えない。次の要求で要れば読み直す（system に 1 行）。合成して戻す案は CLI の transcript の内部の形への依存が増えるので採らない
 10. ログ: `ai_request` に `skills`（読んだスキルの名前。本文は出さない）・`turns`（上流の message の数）。usage は全 turn の合計（生の事象から足す。`cache_creation` の 5 分 / 1 時間の内訳も持つので 1 時間の書き込みを 1 時間の単価で精算する）
-11. 費用の 1 日上限の予約額（ADR-0004 の式を改める）: Σ_{i=0}^{T−1} [(E + i·(M + K)) × 書き込みの単価 + M × 出力の単価]（E = 入力の見積もり、M = `max_tokens`、K = SKILL.md の合計のバイト数 + `AI_SKILL_OVERHEAD_TOKENS`、T = `AI_MAX_TURNS`）。turn i の入力 ≤ 最初の入力 + それまでの出力と読んだスキル、なので上界。書き込みの単価は 5 分と 1 時間の **大きい方**（CLI は資格情報によって 1 時間の TTL を付ける。`wif` の TTL は手元で確かめられない）。目安: E 25k トークンで 1 要求の予約 約 $0.29 → 約 $1.39。精算（実額）は今どおり usage × 料金表で、日の上限（既定 $3）は変えない
+11. 費用の 1 日上限の予約額（ADR-0004 の式を改める）: E = 入力の見積もり（本文のバイト数 + 2,000 + CLI が足す本文 `AI_CLI_OVERHEAD_TOKENS` 4,000。CLI 2.1.283 の実測は system の先頭 2 block 約 135 B・Skill の定義 約 1.8 KB・環境の message 約 1.0 KB で計 2,843〜2,884 B）、M = `max_tokens`、K = SKILL.md の合計のバイト数 + `AI_SKILL_OVERHEAD_TOKENS`、g = M + K、T = `AI_MAX_TURNS` として turn 0 は E × w + M × o、turn i（1 ≤ i < T）は (E + (i−1)·g) × r（前の turn の要求全体 = キャッシュの読み出し）+ g × w + M × o（g = M + K、w = 書き込みの単価（5 分と 1 時間の大きい方）、r = 読み出しの単価、o = 出力の単価）。turn i の入力は前の turn の要求 + 前の出力（≤ M）+ Skill の結果（≤ K）を超えない。前提: CLI は各要求の最後の message に cache_control を付け、次の turn の要求は前の turn の要求をそのまま前置きに持つ（system・tools も同じ）ので、前の要求はキャッシュの読み出しになる（`tests/test_ai_agent_sdk_cli.py` の `test_cli_overhead_and_cache_prefix_for_reserve` で固定）。キャッシュから読めなかったとき（追い出し）だけ、精算で予約を越えうる（越える分 ≤ 前の要求 × (w − r)。次の要求は 429。ADR-0004 の「見積もりの前提が外れたとき」と同じ扱い）。書き込みの単価は 5 分と 1 時間の大きい方（CLI は資格情報によって 1 時間の TTL を付ける。`wif` の TTL は手元で確かめられない）。目安: 本文 25k トークンで 1 要求の予約 約 $0.30（#221 の前）→ 約 $0.95、90k で 約 $0.62 → 約 $1.49。日の上限 $3 で日の始めに拒否される本文は 約 269k トークンから（全 turn を書き込みと数える式では 約 90k から = 長い会話が使えなくなるので採らない）。精算（実額）は今どおり usage × 料金表で、日の上限（既定 $3）は変えない
 
 ## 検討した選択肢
 
@@ -66,7 +66,7 @@
 - 悪い点:
   - **Messages API の逃げ道が無くなる**。CLI の不具合・上げた版の破綻のとき、資格情報の切り替えでは逃げられない（戻し方は PR の revert）
   - スキルを読む質問は上流を 1 回多く呼ぶ（+2〜4 秒。締め切り 50 秒の内）。スキルの本文は読むたびに書き込みの単価（数百〜千トークン）
-  - 予約額が大きくなり、数える資格情報（`api_key`・`wif`）では日の上限の近くで早めに `budget_exceeded` になる（精算で戻る）
+  - 予約額が大きくなり（約 3 倍）、数える資格情報（`api_key`・`wif`）では日の上限の近くで早めに `budget_exceeded` になる（精算で戻る）。キャッシュの追い出しがあると精算で 1 要求ぶん上限を越えうる
   - モデルが要るときに Skill を呼ばないと答えの質が落ちる → `npm run ai:eval -- --tech-only` / `--propose-only` で切り出しの前と比べる
   - Skill の往復を履歴から落とした後の thinking の署名・tool_use の続きを API が受けるかは、偽の API では確かめられない（本物の評価・デプロイ後に確かめる）
   - CLI が Skill の結果に `Base directory for this skill: <パス>` を足す（イメージではパッケージの中のパス。個人の値は入らない）
@@ -74,4 +74,11 @@
 
 ## 確かめ方（デプロイ後。W2）
 
-`wif` の e2e は traffic 0 のタグ付きリビジョンで確かめる（手順は Issue #221 の Phase 3 の handoff と `infra/README.md` の考え方。`--to-latest` は使わない、終わったらタグとリビジョンを消し、deploy workflow でテンプレートのドリフトを消す）。`ai_request` の `credential=wif`・`error` なし・usage と `cost_usd_est`・`skills` に名前、Firestore の日の計上が増えること。
+`wif` の e2e は、本番の traffic を動かさずに **traffic 0 のタグ付きリビジョン** で確かめる（本番の変更なので所有者の承認の上で。`$P`・`$REGION`・`<TAG>`・`<PREV>`・`<WIF_REV>` はプレースホルダ。値・URL は表示・記録しない）:
+
+1. 控える: `gcloud run services describe simulator --region "$REGION" --project "$P"` の image（digest）・`status.latestReadyRevisionName`（= `<PREV>`）・traffic（`<PREV>` 100%）
+2. 0600 の一時ファイルに `AI_CREDENTIAL=wif` と WIF の ID（GitHub の repository variables から値を表示せずに）を書き、`gcloud run deploy simulator --image <控えた image> --no-traffic --tag <TAG> --env-vars-file <一時ファイル> --remove-secrets ANTHROPIC_AUTH_TOKEN --region "$REGION" --project "$P"` → 一時ファイルを消す（`wif` で `ANTHROPIC_AUTH_TOKEN` が残ると `ai_credential_conflict` で AI が無効になる）
+3. 未認証の `curl -s -o /dev/null -w '%{http_code}'` でタグの URL の `/api/ai/status` が 302 / 401 / 403（IAP がタグの URL にも効く）
+4. ブラウザ（IAP のログイン）でタグの URL を開き、`/api/ai/status` が `"credential":"wif","counted":true`、スキルを使う質問（テクニカル）を 1 回
+5. `gcloud logging read 'jsonPayload.event="ai_request" AND resource.labels.revision_name="<WIF_REV>"' --freshness=30m --project "$P"` で `credential=wif`・`error` が null・usage と `cost_usd_est`・`skills` に名前。`ai_sdk_warning` が 0。`upstream_auth` + `error_type` `token_exchange` はルールの不一致、`IdentityTokenError` は ID トークンが取れていない。`/api/ai/status` の `remaining_usd` が減る（Firestore の計上）
+6. 戻す: `gcloud run services update-traffic simulator --remove-tags <TAG> --region "$REGION" --project "$P"`（**`--to-latest` は使わない**。latest は wif のリビジョン）→ `gcloud run revisions delete <WIF_REV>` → テンプレートのドリフト（wif の env・Secret の参照なし）を消すため、すぐに deploy workflow（Environment `prod` の承認）で terraform apply → describe で traffic が `<PREV>` 100% のままであることを確かめる

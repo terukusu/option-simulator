@@ -33,8 +33,8 @@ const opt = (name, def = null) => {
 };
 const base = (process.env.AI_EVAL_BASE || 'http://127.0.0.1:8080').replace(/\/$/, '');
 const limitUsd = Number(process.env.AI_EVAL_LIMIT_USD || '6.5');
-// 1 要求の予約額の上界（中継の予約の式 budget.reserve_micro_usd。#221 で turn の上限 3 とスキルを入れた: 入力 25k
-// トークンで約 $1.4）
+// 1 要求の予約額の上界（中継の予約の式 budget.reserve_micro_usd。#221 で turn の上限 3・スキル・CLI が足す本文を
+// 入れた: 本文 25k トークンで約 $0.95、90k で約 $1.49）
 const reserveUsd = 1.5;
 const repeat = Number(opt('--repeat', '1'));
 const followups = !args.includes('--no-followups');
@@ -458,7 +458,10 @@ if (relayLog) {
       // 読んだスキルの名前ごとの回数と turn の数（#221）
       skills: recs
         .flatMap((r) => (Array.isArray(r.skills) ? r.skills : []))
-        .reduce((m, n) => ({ ...m, [n]: (m[n] ?? 0) + 1 }), {}),
+        .reduce((m, n) => {
+          m[n] = (m[n] ?? 0) + 1;
+          return m;
+        }, {}),
       turns_p50: p50(sorted('turns')),
     };
   } catch (e) {

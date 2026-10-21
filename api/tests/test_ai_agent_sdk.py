@@ -470,6 +470,7 @@ def test_child_env_only_selected_credential(credential):
     nonempty = {k: env[k] for k in agent_sdk.CREDENTIAL_ENV if env[k]}
     assert nonempty == SELECTED[credential]
     assert set(agent_sdk.CREDENTIAL_ENV) <= set(env)  # 全部を空で上書き（親の値を子に渡さない）
+    assert all(env[k] == "" for k in agent_sdk.ROUTING_ENV)  # 送信先・転送・証明書も空（#221 N4）
     assert env["ANTHROPIC_CONFIG_DIR"].startswith("/tmp/c/") and env["CLAUDE_CODE_FEDERATION_CACHE_DIR"].startswith(
         "/tmp/c/")
 
@@ -548,7 +549,7 @@ def fake_cli(tmp_path, monkeypatch):
     path = tmp_path / "fake-claude"
     path.write_text(FAKE_CLI.format(python=sys.executable))
     path.chmod(0o755)
-    monkeypatch.setenv("FAKE_CLI_NAMES", json.dumps(agent_sdk.CREDENTIAL_ENV))
+    monkeypatch.setenv("FAKE_CLI_NAMES", json.dumps(agent_sdk.CREDENTIAL_ENV + agent_sdk.ROUTING_ENV))
     return str(path), str(tmp_path / "state.json")
 
 
@@ -568,7 +569,7 @@ def test_child_process_env_with_parent_credentials(fake_cli, monkeypatch, capsys
     """#221 AC7: 親の環境に全種類の資格情報（キー・トークン・WIF の ID とトークン・プロファイル系）があっても、
     子に非空で渡るのは選んだ種類のものだけ"""
     cli, out = fake_cli
-    for k in agent_sdk.CREDENTIAL_ENV:
+    for k in agent_sdk.CREDENTIAL_ENV + agent_sdk.ROUTING_ENV:
         monkeypatch.setenv(k, PARENT_DUMMY)
     gw = _gw(credential, cli_path=cli,
              extra_env={"FAKE_CLI_OUT": out, "FAKE_CLI_EXPECT": json.dumps(SELECTED[credential])})
@@ -578,7 +579,8 @@ def test_child_process_env_with_parent_credentials(fake_cli, monkeypatch, capsys
     assert state.pop("matches") is True
     pid = state.pop("pid")
     assert {k for k, v in state.items() if v == "set"} == set(SELECTED[credential])
-    assert {k for k, v in state.items() if v != "set"} == set(agent_sdk.CREDENTIAL_ENV) - set(SELECTED[credential])
+    assert {k for k, v in state.items() if v != "set"} == (
+        set(agent_sdk.CREDENTIAL_ENV + agent_sdk.ROUTING_ENV) - set(SELECTED[credential]))
     assert all(v == "empty" for k, v in state.items() if k not in SELECTED[credential])  # 空 = 未設定扱い
     # 失敗は型と状態だけ。資格情報・CLI の標準エラーは例外・repr・ログに出ない
     e = ei.value
@@ -762,3 +764,11 @@ def test_no_child_left_in_process_tree():
             if ppid == me and state != "Z":
                 kids.append(d.name)
     assert kids == []
+
+
+def test_child_env_extra_overrides_routing():
+    # テストの extra_env（偽の送信先）は空の上書きの後に重なる
+    env = agent_sdk.child_env("oauth_token", FAKE_TOKEN, "/tmp/c", 8000, False,
+                              extra={"ANTHROPIC_BASE_URL": "http://127.0.0.1:9"})
+    assert env["ANTHROPIC_BASE_URL"] == "http://127.0.0.1:9"
+    assert all(env[k] == "" for k in agent_sdk.ROUTING_ENV if k != "ANTHROPIC_BASE_URL")

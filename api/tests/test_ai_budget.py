@@ -19,13 +19,13 @@ def test_price_table_matches_official():
     assert st.AI_PRICE_CHECKED == "2026-10-19"
 
 
-OH = st.AI_INPUT_OVERHEAD_TOKENS
+OH = st.AI_INPUT_OVERHEAD_TOKENS + st.AI_CLI_OVERHEAD_TOKENS  # 見えない分 + CLI が足す分（#221）
 
 
 @pytest.mark.parametrize("text,tokens", [("", OH), ("a", OH + 1), ("abcde", OH + 5), ("あ", OH + 3), ("abあ", OH + 5),
                                          ('{"ask":123.5,"bid":122}', OH + 23)])
 def test_estimate_input_tokens(text, tokens):
-    # UTF-8 のバイト数（トークン 1 つは 1 バイト以上 = 上界）+ 見えない分の余裕
+    # UTF-8 のバイト数（トークン 1 つは 1 バイト以上 = 上界）+ 見えない分の余裕 + CLI が足す分
     assert budget.estimate_input_tokens(text) == tokens
 
 
@@ -44,25 +44,61 @@ def test_reserve():
 
 
 def test_reserve_covers_turns_and_skills():
-    # #221: T = 3 turn、E = 25,000、M = 8,000、K = 5,000 の手計算
-    #   turn 0: 入力 25,000、turn 1: 25,000 + 13,000 = 38,000、turn 2: 51,000 → 入力の和 114,000 × $8/M = $0.912
-    #   出力 3 × 8,000 × $20/M = $0.48 → $1.392
-    assert budget.reserve_micro_usd(M, 25_000, 8000, 3, 5_000) == 1_392_000
+    # #221: T = 3 turn、E = 25,000、M = 8,000、K = 5,000（g = 13,000）の手計算
+    #   書き込み: turn 0 の E 25,000 + turn 1・2 の増えた分 13,000 × 2 = 51,000 × $8/M = $0.408
+    #   読み出し: turn 1 は turn 0 の要求 25,000、turn 2 は turn 1 の要求 38,000 → 63,000 × $0.2/M = $0.0126
+    #   出力: 3 × 8,000 × $20/M = $0.48 → $0.9006
+    assert budget.reserve_micro_usd(M, 25_000, 8000, 3, 5_000) == 900_600
     assert budget.reserve_micro_usd(M, 25_000, 8000, 1, 5_000) == budget.reserve_micro_usd(M, 25_000, 8000)
-    # 各 turn で入力を全部 1 時間の書き込み・出力を max_tokens まで・毎回スキルを読んだ最悪の実額を下回らない
-    est, k, mt = 12_345, budget.skill_tokens(), 8000
-    worst = {"input_tokens": 0, "output_tokens": 0, "cache_creation_input_tokens": 0,
-             "cache_creation": {"ephemeral_1h_input_tokens": 0}}
-    for i in range(st.AI_MAX_TURNS):
-        n = est + i * (mt + k)
-        worst["cache_creation_input_tokens"] += n
-        worst["cache_creation"]["ephemeral_1h_input_tokens"] += n
-        worst["output_tokens"] += mt
-    assert budget.reserve_micro_usd(M, est, mt, st.AI_MAX_TURNS, k) >= budget.cost_micro_usd(M, worst)
-    # スキルの上界は SKILL.md の合計のバイト数 + 余裕
     from simulator_api.ai import skills
 
     assert budget.skill_tokens() == skills.total_bytes() + st.AI_SKILL_OVERHEAD_TOKENS
+
+
+def worst_usage(est: int, mt: int, k: int, turns: int, read_hit: bool = True) -> dict:
+    """turn i の入力 = 前の turn の要求（読み出し。read_hit=False なら書き込み）+ 増えた分の書き込み（1 時間の単価）、
+    出力は max_tokens まで、毎回スキルを全部読む = 前提の下で最も高い使い方"""
+    u = {"input_tokens": 0, "output_tokens": 0, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0,
+         "cache_creation": {"ephemeral_5m_input_tokens": 0, "ephemeral_1h_input_tokens": 0}}
+    prev = 0
+    for i in range(turns):
+        prompt = est + i * (mt + k)
+        read = prev if read_hit else 0
+        u["cache_read_input_tokens"] += read
+        u["cache_creation_input_tokens"] += prompt - read
+        u["cache_creation"]["ephemeral_1h_input_tokens"] += prompt - read
+        u["output_tokens"] += mt
+        prev = prompt
+    return u
+
+
+@pytest.mark.parametrize("est", [1, 12_345, 31_447, 92_500, 300_000])
+@pytest.mark.parametrize("turns", [1, 2, 3])
+def test_reserve_is_upper_bound_when_previous_turn_is_cached(est, turns):
+    # 前の turn の要求が読み出しになる（CLI の要求の形 = tests/test_ai_agent_sdk_cli.py で固定）限り、実額 ≤ 予約。
+    # 使った turn が上限より少ない・出力が少ない・読み出しが多い（前の要求より前のキャッシュ）は安い側
+    k, mt = budget.skill_tokens(), st.AI_MAX_TOKENS
+    reserve = budget.reserve_micro_usd(M, est, mt, st.AI_MAX_TURNS, k)
+    assert budget.cost_micro_usd(M, worst_usage(est, mt, k, turns)) <= reserve
+    if turns == st.AI_MAX_TURNS:  # 最悪の組み合わせでちょうど（切り上げの 1 µUSD まで）
+        assert reserve - budget.cost_micro_usd(M, worst_usage(est, mt, k, turns)) <= 1
+
+
+def test_reserve_cache_miss_is_the_documented_exception():
+    # 前の turn の要求がキャッシュから読めない（追い出し）と予約を越えうる（精算で 1 要求ぶん。次の要求は 429）。
+    # 越える分は前の要求 × (書き込み − 読み出し) の和以下
+    est, k, mt, t = 31_447, budget.skill_tokens(), st.AI_MAX_TOKENS, st.AI_MAX_TURNS
+    reserve = budget.reserve_micro_usd(M, est, mt, t, k)
+    miss = budget.cost_micro_usd(M, worst_usage(est, mt, k, t, read_hit=False))
+    assert miss > reserve
+    prev_total = sum(est + i * (mt + k) for i in range(t - 1))
+    assert miss - reserve <= -(-prev_total * (8_000_000 - 200_000) // 1_000_000) + 1
+
+
+def test_reserve_long_conversation_not_rejected_at_day_start():
+    # api_key / wif で本文 90k トークン（ツールの往復が数回ある長い会話）でも日の始めに上限 $3 に収まる
+    est = budget.estimate_input_tokens("x" * 90_000)
+    assert budget.reserve_micro_usd(M, est, st.AI_MAX_TOKENS, st.AI_MAX_TURNS, budget.skill_tokens()) < 1_600_000
 
 
 def test_cost():
@@ -79,12 +115,16 @@ def test_cost():
 
 
 def test_reserve_covers_worst_cost():
-    # 予約 ≥ 見積もりどおりの入力を全部書き込み（5 分 / 1 時間）・出力を max_tokens まで使ったときの実額
+    # 1 turn: 予約 ≥ 見積もりどおりの入力を全部書き込み（5 分 / 1 時間）・出力を max_tokens まで使ったときの実額
     est = 12_345
     worst = {"input_tokens": 0, "cache_creation_input_tokens": est, "output_tokens": 8000}
     assert budget.reserve_micro_usd(M, est, 8000) >= budget.cost_micro_usd(M, worst)
     worst["cache_creation"] = {"ephemeral_1h_input_tokens": est}
     assert budget.reserve_micro_usd(M, est, 8000) >= budget.cost_micro_usd(M, worst)
+
+
+def test_estimate_includes_cli_overhead():
+    assert budget.estimate_input_tokens("") == st.AI_INPUT_OVERHEAD_TOKENS + st.AI_CLI_OVERHEAD_TOKENS
 
 
 def test_jst_day_boundary():
