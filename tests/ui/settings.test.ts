@@ -330,6 +330,6 @@ describe('AI に渡す自分の前提の欄（#156 AC2）', () => {
     expect(aiProfileCount('')).toBe('0 / 1,000 字');
     expect(aiProfileCount('あいう')).toBe('3 / 1,000 字');
     expect(AI_PROFILE_NOTES.join('')).toContain('この端末にだけ保存');
-    expect(AI_PROFILE_NOTES.join('')).toContain('数字は計算の値');
+    expect(AI_PROFILE_NOTES.join('')).toContain('計算は設定の資金とシミュレーターの値から');
   });
 });

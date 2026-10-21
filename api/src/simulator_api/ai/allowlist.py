@@ -319,16 +319,23 @@ def parse_request(raw: bytes, registry: Registry) -> AiRequest:
     return AiRequest(kind=kind, context=context, messages=messages, topic=topic)
 
 
+def context_json(ctx: dict) -> str:
+    """包みの印の中に置く context の JSON（canonical の `<`・`>` を \\u003c・\\u003e にした同じ値の JSON）。自分の前提
+    （#156。自由な文字列）に `</context>`・`<context_update>` などの印の文字列を書かれても、印を偽装させない。
+    ほかの値は `<`・`>` を含まない（列挙・数・日付の形）ので、前提の無い context のバイト列は変わらない"""
+    return canonical(ctx).replace("<", "\\u003c").replace(">", "\\u003e")
+
+
 def _upstream_block(b: dict) -> dict:
     if b["type"] == "context_update":
-        return {"type": "text", "text": f"{UPDATE_OPEN}{canonical(b['context'])}{UPDATE_CLOSE}"}
+        return {"type": "text", "text": f"{UPDATE_OPEN}{context_json(b['context'])}{UPDATE_CLOSE}"}
     return dict(b)
 
 
 def upstream_messages(req: AiRequest) -> list[dict]:
     """送る messages: 検査済みの会話の最初の user の先頭に context の block を足し、context_update を text block にした
     もの（新しい list / dict）。同じ会話の前の messages は毎回同じバイト列になる（追記だけ）"""
-    ctx_block = {"type": "text", "text": f"{CONTEXT_OPEN}{canonical(req.context)}{CONTEXT_CLOSE}"}
+    ctx_block = {"type": "text", "text": f"{CONTEXT_OPEN}{context_json(req.context)}{CONTEXT_CLOSE}"}
     out = [{"role": m["role"], "content": [_upstream_block(b) for b in m["content"]]} for m in req.messages]
     out[0]["content"].insert(0, ctx_block)
     return out
