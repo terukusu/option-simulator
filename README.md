@@ -274,7 +274,7 @@ GCP_PROJECT_ID=$P GCP_PROJECT_NUMBER=$(gcloud projects describe "$P" --format='v
 ## 板のデータ
 
 - `fixtures/synthetic/*.json`: 開発・テストの既定の板。Black-76 から作った **架空の値**（生成器 `scripts/synthBoard.ts`）。形は `docs/design.md` 7.1
-- `fixtures/local/`: 実データ（毎分取り込んだ板）の dump を手元で試す置き場。**gitignore 済みで、コミットしない**（実データを公開リポジトリに置かない）。`/api/chain` と同じ形の JSON を置くと `npm test` が検証・正規化を試し（`tests/data/local.test.ts`。件数だけ出す）。`npm run dev` の画面のファイル選択でも読める。Issue / PR には件数・割合などの要約だけを書く
+- `fixtures/local/`: 実データ（毎分取り込んだ板）の dump を手元で試す置き場。**gitignore 済みで、コミットしない**（実データを公開リポジトリに置かない）。`/api/chain` と同じ形の JSON を置くと `npm test` が検証・正規化を試し（`tests/data/local.test.ts`。件数だけ出す）。`npm run dev` の画面のファイル選択でも読める。Issue / PR には件数・割合などの要約だけを書く。AI のチャットの [評価に残す] で保存した会話は `fixtures/local/ai_eval/cases/` に置く（`npm run ai:eval -- --saved` で送り直す。手順は `api/README.md` の「AI の評価」）
 
 ## 取引カレンダー
 

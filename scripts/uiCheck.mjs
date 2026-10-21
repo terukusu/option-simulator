@@ -10269,6 +10269,32 @@ async function aiDiagnoseDone(page) {
   await page.waitForTimeout(150);
 }
 
+/**
+ * 返答の行の [評価に残す]（#159）: 終わった返答の末尾にあり窓の中・横にはみ出さない。押す → メモ（window.prompt）に
+ * 書いて OK → ai-eval-*.json がダウンロードされ、版 1 の形・メモ・発言の列（診断）・作り直しの材料（板・ポジション）を持つ
+ */
+async function aiKeepCheck(page, tag) {
+  const btn = page.locator('section.ai .ai-msg.answer button[data-ai="keep"]').last();
+  const box = await btn.boundingBox().catch(() => null);
+  const vw = page.viewportSize()?.width ?? 0;
+  const bad = [];
+  if (!box) bad.push('ボタンが無い');
+  else if (box.x < 0 || box.x + box.width > vw + 0.5) bad.push('ボタンが窓の外');
+  if (box) {
+    page.once('dialog', (d) => d.accept('合成の確かめ'));
+    const [dl] = await Promise.all([page.waitForEvent('download', { timeout: 5000 }), btn.click()]);
+    const name = dl.suggestedFilename();
+    const p = await dl.path();
+    const doc = p ? JSON.parse(readFileSync(p, 'utf8')) : null;
+    if (!/^ai-eval-\d{8}-\d{6}\.json$/.test(name)) bad.push(`ファイル名「${name}」`);
+    if (doc?.kind !== 'optsim.ai_eval_case' || doc?.v !== 1) bad.push('形');
+    if (doc?.note !== '合成の確かめ') bad.push('メモ');
+    if (doc?.turns?.[0]?.kind !== 'diagnose') bad.push('発言の列');
+    if (!doc?.source?.board || !doc?.source?.position) bad.push('作り直しの材料');
+  }
+  aiStat(`${tag} #159 評価に残す`, bad.length === 0, bad.join('・'));
+}
+
 /** 1 件の判定を数えて出す（aiSweep の項目） */
 function aiStat(label, ok, detail = '') {
   aiStats.total++;
@@ -10458,6 +10484,7 @@ async function aiSweep() {
       await readoutCheck(page, lbl, want);
       await aiCheck(page, lbl, w);
       await aiTermCheck(page, tag);
+      if (theme === 'dark') await aiKeepCheck(page, tag);
       await aiTableCheck(page, tag, w, h, theme, want);
       await ctx.close();
     }

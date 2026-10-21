@@ -3,6 +3,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/ho
 import type { AiStatus } from '../../../data/aiStream';
 import { pure } from '../../components/pure';
 import { type AiChatController, useAiChat } from '../../components/useAiChat';
+import { downloadText } from '../../download';
 import type { AiAsk } from '../../view/aiAsk';
 import {
   type AiGate,
@@ -21,6 +22,14 @@ import {
   remainingText,
   sendBlocked,
 } from '../../view/aiChat';
+import {
+  AI_EVAL_KEEP_LABEL,
+  AI_EVAL_NOTE_PROMPT,
+  type AiEvalSource,
+  aiEvalCase,
+  aiEvalFileName,
+  usedTools,
+} from '../../view/aiEvalCase';
 import type { IvStatsData } from '../../view/aiIvStats';
 import { AI_PRESETS, presetBlocked } from '../../view/aiPresets';
 import { proposalCard } from '../../view/aiPropose';
@@ -93,6 +102,8 @@ function AiPanelView(p: {
   visible: boolean;
   base: string;
   env: () => AiToolEnv | null;
+  /** 評価に残す（#159）の文脈の作り直しの材料（板が無ければ null） */
+  evalSource?: () => AiEvalSource | null;
   /** technicals のツールの先物の足の読み込み（#200。NextApp が口を決める） */
   tech?: () => Promise<TechnicalsData>;
   /** iv_stats のツールの日次の値と今の IV の読み込み（#138・#158。NextApp が口を決める） */
@@ -123,6 +134,35 @@ function AiPanelView(p: {
     pending.current = null;
     decide(a, askPlan(chat.state, { ...gate, status: chat.status }));
   }, [chat.status]);
+  // 評価に残す（#159）: 押した返答までの会話を JSON ファイルに保存する（ダウンロードだけ。サーバーに送らない）。
+  // 会話で technicals / iv_stats を呼んでいたら、その材料（読み込みの 10 分の覚え）も入れる
+  const keep = async (key: string) => {
+    const src = p.evalSource?.();
+    if (!src) return;
+    const st = chat.state;
+    const log = chat.turnLog();
+    const note = window.prompt(AI_EVAL_NOTE_PROMPT, '');
+    if (note === null) return;
+    const used = usedTools(st.messages);
+    const [technicals, ivStats] = await Promise.all([
+      used.has('technicals') && p.tech ? p.tech().catch(() => null) : null,
+      used.has('iv_stats') && p.ivStats ? p.ivStats().catch(() => null) : null,
+    ]);
+    const now = Date.now();
+    const doc = aiEvalCase({
+      chat: st,
+      answerKey: key,
+      source: {
+        ...src,
+        ...(technicals && { technicals }),
+        ...(ivStats && { iv_stats: ivStats }),
+      },
+      note: note.trim(),
+      now,
+      log,
+    });
+    if (doc) downloadText(`${JSON.stringify(doc, null, 1)}\n`, aiEvalFileName(now));
+  };
   p.apiRef.current = {
     diagnose: chat.diagnose,
     ask: (a) => decide(a, askPlan(chat.state, { ...gate, status: chat.status })),
@@ -138,6 +178,7 @@ function AiPanelView(p: {
       onApplyScenario={p.onApplyScenario}
       onApplyProposal={p.onApplyProposal}
       draft={draft}
+      {...(p.evalSource && { onKeep: (key: string) => void keep(key) })}
     />
   );
 }
@@ -160,6 +201,8 @@ export function AiChat(p: {
   onApplyProposal: AiProposeApply;
   /** [AI に聞く] で送れなかった質問（#136。入力欄に入れる。フォーカスは動かさない = スマホでキーボードを出さない） */
   draft?: AiDraft | null;
+  /** 返答の行の [評価に残す]（#159。返答の行の key） */
+  onKeep?: (key: string) => void;
 }) {
   const { chat } = p;
   const { state, status } = chat;
@@ -260,6 +303,7 @@ export function AiChat(p: {
               onPropose={p.onApplyProposal}
               onRetry={chat.retry}
               canRetry={sendReason === null}
+              {...(p.onKeep && { onKeep: p.onKeep })}
             />
           ))}
         </div>
@@ -382,6 +426,7 @@ function ChatRow(p: {
   onPropose: AiProposeApply;
   onRetry: () => void;
   canRetry: boolean;
+  onKeep?: (key: string) => void;
 }) {
   const it = p.item;
   switch (it.kind) {
@@ -403,6 +448,11 @@ function ChatRow(p: {
       return (
         <div class="ai-msg answer" data-ai-live={it.live ? 'true' : undefined}>
           {it.text !== '' && <AnswerText text={it.text} sources={p.sources} live={it.live} />}
+          {p.onKeep && !it.live && it.failed === null && it.text !== '' && (
+            <button type="button" class="ai-keep" data-ai="keep" onClick={() => p.onKeep?.(it.key)}>
+              {AI_EVAL_KEEP_LABEL}
+            </button>
+          )}
           {it.failed !== null && (
             <p class="ai-error" data-ai="error" data-code={it.failed}>
               {aiErrorText(it.failed, it.remainingUsd ?? null)}
