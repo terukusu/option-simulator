@@ -139,6 +139,11 @@ function SmilePlotView(p: SmilePlotProps) {
     // 長押し（今のまま）: 選択を最寄りの点へ切り替える
     scrub: { linePx: null },
     onScrub: (x) => select(scrubStrike(model, x, range)),
+    // 長押しの選択のスクラブの間（#223）はマウスのホバーの十字線を出さない（未反映のホバーも捨てる。タッチの十字線は残す）
+    onGrab: () => {
+      hoverAt.current = null;
+      setCursor((c) => (c && !c.touch ? null : c));
+    },
     onScrubKey: (key) => {
       const steps = SCRUB_KEY_STEPS[key];
       if (steps === undefined) return false;

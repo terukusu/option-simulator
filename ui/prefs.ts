@@ -132,7 +132,7 @@ export interface Prefs {
   aiDisclaimerSeen?: boolean;
   /** 先物推移の指標の段の高さ（#207。段ごと px。無い段・無い = 既定） */
   futPaneH?: IndPaneHeights;
-  /** テクニカルの線の太さ（#214。px。EMA の 3 本と指標の段の線。無い項目・無い = 既定） */
+  /** テクニカルの線の太さ（#214。px。EMA の 3 本とオシレーターの線（#223 で表記を改めた。キーは同じ）。無い項目・無い = 既定） */
   techLineWidths?: Partial<TechLineWidths>;
 }
 

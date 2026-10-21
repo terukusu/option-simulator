@@ -722,7 +722,7 @@ export function ivChartModel(p: IvChartInput): IvChartModel {
   }
 
   // 重ねる線（#206）: 見えている足（端は 1 本外まで）を結ぶ。値の無い足（ウォームアップ中）で切る。1 画素に 2 本以上の
-  // 足が入るとき（縮小）は 1 画素の列に 1 点（その列の最後の足）= 指標の段の線と同じ規則（1 万本でも 1 フレームの予算に収める）
+  // 足が入るとき（縮小）は 1 画素の列に 1 点（その列の最後の足）= 指標の段のオシレーターの線と同じ規則（1 万本でも 1 フレームの予算に収める）
   const thin = (range[1] - range[0]) / Math.max(viewport[1] - viewport[0], 1e-9) < 1;
   const has = (v: number | null | undefined): v is number =>
     v !== null && v !== undefined && Number.isFinite(v);

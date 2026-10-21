@@ -60,7 +60,7 @@ export interface SettingsDialogProps {
   /** テクニカル指標の期間（端末の設定。先物推移の段と AI のツール technicals に同じ値。#205） */
   techParams: TechParams;
   onTechParams: (patch: Partial<TechParams>) => void;
-  /** テクニカルの線の太さ（px。端末の設定。EMA の 3 本と指標の段の線。#214） */
+  /** テクニカルの線の太さ（px。端末の設定。EMA の 3 本とオシレーターの線。#214） */
   techLineWidths: TechLineWidths;
   onTechLineWidths: (patch: Partial<TechLineWidths>) => void;
 }

@@ -77,7 +77,7 @@ export interface FutHistoryProps {
   paneH: IndPaneHeights | undefined;
   /** 段の高さを書く（null = 既定に戻す） */
   onPaneH: (h: IndPaneHeights | null) => void;
-  /** テクニカルの線の太さ（#214。px。端末の設定。EMA の 3 本と段の線） */
+  /** テクニカルの線の太さ（#214。px。端末の設定。EMA の 3 本とオシレーターの線） */
   lineWidths: TechLineWidths;
 }
 
@@ -204,7 +204,7 @@ function FutHistoryView(p: FutHistoryProps) {
         : null,
     [showEma, bars, emaShort, emaMid, emaLong],
   );
-  // 線の太さ（#214）: EMA の 3 本は同じ太さ、段の線は段の太さ
+  // 線の太さ（#214）: EMA の 3 本は同じ太さ、オシレーターの線（段）はその太さ
   const widths = p.lineWidths;
   const emaW = widths.ema;
   const overlays = useMemo(() => (ema ? futEmaOverlays(ema, emaW) : undefined), [ema, emaW]);

@@ -2461,7 +2461,8 @@ function futYTagOk(st) {
 
 /**
  * #200: 指標の段の検査。段 3 つ・4 時間が押されている・価格の描画域が 80px 以上・段の幅 = 描画域の幅・段が枠の中
- * （下端が .panel-body の下端以内）・ツールの行と凡例の行が切れない・段の線が 3 本以上ある
+ * （下端が .panel-body の下端以内）・ツールの行と凡例の行が切れない・オシレーターの線が 3 本以上ある。
+ * #223: 境目ごとにつまみ（::before の横棒 2 本。横の中央 ±2px）と、境目の線（.ind-sep）の色が背景と違う
  */
 async function indCheck(page, label) {
   futStats.total++;
@@ -2485,9 +2486,53 @@ async function indCheck(page, label) {
       lines: s?.querySelectorAll('.ind-pane .ind-line[d^="M"]:not([d="M0 0"])').length ?? 0,
       toolsCut: cut(s?.querySelector('.iv-tools')),
       legendCut: cut(s?.querySelector('.iv-legend')),
+      // #223 境目: つまみ（::before の横棒 2 本）の大きさ・色・横の位置と、境目の線（.ind-sep）の色 ≠ 背景
+      splits: [...(s?.querySelectorAll('.ind-split') ?? [])].map((el) => {
+        const cs = getComputedStyle(el, '::before');
+        const r = el.getBoundingClientRect();
+        const pane = el.nextElementSibling?.getBoundingClientRect();
+        return {
+          w: Number.parseFloat(cs.width) || 0,
+          h: Number.parseFloat(cs.height) || 0,
+          top: cs.borderTopWidth,
+          bottom: cs.borderBottomWidth,
+          color: cs.borderTopColor,
+          opacity: Number(cs.opacity),
+          cx: r.left + r.width / 2,
+          paneCx: pane ? pane.left + pane.width / 2 : null,
+        };
+      }),
+      sep: (() => {
+        const line = s?.querySelector('.ind-pane .ind-sep');
+        let bg = 'rgba(0, 0, 0, 0)';
+        for (let e = line?.closest('.ind-pane') ?? null; e; e = e.parentElement) {
+          const c = getComputedStyle(e).backgroundColor;
+          if (c && c !== 'rgba(0, 0, 0, 0)' && c !== 'transparent') {
+            bg = c;
+            break;
+          }
+        }
+        return { stroke: line ? getComputedStyle(line).stroke : null, bg };
+      })(),
     };
   });
   const bad = [];
+  // #223: 境目ごとにつまみ（横棒 2 本・幅 > 0・不透明・横の中央 ±2px）、境目の線の色が背景と違う
+  if (r.splits.length !== r.panes) bad.push(`境目 ${r.splits.length}（段 ${r.panes}）`);
+  for (const [i, g] of r.splits.entries()) {
+    const ok =
+      g.w > 0 &&
+      g.h > 0 &&
+      g.top === '1px' &&
+      g.bottom === '1px' &&
+      g.opacity > 0 &&
+      g.color !== 'rgba(0, 0, 0, 0)' &&
+      g.paneCx !== null &&
+      Math.abs(g.cx - g.paneCx) <= 2;
+    if (!ok) bad.push(`つまみ ${i}: ${JSON.stringify(g)}`);
+  }
+  if (!r.sep.stroke || r.sep.stroke === 'none' || r.sep.stroke === r.sep.bg)
+    bad.push(`境目の線 ${r.sep.stroke}（背景 ${r.sep.bg}）`);
   // #207: 高さが足りなければ後ろの段を隠して知らせる（価格が先）
   if (r.panes !== 3 && !(r.panes < 3 && r.note.includes('隠しています')))
     bad.push(`段 ${r.panes}・知らせ「${r.note}」`);
@@ -2502,7 +2547,7 @@ async function indCheck(page, label) {
   if (ok) futStats.pass++;
   else failed = true;
   console.log(
-    `${label}: 段 ${r.panes}（高さ ${r.paneH.join('/')}px）・描画域 ${r.plotH}px ${ok ? 'pass' : `${bad.join('・')}  ← NG`}`,
+    `${label}: 段 ${r.panes}（高さ ${r.paneH.join('/')}px）・描画域 ${r.plotH}px・境目のつまみ ${r.splits.length}（線 ${r.sep.stroke}） ${ok ? 'pass' : `${bad.join('・')}  ← NG`}`,
   );
 }
 
@@ -2745,7 +2790,7 @@ async function futAllPanesSweep() {
 }
 
 /**
- * #214 テクニカルの線の太さ: EMA の 3 本と段の線（RSI・MACD・シグナル・%K・%D）の画面の太さ（CSS px）が設定の px と同じか。
+ * #214 テクニカルの線の太さ: EMA の 3 本とオシレーターの線（RSI・MACD・シグナル・%K・%D）の画面の太さ（CSS px）が設定の px と同じか。
  * 画面の太さ = computed の stroke-width（non-scaling-stroke なら そのまま、無ければ × svg の画面の拡大率 getScreenCTM().a）。
  * 既定（EMA 1・段 1.25）と設定した値（EMA 3・段 2）を 360×780（覗く）・1440×900 で測る。ヒストの棒は太さを持たない
  */
@@ -10587,16 +10632,51 @@ async function pnlCrossFlows(vp) {
     panned !== null && panned.ticksX.map((t) => t[1]).join() !== ticks0,
     `${ticks0} → ${panned?.ticksX.map((t) => t[1]).join()}`,
   );
-  // 長押し 600ms でシナリオ点をつかんで動かす（今のまま）
+  // 長押し 600ms でシナリオ点をつかんで動かす（今のまま）。#223: つかんで動かす間（離す前）は十字線を出さない
   const h0 = (await pnlCrossState(page))?.handleX ?? null;
   const b = at(0.2, 0.5);
   await page.mouse.move(b.x, b.y);
+  await page.waitForTimeout(100);
+  const hover0 = await pnlCrossState(page);
   await page.mouse.down();
   await page.waitForTimeout(600);
+  const held = await pnlCrossState(page);
   await page.mouse.move(b.x + 30, b.y, { steps: 4 });
+  await page.waitForTimeout(120);
+  const during = await pnlCrossState(page);
   await page.mouse.up();
   await page.waitForTimeout(150);
   const grabbed = await pnlCrossState(page);
+  check(
+    `#223 ${tag} 長押しでつかんで動かす間は十字線 0 本（押す前のホバーは 2 本）`,
+    hover0?.lines === 2 && held?.lines === 0 && during?.lines === 0,
+    `押す前 ${hover0?.lines} 本・長押し ${held?.lines} 本・動かす間 ${during?.lines} 本`,
+  );
+  // #223: ハンドル（縦線）を押してすぐ動かす間も 0 本、離してマウスを動かすとまた 2 本
+  const hx = st0.left + (grabbed?.handleX ?? 0);
+  const hy = at(0.2, 0.6).y;
+  await page.mouse.move(hx, hy);
+  await page.waitForTimeout(100);
+  const hover1 = await pnlCrossState(page);
+  await page.mouse.down();
+  await page.mouse.move(hx + 40, hy, { steps: 4 });
+  await page.waitForTimeout(120);
+  const dragging = await pnlCrossState(page);
+  await page.mouse.up();
+  await page.waitForTimeout(100);
+  const released = await pnlCrossState(page);
+  await page.mouse.move(hx + 60, hy - 10, { steps: 2 });
+  await page.waitForTimeout(120);
+  const after = await pnlCrossState(page);
+  check(
+    `#223 ${tag} ハンドルを押してすぐ動かす間は十字線 0 本、ハンドルは付いて動き、離してマウスを動かすとまた 2 本`,
+    hover1?.lines === 2 &&
+      dragging?.lines === 0 &&
+      (dragging?.handleX ?? 0) - (grabbed?.handleX ?? 0) >= 30 &&
+      released?.lines === 0 &&
+      after?.lines === 2,
+    `押す前 ${hover1?.lines} 本・動かす間 ${dragging?.lines} 本（ハンドル x ${grabbed?.handleX} → ${dragging?.handleX}）・離した直後 ${released?.lines} 本・動かすと ${after?.lines} 本`,
+  );
   check(
     `#201 ${tag} 長押しでシナリオ点（ハンドルの縦線）が押した位置へ動く`,
     grabbed?.handleX !== null &&
@@ -11190,6 +11270,50 @@ async function cross217TouchFlows(vp) {
   }
 }
 
+/**
+ * #223（--cross --flows）: 1440 のマウスでスマイルにホバー（十字線 2 本）→ 長押し 600ms の選択のスクラブで横へ動かす間（離す前）は
+ * 十字線 0 本・選択は最寄りの点へ（今のまま）→ 離してマウスを動かすとまた 2 本
+ */
+async function smileGrabFlow() {
+  const vp = { width: 1440, height: 900 };
+  const tag = `${vp.width}x${vp.height}`;
+  const ctx = await newContext(vp, { [WORKSPACE_KEY]: twoLegs });
+  const page = await ctx.newPage();
+  await page.goto(pageUrl('next'));
+  await waitReady(page, 'next');
+  await cross217Open(page, 'smile', false);
+  const plot = await cross217Plot(page, 'smile');
+  if (!plot) {
+    check(`#223 ${tag} smile`, false, '描画域が無い');
+    await ctx.close();
+    return;
+  }
+  const host = CROSS217_HOST.smile;
+  const at = (fx, fy) => ({ x: plot.x + plot.w * fx, y: plot.y + plot.h * fy });
+  const a = at(0.35, 0.5);
+  await page.mouse.move(a.x, a.y);
+  await page.waitForTimeout(120);
+  const hover = await xcState(page, host);
+  await page.mouse.down();
+  await page.waitForTimeout(600);
+  await page.mouse.move(a.x + 60, a.y, { steps: 5 });
+  await page.waitForTimeout(150);
+  const during = await xcState(page, host);
+  const ro = ((await page.textContent('section.smile .smile-act').catch(() => '')) ?? '').trim();
+  await page.mouse.up();
+  await page.waitForTimeout(120);
+  await page.mouse.move(a.x + 80, a.y - 20, { steps: 2 });
+  await page.waitForTimeout(150);
+  const after = await xcState(page, host);
+  check(
+    `#223 ${tag} smile: 長押しの選択のスクラブで動かす間は十字線 0 本（押す前 2 本）、離してマウスを動かすとまた 2 本`,
+    hover?.lines === 2 && during?.lines === 0 && after?.lines === 2,
+    `押す前 ${hover?.lines} 本・動かす間 ${during?.lines} 本・離して動かすと ${after?.lines} 本・操作行「${ro.slice(0, 24)}」`,
+  );
+  if (shotsDir) await page.screenshot({ path: join(shotsDir, `flows-grab223-smile-${tag}.png`) });
+  await ctx.close();
+}
+
 // 開く URL（#91: 既定はクエリなし。--parts は ?parts）
 console.log(`URL: ${pageUrl(mode)}`);
 try {
@@ -11204,6 +11328,8 @@ try {
         { width: 1440, height: 900 },
       ])
         await cross217TouchFlows(vp);
+      // #223: つかんで動かす間はホバーの十字線を出さない（スマイルの選択のスクラブ。損益グラフは --flows の pnlCrossFlows）
+      await smileGrabFlow();
     } else {
       await cross217All();
       console.log(
