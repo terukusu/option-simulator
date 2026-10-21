@@ -3,7 +3,9 @@
 ブラウザから受けるのは schema_version・kind・context・messages と、kind が ask・preset のときだけ topic（model・
 system・tools・max_tokens などは 400）。topic は [AI に聞く]（#136）の場所の ID か定型の質問（#140）の ID（どちらも
 決まった一覧）で、ログ ai_request に出すだけ（Anthropic には送らない）。
-context に自由な文字列は無い（列挙・日付・時刻の形だけ）。板の行に JPX のグリーク・bid_iv / ask_iv・数量・建玉・出来高は
+context に自由な文字列は無い（列挙・日付・時刻の形だけ）。例外は利用者が設定に書いた自分の前提 profile.text
+（#156。MAX_PROFILE_TEXT 字まで。利用者自身の文で、発言の text と同じ扱い。ログには字数だけ）。
+板の行に JPX のグリーク・bid_iv / ask_iv・数量・建玉・出来高は
 無い（許可リストに無いので 400）。IV は simulator の IV（%）。
 
 送る本文は検査済みの値から作り直す: context は sort_keys の JSON（決定的）にして最初の user の先頭の text block に置き、
@@ -51,6 +53,7 @@ MAX_THINKING_TEXT = 50_000
 MAX_OPAQUE = 100_000  # thinking の signature・redacted_thinking の data（Anthropic が付けた不透明な値）
 MAX_FREE_TEXT_TOTAL = 100_000  # 自由文（text・thinking）の合計
 MAX_TOOL_JSON = 50_000  # tool_result の JSON の字数
+MAX_PROFILE_TEXT = 1_000  # 自分の前提（#156。ui/prefs.ts の AI_PROFILE_MAX と同じ）
 CONTEXT_OPEN = "<context>"  # 送る本文で context を包む印（system prompt が参照する）
 CONTEXT_CLOSE = "</context>"
 UPDATE_OPEN = "<context_update>"  # 会話の途中の文脈の更新（#135）
@@ -79,6 +82,8 @@ SCENARIO = Obj({"days": Num(0, 400), "iv_shift_pt": Num(-100, 100), "x_range": A
                 "dx_yen": Num(-MAX_PRICE, MAX_PRICE), "skew_pt": Num(-50, 50), "beta": Num(0, 10),
                 "iv_mode": Enum(("absolute", "relative"))}, frozenset({"dx_yen", "skew_pt", "beta", "iv_mode"}))
 CAPITAL = Obj({"capital_yen": Num(0, 1e12), "max_loss_yen": Num(0, 1e12)}, frozenset({"max_loss_yen"}))
+# 利用者が設定に書いた自分の前提（#156。自由記述。空は送らない）
+PROFILE = Obj({"text": Text(MAX_PROFILE_TEXT, 1)})
 
 TOOL_USE_ID = Str(r"[A-Za-z0-9_-]{1,128}", 128)
 OPAQUE = Str(r"[A-Za-z0-9+/=_.-]*", MAX_OPAQUE)
@@ -93,8 +98,9 @@ def context_shape(registry: Registry) -> Obj:
         "position": Obj({"legs": Arr(LEG, MAX_LEGS)}),
         "scenario": SCENARIO,
         "capital": CAPITAL,
+        "profile": PROFILE,
         "precomputed": precomputed,
-    }, frozenset({"expiries", "position", "scenario", "capital", "precomputed"}))
+    }, frozenset({"expiries", "position", "scenario", "capital", "profile", "precomputed"}))
 
 
 @dataclass(frozen=True)
@@ -104,6 +110,10 @@ class AiRequest:
     messages: list[dict]
     # [AI に聞く] の場所・定型の ID（kind が ask / preset のときだけ。ログ用。Anthropic には送らない）
     topic: str | None = None
+
+    def profile_chars(self) -> int:
+        """自分の前提の字数（ログ用。本文は出さない。無ければ 0）"""
+        return len(self.context.get("profile", {}).get("text", ""))
 
     def tool_names(self) -> list[str]:
         """会話に出たツールの名前（ログ用。重複なし・出た順）"""

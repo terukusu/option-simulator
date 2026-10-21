@@ -1,6 +1,7 @@
 import { useCallback, useMemo, useRef, useState } from 'preact/hooks';
 import { isTechParams, sameTechParams, type TechParams } from '../../model';
 import {
+  isAiProfile,
   type MarginPrefs,
   PREFS_KEY,
   type Prefs,
@@ -20,7 +21,7 @@ import {
 } from '../view/techLineWidth';
 
 /**
- * 端末の設定（option-simulator.prefs。ui/prefs.ts）の state（#131）。テーマ・証拠金・テクニカルの期間（#205）・線の太さ（#214）などを 1 つの値で持ち、
+ * 端末の設定（option-simulator.prefs。ui/prefs.ts）の state（#131）。テーマ・証拠金・テクニカルの期間（#205）・線の太さ（#214）・AI に渡す自分の前提（#156）などを 1 つの値で持ち、
  * 書くときは全体を serializePrefs で書く（片方だけを書いて他方のキーを消さない）。新しい版の設定があったら
  * 書かない（このセッションの値だけ変える）。書けなくても画面は続ける。別のタブの変更は次に開いたときに反映する。
  */
@@ -85,6 +86,19 @@ export function usePrefs(initial: PrefsRead, storage: Storage | null) {
     },
     [commit],
   );
+  // AI に渡す自分の前提（#156）: 空白だけ・空 → キーを消す。上限を超える値は保存しない（検査は呼ぶ側の欄）。同じなら書かない
+  const setAiProfile = useCallback(
+    (text: string) => {
+      const { aiProfile: old, ...rest } = ref.current;
+      if (text.trim() === '') {
+        if (old !== undefined) commit(rest);
+        return;
+      }
+      if (!isAiProfile(text) || text === old) return;
+      commit({ ...rest, aiProfile: text });
+    },
+    [commit],
+  );
   const storedLw = prefs.techLineWidths;
   const techLineWidths = useMemo(() => techLineWidthsOr(storedLw), [storedLw]);
   // 段とツールに渡す期間（保存した組が変わったときだけ作り直す = 指標の再計算は期間が変わったときだけ）
@@ -100,5 +114,6 @@ export function usePrefs(initial: PrefsRead, storage: Storage | null) {
     setFutPaneH,
     techLineWidths,
     setTechLineWidths,
+    setAiProfile,
   };
 }

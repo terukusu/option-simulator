@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_TECH_PARAMS } from '../../model';
 import {
+  AI_PROFILE_MAX,
   DEFAULT_MARGIN_PREFS,
   DEFAULT_PREFS,
+  isAiProfile,
   type MarginPrefs,
   PREFS_KEY,
   PREFS_SCHEMA_VERSION,
@@ -547,5 +549,37 @@ describe('#214 テクニカルの線の太さ（tech_ema_width_px・tech_pane_wi
       techLineWidths: { ema: 0.5, pane: 7 },
     });
     expect(out).not.toContain('width');
+  });
+});
+
+describe('AI に渡す自分の前提（#156 AC1）', () => {
+  const base = { schema_version: 1, theme: 'auto' };
+  it('書いて読める（入れた文字列のまま）・未設定ならキーを書かない', () => {
+    const text = '資金 500 万円。\n深い OTM の売りが基本。';
+    const s = serializePrefs({ ...DEFAULT_PREFS, aiProfile: text });
+    expect(JSON.parse(s).ai_profile).toBe(text);
+    expect(readPrefs(s).prefs.aiProfile).toBe(text);
+    expect(JSON.parse(serializePrefs(DEFAULT_PREFS))).not.toHaveProperty('ai_profile');
+    expect(readPrefs(JSON.stringify(base)).prefs.aiProfile).toBeUndefined();
+  });
+  it('不正（文字列でない・空白だけ・上限を超える）→ 無し。ほかの設定はそのまま', () => {
+    for (const v of [42, null, '  ', 'あ'.repeat(AI_PROFILE_MAX + 1)]) {
+      const r = readPrefs(JSON.stringify({ ...base, theme: 'dark', ai_profile: v }));
+      expect(r.prefs.aiProfile).toBeUndefined();
+      expect(r.prefs.theme).toBe('dark');
+      expect(r.writable).toBe(true);
+    }
+    expect(
+      readPrefs(JSON.stringify({ ...base, ai_profile: 'あ'.repeat(AI_PROFILE_MAX) })).prefs
+        .aiProfile,
+    ).toHaveLength(AI_PROFILE_MAX);
+    expect(
+      JSON.parse(serializePrefs({ ...DEFAULT_PREFS, aiProfile: 'あ'.repeat(AI_PROFILE_MAX + 1) })),
+    ).not.toHaveProperty('ai_profile');
+  });
+  it('isAiProfile', () => {
+    expect(isAiProfile('a')).toBe(true);
+    expect(isAiProfile(' ')).toBe(false);
+    expect(isAiProfile(1)).toBe(false);
   });
 });

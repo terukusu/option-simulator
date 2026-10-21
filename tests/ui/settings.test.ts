@@ -12,6 +12,9 @@ import { parseFee } from '../../ui/state';
 import { headerModel } from '../../ui/view/header';
 import { DEFAULT_PNL_Y } from '../../ui/view/pnlChart';
 import {
+  AI_PROFILE_NOTES,
+  aiProfileCount,
+  aiProfileField,
   feeField,
   MARGIN_FIELD_ERROR,
   MARGIN_FIELDS,
@@ -312,5 +315,21 @@ describe('テクニカル指標の欄（#205）', () => {
       ok: false,
       error: 'EMA の短期は 2〜100 の整数',
     });
+  });
+});
+
+describe('AI に渡す自分の前提の欄（#156 AC2）', () => {
+  it('1,000 字までは通り、超えたらエラー文（字数つき）', () => {
+    expect(aiProfileField('')).toEqual({ ok: true });
+    expect(aiProfileField('あ'.repeat(1000))).toEqual({ ok: true });
+    const r = aiProfileField('あ'.repeat(1001));
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error).toBe('1,000 字までにする（今 1,001 字。保存していない）');
+  });
+  it('字数の表示と注記（端末にだけ保存・数字は計算の値を使う）', () => {
+    expect(aiProfileCount('')).toBe('0 / 1,000 字');
+    expect(aiProfileCount('あいう')).toBe('3 / 1,000 字');
+    expect(AI_PROFILE_NOTES.join('')).toContain('この端末にだけ保存');
+    expect(AI_PROFILE_NOTES.join('')).toContain('数字は計算の値');
   });
 });

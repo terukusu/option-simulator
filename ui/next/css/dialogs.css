@@ -70,6 +70,31 @@
   border-color: var(--loss);
 }
 
+/* AI に渡す自分の前提（#156。複数行の自由記述） */
+.set-textarea {
+  width: 100%;
+  min-width: 0;
+  min-height: 6em;
+  padding: 6px 8px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-sm);
+  background: var(--s1);
+  color: var(--ink);
+  font: inherit;
+  font-size: var(--fs-sub);
+  line-height: 1.45;
+  resize: vertical;
+}
+
+.set-textarea[aria-invalid="true"] {
+  border-color: var(--loss);
+}
+
+.set-note.set-count {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
 .set-row > .field-error {
   color: var(--loss);
   font-size: var(--fs-sm);

@@ -403,3 +403,48 @@ def test_tool_result_is_error():
     assert req.messages[4]["content"][0]["is_error"] is True
     msgs[4]["content"][0]["content"][0]["text"] = '{"error":"自由文"}'
     assert bad(ai_body(msgs)).reason == "format"
+
+
+def _with_profile(profile) -> dict:
+    ctx = ai_context()
+    ctx["profile"] = profile
+    return ai_body(context=ctx)
+
+
+def test_profile_ok_and_upstream_in_context():
+    # #156 AC4: 自分の前提（1〜1,000 字）は context の任意のキーとして通り、送る本文の <context> に入る
+    head = "資金 500 万円。深い OTM の売りが基本。"
+    text = head + "あ" * (allowlist.MAX_PROFILE_TEXT - len(head))
+    assert len(text) == allowlist.MAX_PROFILE_TEXT
+    req = parse(_with_profile({"text": text}))
+    assert req.context["profile"] == {"text": text}
+    assert req.profile_chars() == allowlist.MAX_PROFILE_TEXT
+    first = allowlist.upstream_messages(req)[0]["content"][0]["text"]
+    assert first.startswith(allowlist.CONTEXT_OPEN) and text in first
+    assert parse(ai_body()).profile_chars() == 0
+
+
+@pytest.mark.parametrize("profile,path,reason", [
+    ({"text": ""}, "context.profile.text", "size"),
+    ({"text": "あ" * (allowlist.MAX_PROFILE_TEXT + 1)}, "context.profile.text", "size"),
+    ({"text": 500}, "context.profile.text", "type"),
+    ({}, "context.profile.text", "missing"),
+    ({"text": "x", "note": "y"}, "context.profile.<unknown>", "unknown_key"),
+    ("資金 500 万円", "context.profile", "type"),
+])
+def test_profile_rejected(profile, path, reason):
+    # #156 AC4: 範囲外・形違い・未知のキーは 400（Bad）
+    e = bad(_with_profile(profile))
+    assert (e.path, e.reason) == (path, reason)
+
+
+def test_profile_in_context_update():
+    # 会話の途中で前提を変えたら context_update で同じ形で通る
+    msgs = [{"role": "user", "content": [{"type": "text", "text": "q1"}]},
+            {"role": "assistant", "content": [{"type": "text", "text": "a1"}]},
+            {"role": "user", "content": [{"type": "text", "text": "q2"},
+                                         {"type": "context_update",
+                                          "context": {**ai_context(), "profile": {"text": "損失は 30 万円まで"}}}]}]
+    req = parse(ai_body(msgs))
+    up = allowlist.upstream_messages(req)
+    assert "損失は 30 万円まで" in up[2]["content"][1]["text"]
