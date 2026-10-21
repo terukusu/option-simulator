@@ -79,6 +79,14 @@ def test_presets_has_each_preset_section():
     assert "simulator:proposals" in text and "simulator:volatility" in text
 
 
+
+def test_volatility_does_not_compute_rates():
+    # #240 の評価: 区分の pt から率を自分で出した（+1.5 pt を「+6.7%」。結果の率は 6.9%）
+    # → 結果の値をそのまま書き、率を計算しない
+    text = skills.skill_path("volatility").read_text(encoding="utf-8")
+    assert "iv_change_median_pct" in text
+    assert "結果に無い率" in text and "自分で計算しない" in text
+
 def test_total_size_under_limit():
     total = sum(skills.skill_path(n).stat().st_size for n in skills.NAMES)
     assert total == skills.total_bytes() <= st.AI_SKILL_MAX_BYTES

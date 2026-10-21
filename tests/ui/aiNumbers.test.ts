@@ -283,3 +283,94 @@ describe('sectionsOf', () => {
     expect(checkNumbers('−3 枚目', []).unmatched).toBe(1);
   });
 });
+
+describe('#240 評価で見つけた書き方', () => {
+  // 架空の値（評価の合成の板の文脈と同じ形: margin_summary の room_yen・scenario_grid の pnl_yen・technicals の MACD）
+  const SRC = [
+    { margin_summary: { room_yen: 5816516 }, scenario_grid: { pnl_yen: [1645825, -1478977] } },
+    { macd: { hist_yen: 256, line_yen: 418 } },
+  ];
+  const st = (text: string) => checkNumbers(text, SRC).tokens.map((t) => [t.raw, t.status]);
+
+  it('千円・万円は切り捨ても一致（5,816,516 円 → 5,816 千円）。四捨五入も今どおり、2 つ下は不一致', () => {
+    expect(st('今の余力は 5,816 千円')).toEqual([['5,816 千円', 'matched']]);
+    expect(st('今の余力は 5,817 千円')).toEqual([['5,817 千円', 'matched']]);
+    expect(st('今の余力は 5,815 千円')).toEqual([['5,815 千円', 'unmatched']]);
+    expect(st('SQ の前日まで待てば +1,645 千円')).toEqual([['+1,645 千円', 'matched']]);
+    expect(st('約 582 万円')).toEqual([['582 万円', 'matched']]);
+    expect(st('約 581 万円')).toEqual([['581 万円', 'matched']]);
+    expect(st('約 580 万円')).toEqual([['580 万円', 'unmatched']]);
+    // 円そのものは切り捨てを足さない（四捨五入だけ）
+    expect(checkNumbers('256 円', [{ hist_yen: 256.7 }]).tokens[0]?.status).toBe('unmatched');
+    // 符号は今どおり（−1,478,977 円を +1,478 千円と書けば不一致）
+    expect(st('+1,478 千円')).toEqual([['+1,478 千円', 'unmatched']]);
+    expect(st('−1,478 千円')).toEqual([['−1,478 千円', 'matched']]);
+  });
+
+  it('「200 円台」は 200〜299 円に値があれば一致。範囲の外・「台」の無い概数・符号つきは今どおり', () => {
+    expect(st('また 200 円台に広がっています')).toEqual([['200 円', 'matched']]);
+    expect(st('また 300 円台に広がっています')).toEqual([['300 円', 'unmatched']]);
+    expect(st('また 200 円に広がっています')).toEqual([['200 円', 'unmatched']]);
+    expect(st('+200 円台')).toEqual([['+200 円', 'unmatched']]);
+    // 10 の倍数でない数・10 未満は幅を取らない
+    expect(st('255 円台')).toEqual([['255 円', 'unmatched']]);
+    // 400 円台 = 400〜499（MACD 418）、千円の台も同じ（5,000 千円台 = 5,000,000〜5,999,999 円）
+    expect(st('MACD は 400 円台')).toEqual([['400 円', 'matched']]);
+    expect(st('余力は 5,000 千円台')).toEqual([['5,000 千円', 'matched']]);
+  });
+
+  it('「（同 10.7）」の節の番号は数えない。「同 5% の下げ」の値は数える', () => {
+    const text =
+      '（マニュアル 10.7「「今」の点とシナリオの水準」）。Δs は効きません（同 10.7）。別です（同 10.4）。';
+    const r = checkNumbers(text, []);
+    expect(r.tokens.map((t) => [t.raw, t.status, t.reason])).toEqual([
+      ['10.7', 'ignored', 'number'],
+      ['10.7', 'ignored', 'number'],
+      ['10.4', 'ignored', 'number'],
+    ]);
+    expect(checkNumbers('（同 10 章）・同「x」', []).unmatched).toBe(0);
+    expect(checkNumbers('同 5% の下げで', []).unmatched).toBe(1);
+    expect(checkNumbers('同値 10.7）', []).unmatched).toBe(1);
+  });
+});
+
+describe('#240 評価で見つけた書き方（2）', () => {
+  const SRC = [{ scenario_grid: { pnl_yen: [1254321, 1275432] }, changes: [{ days: 5 }] }];
+  const st = (text: string, src: unknown[] = SRC) =>
+    checkNumbers(text, src).tokens.map((t) => [t.raw, t.status, t.reason]);
+
+  it('範囲「A〜B 千円」「A から B 千円」の前の数 A に後ろの単位を当てる', () => {
+    expect(st('SQ の前日に約 +1,254〜1,275 千円です')).toEqual([
+      ['+1,254', 'matched', undefined],
+      ['1,275 千円', 'matched', undefined],
+    ]);
+    expect(st('1,254 から 1,275 千円')).toEqual([
+      ['1,254', 'matched', undefined],
+      ['1,275 千円', 'matched', undefined],
+    ]);
+    // 前の数の値が違えば不一致（千円で照合する）
+    expect(st('+1,200〜1,275 千円')[0]).toEqual(['+1,200', 'unmatched', undefined]);
+    // 後ろが数の言葉（つ・本）なら前も数えない、日なら日で照合
+    expect(st('2〜3 つ')).toEqual([
+      ['2', 'ignored', 'count'],
+      ['3', 'ignored', 'count'],
+    ]);
+    expect(st('3〜5 日')).toEqual([
+      ['3', 'unmatched', undefined],
+      ['5 日', 'matched', undefined],
+    ]);
+    // 範囲でない並び（「、」）は今どおり単位なし
+    expect(st('1,254、1,275 千円')[0]).toEqual(['1,254', 'unmatched', undefined]);
+  });
+
+  it('「1 日ずつずらして」「SQ の 1 日前」の 1 日は数えない。ほかの 1 日は数える', () => {
+    expect(st('組は 1 日ずつずらして重ねて数えている', [])).toEqual([
+      ['1 日', 'ignored', 'number'],
+    ]);
+    expect(st('SQ の 1 日前に損益分岐点にいると', [])).toEqual([['1 日', 'ignored', 'date']]);
+    expect(checkNumbers('1 日で −3%', []).tokens[0]?.status).toBe('unmatched');
+    expect(checkNumbers('2 日ずつずらして', []).tokens[0]?.status).toBe('unmatched');
+    expect(checkNumbers('SQ の 2 日前', []).tokens[0]?.status).toBe('unmatched');
+    expect(checkNumbers('1 日ずつ減る', []).tokens[0]?.status).toBe('unmatched');
+  });
+});

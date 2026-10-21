@@ -8,12 +8,12 @@
 // 環境変数（このスクリプトは読まない・出さない）。手順は api/README.md「AI の評価」。
 //
 //   npm run ai:eval                          10 通りの診断 + 追加の質問 2 件 + テクニカルの質問 4 件（#200）+ 提案の質問 3 件（#139）
-//                                            + 文書の質問 7 件（#137）+ [AI に聞く] 5 件（#136）+ IV の統計の質問 3 件（#138・#158）
+//                                            + 文書の質問 14 件（#137・#240）+ [AI に聞く] 5 件（#136）+ IV の統計の質問 3 件（#138・#158）
 //                                            + 定型の質問 7 件（#140）+ 自分の前提つきの質問 2 件（#156）
 //   npm run ai:eval -- --tech-only           テクニカルの質問 4 件だけ（#206 で EMA の質問を足した）
 //   npm run ai:eval -- --iv-only             IV の統計の質問 3 件だけ（#138・#158。iv_stats）
 //   npm run ai:eval -- --propose-only        ポジションの提案の質問 3 件だけ（#139）
-//   npm run ai:eval -- --docs-only           文書（マニュアル・設計書）の質問 7 件だけ（#137）
+//   npm run ai:eval -- --docs-only           文書（マニュアル・設計書）の質問 14 件だけ（#137・#240。計算の前提 10）
 //   npm run ai:eval -- --ask-only            数字・パネルから [AI に聞く] の 5 件だけ（#136。画面と同じ表示モデルから質問を作る）
 //   npm run ai:eval -- --profile-only        自分の前提（設定の欄）つきの質問 2 件だけ（#156）
 //   npm run ai:eval -- --preset-only         定型の質問のチップ 7 件だけ（#140。6 つ + 足 0 本の板の前提。画面と同じ文 = ui/view/aiPresets.ts を kind preset で）
@@ -27,7 +27,9 @@
 // AI_EVAL_RELAY_LOG に中継のログ（標準出力の JSON 行）を指定すると ai_request の cost_usd_est・トークン量・dropped_blocks・
 // 読んだスキル（skills）・turn の数
 // も集める（ログに会話の本文・鍵は出ない = relay.py）。
-// 返答の全文は fixtures/local/ai_eval/<時刻>/ にだけ書く（コミットしない）。標準出力は要約（架空の値）。
+// 返答の全文は fixtures/local/ai_eval/<時刻>/ にだけ書く（コミットしない）。標準出力は要約（架空の値）と、同じモードの
+// 前回の実行（fixtures/local/ai_eval/<時刻>/summary.json）との差（正答・数値の一致 / 不一致の件数・問ごとの pass ↔ FAIL。
+// #240。選び方は scripts/aiEvalDiff.ts）。
 
 import { mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
@@ -51,6 +53,7 @@ const followups = !args.includes('--no-followups');
 const relayLog = process.env.AI_EVAL_RELAY_LOG || null;
 // fixtures/local/ 直下の *.json は板の dump として検査される（tests/data/local.test.ts）ので ai_eval/ の下に置く
 const ledgerPath = join(root, 'fixtures', 'local', 'ai_eval', 'ledger.json');
+// 問の組（id つき。前回の実行との差の鍵）は scripts/aiEvalQuestions.ts・scripts/aiEvalDocs.ts（#240）。以下の説明は判定の規則
 const FOLLOWUPS = [
   { case: 'put_sell', text: '日経が 3 日で −6%、IV が 5pt 上がったら損益はどうなりますか？' },
   { case: 'iron_condor', text: '10 日後に原資産が +4% のときの損益と Δ を教えてください。' },
@@ -58,23 +61,6 @@ const FOLLOWUPS = [
 
 // テクニカルの質問（#200）: 合成の先物の足（scripts/synthFutBars.ts。架空の値）で technicals を呼ぶか・照合の不一致 0・
 // 方向の見立てを書くなら「トレンドでは続くことがある」の但し書きを添えているか（言い回しの簡単な検査 + 全文を目で読む）
-const TECH_QUESTIONS = [
-  {
-    case: 'put_sell',
-    text: '日足と4時間足のRSI・MACD・ストキャスティクスを見て、このポジの崩れ方は？',
-  },
-  {
-    case: 'iron_condor',
-    text: '週足のRSI・MACD・ストキャスティクスはどんな状態？過去に似た状態の後はどう動いた？',
-  },
-  { case: 'calendar', text: '4時間足のストキャスティクスとRSIは今どこにいる？' },
-  // #206: EMA の 3 本（並び順・距離）。返答が EMA に触れること（mentions）も pass の条件
-  {
-    case: 'put_sell',
-    text: '日足と週足のトレンドは？移動平均の並びと価格の位置で教えて。',
-    mentions: /EMA/,
-  },
-];
 /** 方向の断定（予想の言い回し）。「〜でしょう」「〜見込み」「〜はず」などを上げ / 下げの動詞と組で見る */
 export const DIRECTION_RE =
   /(上が|下が|上昇|下落|反発|反落|戻|崩れ|続伸|続落)[^。\n]{0,8}(でしょう|だろう|見込[みま]|はずです|はずだ|と予想|と予測|可能性が高い)/;
@@ -83,23 +69,6 @@ export const CAVEAT_RE =
   /(続けることが|続くことが|続きうる|続く場合|上がり続け|下がり続け|上げ続け|下げ続け|過熱のまま|過熱したまま)/;
 // IV の統計の質問（#138・#158）: 合成の日次の値（dev の /fixtures/atm_daily と同じ。架空の値）で iv_stats を呼ぶか・
 // 照合の不一致 0・IV の上げ下げを断定しないか（DIRECTION_RE）・聞いたことに触れるか（mentions）
-const IV_QUESTIONS = [
-  {
-    case: 'strangle_sell',
-    text: '今の IV は過去のどの辺？前に IV が跳ねたときは、どれくらいで萎んだ？',
-    mentions: /分位|%/,
-  },
-  {
-    case: 'put_sell',
-    text: '2 日で 5% くらい下げたとき、IV は過去どれくらい跳ねてきた？β の実測も教えて。',
-    mentions: /β/,
-  },
-  {
-    case: 'iron_condor',
-    text: '今の IV は実際の値動き（HV）に比べて高い？ボラ売りのタイミングとしてはどう？',
-    mentions: /HV/,
-  },
-];
 const techOnly = args.includes('--tech-only');
 const ivOnly = args.includes('--iv-only');
 const proposeOnly = args.includes('--propose-only');
@@ -121,96 +90,18 @@ const anyOnly =
 // 自分の前提つきの質問（#156）: 文脈の profile に架空の前提を入れて送る。判定: 前提の方針が答えに出る（mentions）・
 // 照合の不一致 0（前提の数は照合の出所 = 画面と同じ numberSources）・前提の数をツールの入力にしない（misuse = ツールの
 // 入力の値に前提の金額（円）が出たら失敗。計算の入力は設定の資金・ツールの結果から）
-const PROFILE_QUESTIONS = [
-  {
-    case: 'put_sell',
-    profile:
-      '1 回の損失は 1,500 千円まで。期近の深い OTM の put の売りが基本。ネイキッドのコールの売りは避ける。',
-    text: '私の前提に照らして、このポジションの弱点と、前提から外れているところを教えて。',
-    mentions: /許容|前提|1,500 千円/,
-    misuse: [1_500_000, -1_500_000],
-  },
-  {
-    case: 'strangle_sell',
-    profile:
-      'ネイキッドのコールの売りは避ける。上値の損失は限定したい。判断は SQ までの日数を重く見る。',
-    text: 'このポジションの調整の方向を、言葉だけで 3 つ挙げて。',
-    mentions: /コール/,
-    misuse: [],
-  },
-];
 
 // ポジションの提案の質問（#139）: 候補のツール → propose_position が呼ばれる・提案が板の検査を通る（error でない）・
 // カードの表示モデルができる・押した時点の反映の純関数で足が作れる・照合の不一致 0。floor があれば後の最大損失 ≥ floor
-const PROPOSE_QUESTIONS = [
-  {
-    case: 'strangle_sell',
-    text: '今の IV と資金規模から見て、ボラ売りのポジションの候補を出して。新しいタブで比べられるようにして。',
-    want: 'structure_candidates',
-    target: 'new_tab',
-  },
-  {
-    case: 'put_ratio',
-    text: '最大損失を −1,000 千円に抑えるヘッジの足を足して。',
-    want: 'strike_scan',
-    target: 'current',
-    floor: -1_000_000,
-  },
-  {
-    case: 'iron_condor',
-    text: 'このアイアンコンドルの調整案を出して。足の削除・枚数・行使価格の変更でもいい。',
-    want: null,
-    target: 'current',
-  },
-];
 
-// 文書の質問（#137）: 中継の read_doc でマニュアル・設計書の節を読み、節を示して答えるか（計算の前提 3・操作の案内 3）、
-// 文書に無いことを無いと言うか（1）。expect は読んでほしい節（どれか 1 つ。中継のログがあるときだけ判定）。
-// 判定: 節を示す（「マニュアル 8.5」「設計書 5.4」の形）・Issue 番号（#123）と決定の記号（K7 など）を書かない・
-// absent は「書かれていない」の言い回し。文書の値は照合できない数字になるので不一致は数えるが失敗にしない
-const DOC_QUESTIONS = [
-  {
-    kind: 'premise',
-    text: 'β と IV の平行移動 Δσ はどう組み合わさって効くの？急落のプリセットで ATM の IV はどうなる？',
-    expect: ['design:5.4', 'user-guide:6', 'user-guide:6.2', 'user-guide:6.4', 'user-guide:16.1'],
-  },
-  {
-    kind: 'premise',
-    text: 'IV 推移の「30 日固定」の ATM IV って何？どうやって求めているの？',
-    expect: ['user-guide:10', 'user-guide:10.4', 'user-guide:10.5'],
-  },
-  {
-    kind: 'premise',
-    text: '必要証拠金（概算）はどうやって計算しているの？実際の証拠金と違うことはある？',
-    expect: ['user-guide:8', 'user-guide:8.4', 'user-guide:13.2.1', 'design:5.10'],
-  },
-  {
-    kind: 'howto',
-    text: '追証マップの点は何を表している？',
-    expect: ['user-guide:8', 'user-guide:8.5', 'design:5.11'],
-  },
-  {
-    kind: 'howto',
-    text: '先物推移の指標の段の高さを元に戻すには？',
-    expect: ['user-guide:10', 'user-guide:10.9', 'user-guide:14.4'],
-  },
-  {
-    kind: 'howto',
-    text: '今のポジションを別の端末で開くにはどうすればいい？',
-    expect: ['user-guide:11', 'user-guide:11.2', 'user-guide:11.3'],
-  },
-  { kind: 'absent', text: '損益グラフを PNG 画像で保存するボタンはどこ？', expect: null },
-];
+// 文書の質問（#137・#240）: 問は scripts/aiEvalDocs.ts（計算の前提 10・操作の案内 3・文書に無いこと 1）。中継の read_doc で
+// マニュアル・設計書の節を読み、節を示して答えるか、文書に無いことを無いと言うか。expect は読んでほしい節（どれか 1 つ。
+// 中継のログがあるときだけ判定）。判定: 節を示す（「マニュアル 8.5」「設計書 5.4」の形）・Issue 番号（#123）と決定の
+// 記号（K7 など）を書かない・absent は「書かれていない」の言い回し。文書の値は照合できない数字になるので不一致は数えるが
+// 失敗にしない。内容が節と矛盾しないかは返答の全文ファイルに想定の節と答えの要点（points）を並べて人が見比べる
 // [AI に聞く]（#136）: 画面と同じ表示モデル（metricsPanel・bigReadout・ivReadout）から質問の文を作り、kind ask と場所の
 // topic で送る。判定: 節を示す・経緯を書かない・想定の節（ASK_DOCS のどれか）を read_doc で読む（ログがあるとき）・ログの
 // kind と topic・照合の不一致 0（照合の出所は画面と同じ numberSources = 質問に入れた表示の値と β の 1% あたりを含む）
-const ASK_QUESTIONS = [
-  { case: 'put_sell', where: 'tile', key: 'maxLoss' },
-  { case: 'iron_condor', where: 'tile', key: 'greeks' },
-  { case: 'strangle_sell', where: 'readout', key: 'delta' },
-  { case: 'put_sell', where: 'tail' },
-  { case: 'put_sell', where: 'iv' },
-];
 /** IV 推移の問の架空の足（%。1 時間足 3 本）と今・シナリオの水準 */
 const ASK_IV_BARS = [
   { t: 1_760_000_000, o: 19.8, h: 20.6, l: 19.5, c: 20.4 },
@@ -272,6 +163,11 @@ const readoutMod = await load('ui/view/readout.ts');
 const stageMod = await load('ui/view/stage.ts');
 const ivMod = await load('ui/view/ivHistory.ts');
 const evalCaseMod = await load('ui/view/aiEvalCase.ts');
+const { DOC_QUESTIONS } = await load('scripts/aiEvalDocs.ts');
+const diffMod = await load('scripts/aiEvalDiff.ts');
+const retryMod = await load('scripts/aiEvalRetry.ts');
+const { TECH_QUESTIONS, IV_QUESTIONS, PROFILE_QUESTIONS, PROPOSE_QUESTIONS, ASK_QUESTIONS } =
+  await load('scripts/aiEvalQuestions.ts');
 
 const latest = JSON.parse(readFileSync(join(root, 'fixtures', 'synthetic', 'latest.json'), 'utf8'));
 const want = opt('--cases');
@@ -299,8 +195,17 @@ const outDir = join(root, 'fixtures', 'local', 'ai_eval', stamp);
 mkdirSync(outDir, { recursive: true });
 
 /** 中継へ送る fetch（同じオリジンの見出し。Node の fetch はブラウザの Sec-Fetch-Site を付けない） */
-const relayFetch = (url, init = {}) =>
-  fetch(`${base}${url}`, { ...init, headers: { ...(init.headers ?? {}), Origin: base } });
+/** 直前の応答の Retry-After（中継の 429 の送り直しの待ち。#240） */
+let lastRetryAfter = null;
+const relayFetch = async (url, init = {}) => {
+  const res = await fetch(`${base}${url}`, {
+    ...init,
+    headers: { ...(init.headers ?? {}), Origin: base },
+  });
+  lastRetryAfter = res.headers.get('retry-after');
+  return res;
+};
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const status = await stream.getAiStatus(relayFetch, '/api/ai/status').catch((e) => {
   console.error(
@@ -321,7 +226,15 @@ let lastRemaining = status.remaining_usd;
 
 /** 1 回の発言（ツールの往復を含む）。画面の useAiChat と同じ順（begin → 文脈 → send → 要求 → ツール → 要求…） */
 async function turn(chat, env, kind, text, topic) {
-  const run = { requests: 0, firstTextMs: null, totalMs: 0, stop: null, error: null, costUsd: 0 };
+  const run = {
+    requests: 0,
+    retries: 0,
+    firstTextMs: null,
+    totalMs: 0,
+    stop: null,
+    error: null,
+    costUsd: 0,
+  };
   const t0 = performance.now();
   let s = chatMod.aiChatReduce(chat, {
     type: 'begin',
@@ -342,27 +255,43 @@ async function turn(chat, env, kind, text, topic) {
     if (!body) break;
     run.requests++;
     let after = null;
-    try {
-      await stream.postAiMessages(
-        body,
-        (ev) => {
-          if (ev.type === 'text' && run.firstTextMs === null)
-            run.firstTextMs = performance.now() - t0;
-          if (ev.type === 'done') {
-            after = ev.remaining_usd;
-            run.stop = ev.stop_reason;
-          }
-          if (ev.type === 'error' || ev.type === 'incomplete')
-            run.error = ev.type === 'error' ? ev.code : 'incomplete';
-          s = chatMod.aiChatReduce(s, { type: 'event', event: ev });
-        },
-        undefined,
-        relayFetch,
-        '/api/ai/messages',
-      );
-    } catch (e) {
-      run.error = e?.code ?? 'network';
-      s = chatMod.aiChatReduce(s, { type: 'fail', code: run.error });
+    // 中継の 1 分の上限（429 rate_limited）は SSE の前に断られる = 事象は届いていないので、待って同じ要求を送り直す
+    for (let attempt = 0; ; attempt++) {
+      try {
+        await stream.postAiMessages(
+          body,
+          (ev) => {
+            if (ev.type === 'text' && run.firstTextMs === null)
+              run.firstTextMs = performance.now() - t0;
+            if (ev.type === 'done') {
+              after = ev.remaining_usd;
+              run.stop = ev.stop_reason;
+            }
+            if (ev.type === 'error' || ev.type === 'incomplete')
+              run.error = ev.type === 'error' ? ev.code : 'incomplete';
+            s = chatMod.aiChatReduce(s, { type: 'event', event: ev });
+          },
+          undefined,
+          relayFetch,
+          '/api/ai/messages',
+        );
+        break;
+      } catch (e) {
+        const wait = retryMod.rateLimitWaitMs(e?.code, attempt, lastRetryAfter);
+        if (wait !== null) {
+          run.retries++;
+          console.log(
+            `  中継の 1 分の上限（rate_limited）: ${wait / 1000} 秒待って送り直す（${attempt + 1}/${retryMod.RATE_RETRY_MAX}）`,
+          );
+          await sleep(wait);
+          continue;
+        }
+        run.error = e?.code ?? 'network';
+        if (run.error === 'rate_limited')
+          console.log(`  rate_limited: ${run.retries} 回送り直しても上限 → この問は FAIL`);
+        s = chatMod.aiChatReduce(s, { type: 'fail', code: run.error });
+        break;
+      }
     }
     // 費用: 数える資格情報は直前の残りと done の残り（精算の後）の差 = 実額。途中で切れたら予約額（上界）で数える。
     // 数えないなら 0
@@ -417,6 +346,7 @@ for (let rep = 0; rep < (anyOnly ? 0 : repeat); rep++) {
     rows.push({
       case: c.name,
       kind: 'diagnose',
+      id: `diagnose:${c.name}${rep ? `#${rep}` : ''}`,
       rep,
       pass,
       weaknesses: weak.length,
@@ -448,6 +378,7 @@ for (let rep = 0; rep < (anyOnly ? 0 : repeat); rep++) {
       rows.push({
         case: c.name,
         kind: 'followup',
+        id: `followup:${c.name}`,
         rep,
         pass: ok2,
         tools,
@@ -506,6 +437,7 @@ for (const q of anyOnly && !techOnly ? [] : TECH_QUESTIONS) {
   rows.push({
     case: q.case,
     kind: 'technicals',
+    id: `technicals:${q.id}`,
     rep: 0,
     pass: ok,
     tools,
@@ -549,6 +481,7 @@ for (const q of anyOnly && !ivOnly ? [] : IV_QUESTIONS) {
   rows.push({
     case: q.case,
     kind: 'iv_stats',
+    id: `iv_stats:${q.id}`,
     rep: 0,
     pass: ok,
     tools,
@@ -615,6 +548,7 @@ for (const q of anyOnly && !proposeOnly ? [] : PROPOSE_QUESTIONS) {
   rows.push({
     case: q.case,
     kind: 'propose',
+    id: `propose:${q.id}`,
     rep: 0,
     pass: ok,
     tools,
@@ -658,6 +592,7 @@ for (const [qi, q] of (anyOnly && !docsOnly ? [] : DOC_QUESTIONS).entries()) {
   rows.push({
     case: c.name,
     kind: 'docs',
+    id: `docs:${q.id}`,
     rep: 0,
     pass: ok,
     question: q.kind,
@@ -670,9 +605,13 @@ for (const [qi, q] of (anyOnly && !docsOnly ? [] : DOC_QUESTIONS).entries()) {
     chars: t.length,
     ...r.run,
   });
-  writeFileSync(join(outDir, `docs-${qi + 1}-${q.kind}.md`), `# 文書: ${q.text}\n\n${t}\n`);
+  // 人の照合用（EPIC #141 の終了条件 7）: 想定の節と答えの要点を返答と並べる
+  writeFileSync(
+    join(outDir, `docs-${qi + 1}-${q.id}.md`),
+    `# 文書: ${q.text}\n\n種類: ${q.kind}・想定の節: ${q.expect?.join(', ') ?? '—（文書に無い）'}\n\n答えの要点: ${q.points}\n\n## 返答\n\n${t}\n`,
+  );
   console.log(
-    `${ok ? 'pass' : 'FAIL'}  文書 ${qi + 1}（${q.kind}）: 読んだ節 ${read === null ? '—（中継のログなし）' : read.join(',') || 'なし'}${hit === null ? '' : `・想定の節 ${hit ? 'あり' : 'なし'}`}・節の明示 ${cited ? 'あり' : 'なし'}${q.kind === 'absent' ? `・無いと言う ${absent ? 'あり' : 'なし'}` : ''}・経緯 ${history ?? 'なし'}・照合できない数字 ${un.length}・往復 ${r.run.requests}・${r.run.stop ?? r.run.error}・完了 ${(r.run.totalMs / 1000).toFixed(1)} 秒`,
+    `${ok ? 'pass' : 'FAIL'}  文書 ${qi + 1}（${q.kind}・${q.id}）: 読んだ節 ${read === null ? '—（中継のログなし）' : read.join(',') || 'なし'}${hit === null ? '' : `・想定の節 ${hit ? 'あり' : 'なし'}`}・節の明示 ${cited ? 'あり' : 'なし'}${q.kind === 'absent' ? `・無いと言う ${absent ? 'あり' : 'なし'}` : ''}・経緯 ${history ?? 'なし'}・照合できない数字 ${un.length}・往復 ${r.run.requests}・${r.run.stop ?? r.run.error}・完了 ${(r.run.totalMs / 1000).toFixed(1)} 秒`,
   );
 }
 
@@ -710,7 +649,15 @@ for (const [qi, q] of (anyOnly && !askOnly ? [] : ASK_QUESTIONS).entries()) {
   }
   if (!ask) {
     console.log(`FAIL  [AI に聞く] ${qi + 1}（${q.where}）: 質問を作れない`);
-    rows.push({ case: q.case, kind: 'ask', rep: 0, pass: false, unmatched: [], costUsd: 0 });
+    rows.push({
+      case: q.case,
+      kind: 'ask',
+      id: `ask:${q.id}`,
+      rep: 0,
+      pass: false,
+      unmatched: [],
+      costUsd: 0,
+    });
     continue;
   }
   const before = relayRecords()?.length ?? null;
@@ -731,6 +678,7 @@ for (const [qi, q] of (anyOnly && !askOnly ? [] : ASK_QUESTIONS).entries()) {
   rows.push({
     case: q.case,
     kind: 'ask',
+    id: `ask:${q.id}`,
     rep: 0,
     pass: ok,
     topic: ask.topic,
@@ -771,6 +719,7 @@ for (const [qi, q] of (anyOnly && !profileOnly ? [] : PROFILE_QUESTIONS).entries
   rows.push({
     case: q.case,
     kind: 'profile',
+    id: `profile:${q.id}`,
     rep: 0,
     pass: ok,
     mentioned,
@@ -844,6 +793,7 @@ for (const q of anyOnly && !presetOnly ? [] : PRESET_QUESTIONS) {
   rows.push({
     case: q.noLegs ? `${q.case}(足なし)` : q.case,
     kind: 'preset',
+    id: `preset:${q.id}${q.noLegs ? '-nolegs' : ''}`,
     rep: 0,
     pass: ok,
     topic: preset.id,
@@ -919,6 +869,7 @@ for (const f of savedFiles) {
     rows.push({
       case: name,
       kind: 'saved',
+      id: `saved:${name}`,
       rep: 0,
       pass: false,
       error: 'invalid',
@@ -963,6 +914,7 @@ for (const f of savedFiles) {
   rows.push({
     case: name,
     kind: 'saved',
+    id: `saved:${name}`,
     rep: 0,
     pass: ok,
     note,
@@ -1042,7 +994,28 @@ const askRows = rows.filter((r) => r.kind === 'ask');
 const presetRows = rows.filter((r) => r.kind === 'preset');
 const profileRows = rows.filter((r) => r.kind === 'profile');
 const savedRows = rows.filter((r) => r.kind === 'saved');
+const mode = diffMod.evalMode(args);
+// 前回の実行（同じモード・偽の送信先かどうかが同じ。#240）
+const aiEvalDir = dirname(outDir);
+const previous = diffMod.pickPrevious(
+  readdirSync(aiEvalDir, { withFileTypes: true })
+    .filter((d) => d.isDirectory() && d.name !== 'cases' && d.name !== stamp)
+    .map((d) => {
+      try {
+        return {
+          dir: d.name,
+          file: JSON.parse(readFileSync(join(aiEvalDir, d.name, 'summary.json'), 'utf8')),
+        };
+      } catch {
+        return { dir: d.name, file: null };
+      }
+    }),
+  { dir: stamp, mode, fake: status.credential === 'fake' },
+);
+const counts = diffMod.runCounts(rows);
 const summary = {
+  mode,
+  previous: previous?.dir ?? null,
   model: status.model,
   credential: status.credential,
   counted: status.counted,
@@ -1060,12 +1033,19 @@ const summary = {
   unmatched_total: rows
     .filter((r) => r.kind !== 'docs')
     .reduce((n, r) => n + r.unmatched.length, 0),
+  matched_total: counts.matched,
   cost_usd: Number(rows.reduce((n, r) => n + r.costUsd, 0).toFixed(4)),
   ledger_total_usd: Number(ledger.total_usd.toFixed(4)),
   relay,
 };
 writeFileSync(join(outDir, 'summary.json'), `${JSON.stringify({ summary, rows }, null, 1)}\n`);
 console.log(JSON.stringify(summary, null, 1));
+for (const line of diffMod.formatDiff(
+  mode,
+  previous?.dir ?? null,
+  previous ? diffMod.diffRuns(previous.file.rows, rows) : null,
+))
+  console.log(line);
 console.log(`返答の全文: fixtures/local/ai_eval/${stamp}/（コミットしない）`);
 const ok =
   summary.diagnose.pass === summary.diagnose.total &&
