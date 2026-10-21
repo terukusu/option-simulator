@@ -1,4 +1,4 @@
-import { useMemo } from 'preact/hooks';
+import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import type { ChainMonth } from '../../../data';
 import type { AtmBasis } from '../../../model';
 import { type Domain, fitTicks, linear, niceTicks } from '../../chart/scale';
@@ -11,8 +11,12 @@ import {
   axisTickLabel,
   axisValue,
   SCRUB_KEY_STEPS,
+  SMILE_MARGIN,
   type SmileAxis,
+  type SmileCursor,
   scrubStrike,
+  smileCrosshair,
+  smileCursorAt,
   smileMarkX,
   smileModel,
   stepStrike,
@@ -21,7 +25,7 @@ import {
 import { SMILE_LINE_CLASS, SMILE_PLOT_LABEL } from '../../view/smilePanel';
 import { useSize } from '../useSize';
 
-const M = { left: 38, right: 22, top: 14, bottom: 24 };
+const M = SMILE_MARGIN;
 /** 横軸の刻みの下限（旧 Smile と同じ。#55） */
 const X_TICK_MIN_STEP: Record<SmileAxis, number> = { k: 1, moneyness: 0.001, delta: 0.01 };
 /** 選択の K のラベルを描画域の端から離す幅（px） */
@@ -41,6 +45,8 @@ export interface SmilePlotProps {
 /**
  * 限月 1 つのスマイルの描画域（#85。旧 Smile の描画と useChartGestures の設定を写した）。高さは残りの高さ（useSize）。
  * 縦線: ATM = .atm（--handle の破線）、シナリオ ATM = .atm2（--pin2 の点線）、選択 = .sel（--ink）+ 上端の K のラベル。
+ * 十字線（#217。docs/ui-redesign.md §4.1 の共通の規則）: PC のホバー・タッチの長押し（今の選択のスクラブと同時。離しても残る）で
+ * 出し、タッチのタップ（選択は今のまま）で消す。カーソルは値の座標のローカル state（smileCrosshair）。横軸を替えたら消す。
  */
 function SmilePlotView(p: SmilePlotProps) {
   const { month, active, basis, axis, viewport, pick, scenarioAtmK, dispatch } = p;
@@ -73,6 +79,20 @@ function SmilePlotView(p: SmilePlotProps) {
     pickX !== null && Number.isFinite(pickX) && pickX >= model.domain[0] && pickX <= model.domain[1]
       ? sx(pickX)
       : null;
+  /** 十字線のカーソル（値の座標。#217）と指 / マウスの位置（長押しの scrub は x だけを返すので控える） */
+  const [cursor, setCursor] = useState<SmileCursor | null>(null);
+  const ptr = useRef<{ y: number; touch: boolean }>({ y: 0, touch: false });
+  const hoverFrame = useRef(0);
+  const hoverAt = useRef<{ x: number; y: number } | null>(null);
+  useEffect(() => () => cancelAnimationFrame(hoverFrame.current), []);
+  useEffect(() => {
+    if (!active) setCursor(null);
+  }, [active]);
+  // 横軸の値の座標が変わるので消す（軸の切替は親の props）
+  useEffect(() => {
+    if (axis) setCursor(null);
+  }, [axis]);
+  const xh = useMemo(() => smileCrosshair(model, cursor, w, h), [model, cursor, w, h]);
   const select = (k: number | null) => {
     if (k !== null && k !== pick) dispatch({ type: 'pickSmile', pick: { monthId: month.id, k } });
   };
@@ -85,11 +105,16 @@ function SmilePlotView(p: SmilePlotProps) {
     disabled: model.empty || !active,
     onViewport: (v) => dispatch({ type: 'setViewport', viewport: v }),
     onTap: (x) => {
+      // タッチのタップは十字線を消す（マウスのクリックはホバーの十字線のまま）
+      if (ptr.current.touch) setCursor(null);
       const k = tapStrike(model, x, range, pick);
       dispatch({ type: 'pickSmile', pick: k === null ? null : { monthId: month.id, k } });
     },
     scrub: { linePx: null },
-    onScrub: (x) => select(scrubStrike(model, x, range)),
+    onScrub: (x) => {
+      select(scrubStrike(model, x, range));
+      setCursor(smileCursorAt(model, x, ptr.current.y, w, h, ptr.current.touch, true));
+    },
     onScrubKey: (key) => {
       const steps = SCRUB_KEY_STEPS[key];
       if (steps === undefined) return false;
@@ -145,6 +170,30 @@ function SmilePlotView(p: SmilePlotProps) {
         tabIndex={model.empty || !active ? -1 : 0}
         role="application"
         aria-label={SMILE_PLOT_LABEL}
+        onPointerDown={(e) => {
+          ptr.current = {
+            y: e.clientY - e.currentTarget.getBoundingClientRect().top,
+            touch: e.pointerType !== 'mouse',
+          };
+        }}
+        onPointerMove={(e) => {
+          const r = e.currentTarget.getBoundingClientRect();
+          ptr.current = { y: e.clientY - r.top, touch: e.pointerType !== 'mouse' };
+          // ホバー（マウス・ボタンを押していない間だけ。1 フレーム 1 回）
+          if (e.pointerType !== 'mouse' || e.buttons !== 0 || model.empty) return;
+          hoverAt.current = { x: e.clientX - r.left, y: e.clientY - r.top };
+          if (hoverFrame.current) return;
+          hoverFrame.current = requestAnimationFrame(() => {
+            hoverFrame.current = 0;
+            const at = hoverAt.current;
+            if (at) setCursor(smileCursorAt(model, at.x, at.y, w, h, false, false));
+          });
+        }}
+        onPointerLeave={(e) => {
+          if (e.pointerType !== 'mouse') return;
+          hoverAt.current = null;
+          setCursor((c) => (c && !c.touch ? null : c));
+        }}
       >
         {model.empty ? (
           <p class="smile-empty">スマイルなし（F が決まらないか、使える気配が無い）</p>
@@ -189,6 +238,28 @@ function SmilePlotView(p: SmilePlotProps) {
               <text class="sellbl" x={labelX} y={M.top - 3}>
                 {fmtNum(pick, 0)}
               </text>
+            )}
+            {xh && (
+              <g class="xc">
+                <line class="xc-line v" x1={xh.px} x2={xh.px} y1={M.top} y2={h - M.bottom} />
+                <line class="xc-line h" x1={M.left} x2={w - M.right} y1={xh.py} y2={xh.py} />
+                {xh.dotPy !== null && <circle class="xc-dot" cx={xh.px} cy={xh.dotPy} r={3} />}
+                {[xh.xTag, xh.yTag].map((t, i) => (
+                  <g key={i === 0 ? 'x' : 'y'} class={i === 0 ? 'xc-tag x' : 'xc-tag y'}>
+                    <rect x={t.x} y={t.y} width={t.w} height={t.h} />
+                    <text x={t.x + t.w / 2} y={t.y + t.h / 2}>
+                      {t.text}
+                    </text>
+                  </g>
+                ))}
+                <text
+                  class={xh.read.anchor === 'end' ? 'xc-val end' : 'xc-val'}
+                  x={xh.read.x}
+                  y={xh.read.y}
+                >
+                  {xh.read.text}
+                </text>
+              </g>
             )}
           </svg>
         )}

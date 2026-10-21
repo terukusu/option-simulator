@@ -21,7 +21,10 @@ import {
   parseCssColor,
   SURFACE_Y_UNIT,
   type SurfaceColors,
+  type SurfaceCursor,
   type SurfaceGrid,
+  surfaceCrosshair,
+  surfaceCursorAt,
   surfaceDayTicks,
   surfaceDragPatch,
   surfaceImage,
@@ -53,7 +56,7 @@ const KIND_CLASS = { expiry: 'expiry', date: 'date', today: 'today' } as const;
 const LINE_LABEL =
   '損益グラフ（マウスを載せる・タップで十字線（タップで置いた十字線は交点をドラッグで動かし、読み取りの × のタップで消す）、ドラッグでパン、ホイール・ピンチで拡大、ダブルクリックでリセット、ハンドルをつかむか長押しして左右にドラッグでシナリオ点 ΔX、足のマーカーで足を選ぶ・長押しして横にドラッグで行使価格。キー: ← / → ΔX ∓100 円（Shift で 1,000 円）、↑ / ↓ Δσ ±0.5pt、[ / ] 経過日数 ∓1 日、0 シナリオを 0 に、+ / − 拡大縮小、R リセット）';
 const SURFACE_LABEL =
-  '損益の面（横 原資産・縦 経過日数・色 損益。描画域を押してドラッグでシナリオ点の ΔX と経過日数 d を同時に動かす、2 本指・横ホイールでパン、ホイール・ピンチで拡大、ダブルクリック / ダブルタップでリセット、足のマーカーで足を選ぶ・長押しして横にドラッグで行使価格。キー: ← / → ΔX ∓100 円（Shift で 1,000 円）、↑ / ↓ Δσ ±0.5pt、[ / ] 経過日数 ∓1 日、0 シナリオを 0 に、+ / − 拡大縮小、R リセット）';
+  '損益の面（横 原資産・縦 経過日数・色 損益。マウスを載せると十字線（X・経過日数・損益）、描画域を押してドラッグでシナリオ点の ΔX と経過日数 d を同時に動かす、2 本指・横ホイールでパン、ホイール・ピンチで拡大、ダブルクリック / ダブルタップでリセット、足のマーカーで足を選ぶ・長押しして横にドラッグで行使価格。キー: ← / → ΔX ∓100 円（Shift で 1,000 円）、↑ / ↓ Δσ ±0.5pt、[ / ] 経過日数 ∓1 日、0 シナリオを 0 に、+ / − 拡大縮小、R リセット）';
 
 /** 面の両極の色（テーマの --gain / --loss を読む。読めなければ null = 面を描かない） */
 function readSurfaceColors(): SurfaceColors | null {
@@ -72,6 +75,7 @@ function readSurfaceColors(): SurfaceColors | null {
  * 十字線（#201。線モードだけ）: カーソルは値の座標のローカル state（pnlCrosshair）。マウスのホバーで置き外れて消す、
  * タッチ・ペンのタップで置く（pinned。交点の ±14px をドラッグで動かす = gesture の cross、読み取りの ×・描画域の外の
  * タップ・ダブルタップ（リセット）で消す）。面・ミニ・空では消す。
+ * 面の十字線（#217）: マウスのホバーだけ（X 10 円・d 1 日の格子・損益 = surfaceCrosshair）。点をつかんでいる間・線へ切り替えたら消す。
  */
 export function PnlPlot(p: {
   chartRef: RefObject<HTMLDivElement>;
@@ -119,6 +123,11 @@ export function PnlPlot(p: {
   useEffect(() => {
     if (!crossOn) setCursor(null);
   }, [crossOn]);
+  /** 面の十字線（#217。PC のホバーだけ = タッチは押すとすぐ点をつかむ）。値の座標 */
+  const [surfCursor, setSurfCursor] = useState<SurfaceCursor | null>(null);
+  useEffect(() => {
+    if (!surfaceOn) setSurfCursor(null);
+  }, [surfaceOn]);
   // つかんでいる間に面モードでなくなった（線へ・ミニ・足が無くなった）ら .live と押す前の値を捨てる
   useEffect(() => {
     if (surfaceOn) return;
@@ -227,6 +236,39 @@ export function PnlPlot(p: {
       p.height,
       p.width,
       frame.offsetX,
+    ],
+  );
+  // 面の十字線（#217）: 点をつかんでいる間（.live）は出さない。読み取りは点のラベル・IV レールの吹き出しを避ける
+  const surfCross = useMemo(
+    () =>
+      surfaceOn && !live && surfCursor
+        ? surfaceCrosshair({
+            base,
+            scenario,
+            chart: model,
+            cursor: surfCursor,
+            unit: amountUnit,
+            width: p.width,
+            height: p.height,
+            obstacles: [
+              ivRailObstacle(dSigma, p.height, p.width + frame.offsetX),
+              ...(point ? [point.box] : []),
+            ],
+          })
+        : null,
+    [
+      surfaceOn,
+      live,
+      surfCursor,
+      base,
+      scenario,
+      model,
+      amountUnit,
+      p.width,
+      p.height,
+      dSigma,
+      frame.offsetX,
+      point,
     ],
   );
   // 足が無い（評価できる足が無い）ときの格子（#111。ミニは今のまま描かない）
@@ -391,8 +433,9 @@ export function PnlPlot(p: {
         pointerType.current = e.pointerType;
       }}
       onPointerMove={(e) => {
-        // 十字線のホバー（マウス・ボタンを押していない間だけ。押している間は値の座標のまま = パンで付いて動く）
-        if (!crossOn || e.pointerType !== 'mouse' || e.buttons !== 0) return;
+        // 十字線のホバー（マウス・ボタンを押していない間だけ。押している間は値の座標のまま = パンで付いて動く）。
+        // 面モード（#217）も同じ（押している間は点をつかむので面の十字線は出さない）
+        if (!(crossOn || surfaceOn) || e.pointerType !== 'mouse' || e.buttons !== 0) return;
         const r = e.currentTarget.getBoundingClientRect();
         hoverAt.current = { x: e.clientX - r.left + ox, y: e.clientY - r.top + frame.offsetY };
         if (hoverFrame.current) return;
@@ -401,6 +444,10 @@ export function PnlPlot(p: {
           const h = hoverAt.current;
           if (!h) return;
           // 位置 → 値は予約した描画の model で読む（1 フレーム以内の差）
+          if (surfaceOn) {
+            setSurfCursor(surfaceCursorAt(model, maxDays, h.x, h.y));
+            return;
+          }
           const at = pnlCursorAt(model, h.x, h.y, false);
           setCursor(at ? { ...at, pinned: false } : null);
         });
@@ -410,6 +457,7 @@ export function PnlPlot(p: {
         // 未反映のホバーを捨ててから消す
         hoverAt.current = null;
         setCursor((c) => (c && !c.pinned ? null : c));
+        setSurfCursor(null);
       }}
     >
       {surfaceOn && (
@@ -647,6 +695,39 @@ export function PnlPlot(p: {
             <text class="legdrag" x={dragMarker.px} y={bottom - MARKER_BAND_PX - 4}>
               K {fmtNum(dragMarker.k, 0)}
             </text>
+          )}
+          {surfCross && (
+            <g class="xc">
+              <line
+                class="xc-line v"
+                x1={surfCross.px}
+                x2={surfCross.px}
+                y1={plot.top}
+                y2={bottom}
+              />
+              <line
+                class="xc-line h"
+                x1={plot.left}
+                x2={right}
+                y1={surfCross.py}
+                y2={surfCross.py}
+              />
+              {[surfCross.xTag, surfCross.yTag].map((t, i) => (
+                <g key={i === 0 ? 'x' : 'y'} class={i === 0 ? 'xc-tag x' : 'xc-tag y'}>
+                  <rect x={t.x} y={t.y} width={t.w} height={t.h} />
+                  <text x={t.x + t.w / 2} y={t.y + t.h / 2}>
+                    {t.text}
+                  </text>
+                </g>
+              ))}
+              <text
+                class={surfCross.read.anchor === 'end' ? 'xc-val end' : 'xc-val'}
+                x={surfCross.read.x}
+                y={surfCross.read.y}
+              >
+                {surfCross.read.text}
+              </text>
+            </g>
           )}
           {cross && (
             <g class="xh">

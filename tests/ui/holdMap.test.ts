@@ -29,6 +29,8 @@ import {
   HOLD_MAP_TITLE,
   type HoldMapResult,
   holdMapBaseScenario,
+  holdMapCellAt,
+  holdMapCrosshair,
   holdMapDxX,
   holdMapInput,
   holdMapNote,
@@ -364,5 +366,56 @@ describe('#179 名前と見出しの下の説明', () => {
     expect(HOLD_MAP_CAPTION).toContain('引けで戻れば追証にならない');
     // 過去の点の近似は点の注記（holdMapNote）だけに書く（説明に重ねない）
     expect(HOLD_MAP_CAPTION).not.toContain('近似');
+  });
+});
+
+describe('追証マップの十字線（#217）', () => {
+  it.each([328, 600, 1200])(
+    '幅 %d: マスの中心に吸着し、札 = ΔX%%・×倍率、読み取り = そのマスの余力、札は svg の内側',
+    (width) => {
+      const plot = holdMapPlot(RESULT, MOVES, width);
+      const { axes } = RESULT;
+      for (const [fx, fy] of [
+        [0.01, 0.01],
+        [0.5, 0.5],
+        [0.99, 0.99],
+      ] as const) {
+        const x = plot.left + (plot.right - plot.left) * fx;
+        const y = plot.top + (plot.bottom - plot.top) * fy;
+        const c = holdMapCrosshair(plot, RESULT, x, y, MOVES, 'yen');
+        const cell = holdMapCellAt(plot, axes, x, y);
+        if (!c || !cell) throw new Error('十字線が無い');
+        const u = axes.us[cell.i] as number;
+        const cv = axes.cs[cell.j] as number;
+        // 吸着: 縦線・横線はマスの中心（指から半マス以内）
+        const cw = (plot.right - plot.left) / axes.us.length;
+        const ch = (plot.bottom - plot.top) / axes.cs.length;
+        expect(Math.abs(c.x - x)).toBeLessThanOrEqual(cw / 2 + 0.1);
+        expect(Math.abs(c.y - y)).toBeLessThanOrEqual(ch / 2 + 0.1);
+        expect(c.xTag.text).toBe(
+          `${u > 0 ? '+' : u < 0 ? '−' : ''}${Math.abs(Math.round(u * 100))}%`,
+        );
+        expect(c.yTag.text).toBe(`×${cv.toFixed(1)}`);
+        // 読み取り = マスの 1 行（holdMapReadout と同じ = 余力はそのマスの値）
+        expect(c.readout).toBe(holdMapReadout(cell, RESULT, MOVES, 'yen'));
+        expect(c.readout).toContain('余力');
+        for (const t of [c.xTag, c.yTag]) {
+          expect(t.x).toBeGreaterThanOrEqual(0);
+          expect(t.x + t.w).toBeLessThanOrEqual(plot.width + 0.01);
+          expect(t.y).toBeGreaterThanOrEqual(0);
+          expect(t.y + t.h).toBeLessThanOrEqual(plot.height + 0.01);
+        }
+      }
+    },
+  );
+
+  it('描画域の外・非数は null（点の近くでも十字線はマス）', () => {
+    const plot = holdMapPlot(RESULT, MOVES, 600);
+    expect(holdMapCrosshair(plot, RESULT, 2, 2, MOVES, 'yen')).toBeNull();
+    expect(holdMapCrosshair(plot, RESULT, Number.NaN, 50, MOVES, 'yen')).toBeNull();
+    const x = plot.px[2] as number;
+    const y = plot.py[2] as number;
+    const c = holdMapCrosshair(plot, RESULT, x, y, MOVES, 'yen');
+    expect(c?.readout.startsWith('原資産')).toBe(true);
   });
 });

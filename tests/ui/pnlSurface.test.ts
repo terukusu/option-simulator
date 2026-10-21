@@ -4,6 +4,7 @@ import { type Leg, preparePosition } from '../../model/position';
 import { fmtAmount, metricsModel } from '../../ui/view/metrics';
 import {
   DEFAULT_PNL_Y,
+  PNL_MARGIN,
   type PnlBase,
   pnlChartModel,
   pnlDomains,
@@ -23,6 +24,8 @@ import {
   sameSurfaceDeps,
   surfaceActive,
   surfaceAlpha,
+  surfaceCrosshair,
+  surfaceCursorAt,
   surfaceDayAt,
   surfaceDayPy,
   surfaceDayTicks,
@@ -676,5 +679,84 @@ describe('surfaceDragPatch（AC-7・AC-13 の根拠。段 B）', () => {
     expect(
       surfaceDragPatch({ ...base, x: Number.NaN, y: Number.NaN, x0: perf.ctx.x0, maxDays: 0 }),
     ).toBeNull();
+  });
+});
+
+describe('面の十字線（#217）', () => {
+  const SVG_W = W + PNL_MARGIN.left + PNL_MARGIN.right;
+  const SVG_H = H + PNL_MARGIN.top + PNL_MARGIN.bottom;
+  it('X は 10 円の格子・d は 1 日の格子、値 = surfaceValueAt（指定日の線と同じ評価）、札・読み取りが svg の内側', () => {
+    for (const base of [strangle, perf]) {
+      const chart = chartOf(base, SC);
+      const { plot } = chart;
+      for (const [fx, fy] of [
+        [0.03, 0.03],
+        [0.5, 0.5],
+        [0.97, 0.97],
+      ] as const) {
+        const sx = plot.left + plot.width * fx;
+        const sy = plot.top + plot.height * fy;
+        const cur = surfaceCursorAt(chart, base.maxDays, sx, sy);
+        if (!cur) throw new Error('カーソルが無い');
+        expect(cur.d).toBe(surfaceDayAt(sy, plot, base.maxDays));
+        const c = surfaceCrosshair({
+          base,
+          scenario: SC,
+          chart,
+          cursor: cur,
+          unit: 'yen',
+          width: SVG_W,
+          height: SVG_H,
+        });
+        if (!c) throw new Error('十字線が無い');
+        expect(c.x % 10).toBe(0);
+        expect(Math.abs(c.x - cur.x)).toBeLessThanOrEqual(5 + 1e-9);
+        expect(Number.isInteger(c.d) || c.d === base.maxDays).toBe(true);
+        expect(c.value).toBe(surfaceValueAt(base, SC, c.x, c.d));
+        expect(c.value).toBeCloseTo(
+          theoreticalPnl(base.legs, c.x, { ...SC, days: c.d }, base.ctx, base.settings),
+          6,
+        );
+        expect(c.py).toBeCloseTo(surfaceDayPy(c.d, plot, base.maxDays), 0);
+        expect(c.xTag.text).toBe(c.x.toLocaleString('en-US'));
+        expect(c.yTag.text).toBe(`${Math.round(c.d * 100) / 100}日`);
+        for (const t of [c.xTag, c.yTag]) {
+          expect(t.x).toBeGreaterThanOrEqual(0);
+          expect(t.x + t.w).toBeLessThanOrEqual(SVG_W + 0.01);
+          expect(t.y + t.h).toBeLessThanOrEqual(SVG_H + 0.01);
+        }
+        const b = c.read.box;
+        expect(b.x0).toBeGreaterThanOrEqual(plot.left);
+        expect(b.x1).toBeLessThanOrEqual(plot.left + plot.width);
+        expect(b.y0).toBeGreaterThanOrEqual(plot.top);
+        expect(b.y1).toBeLessThanOrEqual(plot.top + plot.height);
+        // 読み取りは縦線と反対の側
+        if (c.px > plot.left + plot.width / 2) expect(b.x1).toBeLessThan(c.px);
+        else expect(b.x0).toBeGreaterThan(c.px);
+        expect(c.read.text).toContain(fmtAmount(c.value, 'yen', true));
+      }
+    }
+  });
+
+  it('描画域の外・カーソルなし・表示範囲の外・maxDays ≤ 0 は null。障害物に重なれば下端', () => {
+    const chart = chartOf(strangle, SC);
+    const { plot } = chart;
+    expect(surfaceCursorAt(chart, strangle.maxDays, plot.left - 1, plot.top + 5)).toBeNull();
+    expect(surfaceCursorAt(chart, 0, plot.left + 5, plot.top + 5)).toBeNull();
+    const base = {
+      base: strangle,
+      scenario: SC,
+      chart,
+      unit: 'yen' as const,
+      width: SVG_W,
+      height: SVG_H,
+    };
+    expect(surfaceCrosshair({ ...base, cursor: null })).toBeNull();
+    expect(surfaceCrosshair({ ...base, cursor: { x: chart.domain[1] + 100, d: 1 } })).toBeNull();
+    const cur = { x: chart.domain[0] + (chart.domain[1] - chart.domain[0]) * 0.2, d: 3 };
+    const top = surfaceCrosshair({ ...base, cursor: cur });
+    if (!top) throw new Error('十字線が無い');
+    const moved = surfaceCrosshair({ ...base, cursor: cur, obstacles: [top.read.box] });
+    expect(moved?.read.box.y0).toBeGreaterThan(top.read.box.y0);
   });
 });

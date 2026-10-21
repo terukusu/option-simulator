@@ -142,6 +142,7 @@
 //                                          ツールのカードと [シナリオに適用] → [元に戻す]・提案のカードと [今のタブに適用] →
 //                                          [元に戻す]（#139）・再読み込みで会話が残る（sessionStorage）
 //   --ai                                   #135 の項目だけ（既定の検査・--flows とも。手元の確かめ用）
+//   --cross                                #217 の十字線の項目だけ（既定の検査・--flows とも。手元の確かめ用）
 //   --url <base>                           dev サーバーを起こさず、その URL を使う（例 http://127.0.0.1:5173/?parts）
 //   --dom <file>                           body の下の要素の tag.class の並びを書き出す（DOM の変化の比較用）
 //   --shots <dir>                          スクリーンショットを書く（合成の板だけ。リポジトリに入れない）
@@ -187,7 +188,16 @@ const value = (name) => {
   }
   return v;
 };
-const known = new Set(['--parts', '--flows', '--url', '--dom', '--shots', '--max-wraps', '--ai']);
+const known = new Set([
+  '--parts',
+  '--flows',
+  '--url',
+  '--dom',
+  '--shots',
+  '--max-wraps',
+  '--ai',
+  '--cross',
+]);
 for (const a of args) {
   if (a.startsWith('--') && !known.has(a)) {
     console.error(`知らない引数: ${a}`);
@@ -207,6 +217,7 @@ const urlParams = urlArg ? new URL(urlArg).searchParams : new URLSearchParams();
 const parts = flag('--parts') || urlParams.has('parts');
 const flows = flag('--flows');
 const aiOnly = flag('--ai');
+const crossOnly = flag('--cross');
 const mode = parts ? 'parts' : 'next';
 
 // ---- 足 2 本の作業（版 2）: workspace-v2.json のタブ A だけ（fixture は変えない）
@@ -1065,6 +1076,11 @@ async function measureAll() {
     await pnlCrossAll();
     console.log(
       `損益グラフの十字線の検査（#201）: ${pnlCrossStats.pass} / ${pnlCrossStats.total} 状態で pass`,
+    );
+    // 十字線をそろえる（#217 AC-5）: スマイル・追証マップ・面のホバー
+    await cross217All();
+    console.log(
+      `十字線（スマイル・追証マップ・面）の検査（#217）: ${cross217Stats.pass} / ${cross217Stats.total} 状態で pass`,
     );
     // AI のチャット（#135 AC7）
     await aiSweep();
@@ -3234,6 +3250,12 @@ async function runFlows() {
   // #201 損益グラフの十字線（PC のホバー・タッチのタップ / 交点のドラッグ / 読み取りの箱のタップで移る / × で消す・長押しとパンは今のまま）
   await pnlCrossFlows(pc);
   await pnlCrossTouchFlow();
+  // #217 スマイル・追証マップの長押しの十字線（タッチ 360 / 1440）・面はタッチで出さない
+  for (const vp of [
+    { width: 360, height: 780 },
+    { width: 1440, height: 900 },
+  ])
+    await cross217TouchFlows(vp);
   // #174 追証マップの開閉の時間・開いたときの滑らかなスクロールとスピナー（AC4）
   for (const vp of [pc, phone]) await holdToggleFlow(vp);
   // #135 AI のチャットの進み具合・中止・終端なし・ツールのカード・会話の保存（AC6）
@@ -10676,10 +10698,382 @@ async function pnlCrossTouchFlow() {
   await ctx.close();
 }
 
+// ---- 十字線をそろえる（#217）: スマイル・追証マップ・損益グラフの面
+const cross217Stats = { pass: 0, total: 0 };
+
+/** 描画域の svg の中の .xc（十字線）の状態: 線・札（svg の内側・文字が矩形に収まる）・読み取り（svg の内側）と svg の位置 */
+const xcState = (page, host) =>
+  page.evaluate((q) => {
+    const el = document.querySelector(q);
+    if (!el) return null;
+    const g = el.querySelector('.xc');
+    const svg = g?.ownerSVGElement ?? el.querySelector('svg');
+    if (!svg) return null;
+    const W = Number(svg.getAttribute('width'));
+    const H = Number(svg.getAttribute('height'));
+    const inSvg = (b, eps = 0.5) =>
+      b.x >= -eps && b.y >= -eps && b.x + b.width <= W + eps && b.y + b.height <= H + eps;
+    const tags = g
+      ? [...g.querySelectorAll('.xc-tag')].map((t) => {
+          const rc = t.querySelector('rect');
+          const b = {
+            x: Number(rc?.getAttribute('x')),
+            y: Number(rc?.getAttribute('y')),
+            width: Number(rc?.getAttribute('width')),
+            height: Number(rc?.getAttribute('height')),
+          };
+          const tb = t.querySelector('text')?.getBBox();
+          return {
+            axis: t.classList.contains('x') ? 'x' : 'y',
+            text: (t.querySelector('text')?.textContent ?? '').trim(),
+            inside: b.width > 0 && inSvg(b, 0.01),
+            fits: !!tb && tb.width <= b.width + 0.5,
+          };
+        })
+      : [];
+    const reads = g
+      ? [...g.querySelectorAll('.xc-val')].map((t) => ({
+          text: (t.textContent ?? '').trim(),
+          inside: inSvg(t.getBBox()),
+        }))
+      : [];
+    const v = g?.querySelector('.xc-line.v');
+    const h = g?.querySelector('.xc-line.h');
+    const r = svg.getBoundingClientRect();
+    return {
+      W,
+      H,
+      left: r.left,
+      top: r.top,
+      lines: g ? g.querySelectorAll('.xc-line').length : 0,
+      tags,
+      reads,
+      vx: v ? Number(v.getAttribute('x1')) : null,
+      hy: h ? Number(h.getAttribute('y1')) : null,
+    };
+  }, host);
+
+/** 線 2 本・札 2 個（svg の内側・文字が収まる）・読み取りが svg の内側 */
+function xcOk(st, wantRead) {
+  if (!st) return ['描画域が無い'];
+  const bad = [];
+  if (st.lines !== 2) bad.push(`線 ${st.lines} 本`);
+  if (st.tags.length !== 2 || !st.tags.every((t) => t.inside && t.fits)) bad.push('札');
+  if (wantRead && st.reads.length !== 1) bad.push(`読み取り ${st.reads.length}`);
+  if (!st.reads.every((r) => r.inside)) bad.push('読み取りが svg の外');
+  return bad;
+}
+
+const xcDesc = (st) =>
+  st
+    ? `線 ${st.lines}・札 ${st.tags.map((t) => `${t.axis}「${t.text}」${t.inside ? '' : '（外）'}${t.fits ? '' : '（はみ出し）'}`).join(' ')}・読み取り ${st.reads.map((r) => `${r.text}${r.inside ? '' : '（外）'}`).join(' / ') || '-'}`
+    : '-';
+
+const CROSS217_HOST = {
+  smile: 'section.smile .smile-month:not(.inactive) .smile-wrap',
+  hold: 'section.metrics .hm-wrap',
+  surface: 'section.stage .chart',
+};
+/** 描画域の余白（svg の座標。smile = SMILE_MARGIN・hold = holdMap の M・surface は svg.clip から読む） */
+const CROSS217_MARGIN = {
+  smile: { left: 38, right: 22, top: 14, bottom: 24 },
+  hold: { left: 36, right: 8, top: 6, bottom: 20 },
+};
+
+/** そのチャートを見える状態にする（スマホはパネル・シート、追証マップは開いて計算を待ち、描画域を枠の中へ） */
+async function cross217Open(page, chart, phoneSize) {
+  if (chart === 'smile') {
+    if (phoneSize) {
+      await setShell(page, 'smile', 'full');
+      await smileTab(page);
+    } else await page.click('section.board .panel-head .seg button:has-text("スマイル")');
+    await page.waitForSelector(CROSS217_HOST.smile, { timeout: 8000 }).catch(() => null);
+  } else if (chart === 'hold') {
+    if (phoneSize) await setShell(page, 'metrics', 'full');
+    await page.click('section.metrics .hm-toggle');
+    await page
+      .waitForSelector('section.metrics .hm-svg .hm-ok, section.metrics .hm-svg .hm-call', {
+        timeout: 10000,
+      })
+      .catch(() => null);
+    await page
+      .waitForSelector('section.metrics .hm-wait', { state: 'detached', timeout: 8000 })
+      .catch(() => null);
+    // 描画域を指標の枠の中へ（枠の scrollTop だけ。ページは動かさない）
+    await page.evaluate(() => {
+      const host = document.querySelector('section.metrics .panel-body');
+      const t = document.querySelector('section.metrics .hm-wrap');
+      if (!host || !t) return;
+      const h = host.getBoundingClientRect();
+      const r = t.getBoundingClientRect();
+      host.scrollTop += r.top - h.top - 8;
+    });
+  } else {
+    await toSurface(page);
+  }
+  await page.waitForTimeout(250);
+}
+
+/** 描画域の矩形（画面の座標） */
+async function cross217Plot(page, chart) {
+  const st = await xcState(page, CROSS217_HOST[chart]);
+  if (!st) return null;
+  if (chart === 'surface') {
+    const clip = await page.evaluate(() => {
+      const c = document.querySelector('section.stage .chart svg.clip');
+      return c
+        ? {
+            x: Number(c.getAttribute('x')),
+            y: Number(c.getAttribute('y')),
+            w: Number(c.getAttribute('width')),
+            h: Number(c.getAttribute('height')),
+          }
+        : null;
+    });
+    if (!clip) return null;
+    return { x: st.left + clip.x, y: st.top + clip.y, w: clip.w, h: clip.h, st };
+  }
+  const m = CROSS217_MARGIN[chart];
+  return {
+    x: st.left + m.left,
+    y: st.top + m.top,
+    w: st.W - m.left - m.right,
+    h: st.H - m.top - m.bottom,
+    st,
+  };
+}
+
+/**
+ * 既定の実行（#217 AC-5）: 360 / 1440 × ダーク / ライトで、スマイル・追証マップ・面にマウスを 2 か所載せ、十字線 2 本・札 2 個・
+ * 読み取りが svg の内側（追証マップは読み取り = 描画域の下の 1 行が「原資産 …」）と縦・横スクロール・折り返し
+ */
+async function cross217All() {
+  for (const [w, h] of [
+    [360, 780],
+    [1440, 900],
+  ]) {
+    for (const theme of ['dark', 'light']) {
+      for (const chart of ['smile', 'hold', 'surface']) {
+        const ctx = await newContext(
+          { width: w, height: h },
+          {
+            [WORKSPACE_KEY]: chart === 'hold' ? sellFive : twoLegs,
+            [PREFS_KEY]: prefsText(theme, chart === 'hold' ? { capital_yen: MARGIN_CAPITAL } : {}),
+          },
+        );
+        const page = await ctx.newPage();
+        await page.goto(pageUrl('next'));
+        await waitReady(page, 'next');
+        await cross217Open(page, chart, w <= PHONE_MAX);
+        const plot = await cross217Plot(page, chart);
+        const lbl = `#217 ${theme} ${w}x${h} ${chart}`;
+        if (!plot) {
+          cross217Stats.total++;
+          failed = true;
+          console.log(`${lbl}: 描画域が無い  ← NG`);
+          await ctx.close();
+          continue;
+        }
+        for (const [fx, fy] of [
+          [0.2, 0.3],
+          [0.85, 0.75],
+        ]) {
+          await page.mouse.move(plot.x + plot.w * fx, plot.y + plot.h * fy);
+          await page.waitForTimeout(120);
+          const st = await xcState(page, CROSS217_HOST[chart]);
+          const bad = xcOk(st, chart !== 'hold');
+          if (chart === 'hold') {
+            const ro =
+              (await page.textContent('section.metrics .hm-readout').catch(() => '')) ?? '';
+            if (!ro.startsWith('原資産') || !ro.includes('余力')) bad.push(`読み取り「${ro}」`);
+          }
+          // 横線 = マウスの高さ（追証マップ・面は格子に吸着するので半マス / 1 日以内）
+          const my = plot.y + plot.h * fy - (st?.top ?? 0);
+          const tol = chart === 'smile' ? 0.6 : plot.h / 8;
+          if (st?.hy !== null && st?.hy !== undefined && Math.abs(st.hy - my) > tol)
+            bad.push(`横線 ${st.hy}（マウス ${my.toFixed(1)}）`);
+          cross217Stats.total++;
+          if (bad.length === 0) cross217Stats.pass++;
+          else failed = true;
+          console.log(
+            `${lbl} ホバー（${fx}, ${fy}）: ${xcDesc(st)} ${bad.length ? `${bad.join('・')}  ← NG` : 'pass'}`,
+          );
+        }
+        await report(
+          page,
+          `next ${theme} 十字線 ${chart}`,
+          w,
+          h,
+          `next-${w}x${h}-${theme}-cross-${chart}`,
+        );
+        // 描画域の外へ出すと消える
+        await page.mouse.move(2, 2);
+        await page.waitForTimeout(120);
+        const gone = await xcState(page, CROSS217_HOST[chart]);
+        cross217Stats.total++;
+        if (gone?.lines === 0) cross217Stats.pass++;
+        else failed = true;
+        console.log(
+          `${lbl} 外へ出して消える: 線 ${gone?.lines} 本${gone?.lines === 0 ? ' pass' : '  ← NG'}`,
+        );
+        await ctx.close();
+      }
+    }
+  }
+}
+
+/**
+ * --flows（#217 AC-5）: タッチ（CDP。360×780・1440×900）でスマイル・追証マップの長押しで十字線（横線 = 指の高さ / マスの中心）→
+ * ドラッグで付いて動く（ページ・シート・枠が動かない）→ 離しても残る → タップで消える（選択は今のまま）。すぐのドラッグでは出ない。
+ * 面はタッチの押下で十字線を出さない（点をつかむ）
+ */
+async function cross217TouchFlows(vp) {
+  const tag = `${vp.width}x${vp.height} touch`;
+  const phoneSize = vp.width <= PHONE_MAX;
+  for (const chart of ['smile', 'hold', 'surface']) {
+    const ctx = await touchContext(
+      {
+        [WORKSPACE_KEY]: chart === 'hold' ? sellFive : twoLegs,
+        ...(chart === 'hold'
+          ? { [PREFS_KEY]: prefsText('dark', { capital_yen: MARGIN_CAPITAL }) }
+          : {}),
+      },
+      vp,
+    );
+    const page = await ctx.newPage();
+    await page.goto(pageUrl('next'));
+    await waitReady(page, 'next');
+    await cross217Open(page, chart, phoneSize);
+    const plot = await cross217Plot(page, chart);
+    if (!plot) {
+      check(`#217 ${tag} ${chart}`, false, '描画域が無い');
+      await ctx.close();
+      continue;
+    }
+    const cdp = await ctx.newCDPSession(page);
+    const touch = (type, touchPoints) =>
+      cdp.send('Input.dispatchTouchEvent', { type, touchPoints });
+    const at = (fx, fy) => ({
+      x: Math.round(plot.x + plot.w * fx),
+      y: Math.round(plot.y + plot.h * fy),
+    });
+    const scrolls = () =>
+      page.evaluate(() => ({
+        sy: window.scrollY,
+        sheet: document.querySelector('.layout')?.getAttribute('data-sheet') ?? null,
+        host: document.querySelector('section.metrics .panel-body')?.scrollTop ?? 0,
+      }));
+    const host = CROSS217_HOST[chart];
+    const readout = () =>
+      chart === 'hold'
+        ? page.textContent('section.metrics .hm-readout').catch(() => '')
+        : page.textContent('section.smile .smile-act').catch(() => '');
+    if (chart === 'surface') {
+      const a = at(0.4, 0.4);
+      await touch('touchStart', [{ ...a, id: 0 }]);
+      await page.waitForTimeout(550);
+      const st = await xcState(page, host);
+      await touch('touchEnd', []);
+      await page.waitForTimeout(150);
+      check(
+        `#217 ${tag} 面: タッチの長押しでは十字線を出さない（点をつかむ）`,
+        st?.lines === 0,
+        `線 ${st?.lines} 本`,
+      );
+      await ctx.close();
+      continue;
+    }
+    const s0 = await scrolls();
+    // (a) 長押しで出る
+    const a = at(0.35, 0.45);
+    await touch('touchStart', [{ ...a, id: 0 }]);
+    await page.waitForTimeout(560);
+    const st1 = await xcState(page, host);
+    const bad1 = xcOk(st1, chart === 'smile');
+    const tol = chart === 'smile' ? 1 : plot.h / 8;
+    check(
+      `#217 ${tag} ${chart}: 長押しで十字線 2 本・札 2 個、横線 = 指の高さ（${chart === 'hold' ? 'マスの中心' : '吸着しない'}）`,
+      bad1.length === 0 &&
+        st1?.hy !== null &&
+        Math.abs((st1?.hy ?? 0) - (a.y - (st1?.top ?? 0))) <= tol,
+      `${xcDesc(st1)}${bad1.length ? `・${bad1.join('・')}` : ''}`,
+    );
+    // (b) 離さずにドラッグで付いて動く（ページ・シート・枠は動かない）
+    for (let i = 1; i <= 6; i++) {
+      await touch('touchMove', [{ x: a.x + i * 10, y: a.y + i * 4, id: 0 }]);
+      await page.waitForTimeout(25);
+    }
+    await page.waitForTimeout(120);
+    const st2 = await xcState(page, host);
+    await touch('touchEnd', []);
+    await page.waitForTimeout(200);
+    const s1 = await scrolls();
+    const st3 = await xcState(page, host);
+    const moved = Math.abs((st2?.vx ?? 0) - (st1?.vx ?? 0));
+    check(
+      `#217 ${tag} ${chart}: 右へ 60px・下へ 24px ドラッグで縦線が付いて動き、離しても残る。ページ・シート・枠は動かない`,
+      st2?.lines === 2 &&
+        moved >= (chart === 'smile' ? 55 : 30) &&
+        moved <= 66 &&
+        st3?.lines === 2 &&
+        s1.sy === s0.sy &&
+        s1.sheet === s0.sheet &&
+        Math.abs(s1.host - s0.host) <= 1,
+      `x ${st1?.vx} → ${st2?.vx}・離して ${st3?.lines} 本・scrollY ${s0.sy}→${s1.sy}・枠 ${s0.host}→${s1.host}`,
+    );
+    const roHeld = (await readout()) ?? '';
+    // (c) タップで消える（選択は今のまま = スマイルは点、追証マップはマスの 1 行）
+    const b = at(0.6, 0.5);
+    await touch('touchStart', [{ ...b, id: 0 }]);
+    await page.waitForTimeout(40);
+    await touch('touchEnd', []);
+    await page.waitForTimeout(400);
+    const st4 = await xcState(page, host);
+    const ro = (await readout()) ?? '';
+    check(
+      `#217 ${tag} ${chart}: タップで十字線 0 本、タップの選択は今のまま`,
+      st4?.lines === 0 && (chart === 'smile' ? /put|call/.test(ro) : ro.startsWith('原資産')),
+      `線 ${st4?.lines} 本・読み取り「${ro.slice(0, 40)}」（長押し中「${roHeld.slice(0, 40)}」）`,
+    );
+    // (d) すぐのドラッグでは出ない
+    const c = at(0.5, 0.6);
+    await touch('touchStart', [{ ...c, id: 0 }]);
+    for (let i = 1; i <= 6; i++) {
+      await touch('touchMove', [{ x: c.x + i * 12, y: c.y, id: 0 }]);
+      await page.waitForTimeout(16);
+    }
+    await page.waitForTimeout(500);
+    const st5 = await xcState(page, host);
+    await touch('touchEnd', []);
+    await page.waitForTimeout(150);
+    check(
+      `#217 ${tag} ${chart}: 長押しの前に 6px 動かすと十字線は出ない`,
+      st5?.lines === 0,
+      `線 ${st5?.lines} 本`,
+    );
+    if (shotsDir)
+      await page.screenshot({ path: join(shotsDir, `flows-cross217-${chart}-${tag}.png`) });
+    await ctx.close();
+  }
+}
+
 // 開く URL（#91: 既定はクエリなし。--parts は ?parts）
 console.log(`URL: ${pageUrl(mode)}`);
 try {
-  if (aiOnly && !parts) {
+  if (crossOnly && !parts) {
+    if (flows)
+      for (const vp of [
+        { width: 360, height: 780 },
+        { width: 1440, height: 900 },
+      ])
+        await cross217TouchFlows(vp);
+    else {
+      await cross217All();
+      console.log(
+        `十字線（スマイル・追証マップ・面）の検査（#217）: ${cross217Stats.pass} / ${cross217Stats.total} 状態で pass`,
+      );
+    }
+  } else if (aiOnly && !parts) {
     if (flows)
       for (const vp of [
         { width: 390, height: 844 },

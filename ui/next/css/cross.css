@@ -1,0 +1,48 @@
+/*
+ * 十字線の共通の見た目（#217。docs/ui-redesign.md §4.1「十字線の共通の規則」）。スマイル・追証マップ・損益グラフの面で使う。
+ * 線・札は IV 推移（#130 .iv-tag）・損益グラフの線（#201 .xh-tag）と同じ見た目。色はトークンだけ。
+ */
+.xc {
+  pointer-events: none;
+}
+
+.xc-line {
+  stroke: var(--ink-2);
+  stroke-width: 1;
+  stroke-dasharray: 4 3;
+}
+
+.xc-tag rect {
+  fill: var(--ink-2);
+}
+
+.xc-tag text {
+  dominant-baseline: central;
+  fill: var(--s1);
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+  text-anchor: middle;
+}
+
+.xc-dot {
+  fill: var(--s1);
+  stroke: var(--accent);
+  stroke-width: 1.75;
+}
+
+/* 読み取り（svg の文字。縁取り --s1 = 交点のラベル・#201 の読み取りと同じ） */
+.xc-val {
+  fill: var(--ink);
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 600;
+  dominant-baseline: central;
+  paint-order: stroke;
+  stroke: var(--s1);
+  stroke-width: 3px;
+  stroke-linejoin: round;
+}
+
+.xc-val.end {
+  text-anchor: end;
+}
