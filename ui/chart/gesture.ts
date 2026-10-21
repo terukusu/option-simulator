@@ -180,6 +180,17 @@ export function grabStarted(prev: GestureMode, next: GestureMode): boolean {
 }
 
 /**
+ * 十字線の交点をつかんだ / 離したか（#227）: モードが 'cross' に入ったら true、'cross' から出たら（離す・2 本目の指で
+ * ピンチ・cancel）false、それ以外は null。つかんで動かす間だけ読み取りを指から離れた所に出すのに使う
+ * （docs/ui-redesign.md §4.1「十字線の共通の規則」の読み取り）
+ */
+export function crossHoldChange(prev: GestureMode, next: GestureMode): boolean | null {
+  if (prev === next) return null;
+  if (next === 'cross') return true;
+  return prev === 'cross' ? false : null;
+}
+
+/**
  * 押した位置のマーカー（band の縦の範囲の中で |x − px| ≤ MARKER_HIT_PX の最も近いもの。等距離は配列の先）。
  * ctx.markers が無い・当たらなければ null。
  */

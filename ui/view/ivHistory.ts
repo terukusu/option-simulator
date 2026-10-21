@@ -827,13 +827,13 @@ export interface IvCrosshairInput {
 export function ivCrosshair(p: IvCrosshairInput): IvCrosshair | null {
   const { bars, model } = p;
   const n = bars.length;
-  if (p.cursor === null || n === 0 || model.empty) return null;
-  const c = Math.min(Math.max(Math.round(p.cursor), 0), n - 1);
+  if (model.empty) return null;
+  const c = ivCursorBar(p.cursor, n, p.viewport);
+  if (c === null) return null;
   const b = bars[c] as IvBar;
   const { range, width, height } = model;
   const r1 = (v: number) => Math.round(v * 10) / 10;
   const x = r1(linear(p.viewport, range)(c));
-  if (x < range[0] || x > range[1]) return null;
   const clamp = (v: number, lo: number, hi: number) => Math.min(Math.max(v, lo), Math.max(hi, lo));
   const yPx: Domain = [height - IV_MARGIN.bottom, IV_MARGIN.top];
   const y = r1(
@@ -862,6 +862,23 @@ export function ivCrosshair(p: IvCrosshairInput): IvCrosshair | null {
       text: yText,
     },
   };
+}
+
+/**
+ * 十字線の足（#227）: カーソルを四捨五入して端の足で止めた index。カーソルが無い・足 0 本・その足が表示範囲（値の座標の
+ * viewport。端ちょうどは内）の外なら null。十字線（縦線・横線・札・浮いた読み取り）と読み取りの行は、どれもこの足が
+ * あるときだけカーソルの足を使う（パン・拡大で外へ出たら一緒に外す = 縦線が消えて読み取りだけ残る、を作らない）。
+ * 十字線は値の座標に残るので、表示範囲に戻せばまた出る（docs/ui-redesign.md §4.1）
+ */
+export function ivCursorBar(cursor: number | null, n: number, viewport: Domain): number | null {
+  if (cursor === null || n === 0 || !Number.isFinite(cursor)) return null;
+  const c = Math.min(Math.max(Math.round(cursor), 0), n - 1);
+  return c >= viewport[0] && c <= viewport[1] ? c : null;
+}
+
+/** 読み取り・段に渡すカーソル（#227）: 十字線の足（ivCursorBar）が表示範囲の内ならカーソルのまま、外なら null */
+export function ivCursorShown(cursor: number | null, n: number, viewport: Domain): number | null {
+  return ivCursorBar(cursor, n, viewport) === null ? null : cursor;
 }
 
 /** 画素（要素の座標）→ 足の index（範囲の外は端の足） */

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  crossHoldChange,
   type GestureCtx,
   type GestureResult,
   type GestureState,
@@ -400,5 +401,69 @@ describe('#207 指標の段（scrub の縦線なし）', () => {
     const p2 = gestureDown(s, { id: 2, x: 600, y: 30, t: 50 }, pane);
     expect(p2.state.mode).toBe('pinch');
     expect(gestureLongPress(p2.state, LONG_PRESS_MS, pane).scrub).toBeUndefined();
+  });
+});
+
+// ---- #227: 十字線の交点をつかんでいる間（crossHoldChange）。つかむ間だけ読み取りを指から離れた所に出す
+describe('#227 AC4: 十字線の交点をつかむ / 離す（crossHoldChange）', () => {
+  const cross = { pointPx: { x: 500, y: 100 }, grabPx: 14 };
+  const ctx: GestureCtx = { ...ctxOf([50_000, 70_000]), cross };
+  /** 操作の列を流し、モードが変わるたびの crossHoldChange を集める */
+  const holds = (steps: Array<(s: GestureState) => GestureResult>) => {
+    let s = initialGesture();
+    const out: boolean[] = [];
+    for (const f of steps) {
+      const prev = s.mode;
+      s = f(s).state;
+      const h = crossHoldChange(prev, s.mode);
+      if (h !== null) out.push(h);
+    }
+    return { out, mode: s.mode };
+  };
+  it('交点の ±14px の押下で true、動かして離すと false', () => {
+    const r = holds([
+      (s) => gestureDown(s, { id: 1, x: 505, y: 104, t: 0 }, ctx),
+      (s) => gestureMove(s, { id: 1, x: 540, y: 110, t: 50 }, ctx),
+      (s) => gestureUp(s, { id: 1, x: 540, y: 110, t: 100 }, ctx),
+    ]);
+    expect(r.out).toEqual([true, false]);
+    expect(r.mode).toBe('idle');
+  });
+  it('交点の上の短いタップも離せば false（タップは十字線を消す）', () => {
+    const r = holds([
+      (s) => gestureDown(s, { id: 1, x: 500, y: 100, t: 0 }, ctx),
+      (s) => gestureUp(s, { id: 1, x: 500, y: 100, t: 60 }, ctx),
+    ]);
+    expect(r.out).toEqual([true, false]);
+  });
+  it('つかんでいる間の 2 本目の指（ピンチ）・cancel で false', () => {
+    const pinch = holds([
+      (s) => gestureDown(s, { id: 1, x: 500, y: 100, t: 0 }, ctx),
+      (s) => gestureDown(s, { id: 2, x: 800, y: 100, t: 20 }, ctx),
+    ]);
+    expect(pinch.out).toEqual([true, false]);
+    expect(pinch.mode).toBe('pinch');
+    const cancel = holds([
+      (s) => gestureDown(s, { id: 1, x: 500, y: 100, t: 0 }, ctx),
+      (s) => gestureCancel(s, { id: 1, x: 500, y: 100, t: 20 }, ctx),
+    ]);
+    expect(cancel.out).toEqual([true, false]);
+  });
+  it('交点から離れた押下（パン・タップ）では出ない', () => {
+    const r = holds([
+      (s) => gestureDown(s, { id: 1, x: 300, y: 100, t: 0 }, ctx),
+      (s) => gestureMove(s, { id: 1, x: 340, y: 100, t: 50 }, ctx),
+      (s) => gestureUp(s, { id: 1, x: 340, y: 100, t: 100 }, ctx),
+      (s) => gestureDown(s, { id: 1, x: 300, y: 100, t: 1000 }, ctx),
+      (s) => gestureUp(s, { id: 1, x: 300, y: 100, t: 1040 }, ctx),
+    ]);
+    expect(r.out).toEqual([]);
+  });
+  it('モードが変わらない・cross と関係ない変化は null', () => {
+    expect(crossHoldChange('cross', 'cross')).toBeNull();
+    expect(crossHoldChange('idle', 'drag')).toBeNull();
+    expect(crossHoldChange('pinch', 'drag')).toBeNull();
+    expect(crossHoldChange('idle', 'cross')).toBe(true);
+    expect(crossHoldChange('cross', 'idle')).toBe(false);
   });
 });

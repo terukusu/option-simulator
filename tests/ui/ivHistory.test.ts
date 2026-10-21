@@ -13,6 +13,8 @@ import {
   isIvTradingDay,
   ivChartModel,
   ivCrosshair,
+  ivCursorBar,
+  ivCursorShown,
   ivFullDomain,
   ivIndexAt,
   ivKeepOf,
@@ -732,5 +734,63 @@ describe('AC11: シナリオの水準', () => {
     // 足より上の水準は縦軸に入る
     expect(ivChartModel({ ...input, scenario: 30 }).yDomain[1]).toBeGreaterThan(30);
     expect(ivChartModel(input).scenarioY).toBeNull();
+  });
+});
+
+// ---- #227: 十字線の足が表示範囲の内か（ivCursorBar）。十字線と読み取りを一緒に出し入れする
+describe('#227 AC2: 十字線の足が表示範囲の内か（ivCursorBar・ivCursorShown）', () => {
+  it('表示範囲の外（左・右）は null、端ちょうどは内。四捨五入して端の足で止める', () => {
+    const v: [number, number] = [20, 60];
+    expect(ivCursorBar(19, 80, v)).toBeNull();
+    expect(ivCursorBar(61, 80, v)).toBeNull();
+    expect(ivCursorBar(20, 80, v)).toBe(20);
+    expect(ivCursorBar(60, 80, v)).toBe(60);
+    expect(ivCursorBar(40.4, 80, v)).toBe(40);
+    // 19.6 は 20 の足（内）、60.6 は 61 の足（外）
+    expect(ivCursorBar(19.6, 80, v)).toBe(20);
+    expect(ivCursorBar(60.6, 80, v)).toBeNull();
+    // 足の並びの外のカーソルは端の足（表示範囲が左の余白まであれば 0 の足）
+    expect(ivCursorBar(-3, 80, [-5, 30])).toBe(0);
+    expect(ivCursorBar(200, 80, [60, 85])).toBe(79);
+    expect(ivCursorBar(null, 80, v)).toBeNull();
+    expect(ivCursorBar(10, 0, v)).toBeNull();
+    expect(ivCursorBar(Number.NaN, 80, v)).toBeNull();
+  });
+  it('ivCursorShown は内ならカーソルのまま、外なら null', () => {
+    expect(ivCursorShown(40.4, 80, [20, 60])).toBe(40.4);
+    expect(ivCursorShown(70, 80, [20, 60])).toBeNull();
+    expect(ivCursorShown(null, 80, [20, 60])).toBeNull();
+  });
+  it('ivCrosshair は ivCursorBar が null のとき null（画素の判定と同じ）。読み取りは外ならカーソルなしと同じ', () => {
+    const bars = barsAt(everyStep(jst('2026-11-02T09:00'), H, 300), 7);
+    const full = resolveIvViewport(bars, '1h', null, null);
+    // 一部の足だけが見える表示範囲（左右に外の足がある）
+    const viewport: [number, number] = [full[1] - 120.3, full[1] - 40.6];
+    const model = ivChartModel({
+      bars,
+      tf: '1h',
+      mode: 'candle',
+      viewport,
+      segments: lineSegments(bars, '1h', NTD),
+      width: 600,
+      height: 300,
+      rightLoaded: true,
+    });
+    const n = bars.length;
+    let outside = 0;
+    for (let i = 0; i < n; i++) {
+      const c = ivCrosshair({ bars, tf: '1h', viewport, cursor: i, y: 100, model });
+      const inView = ivCursorBar(i, n, viewport) !== null;
+      expect(c !== null).toBe(inView);
+      if (c) expect(c.x).toBeGreaterThanOrEqual(model.range[0]);
+      if (c) expect(c.x).toBeLessThanOrEqual(model.range[1]);
+      if (!inView) {
+        outside++;
+        expect(ivReadout(bars, '1h', ivCursorShown(i, n, viewport), false)).toEqual(
+          ivReadout(bars, '1h', null, false),
+        );
+      }
+    }
+    expect(outside).toBeGreaterThan(200);
   });
 });

@@ -14,6 +14,7 @@ import {
   IND_PANE_MIN_H,
   type IndPaneHeights,
   indCrosshair,
+  indFloat,
   indKindLabel,
   indPaneModel,
   indReadout,
@@ -392,5 +393,77 @@ describe('#207 段の十字線（indCrosshair）', () => {
     expect(Math.abs(indCrosshair(m, zero)?.value ?? 1)).toBeLessThan(
       (m.yDomain[1] - m.yDomain[0]) / 100,
     );
+  });
+});
+
+// ---- #227: 浮いた読み取り（.ind-float）はタッチの交点をつかんで動かす間だけ
+describe('#227 AC1: 段の浮いた読み取り（indFloat）', () => {
+  const stackH = 400;
+  const layout = futPaneLayout({ stackH, kinds: ['rsi', 'macd'], heights: undefined, max: null });
+  const range: [number, number] = [48, 350];
+  const models = layout.panes.map((p) =>
+    indPaneModel({ ...base, kind: p.kind, marginLeft: 48, height: p.h }),
+  );
+  const at = (cursor: number | null) =>
+    models.map((m) => indReadout(ind, m.kind, bars.length, base.viewport, range, cursor));
+  const crossesOf = (y: number, kind: 'rsi' | 'macd') =>
+    models.map((m) => (m.kind === kind ? indCrosshair(m, y) : null));
+  const pc = { pane: 'rsi' as const, y: 30, touch: true };
+  const input = {
+    pc,
+    held: true,
+    layout,
+    models,
+    crosses: crossesOf(30, 'rsi'),
+    readouts: at(40),
+    stackH,
+  };
+  it('タッチの段の十字線をつかんでいる間: 段の名前・横線の値（札と同じ）・その足の値（見出しと同じ）', () => {
+    const f = indFloat(input);
+    expect(f).not.toBeNull();
+    expect(f?.title).toBe(models[0]?.title);
+    expect(f?.ruler).toBe(input.crosses[0]?.text);
+    expect(f?.values).toEqual(input.readouts[0]?.values);
+    // 指（価格の下の RSI の段の 30px）は枠の上 40% より下 → 上端
+    expect(f?.bottom).toBe(false);
+  });
+  it('離した後（held = false）・マウス・十字線なしは null（段の中の見出しと札だけ = PC と同じ）', () => {
+    expect(indFloat({ ...input, held: false })).toBeNull();
+    expect(indFloat({ ...input, pc: { ...pc, touch: false } })).toBeNull();
+    expect(indFloat({ ...input, pc: null })).toBeNull();
+    expect(indFloat({ ...input, crosses: [null, null] })).toBeNull();
+  });
+  it('十字線の足が表示範囲の外（縦線なし）なら null', () => {
+    expect(indFloat({ ...input, readouts: at(5) })).toBeNull();
+    // 表示範囲 [20.5, 79.5]: 20 の足は外
+    expect(indFloat({ ...input, readouts: at(20) })).toBeNull();
+    expect(indFloat({ ...input, readouts: at(21) })).not.toBeNull();
+    expect(indFloat({ ...input, readouts: at(null) })).toBeNull();
+  });
+  it('段が配置に無い（ほかの段の最大化・隠した段）なら null', () => {
+    const maxed = futPaneLayout({
+      stackH,
+      kinds: ['rsi', 'macd'],
+      heights: undefined,
+      max: 'macd',
+    });
+    expect(indFloat({ ...input, layout: maxed })).toBeNull();
+  });
+  it('指が枠の上 40% にあるとき（最大化した段の上の方）は下端', () => {
+    const maxed = futPaneLayout({ stackH, kinds: ['rsi', 'macd'], heights: undefined, max: 'rsi' });
+    const m = indPaneModel({
+      ...base,
+      kind: 'rsi',
+      marginLeft: 48,
+      height: maxed.panes[0]?.h ?? 0,
+    });
+    const f = indFloat({
+      ...input,
+      layout: maxed,
+      models: [m],
+      crosses: [indCrosshair(m, 30)],
+      readouts: [indReadout(ind, 'rsi', bars.length, base.viewport, range, 40)],
+    });
+    expect(f?.bottom).toBe(true);
   });
 });

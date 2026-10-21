@@ -2582,6 +2582,8 @@ const paneState = (page) =>
       crossPaneH: crossPane ? Number(crossPane.getAttribute('height')) : null,
       hy: hl ? Number(hl.getAttribute('y1')) : null,
       tag: (s?.querySelector('.ind-tag text')?.textContent ?? '').trim() || null,
+      // 十字線のある段の見出し（段の名前とその足の値。#227: 離した後の読み取りは段の中）
+      head: crossPane ? (crossPane.querySelector('.ind-head')?.textContent ?? '').trim() : null,
       priceV: s?.querySelectorAll('.iv-cross .iv-cursor.v').length ?? 0,
       priceH: s?.querySelectorAll('.iv-cross .iv-cursor.h').length ?? 0,
       xTag: (s?.querySelector('.iv-tag.x text')?.textContent ?? '').trim() || null,
@@ -9433,12 +9435,9 @@ async function futPaneTouchFlow() {
   await touch('touchEnd', []);
   await page.waitForTimeout(400);
   const st1 = await paneState(page);
-  const fb = st1.floatBox;
-  const awayFromFinger =
-    fb !== null &&
-    !(a.y >= fb.top - 8 && a.y <= fb.bottom + 8 && a.x >= fb.left && a.x <= fb.right);
+  // #227: 指を離した後は浮いた読み取りを出さない（段の中の見出しの値・縦軸の札だけ = PC のホバーと同じ）
   check(
-    `#207 AC5・AC6 #217 ${tag} RSI の段のタップで段の十字線（横線 = 指の高さ・札 = その高さの値）・価格は縦線と横軸の札だけ・浮いた読み取りは指から離れた所`,
+    `#207 AC5・AC6 #217 #227 AC5(a) ${tag} RSI の段のタップで段の十字線（横線 = 指の高さ・札 = その高さの値）・価格は縦線と横軸の札だけ・離した後は浮いた読み取りなし（段の見出しに値）`,
     st1.cross === 1 &&
       st1.crossKind === 'rsi' &&
       st1.hy !== null &&
@@ -9447,21 +9446,27 @@ async function futPaneTouchFlow() {
       st1.priceV === 1 &&
       st1.priceH === 0 &&
       st1.xTag === st1.time &&
-      (st1.float ?? '').includes(st1.tag ?? '?') &&
-      awayFromFinger,
-    `十字線 ${st1.cross}・y ${st1.hy}・札 ${st1.tag}・価格 縦 ${st1.priceV} 横 ${st1.priceH}・浮き「${st1.float}」${fb ? ` ${Math.round(fb.top)}〜${Math.round(fb.bottom)}px` : ''}・指 ${a.y}px`,
+      st1.float === null &&
+      /RSI/.test(st1.head ?? '') &&
+      /\d\.\d/.test(st1.head ?? ''),
+    `十字線 ${st1.cross}・y ${st1.hy}・札 ${st1.tag}・価格 縦 ${st1.priceV} 横 ${st1.priceH}・浮き「${st1.float}」・見出し「${st1.head}」・指 ${a.y}px`,
   );
   // #217: 交点を押してドラッグで動く（パンしない）→ ほかの所のタップで消える（移らない）→ 長押しでは出ない
+  // #227: つかんで動かす間だけ浮いた読み取り（指から離れた所）、離したら消える
   const xt0 = st1.xTick;
   await touch('touchStart', [{ x: a.x + 3, y: a.y + 2, id: 0 }]);
+  const finger = { x: a.x + 3, y: a.y + 2 };
   for (let i = 1; i <= 4; i++) {
-    await touch('touchMove', [{ x: a.x + 3 - i * 10, y: a.y + 2 + i * 2, id: 0 }]);
+    finger.x = a.x + 3 - i * 10;
+    finger.y = a.y + 2 + i * 2;
+    await touch('touchMove', [{ ...finger, id: 0 }]);
     await page.waitForTimeout(25);
   }
   await page.waitForTimeout(120);
   const stG = await paneState(page);
   await touch('touchEnd', []);
   await page.waitForTimeout(400);
+  const stR = await paneState(page);
   check(
     `#217 ${tag} 段の十字線の交点を押して左へ 40px・下へ 8px ドラッグで付いて動く（パンしない）`,
     stG.cross === 1 &&
@@ -9470,6 +9475,56 @@ async function futPaneTouchFlow() {
       stG.time !== st1.time &&
       stG.xTick === xt0,
     `y ${st1.hy} → ${stG.hy}・時刻 ${st1.time} → ${stG.time}・目盛り ${xt0} → ${stG.xTick}`,
+  );
+  const fb = stG.floatBox;
+  const awayFromFinger =
+    fb !== null &&
+    !(
+      finger.y >= fb.top - 8 &&
+      finger.y <= fb.bottom + 8 &&
+      finger.x >= fb.left &&
+      finger.x <= fb.right
+    );
+  check(
+    `#227 AC5(b)(c) ${tag} 交点をつかんで動かす間だけ浮いた読み取り（横線の値 = 札・指から離れた所）、離した後は無い（十字線は残る）`,
+    (stG.float ?? '').includes(stG.tag ?? '?') &&
+      awayFromFinger &&
+      stR.float === null &&
+      stR.cross === 1 &&
+      stR.tag === stG.tag,
+    `つかむ間「${stG.float}」${fb ? ` ${Math.round(fb.top)}〜${Math.round(fb.bottom)}px` : ''}・指 ${finger.y}px → 離して「${stR.float}」・十字線 ${stR.cross}`,
+  );
+  // #227 AC5(d): 段のパン（交点から離れた所のドラッグ）で十字線の足を表示範囲の外へ → 縦線・段の十字線・札・浮いた読み取り
+  // なし、読み取りの時刻 = カーソルなし（最新の足）。戻すとまた出る（値の座標に残る）
+  const panX0 = Math.round(st0.paneX + st0.paneW * 0.18);
+  const panY = Math.round(st0.paneTop[0] + 30);
+  const panDx = Math.round(st0.paneW * 0.7);
+  const panBy = async (x0, dx) => {
+    await touch('touchStart', [{ x: x0, y: panY, id: 0 }]);
+    const steps = 12;
+    for (let i = 1; i <= steps; i++) {
+      await touch('touchMove', [{ x: Math.round(x0 + (dx * i) / steps), y: panY, id: 0 }]);
+      await page.waitForTimeout(20);
+    }
+    await touch('touchEnd', []);
+    await page.waitForTimeout(350);
+  };
+  await panBy(panX0, panDx);
+  const stO = await paneState(page);
+  await panBy(panX0 + panDx, -panDx);
+  const stB = await paneState(page);
+  check(
+    `#227 AC5(d) ${tag} 段のパンで十字線の足を表示範囲の外へ → 段の十字線・価格の縦線・札・浮いた読み取りなし・読み取りは最新の足、戻すとまた出る`,
+    stO.xTick !== stR.xTick &&
+      stO.cross === 0 &&
+      stO.priceV === 0 &&
+      stO.tag === null &&
+      stO.float === null &&
+      stO.time === st0.time &&
+      stB.cross === 1 &&
+      stB.priceV === 1 &&
+      stB.time === stR.time,
+    `外 十字線 ${stO.cross}・縦 ${stO.priceV}・札 ${stO.tag}・浮き ${stO.float}・時刻 ${stO.time}（カーソルなし ${st0.time}）・目盛り ${stR.xTick} → ${stO.xTick} / 戻して 十字線 ${stB.cross}・縦 ${stB.priceV}・時刻 ${stB.time}（${stR.time}）`,
   );
   await touch('touchStart', [{ x: midX - 80, y: Math.round(st0.paneTop[0] + 12), id: 0 }]);
   await page.waitForTimeout(40);

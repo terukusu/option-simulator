@@ -96,7 +96,9 @@ function SmilePlotView(p: SmilePlotProps) {
   useEffect(() => {
     if (axis) setCursor(null);
   }, [axis]);
-  const xh = useMemo(() => smileCrosshair(model, cursor, w, h), [model, cursor, w, h]);
+  // タッチの交点をつかんで動かしている間（#227。この間だけ読み取りを指で隠れない所へ）
+  const [held, setHeld] = useState(false);
+  const xh = useMemo(() => smileCrosshair(model, cursor, w, h, held), [model, cursor, w, h, held]);
   const select = (k: number | null) => {
     if (k !== null && k !== pick) dispatch({ type: 'pickSmile', pick: { monthId: month.id, k } });
   };
@@ -136,6 +138,7 @@ function SmilePlotView(p: SmilePlotProps) {
             setCursor(smileCursorAt(model, x, y, w, h, true, true)),
         }
       : {}),
+    onCrossHold: setHeld,
     // 長押し（今のまま）: 選択を最寄りの点へ切り替える
     scrub: { linePx: null },
     onScrub: (x) => select(scrubStrike(model, x, range)),

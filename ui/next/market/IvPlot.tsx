@@ -152,9 +152,10 @@ function IvPlotView(p: IvPlotProps) {
       if (v === null && pinned) onCursor(null);
       p.onViewport(v);
     },
-    // タッチのタップ（#217 の共通の規則）: 出ていなければ置く、出ていれば消す。マウスのクリックは今のまま外す（動かせばまた出る）
+    // タッチのタップ（#217 の共通の規則）: 出ていなければ置く、出ていれば消す。マウスのクリックは今のまま外す（動かせばまた出る）。
+    // 「出ている」は描いている十字線（足が表示範囲の外 = 描いていないなら置く。#227）
     onTap: (x, y) => {
-      if (!touch.current || crossTapAction(cursor !== null) === 'hide') {
+      if (!touch.current || crossTapAction(cross !== null) === 'hide') {
         onCursor(null);
         return;
       }

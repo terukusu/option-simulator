@@ -10,6 +10,7 @@ import {
   fmtYen,
   futContractAt,
   futContractLabel,
+  futCursorView,
   futEmaLabel,
   futEmaOverlays,
   futEmaReadout,
@@ -382,5 +383,65 @@ describe('#214 EMA の 3 本は同じ太さ', () => {
     }
     const def = techLineWidthsOr(undefined).ema;
     expect(futEmaOverlays(e, def).map((x) => x.width)).toEqual([1, 1, 1]);
+  });
+});
+
+// ---- #227: 先物推移のカーソルの導出（futCursorView）。十字線の足が表示範囲の外なら十字線と読み取りを一緒に外す
+describe('#227 AC2: 先物推移のカーソル（futCursorView）', () => {
+  const v: [number, number] = [20, 60];
+  it('価格の上: 内なら足・横線の高さ・横線あり。外なら読み取りと横線はカーソルなし（価格には生の足 = つかみを保つ）', () => {
+    const cur = { i: 40, y: 80, pane: 'price' as const, touch: true };
+    expect(futCursorView(cur, 80, v)).toEqual({
+      plot: 40,
+      shown: 40,
+      cursorY: 80,
+      crossH: true,
+      pane: null,
+    });
+    expect(futCursorView({ ...cur, i: 70 }, 80, v)).toEqual({
+      plot: 70,
+      shown: null,
+      cursorY: null,
+      crossH: false,
+      pane: null,
+    });
+  });
+  it('段の上: 内なら段の十字線、外（パン・拡大）なら段の十字線なし・読み取りは最新の足と同じ', () => {
+    const cur = { i: 30, y: 12, pane: 'rsi' as const, touch: true };
+    expect(futCursorView(cur, 80, v)).toEqual({
+      plot: 30,
+      shown: 30,
+      cursorY: null,
+      crossH: false,
+      pane: { pane: 'rsi', y: 12, touch: true },
+    });
+    for (const i of [0, 19, 61, 79]) {
+      const cv = futCursorView({ ...cur, i }, 80, v);
+      expect(cv.shown).toBeNull();
+      expect(cv.pane).toBeNull();
+      expect(cv.plot).toBe(i);
+    }
+    // 読み取り（始 / 高 / 安 / 終・EMA）はカーソルなしと同じ
+    const bars: FutBar[] = Array.from({ length: 80 }, (_, i) => ({
+      t: 1_790_000_000 + i * 3600,
+      o: 30000 + i,
+      h: 30050 + i,
+      l: 29950 + i,
+      c: 30010 + i,
+      m: '2026-12',
+    }));
+    const off = futCursorView({ ...cur, i: 70 }, 80, v);
+    expect(futReadout(bars, '1h', off.shown, false)).toEqual(futReadout(bars, '1h', null, false));
+  });
+  it('縦線だけ（段の上で高さが無い）・カーソルなし', () => {
+    expect(futCursorView({ i: 30, y: null, pane: 'macd', touch: false }, 80, v).pane).toBeNull();
+    expect(futCursorView({ i: 30, y: null, pane: null, touch: false }, 80, v).shown).toBe(30);
+    expect(futCursorView(null, 80, v)).toEqual({
+      plot: null,
+      shown: null,
+      cursorY: null,
+      crossH: false,
+      pane: null,
+    });
   });
 });

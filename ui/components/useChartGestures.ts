@@ -17,6 +17,7 @@
  *   cancel は未反映の位置を捨てて onSurfaceCancel。リセット（ダブルタップ・dblclick・R）の前に未反映の位置を流す
  * - 十字線（#201・#217）: cross を渡すと交点の ±grabPx の押下ですぐつかみ、onCross(x, y)（1 フレーム 1 回）に位置を渡す。
  *   動かさずに離した短い押下は onTap（#217。十字線を消す）
+ * - onCrossHold（#227）: 十字線の交点をつかんだら true、離した・ピンチに移った・cancel で false（gesture.ts の crossHoldChange）
  * - onGrab（#223）: つかむ状態（scrub・markerDrag・surface）に入ったとき 1 回（ホバーの十字線を消すのに使う）
  * - onDouble（#207。先物推移の指標の段）: 渡すとダブルタップ / ダブルクリックを初期表示に戻す代わりに onDouble(x, y)
  *   （離した位置。要素の座標）に渡す（段の最大化）。マウスは dblclick だけで拾い（OS のダブルクリックの間隔）、タッチ・ペンは
@@ -31,6 +32,7 @@
 import type { RefObject } from 'preact';
 import { useEffect, useRef } from 'preact/hooks';
 import {
+  crossHoldChange,
   type GestureCtx,
   type GestureResult,
   gestureCancel,
@@ -101,6 +103,11 @@ export interface ChartGestureOptions {
    * つかんで動かす間はホバーの十字線を出さない（docs/ui-redesign.md §4.1）
    */
   onGrab?: () => void;
+  /**
+   * 十字線の交点をつかんでいるか（#227。'cross' に入った = true、出た = false。同期）。つかんで動かす間だけ読み取りを
+   * 指から離れた所に出す（docs/ui-redesign.md §4.1）
+   */
+  onCrossHold?: (held: boolean) => void;
 }
 
 /** グラフの操作の対象外（ツール行のボタン・入力欄・境目） */
@@ -206,6 +213,8 @@ export function useChartGestures(ref: RefObject<HTMLElement>, opts: ChartGesture
       const prev = state.mode;
       state = res.state;
       if (grabStarted(prev, state.mode)) optsRef.current.onGrab?.();
+      const held = crossHoldChange(prev, state.mode);
+      if (held !== null) optsRef.current.onCrossHold?.(held);
       if (res.surfaceCancel) {
         // 未反映の位置を捨ててから押す前に戻す
         pendingSurface = null;
