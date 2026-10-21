@@ -136,6 +136,12 @@ section.ai .ai-body {
   overscroll-behavior-x: contain;
 }
 
+/* はみ出しているときだけフォーカスできる（キーボードで横に動かす）。輪は内側に */
+.ai-table:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
 .ai-table[data-more="end"] {
   mask-image: linear-gradient(to right, var(--ink) calc(100% - 28px), transparent);
 }

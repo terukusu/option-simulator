@@ -117,9 +117,33 @@ describe('parseAiText の表（#234）', () => {
     expect(cellsOf(b[0]).num).toEqual([true, true, false, false]);
   });
 
-  it('崩れた表は今どおり段落の文字（列数の不一致・区切りなし・区切りの列数違い）', () => {
+  it('本文の列数の合わない行から後だけを表の後の文字に（途中で切れた最後の行・崩れた行。表全体は文字に戻さない）', () => {
+    // 失敗・上限で止まった返答（live でない）の欠けた最後の行
+    const cut = parseAiText(['| a | b |', '|---|---|', '| 1 | 2 |', '| 3'].join('\n'));
+    expect(cut.map((x) => x.kind)).toEqual(['table', 'p']);
+    expect(cellsOf(cut[0]).rows).toEqual([['1', '2']]);
+    expect(cut[1]).toEqual({ kind: 'p', inl: [{ text: '| 3', bold: false }] });
+    // 列数の合わない行の後の `|` の行も文字（表は 1 つ）
+    const bad = parseAiText(
+      ['| a | b |', '|---|---|', '| 1 | 2 |', '| 1 | 2 | 3 |', '| 4 | 5 |', '後の文'].join('\n'),
+    );
+    expect(bad.map((x) => x.kind)).toEqual(['table', 'p']);
+    expect(cellsOf(bad[0]).rows).toEqual([['1', '2']]);
+    expect(bad[1]).toEqual({
+      kind: 'p',
+      inl: [{ text: '| 1 | 2 | 3 |\n| 4 | 5 |\n後の文', bold: false }],
+    });
+    // 流れの途中で列数の合わない行が来ても、それまでの表は表のまま
+    const live = parseAiText(
+      ['| a | b |', '|---|---|', '| 1 | 2 |', '| x | y | z |', ''].join('\n'),
+      true,
+    );
+    expect(live.map((x) => x.kind)).toEqual(['table', 'p']);
+    expect(cellsOf(live[0]).rows).toEqual([['1', '2']]);
+  });
+
+  it('崩れた表は今どおり段落の文字（区切りなし・区切りの列数違い）', () => {
     for (const t of [
-      ['| a | b |', '|---|---|', '| 1 | 2 | 3 |'],
       ['| a | b |', '| 1 | 2 |'],
       ['| a | b |', '|---|---|---|', '| 1 | 2 |'],
     ]) {

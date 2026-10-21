@@ -37,6 +37,8 @@ export const AI_EMPTY_TEXT =
 const UNMATCHED_LABEL = '計算結果に無い数字';
 /** 用語のボタンの読み上げの補い（#232。押すと説明カード） */
 const TERM_LABEL = '用語の説明';
+/** 横にスクロールする表の枠の名前（#234） */
+const TABLE_SCROLL_LABEL = '表（横にスクロール）';
 /** 提案の差分の印の読み上げ（#139） */
 const PROPOSAL_MARK_LABEL = { '+': '追加: ', '−': '削除: ', '±': '変更: ' } as const;
 
@@ -511,32 +513,43 @@ function moreOf(el: HTMLElement): string | null {
 /**
  * 返答の表（#234）。数字の列（class num）は右揃え・折り返さない、文字の列はセルの中で折り返す。入らなければ枠
  * （.ai-table）の中だけ横にスクロールし、続きのある側を data-more（start / end / both）で示す（CSS が端をぼかす）。
- * data-more は DOM の属性を直接書く（描き直しを起こさない。style 属性は使わない）
+ * data-more は DOM の属性を直接書く（描き直しを起こさない。style 属性は使わない）。測るのは scroll と ResizeObserver
+ * （枠と表。流れで行が増えたときも表の大きさの変化で届く）のときだけ（描画のたびに読まない）。はみ出しているときだけ
+ * 枠をフォーカスできる名前つきの region にする（キーボードで横に動かせる）
  */
 function AiTable(p: {
   table: Extract<MarkedBlock, { kind: 'table' }>;
   inl: (xs: MarkedInline[]) => ComponentChildren;
 }) {
   const ref = useRef<HTMLDivElement>(null);
+  const [over, setOver] = useState(false);
   const update = () => {
     const el = ref.current;
     if (!el) return;
     const m = moreOf(el);
     if (m === null) el.removeAttribute('data-more');
     else el.setAttribute('data-more', m);
+    setOver(el.scrollWidth > el.clientWidth + 1);
   };
-  useLayoutEffect(update);
-  useEffect(() => {
+  useLayoutEffect(() => {
+    update();
     const el = ref.current;
     if (!el || typeof ResizeObserver === 'undefined') return;
     const ro = new ResizeObserver(update);
     ro.observe(el);
+    const table = el.firstElementChild;
+    if (table) ro.observe(table);
     return () => ro.disconnect();
   }, []);
   const { table: t } = p;
   const cls = (j: number) => (t.num[j] ? 'num' : undefined);
   return (
-    <div class="ai-table" ref={ref} onScroll={update}>
+    <div
+      class="ai-table"
+      ref={ref}
+      onScroll={update}
+      {...(over && { tabIndex: 0, role: 'region', 'aria-label': TABLE_SCROLL_LABEL })}
+    >
       <table>
         <thead>
           <tr>

@@ -94,8 +94,8 @@ function numericColumns(rows: Inline[][][], cols: number): boolean[] {
 }
 
 /**
- * 返答の文字列 → 木。live（流れの途中）は表の途中の行を出さない（settledLines）。崩れた表（区切りが無い・列数が
- * 合わない）の行は今までどおり段落の文字
+ * 返答の文字列 → 木。live（流れの途中）は表の途中の行を出さない（settledLines）。崩れた表（区切りが無い・見出しと
+ * 区切りの列数が合わない）の行は今までどおり段落の文字。本文の列数の合わない行から後は表の後の段落の文字
  */
 export function parseAiText(text: string, live = false): TextBlock[] {
   const out: TextBlock[] = [];
@@ -108,13 +108,20 @@ export function parseAiText(text: string, live = false): TextBlock[] {
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i] ?? '';
     if (ROW.test(line) && isSep(lines[i + 1] ?? '')) {
-      // 表: 見出し + 区切り + 続く `|` の行。列数が合わなければ全部を段落の行に
+      // 表: 見出し + 区切り + 続く `|` の行。見出しと区切りの列数が合わなければ全部を段落の行に。本文は列数の
+      // 合う行まで（合わない行 = 途中で切れた最後の行・崩れた行から後の `|` の行は表の後の段落の文字）
       let j = i + 2;
       while (j < lines.length && ROW.test(lines[j] ?? '')) j++;
       const head = tableCells(line);
-      const body = lines.slice(i + 2, j).map(tableCells);
       const cols = head.length;
-      if (tableCells(lines[i + 1] ?? '').length === cols && body.every((r) => r.length === cols)) {
+      if (tableCells(lines[i + 1] ?? '').length === cols) {
+        const body: string[][] = [];
+        let k = i + 2;
+        for (; k < j; k++) {
+          const r = tableCells(lines[k] ?? '');
+          if (r.length !== cols) break;
+          body.push(r);
+        }
         flush();
         const rows = body.map((r) => r.map(inlineOf));
         out.push({
@@ -123,6 +130,7 @@ export function parseAiText(text: string, live = false): TextBlock[] {
           num: numericColumns(rows, cols),
           rows,
         });
+        para.push(...lines.slice(k, j));
       } else {
         para.push(...lines.slice(i, j));
       }

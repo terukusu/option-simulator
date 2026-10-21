@@ -10344,6 +10344,11 @@ async function aiTableCheck(page, tag, w, h, theme, want) {
       firstWraps: !!first && lh > 0 && first.getBoundingClientRect().height > lh * 1.5,
       wideOver: !!wide && wide.scrollWidth > wide.clientWidth + 0.5,
       wideMore: wide?.getAttribute('data-more') ?? null,
+      wideRegion:
+        wide?.getAttribute('tabindex') === '0' &&
+        wide?.getAttribute('role') === 'region' &&
+        !!wide?.getAttribute('aria-label'),
+      narrowRegion: narrow?.hasAttribute('tabindex') ?? false,
       cellTerms: ans?.querySelectorAll('.ai-table .ai-term').length ?? 0,
     };
   });
@@ -10373,6 +10378,9 @@ async function aiTableCheck(page, tag, w, h, theme, want) {
   if (r.wideOver && (r.wideMore !== 'end' || endMore !== 'start'))
     bad.push(`端の印 ${r.wideMore} → 右端で ${endMore}`);
   if (!r.wideOver && r.wideMore !== null) bad.push(`収まっているのに端の印 ${r.wideMore}`);
+  if (r.wideOver !== r.wideRegion)
+    bad.push(`はみ出し ${r.wideOver} と region ${r.wideRegion} が合わない`);
+  if (r.narrowRegion) bad.push('収まる表の枠に tabindex');
   if (r.cellTerms === 0) bad.push('表のセルに用語のボタンが無い');
   aiStat(
     lbl,
