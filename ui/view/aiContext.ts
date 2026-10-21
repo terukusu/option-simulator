@@ -7,13 +7,14 @@
  * - 送らないもの: JPX のグリーク・bid_iv / ask_iv・数量・建玉・自由な文字列（タブ名など）
  * - ポジション: 評価できる足（PnlBase の足）だけ。シナリオ: 日数（最遠の SQ に収めた値）・IV の平行移動・ΔX・スキュー・β・
  *   IV の入れ方・横軸の初期範囲。資金: 端末の設定（未設定なら無し）
+ * - 自分の前提（#156）: 端末の設定の自由記述（前後の空白を除く。空・未設定なら無し）。context の中で唯一の自由な文字列
  * - precomputed: ツール 5 本の事前計算（ui/view/aiTools.ts）
  * - 指紋（contextKey）: 決定的な JSON（キーの順）。会話の途中で変わったら次の発言に context_update を足す（aiChat.ts）
  */
 
 import type { AiContext } from '../../data/aiStream';
 import { DEFAULT_SETTINGS, type ModelSettings } from '../../model';
-import type { MarginPrefs } from '../prefs';
+import { isAiProfile, type MarginPrefs } from '../prefs';
 import type { State, UiLeg } from '../state';
 import type { DraftEval } from './aiPropose';
 import { type AiToolEnv, legId, precompute, yen } from './aiTools';
@@ -41,10 +42,14 @@ function sourceOf(s: string | null): AiContext['snapshot']['source'] {
 }
 
 /**
- * 画面の状態（ui/state.ts）と端末の証拠金の設定 → ツールの環境（板が無ければ null）。useAppController と同じ組み立て
+ * 画面の状態（ui/state.ts）と端末の証拠金の設定（と AI に渡す自分の前提。#156）→ ツールの環境（板が無ければ null）。useAppController と同じ組み立て
  * （評価の設定・足の市場・損益グラフの基礎・シナリオ点で広げた全域）。画面（useAiChat）と評価用スクリプトが共用する
  */
-export function aiEnvFromState(state: State, margin: MarginPrefs): AiToolEnv | null {
+export function aiEnvFromState(
+  state: State,
+  margin: MarginPrefs,
+  profile?: string,
+): AiToolEnv | null {
   const chain = state.chain;
   if (!chain) return null;
   const settings: ModelSettings = {
@@ -69,6 +74,7 @@ export function aiEnvFromState(state: State, margin: MarginPrefs): AiToolEnv | n
     margin: { params: marginParamsOf(margin), capital: capitalOf(margin) },
     holidays: state.calendar.holidays,
     draft: { legs: state.legs, evalLegs },
+    ...(profile !== undefined && { profile }),
   };
 }
 
@@ -126,6 +132,8 @@ export function buildAiContext(env: AiToolEnv): AiContext {
   const capital = env.margin.capital;
   if (capital !== null && fin(capital) && capital > 0)
     ctx.capital = { capital_yen: Math.round(capital) };
+  const profile = env.profile?.trim();
+  if (isAiProfile(profile)) ctx.profile = { text: profile };
   const pre = precompute(env);
   if (Object.keys(pre).length > 0) ctx.precomputed = pre;
   return ctx;

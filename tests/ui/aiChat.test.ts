@@ -488,6 +488,37 @@ describe('#136 照合の出所: [AI に聞く] の質問の表示の値・β の
   });
 });
 
+describe('#156 照合の出所: 自分の前提の文の数', () => {
+  const PROFILE = '資金 5,000 千円。1 回の損失は 300 千円まで。デルタは 0.5 枚以内';
+  const ANS =
+    '前提の許容損失 300 千円に対して、資金 5,000 千円の範囲で、デルタは 0.5 枚以内に収めます';
+  const conv = (ctx: AiContext) =>
+    run(
+      INITIAL_AI_CHAT,
+      { type: 'begin', kind: 'chat', text: 'x', now: 1 },
+      { type: 'send', context: ctx, key: 'k0' },
+      DONE_TEXT(ANS),
+    );
+  it('最初の文脈の前提の数を引いた答えは一致する。前提が無ければ不一致', () => {
+    const r = checkNumbers(ANS, numberSources(conv({ ...CTX(0), profile: { text: PROFILE } })));
+    expect(r.tokens.filter((t) => t.status === 'unmatched').map((t) => t.raw)).toEqual([]);
+    expect(r.matched).toBeGreaterThanOrEqual(3);
+    expect(checkNumbers(ANS, numberSources(conv(CTX(0)))).unmatched).toBeGreaterThan(0);
+    // 前提と違う数は今どおり不一致
+    const src = numberSources(conv({ ...CTX(0), profile: { text: PROFILE } }));
+    expect(checkNumbers('損失は 400 千円まで', src).unmatched).toBe(1);
+  });
+  it('会話の途中の文脈の更新（context_update）の前提の数も出所にする', () => {
+    const s = run(
+      conv(CTX(0)),
+      { type: 'begin', kind: 'chat', text: 'y', now: 2 },
+      { type: 'send', context: { ...CTX(0), profile: { text: PROFILE } }, key: 'k1' },
+    );
+    expect(s.messages.at(-1)?.content.some((b) => b.type === 'context_update')).toBe(true);
+    expect(checkNumbers(ANS, numberSources(s)).unmatched).toBe(0);
+  });
+});
+
 describe('押せない理由', () => {
   const s0 = INITIAL_AI_CHAT;
   it('足 0 本・AI 無効・残り 0・送信中・状態を読めない', () => {

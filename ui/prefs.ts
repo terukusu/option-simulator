@@ -31,6 +31,9 @@
  * 足した。版は 1 のまま。無い（#214 より前の保存）・不正 → 項目ごとに既定。px のキーが無く、作業中の版の段のキー
  * tech_line_width（thin / normal / thick）があれば読み替える（細い → 1、普通 → 既定、太い → 2）。段のキーは書かない。
  * 古い画面はこのキーを読まずに書き直すので消える（既定に戻るだけ）。
+ * #156 で AI に渡す自分の前提（ai_profile。自由記述の文字列。AI_PROFILE_MAX 字まで）を足した。版は 1 のまま。前後の空白を
+ * 除いて空・長すぎる・文字列でない → 無し。書くのも同じ条件のときだけ（入れた文字列のまま）。端末にだけ置く（作業の保存・
+ * 保存一覧・書き出し・URL・サーバーには載せない）。古い画面はこのキーを読まずに書き直すので消える。
  */
 
 import {
@@ -54,6 +57,14 @@ import {
 
 export const PREFS_KEY = 'option-simulator.prefs';
 export const PREFS_SCHEMA_VERSION = 1;
+
+/** AI に渡す自分の前提の字数の上限（中継の allowlist.py の MAX_PROFILE_TEXT と同じ。String.length で数える） */
+export const AI_PROFILE_MAX = 1000;
+
+/** 前提として保存・送信できる文字列か（文字列・上限以内・前後の空白を除いて空でない） */
+export function isAiProfile(v: unknown): v is string {
+  return typeof v === 'string' && v.length <= AI_PROFILE_MAX && v.trim() !== '';
+}
 
 /** テーマの設定。auto = 端末に合わせる（prefers-color-scheme） */
 export type ThemePref = 'auto' | 'dark' | 'light';
@@ -134,6 +145,8 @@ export interface Prefs {
   futPaneH?: IndPaneHeights;
   /** テクニカルの線の太さ（#214。px。EMA の 3 本とオシレーターの線（#223 で表記を改めた。キーは同じ）。無い項目・無い = 既定） */
   techLineWidths?: Partial<TechLineWidths>;
+  /** AI に渡す自分の前提（#156。自由記述。無い = 未設定） */
+  aiProfile?: string;
 }
 
 /** 線の太さの JSON のキー（#214。px） */
@@ -181,6 +194,8 @@ function readPaneH(o: Record<string, unknown>): IndPaneHeights | null {
 
 /** AI の免責の文を見たかの JSON のキー（#135） */
 const AI_DISCLAIMER_JSON_KEY = 'ai_disclaimer_seen';
+/** AI に渡す自分の前提の JSON のキー（#156） */
+const AI_PROFILE_JSON_KEY = 'ai_profile';
 
 export const DEFAULT_PREFS: Prefs = { theme: 'auto', margin: { ...DEFAULT_MARGIN_PREFS } };
 
@@ -275,6 +290,8 @@ export function readPrefs(text: string | null): PrefsRead {
   // 線の太さ（#214）: 無い・不正・既定 → 持たない = 既定
   const lw = readLineWidths(o);
   if (lw) prefs.techLineWidths = lw;
+  const profile = o[AI_PROFILE_JSON_KEY];
+  if (isAiProfile(profile)) prefs.aiProfile = profile;
   return { prefs, writable: true };
 }
 
@@ -293,6 +310,7 @@ export function serializePrefs(p: Prefs): string {
       ? m.ignoreLongOptions
       : DEFAULT_MARGIN_PREFS.ignoreLongOptions;
   if (p.aiDisclaimerSeen === true) out[AI_DISCLAIMER_JSON_KEY] = true;
+  if (isAiProfile(p.aiProfile)) out[AI_PROFILE_JSON_KEY] = p.aiProfile;
   // テクニカルの期間は既定と違う項目だけ（組が不正なら書かない = 既定）
   const t = p.technicals;
   if (isTechParams(t)) {

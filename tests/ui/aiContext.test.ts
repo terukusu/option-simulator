@@ -57,3 +57,28 @@ describe('buildAiContext', () => {
     expect(aiEnvFromState({ ...state, chain: null }, caseMargin(c))).toBeNull();
   });
 });
+
+describe('自分の前提（#156 AC3）', () => {
+  const margin = caseMargin(c);
+  it('前提があれば profile.text（前後の空白を除く）が入り、指紋が変わる', () => {
+    const plain = aiEnvFromState(state, margin);
+    const withP = aiEnvFromState(state, margin, '  資金 500 万円。深い OTM の売りが基本  \n');
+    if (!plain || !withP) throw new Error('環境が無い');
+    const a = buildAiContext(plain);
+    const b = buildAiContext(withP);
+    expect(a.profile).toBeUndefined();
+    expect(b.profile).toEqual({ text: '資金 500 万円。深い OTM の売りが基本' });
+    expect(contextKey(a)).not.toBe(contextKey(b));
+    const other = aiEnvFromState(state, margin, '損失は 30 万円まで');
+    if (!other) throw new Error('環境が無い');
+    expect(contextKey(buildAiContext(other))).not.toBe(contextKey(b));
+  });
+  it('空・空白だけ・上限を超える値は送らない', () => {
+    for (const p of ['', '   \n', 'あ'.repeat(1001)]) {
+      const e = aiEnvFromState(state, margin, p);
+      expect(e && buildAiContext(e).profile).toBeUndefined();
+    }
+    const e = aiEnvFromState(state, margin, 'あ'.repeat(1000));
+    expect(e && buildAiContext(e).profile?.text.length).toBe(1000);
+  });
+});

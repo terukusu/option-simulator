@@ -9,6 +9,10 @@ import type { PnlYSettings } from '../view/pnlChart';
 import type { DXUnit } from '../view/scenario';
 import { basisAction, type FutureBasis } from '../view/scenarioRegion';
 import {
+  AI_PROFILE_NOTES,
+  AI_PROFILE_PLACEHOLDER,
+  aiProfileCount,
+  aiProfileField,
   feeField,
   MARGIN_FIELDS,
   MARGIN_LONG_OPTIONS,
@@ -63,11 +67,14 @@ export interface SettingsDialogProps {
   /** テクニカルの線の太さ（px。端末の設定。EMA の 3 本とオシレーターの線。#214） */
   techLineWidths: TechLineWidths;
   onTechLineWidths: (patch: Partial<TechLineWidths>) => void;
+  /** AI に渡す自分の前提（端末の設定。#156。未設定は空文字） */
+  aiProfile: string;
+  onAiProfile: (text: string) => void;
 }
 
 /**
  * 設定のダイアログ（#87 (C)。docs/ui-redesign.md §3・§11-9）: ATM の基準・金額の単位・手数料・損益グラフの縦軸・
- * 先物の basis・ΔX の単位・テーマ・証拠金（概算。#131）・テクニカル指標（#205。線の太さ = #214）・前提（読み取り専用）。変えたらすぐ state / prefs に入る（[保存] なし）。
+ * 先物の basis・ΔX の単位・テーマ・証拠金（概算。#131）・テクニカル指標（#205。線の太さ = #214）・AI に渡す自分の前提（#156）・前提（読み取り専用）。変えたらすぐ state / prefs に入る（[保存] なし）。
  * 値と選べない理由は ui/view/settings.ts、縦軸の欄は舞台の ⋯ と同じ YAxisFields。開いている間だけ描く。
  */
 export function SettingsDialog(p: SettingsDialogProps) {
@@ -192,6 +199,55 @@ function TechField({
           onInput={(e) => onInput(e.currentTarget.value)}
         />
       </div>
+      {error !== null && (
+        <p class="field-error" role="alert">
+          {error}
+        </p>
+      )}
+    </>
+  );
+}
+
+/**
+ * AI に渡す自分の前提の欄（#156）: 入力ごとに判定し、上限以内なら端末の設定に入れる（超えたらエラー文で知らせ、値は
+ * 変えない）。外で値が変わったら欄を戻す
+ */
+function AiProfileField({
+  value,
+  onAiProfile,
+}: {
+  value: string;
+  onAiProfile: (text: string) => void;
+}) {
+  const [text, setText] = useState(value);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    if (aiProfileField(text).ok && text.trim() !== value.trim()) {
+      setText(value);
+      setError(null);
+    }
+  }, [value]);
+  const onInput = (t: string) => {
+    setText(t);
+    const r = aiProfileField(t);
+    setError(r.ok ? null : r.error);
+    if (r.ok) onAiProfile(t);
+  };
+  return (
+    <>
+      <textarea
+        id="set-ai-profile"
+        class="set-textarea"
+        rows={5}
+        value={text}
+        placeholder={AI_PROFILE_PLACEHOLDER}
+        aria-invalid={error !== null}
+        aria-describedby="set-ai-profile-count"
+        onInput={(e) => onInput(e.currentTarget.value)}
+      />
+      <p id="set-ai-profile-count" class="set-note set-count">
+        {aiProfileCount(text)}
+      </p>
       {error !== null && (
         <p class="field-error" role="alert">
           {error}
@@ -400,6 +456,19 @@ function SettingsBody(p: SettingsDialogProps) {
           </div>
         ))}
         {TECH_SETTINGS_NOTES.map((t) => (
+          <p class="set-note" key={t}>
+            {t}
+          </p>
+        ))}
+      </div>
+      <div class="set-row set-ai-profile">
+        <div class="set-line">
+          <label class="set-k" for="set-ai-profile">
+            AI に渡す自分の前提
+          </label>
+        </div>
+        <AiProfileField value={p.aiProfile} onAiProfile={p.onAiProfile} />
+        {AI_PROFILE_NOTES.map((t) => (
           <p class="set-note" key={t}>
             {t}
           </p>

@@ -603,21 +603,35 @@ function betaSource(c: AiContext): unknown[] {
 }
 
 /**
+ * 文脈の値と、自分の前提（#156。利用者自身の文 = 発言の文と同じ読み方で数を足す）。前提の文字列は context の値の
+ * 走査では読まない（文字列を歩かない）ので、ここで表示の値として足す
+ */
+function contextSources(c: AiContext): unknown[] {
+  const out: unknown[] = [c, ...betaSource(c)];
+  if (c.profile) {
+    const shown = displayedValues(c.profile.text);
+    if (Object.keys(shown).length > 0) out.push(shown);
+  }
+  return out;
+}
+
+/**
  * 照合の値（最初の文脈・文脈の更新・ツールの結果）。#136: その会話の [AI に聞く] の質問の文（ASK_PREFIX で始まる
  * 利用者の発言）に入れた画面の表示の値と、シナリオの β の 1% あたりの pt も足す。#140: その会話の利用者の発言の文の数
  * （「最大損失を −1,000 千円に抑える」など。表示の値と同じ読み方）と、AI がツールに渡した入力の値（propose_position の
- * max_loss_floor_yen など。キーの名前で単位）も足す（ほかの会話の値は足さない）
+ * max_loss_floor_yen など。キーの名前で単位）も足す（ほかの会話の値は足さない）。#156: 文脈の自分の前提の文の数も
+ * 利用者の発言と同じく足す
  */
 export function numberSources(s: AiChatState): unknown[] {
   const out: unknown[] = [];
-  if (s.context) out.push(s.context, ...betaSource(s.context));
+  if (s.context) out.push(...contextSources(s.context));
   for (const m of s.messages) {
     if (m.role === 'assistant') {
       for (const b of m.content) if (b.type === 'tool_use') out.push(b.input);
       continue;
     }
     for (const b of m.content) {
-      if (b.type === 'context_update') out.push(b.context, ...betaSource(b.context));
+      if (b.type === 'context_update') out.push(...contextSources(b.context));
       else if (b.type === 'tool_result') out.push(parseJson(b.content[0].text));
       else if (b.type === 'text') {
         const shown = displayedValues(b.text);

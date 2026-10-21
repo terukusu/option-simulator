@@ -50,6 +50,8 @@ export interface AiToolEnv {
   ivStats?: IvStatsData | null;
   /** 提案のツール（#139。作業中のタブの足と、足の列の評価。aiEnvFromState が作る。無ければ no_data） */
   draft?: ProposeDraft | null;
+  /** AI に渡す自分の前提（#156。端末の設定の自由記述。文脈に載せるだけで、ツールは使わない） */
+  profile?: string;
 }
 
 export type ToolResult = Record<string, unknown>;

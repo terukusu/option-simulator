@@ -259,7 +259,13 @@ export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
   // ---- AI（#135）。ツールの環境は送るときに今の state・証拠金の設定から作る（参照の変わらない関数）
   const marginRef = useRef(userPrefs.prefs.margin);
   marginRef.current = userPrefs.prefs.margin;
-  const aiEnv = useCallback(() => aiEnvFromState(stateRef.current, marginRef.current), []);
+  // AI に渡す自分の前提（#156）も送るときの端末の設定を読む（文脈の profile）
+  const profileRef = useRef(userPrefs.prefs.aiProfile);
+  profileRef.current = userPrefs.prefs.aiProfile;
+  const aiEnv = useCallback(
+    () => aiEnvFromState(stateRef.current, marginRef.current, profileRef.current),
+    [],
+  );
   // technicals のツール（#200）: 先物推移と同じ口から日足・1 時間足を読む（呼ばれたときだけ・10 分覚える）
   // 期間（#205）は送るときの端末の設定 = 先物推移の段と同じ値をデータに載せる（中継のスキーマは変えない）
   const techRef = useRef(userPrefs.technicals);
@@ -846,6 +852,8 @@ export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
         onTechParams={userPrefs.setTechnicals}
         techLineWidths={userPrefs.techLineWidths}
         onTechLineWidths={userPrefs.setTechLineWidths}
+        aiProfile={userPrefs.prefs.aiProfile ?? ''}
+        onAiProfile={userPrefs.setAiProfile}
       />
       <BookDialog
         open={c.bookOpen}

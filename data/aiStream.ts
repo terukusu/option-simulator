@@ -88,6 +88,8 @@ export interface AiContext {
     iv_mode?: 'absolute' | 'relative';
   };
   capital?: { capital_yen: number; max_loss_yen?: number };
+  /** 利用者が設定に書いた自分の前提（#156。自由記述。中継の上限 1,000 字） */
+  profile?: { text: string };
   precomputed?: Record<string, unknown>;
 }
 

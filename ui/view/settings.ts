@@ -7,6 +7,7 @@
  * #205 でテクニカル指標の節（RSI・MACD・ストキャスティクスの期間。端末の設定。先物推移の段と AI のツール technicals に
  * 同じ値を渡す）の欄の判定を足した。
  * #214 で同じ節に線の太さ（EMA の線・オシレーターの線の px。#223 で表記を改めた。ui/view/techLineWidth.ts）を足した。
+ * #156 で節「AI に渡す自分の前提」（自由記述の欄 1 つ。端末の設定）の判定・字数の表示・注記を足した。
  */
 
 import {
@@ -19,6 +20,7 @@ import {
   type TechParams,
 } from '../../model';
 import {
+  AI_PROFILE_MAX,
   DEFAULT_MARGIN_PREFS,
   isMarginPrefValue,
   type MarginPrefKey,
@@ -258,3 +260,33 @@ export function techField(
     return { ok: false, error: TECH_EMA_ORDER_ERROR };
   return { ok: true, value: v };
 }
+
+/** 字数の桁区切り（1,000） */
+const count = (n: number) => n.toLocaleString('en-US');
+
+/**
+ * AI に渡す自分の前提の欄の判定（#156。入力ごと）: 上限以内なら通す（前後の空白だけ・空 = 未設定）、超えたらエラー文。
+ * 字数は String.length（中継の上限と同じ数え方より厳しくならない側）
+ */
+export function aiProfileField(text: string): { ok: true } | { ok: false; error: string } {
+  if (text.length <= AI_PROFILE_MAX) return { ok: true };
+  return {
+    ok: false,
+    error: `${count(AI_PROFILE_MAX)} 字までにする（今 ${count(text.length)} 字。保存していない）`,
+  };
+}
+
+/** 欄の下の字数（「120 / 1,000 字」） */
+export function aiProfileCount(text: string): string {
+  return `${count(text.length)} / ${count(AI_PROFILE_MAX)} 字`;
+}
+
+/** 欄の例（placeholder。架空の値） */
+export const AI_PROFILE_PLACEHOLDER =
+  '例: 資金 500 万円。1 回の損失は 30 万円まで。期近の深い OTM の売りが基本。ネイキッドのコールの売りは避ける。決算前は建てない';
+
+/** AI に渡す自分の前提の節の注記 */
+export const AI_PROFILE_NOTES: readonly string[] = [
+  '資金・許容できる損失・好む形・避ける形・判断の癖などを書くと、AI に相談するたびに一緒に渡します。AI は答えの方針に使い、前提の数字を引くことはあっても、計算は設定の資金とシミュレーターの値から行います',
+  'この端末にだけ保存（保存一覧・共有の URL・サーバーに載せない）。空にすると渡しません。会話の途中で変えると次の発言から効きます',
+];
