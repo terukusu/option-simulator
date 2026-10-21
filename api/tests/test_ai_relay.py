@@ -519,6 +519,39 @@ def test_ask_kind_and_topic_logged_without_text(capsys):
     assert "topic" not in gw.calls[0] and "tile.maxLoss" not in json.dumps(gw.calls[0], ensure_ascii=False)
 
 
+def test_preset_kind_and_topic_logged_without_text(capsys):
+    # 定型の質問（#140 AC3）: ログ ai_request に kind preset と定型の ID。質問の文はログに出ず、ID は上流の引数に出ない
+    client, gw, _, _ = ai_app()
+    text = f"{relay.PRESET_PREFIX}反論\nこの建て方が間違っているとしたら、その理由を三つ挙げてください。"
+    body = ai_body([{"role": "user", "content": [{"type": "text", "text": text}]}], kind="preset", topic="rebut")
+    res = post(client, body)
+    assert res.status_code == 200
+    res.get_data()
+    out = capsys.readouterr().out
+    rec = [r for r in log_records(out) if r["event"] == "ai_request"][0]
+    assert rec["kind"] == "preset" and rec["topic"] == "rebut" and rec.get("error") is None
+    assert relay.PRESET_PREFIX not in out and "建て方" not in out
+    assert "topic" not in gw.calls[0] and '"rebut"' not in json.dumps(gw.calls[0], ensure_ascii=False)
+
+
+def test_preset_topic_rejected_without_upstream_call(capsys):
+    client, gw, store, _ = ai_app()
+    for body in (ai_body(kind="preset"), ai_body(kind="preset", topic="INJECT_zz9"), ai_body(topic="crash")):
+        res = post(client, body)
+        assert res.status_code == 400 and res.get_json() == {"error": "bad_request"}
+    assert gw.count() == 0 and store.charged == {}
+    assert "INJECT_zz9" not in capsys.readouterr().out
+
+
+def test_system_prompt_has_preset_rules():
+    # 定型の質問（#140 AC4）: system には案内だけ（手順はスキル simulator:presets）。ツールは増やさない
+    from simulator_api.ai.tools import REGISTRY
+
+    assert relay.PRESET_PREFIX in relay.SYSTEM_PROMPT and "simulator:presets" in relay.SYSTEM_PROMPT
+    assert "## 崩れ方" not in relay.SYSTEM_PROMPT
+    assert len(REGISTRY) == 11
+
+
 def test_chat_log_has_no_topic(capsys):
     client, _, _, _ = ai_app()
     post(client, ai_body()).get_data()

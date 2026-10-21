@@ -32,6 +32,7 @@ import {
   toolResultBlocks,
 } from '../../ui/view/aiChat';
 import { checkNumbers } from '../../ui/view/aiNumbers';
+import { AI_PRESETS, presetBlocked } from '../../ui/view/aiPresets';
 
 /**
  * #135 AC8: AI のチャットの状態（ui/view/aiChat.ts）。送信・イベント・ツールの往復・失敗・中止・保存の形・押せない理由。
@@ -542,5 +543,89 @@ describe('押せない理由', () => {
     expect(remainingText(STATUS, 1.234)).toBe('残り $1.23 / $3.00');
     expect(remainingText({ ...STATUS, counted: false }, null)).toContain('数えない');
     expect(remainingText({ ...STATUS, enabled: false }, null)).toBeNull();
+  });
+});
+
+describe('#140 AC2 定型の質問（kind preset と定型の ID）', () => {
+  const rebut = AI_PRESETS.find((p) => p.id === 'rebut');
+  if (!rebut) throw new Error('反論の定型が無い');
+  const toolUse: AiChatAction = ev({
+    type: 'done',
+    stop_reason: 'tool_use',
+    content: [{ type: 'tool_use', id: 't1', name: 'smile_position', input: {} }],
+    remaining_usd: 2.2,
+  });
+
+  it('preset の要求は kind preset と topic（定型の ID）を持ち、ツールの往復の後の要求でも保つ', () => {
+    let s = run(
+      first,
+      { type: 'begin', kind: 'preset', text: rebut.text, now: 2000, topic: rebut.id },
+      { type: 'send', context: CTX(0), key: 'k0' },
+    );
+    expect(requestOf(s)).toMatchObject({ kind: 'preset', topic: 'rebut' });
+    expect(s.messages.at(-1)).toEqual({
+      role: 'user',
+      content: [{ type: 'text', text: rebut.text }],
+    });
+    s = run(s, toolUse, {
+      type: 'toolResults',
+      blocks: [
+        {
+          type: 'tool_result',
+          tool_use_id: 't1',
+          content: [{ type: 'text', text: '{"expiries":[]}' }],
+        },
+      ],
+    });
+    expect(requestOf(s)).toMatchObject({ kind: 'preset', topic: 'rebut' });
+  });
+
+  it('失敗の後の [もう一度] の材料（failed）に kind preset と topic が残る', () => {
+    const f = run(
+      first,
+      { type: 'begin', kind: 'preset', text: rebut.text, now: 2000, topic: rebut.id },
+      { type: 'send', context: CTX(0), key: 'k0' },
+      ev({ type: 'error', code: 'timeout' }),
+    );
+    expect(f.failed).toMatchObject({ kind: 'preset', topic: 'rebut', userText: rebut.text });
+    expect(f.messages).toEqual(first.messages);
+  });
+
+  it('押せない理由: 足の要る 4 つは [このポジションを診断] と同じ、板の前提・IV は自由な質問と同じ', () => {
+    expect(AI_PRESETS.filter((p) => p.needsLegs).map((p) => p.id)).toEqual([
+      'crash',
+      'rebut',
+      'hedge',
+      'exit',
+    ]);
+    const sending = run(INITIAL_AI_CHAT, { type: 'begin', kind: 'chat', text: 'x', now: 1 });
+    const gates: AiGate[] = [
+      GATE,
+      { ...GATE, legCount: 0 },
+      { ...GATE, hasChain: false },
+      { ...GATE, legCount: 21 },
+      { ...GATE, status: null },
+      { ...GATE, status: { error: 'network' } },
+      { ...GATE, status: { ...STATUS, enabled: false } },
+      { ...GATE, status: { ...STATUS, remaining_usd: 0 } },
+    ];
+    for (const p of AI_PRESETS) {
+      for (const s of [INITIAL_AI_CHAT, sending]) {
+        for (const g of gates) {
+          const want = p.needsLegs ? diagnoseBlocked(s, g) : sendBlocked(s, g);
+          expect(presetBlocked(s, g, p)).toBe(want);
+        }
+      }
+    }
+    // 足 0 本: 崩れ方は押せない（理由つき）、板の前提は押せる
+    const noLegs = { ...GATE, legCount: 0 };
+    const crash = AI_PRESETS[0];
+    const board = AI_PRESETS[2];
+    if (!crash || !board) throw new Error('定型が足りない');
+    expect(presetBlocked(INITIAL_AI_CHAT, noLegs, crash)).toBe(
+      '足がありません（ポジションを組んでから押してください）',
+    );
+    expect(presetBlocked(INITIAL_AI_CHAT, noLegs, board)).toBeNull();
+    expect(presetBlocked(sending, GATE, board)).toBe('送信中です');
   });
 });

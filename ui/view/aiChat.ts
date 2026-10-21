@@ -53,7 +53,7 @@ export const PHASE_LABEL: Record<AiPhase, string> = {
 export interface AiTurn {
   kind: AiKind;
   userText: string;
-  /** [AI に聞く] の場所（#136。kind が ask のときだけ。要求の topic） */
+  /** [AI に聞く] の場所（#136）・定型の ID（#140）。kind が ask / preset のときだけ（要求の topic） */
   topic?: string;
   phase: AiPhase;
   /** 押した時刻（ms。呼び出し側の時計） */
@@ -72,7 +72,7 @@ export interface AiTurn {
 export interface AiFailed {
   kind: AiKind;
   userText: string;
-  /** [もう一度] で同じ場所として送り直す（#136） */
+  /** [もう一度] で同じ場所・定型として送り直す（#136・#140） */
   topic?: string;
   partial: string;
   code: string;
@@ -113,6 +113,9 @@ export type AiChatAction =
   | { type: 'restore'; saved: SavedAiChat };
 
 const STOP_NOTES = new Set(['refusal', 'max_tokens', 'pause_turn']);
+
+/** topic を持つ kind（ask = [AI に聞く] の場所。#136。preset = 定型の ID。#140） */
+export const hasTopic = (k: AiKind): boolean => k === 'ask' || k === 'preset';
 
 function fail(s: AiChatState, code: string, remainingUsd: number | null = null): AiChatState {
   const t = s.turn;
@@ -200,8 +203,8 @@ export function aiChatReduce(s: AiChatState, a: AiChatAction): AiChatState {
         turn: {
           kind: a.kind,
           userText: a.text,
-          // topic は ask のときだけ（chat・diagnose に付けると中継が 400）
-          ...(a.kind === 'ask' && a.topic !== undefined && { topic: a.topic }),
+          // topic は ask・preset のときだけ（chat・diagnose に付けると中継が 400）
+          ...(hasTopic(a.kind) && a.topic !== undefined && { topic: a.topic }),
           phase: 'computing',
           startedAt: a.now,
           thinking: '',
@@ -258,7 +261,7 @@ export function aiChatReduce(s: AiChatState, a: AiChatAction): AiChatState {
   }
 }
 
-/** 今の turn の要求の本文（turn が無い・文脈が無ければ null）。ask は場所の topic を付ける（#136） */
+/** 今の turn の要求の本文（turn が無い・文脈が無ければ null）。ask は場所、preset は定型の topic を付ける（#136・#140） */
 export function requestOf(s: AiChatState): AiRequest | null {
   if (!s.turn || s.context === null) return null;
   const body: AiRequest = {
@@ -267,7 +270,7 @@ export function requestOf(s: AiChatState): AiRequest | null {
     context: s.context,
     messages: s.messages,
   };
-  if (s.turn.kind === 'ask' && s.turn.topic !== undefined) body.topic = s.turn.topic;
+  if (hasTopic(s.turn.kind) && s.turn.topic !== undefined) body.topic = s.turn.topic;
   return body;
 }
 

@@ -90,6 +90,37 @@ def test_topic_not_sent_upstream():
     assert "tile.maxLoss" not in sent and "topic" not in sent
 
 
+# ---- 定型の質問（#140 AC3）: kind preset と定型の ID ----
+
+def test_ok_preset_with_topic():
+    assert "preset" in allowlist.KINDS
+    assert allowlist.PRESET_TOPICS == ("crash", "rebut", "board", "hedge", "exit", "iv")
+    for topic in allowlist.PRESET_TOPICS:
+        req = parse(ai_body(kind="preset", topic=topic))
+        assert req.kind == "preset" and req.topic == topic
+
+
+@pytest.mark.parametrize("body, path, reason", [
+    (ai_body(kind="preset"), "topic", "missing"),
+    (ai_body(kind="preset", topic="tile.maxLoss"), "topic", "enum"),
+    (ai_body(kind="preset", topic="このポジションが一番崩れるのは？"), "topic", "enum"),
+    (ai_body(kind="preset", topic=["crash"]), "topic", "enum"),
+    (ai_body(kind="ask", topic="crash"), "topic", "enum"),
+    (ai_body(topic="crash"), "topic", "unknown_key"),
+    (ai_body(kind="diagnose", topic="crash"), "topic", "unknown_key"),
+], ids=["preset_without_topic", "ask_topic_on_preset", "free_text_topic", "list_topic", "preset_topic_on_ask",
+        "chat_with_preset_topic", "diagnose_with_preset_topic"])
+def test_preset_topic_rejected(body, path, reason):
+    e = bad(body)
+    assert (e.path, e.reason) == (path, reason)
+
+
+def test_preset_topic_not_sent_upstream():
+    req = parse(ai_body(kind="preset", topic="rebut"))
+    sent = json.dumps(allowlist.upstream_messages(req), ensure_ascii=False)
+    assert "rebut" not in sent and "topic" not in sent
+
+
 def update_body(update_ctx=None, extra_first=None):
     """3 件目の user（2 回目の発言）に文脈の更新を足した会話"""
     ctx = ai_context(with_precomputed=False)

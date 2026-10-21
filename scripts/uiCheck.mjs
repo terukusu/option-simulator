@@ -10190,7 +10190,8 @@ async function openAi(page, w, sheet = 'peek') {
 
 /**
  * AI のパネルの中（#135 AC7）: 見出しの残り（$ を含む・切れない・窓の中）、[このポジションを診断]・入力欄・送信が窓の中、
- * 見出し・ボタン・進み具合の行が切れていない、.panel-body が横にはみ出していない、ドックの 6 つ（5 つ）のラベルが切れない
+ * 定型の質問の行（#140 AC5。6 つ。行は窓の中で、入らない分は行の中を横にスクロール）、
+ * 見出し・ボタン・チップ・進み具合の行が切れていない、.panel-body が横にはみ出していない、ドックの 6 つ（5 つ）のラベルが切れない
  */
 async function aiCheck(page, label, w) {
   const r = await page.evaluate(() => {
@@ -10218,13 +10219,19 @@ async function aiCheck(page, label, w) {
     }));
     const heads = [
       ...(sec?.querySelectorAll(
-        '.panel-head h2, .panel-head .btn, .ai-actions .btn, .ai-input .btn, .ai-progress',
+        '.panel-head h2, .panel-head .btn, .ai-actions .btn, .ai-presets .chip, .ai-input .btn, .ai-progress',
       ) ?? []),
     ];
     return {
       remaining: (sub?.textContent ?? '').trim(),
       remainingOk: inWin(sub) && !cut(sub),
       diagnose: inWin(sec?.querySelector('button[data-ai="diagnose"]')),
+      presets: inWin(sec?.querySelector('[data-ai="presets"]')),
+      presetChips: sec?.querySelectorAll('[data-ai="presets"] .chip').length ?? 0,
+      presetsOver: (() => {
+        const row = sec?.querySelector('[data-ai="presets"]');
+        return !!row && row.scrollWidth > row.clientWidth + 0.5;
+      })(),
       input: inWin(sec?.querySelector('.ai-input textarea')),
       send: inWin(sec?.querySelector('button[data-ai="send"]')),
       cuts: heads.filter(cut).map((e) => (e.textContent ?? '').trim().slice(0, 12)),
@@ -10237,6 +10244,9 @@ async function aiCheck(page, label, w) {
   if (!r.remaining.includes('$')) bad.push(`残りの表示「${r.remaining}」`);
   if (!r.remainingOk) bad.push('残りが切れている / 窓の外');
   if (!r.diagnose) bad.push('[このポジションを診断] が窓の外');
+  if (!r.presets) bad.push('定型の質問の行が窓の外');
+  if (r.presetChips !== 6) bad.push(`定型のチップ ${r.presetChips} 個`);
+  if (r.presetsOver) bad.push('定型の質問の行の外枠が横にはみ出す');
   if (!r.input || !r.send) bad.push('入力欄・送信が窓の外');
   if (r.cuts.length) bad.push(`切れ ${r.cuts.join('、')}`);
   if (r.bodyOver) bad.push('.panel-body が横にはみ出す');
