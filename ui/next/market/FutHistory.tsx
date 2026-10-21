@@ -16,8 +16,10 @@ import {
   FUT_PANE_HINT,
   FUT_PLOT_LABEL,
   FUT_SERIES,
+  type FutCursor,
   type FutNowValue,
   fmtYen,
+  futCursorView,
   futEmaLabel,
   futEmaOverlays,
   futEmaReadout,
@@ -32,6 +34,7 @@ import {
   IND_KINDS,
   IND_PANE_H,
   type IndKind,
+  type IndPaneCursor,
   type IndPaneHeights,
   indKindLabel,
 } from '../../view/indicators';
@@ -44,7 +47,7 @@ import { Popover } from '../parts/Popover';
 import { Seg } from '../parts/Seg';
 import { TermLinks } from '../parts/TermLinks';
 import { useSize } from '../useSize';
-import { IndicatorPanes, type IndPaneCursor } from './IndicatorPanes';
+import { IndicatorPanes } from './IndicatorPanes';
 import { IvPlot } from './IvPlot';
 
 export interface FutHistoryProps {
@@ -81,13 +84,9 @@ export interface FutHistoryProps {
   lineWidths: TechLineWidths;
 }
 
-/** カーソル（足と、触っている所。pane = 'price' は価格の描画域、段の種類は段の上、null は縦線だけ） */
-interface FutCursor {
+/** カーソル（その足の並びと、足・触っている所 = futHistory.ts の FutCursor） */
+interface FutCursorAt extends FutCursor {
   bars: readonly FutBar[];
-  i: number;
-  y: number | null;
-  pane: 'price' | IndKind | null;
-  touch: boolean;
 }
 
 const NO_IND: Indicators | null = null;
@@ -118,12 +117,12 @@ function FutHistoryView(p: FutHistoryProps) {
     () => (right ? futNowPoint(p.now, bars, tf, load.lastAt, p.nonTradingDays) : null),
     [right, p.now, bars, tf, load.lastAt, p.nonTradingDays],
   );
-  const [cur, setCur] = useState<FutCursor | null>(null);
+  const [cur, setCur] = useState<FutCursorAt | null>(null);
   const live = cur && cur.bars === bars ? cur : null;
-  const cursor = live ? live.i : null;
-  // 価格の十字線の横線は価格の上のときだけ（段の上なら縦線と横軸の札だけ。#207）
-  const onPrice = live?.pane === 'price';
-  const cursorY = onPrice ? (live?.y ?? null) : null;
+  // 価格の十字線の横線は価格の上のときだけ（段の上なら縦線と横軸の札だけ。#207）。十字線の足が表示範囲の外なら十字線・
+  // 段の十字線・浮いた読み取りを描かず、読み取りは最新の足（#227。futCursorView）
+  const cv = futCursorView(live, bars.length, viewport);
+  const cursor = cv.shown;
   const onCursor = useMemo(
     () => (i: number | null, y?: number | null) =>
       setCur(i === null ? null : { bars, i, y: y ?? null, pane: 'price', touch: false }),
@@ -138,15 +137,16 @@ function FutHistoryView(p: FutHistoryProps) {
       ),
     [bars],
   );
-  const pane = live?.pane;
-  const paneY = live?.y;
-  const paneTouch = live?.touch ?? false;
+  const pc = cv.pane;
+  const paneKind = pc?.pane;
+  const paneY = pc?.y;
+  const paneTouch = pc?.touch ?? false;
   const paneCursor = useMemo<IndPaneCursor | null>(
     () =>
-      pane && pane !== 'price' && paneY !== null && paneY !== undefined
-        ? { pane, y: paneY, touch: paneTouch }
+      paneKind !== undefined && paneY !== undefined
+        ? { pane: paneKind, y: paneY, touch: paneTouch }
         : null,
-    [pane, paneY, paneTouch],
+    [paneKind, paneY, paneTouch],
   );
   const rolls = useCallback(
     (range: Domain) => futRollMarks(bars, viewport, range),
@@ -288,9 +288,9 @@ function FutHistoryView(p: FutHistoryProps) {
               viewport={viewport}
               segments={segments}
               rightLoaded={rightLoaded}
-              cursor={cursor}
-              cursorY={cursorY}
-              crossH={onPrice}
+              cursor={cv.plot}
+              cursorY={cv.cursorY}
+              crossH={cv.crossH}
               leftSlack={p.leftSlack}
               now={nowPt}
               scenario={null}
@@ -320,6 +320,7 @@ function FutHistoryView(p: FutHistoryProps) {
               stackH={stackH}
               leftSlack={p.leftSlack}
               paneCursor={paneCursor}
+              paneTouch={cv.paneTouch}
               onViewport={p.onViewport}
               onCursor={onPaneCursor}
               onMax={onMax}

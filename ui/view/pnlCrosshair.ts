@@ -228,6 +228,21 @@ export function markLabelBox(l: {
 }
 
 /**
+ * タッチのタップの後のカーソル（#217・#227。§4.1 の共通の規則）: タップで置いた十字線を描いている（shown = pinned で
+ * pnlCrosshair が null でない）なら消す、無い・表示範囲の外なら押した位置に置く（描画域の外は置かない）
+ */
+export function pnlTapCursor(
+  chart: Pick<PnlChartModel, 'empty' | 'domain' | 'yDomain' | 'plot'>,
+  shown: boolean,
+  sx: number,
+  sy: number,
+): PnlCursor | null {
+  if (shown) return null;
+  const at = pnlCursorAt(chart, sx, sy, false);
+  return at ? { ...at, pinned: true } : null;
+}
+
+/**
  * 画素（svg の座標）→ カーソルの値（X・損益）。clampToPlot = 描画域の外は端へ寄せる（交点のドラッグ）。
  * そうでなければ描画域の外は null（ホバー・タップで消す）。
  */

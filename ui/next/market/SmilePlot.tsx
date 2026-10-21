@@ -5,7 +5,7 @@ import { type Domain, fitTicks, linear, niceTicks } from '../../chart/scale';
 import { pure } from '../../components/pure';
 import { useChartGestures } from '../../components/useChartGestures';
 import type { Action } from '../../state';
-import { CROSS_TOUCH_GRAB_PX, crossTapAction } from '../../view/crosshair';
+import { CROSS_TOUCH_GRAB_PX } from '../../view/crosshair';
 import { fmtNum } from '../../view/format';
 import {
   AXIS_LABEL,
@@ -19,9 +19,9 @@ import {
   scrubStrike,
   smileCrosshair,
   smileCursorAt,
-  smileDotCursor,
   smileMarkX,
   smileModel,
+  smileTapCursor,
   stepStrike,
   tapStrike,
 } from '../../view/smile';
@@ -96,7 +96,9 @@ function SmilePlotView(p: SmilePlotProps) {
   useEffect(() => {
     if (axis) setCursor(null);
   }, [axis]);
-  const xh = useMemo(() => smileCrosshair(model, cursor, w, h), [model, cursor, w, h]);
+  // タッチの交点をつかんで動かしている間（#227。この間だけ読み取りを指で隠れない所へ）
+  const [held, setHeld] = useState(false);
+  const xh = useMemo(() => smileCrosshair(model, cursor, w, h, held), [model, cursor, w, h, held]);
   const select = (k: number | null) => {
     if (k !== null && k !== pick) dispatch({ type: 'pickSmile', pick: { monthId: month.id, k } });
   };
@@ -119,14 +121,17 @@ function SmilePlotView(p: SmilePlotProps) {
       if (!ptr.current.touch) return;
       // タッチ（#217 の共通の規則）: 点のタップは選択（今のまま）+ 十字線をその点に。解除したら消す。点の外は
       // 出ていなければ置く・出ていれば消す
-      if (pickStrike(model, x, range) !== null) {
-        setCursor(k === null ? null : smileDotCursor(model, k, true));
-        return;
-      }
+      // 「出ている」は描いている十字線（表示範囲の外なら置く。#227）
       setCursor(
-        crossTapAction(cursor !== null) === 'hide'
-          ? null
-          : smileCursorAt(model, x, y, w, h, true, false),
+        smileTapCursor(model, {
+          shown: xh !== null,
+          onDot: pickStrike(model, x, range) !== null,
+          k,
+          x,
+          y,
+          width: w,
+          height: h,
+        }),
       );
     },
     ...(cursor?.touch && xh
@@ -136,6 +141,7 @@ function SmilePlotView(p: SmilePlotProps) {
             setCursor(smileCursorAt(model, x, y, w, h, true, true)),
         }
       : {}),
+    onCrossHold: setHeld,
     // 長押し（今のまま）: 選択を最寄りの点へ切り替える
     scrub: { linePx: null },
     onScrub: (x) => select(scrubStrike(model, x, range)),

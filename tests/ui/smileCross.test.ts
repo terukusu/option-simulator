@@ -12,6 +12,7 @@ import {
   smileCurveIv,
   smileDotCursor,
   smileModel,
+  smileTapCursor,
 } from '../../ui/view/smile';
 import { fixture } from '../support/fixtures';
 
@@ -86,18 +87,27 @@ describe('スマイルの十字線（#217）', () => {
     );
   });
 
-  it('タッチの読み取りは指が上 40% なら下端、それ以外は上端（マウスは常に上端）', () => {
+  it('#227 AC3: タッチの交点をつかんでいる間だけ、指が上 40% なら読み取りは下端。離した後・マウスは上端', () => {
     const m = smileModel(month, 'B', 'k');
     const x = (m.domain[0] + m.domain[1]) / 2;
     const hi = m.yDomain[1] - (m.yDomain[1] - m.yDomain[0]) * 0.05;
     const lo = m.yDomain[0] + (m.yDomain[1] - m.yDomain[0]) * 0.05;
     const h = 220;
-    const up = smileCrosshair(m, { x, iv: hi, touch: true }, 300, h);
-    const down = smileCrosshair(m, { x, iv: lo, touch: true }, 300, h);
-    const mouse = smileCrosshair(m, { x, iv: hi, touch: false }, 300, h);
-    expect(up?.read.y).toBe(h - SMILE_MARGIN.bottom - 9);
-    expect(down?.read.y).toBe(SMILE_MARGIN.top + 9);
-    expect(mouse?.read.y).toBe(SMILE_MARGIN.top + 9);
+    const top = SMILE_MARGIN.top + 9;
+    const bottom = h - SMILE_MARGIN.bottom - 9;
+    // つかんで動かしている間
+    expect(smileCrosshair(m, { x, iv: hi, touch: true }, 300, h, true)?.read.y).toBe(bottom);
+    expect(smileCrosshair(m, { x, iv: lo, touch: true }, 300, h, true)?.read.y).toBe(top);
+    // 離した後（置いたまま）は PC のホバーと同じ上端（指は離れている）。既定は離した後
+    expect(smileCrosshair(m, { x, iv: hi, touch: true }, 300, h, false)?.read.y).toBe(top);
+    expect(smileCrosshair(m, { x, iv: hi, touch: true }, 300, h)?.read.y).toBe(top);
+    // マウスはつかんでいても（来ないが）上端
+    expect(smileCrosshair(m, { x, iv: hi, touch: false }, 300, h, true)?.read.y).toBe(top);
+    // 読み取りの位置のほかは同じ
+    const held = smileCrosshair(m, { x, iv: hi, touch: true }, 300, h, true);
+    const rel = smileCrosshair(m, { x, iv: hi, touch: true }, 300, h, false);
+    expect({ ...held, read: null }).toEqual({ ...rel, read: null });
+    expect(held?.read.text).toBe(rel?.read.text);
   });
 
   it('画素 → カーソル: 描画域の外は null（ホバー）、clamp なら端の値（長押しのドラッグ）', () => {
@@ -137,5 +147,32 @@ describe('タッチのタップの十字線（#217 の共通の規則）', () =>
     expect(smileDotCursor(m, -1, true)).toBeNull();
     const xh = smileCrosshair(m, c, 300, 220);
     expect(xh?.xTag.text).toBe(smileCrossXText('k', mid.x));
+  });
+});
+
+describe('#227: タッチのタップ（smileTapCursor）。表示範囲の外の十字線は「出ていない」ので置く', () => {
+  it('点の外: 描いている十字線があれば消す、表示範囲の外（描いていない）ならその位置に置く。点は吸着', () => {
+    const m = smileModel(month, 'B', 'k');
+    const zoomed = smileModel(month, 'B', 'k', [m.domain[0], (m.domain[0] + m.domain[1]) / 2]);
+    const w = 300;
+    const h = 220;
+    const old = { x: m.domain[1] - 1, iv: 20, touch: true };
+    // 拡大で表示範囲の外 → smileCrosshair は null（描いていない）
+    expect(smileCrosshair(zoomed, old, w, h)).toBeNull();
+    const tap = { onDot: false, k: null, x: 150, y: 100, width: w, height: h };
+    const placed = smileTapCursor(zoomed, {
+      ...tap,
+      shown: smileCrosshair(zoomed, old, w, h) !== null,
+    });
+    expect(placed).toEqual(smileCursorAt(zoomed, 150, 100, w, h, true, false));
+    expect(placed).not.toBeNull();
+    // 描いている → 消す
+    expect(smileTapCursor(zoomed, { ...tap, shown: true })).toBeNull();
+    // 点のタップは選択の点に吸着・解除で消す（描いているかによらない）
+    const k = zoomed.strikeXs[0]?.k ?? 0;
+    expect(smileTapCursor(zoomed, { ...tap, onDot: true, k, shown: true })).toEqual(
+      smileDotCursor(zoomed, k, true),
+    );
+    expect(smileTapCursor(zoomed, { ...tap, onDot: true, k: null, shown: false })).toBeNull();
   });
 });

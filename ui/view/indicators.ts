@@ -22,8 +22,9 @@ import {
   type TechParams,
 } from '../../model';
 import { type Domain, linear, padDomain } from '../chart/scale';
+import { crossFloatBottom } from './crosshair';
 import { DASH, fmtNum } from './format';
-import { IV_MARGIN, IV_TAG_H, IV_TAG_PAD_Y, labelPx } from './ivHistory';
+import { IV_MARGIN, IV_TAG_H, IV_TAG_PAD_Y, ivCursorBar, labelPx } from './ivHistory';
 
 export type IndKind = 'rsi' | 'macd' | 'stoch';
 
@@ -285,8 +286,9 @@ export function indReadout(
 ): IndReadout {
   const ci =
     n === 0 ? -1 : cursor === null ? n - 1 : Math.min(Math.max(Math.round(cursor), 0), n - 1);
-  const x = cursor === null || n === 0 ? null : r1(linear(viewport, range)(ci));
-  const cursorX = x !== null && x >= range[0] && x <= range[1] ? x : null;
+  // 縦線は十字線の足が表示範囲の内のときだけ（価格の ivCrosshair と同じ判定 = ivCursorBar。#227）
+  const shown = ivCursorBar(cursor, n, viewport);
+  const cursorX = shown === null ? null : r1(linear(viewport, range)(shown));
   if (kind === 'macd') {
     const { macd, signal, hist } = ind.macd;
     return {
@@ -324,6 +326,13 @@ export function indImgLabel(kind: IndKind, p: TechParams): string {
 }
 
 // ---- 段の十字線・高さ・最大化（#207。docs/ui-redesign.md §4.8）
+
+/** 段の上の十字線（触っている段・段の座標の高さ・タッチか） */
+export interface IndPaneCursor {
+  pane: IndKind;
+  y: number;
+  touch: boolean;
+}
 
 /** 段の十字線の横線と縦軸の札（横線 = 指 / カーソルの高さ。足の値に寄せない） */
 export interface IndCross {
@@ -599,4 +608,48 @@ export function indHiddenNote(hidden: readonly IndKind[]): string | null {
   if (hidden.length === 0) return null;
   const names = hidden.map((k) => IND_KINDS.find((x) => x.value === k)?.text ?? k).join('・');
   return `高さが足りないので ${names} を隠しています`;
+}
+
+/** スマホ（タッチ）の段の十字線の浮いた読み取り（.ind-float。#207・#227） */
+export interface IndFloat {
+  /** 段の名前（期間つき） */
+  title: string;
+  /** 横線の高さの値（縦軸の札と同じ文字） */
+  ruler: string;
+  /** その足の値（段の見出しと同じ） */
+  values: IndReadout['values'];
+  /** 枠の下端に置く（指が枠の上 40% にある = crossFloatBottom） */
+  bottom: boolean;
+}
+
+/**
+ * 段の十字線の浮いた読み取り（#227。docs/ui-redesign.md §4.1・§4.8）: タッチで置いた段の十字線の交点を **つかんで動かす間
+ * だけ**（held）、触っている段の名前・横線の値・その足の値を指から離れた所（価格と段を包む枠の上端、指が上 40% なら下端）に
+ * 出す。離した後（置いたまま）・マウス・段が配置に無い（隠した・ほかの段の最大化）・横線が無い・十字線の足が表示範囲の
+ * 外（縦線 cursorX が無い）なら null = 段の中の見出しの値・縦軸の札だけ（PC のホバーと同じ）。
+ * models・crosses・readouts は layout.panes と同じ並び
+ */
+export function indFloat(p: {
+  pc: IndPaneCursor | null;
+  held: boolean;
+  layout: FutPaneLayout;
+  models: readonly Pick<IndPaneModel, 'kind' | 'title'>[];
+  crosses: readonly (IndCross | null)[];
+  readouts: readonly IndReadout[];
+  stackH: number;
+}): IndFloat | null {
+  const { pc } = p;
+  if (!pc?.touch || !p.held) return null;
+  const i = p.layout.panes.findIndex((s) => s.kind === pc.pane);
+  const m = p.models[i];
+  const slot = p.layout.panes[i];
+  const c = p.crosses[i];
+  const ro = p.readouts[i];
+  if (i < 0 || !m || !slot || !c || !ro || ro.cursorX === null) return null;
+  return {
+    title: m.title,
+    ruler: c.text,
+    values: ro.values,
+    bottom: crossFloatBottom(p.layout.priceH + slot.top + pc.y, p.stackH),
+  };
 }

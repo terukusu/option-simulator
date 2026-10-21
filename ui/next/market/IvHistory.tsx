@@ -16,6 +16,7 @@ import {
   type IvMode,
   type IvNowValue,
   type IvTf,
+  ivCursorShown,
   ivNowPoint,
   ivReadout,
   ivScenarioLevel,
@@ -87,7 +88,8 @@ function IvHistoryView(p: IvHistoryProps) {
   );
   // 右端の足が進行中（表の作り直しの中。立会の外・週末で表が止まっていれば確定として描く）
   const rightLoaded = ivInProgress(entry);
-  const ro = ivReadout(bars, tf, cursor, rightLoaded);
+  // 読み取りは十字線の足が表示範囲の内のときだけその足（外へパンしたら最新の足 = 十字線と一緒に外す。#227）
+  const ro = ivReadout(bars, tf, ivCursorShown(cursor, bars.length, viewport), rightLoaded);
   const status = !entry
     ? failed
       ? 'failed'

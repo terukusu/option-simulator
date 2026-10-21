@@ -15,6 +15,7 @@ import {
   ivCrosshair,
   ivFullDomain,
   ivIndexAt,
+  ivKeyStep,
 } from '../../view/ivHistory';
 import { useSize } from '../useSize';
 
@@ -152,9 +153,10 @@ function IvPlotView(p: IvPlotProps) {
       if (v === null && pinned) onCursor(null);
       p.onViewport(v);
     },
-    // タッチのタップ（#217 の共通の規則）: 出ていなければ置く、出ていれば消す。マウスのクリックは今のまま外す（動かせばまた出る）
+    // タッチのタップ（#217 の共通の規則）: 出ていなければ置く、出ていれば消す。マウスのクリックは今のまま外す（動かせばまた出る）。
+    // 「出ている」は描いている十字線（足が表示範囲の外 = 描いていないなら置く。#227）
     onTap: (x, y) => {
-      if (!touch.current || crossTapAction(cursor !== null) === 'hide') {
+      if (!touch.current || crossTapAction(cross !== null) === 'hide') {
         onCursor(null);
         return;
       }
@@ -171,9 +173,8 @@ function IvPlotView(p: IvPlotProps) {
       : {}),
     onScrubKey: (key) => {
       if (key !== ',' && key !== '.') return false;
-      const from = cursor ?? n - 1;
-      // 横線の高さは保つ（キーだけで置いたときは最初の足の終値の高さから）
-      onCursor(Math.min(Math.max(from + (key === ',' ? -1 : 1), 0), n - 1), cursorY ?? cross?.y);
+      // 始点は表示範囲の中の足（段と同じ = ivKeyStep。#227）。横線の高さは保つ（キーだけで置いたときは最初の足の終値の高さから）
+      onCursor(ivKeyStep(cursor, n, viewport, key === ',' ? -1 : 1), cursorY ?? cross?.y);
       return true;
     },
   });

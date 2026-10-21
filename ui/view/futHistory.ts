@@ -20,6 +20,7 @@ import type { ChainJson, FutBar } from '../../data';
 import { type EmaSet, lastTradingDay, type TechParams } from '../../model';
 import { type Domain, linear } from '../chart/scale';
 import { fmtNum } from './format';
+import type { IndKind, IndPaneCursor } from './indicators';
 import {
   IV_HINT,
   type IvNowValue,
@@ -28,6 +29,7 @@ import {
   type IvSeries,
   type IvTf,
   isIvTradingDay,
+  ivCursorShown,
   ivNowPoint,
   ivReadout,
   jstDayIndex,
@@ -161,11 +163,61 @@ export function futReadout(
   return { ...ro, contract: b ? futContractLabel(b.m) : '' };
 }
 
+/** 先物推移のカーソル（足と、触っている所。pane = 'price' は価格の描画域、段の種類は段の上、null は縦線だけ） */
+export interface FutCursor {
+  i: number;
+  y: number | null;
+  pane: 'price' | IndKind | null;
+  touch: boolean;
+}
+
+/** FutHistory が価格・段・読み取りに渡すカーソル（futCursorView） */
+export interface FutCursorView {
+  /**
+   * 価格の描画域（IvPlot）に渡す足。表示範囲の外でもそのまま渡す（IvPlot が ivCrosshair で外す。タップで置いた十字線の
+   * つかみ = pinned を、表示範囲に戻したときまで保つ）
+   */
+  plot: number | null;
+  /** 読み取りの行（始 / 高 / 安 / 終・EMA）と段に渡す足。十字線の足が表示範囲の外なら null（最新の足を読む） */
+  shown: number | null;
+  /** 価格の十字線の横線の高さ（価格の上のときだけ。表示範囲の外なら null） */
+  cursorY: number | null;
+  /** 価格の横線を描くか（価格の上のとき） */
+  crossH: boolean;
+  /** 段の十字線（段の上のときだけ。表示範囲の外なら null） */
+  pane: IndPaneCursor | null;
+  /** タッチで段に置いた十字線があるか（表示範囲の外でも。初期表示 = R で消すのに使う） */
+  paneTouch: boolean;
+}
+
+/**
+ * 先物推移のカーソルの導出（#227。docs/ui-redesign.md §4.1・§4.8）: 縦線（価格・全部の段）・段の横線と札・浮いた読み取り・
+ * 読み取りの行・段の見出しを、同じ「十字線の足が表示範囲の内か」（ivCursorBar）で一緒に出し入れする。表示範囲の外へ
+ * パン・拡大したら十字線を描かず読み取りは最新の足、戻せばまた出る（カーソルは値の座標に残る）
+ */
+export function futCursorView(cur: FutCursor | null, n: number, viewport: Domain): FutCursorView {
+  if (!cur)
+    return { plot: null, shown: null, cursorY: null, crossH: false, pane: null, paneTouch: false };
+  const shown = ivCursorShown(cur.i, n, viewport);
+  const { pane, y } = cur;
+  const on = shown !== null;
+  const price = on && pane === 'price';
+  return {
+    plot: cur.i,
+    shown,
+    cursorY: price ? y : null,
+    crossH: price,
+    pane:
+      on && pane !== null && pane !== 'price' && y !== null ? { pane, y, touch: cur.touch } : null,
+    paneTouch: cur.touch && pane !== null && pane !== 'price',
+  };
+}
+
 /** ⓘ の操作の説明（IV 推移と同じ） */
 export const FUT_HINT = IV_HINT;
 /** ⓘ の指標の段の操作の説明（#207） */
 export const FUT_PANE_HINT =
-  '指標の段: 境目のドラッグで高さ（ダブルタップ / ダブルクリックで既定）· 段のダブルタップ / ダブルクリックでその段を最大化（もう一度で戻す）· 段の上もホバー / 長押しの十字線（横線の高さの値を縦軸の札に）· 段の上のパン・ピンチは価格と同じ（初期表示は価格のダブルタップか R）';
+  '指標の段: 境目のドラッグで高さ（ダブルタップ / ダブルクリックで既定）· 段のダブルタップ / ダブルクリックでその段を最大化（もう一度で戻す）· 段の上もホバー / タップの十字線（横線の高さの値を縦軸の札に）· 段の上のパン・ピンチは価格と同じ（初期表示は価格のダブルタップか R）';
 /** ⓘ のデータの説明 */
 export const FUT_NOTE =
   'JPX のページから 1 分ごとに取り込んだ現在値（15 分遅れ）から作った足。1 分ごとのスナップショットから作るので、高値・安値は実際の約定の高値・安値より狭いことがある。期近のつなぎ足（調整なし）: 限月交代（SQ の前日の夜間から次の限月）でも線はつなぎ、値は当時の期近の値のまま（過去の値を調整しない）。限月交代は縦の点線（札が混むときは線だけ）。読むのは開いたとき・⟳・左右の端へパンしたときだけ（トップバーの [最新] では読み直さない）。● 今 = 今の板の先物の値（表より新しい板で、限月が同じとき）';

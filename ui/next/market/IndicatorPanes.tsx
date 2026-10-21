@@ -23,23 +23,20 @@ import {
   IND_PANE_MIN_H,
   type IndCross,
   type IndKind,
+  type IndPaneCursor,
   type IndPaneHeights,
   type IndPaneModel,
   type IndReadout,
   indCrosshair,
+  indFloat,
   indHiddenNote,
   indPaneModel,
   indReadout,
   indSplitLabel,
 } from '../../view/indicators';
-import { IV_MIN_BARS, ivFullDomain, ivIndexAt } from '../../view/ivHistory';
+import { IV_MIN_BARS, ivFullDomain, ivIndexAt, ivKeyStep } from '../../view/ivHistory';
 
-/** 段の上の十字線（触っている段・段の座標の高さ・タッチか） */
-export interface IndPaneCursor {
-  pane: IndKind;
-  y: number;
-  touch: boolean;
-}
+export type { IndPaneCursor } from '../../view/indicators';
 
 export interface IndicatorPanesProps {
   /** 足の並び全体の指標（model の indicators。FutHistory が足・期間ごとに 1 回計算する。期間は ind.params） */
@@ -56,8 +53,10 @@ export interface IndicatorPanesProps {
   stackH: number;
   /** 左の余白（本。価格の描画域と同じ全域を作る） */
   leftSlack: number;
-  /** 段の上の十字線（無ければ縦線だけ = 価格の上のカーソル） */
+  /** 段の上の十字線（無ければ縦線だけ = 価格の上のカーソル。十字線の足が表示範囲の外なら null） */
   paneCursor: IndPaneCursor | null;
+  /** タッチで段に置いた十字線があるか（表示範囲の外でも true = futCursorView の paneTouch。#227） */
+  paneTouch: boolean;
   onViewport: (v: Domain | null) => void;
   /** カーソルの足（null = 外す）。pane = 触っている段と段の座標の高さ（無ければ縦線だけ） */
   onCursor: (i: number | null, at?: IndPaneCursor | null) => void;
@@ -186,9 +185,15 @@ function IndicatorPanesView(p: IndicatorPanesProps) {
     [models, p.ind, n, viewport, p.cursor],
   );
   const pc = p.paneCursor;
+  // 段の横線と札は触っている段だけ、縦線（cursorX）があるときだけ（十字線の足が表示範囲の外なら一緒に外す。#227）
   const crosses = useMemo(
-    () => models.map((m) => (pc && pc.pane === m.kind ? indCrosshair(m, pc.y) : null)),
-    [models, pc],
+    () =>
+      models.map((m, i) =>
+        pc && pc.pane === m.kind && (readouts[i]?.cursorX ?? null) !== null
+          ? indCrosshair(m, pc.y)
+          : null,
+      ),
+    [models, readouts, pc],
   );
   const range: Domain = models[0]?.range ?? [p.marginLeft, width];
   const full = ivFullDomain(n, p.leftSlack);
@@ -213,6 +218,9 @@ function IndicatorPanesView(p: IndicatorPanesProps) {
   const cY = ci >= 0 ? (crosses[ci]?.y ?? null) : null;
   const grabAt = cSlot && cX !== null && cY !== null ? { x: cX, y: cSlot.top + cY } : null;
 
+  // タッチの十字線の交点をつかんで動かしている間（#227。この間だけ浮いた読み取りを指から離れた所に出す）
+  const [held, setHeld] = useState(false);
+
   useChartGestures(ref, {
     viewport,
     full,
@@ -220,7 +228,8 @@ function IndicatorPanesView(p: IndicatorPanesProps) {
     range,
     disabled: n === 0,
     onViewport: (v) => {
-      if (v === null && pc?.touch) p.onCursor(null);
+      // 初期表示（R）でタッチの段の十字線を消す（表示範囲の外 = 描いていない十字線も。#227: paneTouch は生のカーソル）
+      if (v === null && p.paneTouch) p.onCursor(null);
       p.onViewport(v);
     },
     // タッチのタップ（#217 の共通の規則。#207 の長押しをやめた）: 出ていなければ置く、出ていれば消す。マウスのクリックは外す
@@ -239,6 +248,7 @@ function IndicatorPanesView(p: IndicatorPanesProps) {
             p.onCursor(indexAt(Math.min(Math.max(x, range[0]), range[1])), at(y, true)),
         }
       : {}),
+    onCrossHold: setHeld,
     // 境目の帯の上の dblclick は、価格と段を包む枠の捕捉の段階で止める（下の useEffect）。ダブルタップの 1 回目で置いた
     // 十字線は残さない（#217）
     onDouble: (_x, y) => {
@@ -253,8 +263,8 @@ function IndicatorPanesView(p: IndicatorPanesProps) {
         return k !== undefined;
       }
       if (key !== ',' && key !== '.') return false;
-      const from = p.cursor ?? n - 1;
-      p.onCursor(Math.min(Math.max(from + (key === ',' ? -1 : 1), 0), n - 1), pc);
+      // 始点は表示範囲の中の足（価格と同じ = ivKeyStep。#227）
+      p.onCursor(ivKeyStep(p.cursor, n, viewport, key === ',' ? -1 : 1), pc);
       return true;
     },
   });
@@ -412,14 +422,9 @@ function IndicatorPanesView(p: IndicatorPanesProps) {
   };
 
   const note = indHiddenNote(layout.hidden);
-  // スマホ（タッチ）の十字線: 触っている段の名前・横線の値・その足の値を指から離れた所（枠の上端、指が上側なら下端）にも
-  const fi = pc?.touch ? models.findIndex((m) => m.kind === pc.pane) : -1;
-  const fm = fi >= 0 ? models[fi] : undefined;
-  const fc = fi >= 0 ? crosses[fi] : null;
-  const fro = fi >= 0 ? readouts[fi] : undefined;
-  const slot = fi >= 0 ? layout.panes[fi] : undefined;
-  const fingerY = pc && slot ? layout.priceH + slot.top + pc.y : 0;
-  const floatBottom = p.stackH > 0 && fingerY < p.stackH * 0.4;
+  // スマホ（タッチ）の十字線: 交点をつかんで動かす間だけ、触っている段の名前・横線の値・その足の値を指から離れた所（枠の
+  // 上端、指が上側なら下端）にも。離した後は段の中（見出しの値・縦軸の札）だけ = PC のホバーと同じ（#227）
+  const fl = indFloat({ pc, held, layout, models, crosses, readouts, stackH: p.stackH });
 
   return (
     <div
@@ -477,14 +482,14 @@ function IndicatorPanesView(p: IndicatorPanesProps) {
           </Fragment>
         );
       })}
-      {fm && fc && fro && (
-        <div class={floatBottom ? 'ind-float bottom' : 'ind-float'} aria-hidden="true">
-          <span class="name">{fm.title}</span>
+      {fl && (
+        <div class={fl.bottom ? 'ind-float bottom' : 'ind-float'} aria-hidden="true">
+          <span class="name">{fl.title}</span>
           <span class="ruler">
             <span class="k">横線</span>
-            {fc.text}
+            {fl.ruler}
           </span>
-          {fro.values.map((v) => (
+          {fl.values.map((v) => (
             <span key={v.cls} class={`v ${v.cls}`}>
               {v.k ? `${v.k} ` : ''}
               {v.v}

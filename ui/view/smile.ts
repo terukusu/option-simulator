@@ -11,7 +11,13 @@
 import type { ChainMonth, StrikeInfo } from '../../data';
 import { type AtmBasis, normCdf, type OptionType } from '../../model';
 import { clipSegment, type Domain, extent, linear, padDomain } from '../chart/scale';
-import { type CrossTagBox, crossFloatBottom, crossTagX, crossTagY } from './crosshair';
+import {
+  type CrossTagBox,
+  crossFloatBottom,
+  crossTagX,
+  crossTagY,
+  crossTapAction,
+} from './crosshair';
 import { fmtNum } from './format';
 
 export type SmileAxis = 'k' | 'moneyness' | 'delta';
@@ -443,20 +449,22 @@ export interface SmileCrosshair {
   /** 曲線の IV（%。曲線の外は null）と、その画素（縦軸の範囲の外は null） */
   curveIv: number | null;
   dotPy: number | null;
-  /** 読み取り（svg の文字。縦線と反対の側。タッチで指が上側なら下端） */
+  /** 読み取り（svg の文字。縦線と反対の側の上端。タッチの交点をつかんで動かす間だけ、指が上側なら下端。#227） */
   read: { text: string; x: number; y: number; anchor: 'start' | 'end' };
 }
 
 /**
  * スマイルの十字線（#217。docs/ui-redesign.md §4.1）。縦線 = カーソルの横軸の値（吸着しない）、横線 = カーソルの IV
  * （指 / マウスの高さ。描画域の上下で止める）。札 = 横軸の値・横線の高さの IV（小数 2 桁 = IV 推移と同じ）。読み取り =
- * 横軸の値と曲線の IV。カーソルが表示範囲の外・空なら null
+ * 横軸の値と曲線の IV。カーソルが表示範囲の外・空なら null。held = タッチの交点をつかんで動かしている間（#227。この間だけ
+ * 読み取りを指で隠れない所へ = 指が上 40% なら下端。離した後は PC のホバーと同じ上端）
  */
 export function smileCrosshair(
   model: SmileModel,
   cursor: SmileCursor | null,
   width: number,
   height: number,
+  held = false,
 ): SmileCrosshair | null {
   if (model.empty || !cursor || !Number.isFinite(cursor.x) || !Number.isFinite(cursor.iv)) {
     return null;
@@ -480,7 +488,7 @@ export function smileCrosshair(
   const dotPy = cy !== null && cy >= top - 0.5 && cy <= bottom + 0.5 ? r1(cy) : null;
   const text = `${AXIS_SHORT[model.axis]} ${xText} · 曲線 ${curveIv === null ? '—' : `${fmtNum(curveIv, 2)}%`}`;
   const leftSide = px > (left + right) / 2;
-  const down = cursor.touch && crossFloatBottom(py, height);
+  const down = cursor.touch && held && crossFloatBottom(py, height);
   return {
     px,
     py,
@@ -495,6 +503,29 @@ export function smileCrosshair(
       anchor: leftSide ? 'start' : 'end',
     },
   };
+}
+
+/**
+ * タッチのタップの後のカーソル（#217・#227。§4.1 の共通の規則）: 点のタップ（onDot）は選択 + その点に吸着（解除 = k が null
+ * なら消す）。点の外は、描いている十字線（shown = smileCrosshair が null でない）があれば消す、無ければ（無い・表示範囲の外）
+ * その位置に置く
+ */
+export function smileTapCursor(
+  model: SmileModel,
+  p: {
+    shown: boolean;
+    onDot: boolean;
+    k: number | null;
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  },
+): SmileCursor | null {
+  if (p.onDot) return p.k === null ? null : smileDotCursor(model, p.k, true);
+  return crossTapAction(p.shown) === 'hide'
+    ? null
+    : smileCursorAt(model, p.x, p.y, p.width, p.height, true, false);
 }
 
 /** 画素（要素の座標）→ カーソル（値の座標）。描画域の外は null（ホバー）、clamp なら端へ寄せる（交点のドラッグ） */
