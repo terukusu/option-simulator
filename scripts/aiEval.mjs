@@ -143,7 +143,7 @@ const DOC_QUESTIONS = [
 ];
 // [AI に聞く]（#136）: 画面と同じ表示モデル（metricsPanel・bigReadout・ivReadout）から質問の文を作り、kind ask と場所の
 // topic で送る。判定: 節を示す・経緯を書かない・想定の節（ASK_DOCS のどれか）を read_doc で読む（ログがあるとき）・ログの
-// kind と topic・タイル / 読み取り / テール表は照合の不一致 0（IV 推移の値はツールに無いので不一致は数えるが失敗にしない）
+// kind と topic・照合の不一致 0（照合の出所は画面と同じ numberSources = 質問に入れた表示の値と β の 1% あたりを含む）
 const ASK_QUESTIONS = [
   { case: 'put_sell', where: 'tile', key: 'maxLoss' },
   { case: 'iron_condor', where: 'tile', key: 'greeks' },
@@ -596,14 +596,8 @@ for (const [qi, q] of (anyOnly && !askOnly ? [] : ASK_QUESTIONS).entries()) {
   const un = ck.tokens.filter((x) => x.status === 'unmatched').map((x) => x.raw);
   const cited = CITE_RE.test(t);
   const history = t.match(HISTORY_RE)?.[0] ?? null;
-  const strict = q.where !== 'iv';
   const ok =
-    !r.run.error &&
-    cited &&
-    !history &&
-    hit !== false &&
-    logged !== false &&
-    (!strict || ck.unmatched === 0);
+    !r.run.error && cited && !history && hit !== false && logged !== false && ck.unmatched === 0;
   rows.push({
     case: q.case,
     kind: 'ask',
@@ -616,8 +610,7 @@ for (const [qi, q] of (anyOnly && !askOnly ? [] : ASK_QUESTIONS).entries()) {
     cited,
     history,
     matchedTotal: ck.matched,
-    unmatched: strict ? un : [],
-    unmatched_iv: strict ? [] : un,
+    unmatched: un,
     chars: t.length,
     ...r.run,
   });
@@ -626,7 +619,7 @@ for (const [qi, q] of (anyOnly && !askOnly ? [] : ASK_QUESTIONS).entries()) {
     `# [AI に聞く]\n\n${ask.text}\n\n---\n\n${t}\n`,
   );
   console.log(
-    `${ok ? 'pass' : 'FAIL'}  [AI に聞く] ${qi + 1}（${ask.topic}）: 読んだ節 ${read === null ? '—（中継のログなし）' : read.join(',') || 'なし'}${hit === null ? '' : `・想定の節 ${hit ? 'あり' : 'なし'}`}${logged === null ? '' : `・ログの kind / topic ${logged ? 'あり' : 'なし'}`}・節の明示 ${cited ? 'あり' : 'なし'}・経緯 ${history ?? 'なし'}・一致 ${ck.matched}・不一致 ${un.length}${un.length ? `［${un.join('、')}］` : ''}${strict ? '' : '（IV の値は数えない）'}・往復 ${r.run.requests}・${r.run.stop ?? r.run.error}・完了 ${(r.run.totalMs / 1000).toFixed(1)} 秒`,
+    `${ok ? 'pass' : 'FAIL'}  [AI に聞く] ${qi + 1}（${ask.topic}）: 読んだ節 ${read === null ? '—（中継のログなし）' : read.join(',') || 'なし'}${hit === null ? '' : `・想定の節 ${hit ? 'あり' : 'なし'}`}${logged === null ? '' : `・ログの kind / topic ${logged ? 'あり' : 'なし'}`}・節の明示 ${cited ? 'あり' : 'なし'}・経緯 ${history ?? 'なし'}・一致 ${ck.matched}・不一致 ${un.length}${un.length ? `［${un.join('、')}］` : ''}・往復 ${r.run.requests}・${r.run.stop ?? r.run.error}・完了 ${(r.run.totalMs / 1000).toFixed(1)} 秒`,
   );
 }
 

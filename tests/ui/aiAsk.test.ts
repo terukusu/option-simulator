@@ -294,8 +294,9 @@ describe('#136 AC1 質問の文（表示モデルの文字列のまま）', () =
     expect(a.text).toContain(view.tailCaption);
     expect(view.tail.length).toBe(5);
     for (const r of view.tail) {
+      const u = view.unitSub.replace(/（.*$/, '');
       expect(a.text).toContain(
-        `- 原資産 ${r.pct}（${r.x}）: SQ ${r.sq.pnl}（${r.sq.ratio}）・指定日 + シナリオ ${r.scenario.pnl}（${r.scenario.ratio}）`,
+        `- 原資産 ${r.pct}（${r.x} 円）: SQ ${r.sq.pnl} ${u}（${r.sq.ratio}）・指定日 + シナリオ ${r.scenario.pnl} ${u}（${r.scenario.ratio}）`,
       );
     }
   });
@@ -305,8 +306,9 @@ describe('#136 AC1 質問の文（表示モデルの文字列のまま）', () =
     if (!a) throw new Error('証拠金のテール表が無い');
     expect(a.topic).toBe('tail.margin');
     expectShape(a.text, '指標 · テール', MARGIN_TAIL_TITLE, 'tail.margin');
+    const u = view.unitSub.replace(/（.*$/, '');
     for (const r of view.marginTail)
-      expect(a.text).toContain(`必要証拠金 ${r.margin}・余力 ${r.room}`);
+      expect(a.text).toContain(`必要証拠金 ${r.margin} ${u}・余力 ${r.room} ${u}`);
   });
 
   it('足が無い（empty）ならテール表・証拠金のテール表は null', () => {

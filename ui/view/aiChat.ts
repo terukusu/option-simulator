@@ -22,6 +22,8 @@ import type {
   AiStatus,
   AiUserBlock,
 } from '../../data/aiStream';
+import { ASK_PREFIX } from './aiAsk';
+import { displayedValues } from './aiNumbers';
 
 export const AI_SESSION_KEY = 'optsim.ai.v1';
 /** [このポジションを診断] の最初の発言（中継の relay.DIAGNOSE_TEXT と同じ文。system prompt の診断の節が参照する） */
@@ -589,15 +591,30 @@ export function chatItems(s: AiChatState): ChatItem[] {
   return out;
 }
 
-/** 照合の値（最初の文脈・文脈の更新・ツールの結果） */
+/**
+ * β の定義から導ける値（#136 の評価。「β = 1 なので下落 1% ごとに IV +1.0pt」= 1% あたり β pt。docs/design.md 5.4）。
+ * 文脈のシナリオの β だけを pt の値として足す（ほかの値は足さない = 取り違えを広く見逃さない）
+ */
+function betaSource(c: AiContext): unknown[] {
+  const b = c.scenario?.beta;
+  return typeof b === 'number' && Number.isFinite(b) ? [{ beta_iv_per_1pct_pt: b }] : [];
+}
+
+/**
+ * 照合の値（最初の文脈・文脈の更新・ツールの結果）。#136: その会話の [AI に聞く] の質問の文（ASK_PREFIX で始まる
+ * 利用者の発言）に入れた画面の表示の値と、シナリオの β の 1% あたりの pt も足す
+ */
 export function numberSources(s: AiChatState): unknown[] {
   const out: unknown[] = [];
-  if (s.context) out.push(s.context);
+  if (s.context) out.push(s.context, ...betaSource(s.context));
   for (const m of s.messages) {
     if (m.role !== 'user') continue;
     for (const b of m.content) {
-      if (b.type === 'context_update') out.push(b.context);
+      if (b.type === 'context_update') out.push(b.context, ...betaSource(b.context));
       else if (b.type === 'tool_result') out.push(parseJson(b.content[0].text));
+      else if (b.type === 'text' && b.text.startsWith(ASK_PREFIX)) {
+        out.push(displayedValues(b.text));
+      }
     }
   }
   return out;

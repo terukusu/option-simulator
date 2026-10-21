@@ -31,6 +31,7 @@ import {
   TOOL_LIMIT_NOTE,
   toolResultBlocks,
 } from '../../ui/view/aiChat';
+import { checkNumbers } from '../../ui/view/aiNumbers';
 
 /**
  * #135 AC8: AI のチャットの状態（ui/view/aiChat.ts）。送信・イベント・ツールの往復・失敗・中止・保存の形・押せない理由。
@@ -421,6 +422,67 @@ describe('#136 AC2 [AI に聞く]（kind ask と場所の topic）', () => {
       '板がありません（板を読んでから送ってください）',
     );
     expect(footReason(INITIAL_AI_CHAT, { ...GATE, legCount: 0 })).toContain('足がありません');
+  });
+});
+
+describe('#136 照合の出所: [AI に聞く] の質問の表示の値・β の 1% あたり', () => {
+  const ASK_Q = [
+    '［AI に聞く］指標 · テール ›「合計グリーク」',
+    '画面の表示（金額の単位: 千円（自動））:',
+    '- 合計グリーク: −0.013 枚（ミニ −0.13）',
+    '- Γ: −0.0038 / 100 円',
+    '- Θ: +12 千円 / 日',
+    '- 原資産 −10%（60,000 円）: SQ −987 千円（×2.5）',
+    '聞きたいこと: この値は何を表し、なぜこの値になっているか、今のポジションにとってどういう意味があるかを教えてください。',
+    '説明の節: マニュアル 8.1「タイル」・設計書 5.6「損益・指標・グリーク」',
+  ].join('\n');
+  const ANSWER =
+    'Δ は −0.013 枚（ミニ −0.13 枚）、Γ は −0.0038 / 100 円、Θ は +12 千円 / 日です。−10%（60,000 円）の SQ は −987 千円（×2.5）。';
+  const conv = (kind: 'ask' | 'chat', text: string, ctx = CTX(0)) =>
+    run(
+      INITIAL_AI_CHAT,
+      { type: 'begin', kind, text, now: 1, topic: 'tile.greeks' },
+      { type: 'send', context: ctx, key: 'k0' },
+      DONE_TEXT(ANSWER),
+    );
+  it('[AI に聞く] の質問に入れた表示の値を引いた答えは照合が一致する（不一致 0）', () => {
+    const r = checkNumbers(ANSWER, numberSources(conv('ask', ASK_Q)));
+    expect(r.tokens.filter((t) => t.status === 'unmatched').map((t) => t.raw)).toEqual([]);
+    expect(r.matched).toBeGreaterThanOrEqual(8);
+  });
+  it('IV 推移の表示の値（単位の無い数）は % で引いても一致する。金額の桁は単位つきの表示だけ', () => {
+    const q = [
+      '［AI に聞く］IV 推移 ›「ATM IV（30 日固定）」',
+      '画面の表示（単位: %）:',
+      '- 最新の足（1 時間足）: 10/13 21:00 始 20.40 · 高 21.90 · 安 20.20 · 終 21.40',
+      '- 今（今の板から計算）: 21.52',
+    ].join('\n');
+    const src = numberSources(conv('ask', q));
+    expect(checkNumbers('終値は 21.40%、今は 21.52% です', src).unmatched).toBe(0);
+    // 単位の無い表示の数を金額としては引かない
+    expect(checkNumbers('損益は 21.40 千円', src).unmatched).toBe(1);
+  });
+  it('同じ文でも [AI に聞く] の質問でなければ出所にしない（その会話の質問だけ）', () => {
+    const plain = ASK_Q.replace('［AI に聞く］', '');
+    expect(checkNumbers(ANSWER, numberSources(conv('chat', plain))).unmatched).toBeGreaterThan(0);
+    // 質問の値と違う数は今どおり不一致
+    expect(checkNumbers('Θ は +13 千円 / 日', numberSources(conv('ask', ASK_Q))).unmatched).toBe(1);
+  });
+  it('β の定義: 1% あたり β pt（シナリオの β から）は一致し、違う pt は数える', () => {
+    const ctx: AiContext = {
+      ...CTX(0),
+      scenario: { days: 0, iv_shift_pt: 0, x_range: [60000, 70000], beta: 1 },
+    };
+    const src = numberSources(conv('chat', 'x', ctx));
+    const r = checkNumbers('β = 1 なので下落 1% ごとに IV が +1.0pt 上がります', src);
+    expect(r.tokens.find((t) => t.raw === '+1.0pt')?.status).toBe('matched');
+    expect(
+      checkNumbers('下落 1% ごとに +2.0pt', src).tokens.find((t) => t.raw === '+2.0pt')?.status,
+    ).toBe('unmatched');
+    // β が無い文脈では足さない
+    expect(checkNumbers('+1.0pt', numberSources(conv('chat', 'x'))).tokens[0]?.status).toBe(
+      'unmatched',
+    );
   });
 });
 

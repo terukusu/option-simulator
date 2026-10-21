@@ -163,12 +163,18 @@ export function askReadout(it: BigReadoutItem): AiAsk | null {
   return compose(topic, PANEL_READOUT, it.label, '画面の表示:', rowLines(it.full));
 }
 
-/** テール表（5 行 × SQ・指定日 + シナリオ。空なら null） */
+/** 金額の単位の文字（`千円（自動）` → `千円`） */
+const unitOf = (unitSub: string) => unitSub.replace(/（.*$/, '');
+/** 表の金額の文字列に単位を付ける（— と ∞ には付けない。答えの「−1,234 千円」と照合できるように。#136） */
+const withUnit = (v: string, u: string) => (v === DASH || v.endsWith('∞') ? v : `${v} ${u}`);
+
+/** テール表（5 行 × SQ・指定日 + シナリオ。空なら null）。金額に単位、原資産の水準に円を付ける */
 export function askTail(v: MetricsPanelView): AiAsk | null {
   if (v.empty || v.tail.length === 0) return null;
+  const u = unitOf(v.unitSub);
   const lines = v.tail.map(
     (r) =>
-      `- 原資産 ${r.pct}（${r.x}）: SQ ${r.sq.pnl}（${r.sq.ratio}）・指定日 + シナリオ ${r.scenario.pnl}（${r.scenario.ratio}）`,
+      `- 原資産 ${r.pct}（${r.x} 円）: SQ ${withUnit(r.sq.pnl, u)}（${r.sq.ratio}）・指定日 + シナリオ ${withUnit(r.scenario.pnl, u)}（${r.scenario.ratio}）`,
   );
   return compose('tail.pnl', PANEL_METRICS, 'テール表', `画面の表示（${v.tailCaption}）:`, lines);
 }
@@ -176,9 +182,10 @@ export function askTail(v: MetricsPanelView): AiAsk | null {
 /** 証拠金（概算）のテール表（行が無ければ null） */
 export function askMarginTail(v: MetricsPanelView, title: string): AiAsk | null {
   if (v.empty || v.marginTail.length === 0) return null;
+  const u = unitOf(v.unitSub);
   const lines = v.marginTail.map(
     (r) =>
-      `- 原資産 ${r.pct}（${r.x}）: 必要証拠金 ${r.margin}・余力 ${r.room}${r.call ? '（追証）' : ''}`,
+      `- 原資産 ${r.pct}（${r.x} 円）: 必要証拠金 ${withUnit(r.margin, u)}・余力 ${withUnit(r.room, u)}${r.call ? '（追証）' : ''}`,
   );
   return compose(
     'tail.margin',

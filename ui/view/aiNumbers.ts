@@ -341,6 +341,44 @@ export function checkNumbers(text: string, sources: readonly unknown[]): NumberC
   return { tokens, unmatched, matched };
 }
 
+/** 表示の値のトークンの単位 → 照合の値のキー（classOfKey がその単位の種類に読むキー） */
+const DISPLAY_KEY: Record<TokenUnit, string> = {
+  yen: 'shown_yen',
+  thousand_yen: 'shown_yen',
+  man_yen: 'shown_yen',
+  oku_yen: 'shown_yen',
+  lots: 'shown_lots',
+  pt: 'shown_pt',
+  pct: 'shown_pct',
+  ratio: 'shown_ratio',
+  days: 'shown_days',
+  none: 'shown',
+};
+
+const UNITLESS_KEYS = ['shown', 'shown_lots', 'shown_pt', 'shown_pct', 'shown_ratio', 'shown_days'];
+
+/**
+ * 画面の表示の値（#136 の [AI に聞く] の質問の文に入れた全文・表の行）→ 照合の値。文を同じトークンの規則で読み、
+ * 数えないトークン（日付・節の番号・単位の言い方）は除く。金額は円に直し（千円 × 1,000 など）、単位はキーの名前で持つ
+ * （単位の無い数は金額・水準以外の単位でも引ける）。表示の丸めのまま（答えが同じ桁なら一致）
+ */
+export function displayedValues(text: string): Record<string, number[]> {
+  const out: Record<string, number[]> = {};
+  for (const t of checkNumbers(text, []).tokens) {
+    if (t.status === 'ignored' || !Number.isFinite(t.value)) continue;
+    const v = t.value * (SCALE[t.unit] ?? 1);
+    // 単位の無い表示の数（「Δ: −0.013 枚（ミニ −0.13）」の括弧のミニ）は前後の単位を書いていないだけなので、金額・水準
+    // 以外の単位（枚・pt・%・倍・日）でも引けるようにする。金額は単位の付いた表示だけ（千円の桁の取り違えを見逃さない）
+    const keys = t.unit === 'none' ? UNITLESS_KEYS : [DISPLAY_KEY[t.unit]];
+    for (const key of keys) {
+      const xs = out[key] ?? [];
+      xs.push(v);
+      out[key] = xs;
+    }
+  }
+  return out;
+}
+
 export interface AnswerSection {
   /** 見出し（`## ` を除く。見出しの前の文は ''） */
   title: string;
