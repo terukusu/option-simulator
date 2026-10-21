@@ -8,11 +8,11 @@
  * - 照合の値の単位はキーの名前で決める（api/src/simulator_api/ai/tools.py の規則と同じ）: `yen` を含む → 金額、
  *   `pct` → %、`_pt` → pt、`delta`・`gamma`・`qty` → 枚、`days` → 日、`ratio`・`multiple` → 倍、
  *   `x`・`k`・`x0`・`forward`・`atm_k`・`price`・`*_x` → 水準（円）、`iv`・`atm_iv` → %。配列の要素は親のキー
- * - 一致: 単位が合う値を、トークンの単位（円・千円・万円・億円）で割ってトークンの小数の桁に四捨五入したものが、
- *   トークンの値と絶対値で等しい。符号を書いたトークン（− / ▲ / △ / +）は向きも合うこと（言葉の「損失 617 千円」は
+ * - 一致: 単位が合う値を、トークンの単位（円・千円・万円・億円）で割ってトークンの小数の桁に四捨五入したもの
+ *   （千円・万円・億円は切り捨ても。#240）が、トークンの値と絶対値で等しい。「200 円台」は 200〜299 円に値があれば一致。符号を書いたトークン（− / ▲ / △ / +）は向きも合うこと（言葉の「損失 617 千円」は
  *   絶対値だけ）。単位の無いトークンはどの単位の値とも照合する
  * - ignored（数えない）: 日付・時刻（2026-11-13・11/13・9:00・2026 年・2 週間）、限月（11 月限）、番号（弱点 1・行頭の 1.・
- *   文書の節「マニュアル 8.1」「設計書 5.6」。#136）、
+ *   文書の節「マニュアル 8.1」「設計書 5.6」。#136。「（同 10.7）」。#240）、
  *   数の言葉（3 つ・2 本）、「100 円あたり」「/ 原資産 100 円」のような単位の言い方。「- 29.5 日」の空白の前の - は
  *   箇条書きの印（符号にしない）。スマイルの m（ln(K/F)）は ×100 の % としても照合する
  */
@@ -194,6 +194,17 @@ const ORDINAL_AFTER = /^\s?(枚|本|つ|個|回|番)目/;
 const SECTION_BEFORE =
   /(マニュアル|設計書)\s*(の\s*)?(\d+(\.\d+)*\s*(章)?\s*(「[^」\n]*」)?\s*[・、,/と]\s*)*$/;
 /**
+ * 前に示した文書の節の「同 10.7」（#240 の評価。「（同 10.7）」= 同じ文書の節）。「同」が括弧・区切り・行頭の直後で、
+ * 数の直後が「）」「章」「「」のときだけ（「同 5% の下げ」のような値は数える）
+ */
+const SAME_SECTION_BEFORE = /(^|[（(\s、・])同\s*$/;
+const SAME_SECTION_AFTER = /^\s*(章|「|[）)])/;
+/**
+ * 概数の「200 円台」（#240 の評価。テクニカルの MACD のヒストグラム 256 円を「200 円台」）。符号の無い 10 の倍数の円・千円で、
+ * 直後が「台」のときだけ。末尾の 0 の桁の幅（200 → 200〜299、67,000 → 67,000〜67,999）に照合の値があれば一致
+ */
+const BAND_AFTER = /^台/;
+/**
  * Γ の単位の「100 円」（#136 の評価。「Γ / 100 円」「原資産が 100 円動いたとき」= 文書の単位の定義。値ではない）。
  * 符号の無い 100 ちょうどで、直後が「円動く / 円上がる / 円下がる / 円の変化」のときだけ（値の取り違えを広く見逃さない。
  * 「/ 100 円」は PER_BEFORE で数えない）
@@ -235,12 +246,28 @@ function matches(
   const target = Math.round(Math.abs(t.value) * f);
   for (const v of values) {
     if (compat !== null && !compat.includes(v.cls)) continue;
-    if (Math.round(Math.abs(v.value / scale) * f) !== target) continue;
+    const a = Math.abs(v.value / scale) * f;
+    // 千円・万円・億円は切り捨ても一致（#240 の評価: 余力 5,816,516 円を「5,816 千円」。四捨五入の 1 つ下の値だけ足す）
+    if (Math.round(a) !== target && !(scale > 1 && Math.floor(a + 1e-9) === target)) continue;
     if (t.signed < 0 && v.value > 0) continue;
     if (t.signed > 0 && v.value < 0) continue;
     return true;
   }
   return false;
+}
+
+/** 「N 円台」: N の末尾の 0 の桁の幅 [N, N + 10^桁) に金額・水準の照合の値があるか（N は 10 以上の 10 の倍数の整数） */
+function matchesBand(abs: number, unit: TokenUnit, values: readonly SourceValue[]): boolean {
+  if (!Number.isInteger(abs) || abs < 10 || abs % 10 !== 0) return false;
+  let width = 1;
+  while (abs % (width * 10) === 0) width *= 10;
+  const compat = COMPAT[unit];
+  const scale = SCALE[unit] ?? 1;
+  return values.some((v) => {
+    if (compat !== null && !compat.includes(v.cls)) return false;
+    const a = Math.abs(v.value / scale);
+    return a >= abs && a < abs + width;
+  });
 }
 
 /** 返答の文字列の数字を照合する（同じ入力 → 同じ出力） */
@@ -300,6 +327,8 @@ export function checkNumbers(text: string, sources: readonly unknown[]): NumberC
       if (NUMBERING_BEFORE.test(before)) reason = 'number';
       else if (rawSign === '' && ORDINAL_AFTER.test(rest)) reason = 'number';
       else if (SECTION_BEFORE.test(before)) reason = 'number';
+      else if (rawSign === '' && SAME_SECTION_BEFORE.test(before) && SAME_SECTION_AFTER.test(rest))
+        reason = 'number';
       else if (numText === '100' && rawSign === '' && GAMMA_UNIT_AFTER.test(rest))
         reason = 'per_unit';
       else if (
@@ -341,6 +370,13 @@ export function checkNumbers(text: string, sources: readonly unknown[]): NumberC
       tok.status = 'ignored';
       tok.reason = reason;
     } else if (matches({ value, decimals, unit, signed }, values)) {
+      tok.status = 'matched';
+    } else if (
+      signText === '' &&
+      (unit === 'yen' || unit === 'thousand_yen') &&
+      BAND_AFTER.test(n.slice(end)) &&
+      matchesBand(abs, unit, values)
+    ) {
       tok.status = 'matched';
     }
     taken.push([start, end]);
