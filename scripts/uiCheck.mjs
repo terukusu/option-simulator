@@ -3247,7 +3247,7 @@ async function runFlows() {
   for (const vp of [phone, { width: 900, height: 1100 }]) await ivDockFlows(vp);
   // #190 先物推移の遅延ロード・IV 推移と要求が混ざらない・限月交代の印・切替で足を保つ（AC-9）
   for (const vp of [phone, pc]) await futFlows(vp);
-  // #201 損益グラフの十字線（PC のホバー・タッチのタップ / 交点のドラッグ / 読み取りの箱のタップで移る / × で消す・長押しとパンは今のまま）
+  // #201 損益グラフの十字線（PC のホバー・タッチのタップ / 交点のドラッグ / ほかの所のタップ・× で消す（#217。移さない）・長押しとパンは今のまま）
   await pnlCrossFlows(pc);
   await pnlCrossTouchFlow();
   // #217 スマイル・追証マップのタップの十字線（タッチ 360 / 1440）・面はタッチで出さない
@@ -10684,7 +10684,7 @@ async function pnlCrossTouchFlow() {
     `x ${st1?.vx} → ${st2?.vx}・y ${st1?.hy} → ${st2?.hy}・札 ${st1?.xTag} → ${st2?.xTag}・目盛り ${st2?.ticksX.map((t) => t[1]).join() === ticks1 ? '同じ' : '変わった'}`,
   );
   if (shotsDir) await page.screenshot({ path: join(shotsDir, `flows-pnl-cross-${tag}.png`) });
-  // (c) 読み取りの箱（× 以外 = 最後の行）のタップは十字線をそこへ移す、× のタップで消える
+  // (c) 読み取りの箱（× 以外 = 最後の行）のタップでも消える（#217。移さない）、× のタップで消える
   const center = (sel) =>
     page.evaluate((q) => {
       const els = document.querySelectorAll(q);

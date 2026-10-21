@@ -10,8 +10,8 @@
  *   符号は − だけ）を目盛りの列に。札は IV 推移と同じ大きさ（IV_TAG_H・文字幅の見積もり labelPx）で svg の内側へ寄せる
  * - 読み取り = 線ごとの 1 行（`満 / 指 / 今` + 符号つきの金額 + 単位。単位はグラフの縦軸の単位。範囲外は ▲ / ▼）を
  *   積み上げた箱。縦線と反対の側（左右）の上端。箱が縦線に届き、横線・点を覆うなら下端（足マーカーの帯の上）。箱が障害物
- *   （IV レールの吹き出し・追証の札・交点のラベル）に重なるならもう一方の高さ。タッチで置いた十字線（pinned）は箱の右上に × を出し、
- *   × のタップで消す（当たりは × の中心から ±CLOSE_HIT_PX。箱のほかの所のタップは十字線をそこへ移す）
+ *   （IV レールの吹き出し・追証の札・交点のラベル）に重なるならもう一方の高さ。タッチで置いた十字線（pinned）は箱の右上に × を出す。
+ *   消すのは × を含むほかの所のタップ（#217。移さない）
  */
 
 import type { Scenario } from '../../model';
@@ -31,8 +31,6 @@ export const READ_ROW = 14;
 export const READ_PAD = 4;
 /** × の幅（px。pinned のとき箱の右に足す） */
 export const READ_CLOSE_W = 16;
-/** × のタップの当たり（中心から左右・上下の px。24px の四角） */
-export const CLOSE_HIT_PX = 12;
 /** 交点をつかむ距離（px。舞台のハンドルと同じ） */
 export const CROSS_GRAB_PX = 14;
 /** 11px の文字の幅（labelWidth は 10px の見積もり） */
@@ -250,11 +248,4 @@ export function pnlCursorAt(
     x: linear([plot.left, right], chart.domain)(cx),
     y: linear([bottom, plot.top], chart.yDomain as Domain)(cy),
   };
-}
-
-/** × の当たりの中か（タッチで置いた十字線を消すタップ。× が無ければ false） */
-export function inCrossClose(c: PnlCrosshair | null, sx: number, sy: number): boolean {
-  const k = c?.read.close;
-  if (!k) return false;
-  return Math.abs(sx - k.x) <= CLOSE_HIT_PX && Math.abs(sy - k.y) <= CLOSE_HIT_PX;
 }

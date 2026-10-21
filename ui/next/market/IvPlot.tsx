@@ -215,6 +215,7 @@ function IvPlotView(p: IvPlotProps) {
       onPointerMove={(e) => {
         trackY(e);
         if (e.pointerType !== 'mouse' || e.buttons !== 0 || n === 0) return;
+        setPinned(false); // タッチで置いたあとマウスに持ち替えたら、ホバーの十字線（つかまない）に戻す
         const r = e.currentTarget.getBoundingClientRect();
         const x = e.clientX - r.left;
         onCursor(x >= range[0] && x <= range[1] ? indexAt(x) : null, pointerY.current);
