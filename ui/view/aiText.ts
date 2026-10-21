@@ -40,8 +40,10 @@ export function inlineOf(text: string): Inline[] {
   }
 }
 
-/** 表の行（`|` で始まる行） */
-const ROW = /^\s*\|/;
+/** 表の行（`|` で始まり、`|` のほかに文字のある行。`|` だけの行は表の行にしない） */
+const ROW = /^\s*\|(?!\s*$)/;
+/** 流れの途中の書きかけの表の行（`|` だけの行を含む） */
+const ROW_START = /^\s*\|/;
 /** 区切りのセル（`---`・`:--`・`--:`・`:-:`） */
 const SEP_CELL = /^:?-+:?$/;
 /** 数字の列のセル（符号・桁区切り・小数・全角 + 単位）。空・`—`・`-` は数えない */
@@ -49,11 +51,35 @@ const NUM_CELL =
   /^[+＋\-－−–▲△±]?\s*[\d０-９][\d０-９,，.．]*\s*(千円|万円|億円|円|%|％|pt|枚|倍|日)?$/;
 const BLANK_CELL = /^(|—|-|－|−)$/;
 
-/** 表の行 → セルの文字（先頭の `|` と末尾のエスケープでない `|` を外し、エスケープでない `|` で分ける。`\|` → `|`） */
+/**
+ * 表の行 → セルの文字。先頭の `|` を外し、エスケープでない・コード（`…`。閉じているときだけ）の外の `|` で分け、
+ * 末尾がその `|` なら最後の空のセルを外す。`\|` はセルの `|`（コードの中も）
+ */
 export function tableCells(line: string): string[] {
-  let s = line.trim().slice(1);
-  if (s.endsWith('|') && !s.endsWith('\\|')) s = s.slice(0, -1);
-  return s.split(/(?<!\\)\|/).map((c) => c.trim().replace(/\\\|/g, '|'));
+  const s = line.trim().slice(1);
+  const cells: string[] = [];
+  let cur = '';
+  let code = false;
+  let endsWithSep = false;
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i] ?? '';
+    endsWithSep = false;
+    if (c === '\\' && s[i + 1] === '|') {
+      cur += '|';
+      i++;
+    } else if (c === '`' && (code || s.indexOf('`', i + 1) >= 0)) {
+      code = !code;
+      cur += c;
+    } else if (c === '|' && !code) {
+      cells.push(cur.trim());
+      cur = '';
+      endsWithSep = true;
+    } else {
+      cur += c;
+    }
+  }
+  if (!endsWithSep) cells.push(cur.trim());
+  return cells;
 }
 
 const isSep = (line: string): boolean => {
@@ -67,7 +93,7 @@ function settledLines(text: string, live: boolean): string[] {
   const lines = text.split('\n');
   if (!live) return lines;
   const last = lines.at(-1) ?? '';
-  if (last !== '' && ROW.test(last)) lines.pop();
+  if (last !== '' && ROW_START.test(last)) lines.pop();
   // 末尾の `|` の行の並び（最後の空の行 = 改行で終わった分は除いて数える）が 1 行だけ = 区切り待ちの見出し
   const e = lines.length - 1 - (lines.at(-1) === '' ? 1 : 0);
   let n = 0;
@@ -179,10 +205,14 @@ export function markInline(
   seen: Set<TermId> | null,
 ): MarkedText[] {
   const tokens = checkNumbers(text, sources).tokens;
-  const terms = seen ? findTerms(text, seen, tokens) : [];
+  const consumed: { start: number; end: number }[] = [];
+  const terms = seen ? findTerms(text, seen, tokens, consumed) : [];
+  // 用語の語が丸ごと含んだ数値トークン（「30 日固定」の「30 日」）は照合の印にしない
+  const inTerm = (t: { start: number; end: number }) =>
+    consumed.some((c) => c.start <= t.start && t.end <= c.end);
   const marks = [
     ...tokens
-      .filter((t) => t.status === 'unmatched')
+      .filter((t) => t.status === 'unmatched' && !inTerm(t))
       .map((t) => ({ start: t.start, end: t.end, term: undefined as TermId | undefined })),
     ...terms.map((t) => ({ start: t.start, end: t.end, term: t.id as TermId | undefined })),
   ].sort((a, b) => a.start - b.start);

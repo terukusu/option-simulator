@@ -105,6 +105,25 @@ describe('parseAiText の表（#234）', () => {
     expect(tableCells('|  | b |')).toEqual(['', 'b']);
   });
 
+  it('コードの中の | はセルの文字、閉じていない ` は文字（レビュー指摘 8）', () => {
+    expect(tableCells('| `x|y` | b |')).toEqual(['`x|y`', 'b']);
+    expect(tableCells('| `x\\|y` | b |')).toEqual(['`x|y`', 'b']);
+    expect(tableCells('| a ` b | c |')).toEqual(['a ` b', 'c']);
+    const b = parseAiText(['| 式 | 値 |', '|---|---|', '| `max(a|b)` | 1 |'].join('\n'));
+    expect(cellsOf(b[0]).rows).toEqual([['`max(a|b)`', '1']]);
+  });
+
+  it('| だけの行は表の行にしない（レビュー指摘 9）', () => {
+    const b = parseAiText(['| a |', '|-|', '| 1 |', '|'].join('\n'));
+    expect(b.map((x) => x.kind)).toEqual(['table', 'p']);
+    expect(cellsOf(b[0]).rows).toEqual([['1']]);
+    expect(b[1]).toEqual({ kind: 'p', inl: [{ text: '|', bold: false }] });
+    // 流れの途中の | だけの最後の行は出さない
+    expect(parseAiText(['| a |', '|-|', '| 1 |', '|'].join('\n'), true).map((x) => x.kind)).toEqual(
+      ['table'],
+    );
+  });
+
   it('数字の列: 単位つき・符号・全角・空。文字が 1 つでもあれば文字の列、空だけの列は文字の列', () => {
     const b = parseAiText(
       [

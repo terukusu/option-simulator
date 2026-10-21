@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { findTerms } from '../../ui/view/aiTerms';
-import { answerModel, type MarkedBlock, type MarkedInline } from '../../ui/view/aiText';
-import type { TermId } from '../../ui/view/glossary';
+import { findTerms, halfWidth, wordsOf } from '../../ui/view/aiTerms';
+import { answerModel, type MarkedBlock, type MarkedInline, markInline } from '../../ui/view/aiText';
+import { GLOSSARY, type TermId } from '../../ui/view/glossary';
 
 /** #232: AI の返答の中の用語集の用語の印。値は架空。 */
 
@@ -72,6 +72,56 @@ describe('findTerms', () => {
     expect(findTerms(text, new Set(), [{ start: 0, end: 5 }])).toEqual([
       { start: 8, end: 10, id: 'iv' },
     ]);
+  });
+});
+
+describe('findTerms の追加の規則（レビュー指摘 2・3・4）', () => {
+  it('漢字で終わる語の直後が漢字なら付けない（複合語の中）。助詞・記号の前は付く', () => {
+    expect(ids('証拠金率が上がる')).toEqual([]);
+    expect(ids('原資産価格が動く')).toEqual([]);
+    expect(ids('原資産の値と証拠金が増える')).toEqual([
+      ['原資産', 'dx'],
+      ['証拠金', 'margin'],
+    ]);
+    expect(ids('必要証拠金の額')).toEqual([['必要証拠金', 'margin']]);
+  });
+
+  it('全角の英数字は半角に寄せて照合する（表示の位置は元の文字）', () => {
+    expect(halfWidth('ＩＶとｉｖ３０')).toBe('IVとiv30');
+    expect(ids('ＩＶ が上がり ＮＯＶ が減る')).toEqual([
+      ['ＩＶ', 'iv'],
+      ['ＮＯＶ', 'nov'],
+    ]);
+    expect(ids('ＩＶＲ')).toEqual([]);
+  });
+
+  it('数値トークンを丸ごと含む語（30 日固定）は一致し、そのトークンに照合の印を付けない', () => {
+    const parts = markInline('IV 推移は 30 日固定の値', [], new Set());
+    expect(parts).toEqual([
+      { text: 'IV 推移', unmatched: false, term: 'iv30' },
+      // 2 回目の 30 日固定は語を消費するので、中の 30 日にも照合の印が付かない
+      { text: 'は 30 日固定の値', unmatched: false },
+    ]);
+    const first = markInline('30 日固定の値', [], new Set());
+    expect(first[0]).toEqual({ text: '30 日固定', unmatched: false, term: 'iv30' });
+    // 語の途中で切れるトークン（「1σ」の 1）とは重ならない = 付かない
+    expect(markInline('1,000σ', [], new Set()).some((p) => p.term)).toBe(false);
+  });
+
+  it('用語集の全語: 後ろに助詞が続けばその語の用語に、漢字が続けば漢字で終わる語だけ付かない（取りこぼしの検査）', () => {
+    for (const t of GLOSSARY) {
+      for (const w of wordsOf(t)) {
+        const ok = markInline(`${w}の`, [], new Set()).find((p) => p.term);
+        expect(ok?.term, `${w}の`).toBe(t.id);
+        expect(ok?.text, `${w}の`).toBe(w);
+        const kanjiEnd = /[\u4E00-\u9FFF]$/.test(w);
+        const next = markInline(`${w}率`, [], new Set()).find(
+          (p) => p.term && p.text.length >= w.length,
+        );
+        if (kanjiEnd) expect(next, `${w}率`).toBeUndefined();
+        else expect(next?.term, `${w}率`).toBe(t.id);
+      }
+    }
   });
 });
 
