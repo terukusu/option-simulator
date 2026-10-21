@@ -304,10 +304,10 @@ gcloud run services list --project="$P" --format='value(metadata.name,status.lat
 
 ## AI の資格情報（Secret Manager）
 
-AI アドバイザー（`docs/ai-advisor.md`）が Claude を呼ぶための資格情報（#133・#184・#186、`docs/adr-0001-ai-credentials-secret-manager.md`・`docs/adr-0005-ai-oauth-via-agent-sdk.md`）。サブスクリプションの OAuth トークン（`claude setup-token`。**最初の選択肢**）・Anthropic の WIF（鍵なし。下の「wif（Anthropic の WIF）」）・API キーに対応し、使うのはどれか 1 つだけ。1〜7 は Secret Manager を使う `oauth_token` / `api_key` の手順。
+AI アドバイザー（`docs/ai-advisor.md`）が Claude を呼ぶための資格情報（#133・#184・#186・#221、`docs/adr-0001-ai-credentials-secret-manager.md`・`docs/adr-0005-ai-oauth-via-agent-sdk.md`・`docs/adr-0006-ai-agent-sdk-only-and-skills.md`）。どの種類でも、中継は Claude Agent SDK（イメージに入っている Claude Code の CLI）を子プロセスで動かして送り、選んだ種類の資格情報だけを子に渡す（#221）。サブスクリプションの OAuth トークン（`claude setup-token`。**最初の選択肢**）・Anthropic の WIF（鍵なし。下の「wif（Anthropic の WIF）」）・API キーに対応し、使うのはどれか 1 つだけ。1〜7 は Secret Manager を使う `oauth_token` / `api_key` の手順。
 
-- `oauth_token`: 中継は Claude Agent SDK（イメージに入っている Claude Code の CLI）を子プロセスで動かして送る（Messages API の直接呼び出しはこのトークンでは 429 になる。#186）。費用は数えない（Firestore を使わない）。**サブスクリプションの資格情報をこの用途に使ってよいかは、自分で規約を確かめる**（Anthropic の文書の原文と出典は ADR-0005 の「規約」。使うかはデプロイする人の自己責任。迷うなら `wif` か `api_key`）
-- `wif` / `api_key`: `anthropic` SDK で Messages API を直接呼ぶ。従量課金で、1 日の上限（既定 $3）を Firestore で数える（「AI の費用の計上」）
+- `oauth_token`: CLI 経由でだけ使える（Messages API の直接呼び出しはこのトークンでは 429 になる。#186）。費用は数えない（Firestore を使わない）。**サブスクリプションの資格情報をこの用途に使ってよいかは、自分で規約を確かめる**（Anthropic の文書の原文と出典は ADR-0005 の「規約」。使うかはデプロイする人の自己責任。迷うなら `wif` か `api_key`）
+- `wif` / `api_key`: 従量課金で、1 日の上限（既定 $3）を Firestore で数える（「AI の費用の計上」）
 - Terraform の変数 `ai_credential` の既定は `none` のまま（Secret に版が無いまま `oauth_token` にするとインスタンスが起動しないため）。種類は GitHub の repository variable `AI_CREDENTIAL` で選ぶ
 
 | 種類（`AI_CREDENTIAL`） | シークレット | Cloud Run の環境変数 |
@@ -390,7 +390,7 @@ curl -sf -H "Authorization: Bearer $(gcloud auth print-access-token)" \
 |---|---|
 | deploy 後に起動しない・AI を止めたい | `gh variable set AI_CREDENTIAL -R "$REPO" --body none`（または `gh variable delete AI_CREDENTIAL`）→ `gh workflow run deploy.yml` → 承認（環境変数が 3 つに戻る）。急ぐときは prod の「切り戻し・撤去」の `update-traffic` で旧リビジョンへ |
 | 鍵・トークンが漏れた | **最初に Anthropic 側で失効**（API キーは Claude Console で無効化。トークンは作り直す）→ `AI_CREDENTIAL=none` で deploy → `gcloud secrets versions disable` / `destroy`。順序を逆にする（版を先に無効にする）と、参照している simulator のインスタンスが起動しなくなる |
-| `oauth_token` で認証の失敗・429（`ai_request` の `error` が `upstream_auth` / `upstream_rate_limited`）・Agent SDK の送信路を止めたい（#186） | **`wif` に戻す**（数える送信路。イメージは両方の送信路を持つので deploy だけ）: `gh variable set AI_CREDENTIAL -R "$REPO" --body wif` → `gh workflow run deploy.yml -R "$REPO" --ref main` → plan の要約が update 1 なら承認 → `/api/ai/status` が `"credential":"wif","counted":true`。WIF の ID の variables は残したままでよい（下の「wif」）。`api_key` に戻すときは版が登録済みであること |
+| `oauth_token` で認証の失敗・429（`ai_request` の `error` が `upstream_auth` / `upstream_rate_limited`）（#186） | **`wif` に切り替える**（数える資格情報。deploy だけ）: `gh variable set AI_CREDENTIAL -R "$REPO" --body wif` → `gh workflow run deploy.yml -R "$REPO" --ref main` → plan の要約が update 1 なら承認 → `/api/ai/status` が `"credential":"wif","counted":true`。WIF の ID の variables は残したままでよい（下の「wif」）。`api_key` に戻すときは版が登録済みであること。**送信路（Agent SDK・同梱の CLI）そのものの不具合は資格情報の切り替えでは逃げられない**（#221 で Messages API を直接呼ぶ送信路を消した）→ prod の「切り戻し・撤去」の `update-traffic` で旧リビジョンへ、コードは PR の revert |
 | 付与の誤り | 修正の PR → 1 と同じ plan / apply。急ぐときは `gcloud secrets remove-iam-policy-binding`（あとで Terraform と揃える） |
 
 **7. 撤去**（この順で）
@@ -402,7 +402,7 @@ curl -sf -H "Authorization: Bearer $(gcloud auth print-access-token)" \
 
 ### wif（Anthropic の WIF。鍵なし）
 
-Cloud Run の実行 SA（`sa-simulator`）の Google の ID トークン（メタデータサーバーから、audience `https://api.anthropic.com`・`format=full` = `email` の claim を含む）を、中継が SDK の `WorkloadIdentityCredentials` で Anthropic の短命トークンに交換する（#184。公式の手順は Claude のドキュメントの「Use WIF with Google Cloud」）。長命の鍵が無いので、登録・ローテーション・Secret Manager の版の管理が要らない。費用は API の従量課金で、計上（予約・精算・Firestore）は `api_key` と同じ（「AI の費用の計上（Firestore）」の bootstrap が要る）。GCP 側の IAM の付与・API の有効化は要らない（実行 SA は自分の ID トークンをメタデータサーバーから取れる）。
+Cloud Run の実行 SA（`sa-simulator`）の Google の ID トークン（メタデータサーバーから、audience `https://api.anthropic.com`・`format=full` = `email` の claim を含む）を、中継が要求ごとに取って同梱の CLI に `ANTHROPIC_IDENTITY_TOKEN` で渡し、CLI が Anthropic の短命トークンに交換する（#184・#221。公式の手順は Claude のドキュメントの「Use WIF with Google Cloud」）。長命の鍵が無いので、登録・ローテーション・Secret Manager の版の管理が要らない。費用は API の従量課金で、計上（予約・精算・Firestore）は `api_key` と同じ（「AI の費用の計上（Firestore）」の bootstrap が要る）。GCP 側の IAM の付与・API の有効化は要らない（実行 SA は自分の ID トークンをメタデータサーバーから取れる）。
 
 **1. Claude Console**（所有者。Anthropic の組織の admin）: Workload identity の「Connect workload」で Google Cloud のタイルを選び、ウィザードで次を作る。
 
@@ -441,7 +441,7 @@ gcloud logging read 'resource.type="cloud_run_revision" AND resource.labels.serv
   --project "$P" --freshness=30m --format='value(jsonPayload.event,jsonPayload.credential,jsonPayload.error,jsonPayload.error_type,jsonPayload.reason)'
 ```
 
-期待: ブラウザ（IAP のログイン済み）で `/api/ai/status` が `"credential":"wif"`・`"counted":true`。`ai_request` が `wif` で `error` が空。`upstream_auth` で `error_type` が `WorkloadIdentityError` ならルールの不一致（Console の Workload identity の認証の履歴に理由が出る。多いのは `email` の claim の欠落と `sub` の取り違え）、`IdentityTokenError` ならメタデータサーバーから ID トークンが取れていない。`ai_disabled` の `reason` が `ai_credential_conflict` なら `ANTHROPIC_API_KEY` / `ANTHROPIC_AUTH_TOKEN` が残っている、`ai_credential_missing` / `ai_wif_invalid` なら ID が無い・形が違う。
+期待: ブラウザ（IAP のログイン済み）で `/api/ai/status` が `"credential":"wif"`・`"counted":true`。`ai_request` が `wif` で `error` が空。`upstream_auth` で `error_type` が `token_exchange`（`upstream_status` 401 / 403）ならルールの不一致（Console の Workload identity の認証の履歴に理由が出る。多いのは `email` の claim の欠落と `sub` の取り違え）、`IdentityTokenError` ならメタデータサーバーから ID トークンが取れていない。`ai_disabled` の `reason` が `ai_credential_conflict` なら `ANTHROPIC_API_KEY` / `ANTHROPIC_AUTH_TOKEN` が残っている、`ai_credential_missing` / `ai_wif_invalid` なら ID が無い・形が違う。
 
 **4. 切り戻し**
 
@@ -450,6 +450,8 @@ gcloud logging read 'resource.type="cloud_run_revision" AND resource.labels.serv
 | 交換が通らない・AI を止めたい | `gh variable set AI_CREDENTIAL -R "$REPO" --body none`（または前の `api_key` / `oauth_token`。版が登録済みであること）→ `gh workflow run deploy.yml` → 承認。wif は起動時に何も解決しないので、ID の誤りで simulator 全体が起動しなくなることはない（AI だけが失敗する） |
 | SA・ルールを止めたい | Claude Console で federation rule を無効化・削除する（交換したトークンはルールの `token_lifetime_seconds` で切れる）→ `AI_CREDENTIAL=none` で deploy |
 | 撤去 | `AI_CREDENTIAL=none` で deploy → `gh variable delete ANTHROPIC_FEDERATION_RULE_ID`（他の 3 つも）→ Console でルール・サービスアカウントを削除 |
+
+本番の traffic を動かさずに `wif` を試す（traffic 0 のタグ付きリビジョン。`--to-latest` を使わない戻し方とドリフトの消し方を含む）手順は `docs/adr-0006-ai-agent-sdk-only-and-skills.md` の「確かめ方（デプロイ後。W2）」。
 
 **注意**: サブスクリプションの OAuth トークンをこのアプリから使ってよいかは Anthropic の規約（Claude Code の Legal and compliance の「Authentication and credential use」）を利用者が確かめる。製品・サービスとして提供する場合は API キーを使う。
 

@@ -264,6 +264,8 @@ A（SDK がある言語では SDK を使い、生の HTTP と混ぜない）。
 
 **追記（#186、2026-10-19）**: `oauth_token` のときだけ、送信路を Claude Agent SDK（`claude-agent-sdk` 0.2.160、同梱の CLI 2.1.283。MIT・推移の依存 13 個）にした。CLI を要求ごとの子プロセスで動かし、ツールは実行させず（`PreToolUse` フックで止める）、事象は `StreamEvent` から今と同じ形に組み立てる。CLI の内部（transcript の形・未文書の環境変数）に依存するので版を固定し、本物の CLI と 127.0.0.1 の偽の Messages API の結合テストで守る。イメージは約 452 MB。詳細は [ADR-0005](adr-0005-ai-oauth-via-agent-sdk.md)
 
+**追記（#221、2026-10-21）**: 送信路を Claude Agent SDK に一本化した（`api_key`・`wif` も同梱の CLI 経由。`anthropic` SDK と推移の `docstring-parser`・`jiter` を依存から外した。`wif` は本番の一回きりの Job で CLI 経由で動くことを確かめた）。毎回は要らない手順（テクニカル・ポジションの提案）は Agent Skills の `SKILL.md` に切り出し、要るときだけ読む（1 要求で上流を最大 3 回）。決定と理由は [ADR-0006](adr-0006-ai-agent-sdk-only-and-skills.md)、設計は `docs/design.md` 13.4「AI の中継」
+
 ### 論点 8: 中継の口の守り
 - 判断者: 実装時
 

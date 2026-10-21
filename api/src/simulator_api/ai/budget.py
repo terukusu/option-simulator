@@ -1,8 +1,15 @@
 """費用の 1 日上限（K15・docs/ai-advisor.md 論点 3）。金額は整数の µUSD（1e-6 USD。浮動小数の境界を避ける）。
 
-- 予約 = 送る前にその要求の最大額を先に計上する: 入力の見積もり（トークン数の上界）× 5 分のキャッシュ書き込みの単価
-  （入力の 1.25 倍。自動の prompt caching は初回に前置き全体をこの単価で書くので、入力の単価の中の最大を使う）
-  + max_tokens × 出力の単価。計上額 + 予約額 ≤ 上限 のときだけ送る
+- 予約 = 送る前にその要求の最大額を先に計上する。1 要求で上流を最大 T = AI_MAX_TURNS 回呼ぶ（Skill の turn。#221）。
+  E = 入力の見積もり（トークン数の上界。CLI が足す分を含む）、M = max_tokens、K = 1 回に読むスキルの上界、
+  g = M + K（turn ごとに増える入力の上界 = 前の turn の出力 + Skill の結果）、w = 書き込みの単価（5 分と 1 時間の
+  大きい方。CLI は資格情報によって 1 時間の TTL を付ける）、r = 読み出しの単価、o = 出力の単価:
+    turn 0: E × w + M × o
+    turn i（1 ≤ i < T）: (E + (i−1)·g) × r（前の turn の要求全体 = キャッシュの読み出し）+ g × w + M × o
+  前提: CLI は各要求の最後の message に cache_control を付け、次の turn の要求は前の turn の要求をそのまま前置きに
+  持つ（tests/test_ai_agent_sdk_cli.py で固定）ので、前の turn の要求はキャッシュから読まれる。キャッシュから
+  読めなかったとき（追い出し）だけ、その差（前の要求 × (w − r)）の分、精算で予約を越えうる（次の要求は 429）。
+  計上額 + 予約額 ≤ 上限 のときだけ送る
 - 精算: 終わったら usage × 料金表の実額との差を足し引きする。途中で切れたら精算しない（予約額のまま = 多めに数える）
 - 日は JST の日付（0:00 JST に戻る）
 """
@@ -26,13 +33,28 @@ def _ceil_div(a: int, b: int) -> int:
 
 
 def estimate_input_tokens(text: str) -> int:
-    """入力トークンの見積もり（上界）: UTF-8 のバイト数 + 見えない分の余裕（settings の説明）"""
-    return len(text.encode("utf-8")) + st.AI_INPUT_OVERHEAD_TOKENS
+    """入力トークンの見積もり（上界）: UTF-8 のバイト数 + 見えない分の余裕 + CLI が足す分（settings の説明）"""
+    return len(text.encode("utf-8")) + st.AI_INPUT_OVERHEAD_TOKENS + st.AI_CLI_OVERHEAD_TOKENS
 
 
-def reserve_micro_usd(model: str, est_input_tokens: int, max_tokens: int) -> int:
+def skill_tokens() -> int:
+    """1 回に読むスキルの上界 K（トークン）: SKILL.md の合計のバイト数（トークン数 ≤ バイト数）+ 枠の余裕"""
+    from . import skills
+
+    return skills.total_bytes() + st.AI_SKILL_OVERHEAD_TOKENS
+
+
+def reserve_micro_usd(model: str, est_input_tokens: int, max_tokens: int, turns: int = 1,
+                      skill_tokens: int = 0) -> int:
+    """予約額（µUSD）。turn 0 は E を書き込み、turn i ≥ 1 は前の turn の要求全体を読み出し + 増えた分 g を書き込み
+    （モジュールの説明の式）"""
     p = st.AI_PRICES[model]
-    return _ceil_div(est_input_tokens * p["cache_write_5m"] + max_tokens * p["output"], MTOK)
+    write = max(p["cache_write_5m"], p["cache_write_1h"])
+    g = max_tokens + skill_tokens
+    t = max(turns, 1)
+    written = est_input_tokens + (t - 1) * g
+    read = (t - 1) * est_input_tokens + g * (t - 1) * (t - 2) // 2
+    return _ceil_div(written * write + read * p["cache_read"] + t * max_tokens * p["output"], MTOK)
 
 
 def cost_micro_usd(model: str, usage: dict) -> int:

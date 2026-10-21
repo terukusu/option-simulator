@@ -1,4 +1,4 @@
-"""AI_CREDENTIAL=oauth_token の送信先（Claude Agent SDK 経由。#186 AC2・AC3）。
+"""AI の送信先（Claude Agent SDK 経由。#186 AC2・AC3、#221 AC2・AC3・AC7 = スキル・複数 turn・資格情報の 3 種類）。
 
 偽の query（SDK の事象の列を流す関数）と偽の CLI（Python のスクリプト）だけを使い、ネットワークに出ない。
 本物の同梱 CLI と偽の Messages API の結合は tests/test_ai_agent_sdk_cli.py。値はすべて架空。
@@ -17,8 +17,10 @@ from claude_agent_sdk import AssistantMessage, ResultMessage, StreamEvent
 from claude_agent_sdk._errors import CLINotFoundError, ProcessError, ResultError
 from conftest import REPO_ROOT
 from support import (
+    FAKE_ID_TOKEN,
     FAKE_KEY,
     FAKE_TOKEN,
+    FAKE_WIF_ENV,
     ai_app,
     ai_body,
     ai_context,
@@ -29,9 +31,9 @@ from support import (
 from support import ai_post as post
 
 from simulator_api import settings as st
-from simulator_api.ai import agent_sdk, allowlist, relay
+from simulator_api.ai import agent_sdk, allowlist, relay, skills
 from simulator_api.ai.agent_sdk import AgentSdkGateway
-from simulator_api.ai.gateway import UpstreamError
+from simulator_api.ai.gateway import IdentityTokenError, UpstreamError
 from simulator_api.ai.tools import REGISTRY
 
 SIG = "c2lnLXVuaXQtMDAx"
@@ -54,9 +56,29 @@ USAGE = {"input_tokens": 1500, "cache_creation_input_tokens": 10, "cache_read_in
          "output_tokens": 300, "server_tool_use": {"web_search_requests": 0}}
 
 
+START_USAGE = {"input_tokens": 1500, "cache_creation_input_tokens": 10, "cache_read_input_tokens": 20,
+               "output_tokens": 1}
+
+
+def skill_turn(skill="simulator:technicals", usage=None) -> list:
+    """Skill を呼ぶ 1 turn（thinking → Skill の tool_use）"""
+    return [se({"type": "message_start", "message": {"usage": dict(usage or START_USAGE)}}),
+            se({"type": "content_block_start", "index": 0,
+                "content_block": {"type": "thinking", "thinking": "", "signature": ""}}),
+            se({"type": "content_block_delta", "index": 0, "delta": {"type": "thinking_delta", "thinking": "読む"}}),
+            se({"type": "content_block_stop", "index": 0}),
+            se({"type": "content_block_start", "index": 1,
+                "content_block": {"type": "tool_use", "id": "toolu_sk", "name": "Skill", "input": {}}}),
+            se({"type": "content_block_delta", "index": 1,
+                "delta": {"type": "input_json_delta", "partial_json": json.dumps({"skill": skill})}}),
+            se({"type": "content_block_stop", "index": 1}),
+            se({"type": "message_delta", "delta": {"stop_reason": "tool_use"}, "usage": {"output_tokens": 50}}),
+            se({"type": "message_stop"})]
+
+
 def turn_events(tools=2, redacted=True) -> list:
     """モデルの 1 turn（thinking → redacted_thinking → text → ツール）の StreamEvent と、CLI が足す AssistantMessage"""
-    ev = [se({"type": "message_start", "message": {"usage": {"input_tokens": 1, "output_tokens": 1}}}),
+    ev = [se({"type": "message_start", "message": {"usage": dict(START_USAGE)}}),
           se({"type": "content_block_start", "index": 0,
               "content_block": {"type": "thinking", "thinking": "", "signature": ""}}),
           se({"type": "content_block_delta", "index": 0, "delta": {"type": "thinking_delta", "thinking": "下を"}}),
@@ -147,14 +169,15 @@ def run(gw, p=None, cancel=None) -> list[dict]:
     return list(gw.stream(p or params(), cancel or threading.Event()))
 
 
-# ---- 事象の形・順（AnthropicGateway と同じ） ----
+# ---- 事象の形・順 ----
 
-def test_events_same_shape_and_order_as_anthropic_gateway():
+def test_events_shape_and_order():
     fq = FakeQuery(turn_events(), tail=[result(usage=USAGE)])
     gw = AgentSdkGateway(FAKE_TOKEN, query_fn=fq)
     evs = run(gw)
     assert evs[0]["type"] == "meta" and isinstance(evs[0]["spawn_ms"], int)
-    evs = evs[1:]
+    assert evs[-2] == {"type": "meta", "skills": [], "turns": 1}
+    evs = evs[1:-2] + evs[-1:]
     assert [e["type"] for e in evs] == ["thinking", "thinking", "text", "text", "tool_use", "tool_use", "final"]
     assert evs[0] == {"type": "thinking", "text": "下を"}
     assert evs[2] == {"type": "text", "text": "弱点 1:"}
@@ -163,7 +186,8 @@ def test_events_same_shape_and_order_as_anthropic_gateway():
                       "input": {"days": 5, "iv_shift_pt": 0}}
     final = evs[-1]
     assert final["stop_reason"] == "tool_use"
-    assert final["usage"] == {k: USAGE[k] for k in agent_sdk.USAGE_KEYS}  # ResultMessage の usage の 4 キー
+    # usage は生の事象（message_start + message_delta）から。4 キーだけ
+    assert final["usage"] == {k: USAGE[k] for k in agent_sdk.USAGE_KEYS}
     assert final["content"] == [
         {"type": "thinking", "thinking": "下を見る", "signature": SIG},
         {"type": "redacted_thinking", "data": "UkVE"},  # AssistantMessage は落とすが StreamEvent から残す
@@ -205,11 +229,70 @@ def test_no_final_without_message_stop():
     assert "final" not in [e["type"] for e in evs]  # 中継が upstream_incomplete にする
 
 
-def test_second_api_turn_is_an_error():
-    fq = FakeQuery(turn_events() + turn_events(), tail=[result()])
+# ---- 複数 turn（Skill の往復。#221 D3） ----
+
+def test_assembler_multi_turn_drops_skill_blocks():
+    u2 = {"input_tokens": 2500, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 1000, "output_tokens": 1,
+          "cache_creation": {"ephemeral_1h_input_tokens": 0, "ephemeral_5m_input_tokens": 0}}
+    second = turn_events(tools=1, redacted=False)
+    second[0] = se({"type": "message_start", "message": {"usage": u2}})
+    fq = FakeQuery(skill_turn() + second, tail=[result(usage=USAGE)])
+    evs = run(AgentSdkGateway(FAKE_TOKEN, query_fn=fq))
+    # Skill の tool_use は事象に出ない。Skill の turn の thinking は流れる（done の content で置き換わる）
+    assert [e["type"] for e in evs] == ["meta", "thinking", "thinking", "thinking", "text", "text", "tool_use", "meta",
+                                        "final"]
+    assert all(e.get("name") != "Skill" for e in evs)
+    assert evs[-2] == {"type": "meta", "skills": ["simulator:technicals"], "turns": 2}
+    final = evs[-1]
+    # final は最後の message の block だけ（Skill の turn の block を含まない）
+    assert [b["type"] for b in final["content"]] == ["thinking", "text", "tool_use"]
+    assert final["content"][0]["thinking"] == "下を見る" and final["stop_reason"] == "tool_use"
+    # usage は全 turn の合計（1 turn 目 1500 / 10 / 20 / 50、2 turn 目 2500 / 0 / 1000 / 300）
+    assert final["usage"] == {"input_tokens": 4000, "cache_creation_input_tokens": 10, "cache_read_input_tokens": 1020,
+                              "output_tokens": 350,
+                              "cache_creation": {"ephemeral_5m_input_tokens": 0, "ephemeral_1h_input_tokens": 0}}
+
+
+def test_final_is_last_message_even_if_first_had_text():
+    first = turn_events(tools=0, redacted=False)[:-2] + [
+        se({"type": "content_block_start", "index": 2,
+            "content_block": {"type": "tool_use", "id": "toolu_sk", "name": "Skill", "input": {}}}),
+        se({"type": "content_block_delta", "index": 2,
+            "delta": {"type": "input_json_delta", "partial_json": '{"skill": "simulator:proposals"}'}}),
+        se({"type": "content_block_stop", "index": 2}),
+        se({"type": "message_delta", "delta": {"stop_reason": "tool_use"}, "usage": {"output_tokens": 9}}),
+        se({"type": "message_stop"})]
+    last = turn_events(tools=0, redacted=False)
+    fq = FakeQuery(first + last, tail=[result()])
+    evs = run(AgentSdkGateway(FAKE_TOKEN, query_fn=fq))
+    final = evs[-1]
+    assert final["stop_reason"] == "end_turn"
+    assert final["content"] == [{"type": "thinking", "thinking": "下を見る", "signature": SIG},
+                                {"type": "text", "text": "弱点 1: 急落"}]
+    assert evs[-2]["skills"] == ["simulator:proposals"]
+
+
+def test_unlisted_skill_name_not_reported():
+    fq = FakeQuery(skill_turn("other:x") + turn_events(tools=0), tail=[result()])
+    evs = run(AgentSdkGateway(FAKE_TOKEN, query_fn=fq))
+    assert evs[-2] == {"type": "meta", "skills": [], "turns": 2}
+
+
+def test_last_message_unfinished_has_no_final():
+    fq = FakeQuery(skill_turn() + turn_events()[:-1], tail=[result()])
+    evs = run(AgentSdkGateway(FAKE_TOKEN, query_fn=fq))
+    assert "final" not in [e["type"] for e in evs]
+
+
+def test_max_turns_error_classified():
+    fq = FakeQuery(skill_turn() * 3, tail=[result(is_error=True, subtype="error_max_turns")])
+    gw = AgentSdkGateway(FAKE_TOKEN, query_fn=fq)
+    got = []
     with pytest.raises(UpstreamError) as ei:
-        run(AgentSdkGateway(FAKE_TOKEN, query_fn=fq))
-    assert ei.value.code == "upstream_unavailable" and ei.value.error_type == "unexpected_turn"
+        for ev in gw.stream(params(), threading.Event()):
+            got.append(ev)
+    assert ei.value.code == "upstream_unavailable" and ei.value.error_type == "result:error_max_turns"
+    assert got[-1] == {"type": "meta", "skills": ["simulator:technicals"], "turns": 3}
 
 
 # ---- 固定する値（options） ----
@@ -220,8 +303,8 @@ def test_options_fixed_values_and_text_prompt():
     p = params()
     run(gw, p)
     o = fq.options
-    assert o.tools == [] and o.setting_sources == [] and o.strict_mcp_config is True
-    assert o.verbatim_prompts is True and o.include_partial_messages is True and o.max_turns == 1
+    assert o.tools == ["Skill"] and o.setting_sources == [] and o.strict_mcp_config is True
+    assert o.verbatim_prompts is True and o.include_partial_messages is True and o.max_turns == st.AI_MAX_TURNS
     assert o.system_prompt == relay.SYSTEM_PROMPT and o.model == "claude-opus-5-5"
     assert o.thinking == {"type": "adaptive", "display": "summarized"} and o.effort == st.AI_EFFORT
     assert list(o.mcp_servers) == ["sim"] and set(o.hooks) == {"PreToolUse"}
@@ -237,13 +320,41 @@ def test_options_fixed_values_and_text_prompt():
                            "parent_tool_use_id": None, "session_id": "default"}]
 
 
-def test_pre_tool_use_hook_denies_and_stops():
+def test_options_enable_only_listed_skills():
+    fq = FakeQuery(turn_events(), tail=[result()])
+    run(AgentSdkGateway(FAKE_TOKEN, query_fn=fq))
+    o = fq.options
+    assert o.skills == list(skills.ENABLED) == ["simulator:technicals", "simulator:proposals"]
+    assert o.plugins == [{"type": "local", "path": str(skills.PLUGIN_DIR)}]
+    assert Path(o.plugins[0]["path"]).is_absolute() and (Path(o.plugins[0]["path"]) / ".claude-plugin").is_dir()
+    # パッケージの中のディレクトリ（イメージでは site-packages の中 = 読むだけ）
+    assert Path(o.plugins[0]["path"]).is_relative_to(Path(skills.__file__).resolve().parent)
+
+
+def _hook(fq):
+    return fq.options.hooks["PreToolUse"][0].hooks[0]
+
+
+def test_hook_denies_sim_tools_and_stops():
     fq = FakeQuery(turn_events(), tail=[result()])
     run(AgentSdkGateway(FAKE_TOKEN, query_fn=fq), params())
-    hook = fq.options.hooks["PreToolUse"][0].hooks[0]
-    out = asyncio.run(hook({"tool_name": "mcp__sim__evaluate_scenario"}, "toolu_x", {}))
+    out = asyncio.run(_hook(fq)({"tool_name": "mcp__sim__evaluate_scenario", "tool_input": {}}, "toolu_x", {}))
     assert out["continue_"] is False
     assert out["hookSpecificOutput"]["permissionDecision"] == "deny"
+    for other in ("Bash", "Read", "Skill2"):
+        out = asyncio.run(_hook(fq)({"tool_name": other, "tool_input": {"skill": "simulator:technicals"}}, "t", {}))
+        assert out["continue_"] is False and out["hookSpecificOutput"]["permissionDecision"] == "deny"
+
+
+def test_hook_allows_listed_skill_only():
+    fq = FakeQuery(turn_events(), tail=[result()])
+    run(AgentSdkGateway(FAKE_TOKEN, query_fn=fq), params())
+    for name in skills.ENABLED:
+        assert asyncio.run(_hook(fq)({"tool_name": "Skill", "tool_input": {"skill": name}}, "t", {})) == {}
+    for bad in ({"skill": "simulator:unknown"}, {"skill": "other:technicals"}, {}, None, {"skill": 1}):
+        out = asyncio.run(_hook(fq)({"tool_name": "Skill", "tool_input": bad}, "t", {}))
+        assert out["hookSpecificOutput"]["permissionDecision"] == "deny"
+        assert "continue_" not in out  # turn は続く（モデルが別の手で答える）
 
 
 def test_sdk_tool_handler_does_not_compute():
@@ -338,12 +449,75 @@ def test_split_last_requires_user():
 
 # ---- 子の環境（S5） ----
 
-def test_child_env_only_oauth_token(monkeypatch):
-    monkeypatch.setenv("ANTHROPIC_AUTH_TOKEN", "parent-auth-dummy")
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "parent-key-dummy")
-    env = agent_sdk.child_env(FAKE_TOKEN, "/tmp/c", 8000, False)
-    assert env["CLAUDE_CODE_OAUTH_TOKEN"] == FAKE_TOKEN
-    assert env["ANTHROPIC_AUTH_TOKEN"] == "" and env["ANTHROPIC_API_KEY"] == ""
+WIF_IDS = st.WifIds(*FAKE_WIF_ENV.values())
+SELECTED = {
+    "oauth_token": {"CLAUDE_CODE_OAUTH_TOKEN": FAKE_TOKEN},
+    "api_key": {"ANTHROPIC_API_KEY": FAKE_KEY},
+    "wif": {**FAKE_WIF_ENV, "ANTHROPIC_IDENTITY_TOKEN": FAKE_ID_TOKEN},
+}
+
+
+def _gw(credential, **kw) -> AgentSdkGateway:
+    secret = {"oauth_token": FAKE_TOKEN, "api_key": FAKE_KEY}.get(credential)
+    return AgentSdkGateway(secret, credential=credential, wif=WIF_IDS if credential == "wif" else None,
+                           identity_token=lambda: FAKE_ID_TOKEN, **kw)
+
+
+@pytest.mark.parametrize("credential", ["oauth_token", "api_key", "wif"])
+def test_child_env_only_selected_credential(credential):
+    secret = {"oauth_token": FAKE_TOKEN, "api_key": FAKE_KEY}.get(credential)
+    env = agent_sdk.child_env(credential, secret, "/tmp/c", 8000, False, WIF_IDS, FAKE_ID_TOKEN)
+    nonempty = {k: env[k] for k in agent_sdk.CREDENTIAL_ENV if env[k]}
+    assert nonempty == SELECTED[credential]
+    assert set(agent_sdk.CREDENTIAL_ENV) <= set(env)  # 全部を空で上書き（親の値を子に渡さない）
+    assert all(env[k] == "" for k in agent_sdk.ROUTING_ENV)  # 送信先・転送・証明書も空（#221 N4）
+    assert env["ANTHROPIC_CONFIG_DIR"].startswith("/tmp/c/") and env["CLAUDE_CODE_FEDERATION_CACHE_DIR"].startswith(
+        "/tmp/c/")
+
+
+def test_child_env_wif_optional_ids_empty():
+    ids = st.WifIds(FAKE_WIF_ENV["ANTHROPIC_FEDERATION_RULE_ID"], FAKE_WIF_ENV["ANTHROPIC_ORGANIZATION_ID"])
+    env = agent_sdk.child_env("wif", None, "/tmp/c", 8000, False, ids, FAKE_ID_TOKEN)
+    assert env["ANTHROPIC_SERVICE_ACCOUNT_ID"] == "" and env["ANTHROPIC_WORKSPACE_ID"] == ""
+    with pytest.raises(ValueError):
+        agent_sdk.child_env("wif", None, "/tmp/c", 8000, False, ids, None)
+    with pytest.raises(ValueError):
+        agent_sdk.child_env("fake", None, "/tmp/c", 8000, False)
+
+
+def test_wif_identity_token_failure_is_upstream_auth_without_spawn():
+    fq = FakeQuery(turn_events(), tail=[result()])
+
+    def no_token():
+        raise IdentityTokenError("URLError")
+
+    gw = AgentSdkGateway(None, credential="wif", wif=WIF_IDS, identity_token=no_token, query_fn=fq)
+    with pytest.raises(UpstreamError) as ei:
+        run(gw)
+    assert ei.value.code == "upstream_auth" and ei.value.error_type == "IdentityTokenError"
+    assert fq.options is None  # 子を起動していない
+
+
+def test_wif_identity_token_fetched_per_request():
+    calls = []
+
+    def token():
+        calls.append(1)
+        return FAKE_ID_TOKEN
+
+    fq = FakeQuery(turn_events(), tail=[result()])
+    gw = AgentSdkGateway(None, credential="wif", wif=WIF_IDS, identity_token=token, query_fn=fq)
+    run(gw)
+    assert fq.options.env["ANTHROPIC_IDENTITY_TOKEN"] == FAKE_ID_TOKEN
+    run(gw)
+    assert len(calls) == 2  # 要求ごとに取り直す（キャッシュしない）
+
+
+def test_gateway_rejects_bad_credential():
+    with pytest.raises(ValueError):
+        AgentSdkGateway(None, credential="fake")
+    with pytest.raises(ValueError):
+        AgentSdkGateway(None, credential="wif")  # WIF の ID が無い
 
 
 FAKE_CLI = """#!{python}
@@ -352,9 +526,10 @@ if "-v" in sys.argv[1:] or "--version" in sys.argv[1:]:
     print("2.1.283 (Claude Code)")
     sys.exit(0)
 out = os.environ.get("FAKE_CLI_OUT")
-state = {{k: ("set" if os.environ.get(k) else ("empty" if k in os.environ else "absent"))
-         for k in ("ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN")}}
-state["oauth_matches"] = os.environ.get("CLAUDE_CODE_OAUTH_TOKEN") == os.environ.get("FAKE_CLI_EXPECT")
+names = json.loads(os.environ["FAKE_CLI_NAMES"])
+state = {{k: ("set" if os.environ.get(k) else ("empty" if k in os.environ else "absent")) for k in names}}
+expect = json.loads(os.environ.get("FAKE_CLI_EXPECT") or "{{}}")
+state["matches"] = all(os.environ.get(k) == v for k, v in expect.items())
 state["pid"] = os.getpid()
 with open(out + ".tmp", "w") as f:
     json.dump(state, f)
@@ -363,7 +538,7 @@ if os.environ.get("FAKE_CLI_SLEEP"):
     time.sleep(float(os.environ["FAKE_CLI_SLEEP"]))
 if os.environ.get("FAKE_CLI_UNTIL_EOF"):  # 本物の CLI と同じく stdin の EOF で終わる
     sys.stdin.read()
-sys.stderr.write("fake cli stderr " + (os.environ.get("CLAUDE_CODE_OAUTH_TOKEN") or "") + "\\n")
+sys.stderr.write("fake cli stderr " + "".join(os.environ.get(k) or "" for k in names) + "\\n")
 sys.exit(3)
 """
 
@@ -374,6 +549,7 @@ def fake_cli(tmp_path, monkeypatch):
     path = tmp_path / "fake-claude"
     path.write_text(FAKE_CLI.format(python=sys.executable))
     path.chmod(0o755)
+    monkeypatch.setenv("FAKE_CLI_NAMES", json.dumps(agent_sdk.CREDENTIAL_ENV + agent_sdk.ROUTING_ENV))
     return str(path), str(tmp_path / "state.json")
 
 
@@ -385,22 +561,36 @@ def _alive(pid: int) -> bool:
     return "State:\tZ" not in st_
 
 
-def test_child_process_env_with_parent_credentials(fake_cli, monkeypatch, capsys):
+PARENT_DUMMY = "parent-credential-dummy-value"
+
+
+@pytest.mark.parametrize("credential", ["oauth_token", "api_key", "wif"])
+def test_child_process_env_with_parent_credentials(fake_cli, monkeypatch, capsys, credential):
+    """#221 AC7: 親の環境に全種類の資格情報（キー・トークン・WIF の ID とトークン・プロファイル系）があっても、
+    子に非空で渡るのは選んだ種類のものだけ"""
     cli, out = fake_cli
-    monkeypatch.setenv("ANTHROPIC_AUTH_TOKEN", "parent-auth-dummy")
-    monkeypatch.setenv("ANTHROPIC_API_KEY", FAKE_KEY)
-    gw = AgentSdkGateway(FAKE_TOKEN, cli_path=cli, extra_env={"FAKE_CLI_OUT": out, "FAKE_CLI_EXPECT": FAKE_TOKEN})
+    for k in agent_sdk.CREDENTIAL_ENV + agent_sdk.ROUTING_ENV:
+        monkeypatch.setenv(k, PARENT_DUMMY)
+    gw = _gw(credential, cli_path=cli,
+             extra_env={"FAKE_CLI_OUT": out, "FAKE_CLI_EXPECT": json.dumps(SELECTED[credential])})
     with pytest.raises(UpstreamError) as ei:
         run(gw)
     state = json.loads(Path(out).read_text())
-    assert state["CLAUDE_CODE_OAUTH_TOKEN"] == "set" and state["oauth_matches"] is True
-    assert state["ANTHROPIC_AUTH_TOKEN"] == "empty" and state["ANTHROPIC_API_KEY"] == "empty"  # 空 = 未設定扱い
-    # 失敗は型と状態だけ。トークン・CLI の標準エラーは例外・repr・ログに出ない
+    assert state.pop("matches") is True
+    pid = state.pop("pid")
+    assert {k for k, v in state.items() if v == "set"} == set(SELECTED[credential])
+    assert {k for k, v in state.items() if v != "set"} == (
+        set(agent_sdk.CREDENTIAL_ENV + agent_sdk.ROUTING_ENV) - set(SELECTED[credential]))
+    assert all(v == "empty" for k, v in state.items() if k not in SELECTED[credential])  # 空 = 未設定扱い
+    # 失敗は型と状態だけ。資格情報・CLI の標準エラーは例外・repr・ログに出ない
     e = ei.value
     assert e.code == "upstream_unavailable"
     for s in (str(e), repr(e), repr(gw), str(e.error_type), capsys.readouterr().out):
-        assert FAKE_TOKEN not in s and "fake cli stderr" not in s
-    assert not _alive(state["pid"])
+        for v in (*SELECTED[credential].values(), PARENT_DUMMY):
+            assert v not in s
+        assert "fake cli stderr" not in s
+    assert credential in repr(gw)
+    assert not _alive(pid)
 
 
 def test_cancel_stops_child_even_if_it_ignores_stdin_eof(fake_cli):
@@ -537,10 +727,12 @@ def test_relay_maps_rate_limit_to_sse_error(capsys):
     assert FAKE_TOKEN not in json.dumps(rec)
 
 
-def test_repr_has_no_token():
-    gw = AgentSdkGateway(FAKE_TOKEN)
-    assert FAKE_TOKEN not in repr(gw) and FAKE_TOKEN not in str(gw)
-    assert "oauth_token" in repr(gw)
+@pytest.mark.parametrize("credential", ["oauth_token", "api_key", "wif"])
+def test_repr_has_no_secret(credential):
+    gw = _gw(credential)
+    for v in (FAKE_TOKEN, FAKE_KEY, FAKE_ID_TOKEN, *FAKE_WIF_ENV.values()):
+        assert v not in repr(gw) and v not in str(gw)
+    assert repr(gw) == f"AgentSdkGateway(credential={credential!r})"
 
 
 def test_name_mapping():
@@ -572,3 +764,11 @@ def test_no_child_left_in_process_tree():
             if ppid == me and state != "Z":
                 kids.append(d.name)
     assert kids == []
+
+
+def test_child_env_extra_overrides_routing():
+    # テストの extra_env（偽の送信先）は空の上書きの後に重なる
+    env = agent_sdk.child_env("oauth_token", FAKE_TOKEN, "/tmp/c", 8000, False,
+                              extra={"ANTHROPIC_BASE_URL": "http://127.0.0.1:9"})
+    assert env["ANTHROPIC_BASE_URL"] == "http://127.0.0.1:9"
+    assert all(env[k] == "" for k in agent_sdk.ROUTING_ENV if k != "ANTHROPIC_BASE_URL")

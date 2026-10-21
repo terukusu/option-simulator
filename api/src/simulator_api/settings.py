@@ -114,12 +114,17 @@ AI_DAILY_LIMIT_USD_DEFAULT = 3  # 1 日（JST）の上限（K15）。AI_DAILY_LI
 AI_DAILY_LIMIT_USD_MAX = 20
 AI_MAX_TOKENS = 8000  # 出力の上限（thinking を含む）。予約額の出力側。#135 が測って直す
 AI_EFFORT = "medium"  # output_config.effort。#135 が測って決める
+# 1 要求で上流を呼ぶ回数の上限（#221。Skill を 2 回 + 答え）。超えたら CLI は error_max_turns で終わる
+# （SSE は error: upstream_unavailable）。予約額の上界も turn の数で数える（budget.reserve_micro_usd）
+AI_MAX_TURNS = 3
+# スキル（ai/plugin/skills/*/SKILL.md）の合計の大きさの上限（tests/test_ai_skills.py）。予約額の上界には実際の合計 +
+# AI_SKILL_OVERHEAD_TOKENS（Skill の tool_use・tool_result の枠と CLI が足す前置き）を turn ごとに足す
+AI_SKILL_MAX_BYTES = 16 * 1024
+AI_SKILL_OVERHEAD_TOKENS = 1000
 # 1 要求の締め切り（_start の頭 = 予約の前から数える）。超えたら error: timeout で閉じる。
 # 締め切りの直前に final が来ると精算（Firestore の書き込み、最大 AI_FIRESTORE_TIMEOUT_SECONDS = 5 秒）が
 # その後に走るので、最悪 50 + 5 = 55 秒で Cloud Run の 60 秒の内側に収まる
 AI_DEADLINE_SECONDS = 50
-AI_CONNECT_TIMEOUT_SECONDS = 5.0  # Anthropic への接続
-AI_READ_TIMEOUT_SECONDS = 30.0  # Anthropic の応答の読み取りの間隔（ストリームは ping が来るので途切れない）
 AI_MAX_BODY_BYTES = 512 * 1024  # 要求の本文の上限（413）
 AI_MAX_CONCURRENT = 2  # インスタンスごとに同時に流す本数（gunicorn の 8 スレッドのうち 6 本は /api/chain などに残す）
 AI_RATE_PER_MINUTE = 10  # インスタンスごとの 1 分の回数
@@ -128,24 +133,26 @@ AI_RATE_PER_MINUTE = 10  # インスタンスごとの 1 分の回数
 # 上界。ASCII 1 字 = 1、日本語 1 字 = 3）。OVERHEAD は本文に見えない分（message の区切り・ツールを使うときの
 # system prompt など。数百トークン）の余裕
 AI_INPUT_OVERHEAD_TOKENS = 2000
+# CLI（Claude Agent SDK の同梱の CLI。#221）が送る本文に足す分: system の先頭の 2 block（約 135 B）・Skill の
+# ツールの定義（約 1.8 KB）・role=system の環境の message（cwd・OS・モデル名・スキルの一覧。約 1.0 KB）。
+# CLI 2.1.283 の実測で、送った本文（system・tools・messages の UTF-8）− 中継の本文 = 2,843〜2,884 B
+# （tests/test_ai_agent_sdk_cli.py がこの値以下であることを固定する）。見積もり E に足す
+AI_CLI_OVERHEAD_TOKENS = 4000
 AI_FIRESTORE_DATABASE = "simulator-ai"  # 日の計上の置き場所（Firestore の名前つき DB。infra/bootstrap/ai_budget.tf）
 AI_FIRESTORE_COLLECTION = "ai_spend"
 AI_FIRESTORE_TIMEOUT_SECONDS = 5.0
 AI_FIRESTORE_RETRIES = 3  # 前提条件の失敗（他のインスタンスと競合）の読み直し
-AI_OAUTH_BETA = "oauth-2025-04-20"  # OAuth のトークンで /v1/messages を呼ぶときの anthropic-beta
 # fake は手元とテスト用の偽の送信先（Terraform の変数は通さない）
 AI_CREDENTIALS = ("api_key", "oauth_token", "wif", "fake")
-# Anthropic の WIF（#184。ADR-0001 の追補）: Cloud Run のメタデータサーバーから実行 SA の Google の ID トークンを取り、
-# SDK の WorkloadIdentityCredentials が Anthropic の短命トークンに交換する。format=full は email の claim を入れる
-# （federation rule は sub と email の両方を固定する）
+# Anthropic の WIF（#184。ADR-0001 の追補・ADR-0006）: 中継が要求ごとに Cloud Run のメタデータサーバーから実行 SA の
+# Google の ID トークンを取り、同梱の CLI に ANTHROPIC_IDENTITY_TOKEN で渡す（CLI が Anthropic の短命トークンに
+# 交換する）。
+# format=full は email の claim を入れる（federation rule は sub と email の両方を固定する）
 AI_WIF_AUDIENCE = "https://api.anthropic.com"
 AI_IDENTITY_TOKEN_URL = ("http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/identity"
                          f"?audience={AI_WIF_AUDIENCE}&format=full")  # 公式の手順と同じ形
 AI_IDENTITY_TOKEN_TIMEOUT_SECONDS = 3.0
 AI_IDENTITY_TOKEN_MAX_BYTES = 16 * 1024
-# 交換（POST /v1/oauth/token）のタイムアウト（SDK の既定は 30 秒）。401 は SDK が 1 回だけ交換し直すので、最悪でも
-# 2 × (ID トークン 3 秒 + 交換 10 秒) = 26 秒で、締め切り AI_DEADLINE_SECONDS（50 秒）の中に収まる
-AI_TOKEN_EXCHANGE_TIMEOUT_SECONDS = 10.0
 # WIF の ID の形（値は秘密ではないが利用者個人のもの。リポジトリ・ログに書かない）。組織 ID は UUID、他は英数字・_・-
 _AI_WIF_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
 _AI_ORG_ID_RE = re.compile(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")

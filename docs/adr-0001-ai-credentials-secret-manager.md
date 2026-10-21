@@ -68,3 +68,7 @@ AI アドバイザー（EPIC #141）の中継（#134）は Cloud Run `simulator`
 - 観測: `claude setup-token` のトークンを `anthropic` SDK（`auth_token=`・`anthropic-beta: oauth-2025-04-20`）や curl で Messages API に直接渡すと HTTP 429 `rate_limit_error` になる（モデルによらない）。同じトークンを Claude Code CLI に `CLAUDE_CODE_OAUTH_TOKEN` として渡すと応答が返る。上の「Messages API を … 使えることは、オーナーが確認した」は CLI 経由での確認だった
 - 決定: `AI_CREDENTIAL=oauth_token` の送信先を Claude Agent SDK（`claude-agent-sdk`。同梱の CLI を子プロセスで動かす）にする。置き場所（Secret `simulator-anthropic-oauth-token`）・環境変数名（`ANTHROPIC_AUTH_TOKEN`）・`ai_credential` の値・数えないことは変えない。中継は値を子に `CLAUDE_CODE_OAUTH_TOKEN` としてだけ渡し、親の `ANTHROPIC_AUTH_TOKEN`・`ANTHROPIC_API_KEY` は空で上書きする（CLI はそれらを優先して直接送るため）。詳細は [ADR-0005](adr-0005-ai-oauth-via-agent-sdk.md)
 - 規約の文面と出典は ADR-0005 の「規約」。利用者が自分の責任で判断する
+
+## 追補（#221、2026-10-21）: 送信路を Claude Agent SDK に一本化する
+
+- `api_key`・`wif` も Claude Agent SDK（同梱の CLI）経由で送る（`anthropic` SDK を依存から外した）。置き場所・環境変数名・`ai_credential` の値・数えるかどうかは変えない。子には CLI が読む資格情報の変数を全部空で上書きし、`api_key` → `ANTHROPIC_API_KEY`、`wif` → WIF の ID と `ANTHROPIC_IDENTITY_TOKEN`（中継が要求ごとにメタデータサーバーから取る。交換は CLI）だけを入れる。上の「追補（#184）」の SDK 1.8.0 の `WorkloadIdentityCredentials` の記述はこの時点で置き換わる。詳細は [ADR-0006](adr-0006-ai-agent-sdk-only-and-skills.md)
