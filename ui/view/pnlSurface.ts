@@ -16,13 +16,15 @@ import { type Scenario, theoreticalPnl } from '../../model';
 import type { Domain } from '../chart/scale';
 import { niceTicks, pixelToValue } from '../chart/scale';
 import { PIN_SETTLE_MS } from '../pins';
-import { DASH } from './format';
+import { type CrossTagBox, crossTagX, crossTagY } from './crosshair';
+import { DASH, fmtNum } from './format';
 import { AMOUNT_UNIT_LABEL, type AmountUnit, fmtAmount } from './metrics';
 import { clampDays, type PnlBase, type PnlChartModel, pnlViewDomain } from './pnlChart';
+import { CROSS_X_STEP, crossX } from './pnlCrosshair';
 import { dXFromAxis } from './scenario';
 import { labelWidth } from './scenarioMarks';
 import type { ChartMode } from './shell';
-import type { MarkObstacle, StageHandle } from './stage';
+import { MARKER_BAND_PX as MARKER_BAND, type MarkObstacle, type StageHandle } from './stage';
 
 const clamp = (v: number, lo: number, hi: number) => Math.min(Math.max(v, lo), hi);
 
@@ -439,4 +441,107 @@ export function surfaceDragPatch(input: SurfaceDragInput): { dX?: number; days?:
     if (days !== scenario.days) out.days = days;
   }
   return out.dX === undefined && out.days === undefined ? null : out;
+}
+
+// ---------------------------------------------------------------- 十字線（#217。PC のホバーだけ）
+
+/** 面の十字線のカーソル（値の座標: x = 原資産の円、d = 経過日数。1 日の格子・上端は maxDays そのもの） */
+export interface SurfaceCursor {
+  x: number;
+  d: number;
+}
+
+export interface SurfaceCrosshair {
+  /** X（10 円の格子）・d（1 日の格子） */
+  x: number;
+  d: number;
+  px: number;
+  py: number;
+  /** (X, d) の損益（円。surfaceValueAt = 指定日の線と同じ評価） */
+  value: number;
+  xTag: CrossTagBox;
+  yTag: CrossTagBox;
+  read: { text: string; x: number; y: number; anchor: 'start' | 'end'; box: MarkObstacle };
+}
+
+export interface SurfaceCrosshairInput {
+  base: PnlBase | null;
+  scenario: Scenario;
+  chart: PnlChartModel;
+  cursor: SurfaceCursor | null;
+  unit: AmountUnit;
+  /** svg の幅・高さ（札を内側に寄せる） */
+  width: number;
+  height: number;
+  /** 読み取りが避ける箱（点のラベル・IV レールの吹き出し） */
+  obstacles?: readonly MarkObstacle[];
+}
+
+/** 画素（svg の座標）→ カーソル。描画域の外は null（ホバー。外れて消す） */
+export function surfaceCursorAt(
+  chart: PnlChartModel,
+  maxDays: number,
+  sx: number,
+  sy: number,
+): SurfaceCursor | null {
+  if (chart.empty || !(maxDays > 0) || !Number.isFinite(sx) || !Number.isFinite(sy)) return null;
+  const { plot } = chart;
+  const right = plot.left + plot.width;
+  const bottom = plot.top + plot.height;
+  if (sx < plot.left || sx > right || sy < plot.top || sy > bottom) return null;
+  return {
+    x: pixelToValue(chart.domain, [plot.left, right], sx),
+    d: surfaceDayAt(sy, plot, maxDays),
+  };
+}
+
+/**
+ * 面の十字線（#217。docs/ui-redesign.md §4.1）: 縦線 = X（10 円の格子 = ΔX と同じ）、横線 = d（1 日の格子 = 面の点・時間レールと
+ * 同じ）。両方の軸が入力の格子なので吸着する。札 = X（円の整数）・d（日）、読み取り = (X, d) の損益（点のラベルと同じ形・指標の単位）を
+ * 縦線と反対の側の上端（障害物に重なれば下端）。X が表示範囲の外・maxDays ≤ 0・空は null
+ */
+export function surfaceCrosshair(p: SurfaceCrosshairInput): SurfaceCrosshair | null {
+  const { base, chart, cursor } = p;
+  if (!base || chart.empty || !cursor || !(base.maxDays > 0)) return null;
+  if (!Number.isFinite(cursor.x) || !Number.isFinite(cursor.d)) return null;
+  const [lo, hi] = chart.domain;
+  if (!(cursor.x >= lo && cursor.x <= hi)) return null;
+  const gLo = Math.ceil(lo / CROSS_X_STEP) * CROSS_X_STEP;
+  const gHi = Math.floor(hi / CROSS_X_STEP) * CROSS_X_STEP;
+  const x = gLo <= gHi ? clamp(crossX(cursor.x), gLo, gHi) : cursor.x;
+  const d = clamp(cursor.d, 0, base.maxDays);
+  const { plot } = chart;
+  const right = plot.left + plot.width;
+  const bottom = plot.top + plot.height;
+  const r1 = (v: number) => Math.round(v * 10) / 10;
+  const px = r1(plot.left + ((x - lo) / (hi - lo)) * plot.width);
+  const py = r1(surfaceDayPy(d, plot, base.maxDays));
+  const value = surfaceValueAt(base, p.scenario, x, d);
+  const text = surfacePointText(value, d, p.unit);
+  const w = labelWidth(text) * POINT_FONT_RATIO;
+  const h = POINT_LABEL_H;
+  const leftSide = px > plot.left + plot.width / 2;
+  const x0 = leftSide ? plot.left + 4 : right - 4 - w;
+  const at = (y0: number): MarkObstacle => ({ x0, x1: x0 + w, y0, y1: y0 + h });
+  const first = at(plot.top + 4);
+  const second = at(Math.max(plot.top + 4, bottom - MARKER_BAND - 4 - h));
+  const blocked = (b: MarkObstacle) => (p.obstacles ?? []).some((o) => overlaps(o, b));
+  const box = blocked(first) && !blocked(second) ? second : first;
+  const dText = `${Math.round(d * 100) / 100}日`;
+  return {
+    x,
+    d,
+    px,
+    py,
+    value,
+    xTag: crossTagX(fmtNum(x, 0), px, bottom + 3, p.width, p.height),
+    yTag: crossTagY(dText, py, plot.left - 1, p.width, p.height),
+    read: {
+      text,
+      x: r1(leftSide ? box.x0 : box.x1),
+      y: r1((box.y0 + box.y1) / 2),
+      anchor: leftSide ? 'start' : 'end',
+      box,
+    },
+  };
 }

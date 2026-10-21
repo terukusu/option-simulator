@@ -11,6 +11,7 @@
 import type { ChainMonth, StrikeInfo } from '../../data';
 import { type AtmBasis, normCdf, type OptionType } from '../../model';
 import { clipSegment, type Domain, extent, linear, padDomain } from '../chart/scale';
+import { type CrossTagBox, crossFloatBottom, crossTagX, crossTagY } from './crosshair';
 import { fmtNum } from './format';
 
 export type SmileAxis = 'k' | 'moneyness' | 'delta';
@@ -391,4 +392,148 @@ export function axisTickLabel(axis: SmileAxis, v: number): string {
   }
   if (Math.abs(v - 0.5) < 1e-9) return '0.50';
   return v < 0.5 ? `P ${fmtNum(v, 2)}` : `C ${fmtNum(1 - v, 2)}`;
+}
+
+// ---------------------------------------------------------------- 十字線（#217）
+
+/** 描画域の余白（px。market/SmilePlot.tsx の描画と十字線の座標で共用） */
+export const SMILE_MARGIN = { left: 38, right: 22, top: 14, bottom: 24 } as const;
+
+/** 十字線のカーソル（値の座標: x = 横軸の値、iv = IV %）。touch = タッチのタップで出した（読み取りを指から離す） */
+export interface SmileCursor {
+  x: number;
+  iv: number;
+  touch: boolean;
+}
+
+/** 読み取りの頭の横軸の名前（短く） */
+const AXIS_SHORT: Record<SmileAxis, string> = { k: 'K', moneyness: 'm', delta: 'Δ' };
+
+/** 十字線の横軸の札の文字（目盛りより 1 桁細かい: K 円の整数、moneyness 小数 2 桁の %、Δ 小数 3 桁） */
+export function smileCrossXText(axis: SmileAxis, v: number): string {
+  if (axis === 'k') return fmtNum(v, 0);
+  if (axis === 'moneyness') {
+    const p = v * 100;
+    return `${p > 0.0049 ? '+' : ''}${fmtNum(p, 2)}%`;
+  }
+  return v < 0.5 ? `P ${fmtNum(v, 3)}` : `C ${fmtNum(1 - v, 3)}`;
+}
+
+/**
+ * 曲線（σ_smile を結んだ線。実線・点線の区間とも）の横軸の値 x での IV（%）。区間の線形補間（描いている線と同じ）。
+ * x を含む区間が無い（曲線の外）なら null。Δ 軸で単調でない所は配列の先の区間
+ */
+export function smileCurveIv(model: SmileModel, x: number): number | null {
+  if (model.empty || !Number.isFinite(x)) return null;
+  for (const s of model.segments) {
+    const lo = Math.min(s.x1, s.x2);
+    const hi = Math.max(s.x1, s.x2);
+    if (x < lo || x > hi) continue;
+    if (hi - lo < 1e-12) return s.y1;
+    return s.y1 + ((x - s.x1) * (s.y2 - s.y1)) / (s.x2 - s.x1);
+  }
+  return null;
+}
+
+export interface SmileCrosshair {
+  px: number;
+  py: number;
+  xTag: CrossTagBox;
+  yTag: CrossTagBox;
+  /** 曲線の IV（%。曲線の外は null）と、その画素（縦軸の範囲の外は null） */
+  curveIv: number | null;
+  dotPy: number | null;
+  /** 読み取り（svg の文字。縦線と反対の側。タッチで指が上側なら下端） */
+  read: { text: string; x: number; y: number; anchor: 'start' | 'end' };
+}
+
+/**
+ * スマイルの十字線（#217。docs/ui-redesign.md §4.1）。縦線 = カーソルの横軸の値（吸着しない）、横線 = カーソルの IV
+ * （指 / マウスの高さ。描画域の上下で止める）。札 = 横軸の値・横線の高さの IV（小数 2 桁 = IV 推移と同じ）。読み取り =
+ * 横軸の値と曲線の IV。カーソルが表示範囲の外・空なら null
+ */
+export function smileCrosshair(
+  model: SmileModel,
+  cursor: SmileCursor | null,
+  width: number,
+  height: number,
+): SmileCrosshair | null {
+  if (model.empty || !cursor || !Number.isFinite(cursor.x) || !Number.isFinite(cursor.iv)) {
+    return null;
+  }
+  const [lo, hi] = model.domain;
+  if (cursor.x < lo || cursor.x > hi) return null;
+  const M = SMILE_MARGIN;
+  const left = M.left;
+  const right = width - M.right;
+  const top = M.top;
+  const bottom = height - M.bottom;
+  const r1 = (v: number) => Math.round(v * 10) / 10;
+  const sx = linear(model.domain, [left, right]);
+  const sy = linear(model.yDomain, [bottom, top]);
+  const px = r1(sx(cursor.x));
+  const py = r1(Math.min(Math.max(sy(cursor.iv), top), bottom));
+  const level = linear([bottom, top], model.yDomain)(py);
+  const xText = smileCrossXText(model.axis, cursor.x);
+  const curveIv = smileCurveIv(model, cursor.x);
+  const cy = curveIv === null ? null : sy(curveIv);
+  const dotPy = cy !== null && cy >= top - 0.5 && cy <= bottom + 0.5 ? r1(cy) : null;
+  const text = `${AXIS_SHORT[model.axis]} ${xText} · 曲線 ${curveIv === null ? '—' : `${fmtNum(curveIv, 2)}%`}`;
+  const leftSide = px > (left + right) / 2;
+  const down = cursor.touch && crossFloatBottom(py, height);
+  return {
+    px,
+    py,
+    xTag: crossTagX(xText, px, bottom + 3, width, height),
+    yTag: crossTagY(fmtNum(level, 2), py, left - 1, width, height),
+    curveIv,
+    dotPy,
+    read: {
+      text,
+      x: leftSide ? left + 4 : right - 4,
+      y: down ? bottom - 9 : top + 9,
+      anchor: leftSide ? 'start' : 'end',
+    },
+  };
+}
+
+/** 画素（要素の座標）→ カーソル（値の座標）。描画域の外は null（ホバー）、clamp なら端へ寄せる（交点のドラッグ） */
+export function smileCursorAt(
+  model: SmileModel,
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  touch: boolean,
+  clampToPlot: boolean,
+): SmileCursor | null {
+  if (model.empty || !Number.isFinite(x) || !Number.isFinite(y)) return null;
+  const M = SMILE_MARGIN;
+  const left = M.left;
+  const right = width - M.right;
+  const top = M.top;
+  const bottom = height - M.bottom;
+  if (!clampToPlot && (x < left || x > right || y < top || y > bottom)) return null;
+  const cx = Math.min(Math.max(x, left), right);
+  const cy = Math.min(Math.max(y, top), bottom);
+  return {
+    x: linear([left, right], model.domain)(cx),
+    iv: linear([bottom, top], model.yDomain)(cy),
+    touch,
+  };
+}
+
+/**
+ * 点に吸着したカーソル（#217: タッチのタップで点を選んだとき）: 横軸 = その行使価格の横軸の値、IV = mid の点（無ければ
+ * × の点、それも無ければ曲線）の IV。表示範囲に点が無ければ null
+ */
+export function smileDotCursor(model: SmileModel, k: number, touch: boolean): SmileCursor | null {
+  const s = model.strikeXs.find((q) => q.k === k);
+  if (!s) return null;
+  const iv =
+    model.points.find((q) => q.k === k && q.kind === 'mid')?.iv ??
+    model.unstable.find((q) => q.k === k)?.iv ??
+    model.points.find((q) => q.k === k)?.iv ??
+    smileCurveIv(model, s.x);
+  return iv === null || iv === undefined ? null : { x: s.x, iv, touch };
 }

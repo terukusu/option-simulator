@@ -397,6 +397,10 @@ table.tail.margin-tail td small.call {
 
 .hm-wrap {
   touch-action: manipulation;
+  /* 十字線のタップ・交点のドラッグ（#217）: 文字選択・iOS の吹き出しを出さない */
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
 }
 
 /* 待ちの間の前のマップ（#174: 枠の中のスピナー .hm-wait は薄くしない） */

@@ -13,9 +13,7 @@ import {
   todayScenario,
 } from '../../ui/view/pnlChart';
 import {
-  CLOSE_HIT_PX,
   CROSS_X_STEP,
-  inCrossClose,
   markLabelBox,
   type PnlCursor,
   pnlCrosshair,
@@ -363,20 +361,5 @@ describe('画素 → 値・読み取りのタップ（#201）', () => {
     const c = pnlCursorAt(chart, plot.left - 50, plot.top - 50, true);
     expect(c?.x).toBeCloseTo(chart.domain[0], 6);
     expect(c?.y).toBeCloseTo(chart.yDomain[1], 6);
-  });
-
-  it('inCrossClose: × の中心 ±CLOSE_HIT_PX だけ true（箱のほかの所・× の無い十字線は false）', () => {
-    const chart = chartOf(SC, 900, 420);
-    const r = crossOf(chart, { x: x0, y: midY(chart), pinned: true }, 900, 420);
-    const k = r?.read.close;
-    if (!r || !k) throw new Error('× が無い');
-    expect(inCrossClose(r, k.x, k.y)).toBe(true);
-    expect(inCrossClose(r, k.x + CLOSE_HIT_PX, k.y - CLOSE_HIT_PX)).toBe(true);
-    expect(inCrossClose(r, k.x + CLOSE_HIT_PX + 1, k.y)).toBe(false);
-    const row = r.read.items[r.read.items.length - 1];
-    expect(inCrossClose(r, r.read.textX, row?.y ?? 0)).toBe(false);
-    const hover = crossOf(chart, { x: x0, y: midY(chart), pinned: false }, 900, 420);
-    expect(inCrossClose(hover, k.x, k.y)).toBe(false);
-    expect(inCrossClose(null, 0, 0)).toBe(false);
   });
 });

@@ -27,6 +27,7 @@ import {
   type Scenario,
   ZERO_SCENARIO,
 } from '../../model';
+import { type CrossTagBox, crossTagX, crossTagY } from './crosshair';
 import { fmtNum, fmtSigned } from './format';
 import { revealDelta } from './hint';
 import { MARGIN_LINE_SETTLE_MS } from './margin';
@@ -346,6 +347,17 @@ export function holdMapPick(
     }
   }
   if (best >= 0) return { kind: 'point', k: best };
+  return holdMapCellAt(plot, axes, x, y);
+}
+
+/** 画素（要素の座標）のマス。描画域の外は null */
+export function holdMapCellAt(
+  plot: HoldMapPlot,
+  axes: HoldMapAxes,
+  x: number,
+  y: number,
+): { kind: 'cell'; i: number; j: number } | null {
+  if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
   if (x < plot.left || x > plot.right || y < plot.top || y > plot.bottom) return null;
   const s = holdMapScales(axes, plot.width);
   const u = s.u0 + ((x - s.left) / (s.right - s.left)) * (s.u1 - s.u0);
@@ -487,5 +499,46 @@ export function holdMapReveal(
   return {
     delta: revealDelta(plotTop, plotBottom, hostTop, hostBottom),
     behavior: reduced ? 'auto' : 'smooth',
+  };
+}
+
+// ---------------------------------------------------------------- 十字線（#217）
+
+export interface HoldMapCrosshair {
+  /** マスの中心の画素（縦線・横線） */
+  x: number;
+  y: number;
+  xTag: CrossTagBox;
+  yTag: CrossTagBox;
+  /** 読み取りの 1 行（holdMapReadout のマスと同じ形 = 余力はそのマスの値） */
+  readout: string;
+}
+
+/**
+ * 追証マップの十字線（#217。docs/ui-redesign.md §4.1）: 両方の軸が入力の格子なので、縦線・横線は指 / マウスの下のマスの
+ * 中心に吸着する。札 = ΔX%（符号つきの整数 %）・IV の倍率（×小数 1 桁）、読み取り = そのマスの余力。描画域の外・空は null
+ */
+export function holdMapCrosshair(
+  plot: HoldMapPlot,
+  result: HoldMapResult,
+  x: number,
+  y: number,
+  moves: readonly AtmMove[],
+  unit: AmountUnit,
+): HoldMapCrosshair | null {
+  const { axes } = result;
+  const cell = holdMapCellAt(plot, axes, x, y);
+  if (!cell) return null;
+  const u = axes.us[cell.i] as number;
+  const c = axes.cs[cell.j] as number;
+  const s = holdMapScales(axes, plot.width);
+  const cx = r1(s.sx(u));
+  const cy = r1(s.sy(c));
+  return {
+    x: cx,
+    y: cy,
+    xTag: crossTagX(`${fmtSigned(u * 100, 0)}%`, cx, plot.bottom + 2, plot.width, plot.height),
+    yTag: crossTagY(`×${fmtNum(c, 1)}`, cy, plot.left - 1, plot.width, plot.height),
+    readout: holdMapReadout(cell, result, moves, unit),
   };
 }
