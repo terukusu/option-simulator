@@ -167,6 +167,18 @@ export function initialGesture(): GestureState {
   };
 }
 
+/** つかんで動かす状態（シナリオ点・スマイルの選択のスクラブ = scrub、足マーカー = markerDrag、面の点 = surface。#223） */
+const GRAB_MODES: ReadonlySet<GestureMode> = new Set(['scrub', 'markerDrag', 'surface']);
+
+/**
+ * つかみ始めたか（#223）: モードが prev からつかむ状態（scrub・markerDrag・surface）に変わったとき true。
+ * この間は PC のホバーの十字線を出さない（docs/ui-redesign.md §4.1「十字線の共通の規則」）。パン（drag）・ピンチ・
+ * 十字線の交点のつかみ（cross）は対象外
+ */
+export function grabStarted(prev: GestureMode, next: GestureMode): boolean {
+  return prev !== next && GRAB_MODES.has(next);
+}
+
 /**
  * 押した位置のマーカー（band の縦の範囲の中で |x − px| ≤ MARKER_HIT_PX の最も近いもの。等距離は配列の先）。
  * ctx.markers が無い・当たらなければ null。

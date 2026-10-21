@@ -10,7 +10,7 @@ import {
   techLineWidthsOr,
 } from '../../ui/view/techLineWidth';
 
-/** #214: 設定の線の太さ（px）→ EMA の 3 本と指標の段の線の stroke-width（CSS px） */
+/** #214: 設定の線の太さ（px）→ EMA の 3 本とオシレーターの線（指標の段）の stroke-width（CSS px） */
 describe('テクニカルの線の太さ（px）', () => {
   it('選べる値は 1 / 1.5 / 2 / 3 px と段の既定 1.25 px。既定は EMA 1・段 1.25（今の見た目）', () => {
     expect(TECH_LINE_PX).toEqual([1, 1.25, 1.5, 2, 3]);
@@ -29,6 +29,17 @@ describe('テクニカルの線の太さ（px）', () => {
     expect(techLinePxOf('4')).toBeNull();
     expect(techLinePxOf('')).toBeNull();
     expect(TECH_LINE_FIELDS.map((f) => f.key)).toEqual(['ema', 'pane']);
+  });
+  it('#223: 設定の表記は「EMA の線 / オシレーターの線」（保存のキー pane は同じ）', () => {
+    expect(TECH_LINE_FIELDS.map((f) => [f.key, f.label])).toEqual([
+      ['ema', 'EMA の線'],
+      ['pane', 'オシレーターの線'],
+    ]);
+    const pane = TECH_LINE_FIELDS.find((f) => f.key === 'pane');
+    expect(pane?.aria).toBe('オシレーター（RSI・MACD・SO）の線の太さ');
+    expect(
+      TECH_LINE_FIELDS.some((f) => f.label.includes('段の線') || f.aria.includes('段の線')),
+    ).toBe(false);
   });
   it('欠けた・不正な項目は既定で埋める', () => {
     expect(techLineWidthsOr(undefined)).toEqual({ ema: 1, pane: 1.25 });

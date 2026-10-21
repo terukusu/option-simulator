@@ -24,7 +24,7 @@
  * #206 で EMA の 3 本の期間（tech_ema_short・tech_ema_mid・tech_ema_long）を足した。版は 1 のまま。同じ規則（既定と違う
  * 項目だけ書く、無い・不正 → 項目ごとに既定）で、短期 < 中期 < 長期でなければ EMA の 3 つを既定。#206 より前の保存
  * （キーが無い）は EMA が既定（5・25・75）。
- * #207 で先物推移の指標の段の高さ（fut_pane_h_rsi・fut_pane_h_macd・fut_pane_h_stoch。整数 px・28〜2000）を足した。版は 1 の
+ * #207 で先物推移の指標の段の高さ（fut_pane_h_rsi・fut_pane_h_macd・fut_pane_h_stoch。整数 px・28〜2000。#220 で下限を 24 に）を足した。版は 1 の
  * まま。境目をドラッグしたときに描いている段の高さを書き、既定に戻すとキーを消す。無い・不正 → その段は既定（56px）。
  * 古い画面はこのキーを読まずに書き直すので消える（段の高さが既定に戻るだけ）。
  * #214 でテクニカルの線の太さ（tech_ema_width_px・tech_pane_width_px。px = 1 / 1.25 / 1.5 / 2 / 3。既定と違う項目だけ書く）を
@@ -132,7 +132,7 @@ export interface Prefs {
   aiDisclaimerSeen?: boolean;
   /** 先物推移の指標の段の高さ（#207。段ごと px。無い段・無い = 既定） */
   futPaneH?: IndPaneHeights;
-  /** テクニカルの線の太さ（#214。px。EMA の 3 本と指標の段の線。無い項目・無い = 既定） */
+  /** テクニカルの線の太さ（#214。px。EMA の 3 本とオシレーターの線（#223 で表記を改めた。キーは同じ）。無い項目・無い = 既定） */
   techLineWidths?: Partial<TechLineWidths>;
 }
 

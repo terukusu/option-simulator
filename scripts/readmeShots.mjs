@@ -429,7 +429,7 @@ const shots = {
     await save('term-card', await page.screenshot());
     await ctx.close();
   },
-  // 設定のテクニカル指標（期間・EMA の線・段の線。#205・#214）
+  // 設定のテクニカル指標（期間・EMA の線・オシレーターの線。#205・#214・#223）
   async 'settings-tech'() {
     const { ctx, page } = await open({ ...PC_CROP, theme: 'dark' });
     await page.click('button[aria-label="メニュー"]');

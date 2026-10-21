@@ -1,8 +1,8 @@
 /**
  * テクニカルの線の太さ（#214。docs/ui-redesign.md §4.8・§5）。設定の節「テクニカル指標」の 2 つの選択（px）を、
- * 先物推移の EMA の 3 本（3 本とも同じ太さ）と指標の段の線（RSI・MACD とシグナル・SO の %K / %D）の太さ（CSS px。
+ * 先物推移の EMA の 3 本（3 本とも同じ太さ）とオシレーターの線（指標の段の RSI・MACD とシグナル・SO の %K / %D。#223 で表記を改めた）の太さ（CSS px。
  * SVG の stroke-width 属性 + CSS の vector-effect: non-scaling-stroke = 拡大縮小に関係なく画面の px）に当てる。
- * 選べる値は TradingView と同じ 1 / 1.5 / 2 / 3 px に、段の線の既定 1.25 px（#200 からの今の太さ = 既定の見た目を
+ * 選べる値は TradingView と同じ 1 / 1.5 / 2 / 3 px に、オシレーターの線の既定 1.25 px（#200 からの今の太さ = 既定の見た目を
  * 変えない）を足した 5 つ。MACD のヒストの棒・ガイド・カーソルは対象外。純関数だけ。
  */
 
@@ -12,13 +12,13 @@ export const TECH_LINE_PX: readonly number[] = [1, 1.25, 1.5, 2, 3];
 export interface TechLineWidths {
   /** EMA の 3 本（px） */
   ema: number;
-  /** 指標の段の線（px） */
+  /** オシレーターの線（指標の段。px。キー pane は保存の後方互換のため #223 の改名後も同じ） */
   pane: number;
 }
 
 export type TechLineKey = keyof TechLineWidths;
 
-/** 既定（EMA 1 px = #214 の 3 本同じ太さ、段 1.25 px = #200 のまま） */
+/** 既定（EMA 1 px = #214 の 3 本同じ太さ、オシレーター 1.25 px = #200 のまま） */
 export const DEFAULT_TECH_LINE_WIDTHS: TechLineWidths = { ema: 1, pane: 1.25 };
 
 export const isTechLinePx = (v: unknown): v is number =>
@@ -49,7 +49,7 @@ export function techLinePxOf(text: string): number | null {
 /** 設定の 2 行（並び・見出し） */
 export const TECH_LINE_FIELDS: readonly { key: TechLineKey; label: string; aria: string }[] = [
   { key: 'ema', label: 'EMA の線', aria: 'EMA の線の太さ' },
-  { key: 'pane', label: '段の線', aria: '指標の段の線の太さ' },
+  { key: 'pane', label: 'オシレーターの線', aria: 'オシレーター（RSI・MACD・SO）の線の太さ' },
 ];
 
 /**

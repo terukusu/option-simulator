@@ -69,7 +69,7 @@ export interface IndicatorPanesProps {
   onPaneCommit: (shown: IndPaneHeights, border: number) => void;
   /** 境目のダブルタップ / ダブルクリック・Enter（既定の高さに戻す） */
   onPaneReset: () => void;
-  /** 段の線の太さ（CSS px。設定の線の太さ。#214。SVG の stroke-width 属性 + non-scaling-stroke。ヒストの棒には効かない） */
+  /** オシレーターの線の太さ（CSS px。設定の線の太さ。#214。SVG の stroke-width 属性 + non-scaling-stroke。ヒストの棒には効かない） */
   lineWidth: number;
 }
 

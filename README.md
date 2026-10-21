@@ -108,11 +108,11 @@ IV 推移は ATM IV（30 日固定）、先物推移は日経225 先物（ラー
 <table>
   <tr>
     <td width="50%"><img src="docs/images/iv-history.webp" alt="ダーク。ATM IV の 1 時間足のローソク足に十字線と札、上にシナリオの水準の破線"></td>
-    <td width="50%"><img src="docs/images/settings-tech.webp" alt="ダーク。設定のテクニカル指標。RSI・MACD・SO・EMA の期間の欄と、EMA の線・段の線の太さの選択"></td>
+    <td width="50%"><img src="docs/images/settings-tech.webp" alt="ダーク。設定のテクニカル指標。RSI・MACD・SO・EMA の期間の欄と、EMA の線・オシレーターの線の太さの選択"></td>
   </tr>
   <tr>
     <td><b>IV 推移</b> — ATM IV のローソク足と、シナリオの IV の水準の線</td>
-    <td><b>テクニカル指標の設定</b> — RSI・MACD・SO・EMA の期間と、EMA の線・段の線の太さ（1〜3 px）。AI のテクニカルの読みも同じ期間・同じ計算</td>
+    <td><b>テクニカル指標の設定</b> — RSI・MACD・SO・EMA の期間と、EMA の線・オシレーターの線の太さ（1〜3 px）。AI のテクニカルの読みも同じ期間・同じ計算</td>
   </tr>
 </table>
 

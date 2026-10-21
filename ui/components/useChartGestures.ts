@@ -17,6 +17,7 @@
  *   cancel は未反映の位置を捨てて onSurfaceCancel。リセット（ダブルタップ・dblclick・R）の前に未反映の位置を流す
  * - 十字線（#201・#217）: cross を渡すと交点の ±grabPx の押下ですぐつかみ、onCross(x, y)（1 フレーム 1 回）に位置を渡す。
  *   動かさずに離した短い押下は onTap（#217。十字線を消す）
+ * - onGrab（#223）: つかむ状態（scrub・markerDrag・surface）に入ったとき 1 回（ホバーの十字線を消すのに使う）
  * - onDouble（#207。先物推移の指標の段）: 渡すとダブルタップ / ダブルクリックを初期表示に戻す代わりに onDouble(x, y)
  *   （離した位置。要素の座標）に渡す（段の最大化）。マウスは dblclick だけで拾い（OS のダブルクリックの間隔）、タッチ・ペンは
  *   状態機械のダブルタップで拾う（マウスで両方を拾うと 2 回効く = 戻ってしまう）。R キーは今のまま初期表示
@@ -37,6 +38,7 @@ import {
   gestureLongPress,
   gestureMove,
   gestureUp,
+  grabStarted,
   initialGesture,
   LONG_PRESS_MS,
   markerAt,
@@ -94,6 +96,11 @@ export interface ChartGestureOptions {
   onCross?: (x: number, y: number) => void;
   /** ダブルタップ / ダブルクリック（#207。渡すと初期表示に戻さずこれを呼ぶ。位置は要素の座標） */
   onDouble?: (x: number, y: number) => void;
+  /**
+   * つかみ始めた（#223。シナリオ点・スマイルの選択のスクラブ・足マーカー・面の点 = gesture.ts の grabStarted）。同期で 1 回。
+   * つかんで動かす間はホバーの十字線を出さない（docs/ui-redesign.md §4.1）
+   */
+  onGrab?: () => void;
 }
 
 /** グラフの操作の対象外（ツール行のボタン・入力欄・境目） */
@@ -196,7 +203,9 @@ export function useChartGestures(ref: RefObject<HTMLElement>, opts: ChartGesture
       return { id: e.pointerId, x: e.clientX - r.left, y: e.clientY - r.top, t: e.timeStamp };
     };
     const apply = (res: GestureResult, at?: PointerSample, mouse = false) => {
+      const prev = state.mode;
       state = res.state;
+      if (grabStarted(prev, state.mode)) optsRef.current.onGrab?.();
       if (res.surfaceCancel) {
         // 未反映の位置を捨ててから押す前に戻す
         pendingSurface = null;

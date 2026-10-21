@@ -448,6 +448,10 @@
 /*
  * 境目（#207）: 高さ 0 の要素（role="separator"。フォーカスとキー・線の見た目だけ）。pointer-events: none で、押下の当たり
  * 判定は段の枠の座標（futSplitAt。マウス ±5px・タッチ ±10px。境目 0 は価格の描画域の側にも）。近くでは row-resize のカーソルと線
+ *
+ * #223: 境目の線は段の枠の上端の .ind-sep（--line-2）。中央に「つまみ」（::before = 横棒 2 本。線の行を挟んで上下 3px の行）を
+ * 常に薄く（--line-2）出し、近づいた・ドラッグ中（.hot）は濃く（--ink-2。線は ::after の 2px --ink-3）、フォーカスで --accent。
+ * 高さは 0 のまま（段の高さ・配置・当たり判定は変わらない）
  */
 .ind-split {
   position: relative;
@@ -456,6 +460,20 @@
   height: 0;
   outline: none;
   pointer-events: none;
+}
+
+.ind-split::before {
+  position: absolute;
+  top: -3px;
+  left: 50%;
+  z-index: 1;
+  box-sizing: content-box;
+  width: 20px;
+  height: 5px;
+  border-top: 1px solid var(--line-2);
+  border-bottom: 1px solid var(--line-2);
+  content: "";
+  transform: translateX(-50%);
 }
 
 .ind-split::after {
@@ -468,8 +486,16 @@
   background: transparent;
 }
 
+.ind-split.hot::before {
+  border-color: var(--ink-2);
+}
+
 .ind-split.hot::after {
-  background: var(--line-2);
+  background: var(--ink-3);
+}
+
+.ind-split:focus-visible::before {
+  border-color: var(--accent);
 }
 
 .ind-split:focus-visible::after {
@@ -533,8 +559,9 @@
   flex: 0 0 auto;
 }
 
+/* 段の枠の上端 = 境目の線（#223 で --line から濃く。ダーク / ライトの両方で見える） */
 .ind-pane .ind-sep {
-  stroke: var(--line);
+  stroke: var(--line-2);
 }
 
 .ind-pane .ind-guide {

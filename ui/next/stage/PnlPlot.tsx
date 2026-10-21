@@ -75,6 +75,7 @@ function readSurfaceColors(): SurfaceColors | null {
  * タッチ・ペンのタップで置く（pinned。交点の ±14px をドラッグで動かす = gesture の cross、置いてある間のタップ（どこでも・
  * 読み取りの ×）・ダブルタップ（リセット）で消す = #217 の共通の規則）。面・ミニ・空では消す。
  * 面の十字線（#217）: マウスのホバーだけ（X 10 円・d 1 日の格子・損益 = surfaceCrosshair）。点をつかんでいる間・線へ切り替えたら消す。
+ * つかんで動かす間（#223。シナリオ点・足マーカー・面の点 = useChartGestures の onGrab）はホバーの十字線を消す（パンは値の座標のまま）。
  */
 export function PnlPlot(p: {
   chartRef: RefObject<HTMLDivElement>;
@@ -403,6 +404,13 @@ export function PnlPlot(p: {
     onMarkerCancel: () => setDragK(null),
     onLongPress: () => {
       navigator.vibrate?.(8);
+    },
+    // つかんで動かす間（シナリオ点・足マーカー・面の点。#223）はホバーの十字線を出さない: 未反映のホバーを捨てて消す。
+    // タッチで置いた十字線（pinned）は残す（§4.1: 長押しでは消えない）。離した後はマウスを動かすとまた出る
+    onGrab: () => {
+      hoverAt.current = null;
+      setCursor((c) => (c && !c.pinned ? null : c));
+      setSurfCursor(null);
     },
   });
 
