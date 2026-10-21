@@ -7,9 +7,11 @@
 // 送り先は AI_EVAL_BASE（既定 http://127.0.0.1:8080）= 手元で起動した中継。本番の IAP は越えない。資格情報は中継の
 // 環境変数（このスクリプトは読まない・出さない）。手順は api/README.md「AI の評価」。
 //
-//   npm run ai:eval                          10 通りの診断 + 追加の質問 2 件 + テクニカルの質問 3 件（#200）+ 提案の質問 3 件（#139）
+//   npm run ai:eval                          10 通りの診断 + 追加の質問 2 件 + テクニカルの質問 4 件（#200）+ 提案の質問 3 件（#139）
+//                                            + 文書の質問 7 件（#137）
 //   npm run ai:eval -- --tech-only           テクニカルの質問 4 件だけ（#206 で EMA の質問を足した）
 //   npm run ai:eval -- --propose-only        ポジションの提案の質問 3 件だけ（#139）
+//   npm run ai:eval -- --docs-only           文書（マニュアル・設計書）の質問 7 件だけ（#137）
 //   npm run ai:eval -- --cases put_sell,calendar --repeat 2 --no-followups
 //
 // 費用の上限: 累計の台帳 fixtures/local/ai_eval/ledger.json（gitignore）で AI_EVAL_LIMIT_USD（既定 6.5）を超える前に
@@ -34,8 +36,8 @@ const opt = (name, def = null) => {
 const base = (process.env.AI_EVAL_BASE || 'http://127.0.0.1:8080').replace(/\/$/, '');
 const limitUsd = Number(process.env.AI_EVAL_LIMIT_USD || '6.5');
 // 1 要求の予約額の上界（中継の予約の式 budget.reserve_micro_usd。#221 で turn の上限 3・スキル・CLI が足す本文を
-// 入れた: 本文 25k トークンで約 $0.95、90k で約 $1.49）
-const reserveUsd = 1.5;
+// 入れた。#137 で文書の read_doc の 1 要求の上限と目次を足した: 本文 25k トークンで約 $1.25、90k で約 $1.83）
+const reserveUsd = 1.9;
 const repeat = Number(opt('--repeat', '1'));
 const followups = !args.includes('--no-followups');
 const relayLog = process.env.AI_EVAL_RELAY_LOG || null;
@@ -73,6 +75,8 @@ export const CAVEAT_RE =
   /(続けることが|続くことが|続きうる|続く場合|上がり続け|下がり続け|上げ続け|下げ続け|過熱のまま|過熱したまま)/;
 const techOnly = args.includes('--tech-only');
 const proposeOnly = args.includes('--propose-only');
+const docsOnly = args.includes('--docs-only');
+const anyOnly = techOnly || proposeOnly || docsOnly;
 
 // ポジションの提案の質問（#139）: 候補のツール → propose_position が呼ばれる・提案が板の検査を通る（error でない）・
 // カードの表示モデルができる・押した時点の反映の純関数で足が作れる・照合の不一致 0。floor があれば後の最大損失 ≥ floor
@@ -97,6 +101,51 @@ const PROPOSE_QUESTIONS = [
     target: 'current',
   },
 ];
+
+// 文書の質問（#137）: 中継の read_doc でマニュアル・設計書の節を読み、節を示して答えるか（計算の前提 3・操作の案内 3）、
+// 文書に無いことを無いと言うか（1）。expect は読んでほしい節（どれか 1 つ。中継のログがあるときだけ判定）。
+// 判定: 節を示す（「マニュアル 8.5」「設計書 5.4」の形）・Issue 番号（#123）と決定の記号（K7 など）を書かない・
+// absent は「書かれていない」の言い回し。文書の値は照合できない数字になるので不一致は数えるが失敗にしない
+const DOC_QUESTIONS = [
+  {
+    kind: 'premise',
+    text: 'β と IV の平行移動 Δσ はどう組み合わさって効くの？急落のプリセットで ATM の IV はどうなる？',
+    expect: ['design:5.4', 'user-guide:6', 'user-guide:6.2', 'user-guide:6.4', 'user-guide:16.1'],
+  },
+  {
+    kind: 'premise',
+    text: 'IV 推移の「30 日固定」の ATM IV って何？どうやって求めているの？',
+    expect: ['user-guide:10', 'user-guide:10.4', 'user-guide:10.5'],
+  },
+  {
+    kind: 'premise',
+    text: '必要証拠金（概算）はどうやって計算しているの？実際の証拠金と違うことはある？',
+    expect: ['user-guide:8', 'user-guide:8.4', 'user-guide:13.2.1', 'design:5.10'],
+  },
+  {
+    kind: 'howto',
+    text: '追証マップの点は何を表している？',
+    expect: ['user-guide:8', 'user-guide:8.5', 'design:5.11'],
+  },
+  {
+    kind: 'howto',
+    text: '先物推移の指標の段の高さを元に戻すには？',
+    expect: ['user-guide:10', 'user-guide:10.9', 'user-guide:14.4'],
+  },
+  {
+    kind: 'howto',
+    text: '今のポジションを別の端末で開くにはどうすればいい？',
+    expect: ['user-guide:11', 'user-guide:11.2', 'user-guide:11.3'],
+  },
+  { kind: 'absent', text: '損益グラフを PNG 画像で保存するボタンはどこ？', expect: null },
+];
+/** 節を示す言い回し（「マニュアル 8.5「…」」「設計書 5.4」「マニュアル 10 章」） */
+export const CITE_RE = /(マニュアル|設計書)\s*(の\s*)?[0-9]+(\.[0-9]+)*/;
+/** 開発の経緯（Issue 番号・決定の記号）。答えに出さない */
+export const HISTORY_RE = /#[0-9]+|(?<![A-Za-z])[KDQ][0-9]+(?![0-9])/;
+/** 文書に無いことを無いと言う言い回し */
+export const ABSENT_RE =
+  /(書かれていない|書かれていません|書いていない|書いてありません|記載(が|は)?(ない|なく|ありません)|見当たら|載っていない|載っていません)/;
 
 const load = async (p) =>
   (await runnerImport(join(root, p), { configFile: false, root, logLevel: 'error' })).module;
@@ -227,7 +276,7 @@ const answerOf = (chat) => {
 };
 
 const rows = [];
-for (let rep = 0; rep < (techOnly || proposeOnly ? 0 : repeat); rep++) {
+for (let rep = 0; rep < (anyOnly ? 0 : repeat); rep++) {
   for (const c of selected) {
     const env = ctxMod.aiEnvFromState(cases.caseState(latest, c), cases.caseMargin(c));
     const { chat, run } = await turn(
@@ -302,7 +351,7 @@ const techData = (() => {
   const scale = (b) => ({ ...b, o: b.o * k, h: b.h * k, l: b.l * k, c: b.c * k });
   return { daily: d.daily.map(scale), hourly: d.hourly.map(scale) };
 })();
-for (const q of proposeOnly ? [] : TECH_QUESTIONS) {
+for (const q of anyOnly && !techOnly ? [] : TECH_QUESTIONS) {
   const c = cases.AI_EVAL_CASES.find((x) => x.name === q.case);
   const env = {
     ...ctxMod.aiEnvFromState(cases.caseState(latest, c), cases.caseMargin(c)),
@@ -357,7 +406,7 @@ for (const q of proposeOnly ? [] : TECH_QUESTIONS) {
 }
 
 // ---- ポジションの提案（#139）: 新しい会話で 1 問ずつ
-for (const q of techOnly ? [] : PROPOSE_QUESTIONS) {
+for (const q of anyOnly && !proposeOnly ? [] : PROPOSE_QUESTIONS) {
   const c = cases.AI_EVAL_CASES.find((x) => x.name === q.case);
   const env = ctxMod.aiEnvFromState(cases.caseState(latest, c), cases.caseMargin(c));
   const r = await turn(chatMod.INITIAL_AI_CHAT, env, 'chat', q.text);
@@ -423,11 +472,54 @@ for (const q of techOnly ? [] : PROPOSE_QUESTIONS) {
   );
 }
 
-// ---- 中継のログ（任意）: ai_request の概算費用・トークン・落とした block
-let relay = null;
-if (relayLog) {
+// ---- 文書の質問（#137）: 新しい会話で 1 問ずつ。読んだ節は中継のログ（AI_EVAL_RELAY_LOG）の ai_request の docs
+for (const [qi, q] of (anyOnly && !docsOnly ? [] : DOC_QUESTIONS).entries()) {
+  const c = cases.AI_EVAL_CASES.find((x) => x.name === 'put_sell');
+  const env = ctxMod.aiEnvFromState(cases.caseState(latest, c), cases.caseMargin(c));
+  const before = relayRecords()?.length ?? null;
+  const r = await turn(chatMod.INITIAL_AI_CHAT, env, 'chat', q.text);
+  const t = answerOf(r.chat);
+  const recs = before === null ? null : (relayRecords() ?? []).slice(before);
+  const read = recs ? recs.flatMap((x) => (Array.isArray(x.docs) ? x.docs : [])) : null;
+  const readIds = read ? read.map((x) => x.replace(/#[0-9]+$/, '')) : null;
+  const ck = numMod.checkNumbers(t, chatMod.numberSources(r.chat));
+  const un = ck.tokens.filter((x) => x.status === 'unmatched').map((x) => x.raw);
+  const cited = CITE_RE.test(t);
+  const history = t.match(HISTORY_RE)?.[0] ?? null;
+  const absent = ABSENT_RE.test(t);
+  const hit = readIds && q.expect ? q.expect.some((e) => readIds.includes(e)) : null;
+  const ok =
+    !r.run.error &&
+    !history &&
+    (q.kind === 'absent' ? absent : cited) &&
+    (readIds === null || readIds.length > 0) &&
+    hit !== false;
+  rows.push({
+    case: c.name,
+    kind: 'docs',
+    rep: 0,
+    pass: ok,
+    question: q.kind,
+    docs: read,
+    hit,
+    cited,
+    history,
+    absent,
+    unmatched: un,
+    chars: t.length,
+    ...r.run,
+  });
+  writeFileSync(join(outDir, `docs-${qi + 1}-${q.kind}.md`), `# 文書: ${q.text}\n\n${t}\n`);
+  console.log(
+    `${ok ? 'pass' : 'FAIL'}  文書 ${qi + 1}（${q.kind}）: 読んだ節 ${read === null ? '—（中継のログなし）' : read.join(',') || 'なし'}${hit === null ? '' : `・想定の節 ${hit ? 'あり' : 'なし'}`}・節の明示 ${cited ? 'あり' : 'なし'}${q.kind === 'absent' ? `・無いと言う ${absent ? 'あり' : 'なし'}` : ''}・経緯 ${history ?? 'なし'}・照合できない数字 ${un.length}・往復 ${r.run.requests}・${r.run.stop ?? r.run.error}・完了 ${(r.run.totalMs / 1000).toFixed(1)} 秒`,
+  );
+}
+
+/** 中継のログ（標準出力の JSON 行）の ai_request。ログが無ければ null */
+function relayRecords() {
+  if (!relayLog) return null;
   try {
-    const recs = readFileSync(relayLog, 'utf8')
+    return readFileSync(relayLog, 'utf8')
       .split('\n')
       .map((l) => {
         try {
@@ -437,6 +529,16 @@ if (relayLog) {
         }
       })
       .filter((r) => r?.event === 'ai_request');
+  } catch {
+    return null;
+  }
+}
+
+// ---- 中継のログ（任意）: ai_request の概算費用・トークン・落とした block
+let relay = null;
+if (relayLog) {
+  try {
+    const recs = relayRecords() ?? [];
     const sum = (k) => recs.reduce((n, r) => n + (typeof r[k] === 'number' ? r[k] : 0), 0);
     const sorted = (k) =>
       recs
@@ -463,6 +565,13 @@ if (relayLog) {
           return m;
         }, {}),
       turns_p50: p50(sorted('turns')),
+      // 読んだ文書の節ごとの回数（#137）
+      docs: recs
+        .flatMap((r) => (Array.isArray(r.docs) ? r.docs : []))
+        .reduce((m, n) => {
+          m[n] = (m[n] ?? 0) + 1;
+          return m;
+        }, {}),
     };
   } catch (e) {
     console.error(`中継のログを読めない: ${e?.message}`);
@@ -473,6 +582,7 @@ const diag = rows.filter((r) => r.kind === 'diagnose');
 const fus = rows.filter((r) => r.kind === 'followup');
 const techs = rows.filter((r) => r.kind === 'technicals');
 const proposes = rows.filter((r) => r.kind === 'propose');
+const docRows = rows.filter((r) => r.kind === 'docs');
 const summary = {
   model: status.model,
   credential: status.credential,
@@ -481,7 +591,11 @@ const summary = {
   followup: { pass: fus.filter((r) => r.pass).length, total: fus.length },
   technicals: { pass: techs.filter((r) => r.pass).length, total: techs.length },
   propose: { pass: proposes.filter((r) => r.pass).length, total: proposes.length },
-  unmatched_total: rows.reduce((n, r) => n + r.unmatched.length, 0),
+  docs: { pass: docRows.filter((r) => r.pass).length, total: docRows.length },
+  // 文書の質問の不一致（文書の値）は数えない（照合の対象外。#137）
+  unmatched_total: rows
+    .filter((r) => r.kind !== 'docs')
+    .reduce((n, r) => n + r.unmatched.length, 0),
   cost_usd: Number(rows.reduce((n, r) => n + r.costUsd, 0).toFixed(4)),
   ledger_total_usd: Number(ledger.total_usd.toFixed(4)),
   relay,
@@ -493,5 +607,6 @@ const ok =
   summary.diagnose.pass === summary.diagnose.total &&
   summary.followup.pass === summary.followup.total &&
   summary.technicals.pass === summary.technicals.total &&
-  summary.propose.pass === summary.propose.total;
+  summary.propose.pass === summary.propose.total &&
+  summary.docs.pass === summary.docs.total;
 process.exit(ok ? 0 : 1);

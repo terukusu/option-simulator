@@ -12,6 +12,8 @@
 !api/pyproject.toml
 !api/uv.lock
 !api/src/
+!docs/user-guide.md
+!docs/design.md
 **/__pycache__
 **/*.pyc
 **/node_modules

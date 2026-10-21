@@ -49,6 +49,8 @@ case "$IMAGE_NAME" in
       api/pyproject.toml
       api/uv.lock
       api/src
+      docs/user-guide.md
+      docs/design.md
     )
     ;;
   *) usage ;;

@@ -31,7 +31,7 @@ from support import (
 from support import ai_post as post
 
 from simulator_api import settings as st
-from simulator_api.ai import agent_sdk, allowlist, relay, skills
+from simulator_api.ai import agent_sdk, allowlist, docs, relay, skills
 from simulator_api.ai.agent_sdk import AgentSdkGateway
 from simulator_api.ai.gateway import IdentityTokenError, UpstreamError
 from simulator_api.ai.tools import REGISTRY
@@ -155,13 +155,15 @@ class FakeQuery:
         return gen()
 
 
-def params(messages=None, tools=True) -> dict:
+def params(messages=None, tools=True, server_tools=False) -> dict:
     p = {"model": "claude-opus-5-5", "max_tokens": st.AI_MAX_TOKENS, "system": relay.SYSTEM_PROMPT,
          "thinking": dict(relay.THINKING), "output_config": dict(relay.OUTPUT_CONFIG),
          "cache_control": dict(relay.CACHE_CONTROL),
          "messages": messages or [{"role": "user", "content": [{"type": "text", "text": relay.DIAGNOSE_TEXT}]}]}
     if tools:
         p["tools"] = [t.definition() for t in REGISTRY.values()]
+    if server_tools:
+        p["server_tools"] = [docs.TOOL_DEFINITION]
     return p
 
 
@@ -176,7 +178,7 @@ def test_events_shape_and_order():
     gw = AgentSdkGateway(FAKE_TOKEN, query_fn=fq)
     evs = run(gw)
     assert evs[0]["type"] == "meta" and isinstance(evs[0]["spawn_ms"], int)
-    assert evs[-2] == {"type": "meta", "skills": [], "turns": 1}
+    assert evs[-2] == {"type": "meta", "skills": [], "turns": 1, "docs": []}
     evs = evs[1:-2] + evs[-1:]
     assert [e["type"] for e in evs] == ["thinking", "thinking", "text", "text", "tool_use", "tool_use", "final"]
     assert evs[0] == {"type": "thinking", "text": "下を"}
@@ -242,7 +244,7 @@ def test_assembler_multi_turn_drops_skill_blocks():
     assert [e["type"] for e in evs] == ["meta", "thinking", "thinking", "thinking", "text", "text", "tool_use", "meta",
                                         "final"]
     assert all(e.get("name") != "Skill" for e in evs)
-    assert evs[-2] == {"type": "meta", "skills": ["simulator:technicals"], "turns": 2}
+    assert evs[-2] == {"type": "meta", "skills": ["simulator:technicals"], "turns": 2, "docs": []}
     final = evs[-1]
     # final は最後の message の block だけ（Skill の turn の block を含まない）
     assert [b["type"] for b in final["content"]] == ["thinking", "text", "tool_use"]
@@ -275,7 +277,7 @@ def test_final_is_last_message_even_if_first_had_text():
 def test_unlisted_skill_name_not_reported():
     fq = FakeQuery(skill_turn("other:x") + turn_events(tools=0), tail=[result()])
     evs = run(AgentSdkGateway(FAKE_TOKEN, query_fn=fq))
-    assert evs[-2] == {"type": "meta", "skills": [], "turns": 2}
+    assert evs[-2] == {"type": "meta", "skills": [], "turns": 2, "docs": []}
 
 
 def test_last_message_unfinished_has_no_final():
@@ -292,7 +294,7 @@ def test_max_turns_error_classified():
         for ev in gw.stream(params(), threading.Event()):
             got.append(ev)
     assert ei.value.code == "upstream_unavailable" and ei.value.error_type == "result:error_max_turns"
-    assert got[-1] == {"type": "meta", "skills": ["simulator:technicals"], "turns": 3}
+    assert got[-1] == {"type": "meta", "skills": ["simulator:technicals"], "turns": 3, "docs": []}
 
 
 # ---- 固定する値（options） ----
@@ -772,3 +774,64 @@ def test_child_env_extra_overrides_routing():
                               extra={"ANTHROPIC_BASE_URL": "http://127.0.0.1:9"})
     assert env["ANTHROPIC_BASE_URL"] == "http://127.0.0.1:9"
     assert all(env[k] == "" for k in agent_sdk.ROUTING_ENV if k != "ANTHROPIC_BASE_URL")
+
+
+# ---- 文書の read_doc（#137。中継の中で実行する） ----
+
+def doc_turn(section="8.5") -> list:
+    """read_doc を呼ぶ 1 turn（thinking → read_doc の tool_use）"""
+    return [se({"type": "message_start", "message": {"usage": dict(START_USAGE)}}),
+            se({"type": "content_block_start", "index": 0,
+                "content_block": {"type": "thinking", "thinking": "", "signature": ""}}),
+            se({"type": "content_block_delta", "index": 0, "delta": {"type": "thinking_delta", "thinking": "読む"}}),
+            se({"type": "content_block_stop", "index": 0}),
+            se({"type": "content_block_start", "index": 1,
+                "content_block": {"type": "tool_use", "id": "toolu_doc", "name": docs.CLI_TOOL_NAME, "input": {}}}),
+            se({"type": "content_block_delta", "index": 1, "delta": {
+                "type": "input_json_delta", "partial_json": json.dumps({"file": "user-guide", "section": section})}}),
+            se({"type": "content_block_stop", "index": 1}),
+            se({"type": "message_delta", "delta": {"stop_reason": "tool_use"}, "usage": {"output_tokens": 40}}),
+            se({"type": "message_stop"})]
+
+
+def test_options_docs_server_only_with_server_tools():
+    fq = FakeQuery(turn_events(), tail=[result()])
+    run(AgentSdkGateway(FAKE_TOKEN, query_fn=fq), params(server_tools=True))
+    assert list(fq.options.mcp_servers) == ["sim", "docs"]
+    assert fq.options.mcp_servers["docs"]["type"] == "sdk" and fq.options.tools == ["Skill"]
+    fq2 = FakeQuery(turn_events(), tail=[result()])
+    run(AgentSdkGateway(FAKE_TOKEN, query_fn=fq2), params())
+    assert list(fq2.options.mcp_servers) == ["sim"]
+
+
+def test_hook_allows_read_doc_exactly():
+    fq = FakeQuery(turn_events(), tail=[result()])
+    run(AgentSdkGateway(FAKE_TOKEN, query_fn=fq), params(server_tools=True))
+    out = asyncio.run(_hook(fq)({"tool_name": docs.CLI_TOOL_NAME, "tool_input": {"file": "design"}}, "t", {}))
+    assert out["hookSpecificOutput"]["permissionDecision"] == "allow" and "continue_" not in out
+    # 似た名前・ブラウザの server の同名は今どおり deny + 止める
+    for other in ("mcp__sim__read_doc", "mcp__docs__other", "read_doc", "mcp__docs__read_doc2"):
+        out = asyncio.run(_hook(fq)({"tool_name": other, "tool_input": {}}, "t", {}))
+        assert out["continue_"] is False and out["hookSpecificOutput"]["permissionDecision"] == "deny"
+
+
+def test_docs_tool_handler_returns_section_and_errors():
+    reader = docs.Reader(docs.index())
+    t = AgentSdkGateway.docs_tool(reader)
+    assert t.name == "read_doc" and t.input_schema == docs.TOOL_DEFINITION["input_schema"]
+    ok = asyncio.run(t.handler({"file": "user-guide", "section": "8.5"}))
+    assert "is_error" not in ok
+    assert ok["content"][0]["text"].startswith("[マニュアル 8.5「追証マップ」]\n### 追証マップ")
+    bad = asyncio.run(t.handler({"file": "design", "section": "13"}))
+    assert bad["is_error"] is True and "無い" in bad["content"][0]["text"]
+    assert reader.read == ["user-guide:8.5"]
+
+
+def test_assembler_hides_read_doc_blocks():
+    fq = FakeQuery(doc_turn() + turn_events(tools=0, redacted=False), tail=[result()])
+    evs = run(AgentSdkGateway(FAKE_TOKEN, query_fn=fq), params(server_tools=True))
+    assert "tool_use" not in [e["type"] for e in evs]
+    final = evs[-1]
+    assert [b["type"] for b in final["content"]] == ["thinking", "text"] and final["stop_reason"] == "end_turn"
+    # FakeQuery は関数を呼ばない（CLI の代わり）ので docs は空。本物の CLI では test_ai_agent_sdk_cli.py
+    assert evs[-2] == {"type": "meta", "skills": [], "turns": 2, "docs": []}

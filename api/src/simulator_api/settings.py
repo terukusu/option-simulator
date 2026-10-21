@@ -121,6 +121,15 @@ AI_MAX_TURNS = 3
 # AI_SKILL_OVERHEAD_TOKENS（Skill の tool_use・tool_result の枠と CLI が足す前置き）を turn ごとに足す
 AI_SKILL_MAX_BYTES = 16 * 1024
 AI_SKILL_OVERHEAD_TOKENS = 1000
+# 文書（マニュアル・設計書の節。#137 = docs/adr-0007-ai-docs-read-tool.md）。中継の中で実行するツール read_doc が返す
+# 大きさの上限: 1 回の読み（超える節は part に分ける）・1 要求の合計・1 要求の呼び出しの回数。予約額の上界には
+# 1 要求の合計 + AI_DOC_OVERHEAD_TOKENS（tool_use・tool_result の枠と、上限を超えた後の短い断りの文）を足す
+AI_DOC_READ_MAX_BYTES = 8 * 1024
+AI_DOC_REQUEST_MAX_BYTES = 16 * 1024
+AI_DOC_MAX_READS = 6
+AI_DOC_OVERHEAD_TOKENS = 2000
+# 文書の置き場所（イメージは Dockerfile の ENV で /app/docs）。未設定ならリポジトリの docs/（手元・テスト）
+AI_DOCS_DIR_ENV = "AI_DOCS_DIR"
 # 1 要求の締め切り（_start の頭 = 予約の前から数える）。超えたら error: timeout で閉じる。
 # 締め切りの直前に final が来ると精算（Firestore の書き込み、最大 AI_FIRESTORE_TIMEOUT_SECONDS = 5 秒）が
 # その後に走るので、最悪 50 + 5 = 55 秒で Cloud Run の 60 秒の内側に収まる

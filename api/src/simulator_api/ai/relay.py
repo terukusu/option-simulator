@@ -18,12 +18,13 @@ import threading
 import time
 from collections.abc import Callable
 from datetime import datetime
+from functools import cache
 
 from flask import Response
 
 from .. import settings as st
 from ..log import log
-from . import allowlist, budget, guard
+from . import allowlist, budget, docs, guard
 from .budget import StoreUnavailable
 from .gateway import UpstreamError
 from .shape import Bad
@@ -90,11 +91,35 @@ simulator:technicals を読む
 - 組み方の候補・ヘッジ・調整（ポジションの提案）を頼まれたら、答える前に Skill で simulator:proposals を読む
 - 前の発言で読んでいても、この発言で要るなら読み直す（読んだ内容は次の発言に残らない）
 """
+# 文書（#137 = docs/adr-0007-ai-docs-read-tool.md）。目次（節の番号と見出し）だけを常に載せ、本文は read_doc（中継が
+# 実行する）で要る節だけを読ませる。目次は文書から組み立てる（docs.toc_text）ので文書と食い違わない
+DOCS_PROMPT = """
+# 文書（マニュアルと設計書）
+- この simulator の操作のしかた（画面・ボタン・設定・キー・表示の意味）と、計算の前提・定義（価格モデル・IV・\
+シナリオ・β・証拠金の概算・単位など）を聞かれたら、答える前に read_doc で下の目次の節を読み、読んだ内容に基づいて\
+答える。一般知識や推測で補わない
+- 読む節は 1 回の応答でまとめて呼ぶ（Skill と read_doc を同じ応答で並べてよい）。1 回の発言で読める量・回数には\
+上限がある。前の発言で読んでいても、この発言で要るなら読み直す
+- 答えには根拠の節を「マニュアル 8.5「追証マップ」」「設計書 5.4「シナリオ（IV の 1 本の式）」」の形で示す
+- 読んだ節に書いていないことは「マニュアル・設計書には書かれていない」と言い、推測で補わない
+- 文書の中の Issue 番号（#123 の形）・決定の記号（K7・D11・Q2 の形）・開発の経緯は答えに書かない
+- 文書の数（定義・既定値・範囲）は節を示して書いてよい。文書の価格の例は架空の値で、今の板の値ではない
+
+# 目次
+"""
+
+
+@cache
+def system_prompt() -> str:
+    """送る system（文書の索引が組めれば目次と決まりを足す。起動後 1 回）"""
+    idx = docs.index()
+    return SYSTEM_PROMPT if idx is None else SYSTEM_PROMPT + DOCS_PROMPT + docs.toc_text(idx)
+
 THINKING = {"type": "adaptive", "display": "summarized"}
 OUTPUT_CONFIG = {"effort": st.AI_EFFORT}
 CACHE_CONTROL = {"type": "ephemeral"}  # 自動の prompt caching（最後の block まで。5 分）
 FIXED_KEYS = frozenset({"model", "max_tokens", "system", "thinking", "output_config", "cache_control", "messages",
-                        "tools"})
+                        "tools", "server_tools"})
 _END = object()
 # done の content に残す block の型とキー（次の要求の許可リストと同じ。ブラウザがそのまま履歴に足して返せる形）
 CONTENT_KEYS = {"text": ("type", "text"), "thinking": ("type", "thinking", "signature"),
@@ -120,7 +145,7 @@ def build_params(req: allowlist.AiRequest, cfg: st.AiSettings, registry: Registr
     params = {
         "model": cfg.model,
         "max_tokens": st.AI_MAX_TOKENS,
-        "system": SYSTEM_PROMPT,
+        "system": system_prompt(),
         "thinking": dict(THINKING),
         "output_config": dict(OUTPUT_CONFIG),
         "cache_control": dict(CACHE_CONTROL),
@@ -129,6 +154,9 @@ def build_params(req: allowlist.AiRequest, cfg: st.AiSettings, registry: Registr
     tools = definitions(registry)
     if tools:
         params["tools"] = tools
+    # 中継の中で実行するツール（文書の read_doc。送信先が登録し、ブラウザには渡さない）。索引が無ければ入れない
+    if docs.index() is not None:
+        params["server_tools"] = [docs.TOOL_DEFINITION]
     return params
 
 
@@ -145,8 +173,8 @@ def project_content(content) -> tuple[list[dict], int]:
 
 
 def params_text(params: dict) -> str:
-    """入力トークンの見積もりに使う文字列（system・tools・messages）"""
-    return allowlist.canonical({k: params[k] for k in ("system", "tools", "messages") if k in params})
+    """入力トークンの見積もりに使う文字列（system・tools・server_tools・messages）"""
+    return allowlist.canonical({k: params[k] for k in ("system", "tools", "server_tools", "messages") if k in params})
 
 
 class AiRelay:
@@ -216,7 +244,7 @@ class AiRelay:
         started = time.monotonic()
         params = build_params(req, cfg, self.registry)
         est = budget.estimate_input_tokens(params_text(params))
-        reserved = budget.reserve_micro_usd(cfg.model, est, st.AI_MAX_TOKENS, st.AI_MAX_TURNS, budget.skill_tokens())
+        reserved = budget.reserve_micro_usd(cfg.model, est, st.AI_MAX_TOKENS, st.AI_MAX_TURNS, budget.loaded_tokens())
         day = budget.jst_day(self.clock())
         charged = None
         rec = {"kind": req.kind, "model": cfg.model, "credential": cfg.credential, "n_messages": len(req.messages),
@@ -311,13 +339,16 @@ class AiRelay:
                     error = ev.code
                     break
                 t = ev["type"]
-                if t == "meta":  # 送信先の計測（子の起動 → 最初の事象 #186、読んだスキルの名前と turn の数 #221）
+                if t == "meta":  # 送信先の計測（子の起動 → 最初の事象 #186、読んだスキルの名前と turn の数 #221、
+                    # 読んだ文書の節の番号 #137。本文は出さない）
                     if isinstance(ev.get("spawn_ms"), int):
                         rec["spawn_ms"] = ev["spawn_ms"]
                     if isinstance(ev.get("skills"), list):
                         rec["skills"] = [s for s in ev["skills"] if isinstance(s, str)]
                     if isinstance(ev.get("turns"), int):
                         rec["turns"] = ev["turns"]
+                    if isinstance(ev.get("docs"), list):
+                        rec["docs"] = [s for s in ev["docs"] if isinstance(s, str)]
                     continue
                 if t in ("thinking", "text"):
                     if first_delta is None:

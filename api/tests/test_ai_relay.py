@@ -21,7 +21,7 @@ from support import (
 from support import ai_post as post
 
 from simulator_api import settings as st
-from simulator_api.ai import allowlist, budget, relay
+from simulator_api.ai import allowlist, budget, docs, relay
 from simulator_api.ai.budget import MemoryStore
 from simulator_api.ai.gateway import FakeGateway, UpstreamError
 
@@ -34,7 +34,7 @@ def reserved_for(body, cfg=None) -> int:
     cfg = cfg or ai_settings()
     params = relay.build_params(allowlist.parse_request(json.dumps(body, ensure_ascii=False).encode(), REG), cfg, REG)
     return budget.reserve_micro_usd(cfg.model, budget.estimate_input_tokens(relay.params_text(params)),
-                                    st.AI_MAX_TOKENS, st.AI_MAX_TURNS, budget.skill_tokens())
+                                    st.AI_MAX_TOKENS, st.AI_MAX_TURNS, budget.loaded_tokens())
 
 
 def logs(capsys, event=None):
@@ -60,7 +60,8 @@ MESSAGE_KEYS = {"role", "content", "type", "text", "thinking", "signature", "dat
 
 
 def allowed_keys(registry) -> set:
-    fixed = set(relay.FIXED_KEYS) | _keys([relay.THINKING, relay.OUTPUT_CONFIG, relay.CACHE_CONTROL], set())
+    fixed = set(relay.FIXED_KEYS) | _keys([relay.THINKING, relay.OUTPUT_CONFIG, relay.CACHE_CONTROL,
+                                           docs.TOOL_DEFINITION], set())
     tools = _keys([t.definition() for t in registry.values()], set())
     shapes = set()
     for t in registry.values():
@@ -78,7 +79,8 @@ def test_upstream_body_only_allowlisted_keys(messages):
     params = gw.calls[0]
     assert set(params) == relay.FIXED_KEYS  # ツールの登録があれば tools も
     assert params["model"] == "claude-opus-5-5" and params["max_tokens"] == st.AI_MAX_TOKENS
-    assert params["system"] == relay.SYSTEM_PROMPT
+    assert params["system"] == relay.system_prompt() and params["system"].startswith(relay.SYSTEM_PROMPT)
+    assert params["server_tools"] == [docs.TOOL_DEFINITION]  # 中継が実行する文書の read_doc（#137）
     assert _keys(params, set()) - allowed_keys(REG) == set()
     # context は最初の user の先頭の text block の JSON。そのキーは文脈の許可リストの中だけ
     text = params["messages"][0]["content"][0]["text"]
@@ -207,7 +209,8 @@ def test_no_final_keeps_reservation():
 
 def test_client_disconnect_keeps_reservation_and_releases_slot(capsys):
     gate = threading.Event()
-    client, gw, store, _ = ai_app(gateway=FakeGateway(gate=gate))
+    # 予約 3 本分が上限に収まるように（#137 で予約額の上界が増えた。この試験は枠の解放を見る）
+    client, gw, store, _ = ai_app(gateway=FakeGateway(gate=gate), ai_cfg=ai_settings(limit_micro=10_000_000))
     res = post(client, ai_body(), buffered=False)
     it = iter(res.response)
     assert next(it).startswith(b"event: accepted")
@@ -222,7 +225,7 @@ def test_client_disconnect_keeps_reservation_and_releases_slot(capsys):
 
 
 def test_closed_before_start_releases_slot(capsys):
-    client, gw, store, _ = ai_app()
+    client, gw, store, _ = ai_app(ai_cfg=ai_settings(limit_micro=10_000_000))  # 予約 3 本分（枠の解放を見る）
     for _ in range(3):
         res = post(client, ai_body(), buffered=False)
         assert res.status_code == 200
@@ -535,3 +538,35 @@ def test_reserve_counts_max_turns_and_skills():
     est = budget.estimate_input_tokens(relay.params_text(params))
     assert reserved_for(body) > budget.reserve_micro_usd(cfg.model, est, st.AI_MAX_TOKENS)
     assert st.AI_MAX_TURNS == 3
+
+
+# ---- 文書（#137 AC3） ----
+
+def test_system_prompt_has_docs_toc_but_not_bodies():
+    idx = docs.index()
+    assert idx is not None
+    prompt = relay.system_prompt()
+    assert prompt.startswith(relay.SYSTEM_PROMPT) and relay.DOCS_PROMPT in prompt
+    # 目次: 全節の番号と見出し（開発の経緯を除いた見出し）
+    for s in idx.sections.values():
+        assert f"- {s.id} {s.title}\n" in prompt
+    # 本文は載せない（長い節の本文の行が無い）。節の示し方・無いことは無いと言う・Issue 番号を書かない、の決まり
+    body_line = next(line for line in idx.get("design", "5.10").text.splitlines()[2:] if len(line) > 80)
+    assert body_line not in prompt
+    for rule in ("read_doc", "マニュアル 8.5「追証マップ」", "書かれていない", "Issue 番号"):
+        assert rule in prompt
+    assert len(prompt.encode("utf-8")) < len(relay.SYSTEM_PROMPT.encode("utf-8")) + 8 * 1024
+
+
+def test_params_text_counts_server_tools():
+    params = relay.build_params(allowlist.parse_request(json.dumps(ai_body()).encode(), REG), ai_settings(), REG)
+    assert json.dumps(docs.TOOL_DEFINITION["description"], ensure_ascii=False)[1:-1] in relay.params_text(params)
+
+
+def test_ai_request_logs_docs(capsys):
+    script = [{"type": "meta", "skills": [], "turns": 2, "docs": ["user-guide:8.5", None, "design:5.10#2"]},
+              {"type": "text", "text": "答え"}]
+    client, _, _, _ = ai_app(gateway=FakeGateway(script=script))
+    post(client, ai_body()).get_data()
+    rec = logs(capsys, "ai_request")[0]
+    assert rec["docs"] == ["user-guide:8.5", "design:5.10#2"] and rec.get("error") is None

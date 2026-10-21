@@ -15,14 +15,23 @@ import time
 from pathlib import Path
 
 import pytest
-from fake_messages_api import EXCHANGED, SIG, SKILL_NAME, THINKING_PARTS, FakeMessagesApi, turn_usage
+from fake_messages_api import (
+    DOC_INPUT,
+    DOC_TOOL,
+    EXCHANGED,
+    SIG,
+    SKILL_NAME,
+    THINKING_PARTS,
+    FakeMessagesApi,
+    turn_usage,
+)
 from support import FAKE_ID_TOKEN, FAKE_KEY, ai_app, ai_body, ai_context, ai_settings, log_records, sse_events
 from support import ai_post as post
 from test_ai_agent_sdk import _full_history, built, tool_result_text
 from test_ai_skills import frontmatter
 
 from simulator_api import settings as st
-from simulator_api.ai import agent_sdk, budget, relay, skills
+from simulator_api.ai import agent_sdk, budget, docs, relay, skills
 from simulator_api.ai.agent_sdk import AgentSdkGateway
 from simulator_api.ai.gateway import UpstreamError
 from simulator_api.ai.tools import REGISTRY
@@ -127,11 +136,11 @@ def test_diagnose_roundtrip_through_real_cli(parent_creds):
     assert b["model"] == "claude-opus-5-5" and b["max_tokens"] == 8000
     assert b["thinking"] == {"type": "adaptive", "display": "summarized"}
     assert b["output_config"]["effort"] == "medium"
-    # system: CLI が先頭に 2 block を足し、最後が我々の SYSTEM_PROMPT（バイト一致）
-    assert b["system"][-1]["text"] == relay.SYSTEM_PROMPT and len(b["system"]) == 3
-    # ツールは我々の 7 本（#200 で technicals）と組み込みの Skill だけ（#221）
+    # system: CLI が先頭に 2 block を足し、最後が我々の system（SYSTEM_PROMPT + 文書の目次。バイト一致）
+    assert b["system"][-1]["text"] == relay.system_prompt() and len(b["system"]) == 3
+    # ツールは我々のブラウザのツール（#200 で technicals）と組み込みの Skill（#221）と文書の read_doc（#137）だけ
     assert sorted(t["name"] for t in b["tools"]) == sorted(
-        [agent_sdk.SKILL_TOOL, *(agent_sdk.to_cli_name(n) for n in REGISTRY)])
+        [agent_sdk.SKILL_TOOL, docs.CLI_TOOL_NAME, *(agent_sdk.to_cli_name(n) for n in REGISTRY)])
     # messages: role=system（CLI の環境）を除けば、最初の user（context + 診断の文）だけ
     assert strip(b["messages"]) == [{"role": "user", "content": [
         {"type": "text", "text": json_ctx_text(body)}, {"type": "text", "text": relay.DIAGNOSE_TEXT}]}]
@@ -173,7 +182,7 @@ def test_history_with_tool_result_last_adds_only_resume_text(parent_creds):
     assert got == want
     # tool_result の後の要求にもツールが全部載る（入力の stream を結果まで開けておく。#209）
     assert sorted(t["name"] for t in posts[0]["body"].get("tools", [])) == sorted(
-        [agent_sdk.SKILL_TOOL, *(agent_sdk.to_cli_name(n) for n in REGISTRY)])
+        [agent_sdk.SKILL_TOOL, docs.CLI_TOOL_NAME, *(agent_sdk.to_cli_name(n) for n in REGISTRY)])
 
 
 def test_at_path_is_not_read(parent_creds, tmp_path):
@@ -423,16 +432,17 @@ def _strip_cc(blocks):
     return [{k: v for k, v in b.items() if k != "cache_control"} for b in blocks]
 
 
+@pytest.mark.parametrize("script", ["skill", "skill_doc"])
 @pytest.mark.parametrize("history", [False, True])
-def test_cli_overhead_and_cache_prefix_for_reserve(parent_creds, history):
+def test_cli_overhead_and_cache_prefix_for_reserve(parent_creds, history, script):
     """予約額（budget.reserve_micro_usd）の前提を CLI の要求の形で固定する:
     1. CLI が足す本文（system の先頭・Skill の定義・環境の message）は AI_CLI_OVERHEAD_TOKENS 以下 = 見積もり E に入る
     2. 各要求の最後の message に cache_control が付き、次の turn の要求は前の turn の要求をそのまま前置きに持つ
        （system・tools は同じ）= 前の turn の要求はキャッシュの読み出しになる
-    3. turn ごとに増える分（前の出力を除く）は Skill の本文と枠 = K（skill_tokens）以下"""
+    3. turn ごとに増える分（前の出力を除く）は Skill・read_doc（#137）の本文と枠 = K（loaded_tokens）以下"""
     msgs = _full_history() if history else [{"role": "user", "content": [{"type": "text", "text": "RSI は？"}]}]
     p = built(msgs)
-    with FakeMessagesApi("skill") as api:
+    with FakeMessagesApi(script) as api:
         list(gateway(api).stream(p, threading.Event()))
         posts = [r["body"] for r in api.posts()]
     assert len(posts) == 2
@@ -450,7 +460,7 @@ def test_cli_overhead_and_cache_prefix_for_reserve(parent_creds, history):
     assert _norm(second["messages"])[:len(n0)] == n0
     added = _norm(second["messages"])[len(n0):]
     out_bytes = sum(_bytes(m) for m in added if m["role"] == "assistant")
-    assert sent[1] - sent[0] - out_bytes <= budget.skill_tokens()
+    assert sent[1] - sent[0] - out_bytes <= budget.loaded_tokens()
 
 
 def test_parent_base_url_does_not_redirect(parent_creds, monkeypatch):
@@ -493,3 +503,79 @@ def test_empty_routing_env_falls_back_to_default_host(parent_creds):
     finally:
         srv.close()
     assert seen and set(seen) == {"CONNECT api.anthropic.com:443 HTTP/1.1"}
+
+
+# ---- 文書の read_doc（#137。中継の中で実行する） ----
+
+def section_body(file="user-guide", section="8.5") -> str:
+    return docs.index().get(file, section).text
+
+
+def tool_results(body: dict) -> list[dict]:
+    return [b for m in body["messages"] if isinstance(m["content"], list) for b in m["content"]
+            if isinstance(b, dict) and b.get("type") == "tool_result"]
+
+
+def _result_text(block: dict) -> str:
+    c = block.get("content")
+    if isinstance(c, str):
+        return c
+    return "".join(x.get("text", "") for x in c or [] if isinstance(x, dict))
+
+
+def test_doc_roundtrip_through_real_cli(parent_creds, capsys):
+    """AC4: 1 回目が read_doc → フックが通し、中継の関数が節を返す → 2 回目の要求に節の本文。read_doc は SSE・done に
+    出ず、ブラウザのツールの関数は呼ばれない。ログには節の番号だけ"""
+    with FakeMessagesApi("doc") as api:
+        gw = gateway(api)
+        client, _ = relay_app(gw)
+        evs = sse_events(post(client, chat("追証マップの点は何？")).get_data(as_text=True))
+        posts = api.posts()
+    assert len(posts) == 2
+    first, second = posts[0]["body"], posts[1]["body"]
+    assert DOC_TOOL in [t["name"] for t in first["tools"]]
+    results = tool_results(second)
+    assert len(results) == 1 and not results[0].get("is_error")
+    text = _result_text(results[0])
+    assert text.startswith("[マニュアル 8.5「追証マップ」]\n") and section_body() in text
+    # 読んでいない節の本文は送らない（目次は system にある）
+    assert section_body("design", "5.10") not in json.dumps(second, ensure_ascii=False)
+    assert "tool_use" not in [e for e, _ in evs]
+    done = dict(evs)["done"]
+    assert done["stop_reason"] == "end_turn" and [b["type"] for b in done["content"]] == ["thinking", "text"]
+    assert gw.tool_calls == 0
+    rec = ai_request(capsys)
+    assert rec["docs"] == ["user-guide:8.5"] and rec["turns"] == 2 and rec.get("error") is None
+    assert section_body().splitlines()[2] not in json.dumps(rec, ensure_ascii=False)  # 本文はログに出さない
+
+
+def test_skill_and_doc_in_same_turn(parent_creds, capsys):
+    """Skill と read_doc を同じ応答で並べても上流 2 回（turn の上限の内）で答える"""
+    with FakeMessagesApi("skill_doc") as api:
+        client, _ = relay_app(gateway(api))
+        evs = sse_events(post(client, chat()).get_data(as_text=True))
+        posts = api.posts()
+    assert evs[-1][0] == "done" and len(posts) == 2 <= st.AI_MAX_TURNS
+    sent = json.dumps(posts[1]["body"]["messages"], ensure_ascii=False)
+    assert json.dumps(skill_body("technicals"), ensure_ascii=False)[1:-1] in sent
+    assert json.dumps(section_body(), ensure_ascii=False)[1:-1] in sent
+    rec = ai_request(capsys)
+    assert rec["skills"] == [SKILL_NAME] and rec["docs"] == ["user-guide:8.5"]
+
+
+def test_doc_outside_allowlist_returns_error_without_body(parent_creds, capsys):
+    """許可リストの外（設計書の 13 章）は本文を返さず、エラーの文（turn は続く）"""
+    with FakeMessagesApi("doc_outside") as api:
+        client, _ = relay_app(gateway(api))
+        evs = sse_events(post(client, chat("決定事項を教えて")).get_data(as_text=True))
+        posts = api.posts()
+    assert evs[-1][0] == "done" and len(posts) == 2
+    results = tool_results(posts[1]["body"])
+    assert len(results) == 1 and results[0].get("is_error") is True
+    assert "無い" in _result_text(results[0])
+    assert "13.1 決定事項（オーナー確定）" not in json.dumps(posts[1]["body"], ensure_ascii=False)
+    assert ai_request(capsys)["docs"] == []
+
+
+def test_doc_input_matches_fake_api():
+    assert DOC_INPUT == {"file": "user-guide", "section": "8.5"} and DOC_TOOL == docs.CLI_TOOL_NAME
