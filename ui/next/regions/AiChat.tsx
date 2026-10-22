@@ -495,7 +495,9 @@ function ChatRow(p: {
       );
     case 'tool': {
       const prop =
-        it.name === 'propose_position' && !it.isError ? proposalCard(it.input, it.result) : null;
+        it.name === 'propose_position' && it.status === 'ok'
+          ? proposalCard(it.input, it.result)
+          : null;
       if (prop) {
         return (
           <div class="ai-tool ai-prop" data-ai-tool={it.name} data-target={prop.target}>
@@ -527,14 +529,20 @@ function ChatRow(p: {
           </div>
         );
       }
-      const card = toolCard(it.name, it.input, it.result, it.isError);
+      const card = toolCard(it.name, it.input, it.result, it.status);
       const sc = card.applicable ? scenarioOfResult(it.result, p.x0) : null;
       return (
-        <div class="ai-tool" data-ai-tool={it.name}>
+        <div
+          class="ai-tool"
+          data-ai-tool={it.name}
+          data-status={it.status}
+          aria-busy={card.pending ? 'true' : undefined}
+        >
           <p class="ai-tool-title">{card.title}</p>
           {card.input && <p class="ai-tool-input">{card.input}</p>}
           {card.lines.map((l) => (
             <p key={l} class="ai-tool-line">
+              {card.pending && <span class="ai-spin" aria-hidden="true" />}
               {l}
             </p>
           ))}

@@ -494,6 +494,12 @@ export function aiErrorText(code: string, remainingUsd: number | null = null): s
 
 // ---------------------------------------------------------------- 表示の項目
 
+/**
+ * ツールのカードの状態（#242）。ok = 結果あり、error = 結果が is_error、pending = 結果を待つ間（turn が awaitingTools）、
+ * missing = 結果が返らないまま会話が終わった（失敗とは言わない）
+ */
+export type ToolStatus = 'ok' | 'error' | 'pending' | 'missing';
+
 export type ChatItem =
   | { kind: 'user'; text: string; updated: boolean; key: string }
   | { kind: 'thinking'; text: string; key: string; live: boolean }
@@ -512,7 +518,7 @@ export type ChatItem =
       name: string;
       input: Record<string, unknown>;
       result: unknown;
-      isError: boolean;
+      status: ToolStatus;
     };
 
 const parseJson = (t: string): unknown => {
@@ -564,7 +570,7 @@ export function chatItems(s: AiChatState): ChatItem[] {
           name: b.name,
           input: b.input,
           result: r?.result ?? null,
-          isError: r?.isError ?? false,
+          status: r ? (r.isError ? 'error' : 'ok') : s.turn?.awaitingTools ? 'pending' : 'missing',
         });
       }
     });
