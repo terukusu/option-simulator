@@ -134,7 +134,8 @@ table.board tbody th {
 }
 
 table.board tbody th.k {
-  position: relative;
+  /* K のポップオーバー（#264）の包含ブロックを .board-wrap にするため static。バッジの基準は中の .kcell */
+  position: static;
   padding: 0 2px;
   color: var(--ink);
   font-weight: 600;
@@ -221,8 +222,13 @@ table.board .flag {
   font-size: 9px;
 }
 
-/* K のボタン（#264。押すとその行の理論価格と印の全文。行の高さ・列の幅は今のまま） */
-table.board th.k > .kbtn {
+/* K のボタン（#264。押すとその行の理論価格と印の全文。行の高さ・列の幅は今のまま）。.kcell はバッジの基準 */
+table.board th.k > .kcell {
+  position: relative;
+  display: block;
+}
+
+table.board th.k .kbtn {
   display: block;
   width: 100%;
   height: 30px;
@@ -233,29 +239,40 @@ table.board th.k > .kbtn {
   color: inherit;
   font: inherit;
   line-height: inherit;
+  cursor: pointer;
 }
 
-table.board th.k > .kbtn:hover,
-table.board th.k > .kbtn[aria-expanded="true"] {
+/* 押せる手がかり: ホバー・フォーカス・開いている間は薄い背景 */
+table.board th.k .kbtn:hover,
+table.board th.k .kbtn:focus-visible,
+table.board th.k .kbtn[aria-expanded="true"] {
   background: var(--s3);
+  outline: none;
 }
 
-table.board th.k.b > .kbtn > .kv {
+table.board th.k.b .kbtn > .kv {
   position: relative;
   top: -5px;
 }
 
 /*
- * K のポップオーバー（#264）。左右は .board-wrap の幅（container の cqw）で収める: 5 列は K が左端なので枠の幅、
- * 9 / 7 列は K が中央なので枠の半分 + K の列の半分まで（.end は K の右端から左へ）。中は折り返してよい
+ * K のポップオーバー（#264）。包含ブロックは .board-wrap（th.k は static）、縦は K のセルの直下（top: auto = 元の位置）。
+ * 5 列は K が左端なので枠の左、9 / 7 列は K が中央なので枠の中央に置く。幅は枠まで（container の cqw）。
+ * 行は「（」の前でだけ折れる（.kpop-main・.kpop-note・.kpop-mark は途中で折らない）
  */
 .board-wrap {
   container-type: inline-size;
 }
 
-table.board .popover.kpop {
+table.board .popover.kpop,
+table.board .popover.kpop.end {
+  top: auto;
+  right: auto;
+  left: 50%;
   width: max-content;
-  max-width: min(320px, calc(50cqw + 18px));
+  max-width: min(360px, calc(100cqw - 8px));
+  margin-top: var(--sp-1);
+  transform: translateX(-50%);
   color: var(--ink-2);
   font-family: var(--font);
   font-size: var(--fs-sub);
@@ -266,7 +283,8 @@ table.board .popover.kpop {
 }
 
 table.board.c5 .popover.kpop {
-  max-width: min(320px, calc(100cqw - 8px));
+  left: 4px;
+  transform: none;
 }
 
 table.board .popover.kpop > p {
@@ -281,6 +299,12 @@ table.board .popover.kpop > .kpop-head {
 table.board .popover.kpop > .kpop-line {
   color: var(--ink);
   font-family: var(--mono);
+}
+
+table.board .popover.kpop .kpop-main,
+table.board .popover.kpop .kpop-note,
+table.board .popover.kpop .kpop-mark {
+  white-space: nowrap;
 }
 
 table.board .popover.kpop > .kpop-marks {

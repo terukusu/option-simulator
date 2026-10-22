@@ -13,7 +13,7 @@ import {
   type BoardSideText,
   boardKPop,
 } from '../../view/boardPanel';
-import { hintAlign, hintNext, revealDelta } from '../../view/hint';
+import { hintNext, revealDelta } from '../../view/hint';
 import { PANEL_FOCUS_LABEL } from '../../view/keys';
 import { useOverlay } from '../parts/overlay';
 
@@ -80,8 +80,9 @@ function Badges({ pair, side }: { pair: BadgePair; side: 'c' | 'p' }) {
 
 /**
  * K のポップオーバー（#264。押した行にだけ描く）。開閉の規則は parts/Popover.tsx と同じ（押すたびに反転・外側の
- * pointerdown で閉じる・Esc で閉じて K のボタンへ戻す・同時に 1 つ = overlay）。左右は .board-wrap の左右で hintAlign、
- * 開いたら下端が見えるまで .board-wrap だけをスクロールする（revealDelta）。style 属性は使わない。
+ * pointerdown で閉じる・Esc で閉じて K のボタンへ戻す・同時に 1 つ = overlay）。位置は CSS だけ（.board-wrap を包含
+ * ブロックにして、5 列は枠の左、9 / 7 列は枠の中央 = K の列の中央。縦は K のセルの直下 = top: auto）。開いたら下端が
+ * 見えるまで .board-wrap だけをスクロールする（revealDelta）。style 属性は使わない。
  */
 function KPop(p: {
   id: string;
@@ -90,14 +91,7 @@ function KPop(p: {
   onClose: () => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
-  const [align, setAlign] = useState<'start' | 'end'>('start');
   const { onClose, btn } = p;
-  useLayoutEffect(() => {
-    const b = btn.current?.getBoundingClientRect();
-    const host = ref.current?.closest('.board-wrap');
-    const h = host?.getBoundingClientRect();
-    if (b && h) setAlign(hintAlign((b.left + b.right) / 2, h.left, h.right));
-  }, [btn]);
   useLayoutEffect(() => {
     const host = ref.current?.closest('.board-wrap');
     const pop = ref.current;
@@ -106,7 +100,7 @@ function KPop(p: {
     const h = host.getBoundingClientRect();
     const d = revealDelta(r.top, r.bottom, h.top, h.bottom);
     if (d > 0) host.scrollTop += d;
-  }, [align]);
+  }, []);
   useLayoutEffect(() => {
     const onDown = (e: PointerEvent) => {
       const wrap = ref.current?.parentElement;
@@ -128,14 +122,23 @@ function KPop(p: {
   }, [onClose, btn]);
   const v = boardKPop(p.text);
   return (
-    <div class={align === 'end' ? 'popover kpop end' : 'popover kpop'} id={p.id} ref={ref}>
+    <div class="popover kpop" id={p.id} ref={ref}>
       <p class="kpop-head">{v.head}</p>
       {v.lines.map((l) => (
-        <p key={l} class="kpop-line">
-          {l}
+        <p key={l.main} class="kpop-line">
+          <span class="kpop-main">{l.main}</span>
+          {l.note && <span class="kpop-note">{l.note}</span>}
         </p>
       ))}
-      {v.marks.length > 0 && <p class="kpop-marks">{v.marks.join('・')}</p>}
+      {v.marks.length > 0 && (
+        <p class="kpop-marks">
+          {v.marks.map((m, i) => (
+            <span key={m} class="kpop-mark">
+              {i > 0 ? `・${m}` : m}
+            </span>
+          ))}
+        </p>
+      )}
     </div>
   );
 }
@@ -203,27 +206,30 @@ class BoardRowView extends Component<RowProps> {
     const k = (
       <th scope="row" class={hasBadge ? 'k b' : 'k'}>
         {/* K を押すとその行の理論価格と印の全文（#264）。title は PC のマウス用の要約 */}
-        <button
-          type="button"
-          class="kbtn"
-          ref={this.kBtn}
-          title={text.kTitle ?? undefined}
-          aria-expanded={pop}
-          aria-controls={pop ? popId : undefined}
-          onClick={() => onK(row.k)}
-        >
-          <span class={text.kMark ? `kv ${text.kMark}` : 'kv'}>{text.k}</span>
-          {atm && <span class="sr">（ATM）</span>}
-          {kFull.length > 0 && <span class="sr">（{kFull.join('・')}）</span>}
-          <span class="sr">（理論価格を見る）</span>
-        </button>
+        <span class="kcell">
+          <button
+            type="button"
+            class="kbtn"
+            ref={this.kBtn}
+            title={text.kTitle ?? undefined}
+            aria-haspopup="dialog"
+            aria-expanded={pop}
+            aria-controls={popId}
+            onClick={() => onK(row.k)}
+          >
+            <span class={text.kMark ? `kv ${text.kMark}` : 'kv'}>{text.k}</span>
+            {atm && <span class="sr">（ATM）</span>}
+            {kFull.length > 0 && <span class="sr">（{kFull.join('・')}）</span>}
+            <span class="sr">（理論価格を見る）</span>
+          </button>
+          {hasBadge && (
+            <span class={only ? 'legbadges one' : 'legbadges'}>
+              {(only === null || only === 'call') && <Badges pair={call} side="c" />}
+              {(only === null || only === 'put') && <Badges pair={put} side="p" />}
+            </span>
+          )}
+        </span>
         {pop && <KPop id={popId} text={text} btn={this.kBtn} onClose={onPopClose} />}
-        {hasBadge && (
-          <span class={only ? 'legbadges one' : 'legbadges'}>
-            {(only === null || only === 'call') && <Badges pair={call} side="c" />}
-            {(only === null || only === 'put') && <Badges pair={put} side="p" />}
-          </span>
-        )}
       </th>
     );
     const side = (type: OptionType) => {

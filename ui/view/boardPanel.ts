@@ -269,26 +269,33 @@ function kTitle(otm: OptionType, side: BoardSideText, marks: readonly BoardMark[
   return parts.length ? parts.join('・') : null;
 }
 
+/** ポップオーバーの理論価格の 1 行（main と note はそれぞれ途中で折らない = 折れるのは「（」の前だけ） */
+export interface BoardKPopLine {
+  /** `43,000 put · 理論 10.0`（出せない側は `理論 —`） */
+  main: string;
+  /** `（IV 58.9・気配の中ほど）`（出せない側は null） */
+  note: string | null;
+}
+
 /** 板の K のポップオーバー（#264）の中身: 理論価格の行（OTM 側が先）と、その行の印の全文 */
 export interface BoardKPop {
   /** 見出し（`理論価格（周りの行から）`） */
   head: string;
-  /** `43,000 put · 理論 10.0（IV 58.9・気配の中ほど）`（出せない側は `理論 —`） */
-  lines: string[];
-  /** 印の全文（IV 不安定・補間 / 外挿・call / put の気配なし・JPX の IV 欠損）。無ければ空 */
+  lines: BoardKPopLine[];
+  /** 印の全文（IV 不安定・補間 / 外挿・call / put の気配なし・JPX の IV 欠損）。無ければ空。1 つずつ途中で折らない */
   marks: string[];
 }
 
 /** K のポップオーバーの中身（行の文字列から作るだけ。押した行だけで呼ぶ）。 */
 export function boardKPop(text: BoardRowText): BoardKPop {
   const order: OptionType[] = text.otm === 'put' ? ['put', 'call'] : ['call', 'put'];
-  const lines = order.map((type) => {
+  const lines = order.map((type): BoardKPopLine => {
     const f = text[type].fair;
-    if (!f) return `${text.k} ${type} · 理論 ${DASH}`;
+    if (!f) return { main: `${text.k} ${type} · 理論 ${DASH}`, note: null };
     const notes = [`IV ${f.iv}`, f.position, f.extrapolated ? '外挿' : null].filter(
       (t) => t !== null,
     );
-    return `${text.k} ${type} · 理論 ${f.price}（${notes.join('・')}）`;
+    return { main: `${text.k} ${type} · 理論 ${f.price}`, note: `（${notes.join('・')}）` };
   });
   const marks = text.marks.map((m) => m.full);
   for (const type of order) for (const m of text[type].marks) marks.push(`${type} ${m.full}`);

@@ -70,12 +70,14 @@ describe('K のポップオーバー・title の理論価格（#264）', () => {
       order.forEach((type, i) => {
         const f = t[type].fair;
         const line = v.lines[i];
-        expect(line?.startsWith(`${t.k} ${type} · 理論 `)).toBe(true);
-        if (!f) expect(line).toBe(`${t.k} ${type} · 理論 —`);
+        if (!f) expect(line).toEqual({ main: `${t.k} ${type} · 理論 —`, note: null });
         else {
-          expect(line).toContain(`理論 ${f.price}（IV ${f.iv}`);
-          if (f.position) expect(line).toContain(f.position);
-          expect(line?.includes('外挿')).toBe(f.extrapolated);
+          // 折れるのは「（」の前だけ（main と note はそれぞれ 1 つの塊）
+          expect(line?.main).toBe(`${t.k} ${type} · 理論 ${f.price}`);
+          expect(line?.note?.startsWith(`（IV ${f.iv}`)).toBe(true);
+          expect(line?.note?.endsWith('）')).toBe(true);
+          if (f.position) expect(line?.note).toContain(f.position);
+          expect(line?.note?.includes('外挿')).toBe(f.extrapolated);
         }
       });
       // 印の全文: 行の印（IV 不安定・補間 / 外挿）と、種別ごとの気配なし・JPX の IV 欠損
