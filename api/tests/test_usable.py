@@ -347,10 +347,17 @@ def test_three_reads_then_503():
     for back in (2, 1, 0):
         t = at - timedelta(minutes=back)
         w.add(t, synth_board(t, quoted=1), 30000.0)
-    svc, runner, _ = service(w, at + timedelta(minutes=15))
+    svc, runner, clock = service(w, at + timedelta(minutes=15))
     with pytest.raises(Unavailable):
         svc.chain()
     assert runner.count("option_price") == 3
+    # 上限はキャッシュ済みの評価（不採用として覚えた板）も数える（7.2 の 4。#245）: 同じ候補のままなら 2 回目は
+    # 4 つ目へ読み進まず、板を読まずに 503（使える板が無いときに要求のたびに板を読む費用を出さない）
+    runner.reset()
+    clock.advance(11)  # latest_runs の TTL（10 秒）を過ぎる
+    with pytest.raises(Unavailable):
+        svc.chain()
+    assert runner.names() == ["latest_runs"]
 
 
 def test_no_runs_is_503():
