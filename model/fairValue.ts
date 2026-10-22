@@ -55,7 +55,7 @@ export function smileFairIvs(
   if (!fit || !(F > 0) || !Number.isFinite(F) || !(T > 0)) return ks.map(() => null);
   const tight = fit.nodes.filter((n) => isTightNode(n, maxSpreadIv)).sort((a, b) => a.x - b.x);
   const pt = (n: SmileNode) => ({ x: n.x, w: n.iv * n.iv * T });
-  const all = tight.length >= 2 ? new PiecewiseLinearSmile(tight.map(pt), T) : null;
+  const all = tight.length >= 2 ? new PiecewiseLinearSmile(tight.map(pt), T, 'slope', 2, F) : null;
   const index = new Map(tight.map((n, i) => [n.k, i]));
   return ks.map((k) => {
     if (!(k > 0)) return null;
@@ -68,8 +68,13 @@ export function smileFairIvs(
         smile = new PiecewiseLinearSmile(
           [pt(tight[i - 1] as SmileNode), pt(tight[i + 1] as SmileNode)],
           T,
+          'slope',
+          2,
+          F,
         );
-      } else smile = new PiecewiseLinearSmile(tight.filter((_, j) => j !== i).map(pt), T);
+      } else {
+        smile = new PiecewiseLinearSmile(tight.filter((_, j) => j !== i).map(pt), T, 'slope', 2, F);
+      }
     }
     if (!smile) return null;
     const x = Math.log(k / F);

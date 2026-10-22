@@ -200,6 +200,9 @@ describe('板の全行を 1 回で（smileFairIvs）', () => {
             : new PiecewiseLinearSmile(
                 nodes.map((n) => ({ x: n.x, w: n.iv * n.iv * t })),
                 t,
+                'slope',
+                2,
+                f,
               );
         const x = Math.log(k / f);
         if (!want) expect(got[j]).toBeNull();
