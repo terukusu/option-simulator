@@ -572,7 +572,8 @@ function defaultMonth(env: AiToolEnv): ChainMonth | null {
   return months.find((m) => m.T * 365 >= 2) ?? months[0] ?? null;
 }
 
-function monthFor(env: AiToolEnv, expiry: unknown): ChainMonth | Err {
+/** 限月の指定 → 板の限月（省略 = 既定の限月。形の誤りは bad_input、板に無い・スマイルが無いは not_on_board） */
+export function monthFor(env: AiToolEnv, expiry: unknown): ChainMonth | Err {
   if (expiry === undefined) return defaultMonth(env) ?? 'no_data';
   if (!isMonth(expiry)) return 'bad_input';
   const m = env.chain.months.find((x) => x.id === expiry);

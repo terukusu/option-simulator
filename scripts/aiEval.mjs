@@ -9,13 +9,14 @@
 //
 //   npm run ai:eval                          10 通りの診断 + 追加の質問 2 件 + テクニカルの質問 4 件（#200）+ 提案の質問 3 件（#139）
 //                                            + 文書の質問 14 件（#137・#240）+ [AI に聞く] 5 件（#136）+ IV の統計の質問 3 件（#138・#158）
-//                                            + 定型の質問 7 件（#140）+ 自分の前提つきの質問 2 件（#156）
+//                                            + 定型の質問 7 件（#140）+ 自分の前提つきの質問 2 件（#156）+ 行使価格の理論価格 2 件（#266）
 //   npm run ai:eval -- --tech-only           テクニカルの質問 4 件だけ（#206 で EMA の質問を足した）
 //   npm run ai:eval -- --iv-only             IV の統計の質問 3 件だけ（#138・#158。iv_stats）
 //   npm run ai:eval -- --propose-only        ポジションの提案の質問 3 件だけ（#139）
 //   npm run ai:eval -- --docs-only           文書（マニュアル・設計書）の質問 14 件だけ（#137・#240。計算の前提 10）
 //   npm run ai:eval -- --ask-only            数字・パネルから [AI に聞く] の 5 件だけ（#136。画面と同じ表示モデルから質問を作る）
 //   npm run ai:eval -- --profile-only        自分の前提（設定の欄）つきの質問 2 件だけ（#156）
+//   npm run ai:eval -- --quote-only          行使価格の理論価格（strike_quote）の質問 2 件だけ（#266。文脈のスマイルの外の遠い OTM）
 //   npm run ai:eval -- --preset-only         定型の質問のチップ 7 件だけ（#140。6 つ + 足 0 本の板の前提。画面と同じ文 = ui/view/aiPresets.ts を kind preset で）
 //   npm run ai:eval -- --saved               画面の [評価に残す] で保存した会話（fixtures/local/ai_eval/cases/*.json。#159）だけ。
 //                                            ファイルの材料で同じ文脈を作り直し、発言の列を順に送り直す。不一致 0・エラー 0 で合格
@@ -76,6 +77,7 @@ const docsOnly = args.includes('--docs-only');
 const askOnly = args.includes('--ask-only');
 const presetOnly = args.includes('--preset-only');
 const profileOnly = args.includes('--profile-only');
+const quoteOnly = args.includes('--quote-only');
 const savedOnly = args.includes('--saved');
 const anyOnly =
   techOnly ||
@@ -85,6 +87,7 @@ const anyOnly =
   ivOnly ||
   presetOnly ||
   profileOnly ||
+  quoteOnly ||
   savedOnly;
 
 // 自分の前提つきの質問（#156）: 文脈の profile に架空の前提を入れて送る。判定: 前提の方針が答えに出る（mentions）・
@@ -166,8 +169,14 @@ const evalCaseMod = await load('ui/view/aiEvalCase.ts');
 const { DOC_QUESTIONS } = await load('scripts/aiEvalDocs.ts');
 const diffMod = await load('scripts/aiEvalDiff.ts');
 const retryMod = await load('scripts/aiEvalRetry.ts');
-const { TECH_QUESTIONS, IV_QUESTIONS, PROFILE_QUESTIONS, PROPOSE_QUESTIONS, ASK_QUESTIONS } =
-  await load('scripts/aiEvalQuestions.ts');
+const {
+  TECH_QUESTIONS,
+  IV_QUESTIONS,
+  PROFILE_QUESTIONS,
+  PROPOSE_QUESTIONS,
+  ASK_QUESTIONS,
+  QUOTE_QUESTIONS,
+} = await load('scripts/aiEvalQuestions.ts');
 
 const latest = JSON.parse(readFileSync(join(root, 'fixtures', 'synthetic', 'latest.json'), 'utf8'));
 const want = opt('--cases');
@@ -738,6 +747,46 @@ for (const [qi, q] of (anyOnly && !profileOnly ? [] : PROFILE_QUESTIONS).entries
   );
 }
 
+// ---- 行使価格の理論価格（#266）: 新しい会話で 1 問ずつ。判定: strike_quote を呼ぶ・エラーなし・聞いたことに触れる
+// （mentions）・照合の一致 1 以上・不一致 0（理論価格・IV・気配はツールの結果 = 画面の「理論価格（周りの行から）」と同じ値）
+for (const q of anyOnly && !quoteOnly ? [] : QUOTE_QUESTIONS) {
+  const c = cases.AI_EVAL_CASES.find((x) => x.name === q.case);
+  const env = ctxMod.aiEnvFromState(cases.caseState(latest, c), cases.caseMargin(c));
+  const r = await turn(chatMod.INITIAL_AI_CHAT, env, 'chat', q.text);
+  const t = answerOf(r.chat);
+  const ck = numMod.checkNumbers(t, chatMod.numberSources(r.chat));
+  const un = ck.tokens.filter((x) => x.status === 'unmatched').map((x) => x.raw);
+  const uses = r.chat.messages
+    .flatMap((m) => (m.role === 'assistant' ? m.content : []))
+    .filter((b) => b.type === 'tool_use');
+  const tools = uses.map((b) => b.name);
+  const mentioned = q.mentions.test(t);
+  const ok =
+    !r.run.error &&
+    tools.includes('strike_quote') &&
+    mentioned &&
+    ck.matched >= 1 &&
+    ck.unmatched === 0;
+  rows.push({
+    case: q.case,
+    kind: 'quote',
+    id: `quote:${q.id}`,
+    rep: 0,
+    pass: ok,
+    tools,
+    inputs: uses.filter((u) => u.name === 'strike_quote').map((u) => u.input),
+    mentioned,
+    matchedTotal: ck.matched,
+    unmatched: un,
+    chars: t.length,
+    ...r.run,
+  });
+  writeFileSync(join(outDir, `quote-${q.id}.md`), `# 理論価格: ${q.text}\n\n${t}\n`);
+  console.log(
+    `${ok ? 'pass' : 'FAIL'}  理論価格 ${q.id}: ツール ${tools.join(',') || 'なし'}・触れた ${mentioned ? 'あり' : 'なし'}・一致 ${ck.matched}・不一致 ${un.length}${un.length ? `［${un.join('、')}］` : ''}・往復 ${r.run.requests}・${r.run.stop ?? r.run.error}・完了 ${(r.run.totalMs / 1000).toFixed(1)} 秒`,
+  );
+}
+
 // ---- 定型の質問（#140）: 新しい会話で 1 問ずつ。文は画面のチップと同じ。IV の統計を使う問は合成の日次の値を入れる
 for (const q of anyOnly && !presetOnly ? [] : PRESET_QUESTIONS) {
   const preset = presetMod.AI_PRESETS.find((p) => p.id === q.id);
@@ -994,6 +1043,7 @@ const askRows = rows.filter((r) => r.kind === 'ask');
 const presetRows = rows.filter((r) => r.kind === 'preset');
 const profileRows = rows.filter((r) => r.kind === 'profile');
 const savedRows = rows.filter((r) => r.kind === 'saved');
+const quoteRows = rows.filter((r) => r.kind === 'quote');
 const mode = diffMod.evalMode(args);
 // 前回の実行（同じモード・偽の送信先かどうかが同じ。#240）
 const aiEvalDir = dirname(outDir);
@@ -1029,6 +1079,7 @@ const summary = {
   preset: { pass: presetRows.filter((r) => r.pass).length, total: presetRows.length },
   profile: { pass: profileRows.filter((r) => r.pass).length, total: profileRows.length },
   saved: { pass: savedRows.filter((r) => r.pass).length, total: savedRows.length },
+  quote: { pass: quoteRows.filter((r) => r.pass).length, total: quoteRows.length },
   // 文書の質問の不一致（文書の値）は数えない（照合の対象外。#137）
   unmatched_total: rows
     .filter((r) => r.kind !== 'docs')
@@ -1057,5 +1108,6 @@ const ok =
   summary.ask.pass === summary.ask.total &&
   summary.preset.pass === summary.preset.total &&
   summary.profile.pass === summary.profile.total &&
-  summary.saved.pass === summary.saved.total;
+  summary.saved.pass === summary.saved.total &&
+  summary.quote.pass === summary.quote.total;
 process.exit(ok ? 0 : 1);

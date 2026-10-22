@@ -449,6 +449,37 @@ PROPOSE_INPUT_SCHEMA = {
     "required": ["target"],
     "additionalProperties": False,
 }
+# ---- 行使価格の理論価格（#266。ui/view/aiQuote.ts）: 任意の行使価格（板に無い遠い OTM を含む）のスマイルの IV・
+# 理論価格（#264 の「周りの行から」）・気配。値の作り方と桁は画面の理論価格と同じ
+QUOTE_MAX_KS = 10
+STRIKE_QUOTE_INPUT = Obj({"ks": Arr(STRIKE, QUOTE_MAX_KS, min_len=1), "expiry": MONTH, "type": OPT_TYPE},
+                         frozenset({"expiry", "type"}))
+STRIKE_QUOTE_INPUT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "ks": {"type": "array", "minItems": 1, "maxItems": QUOTE_MAX_KS,
+               "items": {"type": "number", "exclusiveMinimum": 0},
+               "description": "行使価格（円）の列。1〜10 本。板に無い行使価格も可（F の 0.3〜2 倍の範囲）"},
+        "expiry": {"type": "string", "pattern": r"^\d{4}-\d{2}$",
+                   "description": "限月 YYYY-MM（省略 = 今の足の最初の OP の限月、無ければ期近）"},
+        "type": {"enum": ["P", "C"], "description": "種別（省略 = 行ごとに OTM 側。K < F は P、それ以外は C）"},
+    },
+    "required": ["ks"],
+    "additionalProperties": False,
+}
+QUOTE_PRICE = Num(0, 1e9, nullable=True)
+STRIKE_QUOTE = Obj({
+    "expiry": MONTH, "sq_date": DATE, "t_days": DAYS, "forward": LEVEL,
+    "rows": Arr(Obj({
+        "k": LEVEL, "type": OPT_TYPE, "on_board": Bool(), "moneyness_pct": PCT, "smile_iv_pct": PCT,
+        "smile_mark": Enum(("node", "interpolated", "extrapolated")), "fair_yen": QUOTE_PRICE, "fair_iv_pct": PCT,
+        "fair_mark": Enum(("interpolated", "extrapolated", None)), "bid_yen": QUOTE_PRICE, "ask_yen": QUOTE_PRICE,
+        "fair_position": Enum(("below_bid", "near_bid", "middle", "near_ask", "above_ask", "above_bid", "below_ask",
+                               None)),
+        "iv_unstable": Nullable(Bool()),
+    }), QUOTE_MAX_KS, min_len=1),
+})
+
 PROPOSE_POSITION = Obj({
     "target": Enum(("current", "new_tab")),
     "diff": Arr(Obj({"change": Enum(("add", "remove", "qty", "strike")),
@@ -536,6 +567,18 @@ REGISTRY: Registry = {t.name: t for t in (
           "最大損失（円。無限なら max_loss_unbounded）・必要証拠金・Δ（ラージ / ミニ）。max_loss_floor_yen を"
           "渡すと行ごとに満たすか（meets_floor）と、満たす中で受払が最も有利な行（best_k）。before は今の要約。"
           "行は最大 25（下限の境の周り）", STRIKE_SCAN, STRIKE_SCAN_INPUT, STRIKE_SCAN_INPUT_SCHEMA),
+    _spec("strike_quote",
+          "行使価格ごとの理論価格と気配（#266）。任意の行使価格（板に無い遠い OTM も可。<context> のスマイルの 11 点"
+          "（m = ln(K/F) が ±0.2）の外も）について: 板にある行か（on_board）・F に対する位置（moneyness_pct）・"
+          "スマイルの IV（今の線。smile_iv_pct。smile_mark = 節点 node / 補間 / 外挿）・"
+          "理論価格（fair_yen。円。画面の「理論価格（周りの行から）」と同じ = その行の気配を使わず、周りの気配の"
+          "狭い行のスマイルの IV で Black-76。100 円未満は小数 1 桁、以上は整数。呼値に丸めない）と使った IV"
+          "（fair_iv_pct。今の線の IV とは違いうる）・fair_mark（extrapolated = 周りの狭い行の外側で確からしさが"
+          "落ちる）、その行の気配（bid_yen・ask_yen。無ければ null）と理論価格の気配の中の位置（fair_position: "
+          "below_bid / near_bid（幅の 1/3 まで）/ middle / near_ask（2/3 から）/ above_ask、片側だけなら "
+          "above_bid / below_ask、気配が無ければ null）、iv_unstable（その行の OTM 側が IV 不安定 = 分解能の帯 > "
+          "5pt か ask ≤ 5 円。板に無い行は null）。薄い行・遠い OTM の妥当な値段を聞かれたらこれを呼ぶ",
+          STRIKE_QUOTE, STRIKE_QUOTE_INPUT, STRIKE_QUOTE_INPUT_SCHEMA),
     _spec("structure_candidates",
           "組み合わせの候補（#139）。型を指定すると、simulator が板の両気配の行から短い足の |Δ| 0.10・0.15・0.20・"
           "0.25・0.30 で候補（最大 5 つ。id c1〜）を作り、単体で評価する: 足（行使価格・建値）・損益分岐・"

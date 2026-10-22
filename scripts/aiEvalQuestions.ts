@@ -1,5 +1,5 @@
 /**
- * AI の評価（scripts/aiEval.mjs）の質問の組（#200・#138・#156・#139・#136。#240 で id を足して aiEval.mjs から移した）。
+ * AI の評価（scripts/aiEval.mjs）の質問の組（#200・#138・#156・#139・#136・#266。#240 で id を足して aiEval.mjs から移した）。
  * id は前回の実行との差（scripts/aiEvalDiff.ts）で問を対応づける鍵 = 変えない。判定の規則は aiEval.mjs の各ループの
  * 説明を見る。値・前提の文はすべて架空。
  */
@@ -116,6 +116,25 @@ export const PROPOSE_QUESTIONS: (Question & {
   },
 ];
 
+/**
+ * 行使価格の理論価格の質問（#266）: 文脈のスマイルの 11 点（m ±0.2）の外の遠い OTM。行使価格は合成の板の架空の値。
+ * mentions は返答が触れること
+ */
+export const QUOTE_QUESTIONS: (Question & { text: string; mentions: RegExp })[] = [
+  {
+    id: 'far-otm-put',
+    case: 'put_sell',
+    text: '11 月限の遠い OTM の put（行使価格 45,000 円と 40,000 円）の妥当な値段は？スマイルから出して、板の気配と比べて。',
+    mentions: /理論|妥当/,
+  },
+  {
+    id: 'thin-and-off-board',
+    case: 'strangle_sell',
+    text: '12 月限の 37,500 円の put は気配が薄いけど、スマイルから見た IV と妥当な値段はいくら？板に無い 85,000 円の call も。',
+    mentions: /IV/,
+  },
+];
+
 /** [AI に聞く]（#136）: 質問の文は画面と同じ表示モデルから作る */
 export const ASK_QUESTIONS: (Question & {
   where: 'tile' | 'readout' | 'tail' | 'iv';
@@ -135,4 +154,5 @@ export const QUESTION_IDS = {
   profile: PROFILE_QUESTIONS.map((q) => q.id),
   propose: PROPOSE_QUESTIONS.map((q) => q.id),
   ask: ASK_QUESTIONS.map((q) => q.id),
+  quote: QUOTE_QUESTIONS.map((q) => q.id),
 };

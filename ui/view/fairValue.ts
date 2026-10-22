@@ -2,7 +2,7 @@
  * 理論価格（妥当な価格。#264、docs/design.md 5.3「理論価格」）の表示の文字列（純関数）。
  * 値は model/ の smileFairIvs / smileFairValue（その行の気配を使わず、周りの気配の狭い行のスマイルの IV で Black-76）。
  * 板の K のポップオーバー・K の title（ui/view/boardPanel.ts）、スマイルの操作行（ui/view/smilePanel.ts）、
- * 足の詳細（ui/view/positionsRegion.ts）で共用する。
+ * 足の詳細（ui/view/positionsRegion.ts）、AI のツール strike_quote（ui/view/aiQuote.ts。#266）で共用する。
  */
 
 import type { ChainMonth } from '../../data';
@@ -50,9 +50,20 @@ export interface FairView {
 
 type Fmt = (v: number, digits: number) => string;
 
-/** 理論価格の数字（小数 1 桁に丸めた値で桁を決める = 99.96 は `100`）。 */
+/** 理論価格の桁（小数 1 桁に丸めた値で決める = 99.96 は 0 桁 = `100`）。画面の文字と AI のツールの値で共用 */
+export function fairPriceDigits(price: number): 0 | 1 {
+  return Math.round(price * 10) / 10 < FAIR_DECIMAL_BELOW ? 1 : 0;
+}
+
+/** 理論価格の数字（桁は fairPriceDigits）。 */
 export function fairPriceText(price: number, fmt: Fmt = fmtNum): string {
-  return Math.round(price * 10) / 10 < FAIR_DECIMAL_BELOW ? fmt(price, 1) : fmt(price, 0);
+  return fmt(price, fairPriceDigits(price));
+}
+
+/** 理論価格を表示と同じ桁に丸めた数（AI のツール strike_quote の fair_yen。#266） */
+export function fairPriceRound(price: number): number {
+  const f = 10 ** fairPriceDigits(price);
+  return Math.round(price * f) / f;
 }
 
 /** model の理論価格（null なら null）とその行の気配から表示の文字列。fmt は板の大量の行では fmtNumFast を渡す。 */

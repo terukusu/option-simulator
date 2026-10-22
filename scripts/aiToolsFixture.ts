@@ -246,5 +246,21 @@ export function buildAiToolsFixture(latest: ChainJson): string {
       result: runTool('propose_position', input, envOf(name)),
     })),
   };
-  return `${JSON.stringify({ schema_version: 1, tools: AI_TOOL_NAMES, cases, technicals, iv_stats: ivStats, propose }, null, 1)}\n`;
+  // 行使価格の理論価格（#266）: 板にある遠い OTM・板に無い行使価格（間と外）・種別と限月の指定
+  const putSell = envOf('put_sell');
+  const second = putSell.chain.months[1]?.id ?? fail();
+  const quoteIns: Record<string, unknown>[] = [
+    { ks: [40_000, 45_000, 45_100, 70_000, 85_000] },
+    { ks: [50_000], type: 'C', expiry: second },
+  ];
+  const quote = {
+    results: quoteIns.map((input) => ({ input, result: runTool('strike_quote', input, putSell) })),
+    errors: [
+      { ks: [] },
+      { ks: [45_000], strike: 1 },
+      { ks: [1_000] },
+      { ks: [45_000], expiry: '2030-01' },
+    ].map((input) => ({ input, result: runTool('strike_quote', input, putSell) })),
+  };
+  return `${JSON.stringify({ schema_version: 1, tools: AI_TOOL_NAMES, cases, technicals, iv_stats: ivStats, propose, quote }, null, 1)}\n`;
 }

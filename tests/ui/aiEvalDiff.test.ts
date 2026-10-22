@@ -15,6 +15,7 @@ describe('evalMode', () => {
   it('--*-only と --saved は固定の順で + つなぎ', () => {
     expect(evalMode(['--docs-only'])).toBe('docs');
     expect(evalMode(['--saved'])).toBe('saved');
+    expect(evalMode(['--quote-only'])).toBe('quote');
     expect(evalMode(['--iv-only', '--tech-only'])).toBe('tech+iv');
   });
   it('何も無ければ all。--cases（並べ替え）・--repeat（1 以外）・--no-followups を足す', () => {

@@ -20,7 +20,7 @@ PRECOMPUTED = ["margin_summary", "position_summary", "scenario_grid", "smile_pos
 def test_names_match_browser():
     assert SAMPLE["tools"] == sorted(REGISTRY)
     assert sorted(REGISTRY) == sorted([*PRECOMPUTED, "evaluate_scenario", "technicals", "strike_scan",
-                                       "structure_candidates", "propose_position", "iv_stats"])
+                                       "structure_candidates", "propose_position", "iv_stats", "strike_quote"])
 
 
 def test_definitions_sorted_and_deterministic():
@@ -390,3 +390,59 @@ def test_iv_stats_result_rejects_raw_days():
     r3["data"]["now_at"] = "<script>"
     with pytest.raises(Bad):
         spec.check(r3, "r")
+
+
+QUOTE = SAMPLE["quote"]
+
+
+def test_strike_quote_samples_pass_shapes():
+    """#266: strike_quote の見本（合成の板）の入力・結果・失敗が tools.py の形を通り、1 往復の要求の本文になる"""
+    spec = REGISTRY["strike_quote"]
+    for e in QUOTE["results"]:
+        spec.input_shape.check(e["input"], "input")
+        spec.result_shape.check(e["result"], "result")
+    rows = QUOTE["results"][0]["result"]["rows"]
+    # 板に無い行使価格（間と外）も理論価格が出て、気配は null
+    off = [r for r in rows if not r["on_board"]]
+    assert off and all(r["fair_yen"] is not None and r["bid_yen"] is None and r["iv_unstable"] is None for r in off)
+    assert {r["type"] for r in rows} == {"P", "C"}
+    assert [e["result"]["error"] for e in QUOTE["errors"]] == ["bad_input", "bad_input", "out_of_range",
+                                                               "not_on_board"]
+    for e in QUOTE["errors"]:
+        allowlist.TOOL_ERROR.check(e["result"], "result")
+    first = QUOTE["results"][0]
+    msgs = [
+        {"role": "user", "content": [{"type": "text", "text": "遠い OTM の put の妥当な値段は？"}]},
+        {"role": "assistant", "content": [{"type": "tool_use", "id": "toolu_q", "name": "strike_quote",
+                                           "input": first["input"]}]},
+        {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "toolu_q", "content": [
+            {"type": "text", "text": json.dumps(first["result"], ensure_ascii=False)}]}]},
+    ]
+    body = ai_body(msgs, context=SAMPLE["cases"][0]["context"])
+    req = allowlist.parse_request(json.dumps(body, ensure_ascii=False).encode(), REGISTRY)
+    assert req.tool_names() == ["strike_quote"]
+
+
+def test_strike_quote_input_rejects():
+    spec = REGISTRY["strike_quote"].input_shape
+    spec.check({"ks": [45000]}, "input")
+    spec.check({"ks": [45000] * 10, "expiry": "2026-11", "type": "C"}, "input")
+    for bad, reason in [({}, "missing"), ({"ks": []}, "size"), ({"ks": [45000] * 11}, "size"),
+                        ({"ks": [0]}, "range"), ({"ks": ["45000"]}, "type"), ({"ks": [45000], "type": "X"}, "enum"),
+                        ({"ks": [45000], "note": "x"}, "unknown_key")]:
+        with pytest.raises(Bad) as e:
+            spec.check(bad, "input")
+        assert e.value.reason == reason
+
+
+def test_strike_quote_result_rejects_unknown_and_long():
+    spec = REGISTRY["strike_quote"].result_shape
+    r = copy.deepcopy(QUOTE["results"][0]["result"])
+    r["rows"][0]["volume"] = 10
+    with pytest.raises(Bad) as e:
+        spec.check(r, "r")
+    assert e.value.reason == "unknown_key"
+    r2 = copy.deepcopy(QUOTE["results"][0]["result"])
+    r2["rows"] = r2["rows"][:1] * 11
+    with pytest.raises(Bad):
+        spec.check(r2, "r")

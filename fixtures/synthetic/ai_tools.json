@@ -8,6 +8,7 @@
   "propose_position",
   "scenario_grid",
   "smile_position",
+  "strike_quote",
   "strike_scan",
   "structure_candidates",
   "tail_table",
@@ -8995,6 +8996,178 @@
     },
     "result": {
      "error": "bad_input"
+    }
+   }
+  ]
+ },
+ "quote": {
+  "results": [
+   {
+    "input": {
+     "ks": [
+      40000,
+      45000,
+      45100,
+      70000,
+      85000
+     ]
+    },
+    "result": {
+     "expiry": "2026-11",
+     "sq_date": "2026-11-13",
+     "t_days": 30.5,
+     "forward": 67812,
+     "rows": [
+      {
+       "k": 40000,
+       "type": "P",
+       "on_board": true,
+       "moneyness_pct": -41,
+       "smile_iv_pct": 62.3,
+       "smile_mark": "node",
+       "fair_yen": 6,
+       "fair_iv_pct": 63.9,
+       "fair_mark": "extrapolated",
+       "bid_yen": 2,
+       "ask_yen": 7,
+       "fair_position": "near_ask",
+       "iv_unstable": false
+      },
+      {
+       "k": 45000,
+       "type": "P",
+       "on_board": true,
+       "moneyness_pct": -33.6,
+       "smile_iv_pct": 56.2,
+       "smile_mark": "node",
+       "fair_yen": 17,
+       "fair_iv_pct": 56.4,
+       "fair_mark": "interpolated",
+       "bid_yen": 14,
+       "ask_yen": 19,
+       "fair_position": "middle",
+       "iv_unstable": false
+      },
+      {
+       "k": 45100,
+       "type": "P",
+       "on_board": false,
+       "moneyness_pct": -33.5,
+       "smile_iv_pct": 56,
+       "smile_mark": "interpolated",
+       "fair_yen": 16.9,
+       "fair_iv_pct": 56,
+       "fair_mark": "interpolated",
+       "bid_yen": null,
+       "ask_yen": null,
+       "fair_position": null,
+       "iv_unstable": null
+      },
+      {
+       "k": 70000,
+       "type": "C",
+       "on_board": true,
+       "moneyness_pct": 3.2,
+       "smile_iv_pct": 23.9,
+       "smile_mark": "node",
+       "fair_yen": 1002,
+       "fair_iv_pct": 23.9,
+       "fair_mark": "interpolated",
+       "bid_yen": 990,
+       "ask_yen": 1010,
+       "fair_position": "middle",
+       "iv_unstable": false
+      },
+      {
+       "k": 85000,
+       "type": "C",
+       "on_board": false,
+       "moneyness_pct": 25.3,
+       "smile_iv_pct": 28.7,
+       "smile_mark": "interpolated",
+       "fair_yen": 6.1,
+       "fair_iv_pct": 28.7,
+       "fair_mark": "interpolated",
+       "bid_yen": null,
+       "ask_yen": null,
+       "fair_position": null,
+       "iv_unstable": null
+      }
+     ]
+    }
+   },
+   {
+    "input": {
+     "ks": [
+      50000
+     ],
+     "type": "C",
+     "expiry": "2026-12"
+    },
+    "result": {
+     "expiry": "2026-12",
+     "sq_date": "2026-12-11",
+     "t_days": 58.5,
+     "forward": 67885,
+     "rows": [
+      {
+       "k": 50000,
+       "type": "C",
+       "on_board": true,
+       "moneyness_pct": -26.3,
+       "smile_iv_pct": 44.4,
+       "smile_mark": "node",
+       "fair_yen": 18051,
+       "fair_iv_pct": 44.5,
+       "fair_mark": "interpolated",
+       "bid_yen": 18035,
+       "ask_yen": 18065,
+       "fair_position": "middle",
+       "iv_unstable": false
+      }
+     ]
+    }
+   }
+  ],
+  "errors": [
+   {
+    "input": {
+     "ks": []
+    },
+    "result": {
+     "error": "bad_input"
+    }
+   },
+   {
+    "input": {
+     "ks": [
+      45000
+     ],
+     "strike": 1
+    },
+    "result": {
+     "error": "bad_input"
+    }
+   },
+   {
+    "input": {
+     "ks": [
+      1000
+     ]
+    },
+    "result": {
+     "error": "out_of_range"
+    }
+   },
+   {
+    "input": {
+     "ks": [
+      45000
+     ],
+     "expiry": "2030-01"
+    },
+    "result": {
+     "error": "not_on_board"
     }
    }
   ]

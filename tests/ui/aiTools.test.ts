@@ -15,6 +15,8 @@ import {
   scenarioOfResult,
   toolCard,
 } from '../../ui/view/aiTools';
+import { FAIR_POSITION_LABEL, fairPriceText, fairView } from '../../ui/view/fairValue';
+import { fmtNum } from '../../ui/view/format';
 import { marginNow, marginPoint, marginTail } from '../../ui/view/margin';
 import { metricsModel } from '../../ui/view/metrics';
 import { todayScenario } from '../../ui/view/pnlChart';
@@ -173,12 +175,13 @@ describe('ツールの境界', () => {
       'strike_scan',
       'structure_candidates',
       'propose_position',
+      'strike_quote',
     ];
     for (const n of AI_TOOL_NAMES.filter((x) => !legFree.includes(x))) {
       expect(runTool(n, {}, e)).toEqual({ error: 'no_legs' });
     }
-    // 提案のツール（#139）は足が無くても使える（入力が無ければ bad_input）
-    for (const n of ['strike_scan', 'structure_candidates', 'propose_position']) {
+    // 提案のツール（#139）・strike_quote（#266）は足が無くても使える（入力が無ければ bad_input）
+    for (const n of ['strike_scan', 'structure_candidates', 'propose_position', 'strike_quote']) {
       expect(runTool(n, {}, e)).toEqual({ error: 'bad_input' });
     }
     // technicals（#200）は足に依らない（先物の足が無ければ no_data）
@@ -270,5 +273,176 @@ describe('position_summary のカードの最大損失（#260）', () => {
     expect(card({ max_loss_yen: -61_234, max_loss_unbounded: false })).toBe(
       '満期の最大損失 −61,234 円',
     );
+  });
+});
+
+describe('strike_quote（#266）: 任意の行使価格のスマイルの IV・理論価格・気配', () => {
+  const env = envOf('put_sell');
+  const month = env.chain.months[0] as AiToolEnv['chain']['months'][number];
+
+  it('板の行は画面の「理論価格（周りの行から）」と同じ数字（理論価格・使った IV・気配の中の位置）', () => {
+    const ks = month.strikes.map((s) => s.k).filter((k) => k / month.F >= 0.3 && k / month.F <= 2);
+    let compared = 0;
+    for (let i = 0; i < ks.length; i += 10) {
+      const r = run(env, 'strike_quote', { ks: ks.slice(i, i + 10), expiry: month.id });
+      for (const row of r.rows) {
+        const j = month.strikes.findIndex((s) => s.k === row.k);
+        const info = month.strikes[j];
+        const q = month.rows[j];
+        if (!info || !q) throw new Error(`板に無い: ${row.k}`);
+        const type = info.otmType;
+        expect(row.type).toBe(type === 'put' ? 'P' : 'C');
+        expect(row.on_board).toBe(true);
+        expect(row.iv_unstable).toBe(info.unstable);
+        expect(row.smile_iv_pct).toBe(
+          info.smileIv === null ? null : Math.round(info.smileIv * 1000) / 10,
+        );
+        expect(row.smile_mark).toBe(info.mark);
+        const view = fairView(month, row.k, type, env.chain.r, q[type].bid, q[type].ask);
+        if (view === null) {
+          expect(row.fair_yen).toBeNull();
+          continue;
+        }
+        compared++;
+        expect(fairPriceText(row.fair_yen)).toBe(view.price);
+        expect(fmtNum(row.fair_iv_pct, 1)).toBe(view.iv);
+        expect(
+          row.fair_position === null
+            ? null
+            : FAIR_POSITION_LABEL[row.fair_position as keyof typeof FAIR_POSITION_LABEL],
+        ).toBe(view.position);
+        expect(row.fair_mark === 'extrapolated').toBe(view.extrapolated);
+      }
+    }
+    expect(compared).toBeGreaterThan(50);
+  });
+
+  it('板に無い行使価格（遠い OTM・行の間）も理論価格とスマイルの IV を出し、気配は null', () => {
+    const F = month.F;
+    const on = new Set(month.strikes.map((s) => s.k));
+    const between = month.strikes.map((s) => s.k + 10).find((k) => !on.has(k) && k < F * 0.8);
+    const beyond = Math.max(...on) + 5_000;
+    if (between === undefined || beyond > F * 2) throw new Error('合成の板の前提が違う');
+    const r = run(env, 'strike_quote', { ks: [beyond, between] });
+    expect(r.expiry).toBe(month.id);
+    expect(r.rows.map((x: { k: number }) => x.k)).toEqual([between, beyond]);
+    for (const row of r.rows) {
+      expect(row.on_board).toBe(false);
+      expect(row.bid_yen).toBeNull();
+      expect(row.ask_yen).toBeNull();
+      expect(row.fair_position).toBeNull();
+      expect(row.iv_unstable).toBeNull();
+      expect(row.fair_yen).toBeGreaterThan(0);
+      expect(row.smile_iv_pct).toBeGreaterThan(0);
+    }
+    expect(r.rows[0].type).toBe('P');
+    expect(r.rows[1].type).toBe('C');
+    expect(r.rows[1].smile_mark).toBe('extrapolated');
+    // 理論価格の桁は画面と同じ（100 円未満は小数 1 桁、以上は整数）
+    for (const row of r.rows) {
+      const f = row.fair_yen as number;
+      expect(f < 100 ? Math.round(f * 10) / 10 : Math.round(f)).toBe(f);
+    }
+  });
+
+  it('種別の指定（ITM 側も可）と限月の指定', () => {
+    const second = env.chain.months[1] as typeof month;
+    const k = month.strikes.find((s) => s.k < month.F * 0.8)?.k as number;
+    const r = run(env, 'strike_quote', { ks: [k], type: 'C', expiry: second.id });
+    expect(r.expiry).toBe(second.id);
+    expect(r.rows[0].type).toBe('C');
+    expect(r.rows[0].fair_yen).toBeGreaterThan(100);
+  });
+
+  it('入力の誤り・範囲の外・板に無い限月', () => {
+    const k = month.strikes[0]?.k as number;
+    const bad = (input: Record<string, unknown>) => runTool('strike_quote', input, env);
+    expect(bad({})).toEqual({ error: 'bad_input' });
+    expect(bad({ ks: [] })).toEqual({ error: 'bad_input' });
+    expect(bad({ ks: Array.from({ length: 11 }, (_, i) => k + i * 250) })).toEqual({
+      error: 'bad_input',
+    });
+    expect(bad({ ks: [-1] })).toEqual({ error: 'bad_input' });
+    expect(bad({ ks: [k], strike: k })).toEqual({ error: 'bad_input' });
+    expect(bad({ ks: [k], type: 'put' })).toEqual({ error: 'bad_input' });
+    expect(bad({ ks: [month.F * 0.29] })).toEqual({ error: 'out_of_range' });
+    expect(bad({ ks: [month.F * 2.01] })).toEqual({ error: 'out_of_range' });
+    expect(bad({ ks: [k], expiry: '2030-01' })).toEqual({ error: 'not_on_board' });
+  });
+
+  it('カード: 行ごとの理論価格（画面と同じ桁・位置の語）と気配、5 本目からは「ほか N 本」', () => {
+    const result = {
+      expiry: '2026-11',
+      rows: [
+        {
+          k: 45000,
+          type: 'P',
+          on_board: true,
+          fair_yen: 10,
+          fair_iv_pct: 40.12,
+          fair_mark: 'interpolated',
+          bid_yen: 8,
+          ask_yen: 12,
+          fair_position: 'middle',
+        },
+        {
+          k: 40000,
+          type: 'P',
+          on_board: true,
+          fair_yen: 3.5,
+          fair_iv_pct: 50,
+          fair_mark: 'extrapolated',
+          bid_yen: null,
+          ask_yen: 4,
+          fair_position: 'below_ask',
+        },
+        {
+          k: 39500,
+          type: 'P',
+          on_board: false,
+          fair_yen: 3.2,
+          fair_iv_pct: 51,
+          fair_mark: 'extrapolated',
+          bid_yen: null,
+          ask_yen: null,
+          fair_position: null,
+        },
+        {
+          k: 70000,
+          type: 'C',
+          on_board: true,
+          fair_yen: 1002,
+          fair_iv_pct: 23.9,
+          fair_mark: 'interpolated',
+          bid_yen: null,
+          ask_yen: null,
+          fair_position: null,
+        },
+        {
+          k: 80000,
+          type: 'C',
+          on_board: true,
+          fair_yen: null,
+          fair_iv_pct: null,
+          fair_mark: null,
+          bid_yen: 1,
+          ask_yen: 3,
+          fair_position: null,
+        },
+      ],
+    };
+    const card = toolCard('strike_quote', { ks: [45000] }, result, 'ok');
+    expect(card.title).toBe('行使価格の理論価格');
+    expect(card.input).toBe('2026-11');
+    expect(card.lines).toEqual([
+      'P 45,000: 理論 10.0 円（IV 40.1%・気配の中ほど） · 気配 8 / 12',
+      'P 40,000: 理論 3.5 円（IV 50.0%・ask より下・外挿） · 気配 — / 4',
+      'P 39,500: 理論 3.2 円（IV 51.0%・外挿） · 板に無い',
+      'C 70,000: 理論 1,002 円（IV 23.9%） · 気配なし',
+      'ほか 1 本',
+    ]);
+    expect(toolCard('strike_quote', {}, { error: 'out_of_range' }, 'error').lines).toEqual([
+      '計算できなかった（F から遠すぎる行使価格）',
+    ]);
   });
 });
