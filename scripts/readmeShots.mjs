@@ -475,7 +475,7 @@ const shots = {
     await save('ai-tech', await shotEl(page, 'section.ai'));
     await ctx.close();
   },
-  // AI の返答の表と用語のリンク（#234・#232）: 「表で」を含む質問 → 偽の SSE の表の見本（架空の値）
+  // AI の返答の表と用語のリンク（#234・#232）: 「表で」を含む質問 → 偽の SSE の tail_table → 結果と文脈の足の値の表
   async 'ai-table'() {
     const { ctx, page } = await openAi({ ...PC_CROP, h: 760, theme: 'light' });
     await ask(page, '足ごとの建値と、下げの幅ごとの損益を表で見せて');
