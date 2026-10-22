@@ -25,6 +25,8 @@ const PREFS_KEY = 'option-simulator.prefs';
 const CAPITAL = 30_000_000;
 /** 追証マップで追証の側が見える資金（架空の値） */
 const CAPITAL_TIGHT = 9_000_000;
+/** 追証マップで許容損失の境目が見える許容損失（架空の値。#180） */
+const ALLOWED_LOSS = 1_500_000;
 const WEBP_QUALITY = 0.86;
 
 const args = process.argv.slice(2);
@@ -73,8 +75,13 @@ const putOnly = () => {
   ws.tabs[0].position.legs = ws.tabs[0].position.legs.filter((l) => l.leg.type === 'put');
   return JSON.stringify(ws);
 };
-const prefs = (theme, capital = CAPITAL) =>
-  JSON.stringify({ schema_version: 1, theme, ...(capital ? { capital_yen: capital } : {}) });
+const prefs = (theme, capital = CAPITAL, allowedLoss = 0) =>
+  JSON.stringify({
+    schema_version: 1,
+    theme,
+    ...(capital ? { capital_yen: capital } : {}),
+    ...(allowedLoss ? { allowed_loss_yen: allowedLoss } : {}),
+  });
 
 // ---- dev サーバー
 const { createServer } = await import('vite');
@@ -89,7 +96,15 @@ const origin = new URL(base).origin;
 
 const browser = await chromium.launch();
 
-async function open({ w, h, theme, ws = workspace(SCENARIO), capital = CAPITAL, dpr = 1 }) {
+async function open({
+  w,
+  h,
+  theme,
+  ws = workspace(SCENARIO),
+  capital = CAPITAL,
+  allowedLoss = 0,
+  dpr = 1,
+}) {
   const ctx = await browser.newContext({
     viewport: { width: w, height: h },
     deviceScaleFactor: dpr,
@@ -102,7 +117,7 @@ async function open({ w, h, theme, ws = workspace(SCENARIO), capital = CAPITAL, 
           origin,
           localStorage: [
             { name: WORKSPACE_KEY, value: ws },
-            { name: PREFS_KEY, value: prefs(theme, capital) },
+            { name: PREFS_KEY, value: prefs(theme, capital, allowedLoss) },
           ],
         },
       ],
@@ -262,7 +277,7 @@ const shots = {
     await save('stage-cross', await shotEl(page, 'section.stage'));
     await ctx.close();
   },
-  // 損益グラフ: ピン（今の線を残す + ヘッジ案を重ねる）。ライト
+  // 損益グラフ: ピン（今の線を残す + ヘッジ案を重ねる）と、凡例の ② を押したピンの中身（#125）。ライト
   async 'stage-pins'() {
     const { ctx, page } = await open({
       ...PC_CROP,
@@ -275,6 +290,12 @@ const shots = {
     await page.click('button[aria-label="ピン"]');
     await page.click('[role="menuitem"]:has-text("ヘッジ案 を重ねる")');
     await page.waitForTimeout(400);
+    await page.locator('section.stage button.pin-open').nth(1).click();
+    await page.waitForSelector('section.stage .pin-pop:not([hidden])', {
+      state: 'visible',
+      timeout: 5000,
+    });
+    await page.waitForTimeout(300);
     await save('stage-pins', await shotEl(page, 'section.stage'));
     await ctx.close();
   },
@@ -329,13 +350,14 @@ const shots = {
     await save('metrics', await shotEl(page, 'section.metrics'));
     await ctx.close();
   },
-  // 追証マップ（過去の点は dev の合成の日次データ）
+  // 追証マップ（過去の点は dev の合成の日次データ）。許容損失の境目・3 色・凡例（#180）
   async holdmap() {
     const { ctx, page } = await open({
       ...PC_CROP,
       h: 1300,
       theme: 'dark',
       capital: CAPITAL_TIGHT,
+      allowedLoss: ALLOWED_LOSS,
     });
     await page.click('section.metrics .hm-toggle');
     await page.waitForSelector('section.metrics .hm-svg', { timeout: 20000 });
@@ -360,12 +382,14 @@ const shots = {
     );
     await ctx.close();
   },
-  // スマイル（点を選んで、板と同じ規則で足を入れる操作行）
+  // スマイル（点を選んで、板と同じ規則で足を入れる操作行）と [効率] の売りの効率の線（#163）
   async smile() {
     const { ctx, page } = await open({ ...PC_CROP, theme: 'dark' });
     await page.click('section.board .panel-head .seg button:has-text("スマイル")');
     const plot = page.locator('section.smile .smile-month:not(.inactive) .smile-wrap');
     await plot.waitFor({ timeout: 15000 });
+    await page.click('section.smile button[aria-label="売りの効率の線"]');
+    await page.waitForTimeout(600);
     await plot.focus();
     await page.keyboard.press('.');
     await page.waitForTimeout(300);
