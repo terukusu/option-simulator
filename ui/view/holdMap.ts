@@ -490,16 +490,33 @@ export function holdMapStep(
   };
 }
 
-function roomText(v: number, unit: AmountUnit): string {
-  if (!Number.isFinite(v)) return '余力 —';
-  return `余力 ${fmtAmount(v, unit, true)} ${AMOUNT_UNIT_LABEL[unit]} · ${v < 0 ? '追証' : '余力あり'}`;
-}
-
-/** 損益の文（#180。許容損失があれば許容内 / 許容損失超も） */
-function pnlText(v: number, unit: AmountUnit, allowedLoss: number | null): string {
-  if (!Number.isFinite(v)) return '損益 —';
-  const tag = allowedLoss === null ? '' : ` · ${v + allowedLoss < 0 ? '許容損失超' : '許容内'}`;
-  return `損益 ${fmtAmount(v, unit, true)} ${AMOUNT_UNIT_LABEL[unit]}${tag}`;
+/**
+ * 余力と損益の文（#180・#259）: 許容損失が無ければ `余力 … · 追証 / 余力あり · 損益 …`。あれば判定はマスの色と同じ
+ * 1 語を最後に（`余力 … · 損益 … · 許容内 / 許容損失超 / 追証`。追証が優先 = 凡例と同じ言葉）
+ */
+function roomPnlText(
+  room: number,
+  pnl: number,
+  unit: AmountUnit,
+  allowedLoss: number | null,
+): string {
+  const amount = (v: number) => `${fmtAmount(v, unit, true)} ${AMOUNT_UNIT_LABEL[unit]}`;
+  const roomOk = Number.isFinite(room);
+  const pnlOk = Number.isFinite(pnl);
+  const roomS = roomOk ? `余力 ${amount(room)}` : '余力 —';
+  const pnlS = pnlOk ? `損益 ${amount(pnl)}` : '損益 —';
+  if (allowedLoss === null) {
+    return `${roomOk ? `${roomS} · ${room < 0 ? '追証' : '余力あり'}` : roomS} · ${pnlS}`;
+  }
+  const tag =
+    roomOk && room < 0
+      ? '追証'
+      : roomOk && pnlOk
+        ? pnl + allowedLoss < 0
+          ? '許容損失超'
+          : '許容内'
+        : null;
+  return `${roomS} · ${pnlS}${tag ? ` · ${tag}` : ''}`;
 }
 
 /** 選んだ点・マスの 1 行（余力と、その点の d の時点の損益） */
@@ -518,14 +535,14 @@ export function holdMapReadout(
     const d1 = mv.d1.slice(0, 4) === mv.d0.slice(0, 4) ? mv.d1.slice(5) : mv.d1;
     const room = holdMapValueAt(axes, rooms, mv.dx, mv.ivRatio);
     const pnl = holdMapValueAt(axes, pnls, mv.dx, mv.ivRatio);
-    return `${mv.d0} → ${d1} · 原資産 ${fmtSigned(mv.dx * 100, 1)}% · IV ${fmtNum(mv.iv0, 1)} → ${fmtNum(mv.iv1, 1)}%（×${fmtNum(mv.ivRatio, 2)} · ${fmtSigned(mv.ivPt, 1)}pt）· ${roomText(room, unit)} · ${pnlText(pnl, unit, allowedLoss)}`;
+    return `${mv.d0} → ${d1} · 原資産 ${fmtSigned(mv.dx * 100, 1)}% · IV ${fmtNum(mv.iv0, 1)} → ${fmtNum(mv.iv1, 1)}%（×${fmtNum(mv.ivRatio, 2)} · ${fmtSigned(mv.ivPt, 1)}pt）· ${roomPnlText(room, pnl, unit, allowedLoss)}`;
   }
   const u = axes.us[sel.i];
   const c = axes.cs[sel.j];
   if (u === undefined || c === undefined) return HOLD_MAP_IDLE_READOUT;
   const v = rooms[sel.i]?.[sel.j] ?? Number.NaN;
   const pnl = pnls[sel.i]?.[sel.j] ?? Number.NaN;
-  return `原資産 ${fmtSigned(u * 100, 0)}% · IV ×${fmtNum(c, 1)} · ${roomText(v, unit)} · ${pnlText(pnl, unit, allowedLoss)}`;
+  return `原資産 ${fmtSigned(u * 100, 0)}% · IV ×${fmtNum(c, 1)} · ${roomPnlText(v, pnl, unit, allowedLoss)}`;
 }
 
 /** 選んだもの（点 / マス）の印の画素（無ければ null） */

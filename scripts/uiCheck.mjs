@@ -1082,6 +1082,11 @@ async function measureAll() {
     // 追証マップを開いたときのスクロールと待ちのスピナー（#174 AC2・AC3）
     await holdMapAll();
     console.log(`追証マップの検査（#174）: ${holdStats.pass} / ${holdStats.total} 状態で pass`);
+    // スマイルの [効率]（#163・#259）: 凡例・右の目盛り・操作行の案内
+    await smileEffAll();
+    console.log(
+      `スマイルの [効率] の検査（#259）: ${effStats.pass} / ${effStats.total} 状態で pass`,
+    );
     // 市場の追加の状態（1200 / 1280 / 1800・322 行の板・字幅 2 通り。#85）
     await marketSweep();
     console.log(
@@ -1583,6 +1588,125 @@ async function holdDailyGate(page) {
     await route.continue();
   });
   return release;
+}
+
+const effStats = { pass: 0, total: 0 };
+
+/**
+ * スマイルの [効率]（#163・#259）: 売り 5 枚 × 360（スマイル full）・1440 × ダーク / ライト × シナリオ（ΔX = 0 /
+ * ΔX ≠ 0・d・Δσ = 今の線とシナリオ ATM も出る）。[効率] を押して線が出てから、縦・横・折り返し（report）、
+ * 凡例に効率の項目（ΔX ≠ 0 は今も）があり 2 行以内（PC の ΔX = 0 は 1 行）で切れない、右の目盛りが 0% を含め 4 本以上、
+ * 未選択の操作行の案内（.hint.eff）が 2 行（32px）に収まる（scrollHeight ≤ clientHeight）
+ */
+async function smileEffAll() {
+  const moved = JSON.parse(sellFive);
+  moved.tabs[0].position.scenario = {
+    ...moved.tabs[0].position.scenario,
+    dX: -1500,
+    days: 10,
+    dSigma: 4,
+  };
+  const still = JSON.parse(sellFive);
+  still.tabs[0].position.scenario = {
+    ...still.tabs[0].position.scenario,
+    dX: 0,
+    days: 0,
+    dSigma: 0,
+    skew: 0,
+  };
+  const runs = [
+    ['ΔX ≠ 0', JSON.stringify(moved), true],
+    ['ΔX = 0', JSON.stringify(still), false],
+  ];
+  for (const [w, h] of [
+    [360, 780],
+    [1440, 900],
+  ]) {
+    const phone = w <= PHONE_MAX;
+    for (const theme of ['dark', 'light']) {
+      for (const [sname, ws, now] of runs) {
+        const ctx = await newContext(
+          { width: w, height: h },
+          {
+            [WORKSPACE_KEY]: ws,
+            [PREFS_KEY]: prefsText(theme),
+          },
+        );
+        const page = await ctx.newPage();
+        await page.goto(pageUrl('next'));
+        await waitReady(page, 'next');
+        const lbl = `next ${theme} スマイルの [効率] ${sname} ${w}x${h}`;
+        let ok = true;
+        const ng = (why) => {
+          ok = false;
+          console.log(`${lbl}: ${why}  ← NG`);
+        };
+        if (phone) {
+          if (!(await setShell(page, 'smile', 'full'))) ng('画面の状態を作れない');
+          await smileTab(page);
+        } else {
+          await page.click('section.board .panel-head .seg button:has-text("スマイル")');
+          await page
+            .waitForSelector('section.smile .smile-month:not(.inactive) .smile-wrap', {
+              timeout: 10000,
+            })
+            .catch(() => null);
+        }
+        await page.click('section.smile button[aria-label="売りの効率の線"]');
+        const drawn = await page
+          .waitForSelector('section.smile .smile-month:not(.inactive) .eff-t', { timeout: 5000 })
+          .then(() => true)
+          .catch(() => false);
+        if (!drawn) ng('効率の線の目盛りが出ない');
+        await page.waitForTimeout(300);
+        const v = await page.evaluate(() => {
+          const sec = document.querySelector('section.smile');
+          const lg = sec?.querySelector('.smile-legend');
+          const items = lg ? [...lg.querySelectorAll(':scope > span')] : [];
+          const rows = new Set(items.map((i) => Math.round(i.getBoundingClientRect().top))).size;
+          const hint = sec?.querySelector('.smile-act > .hint');
+          return {
+            keys: items.map((i) => i.className),
+            rows,
+            cut: lg
+              ? lg.scrollWidth > lg.clientWidth + 1 || lg.scrollHeight > lg.clientHeight + 1
+              : true,
+            ticks: [...(sec?.querySelectorAll('.smile-month:not(.inactive) .eff-t') ?? [])].map(
+              (t) => t.textContent,
+            ),
+            hintCls: hint?.className ?? null,
+            hintFits: hint ? hint.scrollHeight <= hint.clientHeight + 1 : false,
+            hintH: hint ? Math.round(hint.getBoundingClientRect().height) : 0,
+          };
+        });
+        if (!v.keys.includes('eff')) ng(`凡例に効率が無い（${v.keys.join(' ')}）`);
+        if (now && !v.keys.includes('eff now')) ng('凡例に今の効率が無い');
+        const maxRows = !phone && !now ? 1 : 2;
+        if (v.rows > maxRows) ng(`凡例が ${v.rows} 行（${maxRows} 行まで）`);
+        if (v.cut) ng('凡例が切れる');
+        if (v.ticks.length < 4 || !v.ticks.includes('0%')) ng(`右の目盛り ${v.ticks.join(' ')}`);
+        if (v.hintCls !== 'hint eff') ng(`操作行の案内のクラス ${v.hintCls}`);
+        if (!v.hintFits || v.hintH > 33) ng(`操作行の案内が 2 行に入らない（${v.hintH}px）`);
+        if (
+          !(await report(
+            page,
+            lbl,
+            w,
+            h,
+            `next-${w}x${h}-${theme}-smile-eff-${now ? 'moved' : 'still'}`,
+          ))
+        )
+          ok = false;
+        console.log(
+          `${lbl}: 凡例 ${v.rows} 行・目盛り ${v.ticks.join(' ')}・案内 ${v.hintH}px ${ok ? 'pass' : '← NG'}`,
+        );
+        effStats.total++;
+        if (ok) effStats.pass++;
+        else failed = true;
+        await ctx.close();
+      }
+    }
+  }
 }
 
 /** 指標の .panel-body を一番下（閉じた見出し = 末尾が枠の下端）までスクロールする（#174） */

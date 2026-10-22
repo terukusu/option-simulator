@@ -17,6 +17,7 @@ import {
 } from '../../view/smileEff';
 import {
   SMILE_AXIS_OPTIONS,
+  SMILE_EFF_ACT_HINT,
   SMILE_HINT,
   SMILE_LEGEND_HINT,
   smileAct,
@@ -166,7 +167,7 @@ function SmileView(p: SmileRegionProps) {
         </div>
         <div class="smile-act">
           {!act || 'hint' in act ? (
-            <span class="hint">{act?.hint}</span>
+            <span class={act?.hint === SMILE_EFF_ACT_HINT ? 'hint eff' : 'hint'}>{act?.hint}</span>
           ) : (
             <>
               <span class="who">

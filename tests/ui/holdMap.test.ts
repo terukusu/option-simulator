@@ -501,18 +501,34 @@ describe('#180 許容損失の境目', () => {
     );
   });
 
-  it('(c) 読み取りの 1 行に損益（設定ありなら 許容内 / 許容損失超）。十字線も同じ', () => {
+  it('(c) 読み取りの 1 行に損益。設定ありなら判定はマスの色と同じ 1 語（許容内 / 許容損失超 / 追証。#259）。十字線も同じ', () => {
     const i = us.findIndex((u) => Math.abs(u + 0.1) < 1e-9);
     const j = cs.findIndex((c) => Math.abs(c - 1.6) < 1e-9);
     const pnl = RESULT.pnls[i]?.[j] as number;
+    const room = RESULT.rooms[i]?.[j] as number;
     const s = holdMapReadout({ kind: 'cell', i, j }, RESULT, MOVES, 'yen', LOSS);
-    expect(s).toContain('損益 ');
-    expect(s.endsWith(pnl + LOSS < 0 ? '· 許容損失超' : '· 許容内')).toBe(true);
+    const want = room < 0 ? '追証' : pnl + LOSS < 0 ? '許容損失超' : '許容内';
+    expect(s).toMatch(/· 余力 [+−]?[\d,]+ 円 · 損益 [+−]?[\d,]+ 円 · \S+$/);
+    expect(s.endsWith(`· ${want}`)).toBe(true);
+    // 「余力あり」と許容損失の判定を並べない
+    expect(s).not.toContain('余力あり');
+    // 全マスで判定の語がマスの色と一致する
+    for (let a = 0; a < us.length; a++) {
+      for (let b = 0; b < cs.length; b++) {
+        const r = RESULT.rooms[a]?.[b] as number;
+        const q = RESULT.pnls[a]?.[b] as number;
+        if (!Number.isFinite(r) || !Number.isFinite(q)) continue;
+        const t = holdMapReadout({ kind: 'cell', i: a, j: b }, RESULT, MOVES, 'yen', LOSS);
+        const w = r < 0 ? '追証' : q + LOSS < 0 ? '許容損失超' : '許容内';
+        expect(t.endsWith(`· ${w}`)).toBe(true);
+      }
+    }
     const p = holdMapReadout({ kind: 'point', k: 2 }, RESULT, MOVES, 'yen', LOSS);
-    expect(p).toMatch(/· 損益 −[\d,]+ 円 · (許容内|許容損失超)$/);
+    expect(p).toMatch(/· 損益 −[\d,]+ 円 · (許容内|許容損失超|追証)$/);
+    expect(p).not.toContain('余力あり');
     const plot = holdMapPlot(RESULT, MOVES, 600, LOSS);
     const xh = holdMapCrosshair(plot, RESULT, plot.left + 5, plot.bottom - 5, MOVES, 'yen', LOSS);
-    expect(xh?.readout).toMatch(/· 損益 [+−]?[\d,]+ 円 · (許容内|許容損失超)$/);
+    expect(xh?.readout).toMatch(/· 損益 [+−]?[\d,]+ 円 · (許容内|許容損失超|追証)$/);
   });
 });
 
