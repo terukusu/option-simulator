@@ -33,15 +33,17 @@ import {
   holdMapCrosshair,
   holdMapDxX,
   holdMapInput,
+  holdMapLegend,
   holdMapNote,
   holdMapPick,
   holdMapPlot,
   holdMapReadout,
+  holdMapResultOf,
   holdMapReveal,
-  holdMapRooms,
   holdMapStatusText,
   holdMapStep,
   holdMapSummary,
+  holdMapTitle,
   holdMapWait,
 } from '../../ui/view/holdMap';
 import { pnlDomains } from '../../ui/view/pnlChart';
@@ -101,7 +103,7 @@ function resultFor(capital: number, moves: readonly AtmMove[] = MOVES): HoldMapR
   const input = holdMapInput(BASE, ZERO_SCENARIO, PARAMS, capital, []);
   if (!input) throw new Error('入力が作れない');
   const axes = holdMapAxes(moves);
-  return { input, axes, rooms: holdMapRooms(input, axes) };
+  return holdMapResultOf(input, axes);
 }
 
 // 資金は追証の側と余力ありの側の両方が出る額（架空）
@@ -180,28 +182,30 @@ describe('B6 表示モデル', () => {
       ).toEqual({ main: null, moves: null, retry: false });
     }
   });
-  it('点を触った 1 行: 日付・原資産 ±%・IV a → b %・×r・±pt・余力', () => {
+  it('点を触った 1 行: 日付・原資産 ±%・IV a → b %・×r・±pt・余力・損益（#180）', () => {
     const s = holdMapReadout({ kind: 'point', k: 0 }, RESULT, MOVES, 'thousand');
     expect(s).toMatch(
-      /^2031-03-03 → 03-05 · 原資産 −5\.0% · IV 20\.0 → 26\.0%（×1\.30 · \+6\.0pt）· 余力 [+−]?[\d,.]+ 千円 · (追証|余力あり)$/,
+      /^2031-03-03 → 03-05 · 原資産 −5\.0% · IV 20\.0 → 26\.0%（×1\.30 · \+6\.0pt）· 余力 [+−]?[\d,.]+ 千円 · (追証|余力あり) · 損益 [+−]?[\d,.]+ 千円$/,
     );
     // 年を跨ぐと d1 は年から
     expect(holdMapReadout({ kind: 'point', k: 2 }, RESULT, MOVES, 'yen')).toMatch(
-      /^2031-12-29 → 2032-01-02 · 原資産 −20\.0% · IV 18\.0 → 36\.0%（×2\.00 · \+18\.0pt）· 余力 −[\d,]+ 円 · 追証$/,
+      /^2031-12-29 → 2032-01-02 · 原資産 −20\.0% · IV 18\.0 → 36\.0%（×2\.00 · \+18\.0pt）· 余力 −[\d,]+ 円 · 追証 · 損益 −[\d,]+ 円$/,
     );
     expect(holdMapReadout({ kind: 'point', k: 1 }, RESULT, MOVES, 'yen')).toContain(
       '原資産 +1.2% · IV 21.0 → 20.0%（×0.95 · −1.1pt）',
     );
   });
 
-  it('マスを触った 1 行: 原資産 %・IV ×・余力', () => {
+  it('マスを触った 1 行: 原資産 %・IV ×・余力・損益（#180）', () => {
     const { us, cs } = RESULT.axes;
     const i = us.findIndex((u) => Math.abs(u + 0.1) < 1e-9);
     const j = cs.findIndex((c) => Math.abs(c - 1.6) < 1e-9);
     const room = RESULT.rooms[i]?.[j] as number;
     const s = holdMapReadout({ kind: 'cell', i, j }, RESULT, MOVES, 'yen');
-    expect(s).toMatch(/^原資産 −10% · IV ×1\.6 · 余力 [+−]?[\d,]+ 円 · (追証|余力あり)$/);
-    expect(s.endsWith(room < 0 ? '追証' : '余力あり')).toBe(true);
+    expect(s).toMatch(
+      /^原資産 −10% · IV ×1\.6 · 余力 [+−]?[\d,]+ 円 · (追証|余力あり) · 損益 [+−]?[\d,]+ 円$/,
+    );
+    expect(s).toContain(room < 0 ? '· 追証 ·' : '· 余力あり ·');
     expect(holdMapReadout(null, RESULT, MOVES, 'yen')).toBe(HOLD_MAP_IDLE_READOUT);
   });
 
@@ -417,5 +421,73 @@ describe('追証マップの十字線（#217）', () => {
     const y = plot.py[2] as number;
     const c = holdMapCrosshair(plot, RESULT, x, y, MOVES, 'yen');
     expect(c?.readout.startsWith('原資産')).toBe(true);
+  });
+});
+
+describe('#180 許容損失の境目', () => {
+  const { us, cs } = RESULT.axes;
+  // 許容損失（架空）: 余力ありのマスの損益の最小の半分 = 許容損失超かつ追証でないマスができる
+  const okPnls = RESULT.pnls.flatMap((col, i) =>
+    [...col].filter((_, j) => (RESULT.rooms[i]?.[j] as number) >= 0),
+  );
+  const LOSS = Math.round(-Math.min(...okPnls) / 2);
+
+  it('(a) 許容損失が未設定なら 2 本目の境目・3 色目のマス・凡例が無く、見出しは「追証マップ」のまま', () => {
+    const plot = holdMapPlot(RESULT, MOVES, 600, null);
+    expect(plot.lossContour).toBe('');
+    expect(plot.cells.map((c) => c.cls)).not.toContain('hm-loss');
+    expect(holdMapLegend(null)).toEqual([]);
+    expect(holdMapTitle(3, null)).toBe(HOLD_MAP_TITLE);
+    // 既定の引数（今までの呼び方）も同じ
+    expect(holdMapPlot(RESULT, MOVES, 600)).toEqual(plot);
+  });
+
+  it('(b) 設定ありなら見出しに `d 日後`、凡例は 3 項目、許容損失超のマスと 2 本目の境目がある', () => {
+    expect(LOSS).toBeGreaterThan(0);
+    expect(holdMapTitle(3, LOSS)).toBe('追証マップ · 3 日後');
+    expect(holdMapTitle(0, LOSS)).toContain('0 日後');
+    expect(holdMapTitle(2.5, LOSS)).toContain('2.5 日後');
+    expect(holdMapLegend(LOSS).map((k) => k.label)).toEqual(['許容内', '許容損失超', '追証']);
+    const plot = holdMapPlot(RESULT, MOVES, 600, LOSS);
+    expect(plot.lossContour).toMatch(/^M[\d.]+ [\d.]+L[\d.]+ [\d.]+/);
+    expect(plot.cells.map((c) => c.cls)).toContain('hm-loss');
+    // 追証のマスは許容損失によらず同じ（追証が優先）
+    const callOf = (p: typeof plot) => p.cells.find((c) => c.cls === 'hm-call')?.d;
+    expect(callOf(plot)).toBe(callOf(holdMapPlot(RESULT, MOVES, 600, null)));
+  });
+
+  it('マスの色: 余力 < 0 は追証、余力 ≥ 0 で損益 < −許容損失は許容損失超、ほかは許容内（マスの数が一致）', () => {
+    let nCall = 0;
+    let nLoss = 0;
+    let nOk = 0;
+    us.forEach((_, i) => {
+      cs.forEach((_, j) => {
+        const room = RESULT.rooms[i]?.[j] as number;
+        const pnl = RESULT.pnls[i]?.[j] as number;
+        if (!Number.isFinite(room)) return;
+        if (room < 0) nCall++;
+        else if (pnl + LOSS < 0) nLoss++;
+        else nOk++;
+      });
+    });
+    const plot = holdMapPlot(RESULT, MOVES, 600, LOSS);
+    const count = (cls: string) =>
+      (plot.cells.find((c) => c.cls === cls)?.d.match(/M/g) ?? []).length;
+    expect([count('hm-call'), count('hm-loss'), count('hm-ok')]).toEqual([nCall, nLoss, nOk]);
+    expect(nLoss).toBeGreaterThan(0);
+  });
+
+  it('(c) 読み取りの 1 行に損益（設定ありなら 許容内 / 許容損失超）。十字線も同じ', () => {
+    const i = us.findIndex((u) => Math.abs(u + 0.1) < 1e-9);
+    const j = cs.findIndex((c) => Math.abs(c - 1.6) < 1e-9);
+    const pnl = RESULT.pnls[i]?.[j] as number;
+    const s = holdMapReadout({ kind: 'cell', i, j }, RESULT, MOVES, 'yen', LOSS);
+    expect(s).toContain('損益 ');
+    expect(s.endsWith(pnl + LOSS < 0 ? '· 許容損失超' : '· 許容内')).toBe(true);
+    const p = holdMapReadout({ kind: 'point', k: 2 }, RESULT, MOVES, 'yen', LOSS);
+    expect(p).toMatch(/· 損益 −[\d,]+ 円 · (許容内|許容損失超)$/);
+    const plot = holdMapPlot(RESULT, MOVES, 600, LOSS);
+    const xh = holdMapCrosshair(plot, RESULT, plot.left + 5, plot.bottom - 5, MOVES, 'yen', LOSS);
+    expect(xh?.readout).toMatch(/· 損益 [+−]?[\d,]+ 円 · (許容内|許容損失超)$/);
   });
 });

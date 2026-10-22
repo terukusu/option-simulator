@@ -155,6 +155,7 @@ describe('計算の単位（ui/view/margin.ts）', () => {
     expect(
       marginParamsOf({
         capitalYen: 1,
+        allowedLossYen: null,
         factorPct: 150,
         rangePct: 10.5,
         ivUpPct: 12,

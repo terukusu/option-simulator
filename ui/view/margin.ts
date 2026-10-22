@@ -50,6 +50,12 @@ export function capitalOf(m: MarginPrefs): number | null {
   return c !== null && Number.isFinite(c) && c > 0 ? c : null;
 }
 
+/** 許容損失（円。追証マップの 2 本目の境目。#180）。未設定・0・不正（古い保存でキーが無い = undefined も）は null */
+export function allowedLossOf(m: MarginPrefs): number | null {
+  const v = m.allowedLossYen;
+  return typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : null;
+}
+
 export interface MarginCalc {
   /** 基準原資産 X_S（円） */
   x: number;

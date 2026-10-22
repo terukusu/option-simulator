@@ -2,7 +2,7 @@ import type { MutableRef } from 'preact/hooks';
 import { useEffect, useMemo, useState } from 'preact/hooks';
 import type { AtmBasis, TechParamKey, TechParams } from '../../model';
 import type { Domain } from '../chart/scale';
-import type { MarginPrefKey, MarginPrefs, ThemePref } from '../prefs';
+import { isMarginYenKey, type MarginPrefKey, type MarginPrefs, type ThemePref } from '../prefs';
 import type { Action, MetricsUnitSetting } from '../state';
 import type { HeaderModel } from '../view/header';
 import type { PnlYSettings } from '../view/pnlChart';
@@ -116,6 +116,7 @@ function MarginField({
     if (r.ok && r.value !== value) onMargin({ [key]: r.value });
   };
   const id = `set-margin-${key}`;
+  const yen = isMarginYenKey(key);
   return (
     <>
       <div class="set-line">
@@ -124,10 +125,10 @@ function MarginField({
         </label>
         <input
           id={id}
-          class={key === 'capitalYen' ? 'set-input wide' : 'set-input'}
+          class={yen ? 'set-input wide' : 'set-input'}
           type="text"
-          inputMode={key === 'capitalYen' ? 'numeric' : 'decimal'}
-          size={key === 'capitalYen' ? 14 : 6}
+          inputMode={yen ? 'numeric' : 'decimal'}
+          size={yen ? 14 : 6}
           value={text}
           aria-invalid={error !== null}
           onInput={(e) => onInput(e.currentTarget.value)}

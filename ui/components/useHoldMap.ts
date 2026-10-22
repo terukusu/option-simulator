@@ -3,13 +3,19 @@
  *
  * - 入力（useAppController の holdMapInput）は 板の基礎・d・Δs・動き方・パラメータ・資金・休業日だけに依存する
  *   （ΔX・Δσ・β・ivShift・パン・拡大では参照が変わらない = 作り直さない）。軸は過去の点が読めて広がったときだけ変わる
- * - 入力か軸が変わったら HOLD_MAP_SETTLE_MS 待ち、列ごとに setTimeout(0) で回す（1 切れ ≤ HOLD_MAP_SLICE_MS。列が単位）。
+ * - 入力か軸が変わったら HOLD_MAP_SETTLE_MS 待ち、列（余力と損益）ごとに setTimeout(0) で回す（1 切れ ≤ HOLD_MAP_SLICE_MS。列が単位）。
  *   途中で入力が変わったら捨てて待ち直す。計算中は前のマップを残す（computing = true。部品が薄くして aria-busy）
  * - active（マップが見えている）でなければ計算しない（見えたときに作る）
  */
 
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
-import { type HoldMapAxes, type HoldMapPoint, holdMapAxes, holdMapColumn } from '../../model';
+import {
+  type HoldMapAxes,
+  type HoldMapPoint,
+  holdMapAxes,
+  holdMapColumn,
+  holdMapPnlColumn,
+} from '../../model';
 import {
   HOLD_MAP_SETTLE_MS,
   HOLD_MAP_SLICE_MS,
@@ -54,14 +60,17 @@ export function useHoldMap(
     let cancelled = false;
     const calc = holdMapCalcOf(input);
     const rooms: Float64Array[] = [];
+    const pnls: Float64Array[] = [];
     const slice = () => {
       if (cancelled) return;
       const t0 = performance.now();
       do {
+        // 列ごとに余力と損益（#180）
+        pnls.push(holdMapPnlColumn(calc, axes, rooms.length));
         rooms.push(holdMapColumn(calc, axes, rooms.length));
       } while (rooms.length < axes.us.length && performance.now() - t0 < HOLD_MAP_SLICE_MS);
       if (rooms.length < axes.us.length) timer = window.setTimeout(slice, 0);
-      else setResult({ input, axes, rooms });
+      else setResult({ input, axes, rooms, pnls });
     };
     timer = window.setTimeout(slice, HOLD_MAP_SETTLE_MS);
     return () => {

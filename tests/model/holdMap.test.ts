@@ -12,8 +12,10 @@ import {
   holdMapColumn,
   holdMapContour,
   holdMapCount,
-  holdMapRoomAt,
+  holdMapLossRooms,
+  holdMapPnlColumn,
   holdMapScenario,
+  holdMapValueAt,
 } from '../../model/holdMap';
 import { DEFAULT_MARGIN_PARAMS, type MarginParams, marginAt, marginRoom } from '../../model/margin';
 import {
@@ -22,6 +24,7 @@ import {
   type ModelSettings,
   premiumSummary,
   preparePosition,
+  theoreticalPnl,
 } from '../../model/position';
 import { type Scenario, ZERO_SCENARIO } from '../../model/scenario';
 import { businessDaysAhead, DAY_MS } from '../../model/time';
@@ -250,7 +253,7 @@ describe('B4 境目の線と数え方', () => {
     expect(r.n).toBe(pts.length);
     pts.forEach((p, k) => {
       expect(r.calls[k]).toBe(f(p.dx, p.ivRatio) < 0);
-      expect(holdMapRoomAt(axes, rooms, p.dx, p.ivRatio)).toBeCloseTo(f(p.dx, p.ivRatio), 3);
+      expect(holdMapValueAt(axes, rooms, p.dx, p.ivRatio)).toBeCloseTo(f(p.dx, p.ivRatio), 3);
     });
     expect(r.m).toBe(pts.filter((p) => f(p.dx, p.ivRatio) < 0).length);
     expect(r.m).toBeGreaterThan(0);
@@ -281,7 +284,7 @@ describe('B4 境目の線と数え方', () => {
     const r = holdMapCount(axes, rooms, pts);
     expect(r.counted).toEqual([false, false, true]);
     expect(r.n).toBe(1);
-    expect(Number.isNaN(holdMapRoomAt(axes, rooms, pts[0]?.dx ?? 0, pts[0]?.ivRatio ?? 0))).toBe(
+    expect(Number.isNaN(holdMapValueAt(axes, rooms, pts[0]?.dx ?? 0, pts[0]?.ivRatio ?? 0))).toBe(
       true,
     );
   });
@@ -361,5 +364,77 @@ describe('マップ全体', () => {
     expect(all.every(Number.isFinite)).toBe(true);
     expect(all.some((v) => v < 0)).toBe(true);
     expect(all.some((v) => v >= 0)).toBe(true);
+  });
+});
+
+/** #180: マスの損益と許容損失の境目（損益 = −許容損失） */
+describe('#180 マスの損益と許容損失の境目', () => {
+  const current: Scenario = { ...ZERO_SCENARIO, days: 3, skew: 1, ivDynamics: 'sticky_moneyness' };
+  /** 参照値: (u, c) の d の時点の損益を theoreticalPnl で直接 */
+  const pnlRef = (legs: readonly Leg[], u: number, c: number) =>
+    theoreticalPnl(
+      preparePosition(legs, ctx, SETTINGS),
+      ctx.x0 * (1 + u),
+      { ...current, dX: u * ctx.x0, ivShift: 'relative', dSigma: (c - 1) * 100, beta: 0 },
+      ctx,
+      SETTINGS,
+    );
+
+  for (const [name, legs] of FORMS) {
+    it(`${name}: マスの損益は theoreticalPnl と 1 円以内（全マス）`, () => {
+      const input = holdMapInput(baseOf(legs), current, PARAMS, CAPITAL, []);
+      if (!input) throw new Error('入力が作れない');
+      const calc = holdMapCalcOf(input);
+      AXES.us.forEach((u, i) => {
+        const col = holdMapPnlColumn(calc, AXES, i);
+        AXES.cs.forEach((c, j) => {
+          const want = pnlRef(legs, u, c);
+          expect(Number.isFinite(want)).toBe(true);
+          expect(Math.abs((col[j] as number) - want)).toBeLessThanOrEqual(1);
+        });
+      });
+    });
+  }
+
+  it('holdMapLossRooms = 損益 + 許容損失（NaN はそのまま）', () => {
+    const r = holdMapLossRooms([Float64Array.from([-500, 100, Number.NaN])], 300);
+    expect([...(r[0] as Float64Array)].slice(0, 2)).toEqual([-200, 400]);
+    expect(Number.isNaN(r[0]?.[2] as number)).toBe(true);
+  });
+
+  it('ショートストラングル: 境目（損益 = −許容損失）の c は、列ごとに theoreticalPnl を二分法で解いた c と ±1 マス以内', () => {
+    const legs = FORMS[1]?.[1] ?? [];
+    const input = holdMapInput(baseOf(legs), current, PARAMS, CAPITAL, []);
+    if (!input) throw new Error('入力が作れない');
+    const calc = holdMapCalcOf(input);
+    const pnls = AXES.us.map((_, i) => holdMapPnlColumn(calc, AXES, i));
+    // 許容損失（架空）: 今の原資産で IV ×1.6 のときの損失 = 境目が軸の中を通る
+    const loss = -pnlRef(legs, 0, 1.6);
+    expect(loss).toBeGreaterThan(0);
+    const segs = holdMapContour(AXES, holdMapLossRooms(pnls, loss));
+    expect(segs.length).toBeGreaterThan(5);
+    const step = HOLD_MAP_C.step;
+    let checked = 0;
+    AXES.us.forEach((u) => {
+      const f = (c: number) => pnlRef(legs, u, c) + loss;
+      const lo0 = AXES.cs[0] as number;
+      const hi0 = AXES.cs[AXES.cs.length - 1] as number;
+      // 売りだけの足は IV が上がるほど損益が下がる = 列の中で符号が 1 回だけ変わるときに比べる
+      if (!(f(lo0) > 0 && f(hi0) < 0)) return;
+      let lo = lo0;
+      let hi = hi0;
+      for (let n = 0; n < 60; n++) {
+        const mid = (lo + hi) / 2;
+        if (f(mid) > 0) lo = mid;
+        else hi = mid;
+      }
+      const truth = (lo + hi) / 2;
+      // この列の上の境目の点（線分の端で u がこの列のもの）
+      const onCol = segs.flat().filter(([su]) => Math.abs(su - u) < 1e-12);
+      expect(onCol.length, `u=${u}`).toBeGreaterThan(0);
+      for (const [, sc] of onCol) expect(Math.abs(sc - truth), `u=${u}`).toBeLessThanOrEqual(step);
+      checked++;
+    });
+    expect(checked).toBeGreaterThan(5);
   });
 });

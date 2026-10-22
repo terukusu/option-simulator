@@ -7,6 +7,7 @@ import {
   emaSet,
   holdMapAxes,
   holdMapColumn,
+  holdMapPnlColumn,
   indicators,
 } from '../../model';
 import { preparePosition } from '../../model/position';
@@ -48,7 +49,7 @@ import { bookListModel } from '../../ui/view/bookList';
 import { FUT_SERIES, futEmaOverlays, futRollMarks } from '../../ui/view/futHistory';
 import { headerModel, keptBoardNote } from '../../ui/view/header';
 import { hedgeModel } from '../../ui/view/hedge';
-import { holdMapCalcOf, holdMapInput, holdMapPlot, holdMapRooms } from '../../ui/view/holdMap';
+import { holdMapCalcOf, holdMapInput, holdMapPlot, holdMapResultOf } from '../../ui/view/holdMap';
 import { futPaneDrag, futPaneLayout, indPaneModel } from '../../ui/view/indicators';
 import {
   ivChartModel,
@@ -1828,20 +1829,21 @@ describe('性能（#152 追証マップ）', () => {
 
   it(`#152 追証マップの 1 列（21 マス）が ${BUDGET_MS} ms 以内（30 回の最小値）`, () => {
     expect(axes.cs).toHaveLength(21);
+    // 1 列 = 余力と損益（#180。useHoldMap と同じ単位）
     const one = () => {
       col = (col + 1) % axes.us.length;
-      return holdMapColumn(calc, axes, col).length;
+      return holdMapColumn(calc, axes, col).length + holdMapPnlColumn(calc, axes, col).length - 21;
     };
     expect(one()).toBe(21);
     expectWithinBudget('#152 追証マップの 1 列', one, { warmup: 10, runs: 30 });
   });
 
   it('マップ全体（26 列 × 21 行）と描画の表示モデル（記録のみ）', () => {
-    record('#152 追証マップ全体', () => holdMapRooms(input, axes).length, {
+    record('#152 追証マップ全体', () => holdMapResultOf(input, axes).rooms.length, {
       warmup: 1,
       runs: RECORD_RUNS,
     });
-    const result = { input, axes, rooms: holdMapRooms(input, axes) };
+    const result = holdMapResultOf(input, axes);
     const moves = Array.from({ length: 1800 }, (_, k) => ({
       d0: '2031-01-01',
       d1: '2031-01-03',
@@ -1853,7 +1855,7 @@ describe('性能（#152 追証マップ）', () => {
     }));
     record(
       '#152 追証マップの描画（点 1,800）',
-      () => holdMapPlot(result, moves, 400).cells.length,
+      () => holdMapPlot(result, moves, 400, 1_000_000).cells.length,
       {
         warmup: 2,
         runs: RECORD_RUNS,

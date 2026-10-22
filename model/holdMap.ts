@@ -9,12 +9,20 @@
  * - 境目の線 = 格子点の余力の marching squares（辺の線形補間、鞍点は 4 隅の平均の符号）。NaN を含む区画は線にしない
  * - 点の判定 = 双線形補間の余力 < 0（線と同じ面で決める）。NaN を含む区画・範囲の外の点は数えない
  * - 計算は列（u を 1 つ固定した c の全行）ごと（holdMapColumn）。呼び出し側が 1 フレームに収まる単位で回す
+ * - マスの損益（#180）= 同じシナリオの theoreticalPnl（損益グラフの指定日の損益。手数料込み）。許容損失の境目は
+ *   損益 + 許容損失 = 0 の線（holdMapLossRooms を holdMapContour に渡す）。許容損失によらないので作り直さない
  *
  * 純関数（DOM・通信・時計に依存しない）。h（保有期間の暦日）・休業日・資金は呼び出し側が決めて渡す。
  */
 
 import { type MarginParams, marginAt, marginRoom } from './margin';
-import type { MarketContext, ModelSettings, PremiumSummary, PreparedLeg } from './position';
+import {
+  type MarketContext,
+  type ModelSettings,
+  type PremiumSummary,
+  type PreparedLeg,
+  theoreticalPnl,
+} from './position';
 import type { Scenario } from './scenario';
 
 /** 横軸の既定: 原資産の変化 u（X₀ に対する比）−30%〜+20%、2% 刻み（26 列） */
@@ -117,6 +125,36 @@ export function holdMapColumn(calc: HoldMapCalc, axes: HoldMapAxes, i: number): 
   return out;
 }
 
+/** 列 i（u = axes.us[i]）の各行の損益（円。マスと同じシナリオの theoreticalPnl。有限でなければ NaN。#180） */
+export function holdMapPnlColumn(calc: HoldMapCalc, axes: HoldMapAxes, i: number): Float64Array {
+  const { legs, ctx, settings, base } = calc;
+  const u = axes.us[i] as number;
+  const x = ctx.x0 * (1 + u);
+  const out = new Float64Array(axes.cs.length);
+  for (let j = 0; j < axes.cs.length; j++) {
+    const v = theoreticalPnl(
+      legs,
+      x,
+      holdMapScenario(base, u, axes.cs[j] as number, ctx.x0),
+      ctx,
+      settings,
+    );
+    out[j] = Number.isFinite(v) ? v : Number.NaN;
+  }
+  return out;
+}
+
+/**
+ * 許容損失までの残り（円）= 損益 + 許容損失（< 0 = 許容損失を超える。#180）。holdMapContour・holdMapValueAt に
+ * 余力と同じ形で渡せる。NaN はそのまま
+ */
+export function holdMapLossRooms(
+  pnls: readonly Float64Array[],
+  allowedLoss: number,
+): Float64Array[] {
+  return pnls.map((col) => col.map((v) => v + allowedLoss));
+}
+
 export type HoldMapSegment = [[number, number], [number, number]];
 
 /** 辺 a → b の上の room = 0 の点の割合（a の側 0 → b の側 1） */
@@ -197,8 +235,8 @@ function cellIndex(xs: readonly number[], v: number): number {
   return Math.min(n - 2, Math.max(0, Math.floor((v - lo) / step)));
 }
 
-/** (u, c) の余力の双線形補間（円）。範囲の外・NaN を含む区画は NaN */
-export function holdMapRoomAt(
+/** (u, c) の格子の値（余力・損益）の双線形補間（円）。範囲の外・NaN を含む区画は NaN */
+export function holdMapValueAt(
   axes: HoldMapAxes,
   rooms: readonly Float64Array[],
   u: number,
@@ -250,7 +288,7 @@ export function holdMapCount(
   const calls: boolean[] = [];
   const counted: boolean[] = [];
   for (const p of points) {
-    const v = holdMapRoomAt(axes, rooms, p.dx, p.ivRatio);
+    const v = holdMapValueAt(axes, rooms, p.dx, p.ivRatio);
     if (!Number.isFinite(v)) {
       calls.push(false);
       counted.push(false);
