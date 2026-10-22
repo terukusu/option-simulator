@@ -178,6 +178,10 @@ const SIZES = [
   [1440, 900],
 ];
 const PHONE_MAX = 719.98;
+/**
+ * トップバーの [最新]（#87）。PC 幅では前に [AI]（#135。同じ btn sm）があるので `header.top > button.btn` では選ばない（#123）
+ */
+const LATEST_BTN = 'header.top > button.btn[title="API から板を読み直す"]';
 
 // ---- 引数
 const args = process.argv.slice(2);
@@ -5821,7 +5825,7 @@ async function busyPage(vp, theme) {
 
 /** トップバーの検査: 高さ = --top-h、ピルの時刻・F・ATM（スマホは時刻）・[最新]・⋯ が切れず画面内、中の折り返し 0 */
 async function topBarCheck(page, label) {
-  const r = await page.evaluate(() => {
+  const r = await page.evaluate((latestSel) => {
     const top = document.querySelector('header.top');
     if (!top) return { bad: ['header.top が無い'], pill: '' };
     const want = Number.parseFloat(
@@ -5831,12 +5835,7 @@ async function topBarCheck(page, label) {
     const bad = [];
     if (Math.abs(tb.height - want) > 0.5) bad.push(`高さ ${tb.height}px（--top-h ${want}px）`);
     const phone = window.innerWidth < 720;
-    const sels = [
-      '.market-pill',
-      '.market-pill .when',
-      'header.top > button.btn',
-      'button[aria-label="メニュー"]',
-    ];
+    const sels = ['.market-pill', '.market-pill .when', latestSel, 'button[aria-label="メニュー"]'];
     if (!phone) sels.push('.market-pill .vals', 'button[aria-label="テーマ"]');
     if (top.querySelector('.warn-btn')) sels.push('.warn-btn');
     // BOX タブ（#87 (B)）: ＋ が窓の中・切れない、作業中のチップが帯の矩形と窓の中、本数が切れない、スクロールバーなし
@@ -5919,7 +5918,7 @@ async function topBarCheck(page, label) {
     }
     const pill = top.querySelector('.market-pill')?.textContent ?? '';
     return { bad, pill };
-  });
+  }, LATEST_BTN);
   topStats.total++;
   if (r.bad.length === 0) topStats.pass++;
   else {
@@ -6182,7 +6181,7 @@ async function topFlows(vp) {
     await page.goto(pageUrl('next'));
     await waitReady(page, 'next');
     const legs0 = await savedLegs(page);
-    const latest = 'header.top > button.btn';
+    const latest = LATEST_BTN;
     await page.click(latest);
     await page.waitForTimeout(150);
     const during = {
@@ -9119,6 +9118,25 @@ async function motionFlows(vp, reduced = false) {
   // (d) スマホのシート peek → full の高さ
   if (phoneSize) {
     await setShell(page, 'scenario', 'peek');
+    // #123: 押してから補間が終わるまでの舞台の満期の線（足があれば必ずある）の d の書き換えを数える（補間中は大きさを
+    // 反映しない）。0 回は数え損ね（ミニの切替で必ず 1 回は書く）
+    const countD = () =>
+      page.evaluate(() => {
+        window.__dw?.disconnect();
+        window.__dn = 0;
+        const st = document.querySelector('section.stage');
+        if (!st) return;
+        window.__dw = new MutationObserver((ms) => {
+          for (const m of ms) if (m.target.matches?.('.ln.expiry')) window.__dn += 1;
+        });
+        window.__dw.observe(st, { subtree: true, attributes: true, attributeFilter: ['d'] });
+      });
+    const readD = () =>
+      page.evaluate(() => {
+        window.__dw?.disconnect();
+        return window.__dn ?? null;
+      });
+    await countD();
     await page.click('section.scenario .grabber');
     const t = await page.evaluate(() => {
       const el = document.querySelector('section.scenario');
@@ -9151,6 +9169,23 @@ async function motionFlows(vp, reduced = false) {
         m.h === 0,
       `${JSON.stringify(t)}・縦 ${m.v}・横 ${m.h}`,
     );
+    await page.waitForTimeout(150);
+    const toFull = await readD();
+    await countD();
+    await page.click('section.scenario .grabber');
+    await settleMotion(page);
+    await page.waitForTimeout(150); // 終わりの 1 回の反映（次のフレーム）まで数える
+    const toPeek = await readD();
+    const sheetNow = await page.evaluate(() =>
+      document.querySelector('.layout')?.getAttribute('data-sheet'),
+    );
+    if (!reduced) {
+      check(
+        `#123 ${tag} シート peek → full・full → peek の補間の間の舞台の満期の線の d の書き換えがそれぞれ 1〜2 回（ミニの切替 1 + 終わり 1）`,
+        sheetNow === 'peek' && toFull >= 1 && toFull <= 2 && toPeek >= 1 && toPeek <= 2,
+        `→ full ${toFull} 回・→ peek ${toPeek} 回（${sheetNow}）`,
+      );
+    }
     await setShell(page, 'scenario', 'peek');
   }
   if (reduced) {
@@ -9201,7 +9236,7 @@ async function motionFlows(vp, reduced = false) {
         childList: true,
       });
     });
-    await page.click('header.top > button.btn');
+    await page.click(LATEST_BTN);
     await page.waitForSelector('.pill[data-state="loading"]', { timeout: 2000 }).catch(() => null);
     await page.waitForSelector('.pill[data-state="ready"]', { timeout: 10000 });
     await page.waitForTimeout(1000);
@@ -9367,7 +9402,7 @@ async function ivFlows(vp) {
   );
 
   // トップバーの [最新] では IV を読み直さない
-  await page.click('header.top > button.btn');
+  await page.click(LATEST_BTN);
   await page.waitForSelector('.pill[data-state="ready"]', { timeout: 10000 }).catch(() => {});
   await page.waitForTimeout(800);
   check(
@@ -9558,7 +9593,7 @@ async function futFlows(vp) {
   await seg('先物');
   await ready();
   const before = fut.length;
-  await page.click('header.top > button.btn');
+  await page.click(LATEST_BTN);
   await page.waitForSelector('.pill[data-state="ready"]', { timeout: 10000 }).catch(() => {});
   await page.waitForTimeout(800);
   check(
