@@ -140,14 +140,18 @@ export function futVisible(s: ShellState, tier: Tier): boolean {
 }
 
 /**
- * 追証マップが見えているか（#152。見えている間だけ計算し、初めて見えたときに過去の値を読む）: 開いていて、
- * 指標のパネルが見えている（PC は常に、タブレットはパネルが metrics、スマホはそれに加えてシートが hidden でない）
+ * 指標のパネルが見えているか（#176。初めて true になったときに追証マップの過去の値を先読みする）: PC は常に、
+ * タブレットはパネルが metrics、スマホはそれに加えてシートが hidden でない
  */
-export function holdMapVisible(s: ShellState, tier: Tier): boolean {
-  if (!s.holdMap) return false;
+export function metricsVisible(s: ShellState, tier: Tier): boolean {
   if (tier === 'pc') return true;
   if (visiblePanel(s, tier) !== 'metrics') return false;
   return tier === 'tablet' || s.sheet !== 'hidden';
+}
+
+/** 追証マップが見えているか（#152。見えている間だけ計算する）: 開いていて、指標のパネルが見えている */
+export function holdMapVisible(s: ShellState, tier: Tier): boolean {
+  return !!s.holdMap && metricsVisible(s, tier);
 }
 
 /** 舞台のグラフの表示（既定 line） */

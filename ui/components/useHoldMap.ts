@@ -3,7 +3,7 @@
  *
  * - 入力（useAppController の holdMapInput）は 板の基礎・d・Δs・動き方・パラメータ・資金・休業日だけに依存する
  *   （ΔX・Δσ・β・ivShift・パン・拡大では参照が変わらない = 作り直さない）。軸は過去の点が読めて広がったときだけ変わる
- * - 入力か軸が変わったら HOLD_MAP_SETTLE_MS 待ち、列（余力と損益）ごとに setTimeout(0) で回す（1 切れ ≤ HOLD_MAP_SLICE_MS。列が単位）。
+ * - 入力か軸が変わったら HOLD_MAP_SETTLE_MS 待ち（開いただけ = 前に見た入力・軸と同じなら待たない。#176 の holdMapSettleMs）、列（余力と損益）ごとに setTimeout(0) で回す（1 切れ ≤ HOLD_MAP_SLICE_MS。列が単位）。
  *   途中で入力が変わったら捨てて待ち直す。計算中は前のマップを残す（computing = true。部品が薄くして aria-busy）
  * - active（マップが見えている）でなければ計算しない（見えたときに作る）
  */
@@ -17,11 +17,11 @@ import {
   holdMapPnlColumn,
 } from '../../model';
 import {
-  HOLD_MAP_SETTLE_MS,
   HOLD_MAP_SLICE_MS,
   type HoldMapInput,
   type HoldMapResult,
   holdMapCalcOf,
+  holdMapSettleMs,
 } from '../view/holdMap';
 
 export interface HoldMapCtl {
@@ -54,7 +54,11 @@ export function useHoldMap(
   const axes = useAxes(points);
   const [result, setResult] = useState<HoldMapResult | null>(null);
   const done = !!result && result.input === input && result.axes === axes;
+  // 前に効果が走ったときの入力・軸（active でないときも控える = 開いただけなら待たない）
+  const seen = useRef<{ input: HoldMapInput | null; axes: HoldMapAxes } | null>(null);
   useEffect(() => {
+    const prev = seen.current;
+    seen.current = { input, axes };
     if (!input || !active || done) return;
     let timer = 0;
     let cancelled = false;
@@ -72,7 +76,7 @@ export function useHoldMap(
       if (rooms.length < axes.us.length) timer = window.setTimeout(slice, 0);
       else setResult({ input, axes, rooms, pnls });
     };
-    timer = window.setTimeout(slice, HOLD_MAP_SETTLE_MS);
+    timer = window.setTimeout(slice, holdMapSettleMs(prev, input, axes));
     return () => {
       cancelled = true;
       clearTimeout(timer);

@@ -26,6 +26,7 @@ import {
   HOLD_MAP_NO_CAPITAL,
   HOLD_MAP_NO_LEGS,
   HOLD_MAP_PLOT_LABEL,
+  HOLD_MAP_SETTLE_MS,
   HOLD_MAP_TITLE,
   type HoldMapResult,
   holdMapBaseScenario,
@@ -41,6 +42,7 @@ import {
   holdMapReadout,
   holdMapResultOf,
   holdMapReveal,
+  holdMapSettleMs,
   holdMapStatusText,
   holdMapStep,
   holdMapSummary,
@@ -515,5 +517,22 @@ describe('#180 許容損失の境目', () => {
     const plot = holdMapPlot(RESULT, MOVES, 600, LOSS);
     const xh = holdMapCrosshair(plot, RESULT, plot.left + 5, plot.bottom - 5, MOVES, 'yen', LOSS);
     expect(xh?.readout).toMatch(/· 損益 [+−]?[\d,]+ 円 · (許容内|許容損失超)$/);
+  });
+});
+
+describe('#176 開いただけのときは待たない', () => {
+  it('入力・軸が前回と同じ参照なら 0、初めて・どちらかが違えば HOLD_MAP_SETTLE_MS', () => {
+    const input = RESULT.input;
+    const axes = RESULT.axes;
+    const other = holdMapInput(BASE, ZERO_SCENARIO, PARAMS, CAPITAL + 1, []);
+    if (!other) throw new Error('入力が作れない');
+    expect(HOLD_MAP_SETTLE_MS).toBeGreaterThan(0);
+    expect(holdMapSettleMs(null, input, axes)).toBe(HOLD_MAP_SETTLE_MS);
+    expect(holdMapSettleMs({ input, axes }, input, axes)).toBe(0);
+    expect(holdMapSettleMs({ input: other, axes }, input, axes)).toBe(HOLD_MAP_SETTLE_MS);
+    expect(holdMapSettleMs({ input, axes: holdMapAxes(MOVES) }, input, axes)).toBe(
+      HOLD_MAP_SETTLE_MS,
+    );
+    expect(holdMapSettleMs({ input: null, axes }, input, axes)).toBe(HOLD_MAP_SETTLE_MS);
   });
 });
