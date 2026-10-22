@@ -16,6 +16,7 @@ import {
   type LegDetailView,
   type LegRowView,
   legDetail,
+  legFairValue,
   legSpreadCosts,
   openBoardActions,
   positionRows,
@@ -197,7 +198,13 @@ export function Positions(p: Props) {
                   selected={selectedLeg === r.id}
                   detail={
                     isOpen
-                      ? legDetail(row, scen[i] ?? null, spreads[i] ?? null, metrics.unit)
+                      ? legDetail(
+                          row,
+                          scen[i] ?? null,
+                          spreads[i] ?? null,
+                          metrics.unit,
+                          legFairValue(state.chain, row),
+                        )
                       : null
                   }
                   onToggle={() => onToggle(r.id)}

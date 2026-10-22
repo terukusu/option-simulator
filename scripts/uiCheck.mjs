@@ -1089,6 +1089,11 @@ async function measureAll() {
     console.log(
       `スマイルの [効率] の検査（#259）: ${effStats.pass} / ${effStats.total} 状態で pass`,
     );
+    // 板の K のポップオーバー（#264）: 360（5 列）・1440（7 列）で開いて、縦・横 0px・中身が切れない・枠の中
+    await boardKPopAll();
+    console.log(
+      `板の K のポップオーバーの検査（#264）: ${kpopStats.pass} / ${kpopStats.total} 状態で pass`,
+    );
     // 市場の追加の状態（1200 / 1280 / 1800・322 行の板・字幅 2 通り。#85）
     await marketSweep();
     console.log(
@@ -1704,6 +1709,118 @@ async function smileEffAll() {
         );
         effStats.total++;
         if (ok) effStats.pass++;
+        else failed = true;
+        await ctx.close();
+      }
+    }
+  }
+}
+
+const kpopStats = { pass: 0, total: 0 };
+
+/**
+ * 板の K のポップオーバー（#264）: 360×780（板 full・5 列）・1440×900（7 列）× ダーク / ライト × ATM の行・一番下の行
+ * （遠い OTM の put。枠の下端で開く）。K を押して開き、見出し + 理論価格の 2 行（+ 印）があり、ポップオーバーが
+ * .board-wrap と窓の左右の中、中身が切れない（scrollWidth ≤ clientWidth）、語の途中で折れない（括弧の中・印が 1 行）、
+ * K のボタンに aria-haspopup="dialog"・aria-controls、.board-wrap が横にはみ出さない、ページの
+ * 縦・横 0px（report）。もう一度押す・Esc・外側で閉じる、別の K で前のものが閉じる（同時に 1 つ）
+ */
+async function boardKPopAll() {
+  for (const [w, h] of [
+    [360, 780],
+    [1440, 900],
+  ]) {
+    const phone = w <= PHONE_MAX;
+    for (const theme of ['dark', 'light']) {
+      for (const where of ['atm', 'last']) {
+        const ctx = await newContext({ width: w, height: h }, { [PREFS_KEY]: prefsText(theme) });
+        const page = await ctx.newPage();
+        await page.goto(pageUrl('next'));
+        await waitReady(page, 'next');
+        const lbl = `next ${theme} 板の K のポップオーバー ${where} ${w}x${h}`;
+        let ok = true;
+        const ng = (why) => {
+          ok = false;
+          console.log(`${lbl}: ${why}  ← NG`);
+        };
+        if (phone && !(await setShell(page, 'board', 'full'))) ng('画面の状態を作れない');
+        await page.waitForTimeout(300);
+        const sel =
+          where === 'atm'
+            ? 'section.board .board-month:not(.inactive) .board-wrap:not(.side-hidden) tr.atm th.k .kbtn'
+            : 'section.board .board-month:not(.inactive) .board-wrap:not(.side-hidden) tbody tr:last-child th.k .kbtn';
+        const btn = page.locator(sel).first();
+        await btn.scrollIntoViewIfNeeded().catch(() => null);
+        await btn.click().catch(() => ng('K のボタンを押せない'));
+        await page.waitForTimeout(200);
+        const v = await page.evaluate(() => {
+          const pop = document.querySelector('section.board .popover.kpop');
+          const wrap = pop?.closest('.board-wrap');
+          if (!pop || !wrap) return null;
+          const r = pop.getBoundingClientRect();
+          const b = wrap.getBoundingClientRect();
+          const cut = [pop, ...pop.children].filter((el) => el.scrollWidth > el.clientWidth + 1);
+          return {
+            n: pop.children.length,
+            text: pop.textContent ?? '',
+            inWrap: r.left >= b.left - 0.5 && r.right <= b.right + 0.5,
+            inWin: r.left >= -0.5 && r.right <= window.innerWidth + 0.5,
+            visible: r.bottom <= b.bottom + 0.5 && r.top >= b.top - 0.5,
+            cut: cut.map((el) => el.className),
+            wrapX: wrap.scrollWidth - wrap.clientWidth,
+            expanded: wrap.querySelectorAll('.kbtn[aria-expanded="true"]').length,
+            // 語の途中で折れない（#264 の再確認）: 折れるのは「（」の前だけ = 各塊が 1 行
+            split: [...pop.querySelectorAll('.kpop-main, .kpop-note, .kpop-mark')]
+              .filter((el) => el.getClientRects().length !== 1)
+              .map((el) => el.textContent),
+            aria: [...wrap.querySelectorAll('.kbtn[aria-expanded="true"]')].map(
+              (b) =>
+                `${b.getAttribute('aria-haspopup')}:${b.getAttribute('aria-controls') === pop.id}`,
+            ),
+          };
+        });
+        if (!v) ng('ポップオーバーが開かない');
+        else {
+          if (v.n < 3 || !v.text.includes('理論')) ng(`中身が足りない（${v.n} 行）`);
+          if (!v.inWrap) ng('板の枠の左右からはみ出す');
+          if (!v.inWin) ng('窓の左右からはみ出す');
+          if (!v.visible) ng('枠の中で見えていない');
+          if (v.cut.length) ng(`中身が切れる（${v.cut.join(' ')}）`);
+          if (v.wrapX > 0) ng(`板の枠が横に ${v.wrapX}px はみ出す`);
+          if (v.expanded !== 1) ng(`開いている K が ${v.expanded}`);
+          if (v.split.length) ng(`語の途中で折れる（${v.split.join(' / ')}）`);
+          if (v.aria[0] !== 'dialog:true') ng(`K のボタンの aria（${v.aria.join(' ')}）`);
+        }
+        if (!(await report(page, lbl, w, h, `next-${w}x${h}-${theme}-board-kpop-${where}`)))
+          ok = false;
+        // 閉じ方: Esc → もう一度押して開く → 押して閉じる → 開いて外側 → 開いて別の K（前が閉じる）
+        const count = () => page.locator('section.board .popover.kpop').count();
+        await page.keyboard.press('Escape');
+        await page.waitForTimeout(100);
+        if ((await count()) !== 0) ng('Esc で閉じない');
+        await btn.click();
+        await page.waitForTimeout(100);
+        await btn.click();
+        await page.waitForTimeout(100);
+        if ((await count()) !== 0) ng('もう一度押して閉じない');
+        await btn.click();
+        await page.waitForTimeout(100);
+        await page.mouse.click(w - 4, 4);
+        await page.waitForTimeout(100);
+        if ((await count()) !== 0) ng('外側で閉じない');
+        await btn.click();
+        await page.waitForTimeout(100);
+        const other = page
+          .locator(
+            'section.board .board-month:not(.inactive) .board-wrap:not(.side-hidden) tbody tr:nth-child(2) th.k .kbtn',
+          )
+          .first();
+        await other.click().catch(() => ng('別の K を押せない'));
+        await page.waitForTimeout(100);
+        if ((await count()) !== 1) ng(`別の K で ${await count()} 個開いている`);
+        console.log(`${lbl}: ${v ? v.text.slice(0, 60) : '—'} ${ok ? 'pass' : '← NG'}`);
+        kpopStats.total++;
+        if (ok) kpopStats.pass++;
         else failed = true;
         await ctx.close();
       }

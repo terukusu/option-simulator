@@ -3,6 +3,7 @@ export * from './atm';
 export * from './bars';
 export * from './black76';
 export * from './constantMaturity';
+export * from './fairValue';
 export * from './forward';
 export * from './hedge';
 export * from './holdMap';
