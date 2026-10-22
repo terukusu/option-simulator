@@ -5,7 +5,9 @@
  * - 節点の IV は mid（両側）→ 片側（bid / ask）→ 約定 の順
  * - IV の分解能の帯（価格 ±0.5 円）が 5pt 超、または ask ≤ 5 円の行は不安定として節点から外す
  * - x = ln(K / F)、総分散 w = σ²T を区分線形に補間
- * - 翼は w を線形に延ばし、傾きを Lee の上限 2 以下（かつ w が減らない向き）にクランプ。水平も選べる
+ * - 翼は w を端の節点から線形に延ばす。傾きはその翼の側の、端から |Δx| ≤ 0.2 の節点の最小二乗（#268）。
+ *   端の節点の凹の折れは (C₀ + C₂)/2 − C₁ の不足 ≤ 1 円まで（F を渡したとき）。その後 Lee の上限 2 以下・端の節点で
+ *   K 単調性が崩れない上限以下（かつ w が減らない向き）にクランプ。水平も選べる
  * - 補間後に K 単調性とバタフライ ≥ 0 を検査する
  *
  * 後段で SVI 等に差し替えられるよう、評価は Smile インターフェース越しに行う。
@@ -74,6 +76,78 @@ export function wingMonotoneBound(x: number, w: number, side: 'left' | 'right'):
   return (2 * sw * normCdf(side === 'right' ? d2 : -d2)) / pdf;
 }
 
+/** 翼の傾きの回帰に使う範囲: 端の節点からの x の幅（x = ln(K/F)。0.2 ≈ 行使価格で ±20%） */
+export const WING_FIT_WIDTH = 0.2;
+
+/**
+ * 翼の総分散の傾き（クランプ前。#268・docs/design.md 5.3）。xs は昇順。
+ * その翼の側（左翼は x < 0、右翼は x > 0）の節点のうち、端の節点から |x − x_端| ≤ width の全部で
+ * w を x に最小二乗（等しい重み）で回帰した傾き。端の 2 本の差だと、その 2 本の IV の丸めの誤差（呼値 1 円が
+ * IV で数 pt）がそのまま傾きになり、遠い翼の価格が気配の外に大きく外れるため。
+ * 範囲の節点が 2 本未満なら端の 2 本の傾き（2 本ちょうどなら回帰と同じ）。節点が 1 本以下なら 0。
+ */
+export function wingRegressionSlope(
+  xs: readonly number[],
+  ws: readonly number[],
+  side: 'left' | 'right',
+  width = WING_FIT_WIDTH,
+): number {
+  const n = xs.length;
+  if (n < 2) return 0;
+  const end = side === 'left' ? 0 : n - 1;
+  const xe = xs[end] as number;
+  let m = 0;
+  let sx = 0;
+  let sw = 0;
+  const inRange = (i: number) => {
+    const x = xs[i] as number;
+    return (side === 'left' ? x < 0 : x > 0) && Math.abs(x - xe) <= width;
+  };
+  for (let i = 0; i < n; i++) {
+    if (!inRange(i)) continue;
+    m++;
+    sx += xs[i] as number;
+    sw += ws[i] as number;
+  }
+  if (m >= 2) {
+    const mx = sx / m;
+    const mw = sw / m;
+    let sxx = 0;
+    let sxw = 0;
+    for (let i = 0; i < n; i++) {
+      if (!inRange(i)) continue;
+      const dx = (xs[i] as number) - mx;
+      sxx += dx * dx;
+      sxw += dx * ((ws[i] as number) - mw);
+    }
+    if (sxx > 0) return sxw / sxx;
+  }
+  const [a, b] = side === 'left' ? [0, 1] : [n - 2, n - 1];
+  return ((ws[b] as number) - (ws[a] as number)) / ((xs[b] as number) - (xs[a] as number));
+}
+
+/**
+ * 端の節点の凹の折れで許すバタフライの不足（円。#268）。回帰の傾きが端の区間の傾きより緩いと、端の節点で w が凹に
+ * 折れ、そこでバタフライ < 0 になる。端の区間と同じ間隔 h の格子（K₀ = Kₙ − h・K₁ = Kₙ・K₂ = Kₙ + h）で、
+ * **(C₀ + C₂)/2 − C₁ の不足**をこの円以下に抑える（checkArbitrage・性質テストの 1:−2:1 のバタフライ C₀ − 2C₁ + C₂ では
+ * その 2 倍 = 2 円）。合成の板（気配 1〜3 呼値）の比較（docs/design.md 5.3）で、1 円なら裁定の検査の印が端の 2 本の
+ * ときより増えず、1.5 円では増えた
+ */
+export const WING_KINK_YEN = 1;
+
+/**
+ * 点 (x, w) で、翼の傾きが端の区間の傾きより Δs 小さい（凹に折れる）ときの ∂C/∂K の跳びは φ(d₂)·Δs / (2√w)
+ * （d₂ = −x/√w − √w/2。F φ(d₁) = K φ(d₂) から F によらない。put も同じ。割引前の値で、割引後の跳びは e^{−rT} 倍で
+ * これ以下 = 下限は安全側）。跳びを jump 以下にする Δs の上限。
+ */
+export function wingKinkBound(x: number, w: number, jump: number): number {
+  if (!(w > 0)) return 0;
+  const sw = Math.sqrt(w);
+  const pdf = normPdf(-x / sw - sw / 2);
+  if (!(pdf > 0)) return Number.POSITIVE_INFINITY;
+  return (2 * sw * jump) / pdf;
+}
+
 /** 区分線形の総分散スマイル（MVP）。 */
 export class PiecewiseLinearSmile implements Smile {
   readonly T: number;
@@ -82,12 +156,16 @@ export class PiecewiseLinearSmile implements Smile {
   private readonly leftSlope: number;
   private readonly rightSlope: number;
 
-  /** 節点 (x, w) は x の昇順・重複なし。1 点以上。 */
+  /**
+   * 節点 (x, w) は x の昇順・重複なし。1 点以上。forward（F。円）を渡すと、端の節点の凹の折れによるバタフライ
+   * (C₀ + C₂)/2 − C₁ の不足を WING_KINK_YEN 以下に抑える（翼の傾きの下限）。渡さなければ下限なし（回帰の傾きのまま）
+   */
   constructor(
     points: ReadonlyArray<{ x: number; w: number }>,
     T: number,
     wing: WingMode = 'slope',
     maxSlope = 2,
+    forward?: number,
   ) {
     if (points.length === 0) throw new Error('スマイルの節点が 0 個');
     const sorted = [...points].sort((a, b) => a.x - b.x);
@@ -99,12 +177,24 @@ export class PiecewiseLinearSmile implements Smile {
       this.leftSlope = 0;
       this.rightSlope = 0;
     } else {
-      const sL =
-        ((this.ws[1] as number) - (this.ws[0] as number)) /
-        ((this.xs[1] as number) - (this.xs[0] as number));
-      const sR =
-        ((this.ws[n - 1] as number) - (this.ws[n - 2] as number)) /
-        ((this.xs[n - 1] as number) - (this.xs[n - 2] as number));
+      // 傾きは翼の側の複数の節点の回帰（wingRegressionSlope。#268）で、端の節点から延ばす（補間と連続）。
+      const xa = this.xs;
+      const wa = this.ws;
+      const segL =
+        ((wa[1] as number) - (wa[0] as number)) / ((xa[1] as number) - (xa[0] as number));
+      const segR =
+        ((wa[n - 1] as number) - (wa[n - 2] as number)) /
+        ((xa[n - 1] as number) - (xa[n - 2] as number));
+      // 下限: 端の節点の凹の折れ（回帰の傾きが端の区間より緩い）による (C₀ + C₂)/2 − C₁ の不足を、端の区間の間隔
+      // h（円）の格子で WING_KINK_YEN 以下に（不足 ≈ h × ∂C/∂K の跳び / 2。1:−2:1 では 2 倍）。端の区間の傾きは丸めの雑音を含むので、
+      // 下限を強くすると端の 2 本の問題が戻る（呼値 1 本が、裁定の印を増やさない範囲で最も緩い）
+      const kink = (i: number, j: number) => {
+        if (forward === undefined || !(forward > 0)) return Number.POSITIVE_INFINITY;
+        const h = forward * Math.abs(Math.exp(xa[j] as number) - Math.exp(xa[i] as number));
+        return wingKinkBound(xa[i] as number, wa[i] as number, (2 * WING_KINK_YEN) / h);
+      };
+      const sL = Math.min(wingRegressionSlope(xa, wa, 'left'), segL + kink(0, 1));
+      const sR = Math.max(wingRegressionSlope(xa, wa, 'right'), segR - kink(n - 1, n - 2));
       // 左翼は x が減ると w が増える向き（傾き ≤ 0）、右翼は増える向き（傾き ≥ 0）だけを延ばし、|傾き| ≤ 2。
       // さらに端の節点で K 単調性が崩れない傾き（wingMonotoneBound）以下にする。Lee の上限 2 は
       // x → ∞ の漸近条件で、満期の短い限月では端の近くで call 価格が K に増加することがあるため
@@ -270,6 +360,7 @@ export function buildSmile(
     T,
     opts.wing ?? 'slope',
     opts.maxWingSlope ?? 2,
+    F,
   );
   return { smile, nodes };
 }

@@ -9025,12 +9025,12 @@
        "moneyness_pct": -41,
        "smile_iv_pct": 62.3,
        "smile_mark": "node",
-       "fair_yen": 6,
-       "fair_iv_pct": 63.9,
+       "fair_yen": 5.1,
+       "fair_iv_pct": 62.9,
        "fair_mark": "extrapolated",
        "bid_yen": 2,
        "ask_yen": 7,
-       "fair_position": "near_ask",
+       "fair_position": "middle",
        "iv_unstable": false
       },
       {
