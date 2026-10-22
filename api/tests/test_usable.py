@@ -1,5 +1,6 @@
 """使える板の判定（AC-2。docs/design.md 7.2）: 純粋な関数と、偽の runner を通した候補の読み方。"""
 
+import time
 from datetime import UTC, date, datetime, timedelta
 
 import pytest
@@ -353,6 +354,11 @@ def test_three_reads_then_503():
     assert runner.count("option_price") == 3
     # 上限はキャッシュ済みの評価（不採用として覚えた板）も数える（7.2 の 4。#245）: 同じ候補のままなら 2 回目は
     # 4 つ目へ読み進まず、板を読まずに 503（使える板が無いときに要求のたびに板を読む費用を出さない）
+    # 503 の経路はカレンダー（別スレッド）を待たないので、キャッシュに入るまで待ってから数え直す
+    deadline = time.monotonic() + 5
+    while not svc._calendar.fresh() and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert svc._calendar.fresh()
     runner.reset()
     clock.advance(11)  # latest_runs の TTL（10 秒）を過ぎる
     with pytest.raises(Unavailable):
