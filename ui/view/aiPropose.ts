@@ -20,6 +20,7 @@ import { boardOptionLeg, type Chain, type ChainMonth, futureLeg } from '../../da
 import {
   black76Greeks,
   evaluatePosition,
+  type Leg,
   type OptionType,
   premiumSummary,
   type Side,
@@ -110,6 +111,42 @@ const unknownKeys = (o: Record<string, unknown>, known: readonly string[]) =>
 
 // ---------------------------------------------------------------- 要約
 
+/** 行使価格の幅（円。#260）: put_width_x / call_width_x / short_gap_x。決まらなければ null */
+export interface StrikeWidths {
+  put_width_x: number | null;
+  call_width_x: number | null;
+  short_gap_x: number | null;
+}
+
+/**
+ * 形の幅（#260）: AI が行使価格の差を自分で引かずに写せるように、意味のある幅だけを返す。OP の足が 1 限月のときだけ
+ * （先物の足は見ない。2 限月以上は全部 null）。
+ * - put_width_x / call_width_x: その種別の行使価格がちょうど 2 つで、買いと売りが両方あるとき（縦の幅。put_ratio・
+ *   bull_put・アイアンコンドルの翼）= 高い K − 低い K
+ * - short_gap_x: 売りの put と売りの call の行使価格がそれぞれ 1 つのとき（ストラングル・コンドルの間）= call の K − put の K
+ */
+export function strikeWidths(legs: ReadonlyArray<{ leg: Leg }>): StrikeWidths {
+  const none: StrikeWidths = { put_width_x: null, call_width_x: null, short_gap_x: null };
+  const ops = legs.flatMap((p) => (p.leg.kind === 'option' ? [p.leg] : []));
+  if (ops.length === 0 || new Set(ops.map((l) => l.expiry)).size !== 1) return none;
+  const vertical = (type: OptionType): number | null => {
+    const xs = ops.filter((l) => l.type === type);
+    const ks = [...new Set(xs.map((l) => l.strike))].sort((a, b) => a - b);
+    const both = xs.some((l) => l.side === 'buy') && xs.some((l) => l.side === 'sell');
+    return ks.length === 2 && both ? (ks[1] as number) - (ks[0] as number) : null;
+  };
+  const shortK = (type: OptionType) => [
+    ...new Set(ops.filter((l) => l.type === type && l.side === 'sell').map((l) => l.strike)),
+  ];
+  const sp = shortK('put');
+  const sc = shortK('call');
+  return {
+    put_width_x: vertical('put'),
+    call_width_x: vertical('call'),
+    short_gap_x: sp.length === 1 && sc.length === 1 ? (sc[0] as number) - (sp[0] as number) : null,
+  };
+}
+
 /** ポジションの要約（提案の前 / 後・候補。満期の最大損益・受払・必要証拠金・余力・何倍・Δ・Θ・V・追証の水準） */
 export function proposalSummary(env: AiToolEnv, base: PnlBase, calls = true): ToolResult {
   const { legs, ctx, settings, profile } = base;
@@ -139,6 +176,7 @@ export function proposalSummary(env: AiToolEnv, base: PnlBase, calls = true): To
     delta_mini: g.delta_mini,
     theta_yen_per_day: g.theta_yen_per_day,
     vega_yen_per_pt: g.vega_yen_per_pt,
+    ...strikeWidths(legs),
     call_levels_x:
       calls && capital !== null
         ? marginLine(base, env.scenario, params, capital, env.holidays)

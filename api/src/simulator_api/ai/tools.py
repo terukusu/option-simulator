@@ -315,7 +315,9 @@ SUMMARY = Obj({
     "max_profit_unbounded": Bool(), "max_loss_yen": YEN, "max_loss_x": LEVEL, "max_loss_unbounded": Bool(),
     "margin_yen": YEN, "room_yen": YEN, "multiple": RATIO, "delta_large": LOTS, "delta_mini": LOTS,
     "theta_yen_per_day": YEN, "vega_yen_per_pt": YEN, "call_levels_x": Arr(LEVEL, CALL_LEVELS_MAX),
-})
+    # 形の幅（#260。AI が行使価格の差を自分で引かずに写す）。デプロイ前に開いた画面（古い JS）は送らないので任意
+    "put_width_x": LEVEL, "call_width_x": LEVEL, "short_gap_x": Num(-1e8, 1e8, nullable=True),
+}, frozenset({"put_width_x", "call_width_x", "short_gap_x"}))
 
 
 STRIKE_SCAN_INPUT = Obj({
@@ -538,14 +540,17 @@ REGISTRY: Registry = {t.name: t for t in (
           "組み合わせの候補（#139）。型を指定すると、simulator が板の両気配の行から短い足の |Δ| 0.10・0.15・0.20・"
           "0.25・0.30 で候補（最大 5 つ。id c1〜）を作り、単体で評価する: 足（行使価格・建値）・損益分岐・"
           "原資産 ±10・20% の SQ 損益（shocks）・summary（受払・満期の最大利益 / 最大損失（無限なら null と"
-          "*_unbounded）・必要証拠金・余力・何倍・Δ・Θ・V・追証の水準 call_levels_x（資金があるとき））。"
-          "行使価格は自分で選ばず、ここの候補から選ぶ", CANDIDATES, CANDIDATES_INPUT, CANDIDATES_INPUT_SCHEMA),
+          "*_unbounded）・必要証拠金・余力・何倍・Δ・Θ・V・追証の水準 call_levels_x（資金があるとき）・"
+          "形の幅（put_width_x・call_width_x = 縦の幅、short_gap_x = 売りの put と call の間。円、"
+          "決まらなければ null。幅は行使価格を引き算せずにここから写す））。行使価格は自分で選ばず、ここの候補から選ぶ",
+          CANDIDATES, CANDIDATES_INPUT, CANDIDATES_INPUT_SCHEMA),
     _spec("propose_position",
           "ポジションの提案を画面のカードにする（#139）。target=current は今のタブへの差分（changes）、new_tab は"
           "新しいタブの足（legs か candidate）。行使価格は自分で決めない: 結果の値を写すか、k を省いて"
           " max_loss_floor_yen / abs_delta / candidate で simulator に板から選ばせる。"
           "画面が今の板で検査（板に無い限月・行使価格は error）し、差分（diff）と前 → 後の要約（満期の最大損失・"
-          "必要証拠金・Δ・追証の水準など。before / after）を返す。利用者はカードのボタンで反映し、元に戻せる",
+          "必要証拠金・Δ・追証の水準・形の幅 put_width_x / call_width_x / short_gap_x など。before / after）"
+          "を返す。利用者はカードのボタンで反映し、元に戻せる",
           PROPOSE_POSITION, PROPOSE_INPUT, PROPOSE_INPUT_SCHEMA),
 )}
 
