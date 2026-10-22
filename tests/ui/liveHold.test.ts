@@ -97,4 +97,24 @@ describe('liveHold の解除（#123）', () => {
     expect(offWin.mock.calls.map((c) => c[0])).toEqual(['blur']);
     expect(offDoc.mock.calls.map((c) => c[0])).toEqual(['visibilitychange']);
   });
+
+  it('onRelease は返り値・blur・hidden のどの経路でも 1 回だけ呼ぶ', async () => {
+    const live = await load();
+    const a = vi.fn();
+    const ra = live.liveHold(a);
+    win.dispatchEvent(new Event('blur'));
+    ra();
+    expect(a).toHaveBeenCalledTimes(1);
+    const b = vi.fn();
+    live.liveHold(b);
+    doc.visibilityState = 'hidden';
+    doc.dispatchEvent(new Event('visibilitychange'));
+    doc.dispatchEvent(new Event('visibilitychange'));
+    expect(b).toHaveBeenCalledTimes(1);
+    const c = vi.fn();
+    const rc = live.liveHold(c);
+    rc();
+    rc();
+    expect(c).toHaveBeenCalledTimes(1);
+  });
 });

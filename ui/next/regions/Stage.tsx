@@ -23,17 +23,18 @@ const sameStrings = (a: readonly string[], b: readonly string[]) =>
 
 /**
  * 舞台の描画域・レール・読み取りの上の押下（ハンドル・パン・ピンチ・足マーカー・面の点・IV / 時間レール）: 離すまで
- * `.live`（§6）。pointerup / pointercancel はどこで離しても window で受ける
+ * `.live`（§6）。pointerup / pointercancel はどこで離しても window で受ける（blur・タブが隠れたときは liveHold が離す）
  */
 function onStagePointerDown(e: PointerEvent) {
   const id = e.pointerId;
-  const release = liveHold();
-  const up = (ev: PointerEvent) => {
-    if (ev.pointerId !== id) return;
+  // blur・タブが隠れて離したときも購読を外す（タッチは pointerId が毎回変わるので、残すと溜まる。#123）
+  const release = liveHold(() => {
     window.removeEventListener('pointerup', up, true);
     window.removeEventListener('pointercancel', up, true);
-    release();
-  };
+  });
+  function up(ev: PointerEvent) {
+    if (ev.pointerId === id) release();
+  }
   window.addEventListener('pointerup', up, true);
   window.addEventListener('pointercancel', up, true);
 }

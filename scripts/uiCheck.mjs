@@ -162,6 +162,7 @@
 // 折り返しの規則は EPIC #92 の as-is と同じ: 直下のテキストが 40 字以下の要素で、その中身の行（getClientRects の上端）が
 // 2 つ以上。P・LI・DD・TEXTAREA・OPTION と .help-popover・[role="tooltip"]・閉じた details の中は除く。
 
+import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
@@ -242,6 +243,26 @@ const FIXTURE_PATH = 'fixtures/synthetic/latest.json';
 const sha256 = (buf) => createHash('sha256').update(buf).digest('hex');
 const fixtureSha = () => sha256(readFileSync(join(root, FIXTURE_PATH)));
 const twoLegsSha = () => sha256(twoLegs);
+const CALENDAR_PATH = 'data/calendar/calendar.json';
+/** 控えた commit の同梱カレンダーの sha256（git が無い・浅い clone で commit が無いときは null） */
+const calendarShaCache = new Map();
+function calendarAtCommit(commit) {
+  if (!calendarShaCache.has(commit)) calendarShaCache.set(commit, readCalendarAt(commit));
+  return calendarShaCache.get(commit);
+}
+function readCalendarAt(commit) {
+  if (typeof commit !== 'string' || !/^[0-9a-f]{7,40}$/.test(commit)) return null;
+  try {
+    return sha256(
+      execFileSync('git', ['show', `${commit}:${CALENDAR_PATH}`], {
+        cwd: root,
+        stdio: ['ignore', 'pipe', 'ignore'],
+      }),
+    );
+  } catch {
+    return null;
+  }
+}
 function loadExpect() {
   if (!existsSync(EXPECT_PATH)) return { data: null, why: 'scripts/uiCheck.expect.json が無い' };
   const data = JSON.parse(readFileSync(EXPECT_PATH, 'utf8'));
@@ -249,10 +270,19 @@ function loadExpect() {
   const why = [];
   if (src.fixture_sha256 !== fixtureSha()) why.push(`${FIXTURE_PATH} の sha256`);
   if (src.two_legs_sha256 !== twoLegsSha()) why.push('twoLegs（足 2 本の作業）の sha256');
+  // 同梱のカレンダー（ピルの文・残り日数に入る）は控えた commit の版と比べる（#123。控えに sha256 が無いので git で読む）
+  const first = !calendarShaCache.has(src.commit);
+  const cal = calendarAtCommit(src.commit);
+  if (cal === null && first)
+    console.log(
+      `参考  控えの commit の ${CALENDAR_PATH} を git で読めない（カレンダーの版は照合しない）`,
+    );
+  else if (cal !== sha256(readFileSync(join(root, CALENDAR_PATH))))
+    why.push(`${CALENDAR_PATH} の版`);
   if (why.length)
     return {
       data: null,
-      why: `期待値が古い: 合成の板が変わった（${why.join('・')}が控えと違う）。旧画面は消えたので取り直せない。vitest の純関数の比較に寄せるかをその PR で決める`,
+      why: `期待値が古い: 合成の板・カレンダーが変わった（${why.join('・')}が控えと違う）。旧画面は消えたので取り直せない。vitest の純関数の比較に寄せるかをその PR で決める`,
     };
   return { data, why: '' };
 }
@@ -2996,7 +3026,7 @@ async function runFlows() {
     const after = await page.evaluate((k) => localStorage.getItem(k), WORKSPACE_KEY);
     check('AC-11(a) クエリなしで開いて 2 秒: 作業の保存がバイト単位で同じ', after === twoLegs);
     const badge = await page
-      .textContent('.dock button[data-panel="positions"] .cnt')
+      .textContent('.dock button[data-panel="positions"] .cnt', { timeout: 3000 })
       .catch(() => null);
     check('AC-11(a) ドックのポジのバッジが 2', badge === '2', `バッジ ${badge}`);
     await ctx.close();
@@ -3031,7 +3061,7 @@ async function runFlows() {
     await waitReady(page, 'next');
     const rows = await page
       .locator('.dock button[data-panel="positions"] .cnt')
-      .textContent()
+      .textContent({ timeout: 3000 })
       .catch(() => null);
     const saved = await page.evaluate((k) => {
       try {
@@ -9136,6 +9166,16 @@ async function motionFlows(vp, reduced = false) {
         window.__dw?.disconnect();
         return window.__dn ?? null;
       });
+    // 終わりの反映が来たか: 舞台の svg の幅・高さが描画域（.chart）の clientWidth / clientHeight の切り捨てと同じ
+    const svgFits = () =>
+      page.evaluate(() => {
+        const c = document.querySelector('section.stage .chart');
+        const svg = c?.querySelector(':scope > svg');
+        if (!c || !svg) return null;
+        const want = `${Math.floor(c.clientWidth)}x${Math.floor(c.clientHeight)}`;
+        const got = `${svg.getAttribute('width')}x${svg.getAttribute('height')}`;
+        return { ok: want === got, want, got };
+      });
     await countD();
     await page.click('section.scenario .grabber');
     const t = await page.evaluate(() => {
@@ -9171,19 +9211,27 @@ async function motionFlows(vp, reduced = false) {
     );
     await page.waitForTimeout(150);
     const toFull = await readD();
+    const fitFull = await svgFits();
     await countD();
     await page.click('section.scenario .grabber');
     await settleMotion(page);
     await page.waitForTimeout(150); // 終わりの 1 回の反映（次のフレーム）まで数える
     const toPeek = await readD();
+    const fitPeek = await svgFits();
     const sheetNow = await page.evaluate(() =>
       document.querySelector('.layout')?.getAttribute('data-sheet'),
     );
     if (!reduced) {
       check(
-        `#123 ${tag} シート peek → full・full → peek の補間の間の舞台の満期の線の d の書き換えがそれぞれ 1〜2 回（ミニの切替 1 + 終わり 1）`,
-        sheetNow === 'peek' && toFull >= 1 && toFull <= 2 && toPeek >= 1 && toPeek <= 2,
-        `→ full ${toFull} 回・→ peek ${toPeek} 回（${sheetNow}）`,
+        `#123 ${tag} シート peek → full・full → peek の補間の間の舞台の満期の線の d の書き換えがそれぞれ 1〜2 回（ミニの切替 1 + 終わり 1）・終わった後の svg の大きさが描画域と同じ`,
+        sheetNow === 'peek' &&
+          toFull >= 1 &&
+          toFull <= 2 &&
+          toPeek >= 1 &&
+          toPeek <= 2 &&
+          fitFull?.ok === true &&
+          fitPeek?.ok === true,
+        `→ full ${toFull} 回（svg ${fitFull?.got} / 描画域 ${fitFull?.want}）・→ peek ${toPeek} 回（svg ${fitPeek?.got} / 描画域 ${fitPeek?.want}）（${sheetNow}）`,
       );
     }
     await setShell(page, 'scenario', 'peek');
@@ -9203,9 +9251,11 @@ async function motionFlows(vp, reduced = false) {
     await ctx.route('**/api/calendar**', (route) =>
       route.fulfill({ status: 500, contentType: 'text/plain', body: 'x' }),
     );
-    await ctx.route('**/api/chain**', (route) =>
-      route.fulfill({ status: 200, contentType: 'application/json', body: boardText }),
-    );
+    let chainN = 0;
+    await ctx.route('**/api/chain**', (route) => {
+      chainN += 1;
+      return route.fulfill({ status: 200, contentType: 'application/json', body: boardText });
+    });
     await page.evaluate(() => {
       if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
     });
@@ -9246,9 +9296,13 @@ async function motionFlows(vp, reduced = false) {
       ACTIVE_WRAP,
     );
     check(
-      `#91 AC-C6 ${tag} パレットの ATM へ → 板を手で 300px → [最新] で読み直しても ATM へ跳び直さない（強調なし）・枠は #85 の規則の ATM の位置（±1px）`,
-      top !== null && after.top !== null && after.hit === 0 && Math.abs(after.top - top.atm) <= 1,
-      `ATM ${top?.atm}・手 ${top?.manual} → 読み直し後 ${after.top}・強調 ${after.hit} 回`,
+      `#91 AC-C6 ${tag} パレットの ATM へ → 板を手で 300px → [最新] で読み直しても（板の要求 1 回）ATM へ跳び直さない（強調なし）・枠は #85 の規則の ATM の位置（±1px）`,
+      top !== null &&
+        after.top !== null &&
+        after.hit === 0 &&
+        Math.abs(after.top - top.atm) <= 1 &&
+        chainN === 1,
+      `ATM ${top?.atm}・手 ${top?.manual} → 読み直し後 ${after.top}・強調 ${after.hit} 回・板 ${chainN} 回`,
     );
   }
 
@@ -9291,9 +9345,12 @@ async function ivFlows(vp) {
   const ctx = await newContext(vp, { [WORKSPACE_KEY]: twoLegs });
   // トップバーの [最新] は合成の板（latest）に差し替える（手元の API を起こさない）
   const latestText = readFileSync(join(root, FIXTURE_PATH), 'utf8');
-  await ctx.route('**/api/chain**', (route) =>
-    route.fulfill({ status: 200, contentType: 'application/json', body: latestText }),
-  );
+  // [最新] で実際に読み直したか（#123: 押せていないのに「読み直さない」が pass しないように）
+  let chainN = 0;
+  await ctx.route('**/api/chain**', (route) => {
+    chainN += 1;
+    return route.fulfill({ status: 200, contentType: 'application/json', body: latestText });
+  });
   await ctx.route('**/api/calendar**', (route) =>
     route.fulfill({ status: 500, contentType: 'text/plain', body: 'x' }),
   );
@@ -9402,13 +9459,14 @@ async function ivFlows(vp) {
   );
 
   // トップバーの [最新] では IV を読み直さない
+  const chain0 = chainN;
   await page.click(LATEST_BTN);
   await page.waitForSelector('.pill[data-state="ready"]', { timeout: 10000 }).catch(() => {});
   await page.waitForTimeout(800);
   check(
-    `#79 ${tag} トップバーの [最新] では IV を読み直さない（3 回のまま）`,
-    reqs.length === 3,
-    `${reqs.length} 回`,
+    `#79 ${tag} トップバーの [最新] では IV を読み直さない（3 回のまま。板は 1 回読み直す）`,
+    reqs.length === 3 && chainN === chain0 + 1,
+    `IV ${reqs.length} 回・板 ${chainN - chain0} 回`,
   );
   if (shotsDir) await page.screenshot({ path: join(shotsDir, `flows-iv-${tag}.png`) });
   await ctx.close();
@@ -9458,9 +9516,12 @@ async function futFlows(vp) {
   const isPc = vp.width >= 1200;
   const ctx = await newContext(vp, { [WORKSPACE_KEY]: twoLegs });
   const latestText = readFileSync(join(root, FIXTURE_PATH), 'utf8');
-  await ctx.route('**/api/chain**', (route) =>
-    route.fulfill({ status: 200, contentType: 'application/json', body: latestText }),
-  );
+  // [最新] で実際に読み直したか（#123: 押せていないのに「読み直さない」が pass しないように）
+  let chainN = 0;
+  await ctx.route('**/api/chain**', (route) => {
+    chainN += 1;
+    return route.fulfill({ status: 200, contentType: 'application/json', body: latestText });
+  });
   await ctx.route('**/api/calendar**', (route) =>
     route.fulfill({ status: 500, contentType: 'text/plain', body: 'x' }),
   );
@@ -9593,13 +9654,14 @@ async function futFlows(vp) {
   await seg('先物');
   await ready();
   const before = fut.length;
+  const chain0 = chainN;
   await page.click(LATEST_BTN);
   await page.waitForSelector('.pill[data-state="ready"]', { timeout: 10000 }).catch(() => {});
   await page.waitForTimeout(800);
   check(
-    `#190 AC-9 ${tag} トップバーの [最新] では読み直さない（future_bars・atm_iv の回数が同じ）`,
-    fut.length === before && iv.length === 2,
-    `先物 ${before} → ${fut.length}・IV ${iv.length}`,
+    `#190 AC-9 ${tag} トップバーの [最新] では読み直さない（future_bars・atm_iv の回数が同じ。板は 1 回読み直す）`,
+    fut.length === before && iv.length === 2 && chainN === chain0 + 1,
+    `先物 ${before} → ${fut.length}・IV ${iv.length}・板 ${chainN - chain0} 回`,
   );
   await ctx.close();
 }

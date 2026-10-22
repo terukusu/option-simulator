@@ -37,9 +37,10 @@ function sync() {
 
 /**
  * 押している間 on。返り値を 1 回呼ぶと（2 フレーム後に）離す。pointerup / pointercancel が来ないまま窓がフォーカスを
- * 失う（blur）・タブが隠れる（visibilitychange で hidden）と、そこで離す（離し損ねて補間が切れたままにしない。#123）
+ * 失う（blur）・タブが隠れる（visibilitychange で hidden）と、そこで離す（離し損ねて補間が切れたままにしない。#123）。
+ * onRelease はどの経路で離しても 1 回だけ呼ぶ（呼び出し側の pointerup の購読を外すため）
  */
-export function liveHold(): () => void {
+export function liveHold(onRelease?: () => void): () => void {
   state = liveNext(state, { kind: 'hold' });
   sync();
   let done = false;
@@ -48,6 +49,7 @@ export function liveHold(): () => void {
     done = true;
     window.removeEventListener('blur', release);
     document.removeEventListener('visibilitychange', onVisibility);
+    onRelease?.();
     requestAnimationFrame(() =>
       requestAnimationFrame(() => {
         state = liveNext(state, { kind: 'release' });
