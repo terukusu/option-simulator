@@ -32,14 +32,22 @@ function returnTarget(prev: HTMLElement | null): HTMLElement | null {
   return btn instanceof HTMLElement && btn.isConnected ? btn : null;
 }
 
-/** Tab の輪（#124）: 最後のボタンで Tab → 最初のボタン、最初のボタン・見出し・本文で Shift + Tab → 最後のボタン */
+/**
+ * Tab の輪（#124）: 後ろにボタンが無いところ（最後のボタン・ボタンより後ろの本文）で Tab → 最初のボタン、
+ * 最初のボタン・見出し・本文で Shift + Tab → 最後のボタン
+ */
 function tabRing(dlg: HTMLDialogElement, e: KeyboardEvent): void {
   const list = Array.from(dlg.querySelectorAll('button'));
   const first = list[0];
   const last = list.at(-1);
   if (!first || !last) return;
-  const i = list.indexOf(document.activeElement as HTMLButtonElement);
-  if (e.shiftKey ? i <= 0 : i === list.length - 1) {
+  const act = document.activeElement;
+  const i = list.indexOf(act as HTMLButtonElement);
+  // 本文（tabIndex=-1）などボタンでないところ: 文書の順で後ろにボタンが無ければ既定の Tab はカードの外へ出る
+  const noneAfter =
+    act !== null &&
+    !list.some((b) => (act.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0);
+  if (e.shiftKey ? i <= 0 : i === list.length - 1 || (i < 0 && noneAfter)) {
     e.preventDefault();
     (e.shiftKey ? last : first).focus({ preventScroll: true });
   }

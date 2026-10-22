@@ -8605,7 +8605,8 @@ async function paletteWideFlow(vp) {
  * (1) 保存一覧の開閉の前後でトーストの読み上げの領域（.toast-alerts = alert / .toast-log = status）が同じ要素で 1 個ずつ、
  *     開いている間はダイアログの中・閉じたら画面の直下
  * (2) パレット・説明カードを開いている間、画面の直下の兄弟（dialog とトーストの置き場以外）が aria-hidden="true"・
- *     Tab / Shift + Tab を 12 回押してフォーカスが毎回 dialog の中・閉じたら aria-hidden が開く前と同じ
+ *     Tab / Shift + Tab を 12 回押してフォーカスが毎回 dialog の中（説明カードは本文をクリックした後も）・
+ *     閉じ方（Esc・箱の外のクリック・説明カードの ×）によらず閉じたら aria-hidden が開く前と同じ
  * (3) 1 → 4 を同じフレームで押すと 4 の行き先（指標のスクロールする枠）にフォーカス
  */
 async function a11yFlows(vp) {
@@ -8674,33 +8675,50 @@ async function a11yFlows(vp) {
     }
     return out;
   };
-  const dialogCheck = async (label, sel, open, close) => {
-    const before = await bg(sel);
-    const opened = await open();
-    const during = await bg(sel);
-    const out = opened ? await tabInside(sel) : ['開かない'];
-    await close();
-    const after = await bg(sel);
-    const allHidden = during.length > 0 && during.every((x) => x.endsWith('=true'));
-    check(
-      `#124 AC 2 ${tag} ${label}を開いている間は背景が aria-hidden・Tab / Shift + Tab 12 回で外へ出ない・閉じたら元どおり`,
-      opened &&
-        allHidden &&
-        out.length === 0 &&
-        JSON.stringify(before) === JSON.stringify(after) &&
-        before.every((x) => !x.endsWith('=true')),
-      `開いている間 ${during.join(' ')}・外へ出た ${out.join(',') || 0}・閉じた後 ${after.join(' ')}`,
-    );
+  // 閉じ方ごとに回す（閉じ方によらず背景の aria-hidden が開く前と同じに戻る。Tab の検査は Esc の回だけ）
+  const dialogCheck = async (label, sel, open, closes, extra = null) => {
+    for (const [how, close] of closes) {
+      const withTab = how === 'Esc';
+      const before = await bg(sel);
+      const opened = await open();
+      const during = await bg(sel);
+      const out = !opened ? ['開かない'] : withTab ? await tabInside(sel) : [];
+      if (opened && withTab && extra) out.push(...(await extra()));
+      await close();
+      const closed = (await page.$(sel)) === null;
+      const after = await bg(sel);
+      const allHidden = during.length > 0 && during.every((x) => x.endsWith('=true'));
+      check(
+        `#124 AC 2 ${tag} ${label}を開いている間は背景が aria-hidden${withTab ? '・Tab / Shift + Tab 12 回で外へ出ない' : ''}・${how}で閉じたら元どおり`,
+        opened &&
+          closed &&
+          allHidden &&
+          out.length === 0 &&
+          JSON.stringify(before) === JSON.stringify(after) &&
+          before.every((x) => !x.endsWith('=true')),
+        `開いている間 ${during.join(' ')}・外へ出た ${out.join(',') || 0}・閉じた ${closed}・閉じた後 ${after.join(' ')}`,
+      );
+    }
   };
-  await dialogCheck(
-    'パレット',
-    PALETTE,
-    () => openPalette(page),
-    async () => {
-      await page.keyboard.press('Escape');
-      await page.waitForSelector(PALETTE, { state: 'detached', timeout: 2000 }).catch(() => {});
-    },
-  );
+  const gone = (sel) =>
+    page.waitForSelector(sel, { state: 'detached', timeout: 2000 }).catch(() => {});
+  const esc = (sel) => async () => {
+    await page.keyboard.press('Escape');
+    await gone(sel);
+  };
+  // 箱の外（箱の左の余白の中、箱の上端から 10px）をクリック
+  const outside = (sel, box) => async () => {
+    const r = await page.evaluate((q) => {
+      const b = document.querySelector(q)?.getBoundingClientRect();
+      return b ? { x: Math.max(2, b.left / 2), y: Math.max(2, b.top + 10) } : null;
+    }, `${sel} ${box}`);
+    if (r) await page.mouse.click(r.x, r.y);
+    await gone(sel);
+  };
+  await dialogCheck('パレット', PALETTE, () => openPalette(page), [
+    ['Esc', esc(PALETTE)],
+    ['箱の外のクリック', outside(PALETTE, '.pal-box')],
+  ]);
   await dialogCheck(
     '説明カード',
     TERM_CARD,
@@ -8714,9 +8732,30 @@ async function a11yFlows(vp) {
         .then(() => true)
         .catch(() => false);
     },
+    [
+      ['Esc', esc(TERM_CARD)],
+      [
+        '×',
+        async () => {
+          await page.click(`${TERM_CARD} .tc-head button[aria-label="閉じる"]`).catch(() => {});
+          await gone(TERM_CARD);
+        },
+      ],
+      ['箱の外のクリック', outside(TERM_CARD, '.tc-box')],
+    ],
+    // 本文（tabIndex=-1）をクリックしてから Tab / Shift + Tab でも外へ出ない
     async () => {
-      await page.keyboard.press('Escape');
-      await page.waitForSelector(TERM_CARD, { state: 'detached', timeout: 2000 }).catch(() => {});
+      const bad = [];
+      for (const key of ['Tab', 'Shift+Tab']) {
+        await page.click(`${TERM_CARD} .tc-summary`).catch(() => {});
+        await page.keyboard.press(key);
+        const ok = await page.evaluate(
+          (s) => document.querySelector(s)?.contains(document.activeElement) === true,
+          TERM_CARD,
+        );
+        if (!ok) bad.push(`本文から ${key}`);
+      }
+      return bad;
     },
   );
 
