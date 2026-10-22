@@ -741,12 +741,18 @@ describe('pinPopRows（#125。凡例の ①②③ のポップオーバーの行
     expect(g?.[0]).toEqual({ k: '① 固定', v: 'A' });
     const m = map(g);
     expect(m.get('板')).toMatch(/時点$/);
-    expect(m.get('シナリオ')).toBe('d 5 日・Δσ +2.0pt・Δs 0.0');
+    // 1 値 1 行（値の列の幅に収める）
+    expect(m.get('d')).toBe('5 日');
+    expect(m.get('Δσ')).toBe('+2.0pt');
+    expect(m.get('Δs')).toBe('0.0');
     expect(m.get('ピンの線')).toBe('期中（指定日）');
     // 売 P・売 C の最大損失は −∞（無限は単位を付けない）
     expect(list[0]?.maxLossText).toBe('−∞');
     expect(m.get('満期の最大損失')).toBe('−∞');
-    expect(m.get(list[0]?.premiumLabel ?? '')).toBe(`${list[0]?.premiumText} 円`);
+    // 売 P・売 C = 受取の超過（掛け金の行は無い）
+    expect(m.get('受取')).toMatch(/^[\d,]+ 円$/);
+    expect(m.has('掛け金')).toBe(false);
+    expect(m.get('シナリオ点')).toMatch(/^[+−]?[\d,]+ 円$/);
     expect(m.get('シナリオ点')).toBe(`${list[0]?.atScenarioText} 円`);
     expect(m.has('注記')).toBe(false);
   });
@@ -760,6 +766,9 @@ describe('pinPopRows（#125。凡例の ①②③ のポップオーバーの行
     expect(tab.get('ピンの線')).toBe('満期');
     // 買 P 1 枚の最大損失は有限（掛け金）= 単位付き
     expect(tab.get('満期の最大損失')).toMatch(/^−[\d,.]+ 千円$/);
+    // 買 P 1 枚 = 掛け金（受取の行は無い）
+    expect(tab.get('掛け金')).toMatch(/^[\d,.]+ 千円$/);
+    expect(tab.has('受取')).toBe(false);
     const saved = map(pop[2]);
     expect(pop[2]?.[0]).toEqual({ k: '③ 保存', v: '案 1' });
     expect(saved.get('足')).toBe('2 本');

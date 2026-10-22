@@ -60,6 +60,11 @@ export function fmtAmount(v: number | null | undefined, unit: AmountUnit, signed
   return `+${s}`;
 }
 
+/** 金額の文字列に付ける単位（— と ∞ には付けない = 空文字）。読み取り・指標・ピンの中身で共用 */
+export function amountUnitFor(value: string, unit: string): string {
+  return value === DASH || value.endsWith('∞') ? '' : unit;
+}
+
 /** 倍率の文字列（×|比|、小数 1 桁。基準が無ければ「—」）。 */
 export function fmtRatio(r: number | null): string {
   return r === null || !Number.isFinite(r) ? DASH : `×${fmtNum(Math.abs(r), 1)}`;

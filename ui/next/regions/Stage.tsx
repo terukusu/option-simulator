@@ -133,10 +133,8 @@ export function Stage(p: {
     () => (surfaceOn ? surfaceLegend(grid?.vmax ?? null, metrics.unit) : null),
     [surfaceOn, grid, metrics.unit],
   );
-  // 凡例の ①②③ のポップオーバーの行（#125）。シナリオ点 = X₀ + ΔX（足が無ければ NaN = —）
-  const scenarioX = base
-    ? base.ctx.x0 + (Number.isFinite(scenario.dX) ? scenario.dX : 0)
-    : Number.NaN;
+  // 凡例の ①②③ のポップオーバーの行（#125）。シナリオ点 = 指標と同じ X₀ + ΔX（足が無ければ NaN = —）
+  const scenarioX = metrics.empty ? Number.NaN : metrics.scenarioPoint.x;
   const pinRows = useMemo(
     () =>
       mini

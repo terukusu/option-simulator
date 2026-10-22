@@ -21,6 +21,7 @@ import type { MarginCalc, MarginPointAt, MarginView } from './margin';
 import {
   AMOUNT_UNIT_LABEL,
   type AmountUnit,
+  amountUnitFor,
   fmtAmount,
   fmtRatio,
   type MetricsModel,
@@ -200,14 +201,10 @@ const fmtPct = (v: number) => `${fmtSigned(v * 100, 0)}%`;
 const toneOf = (s: string): Tone =>
   s.startsWith('+') ? 'gain' : s.startsWith('−') ? 'loss' : null;
 
-/** 金額に単位を付けるか（— と ∞ には付けない） */
-const unitFor = (value: string, unit: string) =>
-  value === DASH || value.endsWith('∞') ? '' : unit;
-
 /** 金額 + 単位の文字列（内訳の値。— と ∞ には単位を付けない） */
 export function amountText(v: number | null, u: AmountUnit, signed = false): string {
   const s = fmtAmount(v, u, signed);
-  const unit = unitFor(s, AMOUNT_UNIT_LABEL[u]);
+  const unit = amountUnitFor(s, AMOUNT_UNIT_LABEL[u]);
   return unit ? `${s} ${unit}` : s;
 }
 
@@ -463,7 +460,7 @@ function marginTiles(mv: MarginView | null, u: AmountUnit): MetricTile[] {
     k: MARGIN_TILE_LABEL,
     at,
     v: mV,
-    unit: unitFor(mV, ul),
+    unit: amountUnitFor(mV, ul),
     s: `今 ${fmtAmount(marginOf(mv.now), u)}`,
     tone: null,
     full: [{ k: MARGIN_TILE_LABEL, v: amountText(marginOf(mv.point), u) }, ...marginFullRows(g)],
@@ -475,7 +472,7 @@ function marginTiles(mv: MarginView | null, u: AmountUnit): MetricTile[] {
     k: ROOM_TILE_LABEL,
     at,
     v: rV,
-    unit: unitFor(rV, ul),
+    unit: amountUnitFor(rV, ul),
     s:
       mv.capital === null
         ? ROOM_NO_CAPITAL_TEXT
@@ -508,7 +505,7 @@ export function metricTiles(m: MetricsModel, margin: MarginView | null = null): 
     k,
     at: '',
     v,
-    unit: unitFor(v, ul),
+    unit: amountUnitFor(v, ul),
     s,
     tone: toned ? toneOf(v) : null,
     full,

@@ -203,7 +203,7 @@ section.stage {
   background: var(--s3);
 }
 
-/* 中身（#125）: 値の列だけ縮み、名前などの長い値は省略記号（ポップオーバーの幅 320px に収める） */
+/* 中身（#125）: 値の列だけ縮む（ポップオーバーの幅 320px に収める。値は 1 値 1 行で短く、切れないことは ui:check が見る） */
 .pin-pop .full {
   grid-template-columns: auto minmax(0, auto);
 }
@@ -211,6 +211,12 @@ section.stage {
 .pin-pop .full .fv {
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* 1 行目の名前（保存は 40 字まで。スマホの凡例は番号だけなので、ここが全文を読める所）は折り返す */
+.pin-pop .full .fv.lead {
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 .pin-chip .pin-x {

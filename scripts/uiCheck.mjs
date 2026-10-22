@@ -1898,14 +1898,19 @@ async function pinCheck(w, h, long) {
     const pop = await page.evaluate(() => {
       const el = document.querySelector('.pins .pin-chip:nth-child(1) .popover:not([hidden])');
       const b = el?.getBoundingClientRect();
+      // 値が省略記号で切れていない（名前は折り返す。ほかは 1 値 1 行で収まる）
+      const cut = [...(el?.querySelectorAll('.fv') ?? [])]
+        .filter((v) => v.scrollWidth > v.clientWidth + 0.5)
+        .map((v) => v.textContent);
       return {
         shown: !!b && b.width > 0,
         inView: !!b && b.left >= 0 && b.right <= window.innerWidth + 0.5,
         loss: (el?.textContent ?? '').includes('満期の最大損失'),
         hScroll: document.documentElement.scrollWidth - window.innerWidth,
+        cut,
       };
     });
-    if (!pop.shown || !pop.inView || !pop.loss || pop.hScroll > 0)
+    if (!pop.shown || !pop.inView || !pop.loss || pop.hScroll > 0 || pop.cut.length > 0)
       r.bad.push(`① の中身 ${JSON.stringify(pop)}`);
     await page.keyboard.press('Escape');
     await page.waitForTimeout(100);
