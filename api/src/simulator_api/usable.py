@@ -10,7 +10,9 @@
    R0 より前（R0 を評価していなければ R0 も）の「連続売買の窓・rows_option ≥ MIN_ROWS」の候補を新しい順に評価し、
    最初に使えた板を返す（= 板寄せ前の最後のスナップショット）。1 で R0 を評価して使えなかった場合、
    同じ立会の板なら latest
-3. 板を読むのは MAX_BOARD_READS 回まで、先物を読むのは MAX_FUTURE_READS 回まで。尽きたら使える板なし
+3. 板を読むのは MAX_BOARD_READS 回まで、先物を読むのは MAX_FUTURE_READS 回まで。尽きたら使える板なし。
+   回数は evaluate の結果で数える（先物は呼び出しごと、板は board_read の評価だけ。どちらもキャッシュ済みの評価も
+   数える。使える板が無いときに要求のたびに古い方へ読み進んで費用を出さないため。#245）
 """
 
 from collections.abc import Callable, Iterable
