@@ -34,7 +34,8 @@ import {
 } from '../pins';
 import type { Action, TabSlot, UiLeg } from '../state';
 import { DASH, fmtNum, fmtSigned, fmtTime } from './format';
-import { type AmountUnit, fmtAmount } from './metrics';
+import { AMOUNT_UNIT_LABEL, type AmountUnit, amountUnitFor, fmtAmount } from './metrics';
+import type { FullRow } from './metricsPanel';
 import {
   clampDays,
   hasDateLine,
@@ -458,9 +459,20 @@ export interface PinListInput {
   unit: AmountUnit;
 }
 
-function ghostCond(t: PinTarget): string {
+/** ゴーストの条件の各値（凡例の行の cond とポップオーバーの行で共用） */
+function ghostParts(t: PinTarget) {
   const s = t.scenario;
-  return `板 ${fmtTime(t.boardSnapshotAt)} 時点・d ${fmtNum(s.days, s.days % 1 === 0 ? 0 : 2)} 日・Δσ ${fmtSigned(s.dSigma, 1)}pt・Δs ${fmtSigned(s.skew, 1)}・期中 = ${PERIOD_LABEL[t.period]}`;
+  return {
+    board: `${fmtTime(t.boardSnapshotAt)} 時点`,
+    d: `${fmtNum(s.days, s.days % 1 === 0 ? 0 : 2)} 日`,
+    dSigma: `${fmtSigned(s.dSigma, 1)}pt`,
+    skew: fmtSigned(s.skew, 1),
+  };
+}
+
+function ghostCond(t: PinTarget): string {
+  const g = ghostParts(t);
+  return `板 ${g.board}・d ${g.d}・Δσ ${g.dSigma}・Δs ${g.skew}・期中 = ${PERIOD_LABEL[t.period]}`;
 }
 
 export function pinListModel(input: PinListInput): PinRowView[] {
@@ -504,6 +516,53 @@ export function pinListModel(input: PinListInput): PinRowView[] {
       note,
       drawn: fn !== null,
     };
+  });
+}
+
+/** 金額 + 単位（— と ±∞ は単位を付けない。読み取り・指標と同じ規則） */
+function withUnit(s: string, unit: AmountUnit): string {
+  const u = amountUnitFor(s, AMOUNT_UNIT_LABEL[unit]);
+  return u ? `${s} ${u}` : s;
+}
+
+/**
+ * 凡例の ①②③ を押したときのポップオーバーの行（#125。docs/ui-redesign.md §4.5）。targets と同じ順で 1 本ずつ。
+ * 金額・注記は pinListModel と同じ値。条件はポップオーバーの幅（320px・値は折り返さない）に入るよう 1 値 1 行に分ける
+ * （1 行目の名前だけは折り返す。保存の名前は 40 字まで）。
+ */
+export function pinPopRows(input: PinListInput): FullRow[][] {
+  const views = pinListModel(input);
+  return input.targets.map((t, i): FullRow[] => {
+    const r = views[i] as PinRowView;
+    const rows: FullRow[] = [{ k: `${r.mark} ${r.kindLabel}`, v: r.name }];
+    if (t.kind === 'ghost') {
+      const g = ghostParts(t);
+      rows.push(
+        { k: '板', v: g.board },
+        { k: 'd', v: g.d },
+        { k: 'Δσ', v: g.dSigma },
+        { k: 'Δs', v: g.skew },
+      );
+    } else {
+      rows.push(
+        { k: '足', v: `${t.legCount} 本` },
+        { k: '条件', v: `今の板・今のシナリオ${t.kind === 'saved' ? '・今の設定' : ''}` },
+      );
+    }
+    const line =
+      input.mode === 'expiry'
+        ? '満期'
+        : t.kind === 'ghost'
+          ? `期中（${PERIOD_LABEL[t.period]}）`
+          : '期中';
+    rows.push(
+      { k: 'ピンの線', v: line },
+      { k: '満期の最大損失', v: withUnit(r.maxLossText, input.unit) },
+      { k: r.premiumLabel, v: withUnit(r.premiumText, input.unit) },
+      { k: 'シナリオ点', v: withUnit(r.atScenarioText, input.unit) },
+    );
+    if (r.note) rows.push({ k: '注記', v: r.note });
+    return rows;
   });
 }
 

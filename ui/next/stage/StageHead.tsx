@@ -3,10 +3,12 @@ import { MAX_PINS, type PinLineMode } from '../../pins';
 import type { Action } from '../../state';
 import { fmtNum } from '../../view/format';
 import { HINT_TERMS } from '../../view/glossary';
+import type { FullRow } from '../../view/metricsPanel';
 import { PIN_MARK, type PinTarget, pinMenuRows } from '../../view/pins';
 import type { PnlChartModel, PnlYSettings } from '../../view/pnlChart';
 import type { SurfaceLegend } from '../../view/pnlSurface';
 import { CHART_MODES, type ChartMode } from '../../view/shell';
+import { FullText } from '../parts/FullText';
 import { Menu, type MenuItem } from '../parts/Menu';
 import { Popover } from '../parts/Popover';
 import { Seg } from '../parts/Seg';
@@ -29,6 +31,8 @@ export function StageHead(p: {
   scenario: Scenario;
   pnlY: PnlYSettings;
   pins: readonly PinTarget[];
+  /** ①②③ を押したときのポップオーバーの行（pins と同じ順。ui/view/pins.ts の pinPopRows。#125） */
+  pinRows: readonly FullRow[][];
   pinLine: PinLineMode;
   pinTabs: ReadonlyArray<{ id: number; name: string; legCount: number; pinned: boolean }>;
   onPinCurrent: () => void;
@@ -129,11 +133,24 @@ export function StageHead(p: {
       {!legend && pins.length > 0 && (
         // ピンの凡例（①②③ + 名前 + ×）は線の凡例より先に場所を取る（縮むのは名前だけ。スマホ・狭い舞台は番号だけ）
         <div class="pins" data-n={pins.length}>
-          {pins.map((t) => (
-            <span class="pin-chip" key={t.no} title={t.name}>
-              <i class={`p${t.no}`} />
-              <span class={`pin-no p${t.no}`}>{PIN_MARK[t.no]}</span>
-              <span class="pin-name">{t.name}</span>
+          {pins.map((t, i) => (
+            <span class="pin-chip" key={t.no}>
+              <Popover
+                label={`ピン ${PIN_MARK[t.no]} ${t.name} の中身`}
+                buttonClass="pin-open"
+                popClass="pin-pop"
+                button={
+                  <>
+                    <i class={`p${t.no}`} />
+                    <span class={`pin-no p${t.no}`}>{PIN_MARK[t.no]}</span>
+                    <span class="pin-name" title={t.name}>
+                      {t.name}
+                    </span>
+                  </>
+                }
+              >
+                <FullText rows={p.pinRows[i] ?? []} />
+              </Popover>
               <button
                 type="button"
                 class="pin-x"

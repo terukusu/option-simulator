@@ -11,7 +11,7 @@ import type { ModelSettings, OptionType, Scenario, Side } from '../../model';
 import { type Domain, fitTicks, linear, pixelToValue } from '../chart/scale';
 import type { UiLeg } from '../state';
 import { DASH, fmtDateTime, fmtSigned } from './format';
-import { fmtAmount, type MetricsModel } from './metrics';
+import { amountUnitFor, fmtAmount, type MetricsModel } from './metrics';
 import { type FullRow, premiumFullRows } from './metricsPanel';
 import {
   axisX,
@@ -568,10 +568,6 @@ export interface BigReadoutItem {
 const toneOf = (s: string): 'gain' | 'loss' | null =>
   s.startsWith('+') ? 'gain' : s.startsWith('−') ? 'loss' : null;
 
-/** 金額に単位を付けるか（— と ∞ には付けない） */
-const unitFor = (value: string, unit: string) =>
-  value === DASH || value.endsWith('∞') ? '' : unit;
-
 /**
  * 読み取りの 6 項目（§2・§5・§5.2）。値は readoutModel・metricsModel の premium のまま（文字列の丸めだけ）。
  * Δ はラージ 2 桁 + 括弧にミニ 1 桁。表示する個数は CSS（コンテナクエリ）が tier で決める。
@@ -604,14 +600,14 @@ export function bigReadout(
     hero: key === 'date',
     label,
     value,
-    unit: unitFor(value, unit),
+    unit: amountUnitFor(value, unit),
     sub,
     tone: tone ? toneOf(value) : null,
     full,
   });
   /** 見出し + 値（+ 単位）の 1 行目 */
   const head = (label: string, value: string): FullRow => {
-    const un = unitFor(value, u);
+    const un = amountUnitFor(value, u);
     return { k: label, v: un ? `${value} ${un}` : value };
   };
   if (r.empty) {
