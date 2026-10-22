@@ -3,7 +3,8 @@
  *
  * - 入力（useAppController の holdMapInput）は 板の基礎・d・Δs・動き方・パラメータ・資金・休業日だけに依存する
  *   （ΔX・Δσ・β・ivShift・パン・拡大では参照が変わらない = 作り直さない）。軸は過去の点が読めて広がったときだけ変わる
- * - 入力か軸が変わったら HOLD_MAP_SETTLE_MS 待ち（開いただけ = 前に見た入力・軸と同じなら待たない。#176 の holdMapSettleMs）、列（余力と損益）ごとに setTimeout(0) で回す（1 切れ ≤ HOLD_MAP_SLICE_MS。列が単位）。
+ * - 入力か軸が変わったら HOLD_MAP_SETTLE_MS 待ち（開いただけ = 前に見た入力・軸と同じなら待たない。#176 の
+ *   holdMapSettleMs）、列（余力と損益）ごとに setTimeout(0) で回す（1 切れ ≤ HOLD_MAP_SLICE_MS。列が単位）。
  *   途中で入力が変わったら捨てて待ち直す。計算中は前のマップを残す（computing = true。部品が薄くして aria-busy）
  * - active（マップが見えている）でなければ計算しない（見えたときに作る）
  */

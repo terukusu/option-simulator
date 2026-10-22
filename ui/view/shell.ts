@@ -140,8 +140,9 @@ export function futVisible(s: ShellState, tier: Tier): boolean {
 }
 
 /**
- * 指標のパネルが見えているか（#176。初めて true になったときに追証マップの過去の値を先読みする）: PC は常に、
- * タブレットはパネルが metrics、スマホはそれに加えてシートが hidden でない
+ * 指標のパネルが見えているか（#176。初めて true になったときに追証マップの過去の値を先読みする）: PC は常に
+ * （作業台が AI = 指標の列が隠れているときも true。起動したときに読む）、タブレットはパネルが metrics、スマホは
+ * それに加えてシートが hidden でない
  */
 export function metricsVisible(s: ShellState, tier: Tier): boolean {
   if (tier === 'pc') return true;
