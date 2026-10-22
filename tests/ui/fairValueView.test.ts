@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { FAIR_POSITION_LABEL, fairPriceText, fairViewOf } from '../../ui/view/fairValue';
+import {
+  FAIR_POSITION_LABEL,
+  fairPriceRound,
+  fairPriceText,
+  fairViewOf,
+} from '../../ui/view/fairValue';
 
 /** #264: 理論価格の表示の文字列（架空の値） */
 describe('理論価格の表示（fairViewOf）', () => {
@@ -8,6 +13,23 @@ describe('理論価格の表示（fairViewOf）', () => {
     expect(fairPriceText(99.94)).toBe('99.9');
     expect(fairPriceText(99.96)).toBe('100');
     expect(fairPriceText(1925.6)).toBe('1,926');
+  });
+
+  it('#266: AI の値（fairPriceRound）は画面の文字（fairPriceText）と同じ桁。100 円の境の前後', () => {
+    const cases: [number, number][] = [
+      [9.64, 9.6],
+      [99.94, 99.9],
+      [99.95, 100],
+      [99.96, 100],
+      [100, 100],
+      [100.4, 100],
+      [100.5, 101],
+      [1925.6, 1926],
+    ];
+    for (const [x, want] of cases) {
+      expect(fairPriceRound(x)).toBe(want);
+      expect(fairPriceRound(x)).toBe(Number(fairPriceText(x).replace(/,/g, '')));
+    }
   });
 
   it('全文は価格・使った IV・気配の中の位置・外挿の順', () => {

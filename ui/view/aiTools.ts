@@ -495,7 +495,7 @@ const pctText = (v: unknown, signed = true) => {
   return signed && n > 0 ? `+${s}` : s;
 };
 
-/** 提案のツール・strike_quote の失敗の理由（カードの 1 行） */
+/** 提案のツールの失敗の理由（カードの 1 行。strike_quote は QUOTE_ERROR_TEXT が先） */
 export const PROPOSE_ERROR_TEXT: Record<string, string> = {
   not_on_board: '板に無い限月・行使価格',
   no_candidate: '条件に合う行使価格が板に無い',
@@ -504,6 +504,12 @@ export const PROPOSE_ERROR_TEXT: Record<string, string> = {
   no_data: '板・足を読めない',
   tool_limit: '計算の回数の上限',
   out_of_range: 'F から遠すぎる行使価格',
+};
+
+/** strike_quote の失敗の理由（#266。板に無い行使価格は受け付けるので、足・行使価格の語を使わない） */
+export const QUOTE_ERROR_TEXT: Record<string, string> = {
+  bad_input: '行使価格・種別・限月の指定の形が違う',
+  not_on_board: '板に無い限月（またはスマイルが無い）',
 };
 
 /** 組み合わせの型の表示 */
@@ -589,7 +595,12 @@ export function toolCard(
       name === 'strike_scan' ||
       name === 'structure_candidates' ||
       name === 'strike_quote';
-    const why = propose ? (PROPOSE_ERROR_TEXT[code] ?? code) : code;
+    const why =
+      name === 'strike_quote'
+        ? (QUOTE_ERROR_TEXT[code] ?? PROPOSE_ERROR_TEXT[code] ?? code)
+        : propose
+          ? (PROPOSE_ERROR_TEXT[code] ?? code)
+          : code;
     return { title, input: null, lines: [`${head}（${why}）`], applicable: false };
   }
   switch (name) {

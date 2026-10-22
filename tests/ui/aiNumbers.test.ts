@@ -78,6 +78,11 @@ describe('checkNumbers', () => {
       checkNumbers('| 9 割を戻す | 15 日 |\n9 割を戻す前に次が来た', [{ median_days: 15 }])
         .unmatched,
     ).toBe(0);
+    // 広げたのは「を」だけ: 符号つき・9 以外・値の「9 割」は引き続き数える
+    expect(checkNumbers('−9 割を戻す', src).unmatched).toBe(1);
+    expect(checkNumbers('8 割を戻す', src).unmatched).toBe(1);
+    expect(checkNumbers('19 割を戻す', src).unmatched).toBe(1);
+    expect(checkNumbers('9 割を売る', src).unmatched).toBe(1);
   });
   it('#140: 月 / 日の日付（9/28・9/16・10/07）と「日経225」の 225 は数えない（ほかの 225 は数える）', () => {
     const r = checkNumbers('9/28 に始まり 10/05 に山。9/16 の終値から。日経225 先物と日経 225', []);

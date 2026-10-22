@@ -130,7 +130,7 @@ export const QUOTE_QUESTIONS: (Question & { text: string; mentions: RegExp })[] 
   {
     id: 'thin-and-off-board',
     case: 'strangle_sell',
-    text: '12 月限の 37,500 円の put は気配が薄いけど、スマイルから見た IV と妥当な値段はいくら？板に無い 85,000 円の call も。',
+    text: '12 月限の 38,000 円の put は気配が薄いけど、スマイルから見た IV と妥当な値段はいくら？板に無い 85,000 円の call も。',
     mentions: /IV/,
   },
 ];
