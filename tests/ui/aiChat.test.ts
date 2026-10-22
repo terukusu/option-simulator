@@ -630,7 +630,8 @@ describe('押せない理由', () => {
   it('残りの表示（押す前に見える）', () => {
     expect(remainingText(STATUS, null)).toBe('残り $2.40 / $3.00');
     expect(remainingText(STATUS, 1.234)).toBe('残り $1.23 / $3.00');
-    expect(remainingText({ ...STATUS, counted: false }, null)).toContain('数えない');
+    expect(remainingText({ ...STATUS, counted: false }, null)).toBe('残り $—');
+    expect(remainingText({ ...STATUS, limit_usd: null }, null)).toBe('残り $—');
     expect(remainingText({ ...STATUS, enabled: false }, null)).toBeNull();
   });
 });
