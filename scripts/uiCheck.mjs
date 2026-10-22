@@ -1616,6 +1616,26 @@ const holdPlace = (page) =>
   });
 
 /**
+ * 開いた後、描画域の高さが useSize の測った幅で決まるまで待つ（#254。負荷が高いと 2 フレームより遅れる）: 枠の svg の
+ * width 属性 = .hm-wrap の幅（測った幅）になってから rAF 2 回（部品が測り直して動かした後）。3 秒で打ち切り
+ */
+async function holdSettled(page) {
+  await page
+    .waitForFunction(
+      () => {
+        const wrap = document.querySelector('section.metrics .hm-wrap');
+        const svg = wrap?.querySelector('svg.hm-svg');
+        return !!svg && Number(svg.getAttribute('width')) === Math.floor(wrap.clientWidth);
+      },
+      undefined,
+      { timeout: 3000 },
+    )
+    .catch(() => {});
+  await twoFrames(page);
+  return holdPlace(page);
+}
+
+/**
  * (a): 描画域が枠の中（±1px）。見出し 〜 描画域が枠の高さに入るなら見出しも枠の中（上に隠れない）。入らない（スマホの
  * peek）ときは描画域を優先
  */
@@ -1630,7 +1650,7 @@ const holdPlaced = (r) => {
  * 追証マップ（#174 AC2・AC3）: 資金あり・売り 5 枚 × 360（指標 peek / full）・390（peek）・900（ドック）・1440 ×
  * ダーク / ライト。状態ごとに新しいコンテキスト（過去の値動きはセッションで 1 回だけ読むので）。指標の .panel-body を
  * 一番下までスクロール（見出しが枠の下端）→ /fixtures/atm_daily を止めたまま見出しを押す →
- * (a) rAF 2 回の後（既定の実行は reducedMotion reduce = 即時）に描画域が枠の中（見出しと一緒に入る幅では見出しも）
+ * (a) 描画域の高さが決まった後（holdSettled。既定の実行は reducedMotion reduce = 即時）に描画域が枠の中（見出しと一緒に入る幅では見出しも）
  * (b) 枠（.hm-plot の高さ ≥ 200px）の中に .hm-wait（スピナー + `過去の値動きを読み込み中…`）、状態の行に同じ文字が無い、
  *     .hm-spin の animation-name が none（AC3）、文字が切れない（scrollWidth ≤ clientWidth）、縦・横・折り返し（report）
  * → 通す → .hm-wait が無くなりマスの path が出る → (c) 閉じても scrollTop は動かさない（中身が消えて最大値で切られる分だけ）
@@ -1668,10 +1688,8 @@ async function holdMapAll() {
           await holdScrollBottom(page);
           await page.waitForTimeout(50);
           await page.click('section.metrics .hm-toggle');
-          // 部品は 2 フレーム後に測って動かす（reduce = 即時）。その後の 2 フレーム
-          await twoFrames(page);
-          await twoFrames(page);
-          const r = await holdPlace(page);
+          // 部品は中身の大きさが変わるたびに測って動かす（reduce = 即時。#254）。描画域の高さが決まってから
+          const r = await holdSettled(page);
           if (!holdPlaced(r)) ng(`開いた直後の位置 ${JSON.stringify(r)}`);
           await page.waitForSelector('section.metrics .hm-wait', { timeout: 3000 }).catch(() => {});
           const wv = await page.evaluate(() => {
