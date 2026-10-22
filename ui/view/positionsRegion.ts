@@ -35,6 +35,7 @@ import {
   QTY_MAX,
   type State,
 } from '../state';
+import { type FairView, fairView } from './fairValue';
 import { DASH, fmtIv, fmtNum, fmtSigned } from './format';
 import { HEDGE_AT_LABEL, HEDGE_REASON_LABEL, type HedgeModel, type HedgeProduct } from './hedge';
 import {
@@ -174,6 +175,21 @@ export function legSpreadCosts(model: PositionModel, settings: ModelSettings): (
   });
 }
 
+/**
+ * 足 1 本の理論価格（#264。ui/view/fairValue.ts の fairView）。板にある限月・行使価格の OP の足だけ。位置はその行の
+ * 板の気配（建値ではない）に対して。先物・板に無い限月 / 行使価格・出せないときは null。
+ */
+export function legFairValue(chain: Chain | null, row: PositionRow): FairView | null {
+  if (!chain || row.kind !== 'option' || row.strike === null || row.optionType === null)
+    return null;
+  const month = chain.months.find((m) => m.id === row.month);
+  const i = month ? month.strikes.findIndex((s) => s.k === row.strike) : -1;
+  const q = month?.rows[i];
+  if (!month || !q) return null;
+  const type = row.optionType === 'P' ? 'put' : 'call';
+  return fairView(month, row.strike, type, chain.r, q[type].bid, q[type].ask);
+}
+
 // ---------------------------------------------------------------- 詳細
 
 export interface DetailItem {
@@ -189,7 +205,7 @@ export interface DetailItem {
 }
 
 export interface LegDetailView {
-  /** 足の項目（商品・売買・枚数・建値・IV・グリーク（シナリオ 0）・建値ずれ・スプレッドコスト・SQ 日） */
+  /** 足の項目（商品・売買・枚数・建値・IV・グリーク（シナリオ 0）・建値ずれ・スプレッドコスト・理論価格・SQ 日） */
   items: DetailItem[];
   /** 足別のシナリオ点（IV・Δ・Γ・Θ・V・状態。求められなければ —） */
   scenario: DetailItem[];
@@ -219,6 +235,7 @@ export function legDetail(
   scen: LegMetrics | null,
   spread: number | null,
   unit: AmountUnit,
+  fair: FairView | null = null,
 ): LegDetailView {
   const g = row.greeks;
   const u = AMOUNT_UNIT_LABEL[unit];
@@ -261,6 +278,13 @@ export function legDetail(
       key: 'spread',
       label: `スプレッドコスト ${u}`,
       value: fmtAmount(spread, unit, true),
+    },
+    {
+      // 理論価格（#264）: 100 円未満は小数 1 桁と板の気配の中の位置。外挿は印
+      key: 'fair',
+      label: '理論価格（スマイル）',
+      value: fair ? (fair.position ? `${fair.price} · ${fair.position}` : fair.price) : DASH,
+      ...(fair?.extrapolated && { tag: '外挿' }),
     },
     {
       key: 'sq',

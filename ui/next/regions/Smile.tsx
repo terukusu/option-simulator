@@ -80,7 +80,7 @@ function SmileView(p: SmileRegionProps) {
     });
   };
   const effShown = p.effOn && p.eff !== null;
-  const act = month ? smileAct(month, pick, effShown) : null;
+  const act = month ? smileAct(month, pick, chain.r, effShown) : null;
   // 効率の線の凡例（#259 S-1）: 今の線はシナリオの点が今でないときだけ（SmilePlot と同じ条件）
   const legend = smileLegend(
     basis,
@@ -174,6 +174,12 @@ function SmileView(p: SmileRegionProps) {
                 <span class="k">{act.title}</span>
                 <span class="sub">
                   <span class="iv">{act.iv}</span>
+                  {act.fair && (
+                    <span class="fair" title={act.fair.label}>
+                      理論 {act.fair.price}
+                    </span>
+                  )}
+                  {act.fair?.extrapolated && <span class="tag warn">外挿</span>}
                   {act.unstable && <span class="tag warn">IV 不安定</span>}
                 </span>
               </span>

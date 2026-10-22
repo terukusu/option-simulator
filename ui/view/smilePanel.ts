@@ -5,6 +5,7 @@
 
 import type { ChainMonth } from '../../data';
 import type { AtmBasis, OptionType } from '../../model';
+import { type FairView, fairView } from './fairValue';
 import { fmtIv, fmtNum } from './format';
 import { smilePickRow } from './smile';
 
@@ -26,6 +27,11 @@ export type SmileAct =
       /** `IV 28.0`（その行のスマイルの IV、1 桁） */
       iv: string;
       unstable: boolean;
+      /**
+       * 理論価格（#264。その行の気配を使わず周りの気配の狭い行のスマイルから。外挿の印。気配の中の位置は title だけ =
+       * bid / ask は隣のボタンに出ている）。出せなければ null
+       */
+      fair: FairView | null;
       /** 足の種別（OTM 側。smilePickRow） */
       type: OptionType;
       /** bid / ask の数字（無ければ —） */
@@ -36,8 +42,15 @@ export type SmileAct =
       buyLabel: string;
     };
 
-/** 操作行（未選択・板に無い K は案内。[効率] オンなら効率の定義と注意 = SMILE_EFF_ACT_HINT）。 */
-export function smileAct(month: ChainMonth, pick: number | null, effOn = false): SmileAct {
+/**
+ * 操作行（未選択・板に無い K は案内。[効率] オンなら効率の定義と注意 = SMILE_EFF_ACT_HINT）。r は理論価格の金利（chain.r）。
+ */
+export function smileAct(
+  month: ChainMonth,
+  pick: number | null,
+  r: number,
+  effOn = false,
+): SmileAct {
   const hint = { hint: effOn ? SMILE_EFF_ACT_HINT : SMILE_ACT_HINT };
   if (pick === null) return hint;
   const row = smilePickRow(month, pick);
@@ -51,6 +64,7 @@ export function smileAct(month: ChainMonth, pick: number | null, effOn = false):
     title,
     iv: `IV ${fmtIv(info?.smileIv)}`,
     unstable: row.unstable,
+    fair: fairView(month, row.k, row.type, r, row.bid, row.ask),
     type: row.type,
     bid,
     ask,
@@ -103,7 +117,7 @@ export function smileLegend(
 
 /** 見出しの ⓘ（今の「スマイルの操作」の文） */
 export const SMILE_HINT =
-  '点をタップで選択（もう一度タップで解除）。長押しして左右にドラッグで選択を切り替え。十字線: マウスを載せる・タップ（点のタップは点に、横線は指の高さの IV、読み取りは曲線の IV。交点をドラッグで動かす、ほかの所のタップで消す）';
+  '点をタップで選択（もう一度タップで解除）。長押しして左右にドラッグで選択を切り替え。十字線: マウスを載せる・タップ（点のタップは点に、横線は指の高さの IV、読み取りは曲線の IV。交点をドラッグで動かす、ほかの所のタップで消す）。操作行の「理論」= その行の気配を使わず、周りの気配の狭い行のスマイルから求めた価格（100 円未満は小数 1 桁。翼は外挿）';
 
 /** ⓘ の印の意味（凡例は狭い列で短い形になるので全文はここ） */
 export const SMILE_LEGEND_HINT =

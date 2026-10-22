@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { type Chain, type ChainJson, normalizeChain } from '../../data';
-import { DEFAULT_SETTINGS, type ModelSettings, premiumSummary } from '../../model';
+import { DEFAULT_SETTINGS, type ModelSettings, premiumSummary, smileFairValue } from '../../model';
 import {
   type Action,
   initialState,
@@ -11,6 +11,7 @@ import {
   type State,
   type UiLeg,
 } from '../../ui/state';
+import { fairView } from '../../ui/view/fairValue';
 import { fmtIv, fmtNum, fmtSigned } from '../../ui/view/format';
 import { HEDGE_REASON_LABEL, hedgeModel } from '../../ui/view/hedge';
 import { AMOUNT_UNIT_LABEL, fmtAmount, metricsModel } from '../../ui/view/metrics';
@@ -34,6 +35,7 @@ import {
   headSub,
   hedgeSection,
   legDetail,
+  legFairValue,
   legSpreadCosts,
   OPTION_FORM_DEFAULT,
   openBoardActions,
@@ -124,6 +126,43 @@ const errorLeg = (id: number): UiLeg => ({
     mid: 290,
   },
   marks: [],
+});
+
+describe('理論価格の項目（#264）', () => {
+  it('板の OP の足は fairView（板の気配に対する位置）、先物・板に無い足は —', () => {
+    const s = three();
+    const v = views(s);
+    const [r0, , rf] = v.pm.rows as [PositionRow, PositionRow, PositionRow];
+    const q = m1.rows[m1.strikes.findIndex((x) => x.k === k1)]?.put;
+    const fv = legFairValue(chain, r0);
+    expect(fv).toEqual(fairView(m1, k1, 'put', chain.r, q?.bid ?? null, q?.ask ?? null));
+    const want = smileFairValue(m1.smile, m1.F, m1.T, chain.r, k1, 'put');
+    expect(fv?.price).toBe(fmtNum(want?.price, (want?.price as number) < 100 ? 1 : 0));
+    const item = legDetail(r0, null, null, v.metrics.unit, fv).items.find((i) => i.key === 'fair');
+    expect(item?.label).toBe('理論価格（スマイル）');
+    expect(item?.value).toBe(fv?.position ? `${fv.price} · ${fv.position}` : fv?.price);
+    expect(rf.kind).toBe('future');
+    expect(legFairValue(chain, rf)).toBeNull();
+    expect(legFairValue(null, r0)).toBeNull();
+    expect(legFairValue(chain, { ...r0, month: '2099-01' })).toBeNull();
+    expect(
+      legDetail(rf, null, null, v.metrics.unit).items.find((i) => i.key === 'fair')?.value,
+    ).toBe('—');
+  });
+
+  it('外挿の行は「外挿」の印（tag）', () => {
+    const deep = m1.strikes.find(
+      (x) => smileFairValue(m1.smile, m1.F, m1.T, chain.r, x.k, 'put')?.mark === 'extrapolated',
+    );
+    if (!deep) throw new Error('外挿の行が無い');
+    const s = run(loaded(), sellPut(m1.id, deep.k));
+    const v = views(s);
+    const row = v.pm.rows[0] as PositionRow;
+    const item = legDetail(row, null, null, v.metrics.unit, legFairValue(chain, row)).items.find(
+      (i) => i.key === 'fair',
+    );
+    expect(item?.tag).toBe('外挿');
+  });
 });
 
 describe('AC-2 行の表示モデル', () => {

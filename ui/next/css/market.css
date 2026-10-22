@@ -553,6 +553,12 @@ table.board .legbadge.buy {
   font-size: var(--fs-sm);
 }
 
+.smile-act .fair {
+  color: var(--ink-2);
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+}
+
 .smile-act .tag {
   line-height: 14px;
 }

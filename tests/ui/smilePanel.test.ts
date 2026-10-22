@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { normalizeChain } from '../../data';
+import { fairPosition, smileFairValue } from '../../model';
+import { FAIR_DECIMAL_BELOW, FAIR_POSITION_LABEL } from '../../ui/view/fairValue';
 import { fmtIv, fmtNum } from '../../ui/view/format';
 import { smilePickRow } from '../../ui/view/smile';
 import {
@@ -21,19 +23,19 @@ if (!m1) throw new Error('限月が無い');
 
 describe('AC-4(a) 操作行', () => {
   it('未選択は案内の文', () => {
-    expect(smileAct(m1, null)).toEqual({ hint: '点をタップで選ぶ · 長押しで連続 · , .' });
+    expect(smileAct(m1, null, chain.r)).toEqual({ hint: '点をタップで選ぶ · 長押しで連続 · , .' });
     expect(SMILE_ACT_HINT).toBe('点をタップで選ぶ · 長押しで連続 · , .');
   });
 
   it('板に無い K は案内', () => {
-    expect(smileAct(m1, 1)).toEqual({ hint: SMILE_ACT_HINT });
+    expect(smileAct(m1, 1, chain.r)).toEqual({ hint: SMILE_ACT_HINT });
   });
 
   it('選択中は K・種別（OTM 側）・IV 1 桁・bid / ask（無ければ —）', () => {
     let quoted = 0;
     let missing = 0;
     for (const s of m1.strikes) {
-      const a = smileAct(m1, s.k);
+      const a = smileAct(m1, s.k, chain.r);
       const row = smilePickRow(m1, s.k);
       if (!row || 'hint' in a) throw new Error('操作行が無い');
       expect(a.k).toBe(s.k);
@@ -52,10 +54,58 @@ describe('AC-4(a) 操作行', () => {
     expect(missing).toBeGreaterThan(0);
   });
 
+  it('理論価格（#264）: model の smileFairValue の小数 1 桁・気配の中の位置・外挿の印。出せない行は null', () => {
+    let shown = 0;
+    let extrap = 0;
+    for (const s of m1.strikes) {
+      const a = smileAct(m1, s.k, chain.r);
+      const row = smilePickRow(m1, s.k);
+      if (!row || 'hint' in a) throw new Error('操作行が無い');
+      const v = smileFairValue(m1.smile, m1.F, m1.T, chain.r, s.k, s.otmType);
+      if (!v) {
+        expect(a.fair).toBeNull();
+        continue;
+      }
+      shown++;
+      expect(a.fair?.price).toBe(fmtNum(v.price, v.price < FAIR_DECIMAL_BELOW ? 1 : 0));
+      const pos = fairPosition(v.price, row.bid, row.ask);
+      expect(a.fair?.position).toBe(pos === null ? null : FAIR_POSITION_LABEL[pos]);
+      expect(a.fair?.extrapolated).toBe(v.mark === 'extrapolated');
+      expect(a.fair?.label.startsWith(`理論価格 ${a.fair?.price}`)).toBe(true);
+      if (pos !== null) expect(a.fair?.label).toContain(FAIR_POSITION_LABEL[pos]);
+      if (v.mark === 'extrapolated') {
+        extrap++;
+        expect(a.fair?.label).toContain('外挿');
+      }
+    }
+    expect(shown).toBeGreaterThan(0);
+    // 桁: 100 円未満は小数 1 桁（遠い OTM の安い行）、以上は整数
+    const cheap = m1.strikes.find((x) => {
+      const v = smileFairValue(m1.smile, m1.F, m1.T, chain.r, x.k, x.otmType);
+      return v !== null && v.price > 5 && v.price < 50;
+    }) as (typeof m1.strikes)[number];
+    const ca = smileAct(m1, cheap.k, chain.r);
+    expect('hint' in ca ? '' : ca.fair?.price).toMatch(/^\d+\.\d$/);
+    const atmK = m1.atm.B.pick?.k as number;
+    const aa = smileAct(m1, atmK, chain.r);
+    expect('hint' in aa ? '' : aa.fair?.price).toMatch(/^[\d,]+$/);
+    // 合成の板の深い翼（ask だけ・不安定の行）は外挿
+    expect(extrap).toBeGreaterThan(0);
+    expect(Object.values(FAIR_POSITION_LABEL)).toEqual([
+      'bid より下',
+      'bid 寄り',
+      '中ほど',
+      'ask 寄り',
+      'ask より上',
+      'bid より上',
+      'ask より下',
+    ]);
+  });
+
   it('IV 不安定の行は unstable', () => {
     const u = m1.strikes.find((s) => s.unstable);
     if (!u) throw new Error('IV 不安定の行が無い');
-    const a = smileAct(m1, u.k);
+    const a = smileAct(m1, u.k, chain.r);
     expect('hint' in a ? null : a.unstable).toBe(true);
   });
 });
@@ -140,12 +190,12 @@ describe('#259 効率の線の凡例・操作行の案内', () => {
   });
 
   it('S-4 [効率] オンで未選択なら効率の定義と注意、選択中は今のまま', () => {
-    expect(smileAct(m1, null, true)).toEqual({ hint: SMILE_EFF_ACT_HINT });
+    expect(smileAct(m1, null, chain.r, true)).toEqual({ hint: SMILE_EFF_ACT_HINT });
     expect(SMILE_EFF_ACT_HINT).toBe(
       '効率 = プレミアム ÷ 必要証拠金（1 枚売り）· 高い所ほど値動きの損失も大きい',
     );
-    expect(smileAct(m1, null, false)).toEqual({ hint: SMILE_ACT_HINT });
+    expect(smileAct(m1, null, chain.r, false)).toEqual({ hint: SMILE_ACT_HINT });
     const s = m1.strikes.find((r) => r.smileIv !== null) as (typeof m1.strikes)[number];
-    expect(smileAct(m1, s.k, true)).toEqual(smileAct(m1, s.k));
+    expect(smileAct(m1, s.k, chain.r, true)).toEqual(smileAct(m1, s.k, chain.r));
   });
 });
