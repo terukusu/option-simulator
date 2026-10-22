@@ -25,6 +25,7 @@ import {
   theoreticalPnl,
   ZERO_SCENARIO,
 } from '../../model';
+import type { ToolStatus } from './aiChat';
 import { type IvStatsData, ivStatsTool } from './aiIvStats';
 import { type ProposeDraft, proposePosition, strikeScan, structureCandidates } from './aiPropose';
 import { fin, greeksOf, legId, r1, r2, round, yen } from './aiRound';
@@ -508,18 +509,33 @@ export interface ToolCard {
   lines: string[];
   /** [シナリオに適用] を出す（evaluate_scenario の成功） */
   applicable: boolean;
+  /** 結果を待つ間（#242。カードは進み具合の印と「計算中…」） */
+  pending?: true;
 }
 
-/** ツールのカードの文字（結果は中継を通った JSON。形が違えば「—」） */
+/** 足を読み込んでから計算するツール（待ちが長い。#242） */
+const BARS_TOOLS: ReadonlySet<string> = new Set(['technicals', 'iv_stats']);
+
+/**
+ * ツールのカードの文字（結果は中継を通った JSON。形が違えば「—」）。結果を待つ間は「計算中…」（足を読むツールは
+ * 「足を読み込み中…」）、結果が返らないまま終わったら「結果なし」で、どちらも失敗とは言わない（#242）
+ */
 export function toolCard(
   name: string,
   _input: Record<string, unknown>,
   result: unknown,
-  isError: boolean,
+  status: ToolStatus,
 ): ToolCard {
   const title = isAiToolName(name) ? AI_TOOL_LABEL[name] : name;
+  if (status === 'pending') {
+    const line = BARS_TOOLS.has(name) ? '足を読み込み中…' : '計算中…';
+    return { title, input: null, lines: [line], applicable: false, pending: true };
+  }
+  if (status === 'missing') {
+    return { title, input: null, lines: ['結果なし'], applicable: false };
+  }
   const r = obj(result);
-  if (isError || result === null) {
+  if (status === 'error' || result === null) {
     const code = typeof r.error === 'string' ? r.error : '—';
     const head = name === 'propose_position' ? '提案を作れなかった' : '計算できなかった';
     const propose =

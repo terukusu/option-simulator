@@ -179,7 +179,7 @@ describe('propose_position（板の検査と前 → 後）', () => {
     ).toEqual({ error: 'bad_input' });
     // 失敗はカードにしない（1 行の理由だけ）
     expect(proposalCard({ target: 'current' }, { error: 'not_on_board' })).toBeNull();
-    expect(toolCard('propose_position', {}, { error: 'not_on_board' }, true).lines).toEqual([
+    expect(toolCard('propose_position', {}, { error: 'not_on_board' }, 'error').lines).toEqual([
       '提案を作れなかった（板に無い限月・行使価格）',
     ]);
   });

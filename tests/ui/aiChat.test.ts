@@ -33,6 +33,7 @@ import {
 } from '../../ui/view/aiChat';
 import { checkNumbers } from '../../ui/view/aiNumbers';
 import { AI_PRESETS, presetBlocked } from '../../ui/view/aiPresets';
+import { toolCard } from '../../ui/view/aiTools';
 
 /**
  * #135 AC8: AI のチャットの状態（ui/view/aiChat.ts）。送信・イベント・ツールの往復・失敗・中止・保存の形・押せない理由。
@@ -206,6 +207,61 @@ describe('aiChatReduce', () => {
     const roles = requestOf(next)?.messages.map((m) => m.role) ?? [];
     expect(roles).toEqual(['user', 'assistant', 'user']);
     expect(roles.every((r, i) => r === (i % 2 === 0 ? 'user' : 'assistant'))).toBe(true);
+  });
+
+  it('#242 ツールのカード: 結果を待つ間は「計算中…」、返らないまま終われば「結果なし」、エラーだけ「計算できなかった」', () => {
+    const useOf = (id: string, name: string) => ({
+      type: 'tool_use' as const,
+      id,
+      name,
+      input: name === 'technicals' ? { timeframes: ['daily'] } : {},
+    });
+    const waiting = run(
+      first,
+      { type: 'begin', kind: 'chat', text: 'RSI は？', now: 3000 },
+      { type: 'send', context: CTX(0), key: 'k0' },
+      ev({
+        type: 'done',
+        stop_reason: 'tool_use',
+        content: [
+          useOf('a', 'technicals'),
+          useOf('b', 'evaluate_scenario'),
+          useOf('c', 'propose_position'),
+        ],
+        remaining_usd: 2.2,
+      }),
+    );
+    expect(waiting.turn?.awaitingTools).toBe(true);
+    const tools = (s: AiChatState) => chatItems(s).filter((i) => i.kind === 'tool');
+    // (1) 待ち: 失敗の文ではなく「足を読み込み中…」/「計算中…」
+    const pending = tools(waiting);
+    expect(pending.map((i) => i.status)).toEqual(['pending', 'pending', 'pending']);
+    const lines = pending.map((i) => toolCard(i.name, i.input, i.result, i.status));
+    expect(lines.map((c) => c.lines)).toEqual([['足を読み込み中…'], ['計算中…'], ['計算中…']]);
+    expect(lines.every((c) => c.pending === true)).toBe(true);
+    expect(toolCard('iv_stats', {}, null, 'pending').lines).toEqual(['足を読み込み中…']);
+    // (2) 結果がエラー: 今どおり「計算できなかった（理由）」/「提案を作れなかった（理由）」
+    const blocks = toolResultBlocks(waiting, (name) =>
+      name === 'evaluate_scenario' ? { pnl_yen: -1000 } : { error: 'not_on_board' },
+    );
+    const got = tools(aiChatReduce(waiting, { type: 'toolResults', blocks }));
+    expect(got.map((i) => i.status)).toEqual(['error', 'ok', 'error']);
+    const cards = got.map((i) => toolCard(i.name, i.input, i.result, i.status));
+    expect(cards[0]?.lines).toEqual(['計算できなかった（not_on_board）']);
+    expect(cards[2]?.lines).toEqual(['提案を作れなかった（板に無い限月・行使価格）']);
+    expect(cards.some((c) => c.pending)).toBe(false);
+    // (3) 結果が返らないまま会話が終わった（保存から戻した履歴の終わりが tool_use など）: 「結果なし」（失敗と言わない）
+    const ended = aiChatReduce(INITIAL_AI_CHAT, {
+      type: 'restore',
+      saved: { context: CTX(0), lastKey: 'k0', messages: waiting.messages },
+    });
+    const missing = tools(ended);
+    expect(missing.map((i) => i.status)).toEqual(['missing', 'missing', 'missing']);
+    for (const i of missing) {
+      const c = toolCard(i.name, i.input, i.result, i.status);
+      expect(c.lines).toEqual(['結果なし']);
+      expect(c.pending).toBeUndefined();
+    }
   });
 
   it('失敗・終端なし・中止: その発言の履歴を戻し、途中の文と理由を残す', () => {

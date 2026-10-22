@@ -200,7 +200,7 @@ describe('ツールの境界', () => {
         hv: { windows: [{ days: 20, hv_pct: 15.7, iv_minus_hv_pt: 8.8 }] },
         spikes: { n: 3 },
       },
-      false,
+      'ok',
     );
     expect(card.title).toBe('IV の統計（過去）');
     expect(card.lines).toEqual([
@@ -209,8 +209,7 @@ describe('ツールの境界', () => {
       'スパイク 3 回',
     ]);
     expect(
-      toolCard('iv_stats', {}, { data: { iv_now_pct: 20, now_source: 'daily_close' } }, false)
-        .lines,
+      toolCard('iv_stats', {}, { data: { iv_now_pct: 20, now_source: 'daily_close' } }, 'ok').lines,
     ).toEqual(['IV 20.0%（最後の確定日の終値）']);
     const sm = run(e, 'smile_position');
     expect(sm.expiries.length).toBe(2);

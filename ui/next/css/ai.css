@@ -234,6 +234,18 @@ section.ai .ai-body {
   margin-top: var(--sp-1);
 }
 
+/* 結果を待つ間（#242）: 進み具合の行と同じ色と回る印。結果なし（返らないまま終わった）は控えめな色 */
+.ai-tool[data-status="pending"] .ai-tool-line {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  color: var(--accent-ink);
+}
+
+.ai-tool[data-status="missing"] .ai-tool-line {
+  color: var(--ink-3);
+}
+
 /* 提案のカード（#139）: 差分の行（＋ / − / ±）と前 → 後の行 */
 .ai-prop {
   border-color: var(--accent);
