@@ -35,7 +35,7 @@ import {
   QTY_MAX,
   type State,
 } from '../state';
-import { type FairView, fairView } from './fairValue';
+import { FAIR_LABEL, type FairView, fairView } from './fairValue';
 import { DASH, fmtIv, fmtNum, fmtSigned } from './format';
 import { HEDGE_AT_LABEL, HEDGE_REASON_LABEL, type HedgeModel, type HedgeProduct } from './hedge';
 import {
@@ -280,10 +280,12 @@ export function legDetail(
       value: fmtAmount(spread, unit, true),
     },
     {
-      // 理論価格（#264）: 100 円未満は小数 1 桁と板の気配の中の位置。外挿は印
+      // 理論価格（#264）: 100 円未満は小数 1 桁・板の気配の中の位置・使った IV（スマイルの線の IV と違いうる）。外挿は印
       key: 'fair',
-      label: '理論価格（スマイル）',
-      value: fair ? (fair.position ? `${fair.price} · ${fair.position}` : fair.price) : DASH,
+      label: FAIR_LABEL,
+      value: fair
+        ? [fair.price, fair.position, `IV ${fair.iv}`].filter((t) => t !== null).join(' · ')
+        : DASH,
       ...(fair?.extrapolated && { tag: '外挿' }),
     },
     {

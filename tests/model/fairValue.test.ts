@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { black76Price } from '../../model/black76';
-import { fairPosition, isTightNode, smileFairValue } from '../../model/fairValue';
-import { buildSmile, type SmileFit, type SmileNode } from '../../model/smile';
+import { fairPosition, isTightNode, smileFairIvs, smileFairValue } from '../../model/fairValue';
+import { buildSmile, PiecewiseLinearSmile, type SmileFit, type SmileNode } from '../../model/smile';
 import { optionTick, roundOptionPrice, shiftOptionTicks } from '../../model/tick';
 import { makeStrikes, rng, synthChain } from '../support/synthChain';
 
@@ -106,7 +106,8 @@ describe('理論価格（smileFairValue、#264）', () => {
         const c = smileFairValue(fit, f, t, R, row.k, 'call');
         if (!p || !c) continue;
         n++;
-        expect(Number.isFinite(p.price) && p.price >= 0).toBe(true);
+        expect(Number.isFinite(p.price) && p.price > 0).toBe(true);
+        expect(Number.isFinite(c.price) && c.price > 0).toBe(true);
         expect(c.iv).toBe(p.iv);
         expect(c.price - p.price).toBeCloseTo(Math.exp(-R * t) * (f - row.k), 6);
       }
@@ -171,6 +172,75 @@ describe('合成の板での回復（遠い OTM の安い put、#264 AC1）', ()
     const out = rows.find((r) => r.k < lowest);
     expect(out).toBeDefined();
     expect(smileFairValue(fit, F, T, R, out?.k as number, 'put')?.mark).toBe('extrapolated');
+  });
+});
+
+describe('板の全行を 1 回で（smileFairIvs）', () => {
+  it('種 9・合成の板 10 枚: 1 本ずつその行を除いて作り直した値と一致（節点の端・内側・節点でない行）', () => {
+    const rand = rng(9);
+    for (let i = 0; i < 10; i++) {
+      const f = 62000 + Math.floor(rand() * 10000);
+      const t = (3 + rand() * 60) / 365;
+      const { rows } = synthChain({
+        F: f,
+        T: t,
+        r: R,
+        seed: 300 + i,
+        strikes: makeStrikes(f, 0.6),
+      });
+      const fit = buildSmile(rows, f, t, R);
+      const ks = rows.map((r) => r.k);
+      const got = smileFairIvs(fit, f, t, ks);
+      ks.forEach((k, j) => {
+        // 参照: その行を除いた狭い節点で作り直す（素朴な実装）
+        const nodes = (fit?.nodes ?? []).filter((n) => n.k !== k && isTightNode(n));
+        const want =
+          nodes.length < 2
+            ? null
+            : new PiecewiseLinearSmile(
+                nodes.map((n) => ({ x: n.x, w: n.iv * n.iv * t })),
+                t,
+              );
+        const x = Math.log(k / f);
+        if (!want) expect(got[j]).toBeNull();
+        else {
+          expect(got[j]?.iv).toBeCloseTo(want.sigma(x), 12);
+          expect(got[j]?.mark).toBe(
+            want.mark(x) === 'extrapolated' ? 'extrapolated' : 'interpolated',
+          );
+        }
+      });
+    }
+  });
+
+  it('外挿の行（翼）: 有限・正で、put は K に増加・call は K に減少（#1 の指摘。値の正しさは保証しない）', () => {
+    const { rows } = synthChain({ F, T, r: R, seed: 21, strikes: makeStrikes(F, 0.65, 0.4) });
+    const fit = buildSmile(rows, F, T, R);
+    const ks = rows.map((r) => r.k);
+    const ivs = smileFairIvs(fit, F, T, ks);
+    // 狭い節点でない行（同じ 1 本のスマイル）。端の狭い節点の行はその行を除いた別の 1 本なので並びの比較から外す
+    const tight = new Set((fit?.nodes ?? []).filter((n) => isTightNode(n)).map((n) => n.k));
+    const ext = ks
+      .map((k, j) => ({ k, f: ivs[j] }))
+      .filter((e) => e.f?.mark === 'extrapolated' && !tight.has(e.k));
+    const left = ext.filter((e) => e.k < F);
+    const right = ext.filter((e) => e.k > F);
+    expect(left.length).toBeGreaterThan(1);
+    expect(right.length).toBeGreaterThan(1);
+    const price = (e: (typeof ext)[number], type: 'put' | 'call') =>
+      black76Price(type, F, e.k, T, e.f?.iv as number, R);
+    for (let i = 1; i < left.length; i++) {
+      const a = price(left[i - 1] as (typeof ext)[number], 'put');
+      const b = price(left[i] as (typeof ext)[number], 'put');
+      expect(a > 0 && Number.isFinite(b)).toBe(true);
+      expect(b).toBeGreaterThanOrEqual(a);
+    }
+    for (let i = 1; i < right.length; i++) {
+      const a = price(right[i - 1] as (typeof ext)[number], 'call');
+      const b = price(right[i] as (typeof ext)[number], 'call');
+      expect(b > 0 && Number.isFinite(a)).toBe(true);
+      expect(b).toBeLessThanOrEqual(a);
+    }
   });
 });
 

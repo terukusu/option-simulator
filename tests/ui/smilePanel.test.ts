@@ -67,11 +67,14 @@ describe('AC-4(a) 操作行', () => {
         continue;
       }
       shown++;
-      expect(a.fair?.price).toBe(fmtNum(v.price, v.price < FAIR_DECIMAL_BELOW ? 1 : 0));
+      expect(a.fair?.price).toBe(
+        fmtNum(v.price, Math.round(v.price * 10) / 10 < FAIR_DECIMAL_BELOW ? 1 : 0),
+      );
+      expect(a.fair?.iv).toBe(fmtNum(v.iv * 100, 1));
       const pos = fairPosition(v.price, row.bid, row.ask);
       expect(a.fair?.position).toBe(pos === null ? null : FAIR_POSITION_LABEL[pos]);
       expect(a.fair?.extrapolated).toBe(v.mark === 'extrapolated');
-      expect(a.fair?.label.startsWith(`理論価格 ${a.fair?.price}`)).toBe(true);
+      expect(a.fair?.label.startsWith(`理論価格 ${a.fair?.price}（IV ${a.fair?.iv}`)).toBe(true);
       if (pos !== null) expect(a.fair?.label).toContain(FAIR_POSITION_LABEL[pos]);
       if (v.mark === 'extrapolated') {
         extrap++;
@@ -94,7 +97,7 @@ describe('AC-4(a) 操作行', () => {
     expect(Object.values(FAIR_POSITION_LABEL)).toEqual([
       'bid より下',
       'bid 寄り',
-      '中ほど',
+      '気配の中ほど',
       'ask 寄り',
       'ask より上',
       'bid より上',

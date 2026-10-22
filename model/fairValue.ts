@@ -33,6 +33,67 @@ export function isTightNode(n: SmileNode, maxSpreadIv = FAIR_MAX_SPREAD_IV): boo
   );
 }
 
+/** 理論価格の IV と印（種別に依らない。price は種別ごとに black76Price で求める） */
+export interface FairIv {
+  iv: number;
+  mark: 'interpolated' | 'extrapolated';
+}
+
+/**
+ * 行使価格の列 ks の理論価格の IV（板の全行を 1 回で。#264）。各 k について、k 自身の節点を除いた気配の狭い節点の
+ * PiecewiseLinearSmile の σ(ln(k/F))。狭い節点が 2 本未満・F / T / k が不正なら null。
+ * 作り直しを減らすだけで値は 1 本ずつ作るのと同じ: k が狭い節点でなければ全部の狭い節点の 1 本。k が狭い節点で
+ * 両隣があれば、x_k は両隣の間なので両隣 2 本の補間と同じ（翼の傾きは効かない）。端の節点のときだけ 1 本を除いて作り直す。
+ */
+export function smileFairIvs(
+  fit: SmileFit | null,
+  F: number,
+  T: number,
+  ks: readonly number[],
+  maxSpreadIv = FAIR_MAX_SPREAD_IV,
+): (FairIv | null)[] {
+  if (!fit || !(F > 0) || !Number.isFinite(F) || !(T > 0)) return ks.map(() => null);
+  const tight = fit.nodes.filter((n) => isTightNode(n, maxSpreadIv)).sort((a, b) => a.x - b.x);
+  const pt = (n: SmileNode) => ({ x: n.x, w: n.iv * n.iv * T });
+  const all = tight.length >= 2 ? new PiecewiseLinearSmile(tight.map(pt), T) : null;
+  const index = new Map(tight.map((n, i) => [n.k, i]));
+  return ks.map((k) => {
+    if (!(k > 0)) return null;
+    const i = index.get(k);
+    let smile: PiecewiseLinearSmile | null = all;
+    if (i !== undefined) {
+      const rest = tight.length - 1;
+      if (rest < 2) smile = null;
+      else if (i > 0 && i < tight.length - 1) {
+        smile = new PiecewiseLinearSmile(
+          [pt(tight[i - 1] as SmileNode), pt(tight[i + 1] as SmileNode)],
+          T,
+        );
+      } else smile = new PiecewiseLinearSmile(tight.filter((_, j) => j !== i).map(pt), T);
+    }
+    if (!smile) return null;
+    const x = Math.log(k / F);
+    const iv = smile.sigma(x);
+    if (!(iv > 0) || !Number.isFinite(iv)) return null;
+    return { iv, mark: smile.mark(x) === 'extrapolated' ? 'extrapolated' : 'interpolated' };
+  });
+}
+
+/** 理論価格の IV から種別 type の価格（有限・正でなければ null）。 */
+export function fairValueOf(
+  f: FairIv | null,
+  F: number,
+  T: number,
+  r: number,
+  k: number,
+  type: OptionType,
+): FairValue | null {
+  if (!f) return null;
+  const price = black76Price(type, F, k, T, f.iv, r);
+  if (!Number.isFinite(price) || !(price > 0)) return null;
+  return { price, iv: f.iv, mark: f.mark };
+}
+
 /**
  * 行使価格 k・種別 type の理論価格。k 自身の節点を除いた気配の狭い節点が 2 本未満、F・T が不正なら null。
  * put / call は同じ IV（PCP を満たす）。
@@ -46,19 +107,8 @@ export function smileFairValue(
   type: OptionType,
   maxSpreadIv = FAIR_MAX_SPREAD_IV,
 ): FairValue | null {
-  if (!fit || !(F > 0) || !Number.isFinite(F) || !(T > 0) || !(k > 0)) return null;
-  const nodes = fit.nodes.filter((n) => n.k !== k && isTightNode(n, maxSpreadIv));
-  if (nodes.length < 2) return null;
-  const smile = new PiecewiseLinearSmile(
-    nodes.map((n) => ({ x: n.x, w: n.iv * n.iv * T })),
-    T,
-  );
-  const x = Math.log(k / F);
-  const iv = smile.sigma(x);
-  if (!(iv > 0) || !Number.isFinite(iv)) return null;
-  const price = black76Price(type, F, k, T, iv, r);
-  if (!Number.isFinite(price) || price < 0) return null;
-  return { price, iv, mark: smile.mark(x) === 'extrapolated' ? 'extrapolated' : 'interpolated' };
+  const [f] = smileFairIvs(fit, F, T, [k], maxSpreadIv);
+  return fairValueOf(f ?? null, F, T, r, k, type);
 }
 
 export type FairPosition =

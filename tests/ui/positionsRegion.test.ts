@@ -137,10 +137,14 @@ describe('理論価格の項目（#264）', () => {
     const fv = legFairValue(chain, r0);
     expect(fv).toEqual(fairView(m1, k1, 'put', chain.r, q?.bid ?? null, q?.ask ?? null));
     const want = smileFairValue(m1.smile, m1.F, m1.T, chain.r, k1, 'put');
-    expect(fv?.price).toBe(fmtNum(want?.price, (want?.price as number) < 100 ? 1 : 0));
+    expect(fv?.price).toBe(fmtNum(want?.price, (want?.price as number) < 99.95 ? 1 : 0));
     const item = legDetail(r0, null, null, v.metrics.unit, fv).items.find((i) => i.key === 'fair');
-    expect(item?.label).toBe('理論価格（スマイル）');
-    expect(item?.value).toBe(fv?.position ? `${fv.price} · ${fv.position}` : fv?.price);
+    expect(item?.label).toBe('理論価格（周りの行から）');
+    // `17.0 · 気配の中ほど · IV 57.3`（位置が無ければ価格と IV）
+    expect(item?.value).toBe(
+      [fv?.price, fv?.position, `IV ${fv?.iv}`].filter((t) => t !== null).join(' · '),
+    );
+    expect(item?.value).toContain(`IV ${fmtNum((want?.iv as number) * 100, 1)}`);
     expect(rf.kind).toBe('future');
     expect(legFairValue(chain, rf)).toBeNull();
     expect(legFairValue(null, r0)).toBeNull();

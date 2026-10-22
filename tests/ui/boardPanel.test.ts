@@ -20,6 +20,7 @@ import {
   boardBadges,
   boardChips,
   boardFoot,
+  boardKPop,
   boardPanelColumns,
   boardRowTexts,
   fmtNumFast,
@@ -30,6 +31,7 @@ import {
   quoteLabel,
   sqShort,
 } from '../../ui/view/boardPanel';
+import { fairView } from '../../ui/view/fairValue';
 import { fmtIvPct, fmtNum } from '../../ui/view/format';
 import { headerModel } from '../../ui/view/header';
 import { fixture } from '../support/fixtures';
@@ -39,6 +41,67 @@ import { fixture } from '../support/fixtures';
 const chain = normalizeChain(fixture('latest'));
 const [m1, m2] = chain.months;
 if (!m1 || !m2) throw new Error('限月が 2 つ要る');
+
+describe('K のポップオーバー・title の理論価格（#264）', () => {
+  const rows = boardRows(chain, m1);
+  const texts = boardRowTexts(chain, m1, rows);
+
+  it('行ごとの理論価格は 1 本ずつ求めた fairView と同じ文字列（板の全行を 1 回で求めても同じ）', () => {
+    let n = 0;
+    for (const r of rows) {
+      const t = texts.get(r.k);
+      for (const type of ['call', 'put'] as const) {
+        const want = fairView(m1, r.k, type, chain.r, r[type].bid, r[type].ask);
+        expect(t?.[type].fair).toEqual(want);
+        if (want) n++;
+      }
+    }
+    expect(n).toBeGreaterThan(rows.length);
+  });
+
+  it('ポップオーバー: 見出し・OTM 側が先の 2 行（`K 種別 · 理論 N（IV・位置・外挿）`）・印の全文', () => {
+    for (const r of rows) {
+      const t = texts.get(r.k);
+      if (!t) throw new Error('行の文字列が無い');
+      const v = boardKPop(t);
+      expect(v.head).toBe('理論価格（周りの行から）');
+      const order = t.otm === 'put' ? (['put', 'call'] as const) : (['call', 'put'] as const);
+      expect(t.otm).toBe(m1.strikes.find((s) => s.k === r.k)?.otmType);
+      order.forEach((type, i) => {
+        const f = t[type].fair;
+        const line = v.lines[i];
+        expect(line?.startsWith(`${t.k} ${type} · 理論 `)).toBe(true);
+        if (!f) expect(line).toBe(`${t.k} ${type} · 理論 —`);
+        else {
+          expect(line).toContain(`理論 ${f.price}（IV ${f.iv}`);
+          if (f.position) expect(line).toContain(f.position);
+          expect(line?.includes('外挿')).toBe(f.extrapolated);
+        }
+      });
+      // 印の全文: 行の印（IV 不安定・補間 / 外挿）と、種別ごとの気配なし・JPX の IV 欠損
+      const want = [
+        ...rowMarkLabels(r),
+        ...order.flatMap((type) => sideMarkLabels(r[type]).map((m) => `${type} ${m}`)),
+      ];
+      expect(v.marks).toEqual(want);
+    }
+  });
+
+  it('K の title: OTM 側の理論価格（位置・外挿）と補間 / 外挿の全文（IV 不安定は IV の列）', () => {
+    for (const r of rows) {
+      const t = texts.get(r.k);
+      if (!t) throw new Error('行の文字列が無い');
+      const f = t[t.otm].fair;
+      const marks = rowMarkLabels(r).filter((m) => m !== 'IV 不安定');
+      if (!f && marks.length === 0) {
+        expect(t.kTitle).toBeNull();
+        continue;
+      }
+      if (f) expect(t.kTitle?.startsWith(`${t.otm} 理論 ${f.price}`)).toBe(true);
+      for (const m of marks) expect(t.kTitle).toContain(m);
+    }
+  });
+});
 
 describe('AC-2(a) 列の段階（section.board の幅）', () => {
   it.each([

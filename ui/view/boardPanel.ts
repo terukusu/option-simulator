@@ -8,7 +8,14 @@
  */
 
 import { boardOptionLegOnly, type Chain, type ChainMonth } from '../../data';
-import type { AtmBasis, OptionLeg, OptionType, Side } from '../../model';
+import {
+  type AtmBasis,
+  fairValueOf,
+  type OptionLeg,
+  type OptionType,
+  type Side,
+  smileFairIvs,
+} from '../../model';
 import type { UiLeg } from '../state';
 import {
   ASK_FILTER_YEN,
@@ -21,6 +28,7 @@ import {
   rowMarkLabels,
   sideMarkLabels,
 } from './board';
+import { FAIR_LABEL as FAIR_LABEL_TEXT, type FairView, fairViewOf } from './fairValue';
 import { DASH, fmtNum } from './format';
 import type { HeaderMonthView } from './header';
 
@@ -96,6 +104,8 @@ export interface BoardSideText {
   noQuote: boolean;
   /** セルの印（`sideMarkLabels` の順） */
   marks: BoardMark[];
+  /** 理論価格（#264。その行の気配を使わず周りの気配の狭い行から。出せなければ null） */
+  fair: FairView | null;
 }
 
 export interface BoardRowText {
@@ -106,6 +116,10 @@ export interface BoardRowText {
   marks: BoardMark[];
   /** IV 不安定の × を出す側（9 / 7 列。OTM 側。不安定でなければ null） */
   flagSide: OptionType | null;
+  /** OTM 側の種別（K のポップオーバーの 1 行目・K の title の理論価格） */
+  otm: OptionType;
+  /** K の title（OTM 側の理論価格 + 補間 / 外挿 / 気配なし等の全文。無ければ null） */
+  kTitle: string | null;
   call: BoardSideText;
   put: BoardSideText;
 }
@@ -169,7 +183,12 @@ function quoteLabelText(k: string, type: OptionType, side: Side, price: string |
   return `${k} ${type} ${what} ${price ?? '気配なし'} で${side === 'sell' ? '売り' : '買い'}`;
 }
 
-function sideText(k: string, type: OptionType, c: BoardSideCell): BoardSideText {
+function sideText(
+  k: string,
+  type: OptionType,
+  c: BoardSideCell,
+  fair: FairView | null,
+): BoardSideText {
   const bid = fmtNumFast(c.bid);
   const ask = fmtNumFast(c.ask);
   const bidLabel = quoteLabelText(k, type, 'sell', c.bid === null ? null : bid);
@@ -188,6 +207,7 @@ function sideText(k: string, type: OptionType, c: BoardSideCell): BoardSideText 
     askTitle: title(askLabel, c.ask),
     noQuote: c.noQuote,
     marks: sideMarkLabels(c).map((t) => mark(SIDE_MARK_KIND[t] ?? 'noQuote', t)),
+    fair,
   };
 }
 
@@ -196,26 +216,83 @@ function sideText(k: string, type: OptionType, c: BoardSideCell): BoardSideText 
  * 板・限月が変わったときだけ作る。
  */
 export function boardRowTexts(
-  _chain: Chain,
+  chain: Chain,
   month: ChainMonth,
   rows: readonly BoardRow[],
 ): Map<number, BoardRowText> {
   const otm = new Map<number, OptionType>();
   for (const s of month.strikes) otm.set(s.k, s.otmType);
+  // 理論価格の IV は限月の全行を 1 回で（#264。行ごとに作り直さない）
+  const ivs = smileFairIvs(
+    month.smile,
+    month.F,
+    month.T,
+    rows.map((r) => r.k),
+  );
   const out = new Map<number, BoardRowText>();
-  for (const r of rows) {
+  rows.forEach((r, i) => {
     const marks = rowMarkLabels(r).map((t) => mark(ROW_MARK_KIND[t] ?? 'unstable', t));
     const k = fmtNumFast(r.k);
+    const fair = (type: OptionType, c: BoardSideCell) =>
+      fairViewOf(
+        fairValueOf(ivs[i] ?? null, month.F, month.T, chain.r, r.k, type),
+        c.bid,
+        c.ask,
+        fmtNumFast,
+      );
+    const call = sideText(k, 'call', r.call, fair('call', r.call));
+    const put = sideText(k, 'put', r.put, fair('put', r.put));
+    const o = otm.get(r.k) ?? 'put';
     out.set(r.k, {
       k,
       kMark: r.mark === 'interpolated' ? 'interp' : r.mark === 'extrapolated' ? 'extrap' : null,
       marks,
-      flagSide: r.unstable ? (otm.get(r.k) ?? 'put') : null,
-      call: sideText(k, 'call', r.call),
-      put: sideText(k, 'put', r.put),
+      flagSide: r.unstable ? o : null,
+      otm: o,
+      kTitle: kTitle(o, o === 'call' ? call : put, marks),
+      call,
+      put,
     });
-  }
+  });
   return out;
+}
+
+/** K の title: OTM 側の理論価格（`put 理論 10.0（気配の中ほど）`）と、補間 / 外挿の全文（IV 不安定は IV の列の title）。 */
+function kTitle(otm: OptionType, side: BoardSideText, marks: readonly BoardMark[]): string | null {
+  const f = side.fair;
+  const parts: string[] = [];
+  if (f) {
+    const notes = [f.position, f.extrapolated ? '外挿' : null].filter((t) => t !== null);
+    parts.push(`${otm} 理論 ${f.price}${notes.length ? `（${notes.join('・')}）` : ''}`);
+  }
+  for (const m of marks) if (m.kind !== 'unstable') parts.push(m.full);
+  return parts.length ? parts.join('・') : null;
+}
+
+/** 板の K のポップオーバー（#264）の中身: 理論価格の行（OTM 側が先）と、その行の印の全文 */
+export interface BoardKPop {
+  /** 見出し（`理論価格（周りの行から）`） */
+  head: string;
+  /** `43,000 put · 理論 10.0（IV 58.9・気配の中ほど）`（出せない側は `理論 —`） */
+  lines: string[];
+  /** 印の全文（IV 不安定・補間 / 外挿・call / put の気配なし・JPX の IV 欠損）。無ければ空 */
+  marks: string[];
+}
+
+/** K のポップオーバーの中身（行の文字列から作るだけ。押した行だけで呼ぶ）。 */
+export function boardKPop(text: BoardRowText): BoardKPop {
+  const order: OptionType[] = text.otm === 'put' ? ['put', 'call'] : ['call', 'put'];
+  const lines = order.map((type) => {
+    const f = text[type].fair;
+    if (!f) return `${text.k} ${type} · 理論 ${DASH}`;
+    const notes = [`IV ${f.iv}`, f.position, f.extrapolated ? '外挿' : null].filter(
+      (t) => t !== null,
+    );
+    return `${text.k} ${type} · 理論 ${f.price}（${notes.join('・')}）`;
+  });
+  const marks = text.marks.map((m) => m.full);
+  for (const type of order) for (const m of text[type].marks) marks.push(`${type} ${m.full}`);
+  return { head: FAIR_LABEL_TEXT, lines, marks };
 }
 
 /** 売り / 買いの枚数のバッジ（`売3`・`買1`。0 枚は空文字） */
@@ -377,6 +454,7 @@ export function marketAddToast(leg: OptionLeg): string {
 export const BOARD_HINT = [
   'bid = 売り、ask = 買い で足を追加。Δ はスマイルの IV での値。',
   '× = IV 不安定 · K の点線 = 補間 / 外挿 · — = 気配なし · —/— = JPX の IV 欠損 · 売1 / 買2 = 作業中のタブの足の枚数',
+  'K を押すと、その行の理論価格（その行の気配ではなく、周りの気配の狭い行から求めた価格。気配の中の位置つき）と印の全文。',
 ] as const;
 
 /** ジャンプ先の行の強調（ms。§4.3・§6） */

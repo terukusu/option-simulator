@@ -179,7 +179,7 @@ function SmileView(p: SmileRegionProps) {
                       理論 {act.fair.price}
                     </span>
                   )}
-                  {act.fair?.extrapolated && <span class="tag warn">外挿</span>}
+                  {act.fair?.extrapolated && <span class="tag">外挿</span>}
                   {act.unstable && <span class="tag warn">IV 不安定</span>}
                 </span>
               </span>
