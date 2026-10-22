@@ -105,6 +105,7 @@ import { positionModel } from '../view/position';
 import { readoutModel } from '../view/readout';
 import { clampDXInput, evalTimeTargets } from '../view/scenario';
 import { scenarioAtmMark } from '../view/scenarioAtm';
+import type { SmileEffBase } from '../view/smileEff';
 import { openInNewTabError, tabsModel } from '../view/tabs';
 import type { MarginLineInput } from './useMarginLine';
 
@@ -643,6 +644,12 @@ export function useAppController(boot: Boot = NO_BOOT, margin: MarginPrefs = DEF
         : null,
     [pnlBase, state.scenario, marginParams, capital, holidays, marginNowCalc, marginTailRows],
   );
+  // スマイルの売りの効率の線（#163）の市場・設定（足が無くても板があれば作る。シナリオは描く側で渡す）
+  const positionsCtx = positions?.ctx ?? null;
+  const smileEffBase = useMemo<SmileEffBase | null>(
+    () => (positionsCtx ? { ctx: positionsCtx, settings, params: marginParams, holidays } : null),
+    [positionsCtx, settings, marginParams, holidays],
+  );
   const pinTargets = useMemo(
     () =>
       resolvePins(pins, {
@@ -983,6 +990,7 @@ export function useAppController(boot: Boot = NO_BOOT, margin: MarginPrefs = DEF
     onZoom,
     smilePick,
     scenarioAtmView,
+    smileEffBase,
     pins,
     pinLine,
     pinTargets,

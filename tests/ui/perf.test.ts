@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { boardOptionLeg, normalizeChain } from '../../data';
+import { boardOptionLeg, buildMarketContext, normalizeChain } from '../../data';
 import type { AiMessage } from '../../data/aiStream';
 import {
   DEFAULT_MARGIN_PARAMS,
@@ -117,6 +117,13 @@ import {
   stepperAction,
 } from '../../ui/view/scenarioRegion';
 import { smileModel } from '../../ui/view/smile';
+import {
+  effNowScenario,
+  type SmileEffBase,
+  smileEffPath,
+  smileEffPoints,
+  smileEffYDomain,
+} from '../../ui/view/smileEff';
 import {
   bigReadout,
   legMarkers,
@@ -1999,6 +2006,39 @@ describe('性能（#135 AI の事前計算と返答の描き直し）', () => {
     expectWithinBudget(
       '#232・#234 表と用語を含む返答の answerModel',
       () => answerModel(text, [ctx], true).length,
+      { warmup: 5, runs: 30 },
+    );
+  });
+});
+
+/**
+ * #163: スマイルに重ねる売りの効率の線。322 行の板の行の多い限月で、シナリオの点と今の 2 本の点（行使価格ごとに
+ * Black-76 と証拠金の格子 30 点）+ 縦軸 + path の作り直しが予算以内。スライダーの連続の操作の間は作らず、止まってから
+ * 1 回（ui/components/useSmileEffLine.ts）なので、これはその 1 回（と線を重ねた初回）の重さ
+ */
+describe('性能（#163 売りの効率の線）', () => {
+  const chain = normalizeChain(buildWideChainJson());
+  const month = [...chain.months].sort((a, b) => b.strikes.length - a.strikes.length)[0];
+  if (!month) throw new Error('合成の板に限月が無い');
+  const base: SmileEffBase = {
+    ctx: buildMarketContext(chain, { atmBasis: 'B' }),
+    settings: DEFAULT_SETTINGS,
+    params: DEFAULT_MARGIN_PARAMS,
+    holidays: CALENDAR.holidays,
+  };
+  const model = smileModel(month, 'B', 'k');
+  const sc = { ...ZERO_SCENARIO, days: 3, dX: -1500, dSigma: 8, skew: 1 };
+
+  it(`シナリオの点と今の 2 本の作り直しが ${BUDGET_MS} ms 以内（30 回の最小値）`, () => {
+    expect(month.strikes.length).toBeGreaterThan(150);
+    expectWithinBudget(
+      '#163 売りの効率の線 2 本',
+      () => {
+        const a = smileEffPoints(month, 'B', 'k', base, sc);
+        const b = smileEffPoints(month, 'B', 'k', base, effNowScenario(sc));
+        const y = smileEffYDomain([a, b], model.domain);
+        return y ? smileEffPath(a, model.domain, y, 480, 260).length + b.length : 0;
+      },
       { warmup: 5, runs: 30 },
     );
   });

@@ -1,12 +1,13 @@
 import type { ComponentChildren } from 'preact';
 import { useMemo } from 'preact/hooks';
 import type { Chain } from '../../../data';
-import type { AtmBasis } from '../../../model';
+import type { AtmBasis, Scenario } from '../../../model';
 import { type Domain, zoom } from '../../chart/scale';
 import { pure } from '../../components/pure';
 import type { Action } from '../../state';
 import { PANEL_FOCUS_LABEL } from '../../view/keys';
 import { type SmileAxis, smileModel } from '../../view/smile';
+import { SMILE_EFF_CAUTION, SMILE_EFF_HINT, type SmileEffBase } from '../../view/smileEff';
 import {
   SMILE_AXIS_OPTIONS,
   SMILE_HINT,
@@ -18,6 +19,7 @@ import type { MarketAdd } from '../market/BoardMonth';
 import { MonthSeg } from '../market/MonthSeg';
 import { SmilePlot } from '../market/SmilePlot';
 import { PanelHead } from '../PanelHead';
+import { Chip } from '../parts/Chip';
 import { Popover } from '../parts/Popover';
 import { Seg } from '../parts/Seg';
 
@@ -32,6 +34,12 @@ export interface SmileRegionProps {
   pick: { monthId: string; k: number } | null;
   /** useAppController の scenarioAtmView（ΔX ≠ 0 のときだけ） */
   scenarioAtm: { monthId: string; k: number } | null;
+  /** 売りの効率の線（#163）を重ねているか・切り替え */
+  effOn: boolean;
+  onEff: (on: boolean) => void;
+  /** 効率の線の市場・設定とシナリオ（重ねていないときは null = スライダーで描き直さない） */
+  eff: SmileEffBase | null;
+  scenario: Scenario | null;
   dispatch: (a: Action) => void;
   onAdd: MarketAdd;
   marketSeg: ComponentChildren;
@@ -39,7 +47,7 @@ export interface SmileRegionProps {
 
 /**
  * スマイル（docs/ui-redesign.md §3・§4.3・§11 決定 12。#85）: 見出し行（拡大 [− ＋ ⟲]・市場の Seg・ⓘ）→ ツールの行
- * （限月・横軸）→ 描画域（限月ごと。market/SmilePlot.tsx）→ 操作行（グラフの下）→ 凡例。
+ * （限月・横軸・[効率]（#163））→ 描画域（限月ごと。market/SmilePlot.tsx）→ 操作行（グラフの下）→ 凡例。
  */
 function SmileView(p: SmileRegionProps) {
   const { chain, monthId, basis, axis, viewport, dispatch, onAdd } = p;
@@ -88,6 +96,8 @@ function SmileView(p: SmileRegionProps) {
         <Popover label="スマイルの操作" button="ⓘ">
           <p>{SMILE_HINT}</p>
           <p>{SMILE_LEGEND_HINT}</p>
+          <p>{SMILE_EFF_HINT}</p>
+          <p>{SMILE_EFF_CAUTION}</p>
         </Popover>
       </PanelHead>
       {/* biome-ignore lint/a11y/useSemanticElements: 1〜5 の行き先のスクロールする枠に名前を付ける（fieldset にしない） */}
@@ -109,6 +119,13 @@ function SmileView(p: SmileRegionProps) {
             options={SMILE_AXIS_OPTIONS}
             onChange={(a) => dispatch({ type: 'setAxis', axis: a })}
           />
+          <Chip
+            text="効率"
+            label="売りの効率の線"
+            pressed={p.effOn}
+            disabled={empty}
+            onClick={() => p.onEff(!p.effOn)}
+          />
         </div>
         <div class="smile-months">
           {chain.months.map((m) => {
@@ -123,6 +140,8 @@ function SmileView(p: SmileRegionProps) {
                 viewport={active ? viewport : null}
                 pick={active ? pick : null}
                 scenarioAtmK={active ? scnK : null}
+                eff={active ? p.eff : null}
+                scenario={active ? p.scenario : null}
                 dispatch={dispatch}
               />
             );

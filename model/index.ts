@@ -14,6 +14,7 @@ export * from './pnl';
 export * from './position';
 export * from './products';
 export * from './scenario';
+export * from './sellEfficiency';
 export * from './smile';
 export * from './technicals';
 export * from './tick';

@@ -427,6 +427,30 @@ table.board .legbadge.buy {
   text-anchor: middle;
 }
 
+/* 売りの効率の線（#163）: シナリオの点 = 実線、今 = 薄い破線、右端の目盛り（%） */
+.smile-wrap .eff-line {
+  fill: none;
+  stroke: var(--eff);
+  stroke-width: 1.5;
+}
+
+.smile-wrap .eff-line.now {
+  opacity: 0.55;
+  stroke-dasharray: 4 3;
+}
+
+.smile-wrap .eff-t {
+  fill: var(--eff);
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+  dominant-baseline: middle;
+  text-anchor: end;
+}
+
+.smile-wrap .xc-dot.eff {
+  stroke: var(--eff);
+}
+
 /* 凡例の印の色（線・点と同じ） */
 .smile-legend > .mid {
   color: var(--accent);
