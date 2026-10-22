@@ -60,6 +60,7 @@ import {
   INITIAL_SHELL,
   ivVisible,
   layoutTier,
+  metricsVisible,
   type ShellAction,
   shellReduce,
   smileView,
@@ -122,7 +123,7 @@ import { useTheme } from './useTheme';
  * 口は /api/future_bars（dev の合成の板・ファイルは dev だけ /fixtures/future_bars）。IV 推移 ⇄ 先物の切替（市場の Seg）
  * では、離れる側の足と見ていた時間の範囲を入る側に渡す（shellSend）。
  * #152 で指標 · テールに追証マップ（regions/HoldMap.tsx）を入れた。開閉は ShellState.holdMap（保存しない）、過去の点は
- * 常駐の useAtmMoves（見えたら 1 回だけ /api/atm_daily を読む）、マスの計算は useHoldMap（止まってから列ごと）。
+ * 常駐の useAtmMoves（指標のパネルが見えたら 1 回だけ /api/atm_daily を先読み。#176）、マスの計算は useHoldMap（止まってから列ごと）。
  * #135 で AI のチャット（regions/AiChat.tsx の AiPanel。会話の状態は AiPanel の中の useAiChat）を入れた。ツールの環境は
  * 送るときに今の state と端末の証拠金の設定から作る（aiEnvFromState）。口は API のときは /api/ai、dev の合成の板は
  * dev だけ /fixtures/ai（偽の SSE）。PC は作業台の列の入れ替え（ShellState.bench・トップバーの [AI]・キー 6）。
@@ -191,7 +192,8 @@ export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
     () => (boardJson ? futNowValue(boardJson, sqHolidays, nonTradingDays) : null),
     [boardJson, sqHolidays, nonTradingDays],
   );
-  // 追証マップ（#152）: 見えている間だけ計算し、初めて見えたときに過去の値（/api/atm_daily）を 1 回読む。
+  // 追証マップ（#152）: 見えている間だけ計算する。過去の値（/api/atm_daily）は指標のパネルが初めて見えたときに 1 回
+  // 先読みする（#176。開く前に読み終える）。
   // dev の合成の板・ファイルでは dev だけ /fixtures/atm_daily（本番のビルドは常に /api/atm_daily）
   const holdOpen = shell.holdMap ?? false;
   const holdShown = holdMapVisible(shell, tier);
@@ -200,7 +202,11 @@ export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
     import.meta.env.DEV && state.sourceLabel !== API_LABEL
       ? '/fixtures/atm_daily'
       : '/api/atm_daily';
-  const atmMoves = useAtmMoves(holdShown && holdMapInput !== null, dailyEndpoint, nonTradingDays);
+  const atmMoves = useAtmMoves(
+    metricsVisible(shell, tier) && holdMapInput !== null,
+    dailyEndpoint,
+    nonTradingDays,
+  );
   const holdCtl = useHoldMap(holdMapInput, atmMoves.moves, holdShown);
   const onHoldToggle = useCallback(() => send({ type: 'holdMap', open: !holdOpen }), [holdOpen]);
   const holdX0 = c.positions?.ctx.x0 ?? Number.NaN;

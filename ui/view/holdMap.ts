@@ -87,6 +87,17 @@ export function holdMapLegend(allowedLoss: number | null): typeof HOLD_MAP_LEGEN
 
 /** 止まってから作るまでの時間（ms。追証の線の MARGIN_LINE_SETTLE_MS と同じ） */
 export const HOLD_MAP_SETTLE_MS = MARGIN_LINE_SETTLE_MS;
+/**
+ * マスの計算を始めるまでの時間（#176）: 前に見た入力・軸（prev。active でないときも控える）と同じ参照なら 0
+ * （開いただけ = 入力が止まっている）、初めて・どちらかが変わったら HOLD_MAP_SETTLE_MS
+ */
+export function holdMapSettleMs(
+  prev: { input: HoldMapInput | null; axes: HoldMapAxes } | null,
+  input: HoldMapInput,
+  axes: HoldMapAxes,
+): number {
+  return prev && prev.input === input && prev.axes === axes ? 0 : HOLD_MAP_SETTLE_MS;
+}
 /** 列ごとの計算の 1 切れの上限（ms。列が単位 = 列の途中では切らない） */
 export const HOLD_MAP_SLICE_MS = 8;
 /** 点を選ぶ距離（px） */

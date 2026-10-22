@@ -12,6 +12,7 @@ import {
   ivVisible,
   layoutTier,
   MARKET_VIEWS,
+  metricsVisible,
   SHEET_SNAP_PX,
   SHEET_TAP_PX,
   type ShellState,
@@ -358,5 +359,28 @@ describe('追証マップの開閉と見え方（#152）', () => {
     expect(holdMapVisible(open({ panel: 'metrics', sheet: 'hidden' }), 'phone')).toBe(false);
     expect(holdMapVisible(open({ panel: 'scenario' }), 'phone')).toBe(false);
     expect(holdMapVisible(at({ panel: 'metrics', holdMap: false }), 'phone')).toBe(false);
+  });
+
+  it('#176 指標のパネルが見えている（過去の値の先読み）: 開閉によらない、holdMapVisible = 開いている && これ', () => {
+    for (const holdMap of [undefined, false, true]) {
+      const s = (p: Partial<ShellState>) => at({ ...p, ...(holdMap !== undefined && { holdMap }) });
+      expect(metricsVisible(s({ panel: 'positions' }), 'pc')).toBe(true);
+      expect(metricsVisible(s({ panel: 'board', sheet: 'hidden' }), 'pc')).toBe(true);
+      expect(metricsVisible(s({ panel: 'metrics' }), 'tablet')).toBe(true);
+      expect(metricsVisible(s({ panel: 'metrics', sheet: 'hidden' }), 'tablet')).toBe(true);
+      expect(metricsVisible(s({ panel: 'board' }), 'tablet')).toBe(false);
+      expect(metricsVisible(s({ panel: 'metrics', sheet: 'peek' }), 'phone')).toBe(true);
+      expect(metricsVisible(s({ panel: 'metrics', sheet: 'full' }), 'phone')).toBe(true);
+      expect(metricsVisible(s({ panel: 'metrics', sheet: 'hidden' }), 'phone')).toBe(false);
+      expect(metricsVisible(s({ panel: 'scenario' }), 'phone')).toBe(false);
+      for (const tier of ['phone', 'tablet', 'pc'] as const) {
+        for (const panel of ['positions', 'metrics', 'board'] as const) {
+          for (const sheet of ['peek', 'full', 'hidden'] as const) {
+            const st = s({ panel, sheet });
+            expect(holdMapVisible(st, tier)).toBe(!!st.holdMap && metricsVisible(st, tier));
+          }
+        }
+      }
+    }
   });
 });
