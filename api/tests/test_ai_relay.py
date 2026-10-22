@@ -553,7 +553,9 @@ def test_system_prompt_has_preset_rules():
     for rule in ("万円・億円に直さない", "値の符号を自分で裏返さない", "scenario.dx_pct", "書き直しの経緯を書かない"):
         assert rule in relay.SYSTEM_PROMPT
     assert "約 62 万円" not in relay.SYSTEM_PROMPT
-    assert len(REGISTRY) == 11
+    assert len(REGISTRY) == 12
+    # 文脈のスマイルの 11 点の外は strike_quote で取る（#266）
+    assert "strike_quote" in relay.SYSTEM_PROMPT and "−0.2〜+0.2" in relay.SYSTEM_PROMPT
 
 
 def test_chat_log_has_no_topic(capsys):

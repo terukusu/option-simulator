@@ -12,6 +12,7 @@
  * - 失敗は `{ error: '<列挙>' }`（no_legs・bad_input・out_of_range・unknown_tool・no_data・not_on_board・no_candidate）。中継へは tool_result の is_error
  * - technicals（#200）は足が無くても使える（先物の足。ui/view/aiTechnicals.ts）。事前計算には入れない
  * - iv_stats（#138・#158）も足が無くても使える（IV と原資産の日次の値。ui/view/aiIvStats.ts）。事前計算には入れない
+ * - strike_quote（#266）も足が無くても使える（任意の行使価格のスマイルの IV・理論価格・気配。ui/view/aiQuote.ts）
  */
 
 import type { Chain } from '../../data';
@@ -28,8 +29,10 @@ import {
 import type { ToolStatus } from './aiChat';
 import { type IvStatsData, ivStatsTool } from './aiIvStats';
 import { type ProposeDraft, proposePosition, strikeScan, structureCandidates } from './aiPropose';
+import { strikeQuote } from './aiQuote';
 import { fin, greeksOf, legId, r1, r2, round, yen } from './aiRound';
 import { type TechnicalsData, technicalsTool } from './aiTechnicals';
+import { FAIR_POSITION_LABEL, fairPriceText } from './fairValue';
 import { fmtNum } from './format';
 import { type MarginCalc, marginLine, marginNow, marginPoint, marginTail } from './margin';
 import { AMOUNT_UNIT_LABEL, fmtAmount, metricsModel } from './metrics';
@@ -76,6 +79,7 @@ export const AI_TOOL_NAMES = [
   'propose_position',
   'scenario_grid',
   'smile_position',
+  'strike_quote',
   'strike_scan',
   'structure_candidates',
   'tail_table',
@@ -102,6 +106,7 @@ export const AI_TOOL_LABEL: Record<AiToolName, string> = {
   technicals: 'テクニカル（先物）',
   iv_stats: 'IV の統計（過去）',
   strike_scan: '行使価格の探索',
+  strike_quote: '行使価格の理論価格',
   structure_candidates: '組み合わせの候補',
   propose_position: 'ポジションの提案',
 };
@@ -414,6 +419,8 @@ export function runTool(
   if (name === 'smile_position') return smilePosition(env);
   if (name === 'technicals') return technicalsTool(env.technicals ?? null, input);
   if (name === 'iv_stats') return ivStatsTool(env.ivStats ?? null, env.holidays, input);
+  // 行使価格の理論価格（#266）も足が無くても使える（板とスマイルだけ）
+  if (name === 'strike_quote') return strikeQuote(env, input);
   // 提案のツール（#139）は足が無くても使える（新しいタブの候補・丸ごとの提案）
   if (name === 'strike_scan') return strikeScan(env, input);
   if (name === 'structure_candidates') return structureCandidates(env, input);
@@ -488,7 +495,7 @@ const pctText = (v: unknown, signed = true) => {
   return signed && n > 0 ? `+${s}` : s;
 };
 
-/** 提案のツールの失敗の理由（カードの 1 行） */
+/** 提案のツールの失敗の理由（カードの 1 行。strike_quote は QUOTE_ERROR_TEXT が先） */
 export const PROPOSE_ERROR_TEXT: Record<string, string> = {
   not_on_board: '板に無い限月・行使価格',
   no_candidate: '条件に合う行使価格が板に無い',
@@ -496,6 +503,13 @@ export const PROPOSE_ERROR_TEXT: Record<string, string> = {
   no_legs: '足がありません',
   no_data: '板・足を読めない',
   tool_limit: '計算の回数の上限',
+  out_of_range: 'F から遠すぎる行使価格',
+};
+
+/** strike_quote の失敗の理由（#266。板に無い行使価格は受け付けるので、足・行使価格の語を使わない） */
+export const QUOTE_ERROR_TEXT: Record<string, string> = {
+  bad_input: '行使価格・種別・限月の指定の形が違う',
+  not_on_board: '板に無い限月（またはスマイルが無い）',
 };
 
 /** 組み合わせの型の表示 */
@@ -519,6 +533,36 @@ export interface ToolCard {
   applicable: boolean;
   /** 結果を待つ間（#242。カードは進み具合の印と「計算中…」） */
   pending?: true;
+}
+
+/** strike_quote のカードに出す行の数（残りは「ほか N 本」） */
+export const QUOTE_CARD_ROWS = 4;
+
+/**
+ * strike_quote の行（`P 45,000: 理論 10.5 円（IV 40.1%・気配の中ほど・外挿）· 気配 9 / 12`）。理論価格の桁・位置の語は
+ * 画面の「理論価格（周りの行から）」と同じ（ui/view/fairValue.ts）
+ */
+function quoteCardLine(x: Record<string, unknown>): string {
+  const head = `${x.type === 'C' ? 'C' : 'P'} ${fmtNum(num(x.k), 0)}`;
+  const fair = num(x.fair_yen);
+  const notes = [
+    num(x.fair_iv_pct) === null ? null : `IV ${fmtNum(num(x.fair_iv_pct), 1)}%`,
+    typeof x.fair_position === 'string'
+      ? (FAIR_POSITION_LABEL[x.fair_position as keyof typeof FAIR_POSITION_LABEL] ?? null)
+      : null,
+    x.fair_mark === 'extrapolated' ? '外挿' : null,
+  ].filter((t) => t !== null);
+  const fairText =
+    fair === null ? '理論 —' : `理論 ${fairPriceText(fair)} 円（${notes.join('・')}）`;
+  const bid = num(x.bid_yen);
+  const ask = num(x.ask_yen);
+  const quote =
+    x.on_board !== true
+      ? '板に無い'
+      : bid === null && ask === null
+        ? '気配なし'
+        : `気配 ${bid === null ? '—' : fmtNum(bid)} / ${ask === null ? '—' : fmtNum(ask)}`;
+  return `${head}: ${fairText} · ${quote}`;
 }
 
 /** 足を読み込んでから計算するツール（待ちが長い。#242） */
@@ -547,8 +591,16 @@ export function toolCard(
     const code = typeof r.error === 'string' ? r.error : '—';
     const head = name === 'propose_position' ? '提案を作れなかった' : '計算できなかった';
     const propose =
-      name === 'propose_position' || name === 'strike_scan' || name === 'structure_candidates';
-    const why = propose ? (PROPOSE_ERROR_TEXT[code] ?? code) : code;
+      name === 'propose_position' ||
+      name === 'strike_scan' ||
+      name === 'structure_candidates' ||
+      name === 'strike_quote';
+    const why =
+      name === 'strike_quote'
+        ? (QUOTE_ERROR_TEXT[code] ?? PROPOSE_ERROR_TEXT[code] ?? code)
+        : propose
+          ? (PROPOSE_ERROR_TEXT[code] ?? code)
+          : code;
     return { title, input: null, lines: [`${head}（${why}）`], applicable: false };
   }
   switch (name) {
@@ -657,6 +709,13 @@ export function toolCard(
         ],
         applicable: false,
       };
+    }
+    case 'strike_quote': {
+      const rows = Array.isArray(r.rows) ? r.rows.map(obj) : [];
+      const shown = rows.slice(0, QUOTE_CARD_ROWS);
+      const lines = shown.map(quoteCardLine);
+      if (rows.length > shown.length) lines.push(`ほか ${rows.length - shown.length} 本`);
+      return { title, input: String(r.expiry ?? ''), lines, applicable: false };
     }
     case 'structure_candidates': {
       const cs = Array.isArray(r.candidates) ? r.candidates.map(obj) : [];

@@ -34,6 +34,7 @@ export const ONLY_FLAGS = [
   '--ask-only',
   '--profile-only',
   '--preset-only',
+  '--quote-only',
   '--saved',
 ] as const;
 

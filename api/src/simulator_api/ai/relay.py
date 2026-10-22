@@ -85,6 +85,8 @@ x = その水準を渡し、結果の scenario.dx_pct を書く。呼べない�
 ツールの結果と context のほかの値を使う
 - precomputed は画面が事前に計算したツールの結果（position_summary・tail_table・margin_summary・scenario_grid・\
 smile_position）。同じツールを呼び直さない
+- <context> の expiries の smile は m = ln(K/F) が −0.2〜+0.2 の 11 点だけ。その外（遠い OTM）や任意の行使価格の\
+スマイルの IV・理論価格（板の薄い行の妥当な値段）・気配は strike_quote で取る（スマイルを見られないとは言わない）
 - 値のキーの単位: *_yen は円、x・k・forward・atm_k・*_x は原資産・行使価格（円）、*_pct は %、*_pt は pt、\
 delta_large / delta_mini は枚、days は日、*ratio は倍。null は「評価できない」
 
