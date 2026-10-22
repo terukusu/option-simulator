@@ -427,12 +427,12 @@ export function footReason(s: AiChatState, g: AiGate): string | null {
   return sendBlocked(s, g) ?? diagnoseBlocked(s, g);
 }
 
-/** 今日の残りの表示（数えない資格情報は「数えない」） */
+/** 今日の残りの表示（費用を数えない資格情報・上限が無いときは `残り $—`） */
 export function remainingText(st: AiStatus | null, latest: number | null): string | null {
   if (!st?.enabled) return null;
-  if (!st.counted) return '残り: 数えない（Max の利用枠）';
+  if (!st.counted) return '残り $—';
   const rem = latest ?? st.remaining_usd;
-  if (rem === null || st.limit_usd === null) return '残り: —';
+  if (rem === null || st.limit_usd === null) return '残り $—';
   return `残り $${rem.toFixed(2)} / $${st.limit_usd.toFixed(2)}`;
 }
 
