@@ -848,6 +848,19 @@ async function ivFirstOpenCheck(page, label) {
   );
 }
 
+const h1Stats = { pass: 0, total: 0 };
+
+/** #124 AC 3: アクセシビリティツリーに level 1 の見出しが 1 件（スマホはブランドを見た目だけ隠す） */
+async function h1Check(page, label) {
+  const n = await page.getByRole('heading', { level: 1 }).count();
+  h1Stats.total++;
+  if (n === 1) h1Stats.pass++;
+  else {
+    failed = true;
+    console.log(`${label}: level 1 の見出しが ${n} 件（1 件のはず）  ← NG`);
+  }
+}
+
 async function measureAll() {
   if (shotsDir) mkdirSync(shotsDir, { recursive: true });
   const themes = ['dark', 'light'];
@@ -863,6 +876,7 @@ async function measureAll() {
       const name = `${mode}-${w}x${h}-${theme}`;
       // トップバー（#87）: 既定の作業
       if (mode === 'next') await topBarCheck(page, `${tag} ${w}x${h}`);
+      if (mode === 'next') await h1Check(page, `${tag} ${w}x${h}`);
       if (mode === 'next' && w <= PHONE_MAX) {
         // シート 3 段階: peek（既定）→ hidden（開いているドックのボタン）→ full（もう一度で peek、つまみのタップ）
         await report(page, `${tag} peek`, w, h, `${name}-peek`);
@@ -1042,6 +1056,7 @@ async function measureAll() {
     // トップバー（#87 (A)）: 最も混む作業（タブ 6 個・保存した板 + 読み込みの失敗・別のタブ）と開いた状態
     await topSweep();
     console.log(`トップバーの検査: ${topStats.pass} / ${topStats.total} 状態で pass`);
+    console.log(`見出し h1 の検査（#124）: ${h1Stats.pass} / ${h1Stats.total} 状態で pass`);
     console.log(`開いた状態の検査: ${openStats.pass} / ${openStats.total} で pass`);
     // 空の舞台（#111）: 足 0 本でも格子・横軸の目盛り・0 の線と注記
     await emptyStageAll();
@@ -3312,6 +3327,8 @@ async function runFlows() {
   // #89 段 B コマンドパレットの手順（AC-B5）
   for (const vp of [phone, pc]) await paletteFlows(vp);
   for (const vp of [phone, pc]) await paletteWideFlow(vp);
+  // #124 a11y: トーストの読み上げの領域を作り直さない・パレット / 説明カードの背景・同じフレームの連打
+  for (const vp of [phone, pc]) await a11yFlows(vp);
   // #91 段 C 動き（AC-C1・C2・C6・C7）と長いフレーム（AC-C3）
   for (const vp of [phone, pc]) await motionFlows(vp);
   for (const vp of [phone, pc]) await motionFlows(vp, true);
@@ -5872,10 +5889,15 @@ async function topBarCheck(page, label) {
       }
     }
     if (phone) {
-      for (const sel of ['.brand', '.top-theme']) {
-        const el = top.querySelector(sel);
-        if (el && getComputedStyle(el).display !== 'none') bad.push(`スマホで ${sel} が見えている`);
-      }
+      const theme = top.querySelector('.top-theme');
+      if (theme && getComputedStyle(theme).display !== 'none')
+        bad.push('スマホで .top-theme が見えている');
+      // ブランド（h1）は見た目だけ隠す（見出しの構造に残す。#124）: display は none でなく、箱は 1px 以下
+      const brand = top.querySelector('h1.brand');
+      const bb = brand?.getBoundingClientRect();
+      if (!brand || getComputedStyle(brand).display === 'none')
+        bad.push('スマホで h1.brand が見出しの構造に無い');
+      else if (bb && (bb.width > 1.5 || bb.height > 1.5)) bad.push('スマホで .brand が見えている');
     }
     for (const el of top.querySelectorAll('*')) {
       if (el.closest('.popover, .menu')) continue;
@@ -8556,6 +8578,211 @@ async function paletteWideFlow(vp) {
     loafOk && opened && l1.length === 0 && l2.length === 0,
     `${loafOk ? '' : 'LoAF を測れない・'}開く ${l1.map((d) => Math.round(d)).join(',') || 0} 件 / 打つ ${l2.map((d) => Math.round(d)).join(',') || 0} 件・${rows}`,
   );
+  // #124 AC 2: 説明カードを開く（パレットの ?追証 → Enter。背景の aria-hidden を含む）も 50ms 超 0 件
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(200);
+  await openPalette(page);
+  await page.keyboard.type('?追証');
+  await page.waitForTimeout(400);
+  const m3 = await mark();
+  await page.keyboard.press('Enter');
+  const card = await page
+    .waitForSelector(`${TERM_CARD} .tc-head h2`, { timeout: 2000 })
+    .then(() => true)
+    .catch(() => false);
+  await page.waitForTimeout(400);
+  const l3 = await since(m3);
+  check(
+    `#124 AC 2 ${tag} 説明カードを開くの Long Animation Frame（50ms 超）が 0 件`,
+    loafOk && card && l3.length === 0,
+    `${loafOk ? '' : 'LoAF を測れない・'}開く ${l3.map((d) => Math.round(d)).join(',') || 0} 件・カード ${card}`,
+  );
+  await ctx.close();
+}
+
+/**
+ * #124 a11y と操作の見直し（docs/ui-redesign.md §5・§4.6）:
+ * (1) 保存一覧の開閉の前後でトーストの読み上げの領域（.toast-alerts = alert / .toast-log = status）が同じ要素で 1 個ずつ、
+ *     開いている間はダイアログの中・閉じたら画面の直下
+ * (2) パレット・説明カードを開いている間、画面の直下の兄弟（dialog とトーストの置き場以外）が aria-hidden="true"・
+ *     Tab / Shift + Tab を 12 回押してフォーカスが毎回 dialog の中（説明カードは本文をクリックした後も）・
+ *     閉じ方（Esc・箱の外のクリック・説明カードの ×）によらず閉じたら aria-hidden が開く前と同じ
+ * (3) 1 → 4 を同じフレームで押すと 4 の行き先（指標のスクロールする枠）にフォーカス
+ */
+async function a11yFlows(vp) {
+  const tag = `${vp.width}x${vp.height}`;
+  const ctx = await newContext(vp, { [WORKSPACE_KEY]: twoLegs, [PREFS_KEY]: prefsText('dark') });
+  const page = await ctx.newPage();
+  await page.goto(pageUrl('next'));
+  await waitReady(page, 'next');
+
+  // (1) トーストの読み上げの領域
+  {
+    const regions = (keep) =>
+      page.evaluate((k) => {
+        const a = [...document.querySelectorAll('.toast-alerts[role="alert"]')];
+        const s = [...document.querySelectorAll('.toast-log[role="status"]')];
+        if (k) window.__toastRegions = [a[0] ?? null, s[0] ?? null];
+        const [ka, ks] = window.__toastRegions ?? [null, null];
+        const dlg = document.querySelector('dialog.sheet.book[open]');
+        return {
+          n: `${a.length}/${s.length}`,
+          same: ka !== null && ks !== null && a[0] === ka && s[0] === ks,
+          inBook: dlg !== null && dlg.contains(ka),
+          connected: ka?.isConnected === true,
+        };
+      }, keep);
+    const r0 = await regions(true);
+    await openFromMore(page, '保存一覧', BOOK);
+    const r1 = await regions(false);
+    await closeDialog(page);
+    const r2 = await regions(false);
+    check(
+      `#124 AC 1 ${tag} 保存一覧の開閉の前後で role="alert" / role="status" の領域が同じ要素（1 個ずつ・開いている間はダイアログの中）`,
+      [r0, r1, r2].every((r) => r.n === '1/1' && r.same && r.connected) &&
+        !r0.inBook &&
+        r1.inBook &&
+        !r2.inBook,
+      `前 ${JSON.stringify(r0)} / 開 ${JSON.stringify(r1)} / 閉 ${JSON.stringify(r2)}`,
+    );
+  }
+
+  // (2) パレット・説明カードの背景
+  const bg = (sel) =>
+    page.evaluate((s) => {
+      const d = document.querySelector(s);
+      return [...(document.querySelector('.screen')?.children ?? [])]
+        .filter((el) => el !== d && !el.matches('.toast-slot'))
+        .map(
+          (el) =>
+            `${el.tagName}.${el.getAttribute('class') ?? ''}=${el.getAttribute('aria-hidden') ?? '-'}`,
+        );
+    }, sel);
+  const tabInside = async (sel) => {
+    const out = [];
+    for (let i = 0; i < 12; i++) {
+      await page.keyboard.press(i % 3 === 2 ? 'Shift+Tab' : 'Tab');
+      const ok = await page.evaluate(
+        (s) => document.querySelector(s)?.contains(document.activeElement) === true,
+        sel,
+      );
+      if (!ok)
+        out.push(
+          await page.evaluate(
+            () => `${document.activeElement?.tagName}.${document.activeElement?.className ?? ''}`,
+          ),
+        );
+    }
+    return out;
+  };
+  // 閉じ方ごとに回す（閉じ方によらず背景の aria-hidden が開く前と同じに戻る。Tab の検査は Esc の回だけ）
+  const dialogCheck = async (label, sel, open, closes, extra = null) => {
+    for (const [how, close] of closes) {
+      const withTab = how === 'Esc';
+      const before = await bg(sel);
+      const opened = await open();
+      const during = await bg(sel);
+      const out = !opened ? ['開かない'] : withTab ? await tabInside(sel) : [];
+      if (opened && withTab && extra) out.push(...(await extra()));
+      await close();
+      const closed = (await page.$(sel)) === null;
+      const after = await bg(sel);
+      const allHidden = during.length > 0 && during.every((x) => x.endsWith('=true'));
+      check(
+        `#124 AC 2 ${tag} ${label}を開いている間は背景が aria-hidden${withTab ? '・Tab / Shift + Tab 12 回で外へ出ない' : ''}・${how}で閉じたら元どおり`,
+        opened &&
+          closed &&
+          allHidden &&
+          out.length === 0 &&
+          JSON.stringify(before) === JSON.stringify(after) &&
+          before.every((x) => !x.endsWith('=true')),
+        `開いている間 ${during.join(' ')}・外へ出た ${out.join(',') || 0}・閉じた ${closed}・閉じた後 ${after.join(' ')}`,
+      );
+    }
+  };
+  const gone = (sel) =>
+    page.waitForSelector(sel, { state: 'detached', timeout: 2000 }).catch(() => {});
+  const esc = (sel) => async () => {
+    await page.keyboard.press('Escape');
+    await gone(sel);
+  };
+  // 箱の外（箱の左の余白の中、箱の上端から 10px）をクリック
+  const outside = (sel, box) => async () => {
+    const r = await page.evaluate((q) => {
+      const b = document.querySelector(q)?.getBoundingClientRect();
+      return b ? { x: Math.max(2, b.left / 2), y: Math.max(2, b.top + 10) } : null;
+    }, `${sel} ${box}`);
+    if (r) await page.mouse.click(r.x, r.y);
+    await gone(sel);
+  };
+  await dialogCheck('パレット', PALETTE, () => openPalette(page), [
+    ['Esc', esc(PALETTE)],
+    ['箱の外のクリック', outside(PALETTE, '.pal-box')],
+  ]);
+  await dialogCheck(
+    '説明カード',
+    TERM_CARD,
+    async () => {
+      await openPalette(page);
+      await page.keyboard.type('?追証');
+      await page.waitForTimeout(150);
+      await page.keyboard.press('Enter');
+      return page
+        .waitForSelector(`${TERM_CARD} .tc-head h2`, { timeout: 2000 })
+        .then(() => true)
+        .catch(() => false);
+    },
+    [
+      ['Esc', esc(TERM_CARD)],
+      [
+        '×',
+        async () => {
+          await page.click(`${TERM_CARD} .tc-head button[aria-label="閉じる"]`).catch(() => {});
+          await gone(TERM_CARD);
+        },
+      ],
+      ['箱の外のクリック', outside(TERM_CARD, '.tc-box')],
+    ],
+    // 本文（tabIndex=-1）をクリックしてから Tab / Shift + Tab でも外へ出ない
+    async () => {
+      const bad = [];
+      for (const key of ['Tab', 'Shift+Tab']) {
+        await page.click(`${TERM_CARD} .tc-summary`).catch(() => {});
+        await page.keyboard.press(key);
+        const ok = await page.evaluate(
+          (s) => document.querySelector(s)?.contains(document.activeElement) === true,
+          TERM_CARD,
+        );
+        if (!ok) bad.push(`本文から ${key}`);
+      }
+      return bad;
+    },
+  );
+
+  // (3) 同じフレームの連打: 1 → 4 を 1 回の evaluate の中で送る = 最後の 4 の行き先へ
+  {
+    await page.evaluate(() => {
+      if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+      for (const key of ['1', '4']) {
+        document.body.dispatchEvent(
+          new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }),
+        );
+      }
+    });
+    await page.waitForTimeout(400);
+    const at = await page.evaluate(
+      (s) => document.activeElement?.matches(s) === true,
+      KEY_FOCUS.metrics,
+    );
+    const now = await page.evaluate(
+      () => `${document.activeElement?.tagName}.${document.activeElement?.className ?? ''}`,
+    );
+    check(
+      `#124 ${tag} 1 → 4 を同じフレームで押すと 4 の行き先（指標のスクロールする枠）にフォーカス`,
+      at,
+      now,
+    );
+  }
   await ctx.close();
 }
 

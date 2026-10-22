@@ -74,7 +74,7 @@ import { PanelHead } from './PanelHead';
 import { useAiAskHandler } from './parts/aiAsk';
 import { Palette } from './parts/Palette';
 import { TermCard } from './parts/TermCard';
-import { Toasts, useToasts } from './parts/Toast';
+import { ToastSlot, useToastHost, useToasts } from './parts/Toast';
 import { openTerm } from './parts/termCard';
 import { type AiApply, AiPanel, type AiPanelApi, type AiProposeApply } from './regions/AiChat';
 import { Board } from './regions/Board';
@@ -665,10 +665,12 @@ export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
         return;
     }
   };
-  // 保存一覧を開いている間はそのダイアログの中に描く（1 か所だけ = 読み上げも 1 回）
-  const toastList = (
-    <Toasts toasts={toasts.toasts} onUndo={toasts.undo} onDismiss={toasts.dismiss} />
-  );
+  // 保存一覧を開いている間はそのダイアログの中に置く（1 か所だけ = 読み上げも 1 回。箱は同じ要素を移す = #124）
+  const toastHost = useToastHost({
+    toasts: toasts.toasts,
+    onUndo: toasts.undo,
+    onDismiss: toasts.dismiss,
+  });
   return (
     <div class="screen">
       <TopBar
@@ -903,10 +905,10 @@ export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
         onClear={c.onBookClear}
         onExport={c.onBookExport}
         onImport={c.onBookImport}
-        toasts={c.bookOpen ? toastList : null}
+        toasts={c.bookOpen ? <ToastSlot host={toastHost} /> : null}
         focusName={bookFocusName}
       />
-      {!c.bookOpen && toastList}
+      {!c.bookOpen && <ToastSlot host={toastHost} />}
       <Palette
         open={paletteOpen}
         items={items}

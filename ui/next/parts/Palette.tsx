@@ -8,6 +8,7 @@ import {
   paletteKey,
   paletteView,
 } from '../../view/palette';
+import { hideBackground } from './background';
 import { useOverlay } from './overlay';
 
 /**
@@ -22,6 +23,8 @@ import { useOverlay } from './overlay';
  * - ↑ / ↓ = 押せる行だけ（端で回る）、Enter = 選択中の行を実行（押せない・0 件なら何もしない）、Esc / 背景のクリック =
  *   閉じる、行のクリック = その行を実行、Tab = 何もしない（入力欄に留める）。IME の変換中のキーは処理しない
  * - 箱の中の mousedown は入力欄からフォーカスを外さない
+ * - 開いている間は背景（兄弟の要素）に aria-hidden（#124。./background.ts。inert の代わり。キーボードは上の Tab と
+ *   focusin の守り、ポインタは下敷きで止める）
  * - 閉じ方は 1 か所（finish）: close → 開く前の要素へフォーカスを戻す（無ければ body）→ onClose → onRun
  * - 問い合わせ・行の文字は JSX のテキスト / value だけ（HTML 文字列・style を使わない）。DOM の id は useId + 位置
  * - initialQuery（#167。省略可能）: 開いたときの問い合わせ（⋯ > 用語集… の `?` = 用語だけ）。キャレットは末尾。
@@ -56,6 +59,7 @@ function PaletteBody(p: {
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const prevRef = useRef<HTMLElement | null>(null);
+  const showBgRef = useRef<(() => void) | null>(null);
   const listId = useId();
   const { setOpen } = useOverlay('palette');
   const [query, setQuery] = useState(p.initialQuery);
@@ -79,6 +83,8 @@ function PaletteBody(p: {
     // 最初の問い合わせ（用語集… の `?`）の後ろから打てるようにキャレットを末尾へ
     if (input && input.value !== '')
       input.setSelectionRange(input.value.length, input.value.length);
+    // 背景を読み上げから外す（フォーカスを中へ移した後。#124。./background.ts）
+    if (dlg) showBgRef.current = hideBackground(dlg);
     // 非モーダルなので背景は inert でない。フォーカスがパレットの外へ出たら（文書の外から Tab で戻った・背景へ移った）
     // 入力欄へ戻す（#89 段 B のレビュー 1）
     const onFocusIn = (e: FocusEvent) => {
@@ -89,6 +95,7 @@ function PaletteBody(p: {
     document.addEventListener('focusin', onFocusIn);
     return () => {
       document.removeEventListener('focusin', onFocusIn);
+      showBgRef.current?.();
       // アンマウントではフォーカスを戻さない（finish で戻した後に実行した行が動かしたフォーカスを奪わない）
       if (dlg?.open) dlg.close();
       setOpen(false);
@@ -109,6 +116,8 @@ function PaletteBody(p: {
   const finish = (run: PaletteRun | null) => {
     const dlg = ref.current;
     if (dlg?.open) dlg.close();
+    // フォーカスを戻す前に背景の aria-hidden を外す
+    showBgRef.current?.();
     const prev = prevRef.current;
     if (prev?.isConnected) prev.focus({ preventScroll: true });
     else if (document.activeElement instanceof HTMLElement) document.activeElement.blur();

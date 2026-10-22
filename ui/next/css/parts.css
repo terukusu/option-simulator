@@ -453,6 +453,11 @@ dialog.sheet::backdrop {
 }
 
 /* ===== トースト（下中央・ドックの上） ===== */
+/* 箱（.toasts）の置き場。画面の直下か保存一覧のダイアログの中（#124。箱は同じ要素を移す）。配置を持たない */
+.toast-slot {
+  display: contents;
+}
+
 .toasts {
   position: fixed;
   bottom: calc(var(--dock-h) + var(--sp-3));

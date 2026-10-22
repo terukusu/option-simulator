@@ -1,5 +1,6 @@
 import { useId, useLayoutEffect, useRef } from 'preact/hooks';
 import { type TermCardView, termCardView } from '../../view/glossary';
+import { hideBackground } from './background';
 import { useOverlay } from './overlay';
 import { closeTerm, openTerm, useTermCard } from './termCard';
 
@@ -8,7 +9,8 @@ import { closeTerm, openTerm, useTermCard } from './termCard';
  * dialog 自身を窓いっぱいの下敷きにする（コマンドパレットと同じ。showModal() の inert の作り直しを避ける）。
  * NextApp に 1 つだけ置き、開く用語は ./termCard.ts のストア（ⓘ の「用語:」・内訳の見出し・パレットの用語の行）。
  *
- * - 開くと見出しへフォーカス。フォーカスがカードの外へ出たら見出しへ戻す。開いている間は overlay として数える
+ * - 開くと見出しへフォーカス。フォーカスがカードの外へ出たら見出しへ戻す。Tab はカードの中のボタンで回る。
+ *   開いている間は背景（兄弟の要素）に aria-hidden（#124。./background.ts）。開いている間は overlay として数える
  *   （開いていたメニュー / ポップオーバーは閉じる）。全体のキーは dialog[open] で止まる
  * - Esc・×・背景（箱の外）のクリックで閉じ、開く前の要素へフォーカスを戻す（その要素が閉じたポップオーバーの中なら
  *   その ⓘ のボタンへ。無ければ blur）
@@ -30,6 +32,27 @@ function returnTarget(prev: HTMLElement | null): HTMLElement | null {
   return btn instanceof HTMLElement && btn.isConnected ? btn : null;
 }
 
+/**
+ * Tab の輪（#124）: 後ろにボタンが無いところ（最後のボタン・ボタンより後ろの本文）で Tab → 最初のボタン、
+ * 最初のボタン・見出し・本文で Shift + Tab → 最後のボタン
+ */
+function tabRing(dlg: HTMLDialogElement, e: KeyboardEvent): void {
+  const list = Array.from(dlg.querySelectorAll('button'));
+  const first = list[0];
+  const last = list.at(-1);
+  if (!first || !last) return;
+  const act = document.activeElement;
+  const i = list.indexOf(act as HTMLButtonElement);
+  // 本文（tabIndex=-1）などボタンでないところ: 文書の順で後ろにボタンが無ければ既定の Tab はカードの外へ出る
+  const noneAfter =
+    act !== null &&
+    !list.some((b) => (act.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0);
+  if (e.shiftKey ? i <= 0 : i === list.length - 1 || (i < 0 && noneAfter)) {
+    e.preventDefault();
+    (e.shiftKey ? last : first).focus({ preventScroll: true });
+  }
+}
+
 function TermCardBody({ view }: { view: TermCardView }) {
   const ref = useRef<HTMLDialogElement>(null);
   const boxRef = useRef<HTMLDivElement>(null);
@@ -44,6 +67,9 @@ function TermCardBody({ view }: { view: TermCardView }) {
     prevRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     if (dlg && !dlg.open) dlg.show();
     setOpen(true);
+    // 見出しへフォーカスしてから背景を読み上げから外す（#124。./background.ts）
+    headRef.current?.focus({ preventScroll: true });
+    const showBg = dlg ? hideBackground(dlg) : null;
     const onFocusIn = (e: FocusEvent) => {
       if (!dlg?.open) return;
       if (e.target instanceof Node && dlg.contains(e.target)) return;
@@ -51,6 +77,10 @@ function TermCardBody({ view }: { view: TermCardView }) {
     };
     // 非モーダルの dialog は Esc で cancel しないので文書の keydown で閉じる（フォーカスが body に落ちていても効く）
     const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Tab' && dlg) {
+        tabRing(dlg, e);
+        return;
+      }
       if (e.key !== 'Escape' || e.isComposing) return;
       e.preventDefault();
       closeTerm();
@@ -60,6 +90,7 @@ function TermCardBody({ view }: { view: TermCardView }) {
     return () => {
       document.removeEventListener('focusin', onFocusIn);
       document.removeEventListener('keydown', onKey);
+      showBg?.();
       if (dlg?.open) dlg.close();
       setOpen(false);
       const back = returnTarget(prevRef.current);

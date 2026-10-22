@@ -345,7 +345,16 @@
     --tab-name: 4.5em;
   }
 
-  .top .brand,
+  /* ブランド（h1）は見た目だけ隠す（見出しの構造に残す = 読み上げの見出しジャンプ。#124。base.css の .sr と同じ） */
+  .top .brand {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+  }
+
   .top-theme {
     display: none;
   }
