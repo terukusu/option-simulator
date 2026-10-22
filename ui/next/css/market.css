@@ -15,6 +15,27 @@
   padding: 0 8px;
 }
 
+/* スマイルのツールの行の Seg・Chip を詰める（#163。360px に 1 行。IV 推移のツールの行と同じ規則。行の箱は下の .smile-tools） */
+.smile-tools .seg > button {
+  padding: 0 7px;
+}
+
+.smile-tools .chip {
+  padding: 0 8px;
+}
+
+@container (max-width: 399.98px) {
+  .smile-tools .seg > button {
+    padding: 0 5px;
+    font-size: var(--fs-sm);
+  }
+
+  .smile-tools .chip {
+    padding: 0 7px;
+    font-size: var(--fs-sm);
+  }
+}
+
 /* ===== 板: ツールの行（2 段） ===== */
 .board-tools {
   display: flex;
@@ -314,6 +335,7 @@ table.board .legbadge.buy {
 }
 
 /* ===== スマイル ===== */
+/* ツールの行（限月・横軸・[効率]（#163））。360px に 1 行で入るよう Seg・Chip の左右を詰める（IV 推移のツールの行と同じ規則） */
 .smile-tools {
   display: flex;
   flex: 0 0 auto;
@@ -322,6 +344,13 @@ table.board .legbadge.buy {
   min-width: 0;
   padding: var(--sp-2) var(--sp-3);
   border-bottom: 1px solid var(--line);
+}
+
+/* 枠の幅 < 400px では間を詰める（ボタンの詰め方はファイルの先頭。#163） */
+@container (max-width: 399.98px) {
+  .smile-tools {
+    gap: 4px;
+  }
 }
 
 .smile-months {
@@ -425,6 +454,34 @@ table.board .legbadge.buy {
   stroke: var(--s1);
   stroke-width: 3px;
   text-anchor: middle;
+}
+
+/* 売りの効率の線（#163）: シナリオの点 = 実線、今 = 薄い破線、右端の内側の目盛り（%。縁取り） */
+.smile-wrap .eff-line {
+  fill: none;
+  stroke: var(--eff);
+  stroke-width: 1.5;
+}
+
+.smile-wrap .eff-line.now {
+  opacity: 0.55;
+  stroke-dasharray: 4 3;
+}
+
+.smile-wrap .eff-t {
+  fill: var(--eff);
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+  dominant-baseline: middle;
+  paint-order: stroke;
+  stroke: var(--s1);
+  stroke-width: 3px;
+  stroke-linejoin: round;
+  text-anchor: end;
+}
+
+.smile-wrap .xc-dot.eff {
+  stroke: var(--eff);
 }
 
 /* 凡例の印の色（線・点と同じ） */

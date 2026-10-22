@@ -265,6 +265,7 @@ export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
   // 足が消えたら選択を外す
   const selectedLeg = picked !== null && c.curLegs.some((l) => l.id === picked) ? picked : null;
   const onChart = useCallback((chart: ChartMode) => send({ type: 'chart', chart }), []);
+  const onSmileEff = useCallback((on: boolean) => send({ type: 'smileEff', on }), []);
   const onPickLeg = useCallback(
     (id: number) => {
       setPicked(id);
@@ -816,6 +817,10 @@ export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
               viewport={state.smileViewport}
               pick={state.smilePick}
               scenarioAtm={c.scenarioAtmView}
+              effOn={shell.smileEff === true}
+              onEff={onSmileEff}
+              eff={shell.smileEff ? c.smileEffBase : null}
+              scenario={shell.smileEff ? state.scenario : null}
               dispatch={dispatch}
               onAdd={onMarketAdd}
               marketSeg={seg}

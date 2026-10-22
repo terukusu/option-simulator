@@ -51,6 +51,8 @@ export interface ShellState {
   holdMap?: boolean;
   /** PC の作業台の列（#135。無い = work。保存しない） */
   bench?: BenchView;
+  /** スマイルに売りの効率の線を重ねる（#163。無い = 重ねない。保存しない） */
+  smileEff?: boolean;
 }
 
 export const INITIAL_SHELL: ShellState = { panel: 'positions', sheet: 'peek', market: 'board' };
@@ -71,7 +73,9 @@ export type ShellAction =
   /** 追証マップの開閉（#152） */
   | { type: 'holdMap'; open: boolean }
   /** PC の作業台の列（#135。bench が無ければ入れ替え） */
-  | { type: 'bench'; bench?: BenchView };
+  | { type: 'bench'; bench?: BenchView }
+  /** スマイルの売りの効率の線の表示（#163） */
+  | { type: 'smileEff'; on: boolean };
 
 /**
  * ドックのボタンの文字と読み上げの名前（#130。smile のパネルは IV 推移とスマイル。ラベルは「IV」）。アイコンは
@@ -220,6 +224,8 @@ export function shellReduce(s: ShellState, a: ShellAction): ShellState {
       return a.chart === chartMode(s) ? s : { ...s, chart: a.chart };
     case 'holdMap':
       return a.open === (s.holdMap ?? false) ? s : { ...s, holdMap: a.open };
+    case 'smileEff':
+      return a.on === (s.smileEff ?? false) ? s : { ...s, smileEff: a.on };
     case 'bench': {
       const cur = benchView(s);
       const bench = a.bench ?? (cur === 'ai' ? 'work' : 'ai');

@@ -6,7 +6,14 @@
  */
 
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'preact/hooks';
-import { axisOrigin, type Chain, type ChainJson, ChainLoadError, monthOf } from '../../data';
+import {
+  axisOrigin,
+  buildMarketContext,
+  type Chain,
+  type ChainJson,
+  ChainLoadError,
+  monthOf,
+} from '../../data';
 import {
   DEFAULT_SETTINGS,
   type MarginParams,
@@ -105,6 +112,7 @@ import { positionModel } from '../view/position';
 import { readoutModel } from '../view/readout';
 import { clampDXInput, evalTimeTargets } from '../view/scenario';
 import { scenarioAtmMark } from '../view/scenarioAtm';
+import type { SmileEffBase } from '../view/smileEff';
 import { openInNewTabError, tabsModel } from '../view/tabs';
 import type { MarginLineInput } from './useMarginLine';
 
@@ -643,6 +651,16 @@ export function useAppController(boot: Boot = NO_BOOT, margin: MarginPrefs = DEF
         : null,
     [pnlBase, state.scenario, marginParams, capital, holidays, marginNowCalc, marginTailRows],
   );
+  // スマイルの売りの効率の線（#163）の市場・設定。線は足に依らない（板の限月だけ）ので、市場は板・基準だけから作る
+  // （positions.ctx は足の変更ごとに新しい参照になり、線を隠して作り直してしまう）
+  const effCtx = useMemo(
+    () => (chain ? buildMarketContext(chain, { atmBasis }) : null),
+    [chain, atmBasis],
+  );
+  const smileEffBase = useMemo<SmileEffBase | null>(
+    () => (effCtx ? { ctx: effCtx, settings, params: marginParams, holidays } : null),
+    [effCtx, settings, marginParams, holidays],
+  );
   const pinTargets = useMemo(
     () =>
       resolvePins(pins, {
@@ -983,6 +1001,7 @@ export function useAppController(boot: Boot = NO_BOOT, margin: MarginPrefs = DEF
     onZoom,
     smilePick,
     scenarioAtmView,
+    smileEffBase,
     pins,
     pinLine,
     pinTargets,

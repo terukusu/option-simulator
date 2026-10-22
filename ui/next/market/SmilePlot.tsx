@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import type { ChainMonth } from '../../../data';
-import type { AtmBasis } from '../../../model';
+import type { AtmBasis, Scenario } from '../../../model';
 import { type Domain, fitTicks, linear, niceTicks } from '../../chart/scale';
 import { pure } from '../../components/pure';
 import { useChartGestures } from '../../components/useChartGestures';
+import { type SmileEffLineInput, useSmileEffLine } from '../../components/useSmileEffLine';
 import type { Action } from '../../state';
 import { CROSS_TOUCH_GRAB_PX } from '../../view/crosshair';
 import { fmtNum } from '../../view/format';
@@ -25,6 +26,20 @@ import {
   stepStrike,
   tapStrike,
 } from '../../view/smile';
+import {
+  EFF_NOW_SCENARIO,
+  EFF_TICK_INSET_PX,
+  effAtNow,
+  effReadYs,
+  effTickLabel,
+  effTicksClear,
+  type SmileEffBase,
+  smileEffNearest,
+  smileEffPath,
+  smileEffReadLines,
+  smileEffTicks,
+  smileEffYDomain,
+} from '../../view/smileEff';
 import { SMILE_LINE_CLASS, SMILE_PLOT_LABEL } from '../../view/smilePanel';
 import { useSize } from '../useSize';
 
@@ -42,6 +57,9 @@ export interface SmilePlotProps {
   viewport: Domain | null;
   pick: number | null;
   scenarioAtmK: number | null;
+  /** 売りの効率の線（#163。重ねないとき・表示中でない限月は null） */
+  eff: SmileEffBase | null;
+  scenario: Scenario | null;
   dispatch: (a: Action) => void;
 }
 
@@ -51,9 +69,11 @@ export interface SmilePlotProps {
  * 十字線（#217。docs/ui-redesign.md §4.1 の共通の規則）: PC のホバー、タッチのタップ（点のタップは選択 + 点に吸着、点の外は
  * 置く / 消す。交点の ±14px をつかんで動かす）。長押しは今のまま選択のスクラブ。カーソルは値の座標のローカル state
  * （smileCrosshair）。横軸を替えたら・ダブルタップで消す。
+ * 売りの効率の線（#163。eff があるとき）: シナリオの点 = .eff（実線）、今 = .eff.now（薄い破線。シナリオの点が今でないとき）、
+ * 右端に効率の目盛り（%）、十字線の読み取りに最寄りの行使価格の 2 行と線の上の点。
  */
 function SmilePlotView(p: SmilePlotProps) {
-  const { month, active, basis, axis, viewport, pick, scenarioAtmK, dispatch } = p;
+  const { month, active, basis, axis, viewport, pick, scenarioAtmK, eff, scenario, dispatch } = p;
   const model = useMemo(
     () => smileModel(month, basis, axis, viewport),
     [month, basis, axis, viewport],
@@ -77,6 +97,35 @@ function SmilePlotView(p: SmilePlotProps) {
   );
   const yTicks = niceTicks(model.yDomain[0], model.yDomain[1], h < 180 ? 3 : 4);
 
+  // 売りの効率の線（#163）: シナリオの点・今の線とも止まってから作る（useSmileEffLine）。今の線はシナリオの点が今でないときだけ
+  const effInput = useMemo<SmileEffLineInput | null>(
+    () => (eff && scenario ? { month, basis, axis, base: eff, scenario } : null),
+    [month, basis, axis, eff, scenario],
+  );
+  const atNow = scenario === null || effAtNow(scenario);
+  // 今の線はシナリオに依らない（EFF_NOW_SCENARIO）。作り直すのは限月・横軸・基準・市場と、今かどうかが変わったときだけ
+  const effNowInput = useMemo<SmileEffLineInput | null>(
+    () => (eff && !atNow ? { month, basis, axis, base: eff, scenario: EFF_NOW_SCENARIO } : null),
+    [month, basis, axis, eff, atNow],
+  );
+  const effPts = useSmileEffLine(effInput);
+  const effNowPts = useSmileEffLine(effNowInput);
+  const effY = useMemo(
+    () => (effPts ? smileEffYDomain([effPts, effNowPts], model.domain) : null),
+    [effPts, effNowPts, model.domain],
+  );
+  const effPaths = useMemo(
+    () =>
+      effPts && effY
+        ? {
+            now: effNowPts ? smileEffPath(effNowPts, model.domain, effY, w, h) : '',
+            point: smileEffPath(effPts, model.domain, effY, w, h),
+          }
+        : null,
+    [effPts, effNowPts, effY, model.domain, w, h],
+  );
+  const syEff = effY ? linear(effY, [h - M.bottom, M.top]) : null;
+
   const pickInfo = pick === null ? undefined : month.strikes.find((s) => s.k === pick);
   const pickX = pickInfo ? axisValue(month, basis, axis, pickInfo) : null;
   const pickPx =
@@ -99,6 +148,11 @@ function SmilePlotView(p: SmilePlotProps) {
   // タッチの交点をつかんで動かしている間（#227。この間だけ読み取りを指で隠れない所へ）
   const [held, setHeld] = useState(false);
   const xh = useMemo(() => smileCrosshair(model, cursor, w, h, held), [model, cursor, w, h, held]);
+  // 十字線の読み取りに足す 2 行（最寄りの行使価格の売り。#163）
+  const effAt =
+    xh && cursor && effPts && effY ? smileEffNearest(effPts, cursor.x, model.domain) : null;
+  const effLines = effAt ? smileEffReadLines(effAt) : null;
+  const readYs = xh ? effReadYs(xh.read.y, h, effLines ? effLines.length : 0) : [];
   const select = (k: number | null) => {
     if (k !== null && k !== pick) dispatch({ type: 'pickSmile', pick: { monthId: month.id, k } });
   };
@@ -238,7 +292,7 @@ function SmilePlotView(p: SmilePlotProps) {
             height={h}
             viewBox={`0 0 ${w} ${h}`}
             role="img"
-            aria-label={`${month.id} 限のスマイル（横軸 ${AXIS_LABEL[axis]}、縦軸 IV %）`}
+            aria-label={`${month.id} 限のスマイル（横軸 ${AXIS_LABEL[axis]}、縦軸 IV %${effPaths ? '、右の目盛り 売りの効率 %' : ''}）`}
           >
             <g class="grid">
               {yTicks.map((t) => (
@@ -262,6 +316,22 @@ function SmilePlotView(p: SmilePlotProps) {
             </g>
             {model.atmX !== null && vline(SMILE_LINE_CLASS.atm, sx(model.atmX))}
             {scnAtmX !== null && vline(SMILE_LINE_CLASS.scenario, sx(scnAtmX))}
+            {effPaths && (
+              <g class="eff">
+                {effPaths.now && <path class="eff-line now" d={effPaths.now} />}
+                <path class="eff-line" d={effPaths.point || 'M0 0'} />
+                {syEff &&
+                  effY &&
+                  effTicksClear(
+                    smileEffTicks(effY).map((t) => ({ t, y: syEff(t) })),
+                    xh && xh.read.anchor === 'end' ? readYs : [],
+                  ).map(({ t, y }) => (
+                    <text key={`e${t}`} class="eff-t" x={w - M.right - EFF_TICK_INSET_PX} y={y}>
+                      {effTickLabel(t)}
+                    </text>
+                  ))}
+              </g>
+            )}
             <path class="curve" d={solid || 'M0 0'} />
             <path class="curve ext" d={dotted || 'M0 0'} />
             {(['bid', 'ask', 'mid'] as const).map((kind) => (
@@ -279,6 +349,9 @@ function SmilePlotView(p: SmilePlotProps) {
                 <line class="xc-line v" x1={xh.px} x2={xh.px} y1={M.top} y2={h - M.bottom} />
                 <line class="xc-line h" x1={M.left} x2={w - M.right} y1={xh.py} y2={xh.py} />
                 {xh.dotPy !== null && <circle class="xc-dot" cx={xh.px} cy={xh.dotPy} r={3} />}
+                {effAt && syEff && (
+                  <circle class="xc-dot eff" cx={sx(effAt.x)} cy={syEff(effAt.eff)} r={3} />
+                )}
                 {[xh.xTag, xh.yTag].map((t, i) => (
                   <g key={i === 0 ? 'x' : 'y'} class={i === 0 ? 'xc-tag x' : 'xc-tag y'}>
                     <rect x={t.x} y={t.y} width={t.w} height={t.h} />
@@ -290,10 +363,20 @@ function SmilePlotView(p: SmilePlotProps) {
                 <text
                   class={xh.read.anchor === 'end' ? 'xc-val end' : 'xc-val'}
                   x={xh.read.x}
-                  y={xh.read.y}
+                  y={readYs[0] ?? xh.read.y}
                 >
                   {xh.read.text}
                 </text>
+                {effLines?.map((line, i) => (
+                  <text
+                    key={i === 0 ? 'e1' : 'e2'}
+                    class={xh.read.anchor === 'end' ? 'xc-val eff end' : 'xc-val eff'}
+                    x={xh.read.x}
+                    y={readYs[i + 1]}
+                  >
+                    {line}
+                  </text>
+                ))}
               </g>
             )}
           </svg>
