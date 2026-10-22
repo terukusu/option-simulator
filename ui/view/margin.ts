@@ -51,16 +51,9 @@ export function marginParamsOf(m: MarginPrefs): MarginParams {
  */
 export function marginParamsKeep(prev: MarginParams | null, m: MarginPrefs): MarginParams {
   const next = marginParamsOf(m);
-  if (
-    prev &&
-    prev.range === next.range &&
-    prev.ivUp === next.ivUp &&
-    prev.ivDown === next.ivDown &&
-    prev.factor === next.factor &&
-    prev.ignoreLongOptions === next.ignoreLongOptions
-  ) {
-    return prev;
-  }
+  // 全項目を比べる（MarginParams に項目が増えても漏れない）
+  const keys = Object.keys(next) as (keyof MarginParams)[];
+  if (prev && keys.every((k) => prev[k] === next[k])) return prev;
   return next;
 }
 
