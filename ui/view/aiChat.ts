@@ -600,6 +600,22 @@ export function chatItems(s: AiChatState): ChatItem[] {
 }
 
 /**
+ * 最後の user の吹き出しの位置（#263。無ければ −1）。ここから下（最後の発言とその返答・ツールのカード・失敗の行）が
+ * 「最後の発言」の塊で、送った後は塊の上端を枠の上端に合わせる。ツールの結果だけの user の発言は項目にならないので
+ * 数えない。失敗した発言（failed-user）は履歴を戻した後の最後に出る = 送ったときと同じ位置
+ */
+export function lastUserIndex(items: readonly ChatItem[]): number {
+  for (let i = items.length - 1; i >= 0; i--) if (items[i]?.kind === 'user') return i;
+  return -1;
+}
+
+/** 今の発言（turn）の user の発言が会話に入ったか（#263。computing の間 = 文脈を作る前は false） */
+export function turnSent(s: AiChatState): boolean {
+  const t = s.turn;
+  return t !== null && s.messages.length > t.prev.length;
+}
+
+/**
  * β の定義から導ける値（#136 の評価。「β = 1 なので下落 1% ごとに IV +1.0pt」= 1% あたり β pt。docs/design.md 5.4）。
  * 文脈のシナリオの β だけを pt の値として足す（ほかの値は足さない = 取り違えを広く見逃さない）
  */

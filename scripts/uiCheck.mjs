@@ -143,7 +143,9 @@
 //                                          [元に戻す]（#139）・再読み込みで会話が残る（sessionStorage）
 //                                          [AI に聞く]（#136 AC4）: 4 幅 × ダーク / ライトでタイル（満期 最大損失）・読み取り（Δ）・
 //                                          テール表・IV 推移のボタンが窓の中で切れない、押すと AI のパネルで送り（吹き出しに見出し・
-//                                          偽の返答）、縦・横 0px。AI が無効なら送らずに入力欄に質問の文と理由
+//                                          偽の返答）、縦・横 0px。AI が無効なら送らずに入力欄に質問の文と理由。
+//                                          #263: 送った吹き出しの上端が枠の内側の上端 ±4px（送った直後と返答の後）・返答の
+//                                          流れる間の枠の scrollTop の変化 ≤ 1px（末尾に追従しない）
 //   --ai                                   #135・#136 の項目だけ（既定の検査・--flows とも。手元の確かめ用）。
 //                                          #242 のツールの結果を待つ間のカードは --ai（--flows なし）でだけ
 //   --cross                                #217 の十字線の項目だけ（既定の検査・--flows とも。--flows は #201・#130・#207 のタッチの流れも。手元の確かめ用）
@@ -11039,9 +11041,43 @@ const askButtonInfo = (page, sel) =>
     };
   }, sel);
 
-/** 押す → AI のパネルが見え、最後の user の吹き出しに want、返答（偽の SSE）が終わる */
+/**
+ * #263: 送った吹き出しが会話に入ってから、フレームごとに .ai-body の scrollTop と、吹き出しの上端と枠の内側の上端
+ * （枠の上端 + 内側の余白）の差を採る（枠が見えている間だけ）。止めると { tops, gaps } を返す
+ */
+const watchSentScroll = (page, n) =>
+  page.evaluate((n) => {
+    const rec = { tops: [], gaps: [], stop: false };
+    window.__aiSentScroll = rec;
+    const tick = () => {
+      if (rec.stop) return;
+      const body = document.querySelector('section.ai .ai-body');
+      const users = document.querySelectorAll('section.ai .ai-msg.user');
+      if (body && users.length > n && body.clientHeight > 0) {
+        const u = users[users.length - 1];
+        const pad = Number.parseFloat(getComputedStyle(body).paddingTop) || 0;
+        const top = body.getBoundingClientRect().top + body.clientTop + pad;
+        rec.tops.push(body.scrollTop);
+        rec.gaps.push(u.getBoundingClientRect().top - top);
+      }
+      requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+  }, n);
+const stopSentScroll = (page) =>
+  page.evaluate(() => {
+    const rec = window.__aiSentScroll ?? { tops: [], gaps: [] };
+    rec.stop = true;
+    return { tops: rec.tops, gaps: rec.gaps };
+  });
+
+/**
+ * 押す → AI のパネルが見え、最後の user の吹き出しに want、返答（偽の SSE）が終わる。
+ * #263: 吹き出しの上端が枠の内側の上端 ±4px（送った直後と返答の後）、返答が流れる間の scrollTop の変化 ≤ 1px
+ */
 async function askAndWait(page, sel, want) {
   const before = await page.$$eval('section.ai .ai-msg.user', (xs) => xs.length);
+  await watchSentScroll(page, before);
   await page.locator(sel).first().click();
   const shown = await page
     .waitForSelector('section.ai .ai-foot', { state: 'visible', timeout: 5000 })
@@ -11058,6 +11094,11 @@ async function askAndWait(page, sel, want) {
     .waitForSelector('section.ai .ai-progress', { state: 'detached', timeout: 15000 })
     .catch(() => {});
   await page.waitForTimeout(150);
+  const sc = await stopSentScroll(page);
+  const span = sc.tops.length > 0 ? Math.max(...sc.tops) - Math.min(...sc.tops) : Number.NaN;
+  const gap0 = sc.gaps[0] ?? Number.NaN;
+  const gap1 = sc.gaps.at(-1) ?? Number.NaN;
+  const seen = Math.abs(gap0) <= 4 && Math.abs(gap1) <= 4 && span <= 1;
   const r = await page.evaluate(() => {
     const users = [...document.querySelectorAll('section.ai .ai-msg.user .ai-bubble')];
     const answers = [...document.querySelectorAll('section.ai .ai-msg.answer')];
@@ -11074,10 +11115,12 @@ async function askAndWait(page, sel, want) {
     r.user.includes(want) &&
     r.answer !== '' &&
     !r.error &&
-    r.popOpen === 0;
+    r.popOpen === 0 &&
+    seen;
+  const px = (v) => (Number.isFinite(v) ? v.toFixed(1) : '—');
   return {
     ok,
-    detail: `${shown ? '' : 'AI のパネルが見えない・'}吹き出し「${r.user.split('\n')[0]}」・返答 ${r.answer ? 'あり' : 'なし'}${r.error ? '・失敗' : ''}${r.popOpen ? `・吹き出しが ${r.popOpen} 個開いたまま` : ''}`,
+    detail: `${shown ? '' : 'AI のパネルが見えない・'}吹き出し「${r.user.split('\n')[0]}」・返答 ${r.answer ? 'あり' : 'なし'}${r.error ? '・失敗' : ''}${r.popOpen ? `・吹き出しが ${r.popOpen} 個開いたまま` : ''}・送った吹き出しの上端 ${px(gap0)} → ${px(gap1)}px・流れの間の scrollTop の変化 ${px(span)}px（${sc.tops.length} フレーム）${seen ? '' : '（#263 NG）'}`,
   };
 }
 

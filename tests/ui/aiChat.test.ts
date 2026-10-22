@@ -21,6 +21,7 @@ import {
   encodeAiChat,
   footReason,
   INITIAL_AI_CHAT,
+  lastUserIndex,
   MAX_MESSAGES,
   MAX_TOOL_ROUNDS,
   nearLimit,
@@ -30,6 +31,7 @@ import {
   sendBlocked,
   TOOL_LIMIT_NOTE,
   toolResultBlocks,
+  turnSent,
 } from '../../ui/view/aiChat';
 import { checkNumbers } from '../../ui/view/aiNumbers';
 import { AI_PRESETS, presetBlocked } from '../../ui/view/aiPresets';
@@ -573,6 +575,71 @@ describe('#156 照合の出所: 自分の前提の文の数', () => {
     );
     expect(s.messages.at(-1)?.content.some((b) => b.type === 'context_update')).toBe(true);
     expect(checkNumbers(ANS, numberSources(s)).unmatched).toBe(0);
+  });
+});
+
+describe('#263 送った発言の位置（最後の user の吹き出し・送った発言が会話に入ったか）', () => {
+  it('最後の user の項目の位置: 会話なしは −1、返答・ツールの結果の後も最後の発言', () => {
+    expect(lastUserIndex(chatItems(INITIAL_AI_CHAT))).toBe(-1);
+    // 1 回目: user・thinking・answer
+    expect(lastUserIndex(chatItems(first))).toBe(0);
+    const second = run(
+      first,
+      { type: 'begin', kind: 'chat', text: '−6% なら？', now: 2000 },
+      { type: 'send', context: CTX(0), key: 'k0' },
+      ev({
+        type: 'done',
+        stop_reason: 'tool_use',
+        content: [{ type: 'tool_use', id: 't1', name: 'evaluate_scenario', input: { dx_pct: -6 } }],
+        remaining_usd: 2.4,
+      }),
+    );
+    const items = chatItems(second);
+    expect(lastUserIndex(items)).toBe(3);
+    expect(items[3]).toMatchObject({ kind: 'user', text: '−6% なら？' });
+    // ツールの結果だけの user の発言は吹き出しにならない（数えない）
+    const withResult = aiChatReduce(second, {
+      type: 'toolResults',
+      blocks: [
+        {
+          type: 'tool_result',
+          tool_use_id: 't1',
+          content: [{ type: 'text', text: '{"pnl_yen":-1}' }],
+        },
+      ],
+    });
+    expect(withResult.messages.at(-1)?.role).toBe('user');
+    expect(lastUserIndex(chatItems(withResult))).toBe(3);
+  });
+
+  it('失敗した発言（failed-user）は履歴を戻した後の最後の user = 送ったときと同じ位置', () => {
+    const mid = run(
+      first,
+      { type: 'begin', kind: 'chat', text: '日数を変えた', now: 2000 },
+      { type: 'send', context: CTX(7), key: 'k7' },
+      ev({ type: 'text', text: '途中まで' }),
+    );
+    const before = lastUserIndex(chatItems(mid));
+    const items = chatItems(aiChatReduce(mid, ev({ type: 'error', code: 'timeout' })));
+    const i = lastUserIndex(items);
+    expect(items[i]).toMatchObject({ kind: 'user', key: 'failed-user', text: '日数を変えた' });
+    expect(i).toBe(before);
+  });
+
+  it('送った発言が会話に入ったか: turn なし・computing の間は false、send の後は流れの間ずっと true', () => {
+    expect(turnSent(INITIAL_AI_CHAT)).toBe(false);
+    expect(turnSent(first)).toBe(false);
+    const begun = aiChatReduce(first, {
+      type: 'begin',
+      kind: 'ask',
+      text: '［AI に聞く］',
+      now: 3,
+    });
+    expect(turnSent(begun)).toBe(false);
+    const sent = aiChatReduce(begun, { type: 'send', context: CTX(0), key: 'k0' });
+    expect(turnSent(sent)).toBe(true);
+    expect(turnSent(aiChatReduce(sent, ev({ type: 'text', text: '途中' })))).toBe(true);
+    expect(turnSent(aiChatReduce(sent, DONE_TEXT('おわり')))).toBe(false);
   });
 });
 

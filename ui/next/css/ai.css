@@ -8,6 +8,8 @@
 section.ai .ai-body {
   /* 読み上げだけの .sr（position: absolute）をスクロールする枠の中に留める（枠の外 = 画面のはみ出しにしない） */
   position: relative;
+  /* 最後の発言の塊の min-height（100cqh = 枠の内側の高さ。#263）。高さは flex: 1・min-height: 0 で中身によらない */
+  container-type: size;
   display: flex;
   flex-direction: column;
   gap: var(--sp-2);
@@ -39,6 +41,21 @@ section.ai .ai-body {
   flex-direction: column;
   gap: var(--sp-2);
   min-width: 0;
+}
+
+/*
+ * 最後の発言の塊（最後の user の吹き出しから下。#263）。発言を送った後（data-hold）は枠の内側の高さを最低にする =
+ * 返答が短くても吹き出しの上端を枠の上端まで上げられる（AiChat が送った後に 1 回だけ合わせる）
+ */
+.ai-tail {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+
+.ai-tail[data-hold] {
+  min-height: 100cqh;
 }
 
 .ai-msg {
