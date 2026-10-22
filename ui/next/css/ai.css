@@ -242,6 +242,10 @@ section.ai .ai-body {
   color: var(--accent-ink);
 }
 
+.ai-tool[data-status="pending"] .ai-spin {
+  flex: none;
+}
+
 .ai-tool[data-status="missing"] .ai-tool-line {
   color: var(--ink-3);
 }

@@ -144,7 +144,8 @@
 //                                          [AI に聞く]（#136 AC4）: 4 幅 × ダーク / ライトでタイル（満期 最大損失）・読み取り（Δ）・
 //                                          テール表・IV 推移のボタンが窓の中で切れない、押すと AI のパネルで送り（吹き出しに見出し・
 //                                          偽の返答）、縦・横 0px。AI が無効なら送らずに入力欄に質問の文と理由
-//   --ai                                   #135・#136・#242 の項目だけ（既定の検査・--flows とも。手元の確かめ用）
+//   --ai                                   #135・#136 の項目だけ（既定の検査・--flows とも。手元の確かめ用）。
+//                                          #242 のツールの結果を待つ間のカードは --ai（--flows なし）でだけ
 //   --cross                                #217 の十字線の項目だけ（既定の検査・--flows とも。--flows は #201・#130・#207 のタッチの流れも。手元の確かめ用）
 //   --url <base>                           dev サーバーを起こさず、その URL を使う（例 http://127.0.0.1:5173/?parts）
 //   --dom <file>                           body の下の要素の tag.class の並びを書き出す（DOM の変化の比較用）
@@ -10730,10 +10731,6 @@ async function aiAskSweep() {
 }
 
 /**
- * #135 AC6: 進み具合（押してから表示まで < 1,000 ms・考え中 → 書いています → 完了の順）・中止・終端なし・ツールのカードと
- * [シナリオに適用]・再読み込みで会話が残る
- */
-/**
  * #242: ツールの結果を待つ間のカード。technicals が先物の足を読む間（/fixtures/future_bars を止める）は
  * 「足を読み込み中…」（「計算できなかった」でない）・data-status="pending"・aria-busy。通すと結果のカードに置き換わる
  */
@@ -10787,6 +10784,10 @@ async function aiToolPendingFlow() {
   await ctx.close();
 }
 
+/**
+ * #135 AC6: 進み具合（押してから表示まで < 1,000 ms・考え中 → 書いています → 完了の順）・中止・終端なし・ツールのカードと
+ * [シナリオに適用]・再読み込みで会話が残る
+ */
 async function aiFlows(vp) {
   const tag = `#135 ${vp.width}x${vp.height}`;
   const ctx = await newContext(vp, { [WORKSPACE_KEY]: twoLegs, [PREFS_KEY]: prefsText('dark') });

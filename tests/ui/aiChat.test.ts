@@ -250,7 +250,8 @@ describe('aiChatReduce', () => {
     expect(cards[0]?.lines).toEqual(['計算できなかった（not_on_board）']);
     expect(cards[2]?.lines).toEqual(['提案を作れなかった（板に無い限月・行使価格）']);
     expect(cards.some((c) => c.pending)).toBe(false);
-    // (3) 結果が返らないまま会話が終わった（保存から戻した履歴の終わりが tool_use など）: 「結果なし」（失敗と言わない）
+    // (3) turn が無いのに結果の無い tool_use が残った場合（防御。中止・失敗・上限は fail() が発言ごと戻し、再読み込みは
+    // decodeAiChat が末尾の tool_use を落とすので普通は届かない。ここでは restore で直接作る）: 「結果なし」（失敗と言わない）
     const ended = aiChatReduce(INITIAL_AI_CHAT, {
       type: 'restore',
       saved: { context: CTX(0), lastKey: 'k0', messages: waiting.messages },
