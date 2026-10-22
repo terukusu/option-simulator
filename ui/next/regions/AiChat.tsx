@@ -11,18 +11,18 @@ import {
   applyDraft,
   askPlan,
   type ChatItem,
+  chatGroups,
   chatItems,
   DRAFT_KEPT_TEXT,
   diagnoseBlocked,
   footReason,
-  lastUserIndex,
   MAX_USER_TEXT,
   nearLimit,
   numberSources,
   PHASE_LABEL,
   remainingText,
   sendBlocked,
-  turnSent,
+  sentShown,
 } from '../../view/aiChat';
 import {
   AI_EVAL_KEEP_LABEL,
@@ -256,9 +256,9 @@ export function AiChat(p: {
     setText(draft.text);
   }, [draft]);
   const logRef = useRef<HTMLDivElement>(null);
-  const tailRef = useRef<HTMLDivElement>(null);
   // 送った発言を見せる（#263）: 新しい発言（入力欄・診断・定型・[AI に聞く]・パレット・[もう一度]）を始めたら、
-  // その吹き出しが会話に入った描き直しで 1 回だけ、最後の発言の塊（.ai-tail）の上端を枠の内側の上端に合わせる。
+  // その吹き出しが会話に出た描き直し（sentShown。送る前の失敗の行を含む）で 1 回だけ、最後の発言の塊（.ai-tail）の
+  // 上端を枠の内側の上端に合わせる。
   // 以後は自動で動かさない（返答・ツールのカード・失敗の行は下に伸びる。利用者のスクロールを戻さない）。
   // sent: この表示で発言を送った（塊に枠の高さの min-height = 上端まで上げられる）。[新しい会話] で戻す
   const sent = useRef(false);
@@ -273,20 +273,23 @@ export function AiChat(p: {
     anchor.current = true;
   }
   seenAt.current = startedAt;
-  const ready = turnSent(state);
+  const ready = sentShown(state);
   useLayoutEffect(() => {
     const el = logRef.current;
-    const tail = tailRef.current;
+    const tail = el?.querySelector<HTMLElement>('.ai-tail[data-last]');
     // 枠が見えていない（display: none）間は合わせずに待つ（見えた後の描き直しで合わせる）
     if (!anchor.current || !ready || !el || !tail || el.clientHeight === 0) return;
     anchor.current = false;
-    el.scrollTop = tail.offsetTop - Number.parseFloat(getComputedStyle(el).paddingTop || '0');
+    // 位置は画面の座標の差で求める（offsetParent に頼らない）
+    const pad = Number.parseFloat(getComputedStyle(el).paddingTop) || 0;
+    const top = el.getBoundingClientRect().top + el.clientTop + pad;
+    el.scrollTop += tail.getBoundingClientRect().top - top;
   });
   useEffect(() => {
     const el = logRef.current;
     if (el && !sent.current && stick.current) el.scrollTop = el.scrollHeight;
   });
-  const tail = lastUserIndex(items);
+  const groups = useMemo(() => chatGroups(items), [items]);
   const row = (it: ChatItem) => (
     <ChatRow
       key={it.key}
@@ -355,12 +358,19 @@ export function AiChat(p: {
         )}
         {items.length === 0 && <p class="ai-empty">{AI_EMPTY_TEXT}</p>}
         <div class="ai-log" role="log" aria-live="off">
-          {(tail < 0 ? items : items.slice(0, tail)).map(row)}
-          {tail >= 0 && (
-            <div class="ai-tail" ref={tailRef} data-hold={sent.current ? 'true' : undefined}>
-              {items.slice(tail).map(row)}
-            </div>
-          )}
+          {groups.map((g, i) => {
+            const last = i === groups.length - 1;
+            return (
+              <div
+                key={g.key}
+                class="ai-tail"
+                data-last={last ? 'true' : undefined}
+                data-hold={last && sent.current ? 'true' : undefined}
+              >
+                {g.items.map(row)}
+              </div>
+            );
+          })}
         </div>
         {state.stop !== null && <p class="ai-note">{aiErrorText(state.stop)}</p>}
         {long && (

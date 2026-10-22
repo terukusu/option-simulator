@@ -14,6 +14,7 @@ import {
   applyDraft,
   askPlan,
   atLimit,
+  chatGroups,
   chatItems,
   DIAGNOSE_TEXT,
   decodeAiChat,
@@ -21,7 +22,6 @@ import {
   encodeAiChat,
   footReason,
   INITIAL_AI_CHAT,
-  lastUserIndex,
   MAX_MESSAGES,
   MAX_TOOL_ROUNDS,
   nearLimit,
@@ -29,6 +29,7 @@ import {
   remainingText,
   requestOf,
   sendBlocked,
+  sentShown,
   TOOL_LIMIT_NOTE,
   toolResultBlocks,
   turnSent,
@@ -578,11 +579,14 @@ describe('#156 照合の出所: 自分の前提の文の数', () => {
   });
 });
 
-describe('#263 送った発言の位置（最後の user の吹き出し・送った発言が会話に入ったか）', () => {
-  it('最後の user の項目の位置: 会話なしは −1、返答・ツールの結果の後も最後の発言', () => {
-    expect(lastUserIndex(chatItems(INITIAL_AI_CHAT))).toBe(-1);
-    // 1 回目: user・thinking・answer
-    expect(lastUserIndex(chatItems(first))).toBe(0);
+describe('#263 送った発言の位置（発言ごとの塊・送った発言が会話に出たか）', () => {
+  const keys = (s: AiChatState) => chatGroups(chatItems(s)).map((g) => g.key);
+  it('発言ごとの塊: 会話なしは 0 個、user の項目から次の user の手前まで、ツールの結果だけの user は区切らない', () => {
+    expect(chatGroups(chatItems(INITIAL_AI_CHAT))).toEqual([]);
+    // 1 回目: user・thinking・answer = 1 塊
+    expect(chatGroups(chatItems(first)).map((g) => g.items.map((i) => i.kind))).toEqual([
+      ['user', 'thinking', 'answer'],
+    ]);
     const second = run(
       first,
       { type: 'begin', kind: 'chat', text: '−6% なら？', now: 2000 },
@@ -594,10 +598,6 @@ describe('#263 送った発言の位置（最後の user の吹き出し・送�
         remaining_usd: 2.4,
       }),
     );
-    const items = chatItems(second);
-    expect(lastUserIndex(items)).toBe(3);
-    expect(items[3]).toMatchObject({ kind: 'user', text: '−6% なら？' });
-    // ツールの結果だけの user の発言は吹き出しにならない（数えない）
     const withResult = aiChatReduce(second, {
       type: 'toolResults',
       blocks: [
@@ -609,21 +609,41 @@ describe('#263 送った発言の位置（最後の user の吹き出し・送�
       ],
     });
     expect(withResult.messages.at(-1)?.role).toBe('user');
-    expect(lastUserIndex(chatItems(withResult))).toBe(3);
+    const gs = chatGroups(chatItems(withResult));
+    expect(gs.map((g) => g.key)).toEqual(['m0', 'm2']);
+    expect(gs[1]?.items[0]).toMatchObject({ kind: 'user', text: '−6% なら？' });
+    expect(gs[1]?.items.map((i) => i.kind)).toEqual(['user', 'tool']);
+    // 新しい発言を送っても前の塊の key は変わらない（作り直さない）
+    expect(keys(first)[0]).toBe(gs[0]?.key);
   });
 
-  it('失敗した発言（failed-user）は履歴を戻した後の最後の user = 送ったときと同じ位置', () => {
+  it('先頭に user の無い部分は key head の塊', () => {
+    const gs = chatGroups([
+      { kind: 'answer', text: 'a', key: 'x', live: false, failed: null },
+      { kind: 'user', text: 'q', updated: false, key: 'm1' },
+    ]);
+    expect(gs.map((g) => [g.key, g.items.length])).toEqual([
+      ['head', 1],
+      ['m1', 1],
+    ]);
+  });
+
+  it('失敗した発言（failed-user）は最後の塊の先頭 = 送ったときと同じ塊の位置', () => {
     const mid = run(
       first,
       { type: 'begin', kind: 'chat', text: '日数を変えた', now: 2000 },
       { type: 'send', context: CTX(7), key: 'k7' },
       ev({ type: 'text', text: '途中まで' }),
     );
-    const before = lastUserIndex(chatItems(mid));
-    const items = chatItems(aiChatReduce(mid, ev({ type: 'error', code: 'timeout' })));
-    const i = lastUserIndex(items);
-    expect(items[i]).toMatchObject({ kind: 'user', key: 'failed-user', text: '日数を変えた' });
-    expect(i).toBe(before);
+    const before = keys(mid);
+    const gs = chatGroups(chatItems(aiChatReduce(mid, ev({ type: 'error', code: 'timeout' }))));
+    expect(gs).toHaveLength(before.length);
+    expect(gs.slice(0, -1).map((g) => g.key)).toEqual(before.slice(0, -1));
+    expect(gs.at(-1)?.items[0]).toMatchObject({
+      kind: 'user',
+      key: 'failed-user',
+      text: '日数を変えた',
+    });
   });
 
   it('送った発言が会話に入ったか: turn なし・computing の間は false、send の後は流れの間ずっと true', () => {
@@ -640,6 +660,23 @@ describe('#263 送った発言の位置（最後の user の吹き出し・送�
     expect(turnSent(sent)).toBe(true);
     expect(turnSent(aiChatReduce(sent, ev({ type: 'text', text: '途中' })))).toBe(true);
     expect(turnSent(aiChatReduce(sent, DONE_TEXT('おわり')))).toBe(false);
+  });
+
+  it('送った発言が会話に出たか（合わせてよいか）: 流れの途中・終わって失敗が残る（送る前の失敗を含む）は true', () => {
+    expect(sentShown(INITIAL_AI_CHAT)).toBe(false);
+    expect(sentShown(first)).toBe(false);
+    const begun = aiChatReduce(first, { type: 'begin', kind: 'chat', text: '日数', now: 3 });
+    expect(sentShown(begun)).toBe(false);
+    expect(sentShown(aiChatReduce(begun, { type: 'send', context: CTX(0), key: 'k0' }))).toBe(true);
+    // 送る前の失敗（板が無い: send の無いまま終わる）でも failed-user と失敗の行が出る
+    const noBoard = aiChatReduce(begun, { type: 'fail', code: 'no_board' });
+    expect(turnSent(noBoard)).toBe(false);
+    expect(sentShown(noBoard)).toBe(true);
+    expect(chatItems(noBoard).at(-2)).toMatchObject({ kind: 'user', key: 'failed-user' });
+    // 次の発言を始めると失敗は消える（computing の間は合わせない）
+    expect(
+      sentShown(aiChatReduce(noBoard, { type: 'begin', kind: 'chat', text: '日数', now: 4 })),
+    ).toBe(false);
   });
 });
 

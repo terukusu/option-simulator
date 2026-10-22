@@ -11416,6 +11416,29 @@ async function aiFlows(vp) {
     .then(() => true)
     .catch(() => false);
   check(`${tag} done の無い終わりは「途中で切れました」`, inc);
+  // #263: [もう一度]（失敗の行が消え → 送り直した吹き出し → また失敗の行）でも、送った吹き出しの上端が枠の内側の
+  // 上端 ±4px・流れの間の scrollTop の変化 ≤ 1px（failed-user が消える間は数えない = 吹き出しの数 − 1 から見る）
+  if (inc) {
+    const n = await page.$$eval('section.ai .ai-msg.user', (xs) => xs.length);
+    await watchSentScroll(page, n - 1);
+    await page.click('section.ai .ai-error[data-code="incomplete"] button');
+    await page
+      .waitForSelector('section.ai .ai-progress', { state: 'attached', timeout: 3000 })
+      .catch(() => {});
+    await page
+      .waitForSelector('section.ai .ai-progress', { state: 'detached', timeout: 8000 })
+      .catch(() => {});
+    await page.waitForTimeout(150);
+    const sc = await stopSentScroll(page);
+    const span = sc.tops.length > 0 ? Math.max(...sc.tops) - Math.min(...sc.tops) : Number.NaN;
+    const g0 = sc.gaps[0] ?? Number.NaN;
+    const g1 = sc.gaps.at(-1) ?? Number.NaN;
+    check(
+      `${tag} #263 [もう一度] で送り直した吹き出しの上端が枠の上端・流れで動かない`,
+      Math.abs(g0) <= 4 && Math.abs(g1) <= 4 && span <= 1,
+      `上端 ${g0.toFixed(1)} → ${g1.toFixed(1)}px・scrollTop の変化 ${span.toFixed(1)}px（${sc.tops.length} フレーム）`,
+    );
+  }
   // (d) 追加の質問 → ツールのカード → [シナリオに適用] → [元に戻す]
   await page.fill('section.ai .ai-input textarea', '−6% なら？');
   await page.press('section.ai .ai-input textarea', 'Enter');
