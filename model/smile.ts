@@ -6,7 +6,7 @@
  * - IV の分解能の帯（価格 ±0.5 円）が 5pt 超、または ask ≤ 5 円の行は不安定として節点から外す
  * - x = ln(K / F)、総分散 w = σ²T を区分線形に補間
  * - 翼は w を端の節点から線形に延ばす。傾きはその翼の側の、端から |Δx| ≤ 0.2 の節点の最小二乗（#268）。
- *   端の節点の凹の折れはバタフライの不足 ≤ 1 円まで（F を渡したとき）。その後 Lee の上限 2 以下・端の節点で
+ *   端の節点の凹の折れは (C₀ + C₂)/2 − C₁ の不足 ≤ 1 円まで（F を渡したとき）。その後 Lee の上限 2 以下・端の節点で
  *   K 単調性が崩れない上限以下（かつ w が減らない向き）にクランプ。水平も選べる
  * - 補間後に K 単調性とバタフライ ≥ 0 を検査する
  *
@@ -128,14 +128,17 @@ export function wingRegressionSlope(
 
 /**
  * 端の節点の凹の折れで許すバタフライの不足（円。#268）。回帰の傾きが端の区間の傾きより緩いと、端の節点で w が凹に
- * 折れ、そこでバタフライ < 0 になる。端の区間と同じ間隔の格子で、その不足をこの円（呼値 1 本）以下に抑える。
- * 合成の板の比較（docs/design.md 5.3）で、1 円なら裁定の検査の印が端の 2 本のときより増えず、1.5 円では増えた
+ * 折れ、そこでバタフライ < 0 になる。端の区間と同じ間隔 h の格子（K₀ = Kₙ − h・K₁ = Kₙ・K₂ = Kₙ + h）で、
+ * **(C₀ + C₂)/2 − C₁ の不足**をこの円以下に抑える（checkArbitrage・性質テストの 1:−2:1 のバタフライ C₀ − 2C₁ + C₂ では
+ * その 2 倍 = 2 円）。合成の板（気配 1〜3 呼値）の比較（docs/design.md 5.3）で、1 円なら裁定の検査の印が端の 2 本の
+ * ときより増えず、1.5 円では増えた
  */
 export const WING_KINK_YEN = 1;
 
 /**
  * 点 (x, w) で、翼の傾きが端の区間の傾きより Δs 小さい（凹に折れる）ときの ∂C/∂K の跳びは φ(d₂)·Δs / (2√w)
- * （d₂ = −x/√w − √w/2。F φ(d₁) = K φ(d₂) から F によらない。put も同じ）。跳びを jump 以下にする Δs の上限。
+ * （d₂ = −x/√w − √w/2。F φ(d₁) = K φ(d₂) から F によらない。put も同じ。割引前の値で、割引後の跳びは e^{−rT} 倍で
+ * これ以下 = 下限は安全側）。跳びを jump 以下にする Δs の上限。
  */
 export function wingKinkBound(x: number, w: number, jump: number): number {
   if (!(w > 0)) return 0;
@@ -154,8 +157,8 @@ export class PiecewiseLinearSmile implements Smile {
   private readonly rightSlope: number;
 
   /**
-   * 節点 (x, w) は x の昇順・重複なし。1 点以上。forward（F。円）を渡すと、端の節点の凹の折れによるバタフライの
-   * 不足を WING_KINK_YEN 以下に抑える（翼の傾きの下限）。渡さなければ下限なし（回帰の傾きのまま）
+   * 節点 (x, w) は x の昇順・重複なし。1 点以上。forward（F。円）を渡すと、端の節点の凹の折れによるバタフライ
+   * (C₀ + C₂)/2 − C₁ の不足を WING_KINK_YEN 以下に抑える（翼の傾きの下限）。渡さなければ下限なし（回帰の傾きのまま）
    */
   constructor(
     points: ReadonlyArray<{ x: number; w: number }>,
@@ -182,8 +185,8 @@ export class PiecewiseLinearSmile implements Smile {
       const segR =
         ((wa[n - 1] as number) - (wa[n - 2] as number)) /
         ((xa[n - 1] as number) - (xa[n - 2] as number));
-      // 下限: 端の節点の凹の折れ（回帰の傾きが端の区間より緩い）によるバタフライの不足を、端の区間の間隔 h（円）の
-      // 格子で WING_KINK_YEN 以下に（不足 ≈ h × ∂C/∂K の跳び / 2）。端の区間の傾きは丸めの雑音を含むので、
+      // 下限: 端の節点の凹の折れ（回帰の傾きが端の区間より緩い）による (C₀ + C₂)/2 − C₁ の不足を、端の区間の間隔
+      // h（円）の格子で WING_KINK_YEN 以下に（不足 ≈ h × ∂C/∂K の跳び / 2。1:−2:1 では 2 倍）。端の区間の傾きは丸めの雑音を含むので、
       // 下限を強くすると端の 2 本の問題が戻る（呼値 1 本が、裁定の印を増やさない範囲で最も緩い）
       const kink = (i: number, j: number) => {
         if (forward === undefined || !(forward > 0)) return Number.POSITIVE_INFINITY;
