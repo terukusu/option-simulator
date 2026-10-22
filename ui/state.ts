@@ -399,7 +399,9 @@ export function validScenarioPatch(p: Partial<Scenario>): boolean {
     (p.ivDynamics === undefined ||
       p.ivDynamics === 'sticky_strike' ||
       p.ivDynamics === 'sticky_moneyness') &&
-    (p.ivShift === undefined || p.ivShift === 'absolute' || p.ivShift === 'relative')
+    // IV の入れ方は absolute だけ（relative を選ぶ部品は無い = 後段。プリセット・AI の文脈の iv_shift_pt は pt の前提。
+    // relative は追証マップの model の中だけで使う。#260）
+    (p.ivShift === undefined || p.ivShift === 'absolute')
   );
 }
 

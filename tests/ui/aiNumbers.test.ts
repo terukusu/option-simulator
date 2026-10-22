@@ -374,3 +374,24 @@ describe('#240 評価で見つけた書き方（2）', () => {
     expect(checkNumbers('1 日ずつ減る', []).tokens[0]?.status).toBe('unmatched');
   });
 });
+
+describe('#260 文脈の横軸の範囲・IV − HV20 の日数', () => {
+  const src = [
+    { scenario: { days: 5, x_range: [61234, 74321] } },
+    { hv: { iv_minus_hv20_percentile_pct: 71, n_hv20: 597 } },
+  ];
+  const st = (text: string) => checkNumbers(text, src).tokens.map((t) => t.status);
+
+  it('x_range は水準（円）として照合する', () => {
+    expect(st('横軸は 61,234 円〜74,321 円')).toEqual(['matched', 'matched']);
+    // % や日では照合しない（水準の値だけ）
+    expect(st('61,234 日')).toEqual(['unmatched']);
+  });
+
+  it('n_hv20 は日数として照合する（「過去 597 日」）', () => {
+    expect(st('過去 597 日の中で今以下の日が 71% の位置')).toEqual(['matched', 'matched']);
+    // 円・% では照合しない
+    expect(st('597 円')).toEqual(['unmatched']);
+    expect(st('597%')).toEqual(['unmatched']);
+  });
+});

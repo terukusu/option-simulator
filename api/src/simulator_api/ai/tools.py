@@ -66,9 +66,15 @@ POSITION_SUMMARY = Obj({
                     LEG_OPTIONAL | {"leg_no"}), MAX_LEGS),
     "premium": Obj({"received_yen": YEN, "paid_yen": YEN, "net_yen": YEN, "fees_yen": YEN,
                     "net_after_fees_yen": YEN}),
+    # 無限なら max_*_yen・max_*_x は null（#260。proposal の要約と同じ意味）。有限の put 側の値は put_side_*（無限で
+    # なければ null）。put_side_* は #260 で足した。デプロイ前に開いた画面（古い JS）は送らないので任意
     "expiry": Obj({"max_profit_yen": YEN, "max_profit_x": LEVEL, "max_profit_unbounded": Bool(),
                    "max_loss_yen": YEN, "max_loss_x": LEVEL, "max_loss_unbounded": Bool(),
-                   "breakevens_x": Arr(LEVEL, 20)}),
+                   "put_side_max_profit_yen": YEN, "put_side_max_profit_x": LEVEL,
+                   "put_side_max_loss_yen": YEN, "put_side_max_loss_x": LEVEL,
+                   "breakevens_x": Arr(LEVEL, 20)},
+                  frozenset({"put_side_max_profit_yen", "put_side_max_profit_x",
+                             "put_side_max_loss_yen", "put_side_max_loss_x"})),
     "greeks_now": GREEKS,
     "scenario_point": Obj({"days": DAYS, "dx_pct": PCT, "x": LEVEL, "pnl_yen": YEN, "greeks": GREEKS}),
 })
@@ -461,7 +467,9 @@ def _spec(name, description, result, input_shape=NO_INPUT, input_schema=None) ->
 REGISTRY: Registry = {t.name: t for t in (
     _spec("position_summary",
           "今のポジションの要約（画面の指標と同じ計算）。足ごとの売買・枚数・建値・IV（%）・Δ、"
-          "受取 / 支払 / 差し引き / 手数料（円）、満期の最大利益・最大損失（円）とその原資産・無限か、"
+          "受取 / 支払 / 差し引き / 手数料（円）、満期の最大利益・最大損失（円）とその原資産・無限か"
+          "（無限なら max_*_yen は null。そのとき有限の put 側の値は put_side_max_*。"
+          "これは最大損失・最大利益ではない）、"
           "損益分岐点、今の合計グリーク（Δ はラージ枚と"
           "ミニ枚、Γ は原資産 100 円あたりの Δ の変化、Θ は円 / 日、V は円 / IV 1pt）、今のシナリオの点の損益。"
           "診断では最初の <context> の precomputed に入っている", POSITION_SUMMARY),

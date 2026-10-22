@@ -208,7 +208,9 @@ describe('往復（作る → 読む）', () => {
     expect(r.legs[1]?.optionMarket?.market.forward).toBeNaN();
     expect(r.legs[2]?.leg).toEqual(v1.position.legs[2]?.leg);
     expect(r.legs[2]?.futureMarket).toBeDefined();
-    expect(r.scenario).toEqual(v1.position.scenario);
+    // fixture の relative は absolute・Δσ = 0 として読む（#260。アプリの状態に relative を入れない）
+    expect(v1.position.scenario.ivShift).toBe('relative');
+    expect(r.scenario).toEqual({ ...v1.position.scenario, ivShift: 'absolute', dSigma: 0 });
     expect(r.feePerLot).toBe(300);
     expect(r.futureBasis).toBe('decay');
     expect(r.savedAt).toBe(NOW);

@@ -516,6 +516,15 @@ export function clampDays(scenario: Scenario, maxDays: number): { days: number; 
   return { days: Math.min(want, maxDays), clamped: want > maxDays + 1e-9 };
 }
 
+/**
+ * d を clampDays で収めたシナリオ（収める必要が無ければ同じ参照）。指標・証拠金のタイルと同じ点を、d を自分で
+ * 収めない計算（スマイルの売りの効率の線。#260）に渡すため。足 0 本は maxDays = 0 → d = 0（時間レールの表示と同じ）
+ */
+export function clampScenarioDays(scenario: Scenario, maxDays: number): Scenario {
+  const { days } = clampDays(scenario, maxDays);
+  return days === scenario.days ? scenario : { ...scenario, days };
+}
+
 export function pnlChartModel(input: PnlChartInput): PnlChartModel {
   const { base, scenario } = input;
   if (!base) return emptyModel(input);

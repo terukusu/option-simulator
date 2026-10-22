@@ -195,6 +195,10 @@
        "max_loss_yen": -63220000,
        "max_loss_x": 0,
        "max_loss_unbounded": false,
+       "put_side_max_profit_yen": null,
+       "put_side_max_profit_x": null,
+       "put_side_max_loss_yen": null,
+       "put_side_max_loss_x": null,
        "breakevens_x": [
         63220
        ]
@@ -875,6 +879,10 @@
        "max_loss_yen": -1310000,
        "max_loss_x": 0,
        "max_loss_unbounded": false,
+       "put_side_max_profit_yen": null,
+       "put_side_max_profit_x": null,
+       "put_side_max_loss_yen": null,
+       "put_side_max_loss_x": null,
        "breakevens_x": [
         64310,
         71690
@@ -1624,9 +1632,13 @@
        "max_profit_yen": 1446193,
        "max_profit_x": 66000,
        "max_profit_unbounded": false,
-       "max_loss_yen": -57953807,
-       "max_loss_x": 0,
+       "max_loss_yen": null,
+       "max_loss_x": null,
        "max_loss_unbounded": true,
+       "put_side_max_profit_yen": null,
+       "put_side_max_profit_x": null,
+       "put_side_max_loss_yen": -57953807,
+       "put_side_max_loss_x": 0,
        "breakevens_x": [
         64393,
         80462
@@ -2287,6 +2299,10 @@
        "max_loss_yen": -870000,
        "max_loss_x": 0,
        "max_loss_unbounded": false,
+       "put_side_max_profit_yen": null,
+       "put_side_max_profit_x": null,
+       "put_side_max_loss_yen": null,
+       "put_side_max_loss_x": null,
        "breakevens_x": []
       },
       "greeks_now": {

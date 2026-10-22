@@ -56,8 +56,16 @@ describe.each(AI_EVAL_CASES.map((c) => c.name))('ツール = 画面の表示モ�
     expect(r.premium.net_yen).toBe(yen(m.premium.net));
     const lossInf = m.expiry.maxLoss.value === Number.NEGATIVE_INFINITY;
     expect(r.expiry.max_loss_unbounded).toBe(lossInf);
-    expect(r.expiry.max_loss_yen).toBe(
-      yen(lossInf ? m.expiry.lossFinite?.value : m.expiry.maxLoss.value),
+    // 無限なら max_loss_yen は null（proposalSummary と同じ意味）、有限の put 側は put_side_*（#260）
+    expect(r.expiry.max_loss_yen).toBe(lossInf ? null : yen(m.expiry.maxLoss.value));
+    expect(r.expiry.put_side_max_loss_yen).toBe(lossInf ? yen(m.expiry.lossFinite?.value) : null);
+    expect(r.expiry.put_side_max_loss_x).toBe(lossInf ? yen(m.expiry.lossFinite?.x) : null);
+    if (lossInf) expect(Number.isFinite(r.expiry.put_side_max_loss_yen)).toBe(true);
+    const profitInf = m.expiry.maxProfit.value === Number.POSITIVE_INFINITY;
+    expect(r.expiry.max_profit_unbounded).toBe(profitInf);
+    expect(r.expiry.max_profit_yen).toBe(profitInf ? null : yen(m.expiry.maxProfit.value));
+    expect(r.expiry.put_side_max_profit_yen).toBe(
+      profitInf ? yen(m.expiry.profitFinite?.value) : null,
     );
     expect(r.expiry.breakevens_x).toEqual(m.expiry.breakevens.map(yen));
     expect(r.scenario_point.pnl_yen).toBe(yen(m.scenarioPoint.pnl));
@@ -247,5 +255,20 @@ describe('ツールの境界', () => {
     expect(sc?.skew).toBe(1);
     expect(Math.abs((sc?.dX ?? 0) - x0 * -0.06)).toBeLessThan(1);
     expect(scenarioOfResult({ error: 'x' }, x0)).toBeNull();
+  });
+});
+
+describe('position_summary のカードの最大損失（#260）', () => {
+  const card = (expiry: Record<string, unknown>) =>
+    toolCard('position_summary', {}, { expiry, greeks_now: { delta_large: 0 } }, 'ok').lines[0];
+  it('無限なら「無限」と put 側の値（put_side_max_loss_yen）', () => {
+    expect(
+      card({ max_loss_yen: null, max_loss_unbounded: true, put_side_max_loss_yen: -1_234_567 }),
+    ).toBe('満期の最大損失 無限（put 側 −1,235 千円）');
+  });
+  it('有限ならその値', () => {
+    expect(card({ max_loss_yen: -61_234, max_loss_unbounded: false })).toBe(
+      '満期の最大損失 −61,234 円',
+    );
   });
 });
