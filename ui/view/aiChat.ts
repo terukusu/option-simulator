@@ -599,6 +599,41 @@ export function chatItems(s: AiChatState): ChatItem[] {
   return out;
 }
 
+/** 今の発言（turn）の user の発言が会話に入ったか（#263。computing の間 = 文脈を作る前は false） */
+export function turnSent(s: AiChatState): boolean {
+  const t = s.turn;
+  return t !== null && s.messages.length > t.prev.length;
+}
+
+/**
+ * 送った発言の吹き出しが会話に出ているか（#263。上端を合わせてよいか）。流れの途中（turnSent）か、終わって失敗が残る
+ * （failed-user。送る前の失敗 = no_board などで send が無かったときも、失敗の行が会話の末尾に出る）
+ */
+export function sentShown(s: AiChatState): boolean {
+  return turnSent(s) || (s.turn === null && s.failed !== null);
+}
+
+/** 発言ごとの塊（#263）。先頭の user の項目から次の user の項目の手前まで。key は先頭の user の項目の key（変わらない） */
+export interface ChatGroup {
+  key: string;
+  items: ChatItem[];
+}
+
+/**
+ * 項目 → 発言ごとの塊（#263）。塊の key は先頭の user の項目の key なので、新しい発言を送っても前の塊は作り直されない
+ * （考え中の折りたたみ・表の横スクロールを保つ）。先頭に user の無い部分は key 'head'。最後の塊が最後の発言の塊
+ */
+export function chatGroups(items: readonly ChatItem[]): ChatGroup[] {
+  const out: ChatGroup[] = [];
+  for (const it of items) {
+    const g = out.at(-1);
+    if (it.kind === 'user' || !g)
+      out.push({ key: it.kind === 'user' ? it.key : 'head', items: [it] });
+    else g.items.push(it);
+  }
+  return out;
+}
+
 /**
  * β の定義から導ける値（#136 の評価。「β = 1 なので下落 1% ごとに IV +1.0pt」= 1% あたり β pt。docs/design.md 5.4）。
  * 文脈のシナリオの β だけを pt の値として足す（ほかの値は足さない = 取り違えを広く見逃さない）

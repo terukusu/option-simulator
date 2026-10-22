@@ -11,6 +11,7 @@ import {
   applyDraft,
   askPlan,
   type ChatItem,
+  chatGroups,
   chatItems,
   DRAFT_KEPT_TEXT,
   diagnoseBlocked,
@@ -21,6 +22,7 @@ import {
   PHASE_LABEL,
   remainingText,
   sendBlocked,
+  sentShown,
 } from '../../view/aiChat';
 import {
   AI_EVAL_KEEP_LABEL,
@@ -254,17 +256,53 @@ export function AiChat(p: {
     setText(draft.text);
   }, [draft]);
   const logRef = useRef<HTMLDivElement>(null);
-  // 新しい項目・流れの文で末尾へ（利用者が上へ戻して読んでいるときは動かさない）
+  // 送った発言を見せる（#263）: 新しい発言（入力欄・診断・定型・[AI に聞く]・パレット・[もう一度]）を始めたら、
+  // その吹き出しが会話に出た描き直し（sentShown。送る前の失敗の行を含む）で 1 回だけ、最後の発言の塊（.ai-tail）の
+  // 上端を枠の内側の上端に合わせる。
+  // 以後は自動で動かさない（返答・ツールのカード・失敗の行は下に伸びる。利用者のスクロールを戻さない）。
+  // sent: この表示で発言を送った（塊に枠の高さの min-height = 上端まで上げられる）。[新しい会話] で戻す
+  const sent = useRef(false);
+  const anchor = useRef(false);
+  // 送る前（戻した会話・開き直し）は今までどおり末尾へ（利用者が上へ戻して読んでいるときは動かさない）
   const stick = useRef(true);
-  // 新しい発言（パレットの診断・[AI に聞く] を含む）を始めたら末尾へ
+  // 描く前に決める（吹き出しが入る描き直しで塊に min-height が付いている = 上端まで上げられる）
   const startedAt = state.turn?.startedAt;
-  useEffect(() => {
-    if (startedAt !== undefined) stick.current = true;
-  }, [startedAt]);
+  const seenAt = useRef(startedAt);
+  if (startedAt !== undefined && startedAt !== seenAt.current) {
+    sent.current = true;
+    anchor.current = true;
+  }
+  seenAt.current = startedAt;
+  const ready = sentShown(state);
+  useLayoutEffect(() => {
+    const el = logRef.current;
+    const tail = el?.querySelector<HTMLElement>('.ai-tail[data-last]');
+    // 枠が見えていない（display: none）間は合わせずに待つ（見えた後の描き直しで合わせる）
+    if (!anchor.current || !ready || !el || !tail || el.clientHeight === 0) return;
+    anchor.current = false;
+    // 位置は画面の座標の差で求める（offsetParent に頼らない）
+    const pad = Number.parseFloat(getComputedStyle(el).paddingTop) || 0;
+    const top = el.getBoundingClientRect().top + el.clientTop + pad;
+    el.scrollTop += tail.getBoundingClientRect().top - top;
+  });
   useEffect(() => {
     const el = logRef.current;
-    if (el && stick.current) el.scrollTop = el.scrollHeight;
+    if (el && !sent.current && stick.current) el.scrollTop = el.scrollHeight;
   });
+  const groups = useMemo(() => chatGroups(items), [items]);
+  const row = (it: ChatItem) => (
+    <ChatRow
+      key={it.key}
+      item={it}
+      sources={sources}
+      x0={p.x0}
+      onApply={p.onApplyScenario}
+      onPropose={p.onApplyProposal}
+      onRetry={chat.retry}
+      canRetry={sendReason === null}
+      {...(p.onKeep && keepable.has(it.key) && { onKeep: p.onKeep })}
+    />
+  );
   const remaining = remainingText(
     status && !('error' in status) ? status : null,
     state.remainingUsd,
@@ -278,7 +316,6 @@ export function AiChat(p: {
     draftRef.current = null;
     setKept(false);
     setText('');
-    stick.current = true;
   };
   const long = nearLimit(state);
   return (
@@ -289,7 +326,12 @@ export function AiChat(p: {
           class="btn ghost sm"
           data-ai="reset"
           disabled={state.messages.length === 0 && state.failed === null && !turn}
-          onClick={chat.reset}
+          onClick={() => {
+            sent.current = false;
+            anchor.current = false;
+            stick.current = true;
+            chat.reset();
+          }}
         >
           新しい会話
         </button>
@@ -316,19 +358,19 @@ export function AiChat(p: {
         )}
         {items.length === 0 && <p class="ai-empty">{AI_EMPTY_TEXT}</p>}
         <div class="ai-log" role="log" aria-live="off">
-          {items.map((it) => (
-            <ChatRow
-              key={it.key}
-              item={it}
-              sources={sources}
-              x0={p.x0}
-              onApply={p.onApplyScenario}
-              onPropose={p.onApplyProposal}
-              onRetry={chat.retry}
-              canRetry={sendReason === null}
-              {...(p.onKeep && keepable.has(it.key) && { onKeep: p.onKeep })}
-            />
-          ))}
+          {groups.map((g, i) => {
+            const last = i === groups.length - 1;
+            return (
+              <div
+                key={g.key}
+                class="ai-tail"
+                data-last={last ? 'true' : undefined}
+                data-hold={last && sent.current ? 'true' : undefined}
+              >
+                {g.items.map(row)}
+              </div>
+            );
+          })}
         </div>
         {state.stop !== null && <p class="ai-note">{aiErrorText(state.stop)}</p>}
         {long && (
@@ -361,10 +403,7 @@ export function AiChat(p: {
             data-ai="diagnose"
             disabled={diagnoseReason !== null}
             title={diagnoseReason ?? undefined}
-            onClick={() => {
-              stick.current = true;
-              chat.diagnose();
-            }}
+            onClick={chat.diagnose}
           >
             このポジションを診断
           </button>
@@ -379,10 +418,7 @@ export function AiChat(p: {
                   text={pr.label}
                   disabled={why !== null}
                   {...(why !== null && { title: why })}
-                  onClick={() => {
-                    stick.current = true;
-                    chat.preset(pr);
-                  }}
+                  onClick={() => chat.preset(pr)}
                 />
               );
             })}
