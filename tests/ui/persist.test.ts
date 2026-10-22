@@ -153,14 +153,15 @@ describe('版 1 の保存の読み取り（後方互換の固定）', () => {
       },
     ]);
     expect(s.nextId).toBe(4);
+    // fixture の relative（Δσ 3%）は absolute・Δσ = 0 として読む（#260。アプリの状態に relative を入れない）
     expect(s.scenario).toEqual({
       days: 2.5,
       dX: -1200,
-      dSigma: 3,
+      dSigma: 0,
       skew: 0.5,
       beta: 1.2,
       ivDynamics: 'sticky_moneyness',
-      ivShift: 'relative',
+      ivShift: 'absolute',
     });
     expect({
       atmBasis: s.atmBasis,
@@ -243,7 +244,7 @@ describe('書き出しと往復', () => {
       { type: 'editLeg', id: 1, patch: { iv: 0.215, qty: 2, entry: 812.5 } },
       {
         type: 'setScenario',
-        patch: { days: 3, dX: 500, dSigma: -2, skew: 1, beta: 0.5, ivShift: 'relative' },
+        patch: { days: 3, dX: 500, dSigma: -2, skew: 1, beta: 0.5 },
       },
       { type: 'setFee', fee: 250 },
       { type: 'setFutureBasis', basis: 'decay' },
@@ -465,6 +466,29 @@ describe('検証（壊れた・他の版・余計なキー・範囲外）', () =
     expect(s.legs).toEqual([]);
     expect(s.scenario).toEqual(ZERO_SCENARIO);
     expect(s.feePerLot).toBe(300);
+  });
+
+  it('ivShift relative は absolute・Δσ = 0 として読む（足・ほかのシナリオは残す。#260）', () => {
+    const { saved, dropped } = ok(
+      readPositionDoc(
+        v1With((o) => {
+          o.position.scenario.ivShift = 'relative';
+          o.position.scenario.dSigma = 20;
+        }),
+      ),
+    );
+    expect(dropped).toBe(false);
+    expect(saved.position?.scenario.ivShift).toBe('absolute');
+    expect(saved.position?.scenario.dSigma).toBe(0);
+    expect(saved.position?.legs.length).toBeGreaterThan(0);
+  });
+
+  it('reducer の setScenario は relative を受けない（#260）', () => {
+    const s = reduce(initialState, {
+      type: 'setScenario',
+      patch: { ivShift: 'relative', dSigma: 5 },
+    });
+    expect(s.scenario).toEqual(initialState.scenario);
   });
 
   it('建値の上限 1e9 ちょうどは読める（入力 parseEntry と同じ範囲）', () => {

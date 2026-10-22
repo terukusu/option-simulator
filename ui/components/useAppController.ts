@@ -107,7 +107,13 @@ import {
   shareNote,
 } from '../view/persistNote';
 import { ghostSource, overlayBases, resolvePins } from '../view/pins';
-import { pnlDomains, scenarioFull, withScenarioFull, zoomViewport } from '../view/pnlChart';
+import {
+  clampScenarioDays,
+  pnlDomains,
+  scenarioFull,
+  withScenarioFull,
+  zoomViewport,
+} from '../view/pnlChart';
 import { positionModel } from '../view/position';
 import { readoutModel } from '../view/readout';
 import { clampDXInput, evalTimeTargets } from '../view/scenario';
@@ -661,6 +667,13 @@ export function useAppController(boot: Boot = NO_BOOT, margin: MarginPrefs = DEF
     () => (effCtx ? { ctx: effCtx, settings, params: marginParams, holidays } : null),
     [effCtx, settings, marginParams, holidays],
   );
+  // 効率の線のシナリオ（#260）: d はタイル・指標と同じく最遠の足の SQ に収める（足を消して scenario.days が上限を
+  // 超えて残っても、画面に出ていない d で線を描かない）
+  const effMaxDays = pnlBoard?.maxDays ?? 0;
+  const smileEffScenario = useMemo(
+    () => clampScenarioDays(state.scenario, effMaxDays),
+    [state.scenario, effMaxDays],
+  );
   const pinTargets = useMemo(
     () =>
       resolvePins(pins, {
@@ -1002,6 +1015,7 @@ export function useAppController(boot: Boot = NO_BOOT, margin: MarginPrefs = DEF
     smilePick,
     scenarioAtmView,
     smileEffBase,
+    smileEffScenario,
     pins,
     pinLine,
     pinTargets,

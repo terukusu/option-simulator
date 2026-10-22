@@ -130,8 +130,12 @@ function positionSummary(env: AiToolEnv, base: PnlBase): ToolResult {
   const e = m.expiry;
   const profitInf = e.maxProfit.value === Number.POSITIVE_INFINITY;
   const lossInf = e.maxLoss.value === Number.NEGATIVE_INFINITY;
-  const profit = profitInf ? e.profitFinite : e.maxProfit;
-  const loss = lossInf ? e.lossFinite : e.maxLoss;
+  // 無限なら max_*_yen は null（proposalSummary と同じ意味。#260）。画面のタイルが併記する有限の put 側の値は
+  // 別の名前 put_side_*（無限でなければ null）で返し、「最大損失」と読み違えないようにする
+  const profit = profitInf ? null : e.maxProfit;
+  const loss = lossInf ? null : e.maxLoss;
+  const profitPut = profitInf ? e.profitFinite : null;
+  const lossPut = lossInf ? e.lossFinite : null;
   return {
     x0: yen(ctx.x0),
     max_days: r1(base.maxDays),
@@ -162,6 +166,10 @@ function positionSummary(env: AiToolEnv, base: PnlBase): ToolResult {
       max_loss_yen: yen(loss?.value),
       max_loss_x: yen(loss?.x),
       max_loss_unbounded: lossInf,
+      put_side_max_profit_yen: yen(profitPut?.value),
+      put_side_max_profit_x: yen(profitPut?.x),
+      put_side_max_loss_yen: yen(lossPut?.value),
+      put_side_max_loss_x: yen(lossPut?.x),
       breakevens_x: e.breakevens.slice(0, 20).map(yen),
     },
     greeks_now: greeksOf(now.total),
@@ -563,7 +571,9 @@ export function toolCard(
         title,
         input: null,
         lines: [
-          `満期の最大損失 ${cardYen(e.max_loss_yen)}${e.max_loss_unbounded === true ? '（上は無限）' : ''}`,
+          e.max_loss_unbounded === true
+            ? `満期の最大損失 無限（put 側 ${cardYen(e.put_side_max_loss_yen)}）`
+            : `満期の最大損失 ${cardYen(e.max_loss_yen)}`,
           `Δ ${fmtNum(num(obj(r.greeks_now).delta_large), 2)} 枚`,
         ],
         applicable: false,

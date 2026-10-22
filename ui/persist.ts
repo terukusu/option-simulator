@@ -557,9 +557,12 @@ function readScenario(v: unknown): Scenario | null {
     skew: s.skew,
     beta: s.beta,
     ivDynamics: s.ivDynamics,
-    ivShift: s.ivShift,
+    ivShift: 'absolute',
   };
-  return validScenarioPatch(scenario) ? scenario : null;
+  if (!validScenarioPatch(scenario)) return null;
+  // relative（IV の % 増減）はアプリの状態に入れない（#260。切替の部品は無い）。範囲の検査は書かれた値のまま
+  // して、% の Δσ は pt に直せないので absolute・Δσ = 0 として読む（ほかの値と足は残す）
+  return s.ivShift === 'relative' ? { ...scenario, dSigma: 0 } : scenario;
 }
 
 /** ISO 8601 の時刻 → epoch ミリ秒（読めなければ null）。 */

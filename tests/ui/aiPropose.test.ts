@@ -10,6 +10,7 @@ import {
   proposalCard,
   SCAN_MAX_ROWS,
   STRUCTURES,
+  strikeWidths,
 } from '../../ui/view/aiPropose';
 import { type AiToolEnv, isToolError, runTool, toolCard } from '../../ui/view/aiTools';
 import { metricsModel } from '../../ui/view/metrics';
@@ -469,5 +470,62 @@ describe('検査の細部（#139 レビュー L2・L4）', () => {
         envOf('strangle_sell'),
       ),
     ).toEqual({ error: 'bad_input' });
+  });
+});
+
+describe('形の幅（#260。AI が行使価格の差を自分で引かずに写す）', () => {
+  const op = (type: 'put' | 'call', strike: number, side: 'buy' | 'sell', expiry = '2026-11') => ({
+    leg: {
+      kind: 'option' as const,
+      product: 'op_large' as const,
+      type,
+      expiry,
+      strike,
+      side,
+      qty: 1,
+      entry: 100,
+    },
+  });
+  it('アイアンコンドル: put・call の翼の幅と売りの間', () => {
+    expect(
+      strikeWidths([
+        op('put', 61000, 'buy'),
+        op('put', 63000, 'sell'),
+        op('call', 71000, 'sell'),
+        op('call', 72500, 'buy'),
+      ]),
+    ).toEqual({ put_width_x: 2000, call_width_x: 1500, short_gap_x: 8000 });
+  });
+  it('put_ratio（1 買 2 売）は縦の幅、ストラドルは間 0、決まらない形は null', () => {
+    expect(strikeWidths([op('put', 66000, 'buy'), op('put', 63000, 'sell')])).toEqual({
+      put_width_x: 3000,
+      call_width_x: null,
+      short_gap_x: null,
+    });
+    expect(strikeWidths([op('put', 67000, 'sell'), op('call', 67000, 'sell')]).short_gap_x).toBe(0);
+    // 同じ売買だけ・行使価格が 3 つ・2 限月は幅を出さない
+    expect(
+      strikeWidths([op('put', 62000, 'sell'), op('put', 63000, 'sell')]).put_width_x,
+    ).toBeNull();
+    expect(
+      strikeWidths([op('put', 60000, 'buy'), op('put', 63000, 'sell'), op('put', 66000, 'buy')])
+        .put_width_x,
+    ).toBeNull();
+    expect(strikeWidths([op('put', 61000, 'buy'), op('put', 63000, 'sell', '2026-12')])).toEqual({
+      put_width_x: null,
+      call_width_x: null,
+      short_gap_x: null,
+    });
+  });
+  it('structure_candidates の iron_condor の要約の幅 = 候補の足の行使価格の差', () => {
+    const env = envOf('iron_condor');
+    const r = run(env, 'structure_candidates', { structure: 'iron_condor' });
+    for (const c of r.candidates) {
+      const k = (t: string, side: string) =>
+        c.legs.find((l: { type: string; side: string }) => l.type === t && l.side === side).k;
+      expect(c.summary.put_width_x).toBe(k('P', 'sell') - k('P', 'buy'));
+      expect(c.summary.call_width_x).toBe(k('C', 'buy') - k('C', 'sell'));
+      expect(c.summary.short_gap_x).toBe(k('C', 'sell') - k('P', 'sell'));
+    }
   });
 });

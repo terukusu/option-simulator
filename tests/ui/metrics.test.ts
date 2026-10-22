@@ -101,6 +101,26 @@ describe('板から入れた直後（AC-1 = AC21）', () => {
     expect(Math.abs(md.premium.entryMismatch)).toBeGreaterThan(1);
     expect(Math.abs(md.scenarioPoint.pnl)).toBeGreaterThan(1);
   });
+
+  it('建値ずれの向き（#260）: 内訳 = 足の詳細の合計 = シナリオ 0 の理論損益（OP だけ・手数料 0）', () => {
+    // 建値 1 円の深い ITM の put 買い = 理論より安く買った（有利）。スマイルの IV を使う足
+    const deep = run(s, add(m1.id, 75_000, 'put', 'buy'), {
+      type: 'editLeg',
+      id: 5,
+      patch: { entry: 1 },
+    });
+    // 理論より高く売った（有利）: 板の行の売り足の IV を手で下げる = 建値が理論価格より高い
+    const both = run(deep, { type: 'editLeg', id: 1, patch: { iv: 0.05 } });
+    for (const st of [deep, both]) {
+      const { m } = metricsOf(st);
+      const rows = positionModel(chain, st.legs, st.atmBasis, CALENDAR, DEFAULT_SETTINGS).rows;
+      const sumRows = rows.reduce((a, r) => a + (r.mismatchYen ?? 0), 0);
+      expect(m.premium.entryMismatch).toBeCloseTo(sumRows, 6);
+      expect(m.premium.entryMismatch).toBeCloseTo(m.scenarioPoint.pnl, 6);
+      // 有利な建値ずれ → 損益への影響は正
+      expect(m.premium.entryMismatch).toBeGreaterThan(1);
+    }
+  });
 });
 
 describe('テール表（AC-2 = AC22）', () => {

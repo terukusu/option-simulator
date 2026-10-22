@@ -66,9 +66,15 @@ POSITION_SUMMARY = Obj({
                     LEG_OPTIONAL | {"leg_no"}), MAX_LEGS),
     "premium": Obj({"received_yen": YEN, "paid_yen": YEN, "net_yen": YEN, "fees_yen": YEN,
                     "net_after_fees_yen": YEN}),
+    # 無限なら max_*_yen・max_*_x は null（#260。proposal の要約と同じ意味）。有限の put 側の値は put_side_*（無限で
+    # なければ null）。put_side_* は #260 で足した。デプロイ前に開いた画面（古い JS）は送らないので任意
     "expiry": Obj({"max_profit_yen": YEN, "max_profit_x": LEVEL, "max_profit_unbounded": Bool(),
                    "max_loss_yen": YEN, "max_loss_x": LEVEL, "max_loss_unbounded": Bool(),
-                   "breakevens_x": Arr(LEVEL, 20)}),
+                   "put_side_max_profit_yen": YEN, "put_side_max_profit_x": LEVEL,
+                   "put_side_max_loss_yen": YEN, "put_side_max_loss_x": LEVEL,
+                   "breakevens_x": Arr(LEVEL, 20)},
+                  frozenset({"put_side_max_profit_yen", "put_side_max_profit_x",
+                             "put_side_max_loss_yen", "put_side_max_loss_x"})),
     "greeks_now": GREEKS,
     "scenario_point": Obj({"days": DAYS, "dx_pct": PCT, "x": LEVEL, "pnl_yen": YEN, "greeks": GREEKS}),
 })
@@ -309,7 +315,9 @@ SUMMARY = Obj({
     "max_profit_unbounded": Bool(), "max_loss_yen": YEN, "max_loss_x": LEVEL, "max_loss_unbounded": Bool(),
     "margin_yen": YEN, "room_yen": YEN, "multiple": RATIO, "delta_large": LOTS, "delta_mini": LOTS,
     "theta_yen_per_day": YEN, "vega_yen_per_pt": YEN, "call_levels_x": Arr(LEVEL, CALL_LEVELS_MAX),
-})
+    # 形の幅（#260。AI が行使価格の差を自分で引かずに写す）。デプロイ前に開いた画面（古い JS）は送らないので任意
+    "put_width_x": LEVEL, "call_width_x": LEVEL, "short_gap_x": Num(-1e8, 1e8, nullable=True),
+}, frozenset({"put_width_x", "call_width_x", "short_gap_x"}))
 
 
 STRIKE_SCAN_INPUT = Obj({
@@ -461,7 +469,9 @@ def _spec(name, description, result, input_shape=NO_INPUT, input_schema=None) ->
 REGISTRY: Registry = {t.name: t for t in (
     _spec("position_summary",
           "今のポジションの要約（画面の指標と同じ計算）。足ごとの売買・枚数・建値・IV（%）・Δ、"
-          "受取 / 支払 / 差し引き / 手数料（円）、満期の最大利益・最大損失（円）とその原資産・無限か、"
+          "受取 / 支払 / 差し引き / 手数料（円）、満期の最大利益・最大損失（円）とその原資産・無限か"
+          "（無限なら max_*_yen は null。そのとき有限の put 側の値は put_side_max_*。"
+          "これは最大損失・最大利益ではない）、"
           "損益分岐点、今の合計グリーク（Δ はラージ枚と"
           "ミニ枚、Γ は原資産 100 円あたりの Δ の変化、Θ は円 / 日、V は円 / IV 1pt）、今のシナリオの点の損益。"
           "診断では最初の <context> の precomputed に入っている", POSITION_SUMMARY),
@@ -530,14 +540,17 @@ REGISTRY: Registry = {t.name: t for t in (
           "組み合わせの候補（#139）。型を指定すると、simulator が板の両気配の行から短い足の |Δ| 0.10・0.15・0.20・"
           "0.25・0.30 で候補（最大 5 つ。id c1〜）を作り、単体で評価する: 足（行使価格・建値）・損益分岐・"
           "原資産 ±10・20% の SQ 損益（shocks）・summary（受払・満期の最大利益 / 最大損失（無限なら null と"
-          "*_unbounded）・必要証拠金・余力・何倍・Δ・Θ・V・追証の水準 call_levels_x（資金があるとき））。"
-          "行使価格は自分で選ばず、ここの候補から選ぶ", CANDIDATES, CANDIDATES_INPUT, CANDIDATES_INPUT_SCHEMA),
+          "*_unbounded）・必要証拠金・余力・何倍・Δ・Θ・V・追証の水準 call_levels_x（資金があるとき）・"
+          "形の幅（put_width_x・call_width_x = 縦の幅、short_gap_x = 売りの put と call の間。円、"
+          "決まらなければ null。幅は行使価格を引き算せずにここから写す））。行使価格は自分で選ばず、ここの候補から選ぶ",
+          CANDIDATES, CANDIDATES_INPUT, CANDIDATES_INPUT_SCHEMA),
     _spec("propose_position",
           "ポジションの提案を画面のカードにする（#139）。target=current は今のタブへの差分（changes）、new_tab は"
           "新しいタブの足（legs か candidate）。行使価格は自分で決めない: 結果の値を写すか、k を省いて"
           " max_loss_floor_yen / abs_delta / candidate で simulator に板から選ばせる。"
           "画面が今の板で検査（板に無い限月・行使価格は error）し、差分（diff）と前 → 後の要約（満期の最大損失・"
-          "必要証拠金・Δ・追証の水準など。before / after）を返す。利用者はカードのボタンで反映し、元に戻せる",
+          "必要証拠金・Δ・追証の水準・形の幅 put_width_x / call_width_x / short_gap_x など。before / after）"
+          "を返す。利用者はカードのボタンで反映し、元に戻せる",
           PROPOSE_POSITION, PROPOSE_INPUT, PROPOSE_INPUT_SCHEMA),
 )}
 

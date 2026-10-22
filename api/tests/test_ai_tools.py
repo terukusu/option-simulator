@@ -286,6 +286,48 @@ def test_position_summary_without_leg_no_still_passes():
     REGISTRY["position_summary"].result_shape.check(old, "r")
 
 
+def test_position_summary_put_side_keys():
+    """#260: 無限なら max_loss_yen は null で有限の put 側は put_side_*。古い画面（put_side_* なし）も通す"""
+    shape = REGISTRY["position_summary"].result_shape
+    cur = copy.deepcopy(SAMPLE["cases"][0]["context"]["precomputed"]["position_summary"])
+    unbounded = [c["context"]["precomputed"]["position_summary"] for c in SAMPLE["cases"]
+                 if c["context"]["precomputed"]["position_summary"]["expiry"]["max_loss_unbounded"]]
+    assert unbounded, "合成のケースに右端が無限のポジションが無い"
+    for ps in unbounded:
+        assert ps["expiry"]["max_loss_yen"] is None
+        assert isinstance(ps["expiry"]["put_side_max_loss_yen"], int)
+    old = copy.deepcopy(cur)
+    for k in ("put_side_max_profit_yen", "put_side_max_profit_x", "put_side_max_loss_yen", "put_side_max_loss_x"):
+        old["expiry"].pop(k, None)
+    shape.check(old, "r")
+    shape.check(cur, "r")
+
+
+def test_proposal_summary_widths_optional():
+    """#260: 提案の要約の形の幅（put_width_x・call_width_x・short_gap_x）。古い画面（キーなし）も通す"""
+    from simulator_api.ai.tools import SUMMARY
+
+    found = []
+
+    def walk(v):
+        if isinstance(v, dict):
+            if "short_gap_x" in v:
+                found.append(v)
+            for x in v.values():
+                walk(x)
+        elif isinstance(v, list):
+            for x in v:
+                walk(x)
+
+    walk(SAMPLE)
+    assert found, "見本に形の幅の入った要約が無い"
+    for summ in found:
+        SUMMARY.check(summ, "r")
+        old = {k: v for k, v in summ.items() if k not in ("put_width_x", "call_width_x", "short_gap_x")}
+        SUMMARY.check(old, "r")
+    assert any(isinstance(x["put_width_x"], int) for x in found)
+
+
 def test_iv_stats_sample_passes_shapes():
     """#138・#158: iv_stats の見本（合成の日次の値）の入力・結果・失敗が tools.py の形を通り、1 往復の要求の
     本文になる"""

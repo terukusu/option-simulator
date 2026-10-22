@@ -7,7 +7,8 @@
  *
  * - 照合の値の単位はキーの名前で決める（api/src/simulator_api/ai/tools.py の規則と同じ）: `yen` を含む → 金額、
  *   `pct` → %、`_pt` → pt、`delta`・`gamma`・`qty` → 枚、`days` → 日、`ratio`・`multiple` → 倍、
- *   `x`・`k`・`x0`・`forward`・`atm_k`・`price`・`*_x` → 水準（円）、`iv`・`atm_iv` → %。配列の要素は親のキー
+ *   `x`・`k`・`x0`・`forward`・`atm_k`・`price`・`x_range`・`*_x` → 水準（円）、`iv`・`atm_iv` → %、`n_hv20` → 日。
+ *   配列の要素は親のキー
  * - 一致: 単位が合う値を、トークンの単位（円・千円・万円・億円）で割ってトークンの小数の桁に四捨五入したもの
  *   （千円・万円・億円は切り捨ても。#240）が、トークンの値と絶対値で等しい。「200 円台」は 200〜299 円に値があれば一致。符号を書いたトークン（− / ▲ / △ / +）は向きも合うこと（言葉の「損失 617 千円」は
  *   絶対値だけ）。単位の無いトークンはどの単位の値とも照合する
@@ -55,7 +56,10 @@ export interface NumberCheck {
   matched: number;
 }
 
-const LEVEL_KEYS = new Set(['x', 'k', 'x0', 'forward', 'atm_k', 'price', 'strike']);
+/** 水準（円）のキー。x_range は文脈の横軸の範囲（円の水準の 2 つ。#260） */
+const LEVEL_KEYS = new Set(['x', 'k', 'x0', 'forward', 'atm_k', 'price', 'strike', 'x_range']);
+/** 日数のキー（名前に days を含まないもの）。n_hv20 = IV − HV20 の日次の件数 = 日数（返答は「597 日」と書く。#260） */
+const DAYS_KEYS = new Set(['n_hv20']);
 
 /** キーの名前 → 単位の種類 */
 export function classOfKey(key: string): ValueClass {
@@ -65,7 +69,7 @@ export function classOfKey(key: string): ValueClass {
   if (k.endsWith('_pt') || k.includes('_pt_')) return 'pt';
   if (k.includes('delta') || k.includes('gamma') || k === 'qty' || k.includes('lots'))
     return 'lots';
-  if (k.includes('days')) return 'days';
+  if (k.includes('days') || DAYS_KEYS.has(k)) return 'days';
   if (k.includes('ratio') || k === 'multiple') return 'ratio';
   if (LEVEL_KEYS.has(k) || k.endsWith('_x') || k.endsWith('_k')) return 'level';
   if (k === 'iv' || k === 'atm_iv') return 'pct';

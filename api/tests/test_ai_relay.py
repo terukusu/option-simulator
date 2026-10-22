@@ -550,7 +550,7 @@ def test_system_prompt_has_preset_rules():
     assert relay.PRESET_PREFIX in relay.SYSTEM_PROMPT and "simulator:presets" in relay.SYSTEM_PROMPT
     assert "## 崩れ方" not in relay.SYSTEM_PROMPT
     # 数字の規則（#140 の評価の反映）: 万円に直さない・符号を裏返さない・差と率を自分で出さない（dx_pct を使う）
-    for rule in ("万円・億円に直さない", "値の符号を自分で裏返さない", "scenario.dx_pct"):
+    for rule in ("万円・億円に直さない", "値の符号を自分で裏返さない", "scenario.dx_pct", "書き直しの経緯を書かない"):
         assert rule in relay.SYSTEM_PROMPT
     assert "約 62 万円" not in relay.SYSTEM_PROMPT
     assert len(REGISTRY) == 11

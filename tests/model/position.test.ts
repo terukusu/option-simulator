@@ -183,11 +183,12 @@ describe('板から入れた直後の損益 = 0（AC21）', () => {
     expect(p.option?.anchor).toBeCloseTo(smile?.sigma(Math.log(k / M1.F)) ?? 0, 15);
     const theo = black76Price('call', M1.F, k, T, p.option?.anchor ?? 0, ctx.r);
     expect(p.option?.mismatch).toBeCloseTo(leg.entry - theo, 9);
-    // 売りで理論より安く売った → 不利（正）。損益はその分だけ負
+    // 売りで理論より安く売った → 不利（損益への影響は負。#260 で足の詳細と同じ向きに）。損益はその分だけ負
     const s = premiumSummary([p]);
-    expect(s.entryMismatch).toBeCloseTo((theo - leg.entry) * 1000, 6);
+    expect(s.entryMismatch).toBeCloseTo((leg.entry - theo) * 1000, 6);
+    expect(s.entryMismatch).toBeLessThan(0);
     const e = evaluateLeg(p, ctx.x0, ZERO_SCENARIO, ctx);
-    expect(e.pnl).toBeCloseTo(-s.entryMismatch, 6);
+    expect(e.pnl).toBeCloseTo(s.entryMismatch, 6);
   });
 
   it('IV を編集した足はその IV で評価する', () => {
@@ -307,5 +308,48 @@ describe('F が決まらない限月（NaN を広げない）', () => {
     const prof = expiryProfile(legs, noF);
     expect(prof.points.every((pt) => Number.isFinite(pt.pnl))).toBe(true);
     expect(prof.kinks).toEqual([64000]);
+  });
+});
+
+describe('% モード（basisMode = pct）の Δ・Γ の定義（#260。設計 5.6）', () => {
+  // Δ は各足の原資産 F_i あたり（dF/dX を掛けない。5.8 のヘッジと同じ定義）、Γ は「X が 100 円動いたときの
+  // その Δ の変化」= Σ 枚数 × γ_i × dF_i/dX × 乗数 / 1,000 × 100（dF_i/dX = F_i / X₀ を 1 回）
+  const pct = { ...DEFAULT_SETTINGS, basisMode: 'pct' as const };
+  // β = 0: X を動かしても IV が変わらない（Γ の中心差分を IV の変化と混ぜない）
+  const sc: Scenario = { ...ZERO_SCENARIO, beta: 0 };
+  const legs = preparePosition(
+    [
+      opLeg(M2, 'put', 66000, 'sell', 2),
+      opLeg(M2, 'call', 69000, 'buy'),
+      opLeg(M1, 'put', 66500, 'sell'),
+    ],
+    ctx,
+    pct,
+  );
+  const deltaAt = (x: number) =>
+    evaluatePosition(legs, { ...sc, dX: x - ctx.x0 }, ctx, pct, x).total.deltaLarge;
+
+  it('Δ = Σ 枚数 × δ(F_i) × 乗数 / 1,000（dF/dX を掛けない）', () => {
+    const e = evaluatePosition(legs, sc, ctx, pct);
+    let want = 0;
+    for (const p of legs) {
+      const g = evaluateLeg(p, ctx.x0, sc, ctx, pct).greeks;
+      want += (p.sign * p.leg.qty * p.multiplier * g.delta) / 1000;
+    }
+    expect(e.total.deltaLarge).toBeCloseTo(want, 12);
+  });
+
+  it('Γ / 100 円 = その Δ の X についての中心差分 × 100（dF/dX を 1 回）', () => {
+    const e = evaluatePosition(legs, sc, ctx, pct);
+    const h = 1;
+    const fd = ((deltaAt(ctx.x0 + h) - deltaAt(ctx.x0 - h)) / (2 * h)) * 100;
+    expect(e.total.gammaPer100).toBeCloseTo(fd, 6);
+    // dF/dX を掛けない Γ とは違う（M2 の F / X₀ ≠ 1 の分）
+    let noSlope = 0;
+    for (const p of legs) {
+      const g = evaluateLeg(p, ctx.x0, sc, ctx, pct).greeks;
+      noSlope += ((p.sign * p.leg.qty * p.multiplier * g.gamma) / 1000) * 100;
+    }
+    expect(Math.abs(e.total.gammaPer100 - noSlope)).toBeGreaterThan(1e-6);
   });
 });

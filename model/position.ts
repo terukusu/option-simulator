@@ -529,7 +529,10 @@ export interface PremiumSummary {
   netAfterFees: number;
   /** スプレッドコスト Σ |建値 − mid| 方向込み（建値側が不利なら正）。mid の無い足は除く */
   spreadCost: number;
-  /** 建値ずれ（円）Σ (建値 − 理論価格) × 売買符号 × 枚数 × 乗数（不利なら正） */
+  /**
+   * 建値ずれ（円）= シナリオ 0 の理論損益への影響 Σ −(建値 − 理論価格) × 売買符号 × 枚数 × 乗数（不利なら負。
+   * 足の詳細の建値ずれの合計と同じ向き。手数料は含めない。#260）
+   */
   entryMismatch: number;
 }
 
@@ -554,7 +557,7 @@ export function premiumSummary(
     if (p.leg.mid !== undefined && p.leg.mid !== null) {
       spreadCost += (p.leg.entry - p.leg.mid) * p.sign * p.leg.qty * p.multiplier;
     }
-    if (p.option) entryMismatch += p.option.mismatch * p.sign * p.leg.qty * p.multiplier;
+    if (p.option) entryMismatch -= p.option.mismatch * p.sign * p.leg.qty * p.multiplier;
   }
   return {
     received,
@@ -563,6 +566,7 @@ export function premiumSummary(
     fees,
     netAfterFees: received - paid - optionFees,
     spreadCost,
-    entryMismatch,
+    // || 0: −0 を 0 にする
+    entryMismatch: entryMismatch || 0,
   };
 }

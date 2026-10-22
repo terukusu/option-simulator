@@ -195,6 +195,10 @@
        "max_loss_yen": -63220000,
        "max_loss_x": 0,
        "max_loss_unbounded": false,
+       "put_side_max_profit_yen": null,
+       "put_side_max_profit_x": null,
+       "put_side_max_loss_yen": null,
+       "put_side_max_loss_x": null,
        "breakevens_x": [
         63220
        ]
@@ -875,6 +879,10 @@
        "max_loss_yen": -1310000,
        "max_loss_x": 0,
        "max_loss_unbounded": false,
+       "put_side_max_profit_yen": null,
+       "put_side_max_profit_x": null,
+       "put_side_max_loss_yen": null,
+       "put_side_max_loss_x": null,
        "breakevens_x": [
         64310,
         71690
@@ -1624,9 +1632,13 @@
        "max_profit_yen": 1446193,
        "max_profit_x": 66000,
        "max_profit_unbounded": false,
-       "max_loss_yen": -57953807,
-       "max_loss_x": 0,
+       "max_loss_yen": null,
+       "max_loss_x": null,
        "max_loss_unbounded": true,
+       "put_side_max_profit_yen": null,
+       "put_side_max_profit_x": null,
+       "put_side_max_loss_yen": -57953807,
+       "put_side_max_loss_x": 0,
        "breakevens_x": [
         64393,
         80462
@@ -2287,6 +2299,10 @@
        "max_loss_yen": -870000,
        "max_loss_x": 0,
        "max_loss_unbounded": false,
+       "put_side_max_profit_yen": null,
+       "put_side_max_profit_x": null,
+       "put_side_max_loss_yen": null,
+       "put_side_max_loss_x": null,
        "breakevens_x": []
       },
       "greeks_now": {
@@ -4751,6 +4767,9 @@
       "delta_mini": 0.24,
       "theta_yen_per_day": 19967,
       "vega_yen_per_pt": -32579,
+      "put_width_x": 3000,
+      "call_width_x": null,
+      "short_gap_x": null,
       "call_levels_x": []
      },
      "best_k": 59500,
@@ -5062,6 +5081,9 @@
       "delta_mini": 0.24,
       "theta_yen_per_day": 19967,
       "vega_yen_per_pt": -32579,
+      "put_width_x": 3000,
+      "call_width_x": null,
+      "short_gap_x": null,
       "call_levels_x": []
      },
      "best_k": null,
@@ -5434,6 +5456,9 @@
         "delta_mini": 1,
         "theta_yen_per_day": 19281,
         "vega_yen_per_pt": -34265,
+        "put_width_x": null,
+        "call_width_x": null,
+        "short_gap_x": null,
         "call_levels_x": [
          57106
         ]
@@ -5493,6 +5518,9 @@
         "delta_mini": 1.47,
         "theta_yen_per_day": 23388,
         "vega_yen_per_pt": -45102,
+        "put_width_x": null,
+        "call_width_x": null,
+        "short_gap_x": null,
         "call_levels_x": [
          58397
         ]
@@ -5552,6 +5580,9 @@
         "delta_mini": 1.97,
         "theta_yen_per_day": 26653,
         "vega_yen_per_pt": -54434,
+        "put_width_x": null,
+        "call_width_x": null,
+        "short_gap_x": null,
         "call_levels_x": [
          59300
         ]
@@ -5611,6 +5642,9 @@
         "delta_mini": 2.49,
         "theta_yen_per_day": 28875,
         "vega_yen_per_pt": -62165,
+        "put_width_x": null,
+        "call_width_x": null,
+        "short_gap_x": null,
         "call_levels_x": [
          59990
         ]
@@ -5670,6 +5704,9 @@
         "delta_mini": 2.98,
         "theta_yen_per_day": 30306,
         "vega_yen_per_pt": -67933,
+        "put_width_x": null,
+        "call_width_x": null,
+        "short_gap_x": null,
         "call_levels_x": [
          60494
         ]
@@ -5744,6 +5781,9 @@
         "delta_mini": -1.01,
         "theta_yen_per_day": 13626,
         "vega_yen_per_pt": -34664,
+        "put_width_x": null,
+        "call_width_x": null,
+        "short_gap_x": null,
         "call_levels_x": [
          78544
         ]
@@ -5803,6 +5843,9 @@
         "delta_mini": -1.47,
         "theta_yen_per_day": 17430,
         "vega_yen_per_pt": -45098,
+        "put_width_x": null,
+        "call_width_x": null,
+        "short_gap_x": null,
         "call_levels_x": [
          77467
         ]
@@ -5862,6 +5905,9 @@
         "delta_mini": -1.99,
         "theta_yen_per_day": 21108,
         "vega_yen_per_pt": -54628,
+        "put_width_x": null,
+        "call_width_x": null,
+        "short_gap_x": null,
         "call_levels_x": [
          76658
         ]
@@ -5921,6 +5967,9 @@
         "delta_mini": -2.45,
         "theta_yen_per_day": 23858,
         "vega_yen_per_pt": -61578,
+        "put_width_x": null,
+        "call_width_x": null,
+        "short_gap_x": null,
         "call_levels_x": [
          76086
         ]
@@ -5980,6 +6029,9 @@
         "delta_mini": -2.97,
         "theta_yen_per_day": 26321,
         "vega_yen_per_pt": -67767,
+        "put_width_x": null,
+        "call_width_x": null,
+        "short_gap_x": null,
         "call_levels_x": [
          75548
         ]
@@ -6064,6 +6116,9 @@
         "delta_mini": -0.02,
         "theta_yen_per_day": 32907,
         "vega_yen_per_pt": -68928,
+        "put_width_x": null,
+        "call_width_x": null,
+        "short_gap_x": 14250,
         "call_levels_x": [
          57007,
          78859
@@ -6134,6 +6189,9 @@
         "delta_mini": 0,
         "theta_yen_per_day": 40819,
         "vega_yen_per_pt": -90200,
+        "put_width_x": null,
+        "call_width_x": null,
+        "short_gap_x": 11125,
         "call_levels_x": [
          58203,
          77936
@@ -6204,6 +6262,9 @@
         "delta_mini": -0.01,
         "theta_yen_per_day": 47761,
         "vega_yen_per_pt": -109062,
+        "put_width_x": null,
+        "call_width_x": null,
+        "short_gap_x": 8750,
         "call_levels_x": [
          58984,
          77302
@@ -6274,6 +6335,9 @@
         "delta_mini": 0.04,
         "theta_yen_per_day": 52734,
         "vega_yen_per_pt": -123743,
+        "put_width_x": null,
+        "call_width_x": null,
+        "short_gap_x": 6875,
         "call_levels_x": [
          59559,
          76916
@@ -6344,6 +6408,9 @@
         "delta_mini": 0.02,
         "theta_yen_per_day": 56626,
         "vega_yen_per_pt": -135700,
+        "put_width_x": null,
+        "call_width_x": null,
+        "short_gap_x": 5250,
         "call_levels_x": [
          59916,
          76563
@@ -6429,6 +6496,9 @@
         "delta_mini": -0.39,
         "theta_yen_per_day": 63724,
         "vega_yen_per_pt": -156099,
+        "put_width_x": null,
+        "call_width_x": null,
+        "short_gap_x": 0,
         "call_levels_x": [
          60259,
          75847
@@ -6532,6 +6602,9 @@
         "delta_mini": -0.23,
         "theta_yen_per_day": 8446,
         "vega_yen_per_pt": -22157,
+        "put_width_x": 1750,
+        "call_width_x": 2250,
+        "short_gap_x": 14250,
         "call_levels_x": [
          57475,
          78535
@@ -6620,6 +6693,9 @@
         "delta_mini": -0.28,
         "theta_yen_per_day": 9680,
         "vega_yen_per_pt": -27459,
+        "put_width_x": 1875,
+        "call_width_x": 2250,
+        "short_gap_x": 11125,
         "call_levels_x": [
          58873,
          77452
@@ -6708,6 +6784,9 @@
         "delta_mini": -0.3,
         "theta_yen_per_day": 10815,
         "vega_yen_per_pt": -30629,
+        "put_width_x": 1875,
+        "call_width_x": 2125,
+        "short_gap_x": 8750,
         "call_levels_x": [
          59874,
          76639
@@ -6796,6 +6875,9 @@
         "delta_mini": -0.28,
         "theta_yen_per_day": 10461,
         "vega_yen_per_pt": -31192,
+        "put_width_x": 1875,
+        "call_width_x": 2125,
+        "short_gap_x": 6875,
         "call_levels_x": [
          60692,
          76050
@@ -6884,6 +6966,9 @@
         "delta_mini": -0.3,
         "theta_yen_per_day": 10348,
         "vega_yen_per_pt": -31740,
+        "put_width_x": 2000,
+        "call_width_x": 2125,
+        "short_gap_x": 5250,
         "call_levels_x": [
          61278,
          75505
@@ -6968,6 +7053,9 @@
         "delta_mini": 0.28,
         "theta_yen_per_day": 2987,
         "vega_yen_per_pt": -7590,
+        "put_width_x": 1750,
+        "call_width_x": null,
+        "short_gap_x": null,
         "call_levels_x": [
          57434
         ]
@@ -7036,6 +7124,9 @@
         "delta_mini": 0.44,
         "theta_yen_per_day": 3288,
         "vega_yen_per_pt": -9972,
+        "put_width_x": 1875,
+        "call_width_x": null,
+        "short_gap_x": null,
         "call_levels_x": [
          58855
         ]
@@ -7104,6 +7195,9 @@
         "delta_mini": 0.63,
         "theta_yen_per_day": 3870,
         "vega_yen_per_pt": -11923,
+        "put_width_x": 1875,
+        "call_width_x": null,
+        "short_gap_x": null,
         "call_levels_x": [
          59877
         ]
@@ -7172,6 +7266,9 @@
         "delta_mini": 0.8,
         "theta_yen_per_day": 3670,
         "vega_yen_per_pt": -12625,
+        "put_width_x": 1875,
+        "call_width_x": null,
+        "short_gap_x": null,
         "call_levels_x": [
          60700
         ]
@@ -7240,6 +7337,9 @@
         "delta_mini": 0.99,
         "theta_yen_per_day": 3248,
         "vega_yen_per_pt": -13177,
+        "put_width_x": 2000,
+        "call_width_x": null,
+        "short_gap_x": null,
         "call_levels_x": [
          61323
         ]
@@ -7323,6 +7423,9 @@
         "delta_mini": -0.51,
         "theta_yen_per_day": 5459,
         "vega_yen_per_pt": -14567,
+        "put_width_x": null,
+        "call_width_x": 2250,
+        "short_gap_x": null,
         "call_levels_x": [
          78450
         ]
@@ -7391,6 +7494,9 @@
         "delta_mini": -0.73,
         "theta_yen_per_day": 6392,
         "vega_yen_per_pt": -17487,
+        "put_width_x": null,
+        "call_width_x": 2250,
+        "short_gap_x": null,
         "call_levels_x": [
          77317
         ]
@@ -7459,6 +7565,9 @@
         "delta_mini": -0.92,
         "theta_yen_per_day": 6946,
         "vega_yen_per_pt": -18706,
+        "put_width_x": null,
+        "call_width_x": 2125,
+        "short_gap_x": null,
         "call_levels_x": [
          76431
         ]
@@ -7527,6 +7636,9 @@
         "delta_mini": -1.08,
         "theta_yen_per_day": 6791,
         "vega_yen_per_pt": -18567,
+        "put_width_x": null,
+        "call_width_x": 2125,
+        "short_gap_x": null,
         "call_levels_x": [
          75773
         ]
@@ -7595,6 +7707,9 @@
         "delta_mini": -1.29,
         "theta_yen_per_day": 7100,
         "vega_yen_per_pt": -18564,
+        "put_width_x": null,
+        "call_width_x": 2125,
+        "short_gap_x": null,
         "call_levels_x": [
          75147
         ]
@@ -7679,6 +7794,9 @@
         "delta_mini": -0.52,
         "theta_yen_per_day": 9229,
         "vega_yen_per_pt": -6085,
+        "put_width_x": 4375,
+        "call_width_x": null,
+        "short_gap_x": null,
         "call_levels_x": [
          63800
         ]
@@ -7748,6 +7866,9 @@
         "delta_mini": -0.06,
         "theta_yen_per_day": 15965,
         "vega_yen_per_pt": -22056,
+        "put_width_x": 3375,
+        "call_width_x": null,
+        "short_gap_x": null,
         "call_levels_x": [
          64882
         ]
@@ -7816,6 +7937,9 @@
         "delta_mini": 0.47,
         "theta_yen_per_day": 21559,
         "vega_yen_per_pt": -36428,
+        "put_width_x": 2750,
+        "call_width_x": null,
+        "short_gap_x": null,
         "call_levels_x": [
          65670
         ]
@@ -7884,6 +8008,9 @@
         "delta_mini": 0.96,
         "theta_yen_per_day": 25343,
         "vega_yen_per_pt": -48538,
+        "put_width_x": 2375,
+        "call_width_x": null,
+        "short_gap_x": null,
         "call_levels_x": [
          66312
         ]
@@ -7952,6 +8079,9 @@
         "delta_mini": 1.46,
         "theta_yen_per_day": 28364,
         "vega_yen_per_pt": -58330,
+        "put_width_x": 2125,
+        "call_width_x": null,
+        "short_gap_x": null,
         "call_levels_x": [
          66796
         ]
@@ -8053,6 +8183,9 @@
       "delta_mini": 0.24,
       "theta_yen_per_day": 19967,
       "vega_yen_per_pt": -32579,
+      "put_width_x": 3000,
+      "call_width_x": null,
+      "short_gap_x": null,
       "call_levels_x": [
        65548
       ]
@@ -8072,6 +8205,9 @@
       "delta_mini": -0.69,
       "theta_yen_per_day": 974,
       "vega_yen_per_pt": -28,
+      "put_width_x": null,
+      "call_width_x": null,
+      "short_gap_x": null,
       "call_levels_x": [
        65798
       ]
@@ -8164,6 +8300,9 @@
       "delta_mini": 0.24,
       "theta_yen_per_day": 19967,
       "vega_yen_per_pt": -32579,
+      "put_width_x": 3000,
+      "call_width_x": null,
+      "short_gap_x": null,
       "call_levels_x": [
        65548
       ]
@@ -8183,6 +8322,9 @@
       "delta_mini": -1.3,
       "theta_yen_per_day": -5422,
       "vega_yen_per_pt": 17191,
+      "put_width_x": 2500,
+      "call_width_x": null,
+      "short_gap_x": null,
       "call_levels_x": [
        60607
       ]
@@ -8267,6 +8409,9 @@
       "delta_mini": -0.13,
       "theta_yen_per_day": 9991,
       "vega_yen_per_pt": -30963,
+      "put_width_x": 2000,
+      "call_width_x": 2000,
+      "short_gap_x": 6000,
       "call_levels_x": []
      },
      "after": {
@@ -8284,6 +8429,9 @@
       "delta_mini": 2.7,
       "theta_yen_per_day": 39897,
       "vega_yen_per_pt": -97286,
+      "put_width_x": 2000,
+      "call_width_x": 2000,
+      "short_gap_x": 6000,
       "call_levels_x": []
      }
     }
@@ -8346,6 +8494,9 @@
       "delta_mini": 2.47,
       "theta_yen_per_day": 31472,
       "vega_yen_per_pt": -72372,
+      "put_width_x": null,
+      "call_width_x": null,
+      "short_gap_x": null,
       "call_levels_x": [
        63639,
        124249
@@ -8366,6 +8517,9 @@
       "delta_mini": 3.47,
       "theta_yen_per_day": 31472,
       "vega_yen_per_pt": -72372,
+      "put_width_x": null,
+      "call_width_x": null,
+      "short_gap_x": null,
       "call_levels_x": [
        64562
       ]
@@ -8440,6 +8594,9 @@
       "delta_mini": -0.02,
       "theta_yen_per_day": 32907,
       "vega_yen_per_pt": -68928,
+      "put_width_x": null,
+      "call_width_x": null,
+      "short_gap_x": 14250,
       "call_levels_x": [
        57007,
        78859
@@ -8518,6 +8675,9 @@
       "delta_mini": 0.24,
       "theta_yen_per_day": 19967,
       "vega_yen_per_pt": -32579,
+      "put_width_x": 3000,
+      "call_width_x": null,
+      "short_gap_x": null,
       "call_levels_x": [
        65548
       ]
@@ -8537,6 +8697,9 @@
       "delta_mini": -0.69,
       "theta_yen_per_day": 974,
       "vega_yen_per_pt": -28,
+      "put_width_x": null,
+      "call_width_x": null,
+      "short_gap_x": null,
       "call_levels_x": [
        65798
       ]
@@ -8622,6 +8785,9 @@
       "delta_mini": -0.13,
       "theta_yen_per_day": 9991,
       "vega_yen_per_pt": -30963,
+      "put_width_x": 2000,
+      "call_width_x": 2000,
+      "short_gap_x": 6000,
       "call_levels_x": []
      },
      "after": {
@@ -8639,6 +8805,9 @@
       "delta_mini": -0.63,
       "theta_yen_per_day": -3128,
       "vega_yen_per_pt": -10832,
+      "put_width_x": null,
+      "call_width_x": 2000,
+      "short_gap_x": 6000,
       "call_levels_x": []
      }
     }
@@ -8721,6 +8890,9 @@
       "delta_mini": -0.28,
       "theta_yen_per_day": 9680,
       "vega_yen_per_pt": -27459,
+      "put_width_x": 1875,
+      "call_width_x": 2250,
+      "short_gap_x": 11125,
       "call_levels_x": [
        58873,
        77452
