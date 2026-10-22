@@ -5,6 +5,7 @@ import { smilePickRow } from '../../ui/view/smile';
 import {
   SMILE_ACT_HINT,
   SMILE_AXIS_OPTIONS,
+  SMILE_EFF_ACT_HINT,
   SMILE_LEGEND_HINT,
   SMILE_LINE_CLASS,
   smileAct,
@@ -116,5 +117,35 @@ describe('AC-4(c) 線の種類', () => {
   it('横軸の Seg: Δ の aria-label はデルタ', () => {
     expect(SMILE_AXIS_OPTIONS.map((o) => o.text)).toEqual(['行使価格', 'moneyness', 'Δ']);
     expect(SMILE_AXIS_OPTIONS[2].label).toBe('デルタ');
+  });
+});
+
+describe('#259 効率の線の凡例・操作行の案内', () => {
+  it('S-1 [効率] オフなら効率の項目なし、オンでシナリオ点の実線、今の線があれば今の破線（最後に）', () => {
+    expect(smileLegend('B', null).some((i) => i.key.startsWith('eff'))).toBe(false);
+    const on = smileLegend('B', 67500, { now: false });
+    expect(on.at(-1)).toEqual({
+      key: 'eff',
+      text: '─ 効率（シナリオ点）',
+      short: '─効率',
+      cls: 'eff',
+    });
+    const now = smileLegend('B', null, { now: true });
+    expect(now.slice(-2).map((i) => [i.text, i.short, i.cls])).toEqual([
+      ['─ 効率（シナリオ点）', '─効率', 'eff'],
+      ['┄ 効率（今）', '┄今', 'eff now'],
+    ]);
+    expect(SMILE_LEGEND_HINT).toContain('─ 効率（シナリオ点）');
+    expect(SMILE_LEGEND_HINT).toContain('┄ 効率（今）');
+  });
+
+  it('S-4 [効率] オンで未選択なら効率の定義と注意、選択中は今のまま', () => {
+    expect(smileAct(m1, null, true)).toEqual({ hint: SMILE_EFF_ACT_HINT });
+    expect(SMILE_EFF_ACT_HINT).toBe(
+      '効率 = プレミアム ÷ 必要証拠金（1 枚売り）· 高い所ほど値動きの損失も大きい',
+    );
+    expect(smileAct(m1, null, false)).toEqual({ hint: SMILE_ACT_HINT });
+    const s = m1.strikes.find((r) => r.smileIv !== null) as (typeof m1.strikes)[number];
+    expect(smileAct(m1, s.k, true)).toEqual(smileAct(m1, s.k));
   });
 });

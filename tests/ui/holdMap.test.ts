@@ -15,6 +15,7 @@ import {
   ZERO_SCENARIO,
 } from '../../model';
 import {
+  HOLD_MAP_CALL_NOTE,
   HOLD_MAP_CAPTION,
   HOLD_MAP_COMPUTING,
   HOLD_MAP_EMPTY,
@@ -366,11 +367,11 @@ describe('#179 名前と見出しの下の説明', () => {
     expect(HOLD_MAP_PLOT_LABEL.startsWith('追証マップ')).toBe(true);
   });
 
-  it('説明は「原資産と IV が同時に動いたときの余力」で始まり、追証の側は概算・実際の判定は引けの清算値と書く', () => {
+  it('説明は「原資産と IV が同時に動いたときの余力」で始まり、追証の側は概算・実際の判定は引けの清算値と書く（#259 で読み取りの下の注記へ）', () => {
     expect(HOLD_MAP_CAPTION.startsWith('原資産と IV が同時に動いたときの余力')).toBe(true);
-    expect(HOLD_MAP_CAPTION).toContain('概算');
-    expect(HOLD_MAP_CAPTION).toContain('引けの清算値');
-    expect(HOLD_MAP_CAPTION).toContain('引けで戻れば追証にならない');
+    expect(HOLD_MAP_CALL_NOTE).toContain('概算');
+    expect(HOLD_MAP_CALL_NOTE).toContain('引けの清算値');
+    expect(HOLD_MAP_CALL_NOTE).toContain('引けで戻れば追証にならない');
     // 過去の点の近似は点の注記（holdMapNote）だけに書く（説明に重ねない）
     expect(HOLD_MAP_CAPTION).not.toContain('近似');
   });
@@ -435,27 +436,22 @@ describe('#180 許容損失の境目', () => {
   );
   const LOSS = Math.round(-Math.min(...okPnls) / 2);
 
-  it('(a) 許容損失が未設定なら 2 本目の境目・3 色目のマス・凡例が無く、見出しは「追証マップ」のまま', () => {
+  it('(a) 許容損失が未設定なら 2 本目の境目・3 色目のマス・凡例が無い', () => {
     const plot = holdMapPlot(RESULT, MOVES, 600, null);
     expect(plot.lossContour).toBe('');
     expect(plot.cells.map((c) => c.cls)).not.toContain('hm-loss');
     expect(holdMapLegend(null)).toEqual([]);
-    expect(holdMapTitle(3, null)).toBe(HOLD_MAP_TITLE);
     // 既定の引数（今までの呼び方）も同じ
     expect(holdMapPlot(RESULT, MOVES, 600)).toEqual(plot);
   });
 
-  it('(b) 設定ありなら見出しに `d 日後`、凡例は 3 項目、許容損失超のマスと 2 本目の境目がある', () => {
+  it('(b) 設定ありなら凡例は 3 項目、許容損失超のマスと 2 本目の境目がある', () => {
     expect(LOSS).toBeGreaterThan(0);
-    expect(holdMapTitle(3, LOSS)).toBe('追証マップ · 3 日後');
-    expect(holdMapTitle(0, LOSS)).toContain('0 日後');
-    expect(holdMapTitle(2.5, LOSS)).toContain('2.5 日後');
-    // マップを出さない（資金・足なし）ときは d を付けない
-    expect(holdMapTitle(3, LOSS, false)).toBe(HOLD_MAP_TITLE);
-    // 説明: 設定ありのときだけ破線と許容損失超の読み方を足す
+    // 説明: 設定ありのときは色の言葉を凡例にそろえ、2 本の境目の線種を書く（#259 H-1）
     expect(holdMapCaption(null)).toBe(HOLD_MAP_CAPTION);
-    expect(holdMapCaption(LOSS).startsWith(HOLD_MAP_CAPTION)).toBe(true);
-    expect(holdMapCaption(LOSS)).toContain('破線 = d 日後の損益が −許容損失になる境目');
+    expect(holdMapCaption(LOSS)).toContain('色 = 許容内 / 許容損失超 / 追証（余力 < 0）');
+    expect(holdMapCaption(LOSS)).toContain('実線 = 追証、破線 = d 日後の損益が −許容損失');
+    expect(holdMapCaption(LOSS)).not.toContain('余力あり');
     expect(holdMapLegend(LOSS).map((k) => k.label)).toEqual(['許容内', '許容損失超', '追証']);
     const plot = holdMapPlot(RESULT, MOVES, 600, LOSS);
     expect(plot.lossContour).toMatch(/^M[\d.]+ [\d.]+L[\d.]+ [\d.]+/);
@@ -534,5 +530,25 @@ describe('#176 開いただけのときは待たない', () => {
       HOLD_MAP_SETTLE_MS,
     );
     expect(holdMapSettleMs({ input: null, axes }, input, axes)).toBe(HOLD_MAP_SETTLE_MS);
+  });
+});
+
+describe('#259 見出しの日数・説明の長さ・追証の側の注意', () => {
+  it('H-3 マップを出すときは許容損失によらず見出しに `d 日後`、出さないときは「追証マップ」', () => {
+    expect(holdMapTitle(3)).toBe('追証マップ · 3 日後');
+    expect(holdMapTitle(0)).toBe('追証マップ · 0 日後');
+    expect(holdMapTitle(2.5)).toContain('2.5 日後');
+    expect(holdMapTitle(3, false)).toBe(HOLD_MAP_TITLE);
+  });
+
+  it('H-2 説明に引けの清算値の注意を入れず（読み取りの下の注記へ）、短くする', () => {
+    // 前は 167 字（許容損失ありは 219 字）で、幅 360px で 7 行になりマップが画面の下半分に押された
+    expect(holdMapCaption(null).length).toBeLessThan(120);
+    expect(holdMapCaption(1_000_000).length).toBeLessThan(160);
+    for (const c of [holdMapCaption(null), holdMapCaption(1_000_000)]) {
+      expect(c).not.toContain('引けの清算値');
+    }
+    expect(HOLD_MAP_CALL_NOTE).toContain('引けの清算値');
+    expect(HOLD_MAP_CALL_NOTE).toContain('概算');
   });
 });

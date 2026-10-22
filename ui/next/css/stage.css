@@ -149,9 +149,17 @@ section.stage {
   border-top-style: dotted;
 }
 
+/* 一点鎖線（描画域の .ln-pin.p3 と同じ線種。border に一点鎖線が無いので背景の繰り返しで描く。#259） */
 .pin-chip i.p3 {
-  border-color: var(--pin3);
-  border-top-style: dashed;
+  height: 2px;
+  border-top: 0;
+  background: repeating-linear-gradient(
+    to right,
+    var(--pin3) 0 6px,
+    transparent 6px 8px,
+    var(--pin3) 8px 10px,
+    transparent 10px 12px
+  );
 }
 
 .pin-chip .pin-no {

@@ -1593,13 +1593,14 @@ const holdScrollBottom = (page) =>
     return host?.scrollTop ?? -1;
   });
 
-/** 開いた後の見出し・描画域と枠の位置（#174 AC2 (a)） */
+/** 開いた後の見出し・描画域・読み取り（#259）と枠の位置（#174 AC2 (a)） */
 const holdPlace = (page) =>
   page.evaluate(() => {
     const host = document.querySelector('section.metrics .panel-body');
     const btn = document.querySelector('section.metrics .hm-toggle');
     const plot = document.querySelector('section.metrics .hm-plot');
-    if (!host || !btn || !plot) return null;
+    const read = document.querySelector('section.metrics .hm-readout');
+    if (!host || !btn || !plot || !read) return null;
     const h = host.getBoundingClientRect();
     const b = btn.getBoundingClientRect();
     const p = plot.getBoundingClientRect();
@@ -1609,6 +1610,7 @@ const holdPlace = (page) =>
       btnTop: b.top,
       plotTop: p.top,
       plotBottom: p.bottom,
+      readBottom: read.getBoundingClientRect().bottom,
       plotH: p.height,
       scrollTop: host.scrollTop,
       maxTop: host.scrollHeight - host.clientHeight,
@@ -1642,13 +1644,16 @@ async function holdSettled(page) {
 }
 
 /**
- * (a): 描画域が枠の中（±1px）。見出し 〜 描画域が枠の高さに入るなら見出しも枠の中（上に隠れない）。入らない（スマホの
+ * (a): 描画域と読み取りの 1 行（#259 H-2。タップの値）が枠の中（±1px）。描画域 + 読み取りが枠の高さに入らないときは
+ * 描画域まで（上端を隠さない）。見出し 〜 その下端が枠の高さに入るなら見出しも枠の中（上に隠れない）。入らない（スマホの
  * peek）ときは描画域を優先
  */
 const holdPlaced = (r) => {
   if (!r) return false;
-  const inPlot = r.plotBottom <= r.hostBottom + 1 && r.plotTop >= r.hostTop - 1;
-  const fits = r.plotBottom - r.btnTop <= r.hostBottom - r.hostTop;
+  const hostH = r.hostBottom - r.hostTop;
+  const bottom = r.readBottom - r.plotTop <= hostH ? r.readBottom : r.plotBottom;
+  const inPlot = bottom <= r.hostBottom + 1 && r.plotTop >= r.hostTop - 1;
+  const fits = bottom - r.btnTop <= hostH;
   return inPlot && (!fits || r.btnTop >= r.hostTop - 1);
 };
 
@@ -1656,7 +1661,7 @@ const holdPlaced = (r) => {
  * 追証マップ（#174 AC2・AC3）: 資金あり・売り 5 枚 × 360（指標 peek / full）・390（peek）・900（ドック）・1440 ×
  * ダーク / ライト。状態ごとに新しいコンテキスト（過去の値動きはセッションで 1 回だけ読むので）。指標の .panel-body を
  * 一番下までスクロール（見出しが枠の下端）→ /fixtures/atm_daily を止めたまま見出しを押す →
- * (a) 描画域の高さが決まった後（holdSettled。既定の実行は reducedMotion reduce = 即時）に描画域が枠の中（見出しと一緒に入る幅では見出しも）
+ * (a) 描画域の高さが決まった後（holdSettled。既定の実行は reducedMotion reduce = 即時）に描画域と読み取り（#259）が枠の中（見出しと一緒に入る幅では見出しも）
  * (b) 枠（.hm-plot の高さ ≥ 200px）の中に .hm-wait（スピナー + `過去の値動きを読み込み中…`）、状態の行に同じ文字が無い、
  *     .hm-spin の animation-name が none（AC3）、文字が切れない（scrollWidth ≤ clientWidth）、縦・横・折り返し（report）
  * → 通す → .hm-wait が無くなりマスの path が出る → (c) 閉じても scrollTop は動かさない（中身が消えて最大値で切られる分だけ）
@@ -1754,7 +1759,7 @@ async function holdMapAll() {
               `閉じたときに動いた ${before?.scrollTop} → ${after?.scrollTop}（最大 ${after?.maxTop}）`,
             );
           console.log(
-            `${lbl}: 開いた直後 見出し ${r ? Math.round(r.btnTop - r.hostTop) : '?'}px・描画域の下端の余り ${r ? Math.round(r.hostBottom - r.plotBottom) : '?'}px・枠 ${Math.round(wv.plotH)}px・待ち「${wv.text}」・スピナー ${wv.anim} ${ok ? 'pass' : '← NG'}`,
+            `${lbl}: 開いた直後 見出し ${r ? Math.round(r.btnTop - r.hostTop) : '?'}px・描画域 / 読み取りの下端の余り ${r ? `${Math.round(r.hostBottom - r.plotBottom)} / ${Math.round(r.hostBottom - r.readBottom)}` : '?'}px・枠 ${Math.round(wv.plotH)}px・待ち「${wv.text}」・スピナー ${wv.anim} ${ok ? 'pass' : '← NG'}`,
           );
         }
         holdStats.total++;
@@ -3467,10 +3472,10 @@ async function holdToggleFlow(vp) {
   );
   const r = await holdPlace(page);
   check(
-    `#174 ${tag} 開いたら（滑らかなスクロールの後）描画域が枠の中（入る幅では見出しも）`,
+    `#174 ${tag} 開いたら（滑らかなスクロールの後）描画域と読み取りが枠の中（入る幅では見出しも）`,
     holdPlaced(r),
     r
-      ? `見出し ${Math.round(r.btnTop - r.hostTop)}px・下端の余り ${Math.round(r.hostBottom - r.plotBottom)}px`
+      ? `見出し ${Math.round(r.btnTop - r.hostTop)}px・下端の余り 描画域 ${Math.round(r.hostBottom - r.plotBottom)}px / 読み取り ${Math.round(r.hostBottom - r.readBottom)}px`
       : 'なし',
   );
   release();

@@ -47,9 +47,19 @@ export const HOLD_MAP_FAILED = '過去の値動きを読めない';
 export const HOLD_MAP_EMPTY = '過去の値動きが無い';
 export const HOLD_MAP_RETRY = '再試行';
 export const HOLD_MAP_IDLE_READOUT = '点かマスを触ると値を出す（矢印キーでマスを動かす）';
-/** 見出しの下の説明（#179: 何の図か・追証の側は概算で実際の判定は引けの清算値。過去の点の近似は holdMapNote） */
-export const HOLD_MAP_CAPTION =
-  '原資産と IV が同時に動いたときの余力。横 = 原資産の変化（今の X₀ に対する %）、縦 = IV の倍率（足ごとの IV に掛ける）。色 = 余力あり / 追証（余力 < 0）、線 = 境目、十字 = 今。β・Δσ は使わない。追証の側（赤）は概算で、実際の追証は引けの清算値で判定（日中に入っても引けで戻れば追証にならない）';
+/** 見出しの下の説明の頭（何の図か・軸） */
+const CAPTION_HEAD =
+  '原資産と IV が同時に動いたときの余力。横 = 原資産の変化（今の X₀ に対する %）、縦 = IV の倍率（足ごとの IV に掛ける）。';
+/** 見出しの下の説明の尾 */
+const CAPTION_TAIL = '、十字 = 今。β・Δσ は使わない';
+/**
+ * 見出しの下の説明（#179・#259 H-2: 何の図か・軸・色・線。短くしてマップを上に寄せる。追証の側の注意は
+ * HOLD_MAP_CALL_NOTE、過去の点の近似は holdMapNote = どちらも読み取りの下）
+ */
+export const HOLD_MAP_CAPTION = `${CAPTION_HEAD}色 = 余力あり / 追証（余力 < 0）、線 = 境目${CAPTION_TAIL}`;
+/** 読み取りの下の注意（#179 で説明に入れた文を #259 H-2 で移した。マップを出すときは常に） */
+export const HOLD_MAP_CALL_NOTE =
+  '追証の側（赤）は概算で、実際の追証は引けの清算値で判定（日中に入っても引けで戻れば追証にならない）';
 export const HOLD_MAP_PLOT_LABEL = '追証マップ（原資産と IV が同時に動いたときの余力）';
 /** 許容損失があるときの凡例（#180。マスの色の 3 区分。追証が優先） */
 export const HOLD_MAP_LEGEND: ReadonlyArray<{
@@ -64,20 +74,21 @@ export const HOLD_MAP_LEGEND: ReadonlyArray<{
 const daysText = (days: number) => fmtNum(days, Number.isInteger(days) ? 0 : 1);
 
 /**
- * 見出し（#180）: 許容損失があってマップを出す（資金・足がある）ときは `追証マップ · d 日後`（損益を見る時点 =
- * シナリオの d）、それ以外は `追証マップ`
+ * 見出し（#180・#259 H-3）: マップを出す（資金・足がある）ときは `追証マップ · d 日後`（余力も損益も d の時点 =
+ * シナリオの d。許容損失によらない）、それ以外は `追証マップ`
  */
-export function holdMapTitle(days: number, allowedLoss: number | null, mapShown = true): string {
-  return allowedLoss === null || !mapShown
-    ? HOLD_MAP_TITLE
-    : `${HOLD_MAP_TITLE} · ${daysText(days)} 日後`;
+export function holdMapTitle(days: number, mapShown = true): string {
+  return mapShown ? `${HOLD_MAP_TITLE} · ${daysText(days)} 日後` : HOLD_MAP_TITLE;
 }
 
-/** 見出しの下の説明（#180）: 許容損失があれば破線と 3 色目の読み方を足す */
+/**
+ * 見出しの下の説明（#180・#259 H-1）: 許容損失があれば色の言葉を凡例（許容内 / 許容損失超 / 追証）にそろえ、
+ * 2 本の境目の線種を書く
+ */
 export function holdMapCaption(allowedLoss: number | null): string {
   return allowedLoss === null
     ? HOLD_MAP_CAPTION
-    : `${HOLD_MAP_CAPTION}。破線 = d 日後の損益が −許容損失になる境目、許容損失超 = 損失が許容損失を超えるが追証ではない`;
+    : `${CAPTION_HEAD}色 = 許容内 / 許容損失超 / 追証（余力 < 0）、線 = 境目（実線 = 追証、破線 = d 日後の損益が −許容損失）${CAPTION_TAIL}`;
 }
 
 /** 凡例（#180）: 許容損失が無ければ出さない（[]） */

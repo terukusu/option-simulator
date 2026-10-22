@@ -333,26 +333,32 @@ table.tail.margin-tail td small.call {
   white-space: nowrap;
 }
 
+/* 見本の枠の線種でも区別する（#259 H-4。色だけに頼らない）: 許容内 = 点線、許容損失超 = 破線（その境目の線と同じ）、
+   追証 = 実線（その境目の線と同じ） */
 .hm-sw {
   flex: none;
-  width: 10px;
-  height: 10px;
+  box-sizing: border-box;
+  width: 12px;
+  height: 12px;
+  border: 1px solid;
   border-radius: 2px;
 }
 
 .hm-sw.hm-ok {
   background: var(--gain-fill);
-  box-shadow: inset 0 0 0 1px var(--gain);
+  border-color: var(--gain);
+  border-style: dotted;
 }
 
 .hm-sw.hm-loss {
   background: var(--warn-fill);
-  box-shadow: inset 0 0 0 1px var(--warn);
+  border-color: var(--warn);
+  border-style: dashed;
 }
 
 .hm-sw.hm-call {
   background: var(--loss-fill);
-  box-shadow: inset 0 0 0 1px var(--loss);
+  border-color: var(--loss);
 }
 
 .hm-readout {

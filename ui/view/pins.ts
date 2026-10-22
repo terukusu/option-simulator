@@ -559,7 +559,7 @@ export function pinPopRows(input: PinListInput): FullRow[][] {
       { k: 'ピンの線', v: line },
       { k: '満期の最大損失', v: withUnit(r.maxLossText, input.unit) },
       { k: r.premiumLabel, v: withUnit(r.premiumText, input.unit) },
-      { k: 'シナリオ点', v: withUnit(r.atScenarioText, input.unit) },
+      { k: 'シナリオ点の損益', v: withUnit(r.atScenarioText, input.unit) },
     );
     if (r.note) rows.push({ k: '注記', v: r.note });
     return rows;

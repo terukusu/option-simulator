@@ -13,6 +13,9 @@ export const SMILE_LINE_CLASS = { atm: 'atm', scenario: 'atm2', pick: 'sel' } as
 
 /** 操作行の未選択の案内 */
 export const SMILE_ACT_HINT = '点をタップで選ぶ · 長押しで連続 · , .';
+/** [効率] オンで未選択のときの操作行（#259。線は必ず ATM 付近で尖るので、効率の定義と注意をここに出す） */
+export const SMILE_EFF_ACT_HINT =
+  '効率 = プレミアム ÷ 必要証拠金（1 枚売り）· 高い所ほど値動きの損失も大きい';
 
 export type SmileAct =
   | { hint: string }
@@ -33,11 +36,12 @@ export type SmileAct =
       buyLabel: string;
     };
 
-/** 操作行（未選択・板に無い K は案内）。 */
-export function smileAct(month: ChainMonth, pick: number | null): SmileAct {
-  if (pick === null) return { hint: SMILE_ACT_HINT };
+/** 操作行（未選択・板に無い K は案内。[効率] オンなら効率の定義と注意 = SMILE_EFF_ACT_HINT）。 */
+export function smileAct(month: ChainMonth, pick: number | null, effOn = false): SmileAct {
+  const hint = { hint: effOn ? SMILE_EFF_ACT_HINT : SMILE_ACT_HINT };
+  if (pick === null) return hint;
   const row = smilePickRow(month, pick);
-  if (!row) return { hint: SMILE_ACT_HINT };
+  if (!row) return hint;
   const info = month.strikes.find((s) => s.k === pick);
   const title = `${fmtNum(row.k, 0)} ${row.type}`;
   const bid = fmtNum(row.bid, 0);
@@ -64,8 +68,15 @@ export interface SmileLegendItem {
   cls: string;
 }
 
-/** 凡例（ΔX ≠ 0 = シナリオ ATM の K があれば、ATM の後にシナリオ ATM）。 */
-export function smileLegend(basis: AtmBasis, scenarioAtmK: number | null): SmileLegendItem[] {
+/**
+ * 凡例（ΔX ≠ 0 = シナリオ ATM の K があれば、ATM の後にシナリオ ATM）。売りの効率の線（#163）を重ねているとき（eff）は
+ * 最後に効率の線（シナリオの点 = 実線、今の線があれば（eff.now）今 = 破線。#259 S-1）
+ */
+export function smileLegend(
+  basis: AtmBasis,
+  scenarioAtmK: number | null,
+  eff: { now: boolean } | null = null,
+): SmileLegendItem[] {
   const items: SmileLegendItem[] = [
     { key: 'mid', text: '● mid', short: '●mid', cls: 'mid' },
     { key: 'bid', text: '● bid', short: '●bid', cls: 'bid' },
@@ -83,6 +94,10 @@ export function smileLegend(basis: AtmBasis, scenarioAtmK: number | null): Smile
       cls: SMILE_LINE_CLASS.scenario,
     });
   }
+  if (eff) {
+    items.push({ key: 'eff', text: '─ 効率（シナリオ点）', short: '─効率', cls: 'eff' });
+    if (eff.now) items.push({ key: 'effNow', text: '┄ 効率（今）', short: '┄今', cls: 'eff now' });
+  }
   return items;
 }
 
@@ -92,7 +107,7 @@ export const SMILE_HINT =
 
 /** ⓘ の印の意味（凡例は狭い列で短い形になるので全文はここ） */
 export const SMILE_LEGEND_HINT =
-  '● mid / bid / ask = OTM 側の IV · ─ 節点の区間 · ┄ 補間・外挿の区間 · × IV 不安定 · ┆ ATM（基準 A / B） · ┆ シナリオ ATM（ΔX ≠ 0 のとき）';
+  '● mid / bid / ask = OTM 側の IV · ─ 節点の区間 · ┄ 補間・外挿の区間 · × IV 不安定 · ┆ ATM（基準 A / B） · ┆ シナリオ ATM（ΔX ≠ 0 のとき） · ─ 効率（シナリオ点）/ ┄ 効率（今）= [効率] の売りの効率の線（右の目盛り %）';
 
 /** 描画域の操作の説明（今の Smile の aria-label） */
 export const SMILE_PLOT_LABEL =

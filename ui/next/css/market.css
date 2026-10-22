@@ -509,6 +509,11 @@ table.board .legbadge.buy {
   color: var(--pin2);
 }
 
+/* 売りの効率の線（#259 S-1）: × IV 不安定（--warn）と近い色相なので、印の形（─ / ┄）と名前で区別する */
+.smile-legend > .eff {
+  color: var(--eff);
+}
+
 /* 操作行（グラフの下。高さ固定 = 選択の有無で描画域の高さを変えない） */
 .smile-act {
   display: flex;
@@ -554,10 +559,14 @@ table.board .legbadge.buy {
 
 .smile-act > .hint {
   min-width: 0;
+  max-height: 32px;
   overflow: hidden;
   color: var(--ink-3);
   font-size: 12px;
+  line-height: 16px;
   text-overflow: ellipsis;
+  /* 2 行まで（[効率] の定義と注意は狭い幅で 2 行になる。#259 S-4。行の高さ 48px は変えない） */
+  white-space: normal;
 }
 
 .smile-act > .spacer {
@@ -579,6 +588,12 @@ table.board .legbadge.buy {
 
 .smile-act .btn > .ask {
   color: var(--ask);
+}
+
+/* [効率] の線の項目（#259 S-1）を足すと狭い幅では短い形でも 1 行に入らないので、そのときだけ折り返す（項目は隠さない） */
+.smile-legend:has(> .eff) {
+  flex-wrap: wrap;
+  row-gap: 2px;
 }
 
 /* 凡例の項目は隠さない。入らない幅では短い形（全文は title と ⓘ。§5.1） */

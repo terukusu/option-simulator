@@ -6,8 +6,15 @@ import { type Domain, zoom } from '../../chart/scale';
 import { pure } from '../../components/pure';
 import type { Action } from '../../state';
 import { PANEL_FOCUS_LABEL } from '../../view/keys';
+import type { AmountUnit } from '../../view/metrics';
 import { type SmileAxis, smileModel } from '../../view/smile';
-import { SMILE_EFF_CAUTION, SMILE_EFF_HINT, type SmileEffBase } from '../../view/smileEff';
+import {
+  effAtNow,
+  SMILE_EFF_CAUTION,
+  SMILE_EFF_CHIP_TITLE,
+  SMILE_EFF_HINT,
+  type SmileEffBase,
+} from '../../view/smileEff';
 import {
   SMILE_AXIS_OPTIONS,
   SMILE_HINT,
@@ -40,6 +47,8 @@ export interface SmileRegionProps {
   /** 効率の線の市場・設定とシナリオ（重ねていないときは null = スライダーで描き直さない） */
   eff: SmileEffBase | null;
   scenario: Scenario | null;
+  /** 金額の単位（指標のタイルと同じ。効率の読み取りの証拠金。#259 S-6） */
+  unit: AmountUnit;
   dispatch: (a: Action) => void;
   onAdd: MarketAdd;
   marketSeg: ComponentChildren;
@@ -69,8 +78,14 @@ function SmileView(p: SmileRegionProps) {
       viewport: zoom(viewport ?? full.fullDomain, factor, full.fullDomain, full.minWidth),
     });
   };
-  const act = month ? smileAct(month, pick) : null;
-  const legend = smileLegend(basis, scnK);
+  const effShown = p.effOn && p.eff !== null;
+  const act = month ? smileAct(month, pick, effShown) : null;
+  // 効率の線の凡例（#259 S-1）: 今の線はシナリオの点が今でないときだけ（SmilePlot と同じ条件）
+  const legend = smileLegend(
+    basis,
+    scnK,
+    effShown ? { now: p.scenario !== null && !effAtNow(p.scenario) } : null,
+  );
 
   return (
     <>
@@ -122,6 +137,7 @@ function SmileView(p: SmileRegionProps) {
           <Chip
             text="効率"
             label="売りの効率の線"
+            title={SMILE_EFF_CHIP_TITLE}
             pressed={p.effOn}
             disabled={empty}
             onClick={() => p.onEff(!p.effOn)}
@@ -142,6 +158,7 @@ function SmileView(p: SmileRegionProps) {
                 scenarioAtmK={active ? scnK : null}
                 eff={active ? p.eff : null}
                 scenario={active ? p.scenario : null}
+                unit={p.unit}
                 dispatch={dispatch}
               />
             );

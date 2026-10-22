@@ -11,6 +11,7 @@ import type { AtmMovesCtl } from '../../components/useAtmMoves';
 import type { HoldMapCtl } from '../../components/useHoldMap';
 import { CROSS_TOUCH_GRAB_PX, crossTapAction } from '../../view/crosshair';
 import {
+  HOLD_MAP_CALL_NOTE,
   HOLD_MAP_PLOT_LABEL,
   HOLD_MAP_RETRY,
   type HoldMapResult,
@@ -332,6 +333,7 @@ function HoldMapPlotView({
       <p class="hm-readout" aria-live={xh ? 'off' : 'polite'}>
         {readout}
       </p>
+      <p class="mx-note">{HOLD_MAP_CALL_NOTE}</p>
       {showMoves && <p class="mx-note">{holdMapNote(moves, hold.days)}</p>}
     </>
   );
@@ -359,7 +361,7 @@ export function HoldMap({ hold, unit }: { hold: HoldBundle; unit: AmountUnit }) 
   const blocked = hold.noLegs || hold.noCapital;
   const bodyRef = useRef<HTMLDivElement>(null);
   const wasOpen = useRef(hold.open);
-  // 開いたとき（前の描画で閉 → 今開。マウント時の開では動かさない）だけ、描画域がパネルのスクロール枠に入るよう
+  // 開いたとき（前の描画で閉 → 今開。マウント時の開では動かさない）だけ、描画域と読み取りがパネルのスクロール枠に入るよう
   // 枠の scrollTop だけを動かす（#174。scrollIntoView は祖先・ページまで動かしうるので使わない）。閉じるときは動かさない。
   // 初めの描画は描画域が仮の幅 320px の高さで、useSize が測った幅の高さになるのは useEffect の後（負荷が高いと 2 フレーム
   // より遅れる。#254）。なので中身（.hm）の大きさを ResizeObserver で見て、開いてから HOLD_REVEAL_MS の間は大きさが
@@ -374,14 +376,17 @@ export function HoldMap({ hold, unit }: { hold: HoldBundle; unit: AmountUnit }) 
     if (!body || !(found instanceof HTMLElement)) return;
     const host: HTMLElement = found;
     const reveal = () => {
+      // 描画域の上端 〜 読み取りの 1 行の下端（#259 H-2。タップの値まで見せる。読み取りは 3 行分の高さで固定）。
       // 資金なし・足なしは描画域が無いので中身（.hm）の全体
-      const target = body.querySelector('.hm-plot') ?? body;
+      const top = body.querySelector('.hm-plot') ?? body;
+      const bottom = body.querySelector('.hm-readout') ?? top;
       const oy = getComputedStyle(host).overflowY;
       if (oy !== 'auto' && oy !== 'scroll') return;
       const h = host.getBoundingClientRect();
       const reduced = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
-      const t = target.getBoundingClientRect();
-      const { delta, behavior } = holdMapReveal(t.top, t.bottom, h.top, h.bottom, reduced);
+      const t = top.getBoundingClientRect();
+      const b = bottom.getBoundingClientRect();
+      const { delta, behavior } = holdMapReveal(t.top, b.bottom, h.top, h.bottom, reduced);
       if (delta > 0) host.scrollTo({ top: host.scrollTop + delta, behavior });
     };
     const ro = new ResizeObserver(reveal);
@@ -407,7 +412,7 @@ export function HoldMap({ hold, unit }: { hold: HoldBundle; unit: AmountUnit }) 
         aria-controls={id}
         onClick={hold.onToggle}
       >
-        <span>{holdMapTitle(hold.days, hold.allowedLoss, !blocked)}</span>
+        <span>{holdMapTitle(hold.days, !blocked)}</span>
       </button>
       {hold.open && (
         <div id={id} ref={bodyRef} class="hm">
