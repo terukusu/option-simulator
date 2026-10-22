@@ -1,6 +1,6 @@
 // README のスクリーンショット（`npm run readme:shots`。#160）。Chromium（Playwright）で画面を開き、docs/images/ に
 // WebP で書く。板は dev サーバーの合成の板（fixtures/synthetic/ の latest。Black-76 から作った架空の値）、IV 推移・
-// 先物推移・追証マップの過去の点・AI の返答（診断・シナリオの評価・提案・テクニカル。偽の SSE）は dev サーバーの合成の
+// 先物推移・追証マップの過去の点・AI の返答（診断・シナリオの評価・提案・テクニカル・表。偽の SSE）は dev サーバーの合成の
 // 応答（scripts/devFixtures.mjs）だけを使う。本番・API・BigQuery・Anthropic には触れない。資金（capital_yen）などの
 // 設定値も架空の値。
 //
@@ -473,6 +473,15 @@ const shots = {
     });
     await page.waitForTimeout(400);
     await save('ai-tech', await shotEl(page, 'section.ai'));
+    await ctx.close();
+  },
+  // AI の返答の表と用語のリンク（#234・#232）: 「表で」を含む質問 → 偽の SSE の表の見本（架空の値）
+  async 'ai-table'() {
+    const { ctx, page } = await openAi({ ...PC_CROP, h: 760, theme: 'light' });
+    await ask(page, '足ごとの建値と、下げの幅ごとの損益を表で見せて');
+    await page.waitForSelector('section.ai table', { timeout: 15000 });
+    await page.waitForTimeout(400);
+    await save('ai-table', await shotEl(page, 'section.ai'));
     await ctx.close();
   },
   // スマホ: ドックとシート（ダーク 3 台）
