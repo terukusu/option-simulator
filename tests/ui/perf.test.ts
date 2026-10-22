@@ -118,7 +118,7 @@ import {
 } from '../../ui/view/scenarioRegion';
 import { smileModel } from '../../ui/view/smile';
 import {
-  effNowScenario,
+  EFF_NOW_SCENARIO,
   type SmileEffBase,
   smileEffPath,
   smileEffPoints,
@@ -2035,7 +2035,7 @@ describe('性能（#163 売りの効率の線）', () => {
       '#163 売りの効率の線 2 本',
       () => {
         const a = smileEffPoints(month, 'B', 'k', base, sc);
-        const b = smileEffPoints(month, 'B', 'k', base, effNowScenario(sc));
+        const b = smileEffPoints(month, 'B', 'k', base, EFF_NOW_SCENARIO);
         const y = smileEffYDomain([a, b], model.domain);
         return y ? smileEffPath(a, model.domain, y, 480, 260).length + b.length : 0;
       },

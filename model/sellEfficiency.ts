@@ -5,7 +5,8 @@
  * - 状態 S = (x, シナリオ): プレミアム P = その状態の評価価格（evaluateLeg。Black-76、β・Δσ・Δs・動き方込み）、
  *   必要証拠金 M = marginAt の margin（k × PFE。指標のタイルと同じ物差し。5.10）
  * - 効率 = P × 乗数 / M（小数。0.12 = 12%）。新しい式は作らず、position・margin の関数を呼ぶだけ
- * - 満期を過ぎた・F が決まらない・M ≤ 0・非有限は null
+ * - 満期を過ぎた・F が決まらない・非有限は null。建てられない・比が不安定な点も null: プレミアムが最小の呼値（1 円）
+ *   未満（ファー OTM・SQ 直前）、必要証拠金が 1 円未満（P と M がどちらも 0 に近い）
  */
 
 import type { OptionType } from './black76';
@@ -19,7 +20,12 @@ import {
   type PreparedLeg,
   prepareLeg,
 } from './position';
+import { OPTION_TICK_RULE } from './products';
 import type { Scenario } from './scenario';
+
+/** 線に入れる下限: プレミアム = 最小の呼値（円）、必要証拠金 = 1 円 */
+export const SELL_EFF_MIN_PREMIUM = OPTION_TICK_RULE.small;
+export const SELL_EFF_MIN_MARGIN = 1;
 
 export interface SellEfficiencyInput {
   /** 限月 ID（MarketContext.options のキー） */
@@ -89,7 +95,8 @@ export function sellEfficiency(
     params,
   );
   const margin = r.margin;
-  if (!(margin > 0) || !Number.isFinite(margin) || !Number.isFinite(e.value)) return null;
+  if (!(margin >= SELL_EFF_MIN_MARGIN) || !Number.isFinite(margin)) return null;
+  if (!(e.value >= SELL_EFF_MIN_PREMIUM) || !Number.isFinite(e.value)) return null;
   const efficiency = (e.value * p.multiplier) / margin;
   if (!Number.isFinite(efficiency)) return null;
   const g = displayGreeks(p, e, ctx, settings);

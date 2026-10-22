@@ -31,8 +31,9 @@ export function useSmileEffLine(input: SmileEffLineInput | null): SmileEffPoint[
   const last = useRef<SmileEffLineInput | null>(null);
   useEffect(() => {
     if (!input) {
-      // 消した後にまた重ねたら、前の線を待たせずにすぐ作る
+      // 消した後にまた重ねたら、前の線（古いシナリオ）を出さずにすぐ作る
       last.current = null;
+      setLine(null);
       return;
     }
     // シナリオだけの変化は止まってから、座標が変わる（初回・限月・横軸の切替）ならすぐ作る

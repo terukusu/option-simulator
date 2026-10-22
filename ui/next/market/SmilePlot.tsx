@@ -27,10 +27,12 @@ import {
   tapStrike,
 } from '../../view/smile';
 import {
+  EFF_NOW_SCENARIO,
+  EFF_TICK_INSET_PX,
   effAtNow,
-  effNowScenario,
   effReadYs,
   effTickLabel,
+  effTicksClear,
   type SmileEffBase,
   smileEffNearest,
   smileEffPath,
@@ -101,21 +103,10 @@ function SmilePlotView(p: SmilePlotProps) {
     [month, basis, axis, eff, scenario],
   );
   const atNow = scenario === null || effAtNow(scenario);
-  const beta = scenario?.beta;
-  const ivDynamics = scenario?.ivDynamics;
-  const ivShift = scenario?.ivShift;
+  // 今の線はシナリオに依らない（EFF_NOW_SCENARIO）。作り直すのは限月・横軸・基準・市場と、今かどうかが変わったときだけ
   const effNowInput = useMemo<SmileEffLineInput | null>(
-    () =>
-      eff && !atNow && beta !== undefined && ivDynamics && ivShift
-        ? {
-            month,
-            basis,
-            axis,
-            base: eff,
-            scenario: effNowScenario({ beta, ivDynamics, ivShift }),
-          }
-        : null,
-    [month, basis, axis, eff, atNow, beta, ivDynamics, ivShift],
+    () => (eff && !atNow ? { month, basis, axis, base: eff, scenario: EFF_NOW_SCENARIO } : null),
+    [month, basis, axis, eff, atNow],
   );
   const effPts = useSmileEffLine(effInput);
   const effNowPts = useSmileEffLine(effNowInput);
@@ -331,8 +322,11 @@ function SmilePlotView(p: SmilePlotProps) {
                 <path class="eff-line" d={effPaths.point || 'M0 0'} />
                 {syEff &&
                   effY &&
-                  smileEffTicks(effY).map((t) => (
-                    <text key={`e${t}`} class="eff-t" x={w - 2} y={syEff(t)}>
+                  effTicksClear(
+                    smileEffTicks(effY).map((t) => ({ t, y: syEff(t) })),
+                    xh && xh.read.anchor === 'end' ? readYs : [],
+                  ).map(({ t, y }) => (
+                    <text key={`e${t}`} class="eff-t" x={w - M.right - EFF_TICK_INSET_PX} y={y}>
                       {effTickLabel(t)}
                     </text>
                   ))}

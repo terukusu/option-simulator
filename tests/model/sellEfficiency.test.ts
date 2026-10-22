@@ -9,7 +9,12 @@ import { black76Price, type OptionType } from '../../model/black76';
 import { DEFAULT_MARGIN_PARAMS, type MarginParams, marginAt } from '../../model/margin';
 import { DEFAULT_SETTINGS, evaluateLeg, prepareLeg } from '../../model/position';
 import { type Scenario, ZERO_SCENARIO } from '../../model/scenario';
-import { sellEfficiency, sellLeg } from '../../model/sellEfficiency';
+import {
+  SELL_EFF_MIN_MARGIN,
+  SELL_EFF_MIN_PREMIUM,
+  sellEfficiency,
+  sellLeg,
+} from '../../model/sellEfficiency';
 import { businessDaysAhead, DAY_MS, yearFraction } from '../../model/time';
 import { M1, M2, makeMarket, R } from '../support/market';
 import { rng, synthChain } from '../support/synthChain';
@@ -94,6 +99,7 @@ describe('売りの効率（#163）', () => {
 
   it('性質: Δσ を上げるとプレミアムは単調に増える（種 7 の 200 ケース）', () => {
     const rand = rng(7);
+    let both = 0;
     for (let i = 0; i < 200; i++) {
       const month = rand() < 0.5 ? M1 : M2;
       const k = Math.round((month.F * (0.6 + rand() * 0.55)) / 125) * 125;
@@ -107,33 +113,79 @@ describe('売りの効率（#163）', () => {
       const d2 = d1 + 0.5 + rand() * 10;
       const a = sellEfficiency(input(month, k, { ...base, dSigma: d1 }), ctx, DEFAULT_SETTINGS, P);
       const b = sellEfficiency(input(month, k, { ...base, dSigma: d2 }), ctx, DEFAULT_SETTINGS, P);
-      if (!a || !b) throw new Error(`効率が決まらない: ${month.id} ${k}`);
+      // 呼値未満で null になるのは IV の低い方から（高い方が null なら低い方も null）
+      if (!b) {
+        expect(a).toBeNull();
+        continue;
+      }
+      if (!a) continue;
+      both++;
       expect(b.premium).toBeGreaterThanOrEqual(a.premium);
       for (const r of [a, b]) {
         expect(Number.isFinite(r.efficiency)).toBe(true);
         expect(r.efficiency).toBeGreaterThanOrEqual(0);
       }
     }
+    expect(both).toBeGreaterThan(150);
   });
 
-  it('極限: ファー OTM・T → 0・σ → 0 で NaN を返さない（値か null）', () => {
-    const cases: Array<[number, Scenario]> = [
-      [20000, ZERO_SCENARIO],
-      [140000, ZERO_SCENARIO],
-      [60000, { ...ZERO_SCENARIO, days: M1.days - 1e-6 }],
-      [67500, { ...ZERO_SCENARIO, days: M1.days - 0.01 }],
-      [60000, { ...ZERO_SCENARIO, dSigma: -500 }],
+  it('極限: ケースごとに値（有限・効率 ≥ 0・P ≥ 呼値・M ≥ 1 円）か null かを固定する（NaN を返さない）', () => {
+    // 満期までの暦日（T0 × 365。yearFraction から作る = 足の T0 と同じ）
+    const dExp = yearFraction(ctx.evalTime, ctx.options[M1.id]?.sqTime as number) * 365;
+    const cases: Array<[string, number, Scenario, 'value' | 'null']> = [
+      ['ファー OTM の put（呼値未満）', 20000, ZERO_SCENARIO, 'null'],
+      ['ファー OTM の call（呼値未満）', 140000, ZERO_SCENARIO, 'null'],
+      ['遠めの OTM の put', 50000, ZERO_SCENARIO, 'value'],
+      [
+        'T → 0 の OTM（時間価値が呼値未満）',
+        60000,
+        { ...ZERO_SCENARIO, days: dExp - 1e-4 },
+        'null',
+      ],
+      [
+        'T → 0 の ATM 付近（SQ の 0.01 日前）',
+        67750,
+        { ...ZERO_SCENARIO, days: dExp - 0.01 },
+        'value',
+      ],
+      ['σ → 0（Δσ −500 で σ_min）', 60000, { ...ZERO_SCENARIO, dSigma: -500 }, 'null'],
+      ['σ → 0 の ATM 付近', 67750, { ...ZERO_SCENARIO, dSigma: -500 }, 'value'],
+      ['IV を大きく上げる', 30000, { ...ZERO_SCENARIO, dSigma: 200 }, 'value'],
     ];
-    for (const [k, sc] of cases) {
+    for (const [name, k, sc, want] of cases) {
       const r = sellEfficiency(input(M1, k, sc), ctx, DEFAULT_SETTINGS, P);
-      if (r === null) continue;
-      for (const v of Object.values(r)) expect(Number.isNaN(v)).toBe(false);
-      expect(r.efficiency).toBeGreaterThanOrEqual(0);
+      if (want === 'null') {
+        expect(r, name).toBeNull();
+        continue;
+      }
+      if (!r) throw new Error(`値が無い: ${name}`);
+      for (const v of Object.values(r)) expect(Number.isFinite(v), name).toBe(true);
+      expect(r.efficiency, name).toBeGreaterThanOrEqual(0);
+      expect(r.premium, name).toBeGreaterThanOrEqual(SELL_EFF_MIN_PREMIUM);
+      expect(r.margin, name).toBeGreaterThanOrEqual(SELL_EFF_MIN_MARGIN);
     }
     expect(
       sellEfficiency({ ...input(M1, 60000), sigma: Number.NaN }, ctx, DEFAULT_SETTINGS, P),
     ).toBeNull();
     expect(sellEfficiency({ ...input(M1, 60000), sigma: 0 }, ctx, DEFAULT_SETTINGS, P)).toBeNull();
+  });
+
+  it('呼値未満のプレミアムは null（下限ちょうどの 1 円は値）、証拠金の下限は 1 円', () => {
+    expect(SELL_EFF_MIN_PREMIUM).toBe(1);
+    expect(SELL_EFF_MIN_MARGIN).toBe(1);
+    // 遠い put を内側へ寄せていき、最初に P ≥ 1 円になる行使価格の 1 本外側は null
+    let k = 20000;
+    let r = sellEfficiency(input(M1, k), ctx, DEFAULT_SETTINGS, P);
+    while (r === null && k < 60000) {
+      k += 125;
+      r = sellEfficiency(input(M1, k), ctx, DEFAULT_SETTINGS, P);
+    }
+    if (!r) throw new Error('値が無い');
+    expect(r.premium).toBeGreaterThanOrEqual(1);
+    const outside = input(M1, k - 125);
+    const p = prepareLeg(sellLeg(outside), ctx, DEFAULT_SETTINGS);
+    expect(evaluateLeg(p, outside.x, ZERO_SCENARIO, ctx, DEFAULT_SETTINGS).value).toBeLessThan(1);
+    expect(sellEfficiency(outside, ctx, DEFAULT_SETTINGS, P)).toBeNull();
   });
 
   it('シナリオの d が満期を過ぎると null、限月が無い・F が決まらないと null', () => {

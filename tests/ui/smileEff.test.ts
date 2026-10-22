@@ -8,6 +8,7 @@ import {
   MARGIN_HORIZON_BUSINESS_DAYS,
   type Scenario,
   sellEfficiency,
+  underlyingAt,
   ZERO_SCENARIO,
 } from '../../model';
 import { CALENDAR } from '../../ui/calendar';
@@ -15,12 +16,13 @@ import { linear } from '../../ui/chart/scale';
 import { INITIAL_SHELL, shellReduce } from '../../ui/view/shell';
 import { axisValue, SMILE_MARGIN, type SmileAxis, smileModel } from '../../ui/view/smile';
 import {
+  EFF_NOW_SCENARIO,
   EFF_READ_LINE_PX,
   EFF_TOP_RATIO,
   effAtNow,
-  effNowScenario,
   effReadYs,
   effTickLabel,
+  effTicksClear,
   type SmileEffBase,
   smileEffNearest,
   smileEffPath,
@@ -30,6 +32,7 @@ import {
   smileEffYDomain,
 } from '../../ui/view/smileEff';
 import { fixture } from '../support/fixtures';
+import { rng } from '../support/synthChain';
 
 /** #163: スマイルに重ねる売りの効率の線（合成の板。架空の値） */
 const chain = normalizeChain(fixture('latest'));
@@ -49,9 +52,29 @@ describe('売りの効率の線の点（#163）', () => {
     '軸 %s: スマイルの IV がある行ごとに OTM 側の点、横軸の値は axisValue と一致',
     (axis) => {
       const pts = smileEffPoints(month, 'B', axis, base, ZERO_SCENARIO);
-      const rows = month.strikes.filter((s) => s.smileIv !== null);
+      // 点がある = スマイルの IV があり、model の sellEfficiency が決まる（呼値未満などで null でない）行。ちょうどその行ごと
+      const h = businessDaysAhead(ctx.evalTime, MARGIN_HORIZON_BUSINESS_DAYS, CALENDAR.holidays);
+      const rows = month.strikes.filter(
+        (s) =>
+          s.smileIv !== null &&
+          sellEfficiency(
+            {
+              expiry: month.id,
+              strike: s.k,
+              type: s.otmType,
+              sigma: s.smileIv,
+              x: ctx.x0,
+              scenario: ZERO_SCENARIO,
+              horizonDays: h,
+            },
+            ctx,
+            DEFAULT_SETTINGS,
+            DEFAULT_MARGIN_PARAMS,
+          ) !== null,
+      );
       expect(pts.length).toBeGreaterThan(10);
-      expect(pts.length).toBeLessThanOrEqual(rows.length);
+      expect(pts.map((p) => p.k)).toEqual(rows.map((s) => s.k));
+      for (const p of pts) expect(month.strikes[p.i]?.k).toBe(p.k);
       for (const p of pts) {
         const info = month.strikes.find((s) => s.k === p.k);
         if (!info) throw new Error('板に無い行使価格');
@@ -100,13 +123,14 @@ describe('売りの効率の線の点（#163）', () => {
   it('Δσ を上げると全部の点でプレミアムが増え、線が上へ動く（最大も上がる）', () => {
     const a = smileEffPoints(month, 'B', 'k', base, ZERO_SCENARIO);
     const b = smileEffPoints(month, 'B', 'k', base, { ...ZERO_SCENARIO, dSigma: 10 });
-    expect(b.length).toBe(a.length);
-    a.forEach((p, i) => {
-      const q = b[i];
+    // IV が上がると呼値未満だった遠い行使価格も点になる（点は増えるだけ）
+    expect(b.length).toBeGreaterThanOrEqual(a.length);
+    const byK = new Map(b.map((q) => [q.k, q]));
+    for (const p of a) {
+      const q = byK.get(p.k);
       if (!q) throw new Error('点が無い');
-      expect(q.k).toBe(p.k);
       expect(q.premium).toBeGreaterThan(p.premium);
-    });
+    }
     const max = (pts: typeof a) => Math.max(...pts.map((p) => p.eff));
     expect(max(b)).toBeGreaterThan(max(a));
   });
@@ -131,9 +155,70 @@ describe('売りの効率の線の点（#163）', () => {
       ivDynamics: 'sticky_moneyness',
       ivShift: 'relative',
     };
-    expect(effNowScenario(s)).toEqual({ ...s, days: 0, dX: 0, dSigma: 0, skew: 0 });
+    expect(effAtNow(s)).toBe(false);
+    // 今の線: β・動き方・IV の入れ方は d = ΔX = Δσ = Δs = 0 では効かない（同じ点になる）
+    const now = smileEffPoints(month, 'B', 'k', base, EFF_NOW_SCENARIO);
+    const nowOther = smileEffPoints(month, 'B', 'k', base, {
+      ...s,
+      days: 0,
+      dX: 0,
+      dSigma: 0,
+      skew: 0,
+    });
+    expect(nowOther.map((p) => [p.k, p.premium, p.margin])).toEqual(
+      now.map((p) => [p.k, p.premium, p.margin]),
+    );
+  });
+
+  it("性質: 線は常に状態 S で OTM の売りだけ（K < F' は put、それ以外は call。種 11 の 60 ケース）", () => {
+    const rand = rng(11);
+    for (let n = 0; n < 60; n++) {
+      const sc: Scenario = {
+        ...ZERO_SCENARIO,
+        days: rand() * 10,
+        dX: (rand() - 0.5) * 0.4 * ctx.x0,
+        dSigma: (rand() - 0.3) * 30,
+        skew: (rand() - 0.5) * 4,
+      };
+      const Fp = underlyingAt(month.F, ctx.x0, ctx.x0 + sc.dX, DEFAULT_SETTINGS.basisMode);
+      const pts = smileEffPoints(month, 'B', 'k', base, sc);
+      expect(pts.length).toBeGreaterThan(0);
+      for (const p of pts) {
+        expect(p.type).toBe(p.k < Fp ? 'put' : 'call');
+        // OTM の売り: 受取は本源的価値を含まない（時間価値だけ）
+        const intrinsic = p.type === 'put' ? Math.max(p.k - Fp, 0) : Math.max(Fp - p.k, 0);
+        expect(intrinsic).toBe(0);
+      }
+    }
+  });
+
+  it('ΔX −1,500 でも、今の F で ITM になった行使価格を put の売りとして山にしない（効率の最大は今と同じくらい）', () => {
+    const now = smileEffPoints(month, 'B', 'k', base, ZERO_SCENARIO);
+    const down = smileEffPoints(month, 'B', 'k', base, { ...ZERO_SCENARIO, dX: -1500 });
+    const max = (pts: typeof now) => Math.max(...pts.map((p) => p.eff));
+    expect(max(down)).toBeLessThan(max(now) * 1.2);
+  });
+
+  it('呼値未満のプレミアム・1 円未満の証拠金の行は点を作らず、線はそこで切る（隣の行どうしだけを結ぶ）', () => {
+    const pts = smileEffPoints(month, 'B', 'k', base, ZERO_SCENARIO);
+    for (const p of pts) {
+      expect(p.premium).toBeGreaterThanOrEqual(1);
+      expect(p.margin).toBeGreaterThanOrEqual(1);
+    }
+    // ファー OTM の端（スマイルはあるが呼値未満）の行が点になっていない
+    const withIv = month.strikes.filter((s) => s.smileIv !== null);
+    expect(pts.length).toBeLessThan(withIv.length);
+    // 真ん中の行を抜くと、その両側を結ばない（path の M が 1 つ増える）
+    const y = smileEffYDomain([pts], model0.domain) as [number, number];
+    const whole = smileEffPath(pts, model0.domain, y, 400, 240);
+    const mid = Math.floor(pts.length / 2);
+    const gap = [...pts.slice(0, mid), ...pts.slice(mid + 1)];
+    const cut = smileEffPath(gap, model0.domain, y, 400, 240);
+    expect((cut.match(/M/g) ?? []).length).toBe((whole.match(/M/g) ?? []).length + 1);
   });
 });
+
+const model0 = smileModel(month, 'B', 'k');
 
 describe('売りの効率の線の描画（#163）', () => {
   const pts = smileEffPoints(month, 'B', 'k', base, { ...ZERO_SCENARIO, dSigma: 5 });
@@ -163,6 +248,13 @@ describe('売りの効率の線の描画（#163）', () => {
       expect(v).toBeLessThanOrEqual(57.5);
     }
     expect(effTickLabel(20)).toBe('20%');
+    const ticks = [
+      { t: 20, y: 100 },
+      { t: 40, y: 50 },
+      { t: 60, y: 24 },
+    ];
+    expect(effTicksClear(ticks, [23, 36, 49]).map((q) => q.t)).toEqual([20]);
+    expect(effTicksClear(ticks, []).map((q) => q.t)).toEqual([20, 40, 60]);
     expect(effTickLabel(2.5)).toBe('2.5%');
   });
 
@@ -193,6 +285,7 @@ describe('売りの効率の線の描画（#163）', () => {
     expect(smileEffNearest(pts, p.x, [-2, -1])).toBeNull();
     const [l1, l2] = smileEffReadLines({
       k: 64000,
+      i: 0,
       x: 64000,
       type: 'put',
       premium: 85.25,
@@ -205,6 +298,7 @@ describe('売りの効率の線の描画（#163）', () => {
     expect(l2).toBe('証拠金 612,346 円 · Δ +0.12（ミニ +1.2）');
     const [c1] = smileEffReadLines({
       k: 71000,
+      i: 1,
       x: 71000,
       type: 'call',
       premium: 410.2,

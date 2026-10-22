@@ -1,10 +1,12 @@
 /**
  * スマイルに重ねる「売りの効率」の線の表示モデル（純関数。#163、docs/design.md 11 章・docs/ui-redesign.md §4.1）。
  *
- * - 点: 表示中の限月の行使価格ごと（スマイルの IV がある行）に、OTM 側の 1 枚の売りの効率（model/sellEfficiency.ts）。
- *   横軸の値はスマイルと同じ axisValue
+ * - 点: 表示中の限月の行使価格ごと（スマイルの IV がある行）に、状態 S で OTM 側（K < F' は put、それ以外は call。
+ *   F' = シナリオの点の限月の原資産）の 1 枚の売りの効率（model/sellEfficiency.ts）。横軸の値はスマイルと同じ axisValue。
+ *   決まらない行（呼値未満・満期後など）は点を作らず、線はそこで切る
  * - 状態: シナリオの点（X₀ + ΔX・d・Δσ・Δs。β・動き方・IV の入れ方は今のシナリオ）= 証拠金のタイルと同じ点。
- *   今 = d = ΔX = Δσ = Δs = 0（marginNow と同じ）。h = 板の時刻 + d から 2 営業日後まで
+ *   今 = d = ΔX = Δσ = Δs = 0（marginNow と同じ。このとき β・動き方・IV の入れ方は効かない）。h = 板の時刻 + d から
+ *   2 営業日後まで
  * - 縦軸: 効率（%）。0 から、表示範囲の中の点（シナリオの点と今）の最大の 1.15 倍まで。右端に目盛り
  * - 読み取り: 縦線に最も近い点の行使価格の「売り K put · プレミアム · 効率」と「証拠金 · Δ（ラージ・ミニ）」
  */
@@ -22,6 +24,7 @@ import {
   type OptionType,
   type Scenario,
   sellEfficiency,
+  underlyingAt,
   ZERO_SCENARIO,
 } from '../../model';
 import { clipSegment, type Domain, linear, niceTicks } from '../chart/scale';
@@ -38,6 +41,8 @@ export interface SmileEffBase {
 
 export interface SmileEffPoint {
   k: number;
+  /** 限月の行（month.strikes）の位置。隣の行でなければ線を切る */
+  i: number;
   /** 横軸の値（スマイルの axisValue） */
   x: number;
   type: OptionType;
@@ -53,10 +58,11 @@ export interface SmileEffPoint {
 
 const finite0 = (v: number) => (Number.isFinite(v) ? v : 0);
 
-/** 今のシナリオ（d = ΔX = Δσ = Δs = 0。β・動き方・IV の入れ方はそのまま。marginNow と同じ） */
-export function effNowScenario(s: Pick<Scenario, 'beta' | 'ivDynamics' | 'ivShift'>): Scenario {
-  return { ...ZERO_SCENARIO, beta: s.beta, ivDynamics: s.ivDynamics, ivShift: s.ivShift };
-}
+/**
+ * 今のシナリオ（d = ΔX = Δσ = Δs = 0。marginNow と同じ）。このとき β（ΔX = 0）・動き方（F' = F）・IV の入れ方（Δσ = 0）は
+ * 価格にも証拠金の格子にも効かないので、今の線はシナリオに依らない
+ */
+export const EFF_NOW_SCENARIO: Scenario = ZERO_SCENARIO;
 
 /** シナリオの点が今か（d・ΔX・Δσ・Δs が全部 0） */
 export function effAtNow(s: Scenario): boolean {
@@ -84,16 +90,21 @@ export function smileEffPoints(
     MARGIN_HORIZON_BUSINESS_DAYS,
     holidays,
   );
+  // OTM 側は状態 S の限月の原資産 F' で決める（今の F のままだと ΔX で ITM になった売りが線の山になる）
+  const Fp = underlyingAt(month.F, ctx.x0, x, settings.basisMode);
+  if (!Number.isFinite(Fp)) return [];
   const out: SmileEffPoint[] = [];
-  for (const s of month.strikes) {
+  for (let i = 0; i < month.strikes.length; i++) {
+    const s = month.strikes[i] as ChainMonth['strikes'][number];
     if (s.smileIv === null) continue;
+    const type: OptionType = s.k < Fp ? 'put' : 'call';
     const ax = axisValue(month, basis, axis, s);
     if (ax === null || !Number.isFinite(ax)) continue;
     const r = sellEfficiency(
       {
         expiry: month.id,
         strike: s.k,
-        type: s.otmType,
+        type,
         sigma: s.smileIv,
         x,
         scenario: sc,
@@ -106,8 +117,9 @@ export function smileEffPoints(
     if (!r) continue;
     out.push({
       k: s.k,
+      i,
       x: ax,
-      type: s.otmType,
+      type,
       premium: r.premium,
       margin: r.margin,
       eff: r.efficiency * 100,
@@ -142,13 +154,29 @@ export function smileEffTicks(yDomain: Domain): number[] {
   return niceTicks(yDomain[0], yDomain[1], 3).filter((t) => t > 0 && t <= yDomain[1]);
 }
 
+/** 右端の目盛りを描画域の右端の内側に置く幅（px。右の余白 22px には 4 文字の % が入らないため内側に右寄せ・縁取り） */
+export const EFF_TICK_INSET_PX = 3;
+/** 目盛りを読み取りの行から離す距離（px） */
+export const EFF_TICK_CLEAR_PX = 8;
+
+/**
+ * 右寄せの読み取り（縦線が左側のとき）と重なる目盛りを外す（読み取りの各行の y から EFF_TICK_CLEAR_PX 未満）。
+ * 読み取りが左寄せ・十字線が無いときは readYs を空で渡す
+ */
+export function effTicksClear<T extends { y: number }>(
+  ticks: readonly T[],
+  readYs: readonly number[],
+): T[] {
+  return ticks.filter((t) => readYs.every((y) => Math.abs(t.y - y) >= EFF_TICK_CLEAR_PX));
+}
+
 /** 目盛りの文字（整数の %。10 未満で刻みが細かいときは小数 1 桁） */
 export function effTickLabel(v: number): string {
   const whole = Math.abs(v - Math.round(v)) < 1e-9;
   return `${fmtNum(v, whole ? 0 : 1)}%`;
 }
 
-/** 点を結ぶ線の path（横軸の表示範囲で切る。横軸の値の順に結ぶ = K の昇順） */
+/** 点を結ぶ線の path（横軸の表示範囲で切る。隣の行どうしだけを結ぶ = 点の無い行で切る） */
 export function smileEffPath(
   pts: readonly SmileEffPoint[],
   domain: Domain,
@@ -164,6 +192,10 @@ export function smileEffPath(
   for (let i = 1; i < pts.length; i++) {
     const a = pts[i - 1] as SmileEffPoint;
     const b = pts[i] as SmileEffPoint;
+    if (b.i !== a.i + 1) {
+      last = null;
+      continue;
+    }
     const c = clipSegment(a.x, a.eff, b.x, b.eff, domain[0], domain[1]);
     if (!c) {
       last = null;
