@@ -1832,7 +1832,9 @@ describe('性能（#152 追証マップ）', () => {
     // 1 列 = 余力と損益（#180。useHoldMap と同じ単位）
     const one = () => {
       col = (col + 1) % axes.us.length;
-      return holdMapColumn(calc, axes, col).length + holdMapPnlColumn(calc, axes, col).length - 21;
+      const rooms = holdMapColumn(calc, axes, col);
+      const pnls = holdMapPnlColumn(calc, axes, col);
+      return rooms.length === pnls.length ? rooms.length : -1;
     };
     expect(one()).toBe(21);
     expectWithinBudget('#152 追証マップの 1 列', one, { warmup: 10, runs: 30 });

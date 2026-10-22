@@ -11,11 +11,11 @@ import type { AtmMovesCtl } from '../../components/useAtmMoves';
 import type { HoldMapCtl } from '../../components/useHoldMap';
 import { CROSS_TOUCH_GRAB_PX, crossTapAction } from '../../view/crosshair';
 import {
-  HOLD_MAP_CAPTION,
   HOLD_MAP_PLOT_LABEL,
   HOLD_MAP_RETRY,
   type HoldMapResult,
   type HoldMapSel,
+  holdMapCaption,
   holdMapCrosshair,
   holdMapDxX,
   holdMapHeight,
@@ -387,11 +387,11 @@ export function HoldMap({ hold, unit }: { hold: HoldBundle; unit: AmountUnit }) 
         aria-controls={id}
         onClick={hold.onToggle}
       >
-        <span>{holdMapTitle(hold.days, hold.allowedLoss)}</span>
+        <span>{holdMapTitle(hold.days, hold.allowedLoss, !blocked)}</span>
       </button>
       {hold.open && (
         <div id={id} ref={bodyRef} class="hm">
-          <p class="mx-note">{HOLD_MAP_CAPTION}</p>
+          <p class="mx-note">{holdMapCaption(blocked ? null : hold.allowedLoss)}</p>
           {blocked ? (
             <p class="hm-status">{status.main}</p>
           ) : (

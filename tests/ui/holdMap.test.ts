@@ -29,6 +29,7 @@ import {
   HOLD_MAP_TITLE,
   type HoldMapResult,
   holdMapBaseScenario,
+  holdMapCaption,
   holdMapCellAt,
   holdMapCrosshair,
   holdMapDxX,
@@ -447,6 +448,12 @@ describe('#180 許容損失の境目', () => {
     expect(holdMapTitle(3, LOSS)).toBe('追証マップ · 3 日後');
     expect(holdMapTitle(0, LOSS)).toContain('0 日後');
     expect(holdMapTitle(2.5, LOSS)).toContain('2.5 日後');
+    // マップを出さない（資金・足なし）ときは d を付けない
+    expect(holdMapTitle(3, LOSS, false)).toBe(HOLD_MAP_TITLE);
+    // 説明: 設定ありのときだけ破線と許容損失超の読み方を足す
+    expect(holdMapCaption(null)).toBe(HOLD_MAP_CAPTION);
+    expect(holdMapCaption(LOSS).startsWith(HOLD_MAP_CAPTION)).toBe(true);
+    expect(holdMapCaption(LOSS)).toContain('破線 = d 日後の損益が −許容損失になる境目');
     expect(holdMapLegend(LOSS).map((k) => k.label)).toEqual(['許容内', '許容損失超', '追証']);
     const plot = holdMapPlot(RESULT, MOVES, 600, LOSS);
     expect(plot.lossContour).toMatch(/^M[\d.]+ [\d.]+L[\d.]+ [\d.]+/);
@@ -466,6 +473,7 @@ describe('#180 許容損失の境目', () => {
         const pnl = RESULT.pnls[i]?.[j] as number;
         if (!Number.isFinite(room)) return;
         if (room < 0) nCall++;
+        else if (!Number.isFinite(pnl)) return;
         else if (pnl + LOSS < 0) nLoss++;
         else nOk++;
       });
@@ -475,6 +483,24 @@ describe('#180 許容損失の境目', () => {
       (plot.cells.find((c) => c.cls === cls)?.d.match(/M/g) ?? []).length;
     expect([count('hm-call'), count('hm-loss'), count('hm-ok')]).toEqual([nCall, nLoss, nOk]);
     expect(nLoss).toBeGreaterThan(0);
+  });
+
+  it('許容損失があるとき、損益が有限でないマスは（余力が有限でも）塗らない。許容損失が無ければ余力の色', () => {
+    const { us: u2 } = RESULT.axes;
+    const i = u2.findIndex((u) => Math.abs(u) < 1e-9);
+    const j = RESULT.axes.cs.findIndex((c) => Math.abs(c - 1) < 1e-9);
+    expect(RESULT.rooms[i]?.[j] as number).toBeGreaterThanOrEqual(0);
+    const pnls = RESULT.pnls.map((c) => Float64Array.from(c));
+    (pnls[i] as Float64Array)[j] = Number.NaN;
+    const broken = { ...RESULT, pnls };
+    const cellsOf = (p: ReturnType<typeof holdMapPlot>) =>
+      p.cells.reduce((n, c) => n + (c.d.match(/M/g) ?? []).length, 0);
+    expect(cellsOf(holdMapPlot(broken, MOVES, 600, LOSS))).toBe(
+      cellsOf(holdMapPlot(RESULT, MOVES, 600, LOSS)) - 1,
+    );
+    expect(cellsOf(holdMapPlot(broken, MOVES, 600, null))).toBe(
+      cellsOf(holdMapPlot(RESULT, MOVES, 600, null)),
+    );
   });
 
   it('(c) 読み取りの 1 行に損益（設定ありなら 許容内 / 許容損失超）。十字線も同じ', () => {

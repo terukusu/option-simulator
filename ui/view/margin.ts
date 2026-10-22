@@ -44,6 +44,26 @@ export function marginParamsOf(m: MarginPrefs): MarginParams {
   };
 }
 
+/**
+ * marginParamsOf の参照を保つ版（#180）: 計算に使う項目（掛け目・幅・IV の上げ / 下げ・買いの OP）が prev と同じなら
+ * prev をそのまま返す。資金・許容損失など計算のパラメータでない項目だけを変えても、証拠金・追証マップの入力の参照が
+ * 変わらない（= 作り直さない）
+ */
+export function marginParamsKeep(prev: MarginParams | null, m: MarginPrefs): MarginParams {
+  const next = marginParamsOf(m);
+  if (
+    prev &&
+    prev.range === next.range &&
+    prev.ivUp === next.ivUp &&
+    prev.ivDown === next.ivDown &&
+    prev.factor === next.factor &&
+    prev.ignoreLongOptions === next.ignoreLongOptions
+  ) {
+    return prev;
+  }
+  return next;
+}
+
 /** 資金（円）。未設定・0・不正は null */
 export function capitalOf(m: MarginPrefs): number | null {
   const c = m.capitalYen;

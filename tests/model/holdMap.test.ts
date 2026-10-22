@@ -28,7 +28,7 @@ import {
 } from '../../model/position';
 import { type Scenario, ZERO_SCENARIO } from '../../model/scenario';
 import { businessDaysAhead, DAY_MS } from '../../model/time';
-import { holdMapCalcOf, holdMapInput, holdMapRooms } from '../../ui/view/holdMap';
+import { holdMapCalcOf, holdMapInput, holdMapResultOf } from '../../ui/view/holdMap';
 import { marginNow } from '../../ui/view/margin';
 import { pnlDomains } from '../../ui/view/pnlChart';
 import { FUT, M1, M2, makeMarket, quoteOf } from '../support/market';
@@ -359,7 +359,7 @@ describe('マップ全体', () => {
     const legs = FORMS[0]?.[1] ?? [];
     const input = holdMapInput(baseOf(legs), ZERO_SCENARIO, PARAMS, 1_500_000, []);
     if (!input) throw new Error('入力が作れない');
-    const rooms = holdMapRooms(input, AXES);
+    const { rooms } = holdMapResultOf(input, AXES);
     const all = rooms.flatMap((c) => [...c]);
     expect(all.every(Number.isFinite)).toBe(true);
     expect(all.some((v) => v < 0)).toBe(true);

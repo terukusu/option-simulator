@@ -63,9 +63,21 @@ export const HOLD_MAP_LEGEND: ReadonlyArray<{
 
 const daysText = (days: number) => fmtNum(days, Number.isInteger(days) ? 0 : 1);
 
-/** 見出し（#180）: 許容損失があれば `追証マップ · d 日後`（損益を見る時点 = シナリオの d）、無ければ `追証マップ` */
-export function holdMapTitle(days: number, allowedLoss: number | null): string {
-  return allowedLoss === null ? HOLD_MAP_TITLE : `${HOLD_MAP_TITLE} · ${daysText(days)} 日後`;
+/**
+ * 見出し（#180）: 許容損失があってマップを出す（資金・足がある）ときは `追証マップ · d 日後`（損益を見る時点 =
+ * シナリオの d）、それ以外は `追証マップ`
+ */
+export function holdMapTitle(days: number, allowedLoss: number | null, mapShown = true): string {
+  return allowedLoss === null || !mapShown
+    ? HOLD_MAP_TITLE
+    : `${HOLD_MAP_TITLE} · ${daysText(days)} 日後`;
+}
+
+/** 見出しの下の説明（#180）: 許容損失があれば破線と 3 色目の読み方を足す */
+export function holdMapCaption(allowedLoss: number | null): string {
+  return allowedLoss === null
+    ? HOLD_MAP_CAPTION
+    : `${HOLD_MAP_CAPTION}。破線 = d 日後の損益が −許容損失になる境目、許容損失超 = 損失が許容損失を超えるが追証ではない`;
 }
 
 /** 凡例（#180）: 許容損失が無ければ出さない（[]） */
@@ -144,13 +156,7 @@ export interface HoldMapResult {
   pnls: Float64Array[];
 }
 
-/** マップ全体を一度に作る（テスト・計測用。画面は useHoldMap が列ごとに回す） */
-export function holdMapRooms(input: HoldMapInput, axes: HoldMapAxes): Float64Array[] {
-  const calc = holdMapCalcOf(input);
-  return axes.us.map((_, i) => holdMapColumn(calc, axes, i));
-}
-
-/** マップ全体（余力と損益）を一度に作る（テスト・計測用） */
+/** マップ全体（余力と損益）を一度に作る（テスト・計測用。画面は useHoldMap が列ごとに回す） */
 export function holdMapResultOf(input: HoldMapInput, axes: HoldMapAxes): HoldMapResult {
   const calc = holdMapCalcOf(input);
   return {
@@ -287,9 +293,20 @@ export function holdMapPlot(
       const yb = yEdge(j);
       const yt = j + 1 < cs.length ? yEdge(j + 1) : r1(s.top);
       const rect = `M${x} ${yt}h${w}v${r1(yb - yt)}h${-w}z`;
-      if (v < 0) call += rect;
-      else if ((lossCol?.[j] ?? 0) < 0) loss += rect;
-      else ok += rect;
+      if (v < 0) {
+        call += rect;
+        continue;
+      }
+      if (lossCol) {
+        // 許容損失があるとき、損益が有限でないマスは許容内とも超とも決めない = 塗らない（余力の NaN と同じ扱い）
+        const lv = lossCol[j] as number;
+        if (!Number.isFinite(lv)) continue;
+        if (lv < 0) {
+          loss += rect;
+          continue;
+        }
+      }
+      ok += rect;
     }
   }
   const cells: HoldMapPlot['cells'] = [];
