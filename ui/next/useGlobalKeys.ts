@@ -38,14 +38,20 @@ export const PANEL_FOCUS: Readonly<Record<PanelId, string>> = {
 /** 行き先を待つフレームの上限（板は初めて見せたとき幅を測ってから表を作るので 1 フレームでは無い） */
 const FOCUS_FRAMES = 10;
 
+/** focusLater の通し番号（同じフレームで続けて押したら最後の要求だけを生かす。#124） */
+let focusSeq = 0;
+
 /**
  * 次のフレームから行き先へ focus（PC で市場を切り替えた直後は描き直しの前で display: none）。無ければ
- * FOCUS_FRAMES まで待ち、それでも無い・その間にフォーカスが他の要素へ動いたら何もしない。
+ * FOCUS_FRAMES まで待ち、それでも無い・その間にフォーカスが他の要素へ動いたら何もしない。後から別の要求が来たら
+ * 前の要求は何もしない（1 → 2 を同じフレームで押すと 2 の行き先へ。#124）。
  */
 function focusLater(sel: string): void {
   const from = document.activeElement;
+  const seq = ++focusSeq;
   let n = 0;
   const tick = () => {
+    if (seq !== focusSeq) return;
     // 前のパネルを隠すとフォーカスは body に落ちる（利用者が動かしたのではない）
     const now = document.activeElement;
     if (now !== from && now !== null && now !== document.body) return;

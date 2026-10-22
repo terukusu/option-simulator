@@ -11,7 +11,7 @@ import { Menu, type MenuItem } from '../parts/Menu';
 import { Popover } from '../parts/Popover';
 import { Seg } from '../parts/Seg';
 import { Stepper } from '../parts/Stepper';
-import { Toasts, useToasts } from '../parts/Toast';
+import { ToastSlot, useToastHost, useToasts } from '../parts/Toast';
 import './gallery.css';
 
 const DAYS = { min: 0, max: 30, step: 1, def: 0 };
@@ -35,6 +35,11 @@ export function PartsGallery() {
   const [dialog, setDialog] = useState(false);
   const [picked, setPicked] = useState('なし');
   const toasts = useToasts();
+  const toastHost = useToastHost({
+    toasts: toasts.toasts,
+    onUndo: toasts.undo,
+    onDismiss: toasts.dismiss,
+  });
   const items: MenuItem[] = [
     { key: 'dup', label: 'タブを複製', kbd: 'D', onSelect: () => setPicked('タブを複製') },
     { key: 'rename', label: '名前を変える', onSelect: () => setPicked('名前を変える') },
@@ -255,7 +260,7 @@ export function PartsGallery() {
           Esc か [×] で閉じ、開く前のボタンへフォーカスが戻る。中身だけスクロールする。
         </p>
       </Dialog>
-      <Toasts toasts={toasts.toasts} onUndo={toasts.undo} onDismiss={toasts.dismiss} />
+      <ToastSlot host={toastHost} />
     </main>
   );
 }
