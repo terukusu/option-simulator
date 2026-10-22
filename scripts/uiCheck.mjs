@@ -1617,10 +1617,10 @@ const holdPlace = (page) =>
 
 /**
  * 開いた後、描画域の高さが useSize の測った幅で決まるまで待つ（#254。負荷が高いと 2 フレームより遅れる）: 枠の svg の
- * width 属性 = .hm-wrap の幅（測った幅）になってから rAF 2 回（部品が測り直して動かした後）。3 秒で打ち切り
+ * width 属性 = .hm-wrap の幅（測った幅）になるまで。3 秒で打ち切り（false）
  */
-async function holdSettled(page) {
-  await page
+const holdWidthSettled = (page) =>
+  page
     .waitForFunction(
       () => {
         const wrap = document.querySelector('section.metrics .hm-wrap');
@@ -1630,9 +1630,15 @@ async function holdSettled(page) {
       undefined,
       { timeout: 3000 },
     )
-    .catch(() => {});
+    .then(() => true)
+    .catch(() => false);
+
+/** holdWidthSettled の後に rAF 2 回（部品が測り直して動かした後）の holdPlace。決まらなければ settled: false */
+async function holdSettled(page) {
+  const settled = await holdWidthSettled(page);
   await twoFrames(page);
-  return holdPlace(page);
+  const r = await holdPlace(page);
+  return r && { ...r, settled };
 }
 
 /**
@@ -1690,6 +1696,7 @@ async function holdMapAll() {
           await page.click('section.metrics .hm-toggle');
           // 部品は中身の大きさが変わるたびに測って動かす（reduce = 即時。#254）。描画域の高さが決まってから
           const r = await holdSettled(page);
+          if (r && !r.settled) ng('描画域の幅が 3 秒で決まらない');
           if (!holdPlaced(r)) ng(`開いた直後の位置 ${JSON.stringify(r)}`);
           await page.waitForSelector('section.metrics .hm-wait', { timeout: 3000 }).catch(() => {});
           const wv = await page.evaluate(() => {
@@ -3436,7 +3443,11 @@ async function holdToggleFlow(vp) {
     return spin ? getComputedStyle(spin).animationName : null;
   });
   check(`#174 ${tag} 読み込み中はスピナーが回る`, anim === 'hm-spin', `animation-name ${anim}`);
-  // 滑らかなスクロールが止まるまで（scrollTop が 3 フレーム変わらない）
+  // 描画域の高さが決まってから（#254。その後に測り直した 2 回目のスクロールが始まりうる）、滑らかなスクロールが
+  // 止まるまで（scrollTop が 3 フレーム変わらない）
+  const settled = await holdWidthSettled(page);
+  check(`#174 ${tag} 開いた後 描画域の幅が決まる（3 秒以内）`, settled);
+  await twoFrames(page);
   await page.evaluate(
     () =>
       new Promise((res) => {

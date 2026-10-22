@@ -35,7 +35,11 @@ import {
 import type { AmountUnit } from '../../view/metrics';
 import { useSize } from '../useSize';
 
-/** 追証マップを開いてから、中身の大きさが変わるたびに描画域を枠に入れ直す時間（#254） */
+/**
+ * 追証マップを開いてから、中身の大きさが変わるたびに描画域を枠に入れ直す時間（#254）。開いてから描画域の幅が決まるまでの
+ * 実測（dev・合成の板・900 / 1440）は負荷あり（load 6）で中央値 27〜29ms・最大 62ms、さらに CPU を 6 倍遅くして中央値
+ * 157ms・最大 296ms。その 3 倍余りの余裕
+ */
 const HOLD_REVEAL_MS = 1000;
 
 /** 指標パネルに渡す追証マップの束（NextApp の useMemo。参照が同じなら描き直さない） */
@@ -360,26 +364,16 @@ export function HoldMap({ hold, unit }: { hold: HoldBundle; unit: AmountUnit }) 
   // 初めの描画は描画域が仮の幅 320px の高さで、useSize が測った幅の高さになるのは useEffect の後（負荷が高いと 2 フレーム
   // より遅れる。#254）。なので中身（.hm）の大きさを ResizeObserver で見て、開いてから HOLD_REVEAL_MS の間は大きさが
   // 変わるたびに測り直して動かす（最初の通知は observe の直後 = 開いた描画のレイアウトの後）。利用者が枠を操作したら
-  // （ホイール・タッチ・ポインター・キー）そこで止める（自分で動かした位置を奪わない）
+  // （ホイール・ポインター（マウス・タッチ・ペン）・キー）そこで止める（自分で動かした位置を奪わない）
   useLayoutEffect(() => {
     const opened = hold.open && !wasOpen.current;
     wasOpen.current = hold.open;
     if (!opened) return;
     const body = bodyRef.current;
-    const host = body?.closest('.panel-body');
-    if (!body || !(host instanceof HTMLElement)) return;
-    const ro = new ResizeObserver(reveal);
-    ro.observe(body);
-    const stopEvents = ['wheel', 'touchstart', 'pointerdown', 'keydown'] as const;
-    for (const ev of stopEvents) host.addEventListener(ev, stop, { passive: true });
-    const timer = setTimeout(stop, HOLD_REVEAL_MS);
-    function stop() {
-      clearTimeout(timer);
-      ro.disconnect();
-      for (const ev of stopEvents) host?.removeEventListener(ev, stop);
-    }
-    function reveal() {
-      if (!body || !(host instanceof HTMLElement)) return;
+    const found = body?.closest('.panel-body');
+    if (!body || !(found instanceof HTMLElement)) return;
+    const host: HTMLElement = found;
+    const reveal = () => {
       // 資金なし・足なしは描画域が無いので中身（.hm）の全体
       const target = body.querySelector('.hm-plot') ?? body;
       const oy = getComputedStyle(host).overflowY;
@@ -389,7 +383,19 @@ export function HoldMap({ hold, unit }: { hold: HoldBundle; unit: AmountUnit }) 
       const t = target.getBoundingClientRect();
       const { delta, behavior } = holdMapReveal(t.top, t.bottom, h.top, h.bottom, reduced);
       if (delta > 0) host.scrollTo({ top: host.scrollTop + delta, behavior });
-    }
+    };
+    const ro = new ResizeObserver(reveal);
+    // pointerdown はマウス・タッチ・ペンのどれでも出る
+    const stopEvents = ['wheel', 'pointerdown', 'keydown'] as const;
+    let timer = 0;
+    const stop = () => {
+      clearTimeout(timer);
+      ro.disconnect();
+      for (const ev of stopEvents) host.removeEventListener(ev, stop);
+    };
+    ro.observe(body);
+    for (const ev of stopEvents) host.addEventListener(ev, stop, { passive: true });
+    timer = window.setTimeout(stop, HOLD_REVEAL_MS);
     return stop;
   }, [hold.open]);
   return (
