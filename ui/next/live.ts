@@ -5,7 +5,8 @@ import { LIVE_INITIAL, LIVE_SETTLE_MS, type LiveState, liveNext, liveOn } from '
 /**
  * 舞台の `.live` / `[data-live]`（docs/ui-redesign.md §6・§10.1「動き」。#91 段 C）のストア: 規則は ui/view/motion.ts の純関数、
  * 時刻とタイマーはここ。DOM を持たない（document の keydown を 1 つ受けるだけ）。
- * - liveHold(): 押している間 on。返り値で離す（離したら 2 フレーム後に外す = 最後の move の rAF を補間しない）
+ * - liveHold(): 押している間 on。返り値で離す（離したら 2 フレーム後に外す = 最後の move の rAF を補間しない）。
+ *   blur・タブが隠れたときも離す
  * - livePulse(): 最後の 1 回から LIVE_SETTLE_MS の間 on
  * - useLiveAttr(ref): 今の値を要素の data-live 属性に直接入れる（Preact の props に無い属性なので描き直しと競合しない。
  *   切り替えで舞台を描き直さない = 連打・ドラッグの始めと終わりに描画を足さない）
@@ -34,14 +35,21 @@ function sync() {
   for (const f of subs) f(on);
 }
 
-/** 押している間 on。返り値を 1 回呼ぶと（2 フレーム後に）離す */
-export function liveHold(): () => void {
+/**
+ * 押している間 on。返り値を 1 回呼ぶと（2 フレーム後に）離す。pointerup / pointercancel が来ないまま窓がフォーカスを
+ * 失う（blur）・タブが隠れる（visibilitychange で hidden）と、そこで離す（離し損ねて補間が切れたままにしない。#123）。
+ * onRelease はどの経路で離しても 1 回だけ呼ぶ（呼び出し側の pointerup の購読を外すため）
+ */
+export function liveHold(onRelease?: () => void): () => void {
   state = liveNext(state, { kind: 'hold' });
   sync();
   let done = false;
-  return () => {
+  const release = () => {
     if (done) return;
     done = true;
+    window.removeEventListener('blur', release);
+    document.removeEventListener('visibilitychange', onVisibility);
+    onRelease?.();
     requestAnimationFrame(() =>
       requestAnimationFrame(() => {
         state = liveNext(state, { kind: 'release' });
@@ -49,6 +57,17 @@ export function liveHold(): () => void {
       }),
     );
   };
+  const onVisibility = () => {
+    if (document.visibilityState === 'hidden') release();
+  };
+  window.addEventListener('blur', release);
+  document.addEventListener('visibilitychange', onVisibility);
+  return release;
+}
+
+/** 今 `.live` か（テスト用。画面は useLiveAttr で属性に入れる） */
+export function liveActive(): boolean {
+  return on;
 }
 
 /** 1 回の連続の変化（最後から LIVE_SETTLE_MS の間 on） */
