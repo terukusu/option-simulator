@@ -1,4 +1,4 @@
-# api（板・カレンダー・IV 推移の JSON を返す Flask と、AI の中継）
+# api（板・カレンダー・IV 推移・先物推移・日次の値の JSON を返す Flask と、AI の中継）
 
 optionchan の BigQuery（データセット `optionchan_tokyo` のテーブル関数 4 本とビュー `trading_calendar_latest`、表 `atm_cm_iv`）を **読むだけ** の API と、AI アドバイザーの中継（Anthropic の Messages API。#134）。計算（F・補間・ATM）はブラウザの `model/` で行う。設計は `docs/design.md` の 7.1〜7.3・7.5・8.3・13.4「AI の中継」・14 章。供給元は `DATA_SOURCE` で差し替えられる（下の設定。供給元の口・板の契約・中立の気配の一覧は `docs/data-sources.md`。#154）。
 
