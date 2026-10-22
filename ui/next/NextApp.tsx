@@ -37,6 +37,7 @@ import { keptBoardNote } from '../view/header';
 import { type IndKind, toggleInd } from '../view/indicators';
 import { ivNowValue } from '../view/ivHistory';
 import { PC_QUERY, PHONE_QUERY } from '../view/layout';
+import { allowedLossOf } from '../view/margin';
 import { marketPill } from '../view/marketPill';
 import {
   LOAD_FAILED_KIND,
@@ -207,6 +208,7 @@ export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
   const holdNoLegs = c.curLegs.length === 0;
   const holdNoCapital = (c.marginView?.capital ?? null) === null;
   const holdDays = c.metrics.days;
+  const holdAllowedLoss = allowedLossOf(userPrefs.prefs.margin);
   const hold = useMemo<HoldBundle>(
     () => ({
       open: holdOpen,
@@ -217,8 +219,19 @@ export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
       moves: atmMoves,
       dXRatio: holdDXRatio,
       days: holdDays,
+      allowedLoss: holdAllowedLoss,
     }),
-    [holdOpen, onHoldToggle, holdNoLegs, holdNoCapital, holdCtl, atmMoves, holdDXRatio, holdDays],
+    [
+      holdOpen,
+      onHoldToggle,
+      holdNoLegs,
+      holdNoCapital,
+      holdCtl,
+      atmMoves,
+      holdDXRatio,
+      holdDays,
+      holdAllowedLoss,
+    ],
   );
   // 全体のキー 1〜5・G・T・Ctrl / ⌘ + K（#89。パレットの行の実行も同じ ctx）
   // paletteQuery = 開いたときの問い合わせ（null = 閉。Ctrl / ⌘ + K は空、⋯ > 用語集… は `?` = 用語だけ。#167）

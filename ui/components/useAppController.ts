@@ -7,7 +7,13 @@
 
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'preact/hooks';
 import { axisOrigin, type Chain, type ChainJson, ChainLoadError, monthOf } from '../../data';
-import { DEFAULT_SETTINGS, type ModelSettings, type Scenario, ZERO_SCENARIO } from '../../model';
+import {
+  DEFAULT_SETTINGS,
+  type MarginParams,
+  type ModelSettings,
+  type Scenario,
+  ZERO_SCENARIO,
+} from '../../model';
 import {
   addEntry,
   bookKey,
@@ -76,7 +82,7 @@ import {
   capitalOf,
   type MarginView,
   marginNow,
-  marginParamsOf,
+  marginParamsKeep,
   marginPoint,
   marginPointAt,
   marginTail,
@@ -583,7 +589,12 @@ export function useAppController(boot: Boot = NO_BOOT, margin: MarginPrefs = DEF
   );
   // 証拠金の概算（#131。設計 5.10）: 今 = 足・板・設定・β / 動き方 / IV の入れ方、シナリオの点 = シナリオ、
   // テール = ΔX 以外のシナリオ（重ねの線と同じ lineScenario。ΔX のドラッグではテールを作り直さない）。資金・パラメータは端末の設定
-  const marginParams = useMemo(() => marginParamsOf(margin), [margin]);
+  // パラメータは計算に使う項目が変わったときだけ新しい参照（許容損失など計算に使わない設定では作り直さない。#180）
+  const marginParamsRef = useRef<MarginParams | null>(null);
+  const marginParams = useMemo(() => {
+    marginParamsRef.current = marginParamsKeep(marginParamsRef.current, margin);
+    return marginParamsRef.current;
+  }, [margin]);
   const capital = capitalOf(margin);
   const { holidays } = calendar;
   const nowScenario = useMemo<Scenario>(

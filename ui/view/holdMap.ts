@@ -6,6 +6,8 @@
  * - マスの計算は model/holdMap.ts の holdMapColumn（列ごと）。h・premium・d の clampDays はここ（marginCalc と同じ求め方）
  * - 表示: マス 2 色（余力あり / 追証）・境目の線・過去の点（余力ありは丸、追証の側は ×）・今（0%, ×1）の十字・軸の目盛り
  *   （固定の本数の上限）・要約・注記・触った 1 行。座標は SVG の数値の属性と path の d だけ（style を使わない）
+ * - 許容損失（#180。設定の資金の次）があれば、2 本目の境目（損益 = −許容損失）・3 色目のマス（許容損失超。追証が優先）・
+ *   凡例・見出しの `d 日後` を足す。許容損失は計算の入力に入れない（変えても作り直さず描き直すだけ）
  * - 部品は ui/next/regions/HoldMap.tsx。計算の時機は ui/components/useHoldMap.ts
  */
 
@@ -20,7 +22,9 @@ import {
   holdMapColumn,
   holdMapContour,
   holdMapCount,
-  holdMapRoomAt,
+  holdMapLossRooms,
+  holdMapPnlColumn,
+  holdMapValueAt,
   MARGIN_HORIZON_BUSINESS_DAYS,
   type MarginParams,
   premiumSummary,
@@ -47,6 +51,39 @@ export const HOLD_MAP_IDLE_READOUT = '点かマスを触ると値を出す（矢
 export const HOLD_MAP_CAPTION =
   '原資産と IV が同時に動いたときの余力。横 = 原資産の変化（今の X₀ に対する %）、縦 = IV の倍率（足ごとの IV に掛ける）。色 = 余力あり / 追証（余力 < 0）、線 = 境目、十字 = 今。β・Δσ は使わない。追証の側（赤）は概算で、実際の追証は引けの清算値で判定（日中に入っても引けで戻れば追証にならない）';
 export const HOLD_MAP_PLOT_LABEL = '追証マップ（原資産と IV が同時に動いたときの余力）';
+/** 許容損失があるときの凡例（#180。マスの色の 3 区分。追証が優先） */
+export const HOLD_MAP_LEGEND: ReadonlyArray<{
+  cls: 'hm-ok' | 'hm-loss' | 'hm-call';
+  label: string;
+}> = [
+  { cls: 'hm-ok', label: '許容内' },
+  { cls: 'hm-loss', label: '許容損失超' },
+  { cls: 'hm-call', label: '追証' },
+];
+
+const daysText = (days: number) => fmtNum(days, Number.isInteger(days) ? 0 : 1);
+
+/**
+ * 見出し（#180）: 許容損失があってマップを出す（資金・足がある）ときは `追証マップ · d 日後`（損益を見る時点 =
+ * シナリオの d）、それ以外は `追証マップ`
+ */
+export function holdMapTitle(days: number, allowedLoss: number | null, mapShown = true): string {
+  return allowedLoss === null || !mapShown
+    ? HOLD_MAP_TITLE
+    : `${HOLD_MAP_TITLE} · ${daysText(days)} 日後`;
+}
+
+/** 見出しの下の説明（#180）: 許容損失があれば破線と 3 色目の読み方を足す */
+export function holdMapCaption(allowedLoss: number | null): string {
+  return allowedLoss === null
+    ? HOLD_MAP_CAPTION
+    : `${HOLD_MAP_CAPTION}。破線 = d 日後の損益が −許容損失になる境目、許容損失超 = 損失が許容損失を超えるが追証ではない`;
+}
+
+/** 凡例（#180）: 許容損失が無ければ出さない（[]） */
+export function holdMapLegend(allowedLoss: number | null): typeof HOLD_MAP_LEGEND {
+  return allowedLoss === null ? [] : HOLD_MAP_LEGEND;
+}
 
 /** 止まってから作るまでの時間（ms。追証の線の MARGIN_LINE_SETTLE_MS と同じ） */
 export const HOLD_MAP_SETTLE_MS = MARGIN_LINE_SETTLE_MS;
@@ -115,12 +152,19 @@ export interface HoldMapResult {
   axes: HoldMapAxes;
   /** rooms[i][j] = (us[i], cs[j]) の余力（円。有限でなければ NaN） */
   rooms: Float64Array[];
+  /** pnls[i][j] = (us[i], cs[j]) の損益（円。d の時点。有限でなければ NaN。#180） */
+  pnls: Float64Array[];
 }
 
-/** マップ全体を一度に作る（テスト・計測用。画面は useHoldMap が列ごとに回す） */
-export function holdMapRooms(input: HoldMapInput, axes: HoldMapAxes): Float64Array[] {
+/** マップ全体（余力と損益）を一度に作る（テスト・計測用。画面は useHoldMap が列ごとに回す） */
+export function holdMapResultOf(input: HoldMapInput, axes: HoldMapAxes): HoldMapResult {
   const calc = holdMapCalcOf(input);
-  return axes.us.map((_, i) => holdMapColumn(calc, axes, i));
+  return {
+    input,
+    axes,
+    rooms: axes.us.map((_, i) => holdMapColumn(calc, axes, i)),
+    pnls: axes.us.map((_, i) => holdMapPnlColumn(calc, axes, i)),
+  };
 }
 
 // ---- 表示モデル
@@ -154,10 +198,12 @@ export interface HoldMapPlot {
   right: number;
   top: number;
   bottom: number;
-  /** マス（クラスごとに 1 本の path。2 種だけ） */
-  cells: Array<{ cls: 'hm-ok' | 'hm-call'; d: string }>;
+  /** マス（クラスごとに 1 本の path。許容損失が無ければ 2 種、あれば 3 種） */
+  cells: Array<{ cls: 'hm-ok' | 'hm-loss' | 'hm-call'; d: string }>;
   /** 境目の線（空なら線なし） */
   contour: string;
+  /** 許容損失の境目の線（損益 = −許容損失。許容損失が無い・線が無ければ空。#180） */
+  lossContour: string;
   /** 余力ありの点（丸）・追証の側の点（×） */
   okDots: string;
   callMarks: string;
@@ -222,8 +268,10 @@ export function holdMapPlot(
   result: HoldMapResult,
   moves: readonly AtmMove[],
   width: number,
+  allowedLoss: number | null = null,
 ): HoldMapPlot {
-  const { axes, rooms } = result;
+  const { axes, rooms, pnls } = result;
+  const lossRooms = allowedLoss === null ? null : holdMapLossRooms(pnls, allowedLoss);
   const { us, cs } = axes;
   const s = holdMapScales(axes, width);
   const { sx, sy } = s;
@@ -231,9 +279,11 @@ export function holdMapPlot(
   const xEdge = (i: number) => r1(sx((us[i] as number) - s.du / 2));
   const yEdge = (j: number) => r1(sy((cs[j] as number) - s.dc / 2));
   let ok = '';
+  let loss = '';
   let call = '';
   for (let i = 0; i < us.length; i++) {
     const col = rooms[i];
+    const lossCol = lossRooms?.[i];
     if (!col) continue;
     const x = xEdge(i);
     const w = r1((i + 1 < us.length ? xEdge(i + 1) : r1(s.right)) - x);
@@ -243,17 +293,35 @@ export function holdMapPlot(
       const yb = yEdge(j);
       const yt = j + 1 < cs.length ? yEdge(j + 1) : r1(s.top);
       const rect = `M${x} ${yt}h${w}v${r1(yb - yt)}h${-w}z`;
-      if (v < 0) call += rect;
-      else ok += rect;
+      if (v < 0) {
+        call += rect;
+        continue;
+      }
+      if (lossCol) {
+        // 許容損失があるとき、損益が有限でないマスは許容内とも超とも決めない = 塗らない（余力の NaN と同じ扱い）
+        const lv = lossCol[j] as number;
+        if (!Number.isFinite(lv)) continue;
+        if (lv < 0) {
+          loss += rect;
+          continue;
+        }
+      }
+      ok += rect;
     }
   }
   const cells: HoldMapPlot['cells'] = [];
   if (ok) cells.push({ cls: 'hm-ok', d: ok });
+  if (loss) cells.push({ cls: 'hm-loss', d: loss });
   if (call) cells.push({ cls: 'hm-call', d: call });
-  let contour = '';
-  for (const [[ua, ca], [ub, cb]] of holdMapContour(axes, rooms)) {
-    contour += `M${r1(sx(ua))} ${r1(sy(ca))}L${r1(sx(ub))} ${r1(sy(cb))}`;
-  }
+  const path = (grid: readonly Float64Array[]) => {
+    let d = '';
+    for (const [[ua, ca], [ub, cb]] of holdMapContour(axes, grid)) {
+      d += `M${r1(sx(ua))} ${r1(sy(ca))}L${r1(sx(ub))} ${r1(sy(cb))}`;
+    }
+    return d;
+  };
+  const contour = path(rooms);
+  const lossContour = lossRooms ? path(lossRooms) : '';
   const count = holdMapCount(axes, rooms, moves);
   const px = new Float64Array(moves.length).fill(Number.NaN);
   const py = new Float64Array(moves.length).fill(Number.NaN);
@@ -294,6 +362,7 @@ export function holdMapPlot(
     bottom: s.bottom,
     cells,
     contour,
+    lossContour,
     okDots,
     callMarks,
     now: inside ? { x: r1(sx(0)), y: r1(sy(1)) } : null,
@@ -323,7 +392,7 @@ export function holdMapNote(moves: readonly AtmMove[], days: number): string {
   const first = moves[0];
   const last = moves[moves.length - 1];
   const span = first && last ? `${first.d0.slice(0, 7)}〜${last.d1.slice(0, 7)} の ` : '';
-  return `点 = ${span}2 営業日（日中の終値）の原資産と ATM IV（30 日）の倍率。重なりあり・足の IV が同じ倍率で動くと見なした近似。マップの日数はシナリオの d（${fmtNum(days, Number.isInteger(days) ? 0 : 1)} 日）`;
+  return `点 = ${span}2 営業日（日中の終値）の原資産と ATM IV（30 日）の倍率。重なりあり・足の IV が同じ倍率で動くと見なした近似。マップの日数はシナリオの d（${daysText(days)} 日）`;
 }
 
 export type HoldMapSel = { kind: 'point'; k: number } | { kind: 'cell'; i: number; j: number };
@@ -404,27 +473,37 @@ function roomText(v: number, unit: AmountUnit): string {
   return `余力 ${fmtAmount(v, unit, true)} ${AMOUNT_UNIT_LABEL[unit]} · ${v < 0 ? '追証' : '余力あり'}`;
 }
 
-/** 選んだ点・マスの 1 行 */
+/** 損益の文（#180。許容損失があれば許容内 / 許容損失超も） */
+function pnlText(v: number, unit: AmountUnit, allowedLoss: number | null): string {
+  if (!Number.isFinite(v)) return '損益 —';
+  const tag = allowedLoss === null ? '' : ` · ${v + allowedLoss < 0 ? '許容損失超' : '許容内'}`;
+  return `損益 ${fmtAmount(v, unit, true)} ${AMOUNT_UNIT_LABEL[unit]}${tag}`;
+}
+
+/** 選んだ点・マスの 1 行（余力と、その点の d の時点の損益） */
 export function holdMapReadout(
   sel: HoldMapSel | null,
   result: HoldMapResult | null,
   moves: readonly AtmMove[],
   unit: AmountUnit,
+  allowedLoss: number | null = null,
 ): string {
   if (!sel || !result) return HOLD_MAP_IDLE_READOUT;
-  const { axes, rooms } = result;
+  const { axes, rooms, pnls } = result;
   if (sel.kind === 'point') {
     const mv = moves[sel.k];
     if (!mv) return HOLD_MAP_IDLE_READOUT;
     const d1 = mv.d1.slice(0, 4) === mv.d0.slice(0, 4) ? mv.d1.slice(5) : mv.d1;
-    const room = holdMapRoomAt(axes, rooms, mv.dx, mv.ivRatio);
-    return `${mv.d0} → ${d1} · 原資産 ${fmtSigned(mv.dx * 100, 1)}% · IV ${fmtNum(mv.iv0, 1)} → ${fmtNum(mv.iv1, 1)}%（×${fmtNum(mv.ivRatio, 2)} · ${fmtSigned(mv.ivPt, 1)}pt）· ${roomText(room, unit)}`;
+    const room = holdMapValueAt(axes, rooms, mv.dx, mv.ivRatio);
+    const pnl = holdMapValueAt(axes, pnls, mv.dx, mv.ivRatio);
+    return `${mv.d0} → ${d1} · 原資産 ${fmtSigned(mv.dx * 100, 1)}% · IV ${fmtNum(mv.iv0, 1)} → ${fmtNum(mv.iv1, 1)}%（×${fmtNum(mv.ivRatio, 2)} · ${fmtSigned(mv.ivPt, 1)}pt）· ${roomText(room, unit)} · ${pnlText(pnl, unit, allowedLoss)}`;
   }
   const u = axes.us[sel.i];
   const c = axes.cs[sel.j];
   if (u === undefined || c === undefined) return HOLD_MAP_IDLE_READOUT;
   const v = rooms[sel.i]?.[sel.j] ?? Number.NaN;
-  return `原資産 ${fmtSigned(u * 100, 0)}% · IV ×${fmtNum(c, 1)} · ${roomText(v, unit)}`;
+  const pnl = pnls[sel.i]?.[sel.j] ?? Number.NaN;
+  return `原資産 ${fmtSigned(u * 100, 0)}% · IV ×${fmtNum(c, 1)} · ${roomText(v, unit)} · ${pnlText(pnl, unit, allowedLoss)}`;
 }
 
 /** 選んだもの（点 / マス）の印の画素（無ければ null） */
@@ -510,7 +589,7 @@ export interface HoldMapCrosshair {
   y: number;
   xTag: CrossTagBox;
   yTag: CrossTagBox;
-  /** 読み取りの 1 行（holdMapReadout のマスと同じ形 = 余力はそのマスの値） */
+  /** 読み取りの 1 行（holdMapReadout のマスと同じ形 = 余力・損益はそのマスの値） */
   readout: string;
 }
 
@@ -525,6 +604,7 @@ export function holdMapCrosshair(
   y: number,
   moves: readonly AtmMove[],
   unit: AmountUnit,
+  allowedLoss: number | null = null,
 ): HoldMapCrosshair | null {
   const { axes } = result;
   const cell = holdMapCellAt(plot, axes, x, y);
@@ -539,6 +619,6 @@ export function holdMapCrosshair(
     y: cy,
     xTag: crossTagX(`${fmtSigned(u * 100, 0)}%`, cx, plot.bottom + 2, plot.width, plot.height),
     yTag: crossTagY(`×${fmtNum(c, 1)}`, cy, plot.left - 1, plot.width, plot.height),
-    readout: holdMapReadout(cell, result, moves, unit),
+    readout: holdMapReadout(cell, result, moves, unit, allowedLoss),
   };
 }

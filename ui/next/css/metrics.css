@@ -317,8 +317,47 @@ table.tail.margin-tail td small.call {
   font-weight: 600;
 }
 
+.hm-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-1) var(--sp-3);
+  padding: 2px var(--sp-3);
+  color: var(--ink-2);
+  font-size: var(--fs-xs);
+}
+
+.hm-key {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  white-space: nowrap;
+}
+
+.hm-sw {
+  flex: none;
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+}
+
+.hm-sw.hm-ok {
+  background: var(--gain-fill);
+  box-shadow: inset 0 0 0 1px var(--gain);
+}
+
+.hm-sw.hm-loss {
+  background: var(--warn-fill);
+  box-shadow: inset 0 0 0 1px var(--warn);
+}
+
+.hm-sw.hm-call {
+  background: var(--loss-fill);
+  box-shadow: inset 0 0 0 1px var(--loss);
+}
+
 .hm-readout {
-  min-height: 2.6em;
+  /* 3 行分（#180 で損益を足し、幅 360px の点の 1 行は 3 行になりうる。点 / マス / 無しの切り替えで下を揺らさない） */
+  min-height: 3.9em;
   color: var(--ink-2);
   font-family: var(--mono);
   font-variant-numeric: tabular-nums;
@@ -430,6 +469,18 @@ table.tail.margin-tail td small.call {
   fill: none;
   stroke: var(--loss);
   stroke-width: 1.5;
+}
+
+/* 許容損失（#180）: 許容損失超のマス・境目の破線・凡例の見本 */
+.hm-svg .hm-loss {
+  fill: var(--warn-fill);
+}
+
+.hm-svg .hm-loss-line {
+  fill: none;
+  stroke: var(--warn);
+  stroke-width: 1.5;
+  stroke-dasharray: 5 3;
 }
 
 .hm-svg .hm-tick {

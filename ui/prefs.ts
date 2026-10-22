@@ -74,6 +74,8 @@ export const THEME_PREFS: readonly ThemePref[] = ['auto', 'dark', 'light'];
 export interface MarginPrefs {
   /** 資金（円の整数）。null = 未設定（0 も未設定と同じ） */
   capitalYen: number | null;
+  /** 許容損失（円の整数。追証マップの 2 本目の境目。#180）。null = 未設定（0 も未設定と同じ） */
+  allowedLossYen: number | null;
   /** 掛け目（%。100 = 1 倍） */
   factorPct: number;
   /** 原資産の値動き幅 R（%） */
@@ -92,6 +94,7 @@ export type MarginPrefKey = Exclude<keyof MarginPrefs, 'ignoreLongOptions'>;
 /** 証拠金の設定の範囲（両端を含む。設計 5.10 の表）。資金は整数 */
 export const MARGIN_PREF_RANGE: Record<MarginPrefKey, { min: number; max: number }> = {
   capitalYen: { min: 0, max: 1e12 },
+  allowedLossYen: { min: 0, max: 1e12 },
   factorPct: { min: 50, max: 300 },
   rangePct: { min: 1, max: 30 },
   ivUpPct: { min: 0, max: 200 },
@@ -101,6 +104,7 @@ export const MARGIN_PREF_RANGE: Record<MarginPrefKey, { min: number; max: number
 /** 既定（6 点の答え合わせで決めた。model/margin.ts の DEFAULT_MARGIN_PARAMS と同じ値。資金は未設定。#150） */
 export const DEFAULT_MARGIN_PREFS: MarginPrefs = {
   capitalYen: null,
+  allowedLossYen: null,
   factorPct: 100,
   rangePct: 5,
   ivUpPct: 50,
@@ -114,6 +118,7 @@ const IGNORE_LONG_JSON_KEY = 'margin_ignore_long_options';
 /** JSON のキー（項目ごと。掛け目・R・IV は #150 で新しくした） */
 const MARGIN_JSON_KEY: Record<MarginPrefKey, string> = {
   capitalYen: 'capital_yen',
+  allowedLossYen: 'allowed_loss_yen',
   factorPct: 'margin_k_pct',
   rangePct: 'margin_r_pct',
   ivUpPct: 'margin_iv_up_pct',
@@ -234,19 +239,26 @@ export function readTechParams(o: Record<string, unknown>): TechParams {
   return t;
 }
 
-/** 証拠金の項目の値が範囲内か（資金は整数。NaN・∞・数でない値は不可） */
+/** 円の整数の項目（資金・許容損失。空欄・0 = 未設定 null） */
+export type MarginYenKey = 'capitalYen' | 'allowedLossYen';
+export const isMarginYenKey = (key: MarginPrefKey): key is MarginYenKey =>
+  key === 'capitalYen' || key === 'allowedLossYen';
+
+/** 証拠金の項目の値が範囲内か（資金・許容損失は整数。NaN・∞・数でない値は不可） */
 export function isMarginPrefValue(key: MarginPrefKey, v: unknown): v is number {
   if (typeof v !== 'number' || !Number.isFinite(v)) return false;
-  if (key === 'capitalYen' && !Number.isInteger(v)) return false;
+  if (isMarginYenKey(key) && !Number.isInteger(v)) return false;
   const r = MARGIN_PREF_RANGE[key];
   return v >= r.min && v <= r.max;
 }
 
-/** 保存した証拠金の項目を読む（項目ごとに: 無い・不正 → その項目の既定。資金 0 → 未設定） */
+/** 保存した証拠金の項目を読む（項目ごとに: 無い・不正 → その項目の既定。資金・許容損失 0 → 未設定） */
 function readMargin(o: Record<string, unknown>): MarginPrefs {
   const m: MarginPrefs = { ...DEFAULT_MARGIN_PREFS };
-  const cap = o[MARGIN_JSON_KEY.capitalYen];
-  m.capitalYen = isMarginPrefValue('capitalYen', cap) && cap > 0 ? cap : null;
+  for (const key of ['capitalYen', 'allowedLossYen'] as const) {
+    const v = o[MARGIN_JSON_KEY[key]];
+    m[key] = isMarginPrefValue(key, v) && v > 0 ? v : null;
+  }
   for (const key of ['factorPct', 'rangePct', 'ivUpPct', 'ivDownPct'] as const) {
     const v = o[MARGIN_JSON_KEY[key]];
     if (isMarginPrefValue(key, v)) m[key] = v;
@@ -295,12 +307,13 @@ export function readPrefs(text: string | null): PrefsRead {
   return { prefs, writable: true };
 }
 
-/** 書き出す（既知のキーだけ。資金が未設定ならキーを書かない。範囲外・型違いの値は既定にして書く）。 */
+/** 書き出す（既知のキーだけ。資金・許容損失が未設定ならキーを書かない。範囲外・型違いの値は既定にして書く）。 */
 export function serializePrefs(p: Prefs): string {
   const out: Record<string, unknown> = { schema_version: PREFS_SCHEMA_VERSION, theme: p.theme };
   const m = p.margin ?? DEFAULT_MARGIN_PREFS;
-  if (isMarginPrefValue('capitalYen', m.capitalYen) && m.capitalYen > 0) {
-    out[MARGIN_JSON_KEY.capitalYen] = m.capitalYen;
+  for (const key of ['capitalYen', 'allowedLossYen'] as const) {
+    const v = m[key];
+    if (isMarginPrefValue(key, v) && v > 0) out[MARGIN_JSON_KEY[key]] = v;
   }
   for (const key of ['factorPct', 'rangePct', 'ivUpPct', 'ivDownPct'] as const) {
     out[MARGIN_JSON_KEY[key]] = isMarginPrefValue(key, m[key]) ? m[key] : DEFAULT_MARGIN_PREFS[key];

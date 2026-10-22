@@ -44,10 +44,29 @@ export function marginParamsOf(m: MarginPrefs): MarginParams {
   };
 }
 
+/**
+ * marginParamsOf の参照を保つ版（#180）: 計算に使う項目（掛け目・幅・IV の上げ / 下げ・買いの OP）が prev と同じなら
+ * prev をそのまま返す。資金・許容損失など計算のパラメータでない項目だけを変えても、証拠金・追証マップの入力の参照が
+ * 変わらない（= 作り直さない）
+ */
+export function marginParamsKeep(prev: MarginParams | null, m: MarginPrefs): MarginParams {
+  const next = marginParamsOf(m);
+  // 全項目を比べる（MarginParams に項目が増えても漏れない）
+  const keys = Object.keys(next) as (keyof MarginParams)[];
+  if (prev && keys.every((k) => prev[k] === next[k])) return prev;
+  return next;
+}
+
 /** 資金（円）。未設定・0・不正は null */
 export function capitalOf(m: MarginPrefs): number | null {
   const c = m.capitalYen;
   return c !== null && Number.isFinite(c) && c > 0 ? c : null;
+}
+
+/** 許容損失（円。追証マップの 2 本目の境目。#180）。未設定・0・不正（古い保存でキーが無い = undefined も）は null */
+export function allowedLossOf(m: MarginPrefs): number | null {
+  const v = m.allowedLossYen;
+  return typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : null;
 }
 
 export interface MarginCalc {

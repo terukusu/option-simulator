@@ -23,6 +23,7 @@ import {
   AI_PROFILE_MAX,
   DEFAULT_MARGIN_PREFS,
   isMarginPrefValue,
+  isMarginYenKey,
   type MarginPrefKey,
   type MarginPrefs,
   type ThemePref,
@@ -121,6 +122,7 @@ export function feeField(text: string): { value: number | null; error: string | 
 /** 証拠金の欄の並び・見出し（#131・#150。設計 5.10。値は % / 円） */
 export const MARGIN_FIELDS: readonly { key: MarginPrefKey; label: string }[] = [
   { key: 'capitalYen', label: '資金（円）' },
+  { key: 'allowedLossYen', label: '許容損失（円）' },
   { key: 'factorPct', label: '掛け目（%）' },
   { key: 'rangePct', label: '値動き幅 R（%）' },
   { key: 'ivUpPct', label: 'IV の上げ（%）' },
@@ -130,6 +132,7 @@ export const MARGIN_FIELDS: readonly { key: MarginPrefKey; label: string }[] = [
 /** 欄ごとのエラー文（範囲は ui/prefs.ts の MARGIN_PREF_RANGE と同じ） */
 export const MARGIN_FIELD_ERROR: Record<MarginPrefKey, string> = {
   capitalYen: '資金は 0〜1,000,000,000,000 円の整数（空欄 = 未設定）',
+  allowedLossYen: '許容損失は 0〜1,000,000,000,000 円の整数（空欄 = 未設定）',
   factorPct: '掛け目は 50〜300%',
   rangePct: '値動き幅 R は 1〜30%',
   ivUpPct: 'IV の上げは 0〜200%',
@@ -141,7 +144,8 @@ export const MARGIN_SETTINGS_NOTES: readonly string[] = [
   '必要証拠金は概算（原資産 ±R × IV の倍率（足の今の IV の ×(1 + 上げ) / ×(1 − 下げ)）× 2 営業日の格子の最悪の損失 × 掛け目）。証券会社の建てる前の必要委託証拠金と同じ物差しで、受け取るプレミアム（NOV）を含まない。JSCC の VaR 証拠金の再現ではない',
   '余力 = 資金 − 支払 + 受取 − 手数料 + 先物の評価損益 − (必要証拠金 − NOV)',
   '既定（R 5%・IV +50% / −25%・掛け目 100%）は 1 枚ずつの売りの 6 形（put 3 形・call・ストラングル・期先）の答え合わせ（証券会社の額との比 0.98〜1.07）で決めた。ストレス日・先物との組み合わせなどは未確認で、実額と違いうる',
-  'JSCC の Web 試算か証券会社の額で確かめ、幅・掛け目で寄せる。資金はこの端末にだけ保存（保存一覧・共有の URL に載せない）',
+  'JSCC の Web 試算か証券会社の額で確かめ、幅・掛け目で寄せる。資金・許容損失はこの端末にだけ保存（保存一覧・共有の URL に載せない）',
+  '許容損失: 入れると追証マップに「d 日後の損益 = −許容損失」の境目を重ね、許容内 / 許容損失超 / 追証の 3 色で塗る（空欄 = 出さない）',
   '買いの OP: 減らさない（既定）= 売りの OP と先物だけで計算（証券会社の扱いに合わせる。買いの支払は余力から引く）。相殺する = 全足（JSCC の形）。売りどうしはポジション全体の格子で相殺する',
 ];
 
@@ -161,7 +165,7 @@ export function marginLongPatch(v: MarginLongValue): Partial<MarginPrefs> {
   return { ignoreLongOptions: v === 'ignore' };
 }
 
-/** [既定に戻す] で戻す項目（幅・掛け目・買いの OP。資金は戻さない） */
+/** [既定に戻す] で戻す項目（幅・掛け目・買いの OP。資金・許容損失は戻さない） */
 export const MARGIN_RESET: Partial<MarginPrefs> = {
   factorPct: DEFAULT_MARGIN_PREFS.factorPct,
   rangePct: DEFAULT_MARGIN_PREFS.rangePct,
@@ -170,24 +174,24 @@ export const MARGIN_RESET: Partial<MarginPrefs> = {
   ignoreLongOptions: DEFAULT_MARGIN_PREFS.ignoreLongOptions,
 };
 
-/** 欄に出す文字列（資金の未設定は空欄） */
+/** 欄に出す文字列（資金・許容損失の未設定は空欄） */
 export function marginFieldText(key: MarginPrefKey, m: MarginPrefs): string {
   const v = m[key];
   return v === null ? '' : String(v);
 }
 
 /**
- * 証拠金の欄の判定（入力ごと）: 通れば値（資金の空欄・0 は null = 未設定）、通らなければエラー文。
+ * 証拠金の欄の判定（入力ごと）: 通れば値（資金・許容損失の空欄・0 は null = 未設定）、通らなければエラー文。
  * 桁区切り・全角でない数の書き方は parseNum と同じ
  */
 export function marginField(
   key: MarginPrefKey,
   text: string,
 ): { ok: true; value: number | null } | { ok: false; error: string } {
-  if (key === 'capitalYen' && text.trim() === '') return { ok: true, value: null };
+  if (isMarginYenKey(key) && text.trim() === '') return { ok: true, value: null };
   const v = parseNum(text);
   if (!isMarginPrefValue(key, v)) return { ok: false, error: MARGIN_FIELD_ERROR[key] };
-  if (key === 'capitalYen' && v === 0) return { ok: true, value: null };
+  if (isMarginYenKey(key) && v === 0) return { ok: true, value: null };
   return { ok: true, value: v };
 }
 

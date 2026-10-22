@@ -152,6 +152,7 @@ describe('証拠金の欄（#131）', () => {
   it('欄の並びと見出し（単位つき。IV の上げ / 下げは % = #150）', () => {
     expect(MARGIN_FIELDS.map((f) => f.key)).toEqual([
       'capitalYen',
+      'allowedLossYen',
       'factorPct',
       'rangePct',
       'ivUpPct',
@@ -159,6 +160,7 @@ describe('証拠金の欄（#131）', () => {
     ]);
     expect(MARGIN_FIELDS.map((f) => f.label)).toEqual([
       '資金（円）',
+      '許容損失（円）',
       '掛け目（%）',
       '値動き幅 R（%）',
       'IV の上げ（%）',
@@ -178,6 +180,19 @@ describe('証拠金の欄（#131）', () => {
         error: MARGIN_FIELD_ERROR.capitalYen,
       });
     }
+  });
+
+  it('#180 許容損失: 資金の次の欄。空欄・0 は未設定、桁区切り可、負・小数・範囲外・文字はエラー文', () => {
+    expect(marginField('allowedLossYen', '')).toEqual({ ok: true, value: null });
+    expect(marginField('allowedLossYen', '0')).toEqual({ ok: true, value: null });
+    expect(marginField('allowedLossYen', '300,000')).toEqual({ ok: true, value: 300_000 });
+    for (const t of ['-1', '1.5', '1000000000001', 'abc']) {
+      expect(marginField('allowedLossYen', t), t).toEqual({
+        ok: false,
+        error: MARGIN_FIELD_ERROR.allowedLossYen,
+      });
+    }
+    expect('allowedLossYen' in MARGIN_RESET).toBe(false);
   });
 
   it('掛け目・R・IV の上げ / 下げ（%。#150）: 範囲の両端は通る、外・空欄・文字はエラー文', () => {

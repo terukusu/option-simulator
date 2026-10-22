@@ -27,6 +27,7 @@ import {
   marginLine,
   marginLineRanges,
   marginNow,
+  marginParamsKeep,
   marginParamsOf,
   marginPoint,
   marginPointAt,
@@ -149,12 +150,34 @@ const putSell5Yen = run(
   { type: 'setMetricsUnit', unit: 'yen' },
 );
 
+describe('#180 marginParamsKeep: 計算に使わない設定ではパラメータの参照を保つ', () => {
+  it('許容損失・資金だけを変えても前と同じ参照（= 証拠金・追証マップの入力を作り直さない）、計算の項目を変えたら新しい参照', () => {
+    const m0: MarginPrefs = { ...DEFAULT_MARGIN_PREFS, capitalYen: 5_000_000 };
+    const p0 = marginParamsKeep(null, m0);
+    expect(p0).toEqual(marginParamsOf(m0));
+    expect(marginParamsKeep(p0, { ...m0, allowedLossYen: 300_000 })).toBe(p0);
+    expect(marginParamsKeep(p0, { ...m0, allowedLossYen: null, capitalYen: 9_000_000 })).toBe(p0);
+    for (const patch of [
+      { factorPct: 120 },
+      { rangePct: 8 },
+      { ivUpPct: 40 },
+      { ivDownPct: 10 },
+      { ignoreLongOptions: false },
+    ] as Partial<MarginPrefs>[]) {
+      const p = marginParamsKeep(p0, { ...m0, ...patch });
+      expect(p, JSON.stringify(patch)).not.toBe(p0);
+      expect(p).toEqual(marginParamsOf({ ...m0, ...patch }));
+    }
+  });
+});
+
 describe('計算の単位（ui/view/margin.ts）', () => {
   it('設定 → model の単位、資金の未設定・0 は null', () => {
     expect(marginParamsOf(DEFAULT_MARGIN_PREFS)).toEqual(DEFAULT_MARGIN_PARAMS);
     expect(
       marginParamsOf({
         capitalYen: 1,
+        allowedLossYen: null,
         factorPct: 150,
         rangePct: 10.5,
         ivUpPct: 12,

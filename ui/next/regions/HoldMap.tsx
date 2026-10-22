@@ -11,15 +11,15 @@ import type { AtmMovesCtl } from '../../components/useAtmMoves';
 import type { HoldMapCtl } from '../../components/useHoldMap';
 import { CROSS_TOUCH_GRAB_PX, crossTapAction } from '../../view/crosshair';
 import {
-  HOLD_MAP_CAPTION,
   HOLD_MAP_PLOT_LABEL,
   HOLD_MAP_RETRY,
-  HOLD_MAP_TITLE,
   type HoldMapResult,
   type HoldMapSel,
+  holdMapCaption,
   holdMapCrosshair,
   holdMapDxX,
   holdMapHeight,
+  holdMapLegend,
   holdMapNote,
   holdMapPick,
   holdMapPlot,
@@ -29,6 +29,7 @@ import {
   holdMapStatusText,
   holdMapStep,
   holdMapSummary,
+  holdMapTitle,
   holdMapWait,
 } from '../../view/holdMap';
 import type { AmountUnit } from '../../view/metrics';
@@ -46,6 +47,8 @@ export interface HoldBundle {
   dXRatio: number;
   /** マップの日数（シナリオの d。clampDays 済み） */
   days: number;
+  /** 許容損失（円。未設定は null。#180。変えても計算し直さず描き直すだけ） */
+  allowedLoss: number | null;
 }
 
 /**
@@ -65,10 +68,12 @@ function HoldMapPlotView({
 }) {
   const { ref, width } = useSize(320, 0);
   const moves = hold.moves.moves;
+  const { allowedLoss } = hold;
   const plot = useMemo(
-    () => (result && width > 60 ? holdMapPlot(result, moves, width) : null),
-    [result, moves, width],
+    () => (result && width > 60 ? holdMapPlot(result, moves, width, allowedLoss) : null),
+    [result, moves, width, allowedLoss],
   );
+  const legend = holdMapLegend(allowedLoss);
   const [sel, setSel] = useState<HoldMapSel | null>(null);
   const axes = result?.axes ?? null;
   const dxX = axes && width > 60 ? holdMapDxX(axes, width, hold.dXRatio) : null;
@@ -80,11 +85,11 @@ function HoldMapPlotView({
   const xh = useMemo(
     () =>
       plot && result && hover
-        ? holdMapCrosshair(plot, result, hover.x, hover.y, moves, unit)
+        ? holdMapCrosshair(plot, result, hover.x, hover.y, moves, unit, allowedLoss)
         : null,
-    [plot, result, hover, moves, unit],
+    [plot, result, hover, moves, unit, allowedLoss],
   );
-  const readout = xh ? xh.readout : holdMapReadout(sel, result, moves, unit);
+  const readout = xh ? xh.readout : holdMapReadout(sel, result, moves, unit, allowedLoss);
   const press = useRef(initialPress());
   const lastTouch = useRef(false);
   const hoverFrame = useRef(0);
@@ -198,6 +203,16 @@ function HoldMapPlotView({
   return (
     <>
       {plot && showMoves && <p class="hm-sum">{holdMapSummary(plot.count)}</p>}
+      {legend.length > 0 && (
+        <p class="hm-legend">
+          {legend.map((k) => (
+            <span key={k.cls} class="hm-key">
+              <span class={`hm-sw ${k.cls}`} aria-hidden="true" />
+              {k.label}
+            </span>
+          ))}
+        </p>
+      )}
       <div class={wait && plot ? 'hm-plot busy' : 'hm-plot'}>
         <div
           ref={ref}
@@ -231,6 +246,7 @@ function HoldMapPlotView({
                 <path key={c.cls} class={c.cls} d={c.d} shape-rendering="crispEdges" />
               ))}
               {plot.contour && <path class="hm-line" d={plot.contour} />}
+              {plot.lossContour && <path class="hm-loss-line" d={plot.lossContour} />}
               {plot.xTicks.map((t) => (
                 <text
                   key={t.label}
@@ -371,11 +387,11 @@ export function HoldMap({ hold, unit }: { hold: HoldBundle; unit: AmountUnit }) 
         aria-controls={id}
         onClick={hold.onToggle}
       >
-        <span>{HOLD_MAP_TITLE}</span>
+        <span>{holdMapTitle(hold.days, hold.allowedLoss, !blocked)}</span>
       </button>
       {hold.open && (
         <div id={id} ref={bodyRef} class="hm">
-          <p class="mx-note">{HOLD_MAP_CAPTION}</p>
+          <p class="mx-note">{holdMapCaption(blocked ? null : hold.allowedLoss)}</p>
           {blocked ? (
             <p class="hm-status">{status.main}</p>
           ) : (

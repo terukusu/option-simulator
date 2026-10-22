@@ -30,6 +30,7 @@ describe('readPrefs', () => {
     expect(DEFAULT_PREFS).toEqual(DEF);
     expect(M0).toEqual({
       capitalYen: null,
+      allowedLossYen: null,
       factorPct: 100,
       rangePct: 5,
       ivUpPct: 50,
@@ -95,6 +96,7 @@ describe('readPrefs', () => {
 describe('証拠金の設定（#131 AC15）', () => {
   const custom: MarginPrefs = {
     capitalYen: 12_345_678,
+    allowedLossYen: null,
     factorPct: 150,
     rangePct: 10.5,
     ivUpPct: 37.5,
@@ -118,6 +120,7 @@ describe('証拠金の設定（#131 AC15）', () => {
     // 範囲の両端
     const ends: MarginPrefs = {
       capitalYen: 1e12,
+      allowedLossYen: null,
       factorPct: 50,
       rangePct: 30,
       ivUpPct: 200,
@@ -127,6 +130,7 @@ describe('証拠金の設定（#131 AC15）', () => {
     expect(readPrefs(serializePrefs({ theme: 'auto', margin: ends })).prefs.margin).toEqual(ends);
     const lows: MarginPrefs = {
       capitalYen: 1,
+      allowedLossYen: null,
       factorPct: 300,
       rangePct: 1,
       ivUpPct: 0,
@@ -192,6 +196,7 @@ describe('証拠金の設定（#131 AC15）', () => {
       theme: 'auto',
       margin: {
         capitalYen: Number.NaN,
+        allowedLossYen: Number.NaN,
         factorPct: Number.NaN,
         rangePct: Infinity,
         ivUpPct: -1,
@@ -211,10 +216,44 @@ describe('証拠金の設定（#131 AC15）', () => {
   });
 });
 
+/** #180: 許容損失（追証マップの 2 本目の境目）。資金と同じ扱い（円の整数・0 / 空 = 未設定） */
+describe('#180 許容損失の設定', () => {
+  const withCap: MarginPrefs = { ...M0, capitalYen: 4_000_000, factorPct: 120 };
+
+  it('許容損失のキーが無い古い保存 → 未設定（null）、資金などほかの値は変わらない', () => {
+    const old = JSON.parse(serializePrefs({ theme: 'dark', margin: withCap }));
+    expect(old).not.toHaveProperty('allowed_loss_yen');
+    expect(readPrefs(JSON.stringify(old))).toEqual({
+      prefs: { theme: 'dark', margin: withCap },
+      writable: true,
+    });
+    expect(readPrefs(JSON.stringify(old)).prefs.margin.allowedLossYen).toBeNull();
+  });
+
+  it('往復: allowed_loss_yen で書き、読むと同じ値。未設定ならキーを書かない', () => {
+    const m: MarginPrefs = { ...withCap, allowedLossYen: 300_000 };
+    const text = serializePrefs({ theme: 'auto', margin: m });
+    expect(JSON.parse(text).allowed_loss_yen).toBe(300_000);
+    expect(readPrefs(text).prefs.margin).toEqual(m);
+    expect(serializePrefs({ theme: 'auto', margin: withCap })).not.toContain('allowed_loss');
+  });
+
+  it('0・負・小数・範囲外・文字列 → 未設定、ほかの値は残る', () => {
+    const good = JSON.parse(serializePrefs({ theme: 'dark', margin: withCap }));
+    for (const v of [0, -1, 1.5, 1e12 + 1, '300000', null, Number.NaN]) {
+      const r = readPrefs(JSON.stringify({ ...good, allowed_loss_yen: v }));
+      expect(r.prefs.margin, String(v)).toEqual(withCap);
+    }
+    const bad = serializePrefs({ theme: 'dark', margin: { ...withCap, allowedLossYen: 2.5 } });
+    expect(bad).not.toContain('allowed_loss');
+  });
+});
+
 describe('#149 買いの OP の設定', () => {
   it('#149 買いの OP の設定: 無い・不正 → 既定（オン）、オフを往復、版は 1', () => {
     const custom: MarginPrefs = {
       capitalYen: 5_000_000,
+      allowedLossYen: null,
       factorPct: 150,
       rangePct: 10,
       ivUpPct: 12,
