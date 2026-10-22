@@ -29,6 +29,7 @@ import {
   pinLineFn,
   pinListModel,
   pinMenuRows,
+  pinPopRows,
   pinSampleCap,
   pinSampleXs,
   resolvePins,
@@ -713,5 +714,66 @@ describe('pinMenuRows（#89 段 B AC-B4。舞台の [ピン N/3] とコマンド
   it('ピン 0 本で全部外すが押せない', () => {
     expect(byKey(base).get('clear')?.disabled).toBe(true);
     expect(byKey({ ...base, pins: [target(1, 'a')] }).get('clear')?.disabled).toBe(false);
+  });
+});
+
+describe('pinPopRows（#125。凡例の ①②③ のポップオーバーの行）', () => {
+  /** A（作業中）にゴースト（d 5 日・Δσ +2）、B（足 1 本）の重ね、保存の重ね */
+  function setup(): State {
+    let s = run(withA(), { type: 'addTab', mode: 'empty' }, board(0, 'put', 'buy'));
+    s = reduce(s, { type: 'switchTab', id: 1 });
+    s = pinGhost(run(s, { type: 'setScenario', patch: { days: 5, dSigma: 2 } }));
+    s = reduce(s, { type: 'addPin', source: { kind: 'tab', tabId: 2 } });
+    const legs = s.legs.map(({ id: _id, ...rest }) => rest);
+    return reduce(s, { type: 'addPin', source: { kind: 'saved', name: '案 1', legs } });
+  }
+  const s = setup();
+  const targets = targetsOf(s);
+  const x = 30000;
+  const map = (rows: { k: string; v: string }[] | undefined) =>
+    new Map((rows ?? []).map((r) => [r.k, r.v]));
+
+  it('固定: 種類・名前・板の時刻・シナリオ・期中の線・金額（単位付き）の行。金額は pinListModel と同じ', () => {
+    const pop = pinPopRows({ targets, mode: 'period', scenarioX: x, unit: 'yen' });
+    expect(pop).toHaveLength(3);
+    const list = pinListModel({ targets, mode: 'period', scenarioX: x, unit: 'yen' });
+    const g = pop[0];
+    expect(g?.[0]).toEqual({ k: '① 固定', v: 'A' });
+    const m = map(g);
+    expect(m.get('板')).toMatch(/時点$/);
+    expect(m.get('シナリオ')).toBe('d 5 日・Δσ +2.0pt・Δs 0.0');
+    expect(m.get('ピンの線')).toBe('期中（指定日）');
+    // 売 P・売 C の最大損失は −∞（無限は単位を付けない）
+    expect(list[0]?.maxLossText).toBe('−∞');
+    expect(m.get('満期の最大損失')).toBe('−∞');
+    expect(m.get(list[0]?.premiumLabel ?? '')).toBe(`${list[0]?.premiumText} 円`);
+    expect(m.get('シナリオ点')).toBe(`${list[0]?.atScenarioText} 円`);
+    expect(m.has('注記')).toBe(false);
+  });
+
+  it('重ね: 足の本数・今の板・今のシナリオ（保存は今の設定も）。満期の線なら「満期」、千円の単位', () => {
+    const pop = pinPopRows({ targets, mode: 'expiry', scenarioX: x, unit: 'thousand' });
+    const tab = map(pop[1]);
+    expect(pop[1]?.[0]).toEqual({ k: '② タブ', v: 'B' });
+    expect(tab.get('足')).toBe('1 本');
+    expect(tab.get('条件')).toBe('今の板・今のシナリオ');
+    expect(tab.get('ピンの線')).toBe('満期');
+    // 買 P 1 枚の最大損失は有限（掛け金）= 単位付き
+    expect(tab.get('満期の最大損失')).toMatch(/^−[\d,.]+ 千円$/);
+    const saved = map(pop[2]);
+    expect(pop[2]?.[0]).toEqual({ k: '③ 保存', v: '案 1' });
+    expect(saved.get('足')).toBe('2 本');
+    expect(saved.get('条件')).toBe('今の板・今のシナリオ・今の設定');
+    expect(map(pop[0]).get('ピンの線')).toBe('満期');
+  });
+
+  it('注記があれば最後の行に出し、値が無い金額（—）には単位を付けない', () => {
+    // 重ねたタブ B に切り替えると「作業中」で描かない
+    const t = targetsOf(reduce(s, { type: 'switchTab', id: 2 }));
+    const pop = pinPopRows({ targets: t, mode: 'period', scenarioX: Number.NaN, unit: 'yen' });
+    const rows = pop[1] ?? [];
+    expect(rows.at(-1)).toEqual({ k: '注記', v: '作業中（線は今の線）' });
+    expect(map(rows).get('シナリオ点')).toBe('—');
+    expect(map(rows).get('ピンの線')).toBe('期中');
   });
 });

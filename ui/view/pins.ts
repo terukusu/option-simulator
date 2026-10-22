@@ -34,7 +34,8 @@ import {
 } from '../pins';
 import type { Action, TabSlot, UiLeg } from '../state';
 import { DASH, fmtNum, fmtSigned, fmtTime } from './format';
-import { type AmountUnit, fmtAmount } from './metrics';
+import { AMOUNT_UNIT_LABEL, type AmountUnit, fmtAmount } from './metrics';
+import type { FullRow } from './metricsPanel';
 import {
   clampDays,
   hasDateLine,
@@ -504,6 +505,52 @@ export function pinListModel(input: PinListInput): PinRowView[] {
       note,
       drawn: fn !== null,
     };
+  });
+}
+
+/** 金額 + 単位（— と ±∞ は単位を付けない。交点のラベルと同じ規則） */
+function withUnit(s: string, unit: AmountUnit): string {
+  return s === DASH || s.endsWith('∞') ? s : `${s} ${AMOUNT_UNIT_LABEL[unit]}`;
+}
+
+/**
+ * 凡例の ①②③ を押したときのポップオーバーの行（#125。docs/ui-redesign.md §4.5）。targets と同じ順で 1 本ずつ。
+ * 金額・注記は pinListModel と同じ値。条件はポップオーバーの幅（320px・値は折り返さない）に入るよう行に分ける。
+ */
+export function pinPopRows(input: PinListInput): FullRow[][] {
+  const views = pinListModel(input);
+  return input.targets.map((t, i): FullRow[] => {
+    const r = views[i] as PinRowView;
+    const rows: FullRow[] = [{ k: `${r.mark} ${r.kindLabel}`, v: r.name }];
+    if (t.kind === 'ghost') {
+      const s = t.scenario;
+      rows.push(
+        { k: '板', v: `${fmtTime(t.boardSnapshotAt)} 時点` },
+        {
+          k: 'シナリオ',
+          v: `d ${fmtNum(s.days, s.days % 1 === 0 ? 0 : 2)} 日・Δσ ${fmtSigned(s.dSigma, 1)}pt・Δs ${fmtSigned(s.skew, 1)}`,
+        },
+      );
+    } else {
+      rows.push(
+        { k: '足', v: `${t.legCount} 本` },
+        { k: '条件', v: `今の板・今のシナリオ${t.kind === 'saved' ? '・今の設定' : ''}` },
+      );
+    }
+    const line =
+      input.mode === 'expiry'
+        ? '満期'
+        : t.kind === 'ghost'
+          ? `期中（${PERIOD_LABEL[t.period]}）`
+          : '期中';
+    rows.push(
+      { k: 'ピンの線', v: line },
+      { k: '満期の最大損失', v: withUnit(r.maxLossText, input.unit) },
+      { k: r.premiumLabel, v: withUnit(r.premiumText, input.unit) },
+      { k: 'シナリオ点', v: withUnit(r.atScenarioText, input.unit) },
+    );
+    if (r.note) rows.push({ k: '注記', v: r.note });
+    return rows;
   });
 }
 

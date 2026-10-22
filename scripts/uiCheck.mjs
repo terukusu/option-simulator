@@ -1891,6 +1891,27 @@ async function pinCheck(w, h, long) {
     }
     return { n: chips.length, tools: tools.length, bad };
   });
+  // ① を押すと中身のポップオーバー（#125）: 画面の中・横スクロール 0・最大損失の行。Esc で閉じる
+  if (r.bad.length === 0) {
+    await page.click('.pins .pin-chip:nth-child(1) .pin-open');
+    await page.waitForTimeout(100);
+    const pop = await page.evaluate(() => {
+      const el = document.querySelector('.pins .pin-chip:nth-child(1) .popover:not([hidden])');
+      const b = el?.getBoundingClientRect();
+      return {
+        shown: !!b && b.width > 0,
+        inView: !!b && b.left >= 0 && b.right <= window.innerWidth + 0.5,
+        loss: (el?.textContent ?? '').includes('満期の最大損失'),
+        hScroll: document.documentElement.scrollWidth - window.innerWidth,
+      };
+    });
+    if (!pop.shown || !pop.inView || !pop.loss || pop.hScroll > 0)
+      r.bad.push(`① の中身 ${JSON.stringify(pop)}`);
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(100);
+    if ((await page.locator('.pins .popover:not([hidden])').count()) !== 0)
+      r.bad.push('① の中身が Esc で閉じない');
+  }
   let ok = r.n === 3 && r.tools >= 3 && r.bad.length === 0;
   if (ok) {
     await page.click('.pins .pin-chip:nth-child(2) .pin-x');
@@ -1902,7 +1923,7 @@ async function pinCheck(w, h, long) {
   }
   if (!ok) failed = true;
   console.log(
-    `${tag} ${w}x${h}: 凡例のピン ${r.n} 本・× とツール ${r.tools} 個が見えて押せる ${ok ? 'pass' : `NG ${r.bad.join('・')}`}`,
+    `${tag} ${w}x${h}: 凡例のピン ${r.n} 本・× とツール ${r.tools} 個が見えて押せる・① の中身 ${ok ? 'pass' : `NG ${r.bad.join('・')}`}`,
   );
   await ctx.close();
 }

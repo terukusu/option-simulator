@@ -95,7 +95,9 @@ section.stage {
 
 /*
  * ピンの凡例: 線の凡例より先に場所を取り、縮むのは名前だけ（§4.1。× は 24px の当たりで常に押せる）。
- * 1 本の下限 = 余白 4 + 線種 14 + 番号 + × 24 と間隔（名前 0）。右のツール（.stage-tools）は縮まない
+ * 1 本の下限 = 余白 4 + 線種 14 + 番号 + × 24 と間隔（名前 0）。右のツール（.stage-tools）は縮まない。
+ * 線種・番号・名前は中身のポップオーバーを開くボタン（#125）。ポップオーバーを切らないよう .pins は overflow を切らない
+ * （下限の min-width がチップの下限の合計なので溢れない。名前の省略は .pin-name の中）
  */
 .pins {
   display: flex;
@@ -103,7 +105,6 @@ section.stage {
   align-items: center;
   gap: 2px;
   min-width: 0;
-  overflow: hidden;
 }
 
 .pins[data-n="1"] {
@@ -174,6 +175,40 @@ section.stage {
   flex: 0 1 auto;
   min-width: 0;
   max-width: 8em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pin-chip > .pop-wrap {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+.pin-chip .pin-open {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  min-width: 0;
+  max-width: 100%;
+  height: 24px;
+  padding: 0 2px;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+}
+
+.pin-chip .pin-open:hover {
+  background: var(--s3);
+}
+
+/* 中身（#125）: 値の列だけ縮み、名前などの長い値は省略記号（ポップオーバーの幅 320px に収める） */
+.pin-pop .full {
+  grid-template-columns: auto minmax(0, auto);
+}
+
+.pin-pop .full .fv {
   overflow: hidden;
   text-overflow: ellipsis;
 }
@@ -994,8 +1029,20 @@ section.stage > .panel-body.stage-main {
 /* ===== スマホ ===== */
 @media (max-width: 719.98px) {
   .stage-head {
+    position: relative;
     height: 36px;
     padding: 0 10px;
+  }
+
+  /* ピンの中身（#125）: チップは画面の中ほどにあるので、凡例行の左端（8px）から開いて画面に収める */
+  .pin-chip > .pop-wrap {
+    position: static;
+  }
+
+  .popover.pin-pop,
+  .popover.pin-pop.end {
+    right: auto;
+    left: 8px;
   }
 
   .legend {

@@ -5,6 +5,7 @@ import type { AppController } from '../../components/useAppController';
 import { useMarginLine } from '../../components/useMarginLine';
 import { usePnlChartModel } from '../../components/usePnlChartModel';
 import { LIVE_SETTLE_MS, liveBurst } from '../../view/motion';
+import { pinPopRows } from '../../view/pins';
 import { surfaceActive, surfaceLegend } from '../../view/pnlSurface';
 import type { ChartMode } from '../../view/shell';
 import { bigReadout, stageFrame } from '../../view/stage';
@@ -132,6 +133,22 @@ export function Stage(p: {
     () => (surfaceOn ? surfaceLegend(grid?.vmax ?? null, metrics.unit) : null),
     [surfaceOn, grid, metrics.unit],
   );
+  // 凡例の ①②③ のポップオーバーの行（#125）。シナリオ点 = X₀ + ΔX（足が無ければ NaN = —）
+  const scenarioX = base
+    ? base.ctx.x0 + (Number.isFinite(scenario.dX) ? scenario.dX : 0)
+    : Number.NaN;
+  const pinRows = useMemo(
+    () =>
+      mini
+        ? []
+        : pinPopRows({
+            targets: c.pinTargets,
+            mode: c.pinLine,
+            scenarioX,
+            unit: metrics.unit,
+          }),
+    [mini, c.pinTargets, c.pinLine, scenarioX, metrics.unit],
+  );
   const evalTime = base?.ctx.evalTime ?? null;
   const items = useMemo(
     () => bigReadout(c.readout, metrics.empty ? null : metrics.premium, evalTime, scenario.dSigma),
@@ -146,6 +163,7 @@ export function Stage(p: {
           scenario={scenario}
           pnlY={state.pnlY}
           pins={c.pinTargets}
+          pinRows={pinRows}
           pinLine={c.pinLine}
           pinTabs={c.pinTabs}
           onPinCurrent={c.pinCurrent}
