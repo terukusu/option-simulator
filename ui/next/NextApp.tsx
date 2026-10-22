@@ -821,6 +821,7 @@ export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
               onEff={onSmileEff}
               eff={shell.smileEff ? c.smileEffBase : null}
               scenario={shell.smileEff ? c.smileEffScenario : null}
+              unit={c.metrics.unit}
               dispatch={dispatch}
               onAdd={onMarketAdd}
               marketSeg={seg}

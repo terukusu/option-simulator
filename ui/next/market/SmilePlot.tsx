@@ -8,6 +8,7 @@ import { type SmileEffLineInput, useSmileEffLine } from '../../components/useSmi
 import type { Action } from '../../state';
 import { CROSS_TOUCH_GRAB_PX } from '../../view/crosshair';
 import { fmtNum } from '../../view/format';
+import type { AmountUnit } from '../../view/metrics';
 import {
   AXIS_LABEL,
   axisTickLabel,
@@ -60,6 +61,8 @@ export interface SmilePlotProps {
   /** 売りの効率の線（#163。重ねないとき・表示中でない限月は null） */
   eff: SmileEffBase | null;
   scenario: Scenario | null;
+  /** 金額の単位（効率の読み取りの証拠金。#259 S-6） */
+  unit: AmountUnit;
   dispatch: (a: Action) => void;
 }
 
@@ -73,7 +76,19 @@ export interface SmilePlotProps {
  * 右端に効率の目盛り（%）、十字線の読み取りに最寄りの行使価格の 2 行と線の上の点。
  */
 function SmilePlotView(p: SmilePlotProps) {
-  const { month, active, basis, axis, viewport, pick, scenarioAtmK, eff, scenario, dispatch } = p;
+  const {
+    month,
+    active,
+    basis,
+    axis,
+    viewport,
+    pick,
+    scenarioAtmK,
+    eff,
+    scenario,
+    unit,
+    dispatch,
+  } = p;
   const model = useMemo(
     () => smileModel(month, basis, axis, viewport),
     [month, basis, axis, viewport],
@@ -151,7 +166,7 @@ function SmilePlotView(p: SmilePlotProps) {
   // 十字線の読み取りに足す 2 行（最寄りの行使価格の売り。#163）
   const effAt =
     xh && cursor && effPts && effY ? smileEffNearest(effPts, cursor.x, model.domain) : null;
-  const effLines = effAt ? smileEffReadLines(effAt) : null;
+  const effLines = effAt ? smileEffReadLines(effAt, unit) : null;
   const readYs = xh ? effReadYs(xh.read.y, h, effLines ? effLines.length : 0) : [];
   const select = (k: number | null) => {
     if (k !== null && k !== pick) dispatch({ type: 'pickSmile', pick: { monthId: month.id, k } });
@@ -323,7 +338,7 @@ function SmilePlotView(p: SmilePlotProps) {
                 {syEff &&
                   effY &&
                   effTicksClear(
-                    smileEffTicks(effY).map((t) => ({ t, y: syEff(t) })),
+                    smileEffTicks(effY, h < 180 ? 4 : 5).map((t) => ({ t, y: syEff(t) })),
                     xh && xh.read.anchor === 'end' ? readYs : [],
                   ).map(({ t, y }) => (
                     <text key={`e${t}`} class="eff-t" x={w - M.right - EFF_TICK_INSET_PX} y={y}>

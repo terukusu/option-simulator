@@ -1082,6 +1082,11 @@ async function measureAll() {
     // 追証マップを開いたときのスクロールと待ちのスピナー（#174 AC2・AC3）
     await holdMapAll();
     console.log(`追証マップの検査（#174）: ${holdStats.pass} / ${holdStats.total} 状態で pass`);
+    // スマイルの [効率]（#163・#259）: 凡例・右の目盛り・操作行の案内
+    await smileEffAll();
+    console.log(
+      `スマイルの [効率] の検査（#259）: ${effStats.pass} / ${effStats.total} 状態で pass`,
+    );
     // 市場の追加の状態（1200 / 1280 / 1800・322 行の板・字幅 2 通り。#85）
     await marketSweep();
     console.log(
@@ -1585,6 +1590,125 @@ async function holdDailyGate(page) {
   return release;
 }
 
+const effStats = { pass: 0, total: 0 };
+
+/**
+ * スマイルの [効率]（#163・#259）: 売り 5 枚 × 360（スマイル full）・1440 × ダーク / ライト × シナリオ（ΔX = 0 /
+ * ΔX ≠ 0・d・Δσ = 今の線とシナリオ ATM も出る）。[効率] を押して線が出てから、縦・横・折り返し（report）、
+ * 凡例に効率の項目（ΔX ≠ 0 は今も）があり 2 行以内（PC の ΔX = 0 は 1 行）で切れない、右の目盛りが 0% を含め 4 本以上、
+ * 未選択の操作行の案内（.hint.eff）が 2 行（32px）に収まる（scrollHeight ≤ clientHeight）
+ */
+async function smileEffAll() {
+  const moved = JSON.parse(sellFive);
+  moved.tabs[0].position.scenario = {
+    ...moved.tabs[0].position.scenario,
+    dX: -1500,
+    days: 10,
+    dSigma: 4,
+  };
+  const still = JSON.parse(sellFive);
+  still.tabs[0].position.scenario = {
+    ...still.tabs[0].position.scenario,
+    dX: 0,
+    days: 0,
+    dSigma: 0,
+    skew: 0,
+  };
+  const runs = [
+    ['ΔX ≠ 0', JSON.stringify(moved), true],
+    ['ΔX = 0', JSON.stringify(still), false],
+  ];
+  for (const [w, h] of [
+    [360, 780],
+    [1440, 900],
+  ]) {
+    const phone = w <= PHONE_MAX;
+    for (const theme of ['dark', 'light']) {
+      for (const [sname, ws, now] of runs) {
+        const ctx = await newContext(
+          { width: w, height: h },
+          {
+            [WORKSPACE_KEY]: ws,
+            [PREFS_KEY]: prefsText(theme),
+          },
+        );
+        const page = await ctx.newPage();
+        await page.goto(pageUrl('next'));
+        await waitReady(page, 'next');
+        const lbl = `next ${theme} スマイルの [効率] ${sname} ${w}x${h}`;
+        let ok = true;
+        const ng = (why) => {
+          ok = false;
+          console.log(`${lbl}: ${why}  ← NG`);
+        };
+        if (phone) {
+          if (!(await setShell(page, 'smile', 'full'))) ng('画面の状態を作れない');
+          await smileTab(page);
+        } else {
+          await page.click('section.board .panel-head .seg button:has-text("スマイル")');
+          await page
+            .waitForSelector('section.smile .smile-month:not(.inactive) .smile-wrap', {
+              timeout: 10000,
+            })
+            .catch(() => null);
+        }
+        await page.click('section.smile button[aria-label="売りの効率の線"]');
+        const drawn = await page
+          .waitForSelector('section.smile .smile-month:not(.inactive) .eff-t', { timeout: 5000 })
+          .then(() => true)
+          .catch(() => false);
+        if (!drawn) ng('効率の線の目盛りが出ない');
+        await page.waitForTimeout(300);
+        const v = await page.evaluate(() => {
+          const sec = document.querySelector('section.smile');
+          const lg = sec?.querySelector('.smile-legend');
+          const items = lg ? [...lg.querySelectorAll(':scope > span')] : [];
+          const rows = new Set(items.map((i) => Math.round(i.getBoundingClientRect().top))).size;
+          const hint = sec?.querySelector('.smile-act > .hint');
+          return {
+            keys: items.map((i) => i.className),
+            rows,
+            cut: lg
+              ? lg.scrollWidth > lg.clientWidth + 1 || lg.scrollHeight > lg.clientHeight + 1
+              : true,
+            ticks: [...(sec?.querySelectorAll('.smile-month:not(.inactive) .eff-t') ?? [])].map(
+              (t) => t.textContent,
+            ),
+            hintCls: hint?.className ?? null,
+            hintFits: hint ? hint.scrollHeight <= hint.clientHeight + 1 : false,
+            hintH: hint ? Math.round(hint.getBoundingClientRect().height) : 0,
+          };
+        });
+        if (!v.keys.includes('eff')) ng(`凡例に効率が無い（${v.keys.join(' ')}）`);
+        if (now && !v.keys.includes('eff now')) ng('凡例に今の効率が無い');
+        const maxRows = !phone && !now ? 1 : 2;
+        if (v.rows > maxRows) ng(`凡例が ${v.rows} 行（${maxRows} 行まで）`);
+        if (v.cut) ng('凡例が切れる');
+        if (v.ticks.length < 4 || !v.ticks.includes('0%')) ng(`右の目盛り ${v.ticks.join(' ')}`);
+        if (v.hintCls !== 'hint eff') ng(`操作行の案内のクラス ${v.hintCls}`);
+        if (!v.hintFits || v.hintH > 33) ng(`操作行の案内が 2 行に入らない（${v.hintH}px）`);
+        if (
+          !(await report(
+            page,
+            lbl,
+            w,
+            h,
+            `next-${w}x${h}-${theme}-smile-eff-${now ? 'moved' : 'still'}`,
+          ))
+        )
+          ok = false;
+        console.log(
+          `${lbl}: 凡例 ${v.rows} 行・目盛り ${v.ticks.join(' ')}・案内 ${v.hintH}px ${ok ? 'pass' : '← NG'}`,
+        );
+        effStats.total++;
+        if (ok) effStats.pass++;
+        else failed = true;
+        await ctx.close();
+      }
+    }
+  }
+}
+
 /** 指標の .panel-body を一番下（閉じた見出し = 末尾が枠の下端）までスクロールする（#174） */
 const holdScrollBottom = (page) =>
   page.evaluate(() => {
@@ -1593,13 +1717,14 @@ const holdScrollBottom = (page) =>
     return host?.scrollTop ?? -1;
   });
 
-/** 開いた後の見出し・描画域と枠の位置（#174 AC2 (a)） */
+/** 開いた後の見出し・描画域・読み取り（#259）と枠の位置（#174 AC2 (a)） */
 const holdPlace = (page) =>
   page.evaluate(() => {
     const host = document.querySelector('section.metrics .panel-body');
     const btn = document.querySelector('section.metrics .hm-toggle');
     const plot = document.querySelector('section.metrics .hm-plot');
-    if (!host || !btn || !plot) return null;
+    const read = document.querySelector('section.metrics .hm-readout');
+    if (!host || !btn || !plot || !read) return null;
     const h = host.getBoundingClientRect();
     const b = btn.getBoundingClientRect();
     const p = plot.getBoundingClientRect();
@@ -1609,6 +1734,7 @@ const holdPlace = (page) =>
       btnTop: b.top,
       plotTop: p.top,
       plotBottom: p.bottom,
+      readBottom: read.getBoundingClientRect().bottom,
       plotH: p.height,
       scrollTop: host.scrollTop,
       maxTop: host.scrollHeight - host.clientHeight,
@@ -1642,13 +1768,16 @@ async function holdSettled(page) {
 }
 
 /**
- * (a): 描画域が枠の中（±1px）。見出し 〜 描画域が枠の高さに入るなら見出しも枠の中（上に隠れない）。入らない（スマホの
+ * (a): 描画域と読み取りの 1 行（#259 H-2。タップの値）が枠の中（±1px）。描画域 + 読み取りが枠の高さに入らないときは
+ * 描画域まで（上端を隠さない）。見出し 〜 その下端が枠の高さに入るなら見出しも枠の中（上に隠れない）。入らない（スマホの
  * peek）ときは描画域を優先
  */
 const holdPlaced = (r) => {
   if (!r) return false;
-  const inPlot = r.plotBottom <= r.hostBottom + 1 && r.plotTop >= r.hostTop - 1;
-  const fits = r.plotBottom - r.btnTop <= r.hostBottom - r.hostTop;
+  const hostH = r.hostBottom - r.hostTop;
+  const bottom = r.readBottom - r.plotTop <= hostH ? r.readBottom : r.plotBottom;
+  const inPlot = bottom <= r.hostBottom + 1 && r.plotTop >= r.hostTop - 1;
+  const fits = bottom - r.btnTop <= hostH;
   return inPlot && (!fits || r.btnTop >= r.hostTop - 1);
 };
 
@@ -1656,7 +1785,7 @@ const holdPlaced = (r) => {
  * 追証マップ（#174 AC2・AC3）: 資金あり・売り 5 枚 × 360（指標 peek / full）・390（peek）・900（ドック）・1440 ×
  * ダーク / ライト。状態ごとに新しいコンテキスト（過去の値動きはセッションで 1 回だけ読むので）。指標の .panel-body を
  * 一番下までスクロール（見出しが枠の下端）→ /fixtures/atm_daily を止めたまま見出しを押す →
- * (a) 描画域の高さが決まった後（holdSettled。既定の実行は reducedMotion reduce = 即時）に描画域が枠の中（見出しと一緒に入る幅では見出しも）
+ * (a) 描画域の高さが決まった後（holdSettled。既定の実行は reducedMotion reduce = 即時）に描画域と読み取り（#259）が枠の中（見出しと一緒に入る幅では見出しも）
  * (b) 枠（.hm-plot の高さ ≥ 200px）の中に .hm-wait（スピナー + `過去の値動きを読み込み中…`）、状態の行に同じ文字が無い、
  *     .hm-spin の animation-name が none（AC3）、文字が切れない（scrollWidth ≤ clientWidth）、縦・横・折り返し（report）
  * → 通す → .hm-wait が無くなりマスの path が出る → (c) 閉じても scrollTop は動かさない（中身が消えて最大値で切られる分だけ）
@@ -1754,7 +1883,7 @@ async function holdMapAll() {
               `閉じたときに動いた ${before?.scrollTop} → ${after?.scrollTop}（最大 ${after?.maxTop}）`,
             );
           console.log(
-            `${lbl}: 開いた直後 見出し ${r ? Math.round(r.btnTop - r.hostTop) : '?'}px・描画域の下端の余り ${r ? Math.round(r.hostBottom - r.plotBottom) : '?'}px・枠 ${Math.round(wv.plotH)}px・待ち「${wv.text}」・スピナー ${wv.anim} ${ok ? 'pass' : '← NG'}`,
+            `${lbl}: 開いた直後 見出し ${r ? Math.round(r.btnTop - r.hostTop) : '?'}px・描画域 / 読み取りの下端の余り ${r ? `${Math.round(r.hostBottom - r.plotBottom)} / ${Math.round(r.hostBottom - r.readBottom)}` : '?'}px・枠 ${Math.round(wv.plotH)}px・待ち「${wv.text}」・スピナー ${wv.anim} ${ok ? 'pass' : '← NG'}`,
           );
         }
         holdStats.total++;
@@ -3467,10 +3596,10 @@ async function holdToggleFlow(vp) {
   );
   const r = await holdPlace(page);
   check(
-    `#174 ${tag} 開いたら（滑らかなスクロールの後）描画域が枠の中（入る幅では見出しも）`,
+    `#174 ${tag} 開いたら（滑らかなスクロールの後）描画域と読み取りが枠の中（入る幅では見出しも）`,
     holdPlaced(r),
     r
-      ? `見出し ${Math.round(r.btnTop - r.hostTop)}px・下端の余り ${Math.round(r.hostBottom - r.plotBottom)}px`
+      ? `見出し ${Math.round(r.btnTop - r.hostTop)}px・下端の余り 描画域 ${Math.round(r.hostBottom - r.plotBottom)}px / 読み取り ${Math.round(r.hostBottom - r.readBottom)}px`
       : 'なし',
   );
   release();

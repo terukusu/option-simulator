@@ -752,8 +752,8 @@ describe('pinPopRows（#125。凡例の ①②③ のポップオーバーの行
     // 売 P・売 C = 受取の超過（掛け金の行は無い）
     expect(m.get('受取')).toMatch(/^[\d,]+ 円$/);
     expect(m.has('掛け金')).toBe(false);
-    expect(m.get('シナリオ点')).toMatch(/^[+−]?[\d,]+ 円$/);
-    expect(m.get('シナリオ点')).toBe(`${list[0]?.atScenarioText} 円`);
+    expect(m.get('シナリオ点の損益')).toMatch(/^[+−]?[\d,]+ 円$/);
+    expect(m.get('シナリオ点の損益')).toBe(`${list[0]?.atScenarioText} 円`);
     expect(m.has('注記')).toBe(false);
   });
 
@@ -782,7 +782,7 @@ describe('pinPopRows（#125。凡例の ①②③ のポップオーバーの行
     const pop = pinPopRows({ targets: t, mode: 'period', scenarioX: Number.NaN, unit: 'yen' });
     const rows = pop[1] ?? [];
     expect(rows.at(-1)).toEqual({ k: '注記', v: '作業中（線は今の線）' });
-    expect(map(rows).get('シナリオ点')).toBe('—');
+    expect(map(rows).get('シナリオ点の損益')).toBe('—');
     expect(map(rows).get('ピンの線')).toBe('期中');
   });
 });

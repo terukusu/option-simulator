@@ -509,6 +509,11 @@ table.board .legbadge.buy {
   color: var(--pin2);
 }
 
+/* 売りの効率の線（#259 S-1）: × IV 不安定（--warn）と近い色相なので、印の形（─ / ┄）と名前で区別する */
+.smile-legend > .eff {
+  color: var(--eff);
+}
+
 /* 操作行（グラフの下。高さ固定 = 選択の有無で描画域の高さを変えない） */
 .smile-act {
   display: flex;
@@ -560,6 +565,20 @@ table.board .legbadge.buy {
   text-overflow: ellipsis;
 }
 
+/*
+ * [効率] の定義と注意（#259 S-4）だけ 2 行まで（狭い幅で 2 行になる。行の高さ 48px は変えない）。語の途中で折らない
+ * （keep-all = 空白の所で折る）。入らなければ 2 行目の末尾を …
+ */
+.smile-act > .hint.eff {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-height: 16px;
+  white-space: normal;
+  word-break: keep-all;
+  overflow-wrap: anywhere;
+}
+
 .smile-act > .spacer {
   flex: 1;
 }
@@ -581,6 +600,12 @@ table.board .legbadge.buy {
   color: var(--ask);
 }
 
+/* [効率] の線の項目（#259 S-1）を足すと狭い幅では短い形でも 1 行に入らないので、そのときだけ折り返す（項目は隠さない） */
+.smile-legend:has(> .eff) {
+  flex-wrap: wrap;
+  row-gap: 2px;
+}
+
 /* 凡例の項目は隠さない。入らない幅では短い形（全文は title と ⓘ。§5.1） */
 .smile-legend .short {
   display: none;
@@ -596,6 +621,21 @@ table.board .legbadge.buy {
   }
 
   .smile-legend .short {
+    display: inline;
+  }
+}
+
+/* [効率] の線の項目（#259）を足した凡例は、全文で 1 行に入らない幅（PC の市場の列など）では短い形 */
+@container (max-width: 699.98px) {
+  .smile-legend:has(> .eff) {
+    gap: 8px;
+  }
+
+  .smile-legend:has(> .eff) .full {
+    display: none;
+  }
+
+  .smile-legend:has(> .eff) .short {
     display: inline;
   }
 }

@@ -30,6 +30,7 @@ import {
 } from '../../model';
 import { clipSegment, type Domain, linear, niceTicks } from '../chart/scale';
 import { fmtNum, fmtSigned } from './format';
+import { AMOUNT_UNIT_LABEL, type AmountUnit, fmtAmount } from './metrics';
 import { axisValue, SMILE_MARGIN, type SmileAxis } from './smile';
 
 /** 効率の線の計算に使う市場・設定（useAppController の smileEffBase） */
@@ -150,9 +151,18 @@ export function smileEffYDomain(
   return max > 0 ? [0, max * EFF_TOP_RATIO] : null;
 }
 
-/** 右端の目盛り（0 を除く 2〜3 本） */
-export function smileEffTicks(yDomain: Domain): number[] {
-  return niceTicks(yDomain[0], yDomain[1], 3).filter((t) => t > 0 && t <= yDomain[1]);
+/**
+ * 右端の目盛り（下端の 0 と、0 を除く 3〜6 本。#259 S-3: 1 本だけだと尺度が読めず、線の底を左の IV の目盛りと読み違える）。
+ * count は niceTicks の目安の本数
+ */
+export function smileEffTicks(yDomain: Domain, count = 5): number[] {
+  const at = (n: number) =>
+    niceTicks(yDomain[0], yDomain[1], n).filter((t) => t >= 0 && t <= yDomain[1]);
+  // 刻みを 1・2・5 に丸めると 0 を除いて 2 本になる上端がある（例 0〜140 で 50・100）。3 本になるまで目安を増やす
+  let ticks = at(count);
+  for (let n = count + 1; n <= count + 3 && ticks.filter((t) => t > 0).length < 3; n++)
+    ticks = at(n);
+  return ticks;
 }
 
 /** 右端の目盛りを描画域の右端の内側に置く幅（px。右の余白 22px には 4 文字の % が入らないため内側に右寄せ・縁取り） */
@@ -238,11 +248,11 @@ function fmtPremium(v: number): string {
   return `${fmtNum(v, v >= 100 ? 0 : 1)} 円`;
 }
 
-/** 読み取りの 2 行（最寄りの点の売り。#163） */
-export function smileEffReadLines(p: SmileEffPoint): [string, string] {
+/** 読み取りの 2 行（最寄りの点の売り。#163）。証拠金は指標のタイルと同じ金額の単位（#259 S-6） */
+export function smileEffReadLines(p: SmileEffPoint, unit: AmountUnit = 'yen'): [string, string] {
   return [
     `売り ${fmtNum(p.k, 0)} ${p.type} ${fmtPremium(p.premium)} · 効率 ${fmtNum(p.eff, 1)}%`,
-    `証拠金 ${fmtNum(p.margin, 0)} 円 · Δ ${fmtSigned(p.deltaLarge, 2)}（ミニ ${fmtSigned(p.deltaMini, 1)}）`,
+    `証拠金 ${fmtAmount(p.margin, unit)} ${AMOUNT_UNIT_LABEL[unit]} · Δ ${fmtSigned(p.deltaLarge, 2)}（ミニ ${fmtSigned(p.deltaMini, 1)}）`,
   ];
 }
 
@@ -260,7 +270,10 @@ export function effReadYs(y0: number, height: number, n: number): number[] {
 
 /** ⓘ の説明（効率の定義と注意の 1 行） */
 export const SMILE_EFF_HINT =
-  '[効率] = 売りの効率の線: 行使価格ごとに OTM 側を 1 枚売ったときの「受け取るプレミアム ÷ 必要証拠金（概算）」（右の目盛り %）。シナリオの点（d・ΔX・Δσ・Δs）で計算し、シナリオの点が今でなければ今の線を薄く重ねる。Δσ を上げると線がどう動くかを見る。十字線で最寄りの行使価格のプレミアム・証拠金・効率・Δ を読む';
+  '[効率] = 売りの効率の線: 行使価格ごとに OTM 側を 1 枚売ったときの「受け取るプレミアム ÷ 必要証拠金（概算）」（右の目盛り %）。シナリオの点（d・ΔX・Δσ・Δs）で計算し、シナリオの点が今でなければ今の線を薄く重ねる。Δσ を上げると線がどう動くかを見る。十字線で最寄りの行使価格のプレミアム・証拠金・効率・Δ を読む。右の目盛りは表示範囲の中の最大に合わせるので、拡大・パンで変わる';
+
+/** チップ [効率] の title（#259 S-5。文字は `効率` のまま） */
+export const SMILE_EFF_CHIP_TITLE = '売りの効率の線（プレミアム ÷ 必要証拠金）';
 
 /** 注意の 1 行（効率は損失の大きさを表さない） */
 export const SMILE_EFF_CAUTION =

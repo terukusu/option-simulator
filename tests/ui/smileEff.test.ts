@@ -240,12 +240,15 @@ describe('売りの効率の線の描画（#163）', () => {
     expect(smileEffYDomain([pts], [-2, -1])).toBeNull();
   });
 
-  it('目盛りは 0 を除き上端以下、文字は %', () => {
-    const t = smileEffTicks([0, 57.5]);
-    expect(t.length).toBeGreaterThanOrEqual(2);
-    for (const v of t) {
-      expect(v).toBeGreaterThan(0);
-      expect(v).toBeLessThanOrEqual(57.5);
+  it('目盛りは 0 から上端以下で 0 を除いて 3 本以上（#259 S-3）、文字は %', () => {
+    expect(smileEffTicks([0, 86.25])).toEqual([0, 20, 40, 60, 80]);
+    for (const top of [3.4, 12, 57.5, 86.25, 140]) {
+      for (const count of [4, 5]) {
+        const t = smileEffTicks([0, top], count);
+        expect(t[0]).toBe(0);
+        expect(t.filter((v) => v > 0).length).toBeGreaterThanOrEqual(3);
+        for (const v of t) expect(v).toBeLessThanOrEqual(top);
+      }
     }
     expect(effTickLabel(20)).toBe('20%');
     const ticks = [
@@ -308,6 +311,22 @@ describe('売りの効率の線の描画（#163）', () => {
       deltaMini: -1.8,
     });
     expect(c1).toBe('売り 71,000 call 410 円 · 効率 41.0%');
+    // 証拠金は指標のタイルと同じ金額の単位（#259 S-6）
+    const [, k2] = smileEffReadLines(
+      {
+        k: 64000,
+        i: 0,
+        x: 64000,
+        type: 'put',
+        premium: 85.25,
+        margin: 612345.6,
+        eff: 13.92,
+        deltaLarge: 0.1234,
+        deltaMini: 1.234,
+      },
+      'thousand',
+    );
+    expect(k2).toBe('証拠金 612 千円 · Δ +0.12（ミニ +1.2）');
   });
 
   it('読み取りの行: 上端なら 1 行目を y0 に下へ、下端なら最後の行を y0 に上へ', () => {
