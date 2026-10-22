@@ -445,6 +445,34 @@ export function synthAiReply(body) {
       const text = `今の IV は ${r.data.iv_now_pct}% で、過去 1 年の日次の終値の中で今以下の日は ${y1.percentile_pct ?? '—'}% です。過去のスパイクは山から半分戻すまで中央値 ${half.median_days ?? '—'} 日（${half.n ?? '—'} 回${half.insufficient ? '・サンプル不足' : ''}）で、予想ではなく材料です。`;
       return { thinking: 'ツールの結果を読む', text, stop: 'end_turn' };
     }
+    if (Array.isArray(r?.rows) && r?.base) {
+      // tail_table の結果（「表で」の見本。#234・#232）: 1 列目の長い 3 列の表（文脈の足の 2 本）と、列の多い表
+      // （テール表の行）。数字はどれも文脈・ツールの結果の値なので照合で一致する（点線が付かない）
+      const legs = (body?.context?.position?.legs ?? [])
+        .filter((l) => l?.product === 'op')
+        .slice(0, 2);
+      const legRow = (l) => {
+        const what = l.side === 'sell' ? 'IV が上がると損が膨らむ足' : '急落のときの損を抑える足';
+        return `| ${l.type} ${l.k.toLocaleString('en-US')} の${l.side === 'sell' ? '売り' : '買い'}（期近。${what}） | ${l.price.toLocaleString('en-US')} 円 | ${l.qty} 枚 |`;
+      };
+      const rows = r.rows;
+      const days = typeof r.days === 'number' ? Math.round(r.days * 10) / 10 : null;
+      const text = [
+        '足ごとに比べると次のとおりです。',
+        '| 足 | 建値 | 枚数 |',
+        '|---|---:|---:|',
+        ...legs.map(legRow),
+        '',
+        '下げの幅ごとの損益です（Δσ と β は今のシナリオのまま）。',
+        `| 条件 | ${rows.map((x) => pct(x.shock_pct)).join(' | ')} |`,
+        `|---|${rows.map(() => '---').join('|')}|`,
+        `| SQ の損益 | ${rows.map((x) => thousand(x.sq_pnl_yen)).join(' | ')} |`,
+        `| ${days ?? '—'} 日後の損益 | ${rows.map((x) => thousand(x.scenario_pnl_yen)).join(' | ')} |`,
+        '',
+        '下げが深いほど必要証拠金も増え、追証の線に近づきます。',
+      ].join('\n');
+      return { thinking: 'テール表を表にまとめる', text, stop: 'end_turn' };
+    }
     if (r?.after && Array.isArray(r?.diff)) {
       // propose_position（#139）の結果: 後の満期の最大損失と必要証拠金だけを引く（架空の値）
       const text = `カードの案を入れると、満期の最大損失は ${thousand(r.after.max_loss_yen)}、必要証拠金は ${thousand(r.after.margin_yen)} です。検討の材料にしてください。`;
@@ -490,23 +518,13 @@ export function synthAiReply(body) {
     return { thinking: '説明の節を読む', text, stop: 'end_turn' };
   }
   if (userText.includes('表で')) {
-    // 返答の表（#234）と用語のリンク（#232）の見本: 1 列目の長い 3 列の表と、列の多い表（架空の値。照合しない数字）
-    const text = [
-      '足ごとに比べると次のとおりです。',
-      '| 足 | 今の建値 | 今の板で建てた場合の建値 |',
-      '|---|---:|---:|',
-      '| P 62,000 の売り 1 枚（11 月限。下の BEP を決める足で、IV が上がると損が膨らむ） | 125 円 | 140 円 |',
-      '| P 60,000 の買い 1 枚（11 月限。急落のときの損を抑える足） | 40 円 | 45 円 |',
-      '',
-      '下げの幅ごとの損益です（Δσ と β は今のシナリオのまま）。',
-      '| 条件 | −5% | −10% | −15% | −20% | −25% | −30% |',
-      '|---|---|---|---|---|---|---|',
-      '| SQ の損益 | −120 千円 | −480 千円 | −910 千円 | −1,350 千円 | −1,790 千円 | −2,230 千円 |',
-      '| 3 日後の損益 | −150 千円 | −520 千円 | −960 千円 | −1,400 千円 | −1,840 千円 | −2,280 千円 |',
-      '',
-      '下げが深いほど必要証拠金も増え、追証の線に近づきます。',
-    ].join('\n');
-    return { thinking: '表にまとめる', text, stop: 'end_turn' };
+    // 返答の表（#234）と用語のリンク（#232）の見本: tail_table を呼び、その結果と文脈の足の値で表を書く（下）
+    return {
+      thinking: '表にまとめる',
+      text: '',
+      stop: 'tool_use',
+      tool: { id: `toolu_dev_${msgs.length}`, name: 'tail_table', input: {} },
+    };
   }
   if (userText.includes('ヘッジ')) {
     // ポジションの提案（#139）: 行使価格は simulator に選ばせる（|Δ| 0.05 の put の買いを今のタブに足す）

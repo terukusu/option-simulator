@@ -172,7 +172,7 @@ gh api $R/environments/prod/deployment-branch-policies --jq '[.branch_policies[]
 gh api $R/branches/main/protection --jq '[.required_status_checks.checks[].context] == ["check"]'   # ブランチ保護は変えない
 ```
 
-AI を使うときは repository variable `AI_CREDENTIAL`（`api_key` か `oauth_token`）と、任意で `AI_SECRET_VERSION`（版の番号）も設定する。どちらも秘匿値ではない（種類と版の番号だけ。値は Secret Manager）。未設定なら `none`・`latest` として扱う（「AI の資格情報（Secret Manager）」）。
+AI を使うときは repository variable `AI_CREDENTIAL`（`oauth_token`・`api_key`・`wif` のどれか。`wif` は「wif（Anthropic の WIF。鍵なし）」）と、任意で `AI_SECRET_VERSION`（版の番号）も設定する。どちらも秘匿値ではない（種類と版の番号だけ。値は Secret Manager）。未設定なら `none`・`latest` として扱う（「AI の資格情報（Secret Manager）」）。
 
 ブランチ保護（`main`、必須 check `check`）はこの手順では変えない。Terraform の検査は `check` job の中にあるので名前は変わらない。
 
@@ -319,7 +319,7 @@ AI アドバイザー（`docs/ai-advisor.md`）が Claude を呼ぶための資�
 
 - シークレットの入れ物 2 つ（東京だけに複製、`deletion_policy = "PREVENT"`）と、シークレット単位の `roles/secretmanager.secretAccessor`（`sa-simulator` だけ）は `infra/bootstrap/ai_credentials.tf`。apply SA・plan SA には Secret Manager の権限を付けない
 - **値（版）は Terraform に入れない**（state・plan・Cloud Run の設定に値が載らない）。所有者が標準入力から登録する
-- キーとトークンを同時に環境変数に置かない（両方あると SDK は `X-Api-Key` と `Authorization: Bearer` の両方を送り、取り違えの元になる。中継（#134）は両方あると AI を無効にし、WARNING `ai_disabled`（`reason: ai_credential_conflict`）を出す）。`infra/prod` の変数 `ai_credential` 1 つで選び、テストで片方だけであることを確かめる
+- キーとトークンを同時に環境変数に置かない（両方あるとどちらで送るかの取り違えの元になる。中継（#134）は両方あると AI を無効にし、WARNING `ai_disabled`（`reason: ai_credential_conflict`）を出す）。`infra/prod` の変数 `ai_credential` 1 つで選び、テストで片方だけであることを確かめる
 - Cloud Run は環境変数の参照をインスタンスの起動時に解決する。**参照する版が無い・無効だとインスタンスが起動せず simulator 全体が開けない**。順序は必ず「値の登録 → `AI_CREDENTIAL` の設定」、戻すときは「`none` の deploy → 版の無効化」
 - deploy 時に Cloud Run は実行 SA（`sa-simulator`）がシークレットを読めるかを検査する。bootstrap の apply より先に `AI_CREDENTIAL` を設定すると deploy が失敗する（動いているリビジョンはそのまま）
 
