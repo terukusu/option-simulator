@@ -15,6 +15,9 @@ JST = timezone(timedelta(hours=9))
 FIXTURES_DIR = REPO_ROOT / "fixtures" / "synthetic"
 SIDE_KEYS = ("bid", "ask", "bid_iv", "ask_iv", "price", "price_time", "iv", "volume", "positions", "quotation",
              "quotation_date", "delta", "gamma", "theta", "vega", "is_atm")
+# 気配だけの供給元で NULL になりうる列（docs/data-sources.md 2 章。#272）。scripts/synthBoard.ts の
+# QUOTES_ONLY_NULL_KEYS と同じ
+QUOTES_ONLY_NULL_KEYS = tuple(k for k in SIDE_KEYS if k not in ("bid", "ask"))
 
 
 def jst(y, mo, d, h, mi=0, s=0) -> datetime:
@@ -47,6 +50,18 @@ def option_row(created_at, typ, k, ltd, **side) -> dict:
                 "quotation", "quotation_date", "volume", "positions", "is_atm"):
         row[key] = side.get(key)
     return row
+
+
+def quotes_only(fx: dict) -> dict:
+    """板の JSON の写しで、欠けうる列（QUOTES_ONLY_NULL_KEYS）と日経平均を null にしたもの
+    （気配 bid / ask と限月・先物だけ）"""
+    out = json.loads(json.dumps(fx))
+    out["spot"] = {"price": None, "price_time": None}
+    for m in out["months"]:
+        for r in m["rows"]:
+            for side in (r["call"], r["put"]):
+                side.update(dict.fromkeys(QUOTES_ONLY_NULL_KEYS))
+    return out
 
 
 def fixture_tables(fx: dict) -> dict:

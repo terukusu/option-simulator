@@ -526,3 +526,42 @@ export function buildWideChainJson(): ChainJson {
     })),
   });
 }
+
+/**
+ * 気配だけの供給元で欠けうる側の項目（docs/data-sources.md 2 章。#154・#272）: 気配の IV・約定・約定 IV・JPX グリーク・
+ * 取引高・建玉・清算値・ATM の表示
+ */
+export const QUOTES_ONLY_NULL_KEYS = [
+  'bid_iv',
+  'ask_iv',
+  'price',
+  'price_time',
+  'iv',
+  'volume',
+  'positions',
+  'quotation',
+  'quotation_date',
+  'delta',
+  'gamma',
+  'theta',
+  'vega',
+  'is_atm',
+] as const satisfies readonly (keyof ChainSide)[];
+
+/**
+ * 気配だけの板: 欠けうる項目（QUOTES_ONLY_NULL_KEYS と日経平均）をすべて null にした写し（気配 bid / ask と限月・先物だけが
+ * 残る）。fixture のファイルにはしない（テスト・ui:check の --quotes-only が既存の合成の板から作る）
+ */
+export function quotesOnlyChainJson(json: ChainJson): ChainJson {
+  const out = structuredClone(json);
+  out.source = 'quotes-only';
+  out.spot = { price: null, price_time: null };
+  for (const m of out.months) {
+    for (const row of m.rows) {
+      for (const side of [row.call, row.put]) {
+        for (const k of QUOTES_ONLY_NULL_KEYS) (side as unknown as Record<string, null>)[k] = null;
+      }
+    }
+  }
+  return out;
+}
