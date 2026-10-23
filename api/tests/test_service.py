@@ -5,7 +5,7 @@ import threading
 from datetime import date, timedelta
 
 import pytest
-from support import Clock, FakeRunner, World, jst, load_fixture, synth_board, wall_of
+from support import Clock, FakeRunner, World, jst, load_fixture, quotes_only, synth_board, wall_of
 
 from simulator_api.service import ChainService, Unavailable
 
@@ -14,9 +14,9 @@ def without(d, *keys):
     return {k: v for k, v in d.items() if k not in keys}
 
 
-def fixture_world(name):
-    """fixture の板を最新（または板寄せ前の最後）として持つ World と、そのときの現在時刻"""
-    fx = load_fixture(name)
+def fixture_world(name, transform=lambda fx: fx):
+    """fixture の板（transform を通した写し）を最新（または板寄せ前の最後）として持つ World と、そのときの現在時刻"""
+    fx = transform(load_fixture(name))
     w = World()
     snap = w.add_fixture(fx)
     if name == "pre_open":
@@ -58,6 +58,24 @@ def test_roundtrip_fixture(name, reason):
     text = res.json_bytes.decode()
     assert "Z\"" not in text and "+00:00" not in text
     assert text.count("+09:00") >= 3
+
+
+@pytest.mark.parametrize("spot_rows", ["null_row", "empty"])
+def test_roundtrip_quotes_only_board(spot_rows):
+    """#272: 気配だけの供給元（option_price の IV・JPX グリーク・ATM の表示・約定・取引高・建玉・清算値が NULL、
+    現物なし = spot_price_latest が NULL の 1 行 / 0 行）でも使える板（latest）を返し、JSON は元の板の同じ項目を
+    null にしたもの（全キーあり）"""
+    fx, w, now = fixture_world("latest", quotes_only)
+    snap = max(w.options)
+    if spot_rows == "empty":
+        w.spots[snap] = []
+    rows = w.options[snap]
+    assert rows and all(r[k] is None for r in rows for k in ("bid_iv", "ask_iv", "iv", "delta", "is_atm", "price"))
+    clock = Clock(now)
+    got = json.loads(ChainService(FakeRunner(w), clock, monotonic=clock.monotonic).chain().json_bytes)
+    assert got["reason"] == "latest"
+    assert without(got, "source", "reason") == without(fx, "source", "reason")
+    assert got["spot"] == {"price": None, "price_time": None}
 
 
 @pytest.mark.parametrize("snap,raw,want", [

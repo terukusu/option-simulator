@@ -153,6 +153,10 @@
 //   --dom <file>                           body の下の要素の tag.class の並びを書き出す（DOM の変化の比較用）
 //   --shots <dir>                          スクリーンショットを書く（合成の板だけ。リポジトリに入れない）
 //   --max-wraps <n>                        折り返しが n 件を超えたら失敗にする（渡したときだけ判定）
+//   --quotes-only                          #272: 気配だけの板（scripts/synthBoard.ts の quotesOnlyChainJson。気配の IV・JPX グリーク・
+//                                          ATM の表示・約定・日経平均が null）で開く。newContext で作る画面の /fixtures/latest.json を
+//                                          差し替える（322 行の板の差し替えは後から登録するのでそちらが優先）。IV 推移の「今」の印は
+//                                          0 個を期待する（JPX の IV・ATM の表示が無いと iv30 を出さない）
 //
 // 動き（#91 段 C）: 既定の実行・--parts は reducedMotion: 'reduce'（終わった後の配置を測る）、--flows は no-preference。
 // 縦・横 = ページのスクロール量（scrollHeight − innerHeight・scrollWidth − innerWidth）。body が切っている（overflow: hidden）
@@ -208,6 +212,7 @@ const known = new Set([
   '--max-wraps',
   '--ai',
   '--cross',
+  '--quotes-only',
 ]);
 for (const a of args) {
   if (a.startsWith('--') && !known.has(a)) {
@@ -229,6 +234,7 @@ const parts = flag('--parts') || urlParams.has('parts');
 const flows = flag('--flows');
 const aiOnly = flag('--ai');
 const crossOnly = flag('--cross');
+const quotesOnly = flag('--quotes-only');
 const mode = parts ? 'parts' : 'next';
 
 // ---- 足 2 本の作業（版 2）: workspace-v2.json のタブ A だけ（fixture は変えない）
@@ -350,13 +356,15 @@ const REDUCED_MOTION = flows ? 'no-preference' : 'reduce';
 /** localStorage を入れた新しいコンテキスト（UI を操作しない・再読み込みで入れ直さない） */
 async function newContext(viewport, storage, colorScheme = 'dark', extra = {}) {
   const localStorage = Object.entries(storage).map(([name, v]) => ({ name, value: v }));
-  return browser.newContext({
+  const ctx = await browser.newContext({
     viewport,
     colorScheme,
     reducedMotion: REDUCED_MOTION,
     ...extra,
     storageState: { cookies: [], origins: localStorage.length ? [{ origin, localStorage }] : [] },
   });
+  if (quotesOnly) await routeQuotesOnly(ctx);
+  return ctx;
 }
 
 /**
@@ -1298,22 +1306,44 @@ function marketWraps(page) {
   });
 }
 
+/** scripts/synthBoard.ts（Vite のモジュールランナーで 1 回だけ読む。322 行の板と気配だけの板が共用） */
+let synthBoardModule = null;
+async function synthBoard() {
+  if (!synthBoardModule) {
+    const { runnerImport } = await import('vite');
+    ({ module: synthBoardModule } = await runnerImport(join(root, 'scripts', 'synthBoard.ts'), {
+      configFile: false,
+      root,
+      logLevel: 'error',
+    }));
+  }
+  return synthBoardModule;
+}
 /** 合成の 322 行 × 2 限月の板（scripts/synthBoard.ts の buildWideChainJson。ファイルを書かない） */
 let wideBoardText = null;
 async function wideBoard() {
   if (wideBoardText) return wideBoardText;
-  const { runnerImport } = await import('vite');
-  const { module } = await runnerImport(join(root, 'scripts', 'synthBoard.ts'), {
-    configFile: false,
-    root,
-    logLevel: 'error',
-  });
+  const module = await synthBoard();
   wideBoardText = module.serializeChainJson(module.buildWideChainJson());
   return wideBoardText;
 }
 /** dev の板の応答（/fixtures/latest.json）を 322 行の板に差し替える */
 async function routeWide(target) {
   const body = await wideBoard();
+  await target.route('**/fixtures/latest.json', (route) =>
+    route.fulfill({ status: 200, contentType: 'application/json; charset=utf-8', body }),
+  );
+}
+
+/** 気配だけの板（#272。latest.json から欠けうる項目を消す。ファイルを書かない） */
+let quotesOnlyText = null;
+async function routeQuotesOnly(target) {
+  if (!quotesOnlyText) {
+    const module = await synthBoard();
+    const latest = JSON.parse(readFileSync(join(root, FIXTURE_PATH), 'utf8'));
+    quotesOnlyText = module.serializeChainJson(module.quotesOnlyChainJson(latest));
+  }
+  const body = quotesOnlyText;
   await target.route('**/fixtures/latest.json', (route) =>
     route.fulfill({ status: 200, contentType: 'application/json; charset=utf-8', body }),
   );
@@ -2702,7 +2732,9 @@ async function ivCheck(page, label, want = {}) {
   if (r.progress !== 1) bad.push(`進行中の足 ${r.progress} 個（1 のはず）`);
   // 段 C: 合成の表の最後の行（板の 50 分前）より新しい板 = 「今」の印 1 個、twoLegs のシナリオ（ΔX −400・Δσ +2）= 水準の線 1 本
   // #190 先物推移: 「今」の印 1 個（表の最後の行 = 板の 2 分前・同じ限月）、シナリオの水準は無い
-  if (r.now !== 1) bad.push(`「今」の印 ${r.now} 個（1 のはず）`);
+  // #272 --quotes-only: 板に JPX の IV・ATM の表示が無いので IV 推移の「今」の印は出ない（先物推移は出る）
+  const wantNow = quotesOnly && !want.fut ? 0 : 1;
+  if (r.now !== wantNow) bad.push(`「今」の印 ${r.now} 個（${wantNow} のはず）`);
   const wantScenario = want.fut ? 0 : 1;
   if (r.scenario !== wantScenario)
     bad.push(`シナリオの水準 ${r.scenario} 本（${wantScenario} のはず）`);

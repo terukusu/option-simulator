@@ -761,7 +761,7 @@ F の推定・補間・ATM の判定はブラウザ（`model/`）。`sq_date`・
 | `file` | `service.FileChainService` | `CHAIN_FILE` の板の JSON 版 1 をそのまま。カレンダー・IV 推移・日次の値は 503 |
 | `quotes` | `service.QuotesFileService`（`quotes.py`） | `QUOTES_FILE` の **中立の気配の一覧**（利用者が自分の API から書き出す）と `CALENDAR_FILE`（`/api/calendar` と同じ形）から板を組み立てる。限月の日付はカレンダーの規則、reason は `snapshot_at` の時刻（7.2 の窓）、使える板の判定は `usable.board_ok`。`/api/calendar` は `CALENDAR_FILE` を `source: "file"` で、IV 推移・日次の値は 503 |
 
-板の JSON は版 1 のまま。画面は欠けうる項目に耐える: 板全体で気配の IV（`bid_iv`・`ask_iv`）が無ければ「JPX の IV 欠損」の印を出さず、板の IV 列は気配の価格から Black-76（限月の F・T・r）で求める（`data/normalize.ts` の `SideInfo.bidIv`・`askIv`、`Chain.quoteIvProvided`）。`delayed_minutes = 0` は「遅れなし」。形・足し方は `docs/data-sources.md`。
+板の JSON は版 1 のまま。画面は欠けうる項目に耐える: 板全体で気配の IV（`bid_iv`・`ask_iv`）が無ければ「JPX の IV 欠損」の印を出さず、板の IV 列は気配の価格から Black-76（限月の F・T・r）で求める（`data/normalize.ts` の `SideInfo.bidIv`・`askIv`、`Chain.quoteIvProvided`）。`delayed_minutes = 0` は「遅れなし」。IV・JPX グリーク・ATM の表示（`is_atm`）・約定・取引高が全行 NULL の板（気配だけの供給元。optionchan が取り込み元を差し替えたときも列は残り NULL になる）でも、`bigquery` の経路の `/api/chain`・画面・AI のツールと文脈が動く（IV 推移の「今」の 1 点は出ない）。AI は板の JSON のこれらの列を直接は読まず、気配から計算した値を使う。違いうるのは、気配が両側とも無く約定だけがある側からスマイルの節点を作らなくなる分だけ（合成の板では AI の結果は JPX の値がある板と同じ。テストは `docs/data-sources.md` 2 章。#272）。形・足し方は `docs/data-sources.md`。
 
 テスト用の板: **合成データ**（Black-76 から生成した板、または実データから絞って丸めた少数行）をリポジトリに置く。実データの dump は `fixtures/local/`（gitignore）にだけ置き、件数だけ Issue に記録する（JPX 由来のデータを公開リポジトリに置かない。8.1 の D 案を退けた理由と同じ）。dump コマンドは「コミットしない」と表示する。
 
@@ -1298,6 +1298,10 @@ optionchan-gcp の bootstrap / prod を写すだけでは足りないもの。
 | テスト | `terraform test`（`infra/bootstrap/tests/`・`infra/prod/tests/`、モックのプロバイダ。資格情報なしで CI の `check` job で回る）: bootstrap は公開の拒否、WIF の条件、apply SA の subject、データセットの付与の型と role。prod は IAP 有効・`ingress`・IAM の検査が有効、`run.invoker` が IAP のサービスエージェント 1 件だけ、イメージが digest か `src-<20hex>` のタグ参照だけ、8.3 の値（AC11） |
 
 ## 変更履歴
+
+### 2026-10-23 気配だけの板の確認（#272）
+
+- 7.4「API の供給元」: IV・JPX グリーク・ATM の表示・約定・取引高が全行 NULL の板（optionchan の取り込み元が気配だけになったときの形）で、`bigquery` の経路・画面・AI が動くことを合成の板で確かめた（設計・製品のコードの変更なし）。AI は板の JSON のこれらの列を直接は読まない（約定だけの側からスマイルの節点を作らなくなる分だけ結果が違いうる。合成の板ではそういう側が無く、AI のツールの結果と文脈は JPX の値がある板と同じ）。IV 推移の「今」の 1 点は出ない（気配から計算し直すかは optionchan の iv30 の定義が決まってから。#257）。テストと手元の検査（`npm run ui:check -- --quotes-only`）は `docs/data-sources.md` 2 章
 
 ### 2026-10-23 翼の傾きを回帰で（#268）
 

@@ -48,11 +48,17 @@
 | `delta`・`gamma`・`theta`・`vega`（JPX グリーク） | 欠けうる | 画面のグリークは Black-76 で自前。手元の照合（AC7。`data/jpxGreeks.ts`）が出ないだけ |
 | `volume`・`positions` | 欠けうる | 使っていない（運ぶだけ） |
 | `quotation`・`quotation_date` | 任意・欠けうる | 「清算値」モード（後段）用。今は運ぶだけ |
-| `is_atm` | 任意・欠けうる | IV 推移の「今」の 1 点（optionchan と同じ定義の iv30。`model/constantMaturity.ts`。`bid_iv`・`ask_iv` も使う）が出ない。ATM の判定は自前（5.9）なので影響なし |
+| `is_atm` | 任意・欠けうる | IV 推移の「今」の 1 点（optionchan と同じ定義の iv30。`model/constantMaturity.ts`。`bid_iv`・`ask_iv` も使う）が出ない（誤った点は出さない。シナリオの水準の基準は最新の足の終値になる）。ATM の判定は自前（5.9）なので影響なし |
 | `spot.price`・`spot.price_time` | 欠けうる（キーは必須） | ヘッダの「日経平均」が — |
 | `source` | 任意 | ヘッダの「データ元」に出す |
 
-テスト: `tests/data/quotesOnly.test.ts`（欠けうる項目をすべて null にした合成の板で、検証・F の回復・スマイル・印・板の IV 列・足の評価）。
+AI（ツール・文脈。docs/design.md 14 章）は上の欠けうる項目を直接は読まない（文脈に JPX のグリーク・`bid_iv` / `ask_iv`・数量・建玉を送らない。数字は気配から自前で計算した値）。ただしスマイルを通して `price` を間接に使う（上の `price` の行。気配が両側とも無く約定だけがある側の節点）ので、約定が欠けるとその分だけスマイルと AI の結果が変わりうる（正しい挙動で、壊れはしない）。`iv_stats` は `/api/atm_daily`・`/api/atm_iv`（optionchan の表 `atm_cm_iv` の iv30）を読むので、供給元が変わると iv30 の定義が少し違いうる（optionchan 側で JPX との差を測る。#257）。列の形は変わらないので壊れない。
+
+テスト（#154・#272）: 欠けうる項目をすべて null にした板は `scripts/synthBoard.ts` の `quotesOnlyChainJson`（合成の `latest.json` から作る。fixture のファイルにはしない）。
+
+- `tests/data/quotesOnly.test.ts`: 検証・F の回復・スマイル・印・板の IV 列・足の評価、AI のツールの結果と文脈（`scripts/aiToolsFixture.ts` の `buildAiToolsFixture`。`fixtures/synthetic/ai_tools.json` と同じ組み立て）が元の板と同じ（データ元の名前を除く。合成の `latest.json` には約定だけの側が無いので、約定からの節点の経路はこの比較に入らない）、IV 推移の「今」の 1 点が null
+- `api/tests/test_service.py` の `test_roundtrip_quotes_only_board`: `bigquery` の経路で option_price の欠けうる列が全部 NULL の行 → `/api/chain` が `latest` の板（全キーあり、欠けは null）。`DATA_SOURCE=quotes` の経路は `api/tests/test_quotes.py`
+- 画面の縦・横スクロールと折り返し: `npm run ui:check -- --quotes-only`（手元の検査。dev の `/fixtures/latest.json` を気配だけの板に差し替える）
 
 取引カレンダー（`/api/calendar`）は板とは別のエンドポイント。供給元が返せなければ 503 で、画面は同梱の版（`data/calendar/calendar.json`）を使う。`source` が `bigquery` 以外の API の版は、ヘッダの前提に「API の版」と出す。IV 推移（`/api/atm_iv`）・日次の値（`/api/atm_daily`）・先物推移（`/api/future_bars`。#190）は optionchan の表だけから作っており、他の供給元では 503（IV 推移・追証マップの過去の点・先物推移は「読めない」）。
 
@@ -102,4 +108,5 @@
 - kabu ステーション API の条件の解釈（第三者のプログラムの利用・加工の禁止）。オーナー判断・証券会社への確認（#154）
 - 立花 e 支店 API の先物・オプションの時価の有無（実測は #247。optionchan の取り込み元の差し替えの中で行う）、J-Quants・楽天・IB の規約本文と料金
 - J-Quants の日次の値（清算値・IV）で板を組む「清算値モード」（後段。別 Issue の候補）
-- optionchan 側で取り込み元を差し替えられるようになったとき（optionchan のリポジトリの EPIC）の、契約の照合・IV とグリークが空の板での確認・この文書の更新（#257）
+- optionchan 側で取り込み元を差し替えられるようになったとき（optionchan のリポジトリの EPIC）の、契約の照合（固定コミットの更新）・iv30 の定義の差の確認・この文書の更新（#257）。IV・グリーク・ATM の表示・約定が空の板で画面・API・AI が動くことは合成の板で確認済み（#272。2 章の「テスト」）
+- IV 推移の「今」の 1 点を、JPX の IV が無い板で気配から計算し直すか（今は出さない。optionchan の iv30 の定義が決まってから。#257）

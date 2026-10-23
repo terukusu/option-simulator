@@ -1,59 +1,30 @@
 /**
- * 気配だけの板（#154。docs/data-sources.md「板の契約」）: 供給元によって欠けうる項目（気配の IV・約定・約定 IV・
- * グリーク・取引高・建玉・清算値・ATM の表示・日経平均）がすべて null でも、検証・正規化・スマイル・足・板の表示が動く。
- * 板は合成の latest.json（架空の値）から欠けうる項目を消して作る。
+ * 気配だけの板（#154・#272。docs/data-sources.md「板の契約」）: 供給元によって欠けうる項目（気配の IV・約定・約定 IV・
+ * グリーク・取引高・建玉・清算値・ATM の表示・日経平均）がすべて null でも、検証・正規化・スマイル・足・板の表示・
+ * AI のツール・IV 推移の「今」の 1 点が動く。板は合成の latest.json（架空の値）から欠けうる項目を消して作る
+ * （scripts/synthBoard.ts の quotesOnlyChainJson）。
  */
 
 import { describe, expect, it } from 'vitest';
-import { type ChainJson, type ChainSide, validateChainJson } from '../../data/chainJson';
+import { validateChainJson } from '../../data/chainJson';
 import { boardOptionLeg, buildMarketContext } from '../../data/legs';
 import { normalizeChain } from '../../data/normalize';
 import { evaluatePosition, preparePosition } from '../../model/position';
 import { ZERO_SCENARIO } from '../../model/scenario';
 import { sqInstant, yearFraction } from '../../model/time';
-import { buildChainJson, SPECS } from '../../scripts/synthBoard';
+import { buildAiToolsFixture } from '../../scripts/aiToolsFixture';
+import { buildChainJson, quotesOnlyChainJson, SPECS } from '../../scripts/synthBoard';
 import { boardRows, sideMarkLabels } from '../../ui/view/board';
 import { boardRowTexts } from '../../ui/view/boardPanel';
+import { ivNowValue } from '../../ui/view/ivHistory';
 import { fixture } from '../support/fixtures';
 import { makeSvi, sviTotalVariance } from '../support/synthChain';
 
-const OPTIONAL_SIDE_KEYS = [
-  'bid_iv',
-  'ask_iv',
-  'price',
-  'price_time',
-  'iv',
-  'volume',
-  'positions',
-  'quotation',
-  'quotation_date',
-  'delta',
-  'gamma',
-  'theta',
-  'vega',
-  'is_atm',
-] as const satisfies readonly (keyof ChainSide)[];
-
-/** 欠けうる項目をすべて null にした板（気配 bid / ask と限月・先物だけが残る） */
-function quotesOnly(json: ChainJson): ChainJson {
-  const out = structuredClone(json);
-  out.source = 'quotes-only';
-  out.spot = { price: null, price_time: null };
-  for (const m of out.months) {
-    for (const row of m.rows) {
-      for (const side of [row.call, row.put]) {
-        for (const k of OPTIONAL_SIDE_KEYS) (side as unknown as Record<string, null>)[k] = null;
-      }
-    }
-  }
-  return out;
-}
-
 const spec = SPECS.find((s) => s.name === 'latest');
 if (!spec) throw new Error('latest の spec が無い');
-const json = quotesOnly(fixture('latest'));
+const json = quotesOnlyChainJson(fixture('latest'));
 
-describe('気配だけの板（#154）', () => {
+describe('気配だけの板（#154・#272）', () => {
   it('(a) 板の JSON 版 1 の検証を通る', () => {
     const res = validateChainJson(structuredClone(json));
     expect(res.ok).toBe(true);
@@ -152,8 +123,28 @@ describe('気配だけの板（#154）', () => {
   });
 
   it('生成器の板（buildChainJson）でも同じ（fixture に依らない）', () => {
-    const c = normalizeChain(quotesOnly(buildChainJson(spec)));
+    const c = normalizeChain(quotesOnlyChainJson(buildChainJson(spec)));
     expect(c.quoteIvProvided).toBe(false);
     expect(c.months.every((m) => m.smile !== null)).toBe(true);
+  });
+
+  it('AI のツールの結果と文脈は元の板と同じ（#272。AI は気配の IV・JPX グリーク・ATM の表示を直接は読まない）', () => {
+    // fixtures/synthetic/ai_tools.json と同じ組み立て（文脈・事前計算 5 本・ツール 12 本の結果と失敗）。中継の pytest
+    // （api/tests/test_ai_tools.py）が ai_tools.json を形に通すので、同じ文字列なら気配だけの板でも中継の形を通る。
+    // 注意: スマイルは気配が両側とも無い側で約定（price）から節点を作る（model/smile.ts の buildNode）。合成の latest.json
+    // にはそういう側（約定あり・気配なし）が無いので一致する。fixture が変わってここが落ちたら、約定の節点が消えた分の
+    // 正しい違いでありうる（AI 側で price を無視して合わせない。比べる板から約定だけの側を外す）
+    // 違ってよいのはデータ元の名前（文脈の snapshot.source）だけなので、そろえて比べる
+    const orig = fixture('latest');
+    const same = structuredClone(json);
+    if (orig.source === undefined) delete same.source;
+    else same.source = orig.source;
+    expect(buildAiToolsFixture(same)).toBe(buildAiToolsFixture(orig));
+  });
+
+  it('IV 推移の「今」の 1 点は出ない（null）、元の板では出る（#272。iv30 は JPX の bid_iv / ask_iv・is_atm で計算する）', () => {
+    expect(ivNowValue(json, new Set())).toBeNull();
+    const orig = ivNowValue(fixture('latest'), new Set());
+    expect(Number.isFinite(orig?.iv)).toBe(true);
   });
 });
