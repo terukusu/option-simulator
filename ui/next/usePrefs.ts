@@ -48,6 +48,10 @@ export function usePrefs(initial: PrefsRead, storage: Storage | null) {
     () => commit({ ...ref.current, aiDisclaimerSeen: true }),
     [commit],
   );
+  // 舞台の操作の案内（#276）: 1 回だけ。既に書いてあれば書かない
+  const setStageHintSeen = useCallback(() => {
+    if (ref.current.stageHintSeen !== true) commit({ ...ref.current, stageHintSeen: true });
+  }, [commit]);
   // テクニカルの期間（#205）: 組で受け取り、検査は呼ぶ側（設定の欄）。同じ値なら作り直さない（段の再計算を起こさない）
   const setTechnicals = useCallback(
     (patch: Partial<TechParams>) => {
@@ -110,6 +114,7 @@ export function usePrefs(initial: PrefsRead, storage: Storage | null) {
     setTheme,
     setMargin,
     setAiDisclaimerSeen,
+    setStageHintSeen,
     setTechnicals,
     setFutPaneH,
     techLineWidths,

@@ -39,11 +39,13 @@ import {
   type MarkObstacle,
   railPick,
   STAGE_LABEL_SHIFT,
+  STAGE_TIP_TEXT,
   stageFill,
   stageFrame,
   stageHandle,
   stageKey,
   stageMarkLabels,
+  stageTipShown,
   strikeAtPx,
   TIME_RAIL_PAD,
   type TimeRailTick,
@@ -899,5 +901,27 @@ describe('emptyStageGrid（#111）', () => {
         inside(g);
       }
     }
+  });
+});
+
+/** #276: 舞台の操作の案内（描画域の中の 1 行・端末で 1 回だけ） */
+describe('stageTipShown', () => {
+  const on = { seen: false, empty: false, mini: false, surface: false };
+  it('まだ出していない・足あり・線モード・ミニでない → 出す', () => {
+    expect(stageTipShown(on)).toBe(true);
+  });
+  it('出した・足 0 本（空）・ミニ・面モード → 出さない', () => {
+    expect(stageTipShown({ ...on, seen: true })).toBe(false);
+    expect(stageTipShown({ ...on, empty: true })).toBe(false);
+    expect(stageTipShown({ ...on, mini: true })).toBe(false);
+    expect(stageTipShown({ ...on, surface: true })).toBe(false);
+  });
+  // 360 の描画域（≈ 270px）に 12px で入る長さ: 全角 22 字 = 44 単位まで（実際の幅は ui:check の案内の判定）
+  it('文言は 1 行（ハンドルと長押し。360 の描画域に入る長さ）', () => {
+    expect(STAGE_TIP_TEXT).toContain('縦線');
+    expect(STAGE_TIP_TEXT).not.toContain('▼');
+    expect(STAGE_TIP_TEXT).toContain('長押し');
+    expect(STAGE_TIP_TEXT).not.toContain('\n');
+    expect(widthUnits(STAGE_TIP_TEXT)).toBeLessThanOrEqual(44);
   });
 });

@@ -51,6 +51,24 @@ section.stage {
   flex: 0 0 auto;
 }
 
+/*
+ * 線の凡例の 1 字（満 / 指 / 今。#276）: 舞台の幅 < 560px（スマホ・タブレットの舞台 ≈ 518px で
+ * 「指定日（d N 日後）」を入れると 3 項目とも省略記号になる）。全文は title
+ */
+.legend .lg-short {
+  display: none;
+}
+
+@container stage (max-width: 559.98px) {
+  .legend .lg-long {
+    display: none;
+  }
+
+  .legend .lg-short {
+    display: inline;
+  }
+}
+
 .legend i {
   display: inline-block;
   flex: 0 0 auto;
@@ -403,6 +421,29 @@ section.stage > .panel-body.stage-main {
   padding: var(--sp-4) var(--sp-3);
   color: var(--ink-3);
   font-size: var(--fs-sub);
+}
+
+/*
+ * 操作の案内（#276）: 描画域の中の 1 行（左下。足マーカーの帯 14px の上）。端末で 1 回だけ、舞台の操作で消える。
+ * 押せない（pointer-events: none = 下のハンドル・マーカーの操作をそのまま通す）。位置は PNL_MARGIN（左 56・下 26）に合わせる。
+ * 折り返さない（入らなければ省略記号。360 の描画域に入る長さ = tests/ui/stage.test.ts）
+ */
+.chart > .stage-tip {
+  position: absolute;
+  bottom: 44px;
+  left: 62px;
+  max-width: calc(100% - 56px - 12px - 12px);
+  margin: 0;
+  padding: 2px 6px;
+  overflow: hidden;
+  border-radius: var(--r-sm);
+  background: var(--s1);
+  color: var(--ink-2);
+  font-size: var(--fs-sm);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  pointer-events: none;
+  box-shadow: inset 0 0 0 1px var(--line);
 }
 
 /*

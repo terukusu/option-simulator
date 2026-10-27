@@ -16,6 +16,7 @@ import {
   type FutureBasis,
   parseStepperInput,
   presetChips,
+  presetRevealAction,
   type ScenarioRegionInput,
   type StepperView,
   scenarioSteppers,
@@ -120,7 +121,11 @@ export function Scenario(p: { c: AppController; dXUnit: DXUnit; onDXUnit: (u: DX
       {...(ch.pressed !== undefined && { pressed: ch.pressed })}
       disabled={ch.disabled}
       onClick={() => {
-        if (ch.action) dispatch(ch.action);
+        if (!ch.action) return;
+        // プリセットの後はシナリオ点が表示範囲の内側 10% に入るように広げる（#276。dispatch の前の表示範囲から作る）
+        const reveal = presetRevealAction(ch.action, base, state.pnlViewport);
+        dispatch(ch.action);
+        if (reveal) dispatch(reveal);
       }}
     />
   );

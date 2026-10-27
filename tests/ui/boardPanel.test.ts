@@ -15,6 +15,7 @@ import {
 import {
   BOARD_COLUMN_HEADS,
   BOARD_FLASH_MS,
+  BOARD_FOOT_MARKS,
   BOARD_HINT,
   BOARD_MARK_SHORT,
   boardBadges,
@@ -245,12 +246,10 @@ describe('AC-3(a) 印の短い形と全文', () => {
     expect(seen).toEqual(new Set(['noQuote:—:気配なし', 'ivMissing:—/—:JPX の IV 欠損']));
   });
 
-  it('ⓘ に印の意味の一覧', () => {
-    const t = BOARD_HINT.join(' ');
-    for (const s of ['IV 不安定', '補間 / 外挿', '気配なし', 'JPX の IV 欠損', '売1 / 買2']) {
-      expect(t).toContain(s);
-    }
-    expect(BOARD_HINT[0]).toBe('bid = 売り、ask = 買い で足を追加。Δ はスマイルの IV での値。');
+  it('ⓘ は bid / ask の 1 文、印の凡例は脚注（#276）', () => {
+    expect(BOARD_HINT).toHaveLength(1);
+    expect(BOARD_HINT[0]).toMatch(/^bid = 売り、ask = 買い で足を追加/);
+    expect(BOARD_FOOT_MARKS).toBe('× 不安定 · 点線 補間/外挿');
   });
 });
 
@@ -366,7 +365,7 @@ describe('AC-3(d) 脚注', () => {
     expect(f.f).toBe(`F ${hm.forward}`);
     expect(f.atm).toBe(`ATM ${hm.atm}（B）`);
     expect(f.sq).toBe(`SQ ${hm.sqDate.slice(5, 7)}/${hm.sqDate.slice(8, 10)}`);
-    expect(f.hint).toBe('bid = 売り · ask = 買い');
+    expect(f.marks).toBe(BOARD_FOOT_MARKS);
     expect(f.f).toMatch(/^F [0-9,]+ ±[0-9,]+$/);
   });
 

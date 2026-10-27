@@ -2,9 +2,9 @@ import { useEffect, useRef, useState } from 'preact/hooks';
 import type { Parsed } from '../../state';
 import {
   clickSteps,
-  EDIT_HOLD_MS,
-  EDIT_MOVE_PX,
+  editKeySteps,
   editOutcome,
+  editStepOrigin,
   isHot,
   repeatSteps,
   type StepSpec,
@@ -16,9 +16,14 @@ import {
   stepperJump,
   stepperKey,
   stepperMove,
+  stepperMoved,
+  stepperTapOpensEdit,
   wheelStep,
 } from '../../view/stepper';
 import { livePulse } from '../live';
+
+/** タッチで離した後に click を待つ時間（ms。来なければ長押しとみなして入力欄を開く。#276） */
+const TAP_CLICK_WAIT_MS = 350;
 
 /** 数値入力（#83）。parse は表示の単位の値、text は開いたときの文字列、onError はエラーの文言（null で消す） */
 export interface StepperEdit {
@@ -44,7 +49,7 @@ interface Props {
   gestures?: boolean;
   /** 段の格子に寄せない（d。#83） */
   keepFraction?: boolean;
-  /** 数値入力（ダブルクリック / タッチの長押し。#83） */
+  /** 数値入力（値を押して離す = タップ 1 回・クリック。#83・#276） */
   edit?: StepperEdit;
 }
 
@@ -53,7 +58,7 @@ interface Props {
  * 値にフォーカスして ↑↓ で ±1 段、範囲で止める、既定でない値は .hot（強調色）。
  * #83 の省略可能な props: gestures（± の pointerdown で 1 段・Shift で 10 段・押し続けると連続、値の上の
  * 横のスクラブ 8px で 1 段・ホイール 1 段・↑→ / ↓← / Shift・PageUp/PageDown ±10 / Home / End / R）、
- * keepFraction（d の端数を保つ）、edit（ダブルクリック / タッチ 450ms で同じ場所に入力欄）、disabled、name。
+ * keepFraction（d の端数を保つ）、edit（値を押して動かさずに離すと同じ場所に入力欄。#276）、disabled、name。
  * 連続の操作（スクラブ・ホイール・長押し）は 1 フレーム 1 回 onChange（rAF）。props の値が描画に届く前の次の段は
  * 最後に送った値から作る（段を落とさない）。
  */
@@ -82,9 +87,11 @@ export function Stepper(p: Props) {
     y0: number;
     applied: number;
     moved: boolean;
-    timer: number;
   } | null>(null);
   const valRef = useRef<HTMLDivElement>(null);
+  /** 直前の押下が「動かさずに離した」か（#276。次の click で数値入力を開く） */
+  const tapped = useRef(false);
+  const tapTimer = useRef(0);
   const inputRef = useRef<HTMLInputElement>(null);
   const [editing, setEditing] = useState<string | null>(null);
   const editingRef = useRef(false);
@@ -132,8 +139,6 @@ export function Stepper(p: Props) {
     repeat.current = null;
   };
   const endScrub = () => {
-    const s = scrub.current;
-    if (s) clearTimeout(s.timer);
     scrub.current = null;
   };
 
@@ -156,6 +161,7 @@ export function Stepper(p: Props) {
       document.removeEventListener('pointerup', onUp);
       document.removeEventListener('pointercancel', onUp);
       cancelAnimationFrame(frame.current);
+      clearTimeout(tapTimer.current);
       stopRepeat();
       endScrub();
     };
@@ -327,21 +333,15 @@ export function Stepper(p: Props) {
                 if (disabled || editing !== null || !e.isPrimary) return;
                 if (e.pointerType === 'mouse' && e.button !== 0) return;
                 endScrub();
+                tapped.current = false;
                 const el = e.currentTarget;
-                const s = {
+                scrub.current = {
                   id: e.pointerId,
                   x0: e.clientX,
                   y0: e.clientY,
                   applied: 0,
                   moved: false,
-                  timer: 0,
                 };
-                if (e.pointerType !== 'mouse' && p.edit) {
-                  s.timer = window.setTimeout(() => {
-                    if (scrub.current === s && !s.moved) openEdit();
-                  }, EDIT_HOLD_MS);
-                }
-                scrub.current = s;
                 try {
                   el.setPointerCapture(e.pointerId);
                 } catch {
@@ -356,10 +356,7 @@ export function Stepper(p: Props) {
                 const s = scrub.current;
                 if (!s || s.id !== e.pointerId) return;
                 const dx = e.clientX - s.x0;
-                if (!s.moved && Math.hypot(dx, e.clientY - s.y0) >= EDIT_MOVE_PX) {
-                  s.moved = true;
-                  clearTimeout(s.timer);
-                }
+                if (!s.moved && stepperMoved(dx, e.clientY - s.y0)) s.moved = true;
                 const total = scrubSteps(dx);
                 if (total === s.applied) return;
                 const n = total - s.applied;
@@ -368,17 +365,38 @@ export function Stepper(p: Props) {
               }
             : undefined
         }
-        onPointerUp={g ? endScrub : undefined}
-        onPointerCancel={g ? endScrub : undefined}
-        onLostPointerCapture={g ? endScrub : undefined}
-        onDblClick={
-          g && p.edit
+        onPointerUp={
+          g
             ? (e) => {
-                e.preventDefault();
+                const s = scrub.current;
+                tapped.current =
+                  !!s && s.id === e.pointerId && stepperTapOpensEdit(s.moved, s.applied);
+                endScrub();
+                // タッチの長押しの後は端末によって click が来ない（contextmenu を止めているため）。来なければ少し待って開く
+                if (tapped.current && e.pointerType !== 'mouse' && p.edit) {
+                  clearTimeout(tapTimer.current);
+                  tapTimer.current = window.setTimeout(() => {
+                    if (!tapped.current) return;
+                    tapped.current = false;
+                    openEdit();
+                  }, TAP_CLICK_WAIT_MS);
+                }
+              }
+            : undefined
+        }
+        onClick={
+          g && p.edit
+            ? () => {
+                // 押して動かさずに離した（タップ 1 回・クリック・長押し）→ 数値入力（#276。スクラブは残す）。
+                // 開くのは click（タッチの互換のマウスイベントでのフォーカスの移動が済んでから。入力欄のフォーカスを奪われない）
+                if (!tapped.current) return;
+                tapped.current = false;
                 openEdit();
               }
             : undefined
         }
+        onPointerCancel={g ? endScrub : undefined}
+        onLostPointerCapture={g ? endScrub : undefined}
         onContextMenu={g ? (e) => e.preventDefault() : undefined}
       >
         {editing !== null ? (
@@ -395,6 +413,32 @@ export function Stepper(p: Props) {
               p.edit?.onError(invalidOf(t));
             }}
             onKeyDown={(e) => {
+              const n = editKeySteps({
+                key: e.key,
+                isComposing: e.isComposing,
+                keyCode: e.keyCode,
+                ctrl: e.ctrlKey,
+                meta: e.metaKey,
+                alt: e.altKey,
+                shift: e.shiftKey,
+              });
+              if (n !== null) {
+                // ↑↓（#276）: 入力欄の値（正しくなければ動かさない）から 1 段（Shift 10）動かしてすぐ反映し、欄を開いたまま書き換える
+                e.preventDefault();
+                const c = props.current;
+                if (!c.edit) return;
+                const from = editStepOrigin(
+                  editOutcome(opened.current, e.currentTarget.value, c.edit.parse),
+                  cur(),
+                );
+                if (from === null) return;
+                const next = move(from, n);
+                now(next);
+                opened.current = c.edit.text(next);
+                setEditing(opened.current);
+                c.edit.onError(null);
+                return;
+              }
               if (e.key === 'Enter') {
                 e.preventDefault();
                 const t = e.currentTarget.value;

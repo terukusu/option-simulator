@@ -34,6 +34,8 @@
  * #156 で AI に渡す自分の前提（ai_profile。自由記述の文字列。AI_PROFILE_MAX 字まで）を足した。版は 1 のまま。前後の空白を
  * 除いて空・長すぎる・文字列でない → 無し。書くのも同じ条件のときだけ（入れた文字列のまま）。端末にだけ置く（作業の保存・
  * 保存一覧・書き出し・URL・サーバーには載せない）。古い画面はこのキーを読まずに書き直すので消える。
+ * #276 で「舞台の操作の案内を出した」（stage_hint_seen。boolean。既定 false。true のときだけ書く）を足した。版は 1 のまま
+ * （ai_disclaimer_seen と同じ規則。古い画面が書き直して消えても案内がもう 1 回出るだけ）。
  */
 
 import {
@@ -152,6 +154,8 @@ export interface Prefs {
   techLineWidths?: Partial<TechLineWidths>;
   /** AI に渡す自分の前提（#156。自由記述。無い = 未設定） */
   aiProfile?: string;
+  /** 舞台の操作の案内（描画域の中の 1 行）を出して、操作で消した（端末で 1 回だけ出す。#276。無い = false） */
+  stageHintSeen?: boolean;
 }
 
 /** 線の太さの JSON のキー（#214。px） */
@@ -199,6 +203,8 @@ function readPaneH(o: Record<string, unknown>): IndPaneHeights | null {
 
 /** AI の免責の文を見たかの JSON のキー（#135） */
 const AI_DISCLAIMER_JSON_KEY = 'ai_disclaimer_seen';
+/** 舞台の操作の案内を出したかの JSON のキー（#276） */
+const STAGE_HINT_JSON_KEY = 'stage_hint_seen';
 /** AI に渡す自分の前提の JSON のキー（#156） */
 const AI_PROFILE_JSON_KEY = 'ai_profile';
 
@@ -297,6 +303,7 @@ export function readPrefs(text: string | null): PrefsRead {
   // テクニカルの期間（#205）: キーが 1 つも無い（#205 より前の保存・既定のまま）→ 持たない = 既定
   if (TECH_PARAM_KEYS.some((k) => TECH_JSON_KEY[k] in o)) prefs.technicals = readTechParams(o);
   if (o[AI_DISCLAIMER_JSON_KEY] === true) prefs.aiDisclaimerSeen = true;
+  if (o[STAGE_HINT_JSON_KEY] === true) prefs.stageHintSeen = true;
   const paneH = readPaneH(o);
   if (paneH) prefs.futPaneH = paneH;
   // 線の太さ（#214）: 無い・不正・既定 → 持たない = 既定
@@ -323,6 +330,7 @@ export function serializePrefs(p: Prefs): string {
       ? m.ignoreLongOptions
       : DEFAULT_MARGIN_PREFS.ignoreLongOptions;
   if (p.aiDisclaimerSeen === true) out[AI_DISCLAIMER_JSON_KEY] = true;
+  if (p.stageHintSeen === true) out[STAGE_HINT_JSON_KEY] = true;
   if (isAiProfile(p.aiProfile)) out[AI_PROFILE_JSON_KEY] = p.aiProfile;
   // テクニカルの期間は既定と違う項目だけ（組が不正なら書かない = 既定）
   const t = p.technicals;

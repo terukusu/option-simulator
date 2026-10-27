@@ -244,8 +244,12 @@ const mode = parts ? 'parts' : 'next';
 // ---- 足 2 本の作業（版 2）: workspace-v2.json のタブ A だけ（fixture は変えない）
 const fixture = JSON.parse(readFileSync(join(root, 'tests/ui/saved/workspace-v2.json'), 'utf8'));
 const twoLegs = JSON.stringify({ ...fixture, active: 0, tabs: [fixture.tabs[0]] });
-/** 端末の設定（版 1）。extra = 証拠金のキー（#131。capital_yen など） */
-const prefsText = (theme, extra = {}) => JSON.stringify({ schema_version: 1, theme, ...extra });
+/**
+ * 端末の設定（版 1）。extra = 証拠金のキー（#131。capital_yen など）。舞台の操作の案内（#276）は出した扱い
+ * （既定の検査の画面を変えない。案内そのものは stageTipAll が stage_hint_seen なしで測る）
+ */
+const prefsText = (theme, extra = {}) =>
+  JSON.stringify({ schema_version: 1, theme, stage_hint_seen: true, ...extra });
 const share = JSON.parse(readFileSync(join(root, 'tests/ui/saved/share-v1.json'), 'utf8'));
 
 // ---- 旧画面から控えた期待値（#91。scripts/uiCheck.expect.json）。合成の板・twoLegs の sha256 が控えたときと違えば
@@ -974,6 +978,257 @@ async function ivFirstOpenCheck(page, label) {
 }
 
 const h1Stats = { pass: 0, total: 0 };
+const legendStats = { pass: 0, total: 0 };
+
+/**
+ * #276（EPIC #281 終了条件 6）: 舞台の線の凡例の各項目が省略されていない（見えている名前の scrollWidth ≤ clientWidth）。
+ * 舞台の幅 < 560px は 満 / 指 / 今 の 1 字
+ */
+async function legendCheck(page, label) {
+  const r = await page.evaluate(() => {
+    const stage = document.querySelector('section.stage');
+    const lg = document.querySelector('section.stage .legend');
+    if (!stage || !lg) return null;
+    const vis = (el) => el.getClientRects().length > 0 && getComputedStyle(el).display !== 'none';
+    const items = [...lg.querySelectorAll(':scope > span[title]')].filter(vis);
+    return {
+      narrow: stage.getBoundingClientRect().width < 560,
+      items: items.map((el) => {
+        const t = [...el.querySelectorAll(':scope > span')].find(vis);
+        return {
+          text: (t?.textContent ?? '').trim(),
+          cut: !t || t.scrollWidth > t.clientWidth,
+        };
+      }),
+    };
+  });
+  legendStats.total++;
+  const bad = [];
+  if (!r) bad.push('凡例が無い');
+  else {
+    if (r.items.length < 2) bad.push(`項目 ${r.items.length}`);
+    for (const it of r.items) {
+      if (it.cut) bad.push(`「${it.text}」が省略`);
+      if (r.narrow && !['満', '指', '今'].includes(it.text))
+        bad.push(`「${it.text}」が 1 字でない`);
+    }
+  }
+  if (bad.length === 0) legendStats.pass++;
+  else {
+    failed = true;
+    console.log(`${label}: 舞台の凡例 ${bad.join('・')}  ← NG`);
+  }
+}
+
+const tipStats = { pass: 0, total: 0 };
+const stepTapStats = { pass: 0, total: 0 };
+
+/**
+ * #276（EPIC #281 終了条件 7）: ステッパーの値を押して離すと入力欄。390 のタッチ（hasTouch）でシナリオの Δσ の値を
+ * (1) 短いタップ (2) 1 秒の長押し（CDP の touchStart → 1s → touchEnd）で開いてフォーカスを持つ、(3) 開いた入力欄で ↑ → Δσ +0.5 が
+ * すぐ保存され欄は開いたまま、(4) 横に 40px 動かす（スクラブ）では開かない。マウス（1440）のクリックでも開く
+ */
+async function stepperTapAll() {
+  const val = 'section.scenario .stepper[data-name="dSigma"] > .val';
+  const input = `${val} input`;
+  const dSigma = (page) =>
+    page.evaluate((k) => {
+      const w = JSON.parse(localStorage.getItem(k) ?? 'null');
+      return w?.tabs?.[w.active ?? 0]?.position?.scenario?.dSigma ?? null;
+    }, WORKSPACE_KEY);
+  const opened = (page) =>
+    page.evaluate((sel) => {
+      const i = document.querySelector(sel);
+      return !!i && document.activeElement === i;
+    }, input);
+  const results = [];
+  {
+    const ctx = await newContext(
+      { width: 390, height: 844 },
+      { [WORKSPACE_KEY]: twoLegs, [PREFS_KEY]: prefsText('dark') },
+      'dark',
+      { hasTouch: true, isMobile: true },
+    );
+    const page = await ctx.newPage();
+    await page.goto(pageUrl('next'));
+    await waitReady(page, 'next');
+    await setShell(page, 'scenario', 'peek');
+    await page.waitForTimeout(200);
+    const esc = async () => {
+      await page.keyboard.press('Escape');
+      await page.waitForTimeout(150);
+    };
+    await page.tap(val);
+    await page.waitForTimeout(500);
+    results.push(['390 タッチのタップで開く', await opened(page)]);
+    await esc();
+    const b = await page.locator(val).boundingBox();
+    const cx = b.x + b.width / 2;
+    const cy = b.y + b.height / 2;
+    const cdp = await ctx.newCDPSession(page);
+    await cdp.send('Input.dispatchTouchEvent', {
+      type: 'touchStart',
+      touchPoints: [{ x: cx, y: cy }],
+    });
+    await page.waitForTimeout(1000);
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+    await page.waitForTimeout(600);
+    results.push(['390 タッチの 1 秒の長押しで開く', await opened(page)]);
+    // 自動保存は 500ms の debounce
+    await page.waitForTimeout(700);
+    const before = await dSigma(page);
+    await page.keyboard.press('ArrowUp');
+    await page.waitForTimeout(800);
+    const after = await dSigma(page);
+    results.push([
+      `390 入力欄の ↑ で +0.5 がすぐ反映・欄は開いたまま（${before} → ${after}）`,
+      after !== null && Math.abs(after - (before ?? 0) - 0.5) < 1e-9 && (await opened(page)),
+    ]);
+    await esc();
+    await cdp.send('Input.dispatchTouchEvent', {
+      type: 'touchStart',
+      touchPoints: [{ x: cx, y: cy }],
+    });
+    for (let i = 1; i <= 8; i++) {
+      await cdp.send('Input.dispatchTouchEvent', {
+        type: 'touchMove',
+        touchPoints: [{ x: cx + i * 5, y: cy }],
+      });
+      await page.waitForTimeout(16);
+    }
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+    await page.waitForTimeout(600);
+    results.push([
+      '390 横に 40px 動かす（スクラブ）では開かない',
+      (await page.locator(input).count()) === 0,
+    ]);
+    await ctx.close();
+  }
+  {
+    const ctx = await newContext(
+      { width: 1440, height: 900 },
+      { [WORKSPACE_KEY]: twoLegs, [PREFS_KEY]: prefsText('dark') },
+    );
+    const page = await ctx.newPage();
+    await page.goto(pageUrl('next'));
+    await waitReady(page, 'next');
+    await page.click(val);
+    await page.waitForTimeout(300);
+    results.push(['1440 マウスのクリックで開く', await opened(page)]);
+    await ctx.close();
+  }
+  for (const [label, ok] of results) {
+    stepTapStats.total++;
+    if (ok) stepTapStats.pass++;
+    else {
+      failed = true;
+      console.log(`next ステッパーの値を押す（#276）${label}  ← NG`);
+    }
+  }
+}
+
+/**
+ * #276: 舞台の操作の案内（描画域の中の 1 行）。stage_hint_seen なしの足 2 本 × 360（シート peek）/ 1440 × ダーク / ライト:
+ * 案内が 1 行（折り返さない・切れない）で描画域（.chart）の中・前面の操作を妨げない（pointer-events: none）→ 描画域を押すと
+ * 消えて prefs に stage_hint_seen: true（ほかのキーは残る）→ 読み込み直しても出ない。面モード・足 0 本では出ない
+ */
+async function stageTipAll() {
+  for (const [w, h] of [
+    [360, 780],
+    [1440, 900],
+  ]) {
+    for (const theme of ['dark', 'light']) {
+      const prefs = JSON.stringify({ schema_version: 1, theme, capital_yen: 3_000_000 });
+      const ctx = await newContext(
+        { width: w, height: h },
+        {
+          [WORKSPACE_KEY]: twoLegs,
+          [PREFS_KEY]: prefs,
+        },
+      );
+      const page = await ctx.newPage();
+      await page.goto(pageUrl('next'));
+      await waitReady(page, 'next');
+      const tag = `next ${theme} 操作の案内 ${w}x${h}`;
+      await report(page, tag, w, h, `next-${w}x${h}-${theme}-stage-tip`);
+      const r = await page.evaluate(() => {
+        const tip = document.querySelector('section.stage .chart > .stage-tip');
+        const chart = document.querySelector('section.stage .chart');
+        if (!tip || !chart) return null;
+        const t = tip.getBoundingClientRect();
+        const c = chart.getBoundingClientRect();
+        const lh = Number.parseFloat(getComputedStyle(tip).lineHeight) || 16;
+        return {
+          oneLine: t.height <= lh + 8,
+          cut: tip.scrollWidth > tip.clientWidth,
+          inside: t.left >= c.left && t.right <= c.right && t.top >= c.top && t.bottom <= c.bottom,
+          passThrough: getComputedStyle(tip).pointerEvents === 'none',
+          x: c.left + c.width / 2,
+          y: c.top + c.height / 3,
+        };
+      });
+      const bad = [];
+      if (!r) bad.push('案内が出ない');
+      else {
+        if (!r.oneLine) bad.push('折り返し');
+        if (r.cut) bad.push('切れ');
+        if (!r.inside) bad.push('描画域の外');
+        if (!r.passThrough) bad.push('押せてしまう');
+        await page.mouse.click(r.x, r.y);
+        await page.waitForTimeout(150);
+        const after = await page.evaluate((key) => {
+          const o = JSON.parse(localStorage.getItem(key) ?? '{}');
+          return {
+            tip: document.querySelectorAll('.stage-tip').length,
+            seen: o.stage_hint_seen === true,
+            kept: o.capital_yen === 3_000_000 && o.schema_version === 1,
+          };
+        }, PREFS_KEY);
+        if (after.tip !== 0) bad.push('押しても消えない');
+        if (!after.seen) bad.push('stage_hint_seen が書かれない');
+        if (!after.kept) bad.push('ほかのキーが消えた');
+        await page.reload();
+        await waitReady(page, 'next');
+        if ((await page.locator('.stage-tip').count()) !== 0) bad.push('読み込み直すと出る');
+      }
+      tipStats.total++;
+      if (bad.length === 0) tipStats.pass++;
+      else {
+        failed = true;
+        console.log(`${tag}: ${bad.join('・')}  ← NG`);
+      }
+      await ctx.close();
+    }
+  }
+  // 足 0 本・面モードでは出さない（1440 のダーク）
+  for (const [storage, what] of [
+    [noLegs, '足 0 本'],
+    [twoLegs, '面モード'],
+  ]) {
+    const ctx = await newContext(
+      { width: 1440, height: 900 },
+      {
+        [WORKSPACE_KEY]: storage,
+        [PREFS_KEY]: JSON.stringify({ schema_version: 1, theme: 'dark' }),
+      },
+    );
+    const page = await ctx.newPage();
+    await page.goto(pageUrl('next'));
+    await waitReady(page, 'next');
+    if (what === '面モード') {
+      await page.click('section.stage .stage-tools .cm button:has-text("面")');
+      await page.waitForTimeout(200);
+    }
+    const n = await page.locator('.stage-tip').count();
+    tipStats.total++;
+    if (n === 0) tipStats.pass++;
+    else {
+      failed = true;
+      console.log(`next dark 操作の案内 1440x900 ${what}: 案内が出る  ← NG`);
+    }
+    await ctx.close();
+  }
+}
 
 /** #124 AC 3: アクセシビリティツリーに level 1 の見出しが 1 件（スマホはブランドを見た目だけ隠す） */
 async function h1Check(page, label) {
@@ -1002,6 +1257,7 @@ async function measureAll() {
       // トップバー（#87）: 既定の作業
       if (mode === 'next') await topBarCheck(page, `${tag} ${w}x${h}`);
       if (mode === 'next') await h1Check(page, `${tag} ${w}x${h}`);
+      if (mode === 'next') await legendCheck(page, `${tag} ${w}x${h}`);
       if (mode === 'next' && w <= PHONE_MAX) {
         // シート 3 段階: peek（既定）→ hidden（開いているドックのボタン）→ full（もう一度で peek、つまみのタップ）
         await report(page, `${tag} peek`, w, h, `${name}-peek`);
@@ -1195,6 +1451,17 @@ async function measureAll() {
     await topSweep();
     console.log(`トップバーの検査: ${topStats.pass} / ${topStats.total} 状態で pass`);
     console.log(`見出し h1 の検査（#124）: ${h1Stats.pass} / ${h1Stats.total} 状態で pass`);
+    console.log(
+      `舞台の凡例の省略の検査（#276）: ${legendStats.pass} / ${legendStats.total} 状態で pass`,
+    );
+    // 舞台の操作の案内（#276）
+    await stageTipAll();
+    console.log(`舞台の操作の案内の検査（#276）: ${tipStats.pass} / ${tipStats.total} 状態で pass`);
+    // ステッパーの値を押す（#276）
+    await stepperTapAll();
+    console.log(
+      `ステッパーの値を押す検査（#276）: ${stepTapStats.pass} / ${stepTapStats.total} で pass`,
+    );
     console.log(`開いた状態の検査: ${openStats.pass} / ${openStats.total} で pass`);
     // 空の舞台（#111）: 足 0 本でも格子・横軸の目盛り・0 の線と注記
     await emptyStageAll();
@@ -2223,7 +2490,7 @@ async function wideDXCheck() {
   const val = 'section.scenario .stepper[data-name="dX"] > .val';
   const input = `${val} input`;
   const enter = async (text) => {
-    await page.dblclick(val);
+    await page.click(val);
     await page.waitForSelector(input);
     await page.fill(input, text);
     await page.keyboard.press('Enter');
@@ -2253,7 +2520,7 @@ async function wideDXCheck() {
   await page.click('section.scenario details.adv summary');
   await page.click('section.scenario .seg[aria-label="ΔX の単位"] button:has-text("円")');
   await page.click('section.scenario details.adv summary');
-  await page.dblclick(val);
+  await page.click(val);
   await page.waitForSelector(input);
   await page.fill(input, '99999999');
   const alert =
@@ -4268,7 +4535,7 @@ async function scenarioFlows(vp) {
     const x0 = Number((/X ([\d,]+)/.exec(sub)?.[1] ?? 'NaN').replaceAll(',', ''));
     const input = `${val('dX')} input`;
     const enter = async (text) => {
-      await page.dblclick(val('dX'));
+      await page.click(val('dX'));
       await page.waitForSelector(input);
       await page.fill(input, text);
       await page.keyboard.press('Enter');
@@ -4287,7 +4554,7 @@ async function scenarioFlows(vp) {
       `+0.5% の ${pctHalf} × −198 = ${pctHalf * -198}`,
     );
     const shown = await page.textContent(`${val('dX')} b`);
-    await page.dblclick(val('dX'));
+    await page.click(val('dX'));
     await page.waitForSelector(input);
     await page.fill(input, '-100');
     const inv = await page.getAttribute(input, 'aria-invalid');
@@ -4428,13 +4695,13 @@ async function scenarioFlows(vp) {
     const input = `${val('days')} input`;
     const focused = () =>
       page.waitForFunction((sel) => document.activeElement === document.querySelector(sel), input);
-    await page.dblclick(val('days'));
+    await page.click(val('days'));
     await focused();
     await page.keyboard.press('Enter');
     await page.waitForTimeout(100);
     const b = (await saved()).scenario;
     const closedEnter = (await page.locator(input).count()) === 0;
-    await page.dblclick(val('days'));
+    await page.click(val('days'));
     await focused();
     await page.focus(val('dSigma'));
     await page.waitForTimeout(100);
@@ -4517,7 +4784,7 @@ async function scenarioFlows(vp) {
     await chip('リセット');
     await page.click(plus('skew'));
     await chip('リセット');
-    await page.dblclick(val('skew'));
+    await page.click(val('skew'));
     const input = `${val('skew')} input`;
     await page.waitForSelector(input);
     const text = await page.inputValue(input);

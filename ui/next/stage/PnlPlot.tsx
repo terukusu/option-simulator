@@ -39,6 +39,7 @@ import {
   MARGIN_CALL_TEXT,
   MARKER_BAND_PX,
   marginCallLabels,
+  STAGE_TIP_TEXT,
   type StageFrame,
   stageFill,
   stageHandle,
@@ -106,6 +107,8 @@ export function PnlPlot(p: {
   dispatch: (a: Action) => void;
   onPickLeg: (id: number) => void;
   onChangeStrike: (id: number, k: number) => void;
+  /** 操作の案内の 1 行を出す（#276。出す条件は ui/view/stage.ts の stageTipShown、消すのは舞台の操作 = Stage） */
+  tip: boolean;
 }) {
   const { model, marks, base, scenario, frame, mini, dispatch } = p;
   const surfaceOn = p.surfaceOn && !mini && !model.empty;
@@ -793,6 +796,12 @@ export function PnlPlot(p: {
             </g>
           )}
         </svg>
+      )}
+      {/* 案内は描画域の SVG より後ろ（前面） */}
+      {p.tip && (
+        <p class="stage-tip" aria-hidden="true">
+          {STAGE_TIP_TEXT}
+        </p>
       )}
     </div>
   );

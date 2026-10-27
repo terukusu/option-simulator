@@ -6,7 +6,7 @@ import { LIVE_SETTLE_MS, liveBurst } from '../../view/motion';
 import { pinPopRows } from '../../view/pins';
 import { surfaceActive, surfaceLegend } from '../../view/pnlSurface';
 import type { ChartMode } from '../../view/shell';
-import { bigReadout, stageFrame } from '../../view/stage';
+import { bigReadout, stageFrame, stageTipShown } from '../../view/stage';
 import { liveHold, livePulse, useLiveAttr } from '../live';
 import { BigReadout } from '../stage/BigReadout';
 import { IvRail } from '../stage/IvRail';
@@ -54,6 +54,10 @@ export function Stage(p: {
   theme: 'dark' | 'light';
   onPickLeg: (id: number) => void;
   onChangeStrike: (id: number, k: number) => void;
+  /** 操作の案内を出した（端末の設定。#276） */
+  tipSeen: boolean;
+  /** 案内を出した状態で舞台を操作した（押す・ホイール・キー）→ 端末の設定に書く */
+  onTipSeen: () => void;
 }) {
   const { c, mini } = p;
   const { state, dispatch, pnlBase: base, metrics } = c;
@@ -139,6 +143,9 @@ export function Stage(p: {
     [mini, c.pinTargets, c.pinLine, scenarioX, metrics.unit],
   );
   const evalTime = base?.ctx.evalTime ?? null;
+  // 操作の案内（#276）: 出している間に舞台（描画域・レール）を押す・ホイール・キー → 消して、端末の設定に書く
+  const tip = stageTipShown({ seen: p.tipSeen, empty: model.empty, mini, surface: surfaceOn });
+  const tipDone = tip ? p.onTipSeen : undefined;
   const items = useMemo(() => bigReadout(c.readout, evalTime), [c.readout, evalTime]);
   return (
     <>
@@ -163,8 +170,17 @@ export function Stage(p: {
       <div
         ref={mainRef}
         class={liveClass ? 'panel-body stage-main live' : 'panel-body stage-main'}
-        onPointerDownCapture={onStagePointerDown}
-        onWheelCapture={livePulse}
+        onPointerDownCapture={(e) => {
+          tipDone?.();
+          onStagePointerDown(e);
+        }}
+        onWheelCapture={() => {
+          tipDone?.();
+          livePulse();
+        }}
+        onKeyDownCapture={(e) => {
+          if (e.key !== 'Tab' && e.key !== 'Shift') tipDone?.();
+        }}
       >
         <div class="stage-body">
           <PnlPlot
@@ -190,6 +206,7 @@ export function Stage(p: {
             dispatch={dispatch}
             onPickLeg={p.onPickLeg}
             onChangeStrike={p.onChangeStrike}
+            tip={tip}
           />
           {!mini && <IvRail value={scenario.dSigma} dispatch={dispatch} />}
         </div>

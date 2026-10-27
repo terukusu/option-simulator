@@ -407,16 +407,17 @@ table.board .legbadge.buy {
   font-family: var(--mono);
 }
 
-.board-foot > .hint {
+.board-foot > .marks {
   flex: 0 1 auto;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-@container (max-width: 479.98px) {
-  .board-foot > .hint {
-    display: none;
+/* 印の凡例（#276）を 360px の枠に入れるため、狭い枠では間を詰める（入らなければ末尾を省略） */
+@container (max-width: 399.98px) {
+  .board-foot {
+    gap: 6px;
   }
 }
 

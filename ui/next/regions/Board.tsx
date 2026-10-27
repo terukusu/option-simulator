@@ -291,6 +291,10 @@ function BoardView(p: BoardRegionProps) {
     return () => clearTimeout(t);
   }, [flash]);
 
+  // [put | call]: 5 列は表の種別なので限月の行、7 / 9 列は C・P を両方出すのでジャンプ・絞り込みの対象 = チップ行の先頭（#276）
+  const targetSeg = (
+    <Seg label="対象の種別" value={target} options={TARGET_OPTIONS} onChange={switchTarget} />
+  );
   const head = month ? p.months.find((m) => m.id === month.id) : undefined;
   const foot = head ? boardFoot(head, basis) : null;
 
@@ -312,12 +316,7 @@ function BoardView(p: BoardRegionProps) {
               value={month?.id ?? ''}
               onChange={(id) => dispatch({ type: 'setMonth', monthId: id })}
             />
-            <Seg
-              label="対象の種別"
-              value={target}
-              options={TARGET_OPTIONS}
-              onChange={switchTarget}
-            />
+            {cols === 5 && targetSeg}
           </div>
           <div class="row">
             <button
@@ -330,6 +329,7 @@ function BoardView(p: BoardRegionProps) {
               ATM
             </button>
             <ChipRow label="ジャンプと絞り込み">
+              {cols !== 5 && targetSeg}
               {chips.map((c) => (
                 <Chip
                   key={c.key}
@@ -376,7 +376,7 @@ function BoardView(p: BoardRegionProps) {
             <span class="f">{foot.f}</span>
             <span class="atm">{foot.atm}</span>
             <span class="sq">{foot.sq}</span>
-            <span class="hint">{foot.hint}</span>
+            <span class="marks">{foot.marks}</span>
           </div>
         )}
       </div>

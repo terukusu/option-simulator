@@ -383,7 +383,8 @@ export interface BoardFoot {
   f: string;
   atm: string;
   sq: string;
-  hint: string;
+  /** 印の凡例（#276。ⓘ から脚注へ移した。全文は K を押したポップオーバー・title） */
+  marks: string;
 }
 
 /** `YYYY-MM-DD` → `MM/DD`（形が違えばそのまま） */
@@ -392,13 +393,16 @@ export function sqShort(date: string): string {
   return m ? `${m[1]}/${m[2]}` : date;
 }
 
-/** 脚注（F・ATM（基準）・SQ・案内）。 */
+/** 脚注の印の凡例（#276。× = IV 不安定、K の点線 = IV の補間 / 外挿） */
+export const BOARD_FOOT_MARKS = '× 不安定 · 点線 補間/外挿';
+
+/** 脚注（F・ATM（基準）・SQ・印の凡例）。 */
 export function boardFoot(m: HeaderMonthView, basis: AtmBasis): BoardFoot {
   return {
     f: m.noForward ? m.forward : `F ${m.forward}`,
     atm: m.noAtm ? m.atm : `ATM ${m.atm}（${basis}）`,
     sq: `SQ ${sqShort(m.sqDate)}`,
-    hint: 'bid = 売り · ask = 買い',
+    marks: BOARD_FOOT_MARKS,
   };
 }
 
@@ -457,11 +461,11 @@ export function marketAddToast(leg: OptionLeg): string {
   return `${marketAddLabel(leg)} を追加`;
 }
 
-/** 見出しの ⓘ（今の「板の使い方」の文 + 印の意味） */
+/**
+ * 見出しの ⓘ（#276 で 1 文に。印の凡例は脚注 = BOARD_FOOT_MARKS、印の全文は K を押したポップオーバー）
+ */
 export const BOARD_HINT = [
-  'bid = 売り、ask = 買い で足を追加。Δ はスマイルの IV での値。',
-  '× = IV 不安定 · K の点線 = 補間 / 外挿 · — = 気配なし · —/— = JPX の IV 欠損 · 売1 / 買2 = 作業中のタブの足の枚数',
-  'K を押すと、その行の理論価格（その行の気配ではなく、周りの気配の狭い行から求めた価格。気配の中の位置つき）と印の全文。',
+  'bid = 売り、ask = 買い で足を追加（Δ はスマイルの IV での値。K を押すとその行の理論価格と印の全文）。',
 ] as const;
 
 /** ジャンプ先の行の強調（ms。§4.3・§6） */

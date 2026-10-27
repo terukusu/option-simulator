@@ -2,8 +2,10 @@ import { describe, expect, it } from 'vitest';
 import {
   BIG_STEPS,
   clickSteps,
-  EDIT_HOLD_MS,
   EDIT_MOVE_PX,
+  editKeySteps,
+  editOutcome,
+  editStepOrigin,
   isHot,
   REPEAT_DELAY_MS,
   REPEAT_INTERVAL_MS,
@@ -19,6 +21,8 @@ import {
   stepperJump,
   stepperKey,
   stepperMove,
+  stepperMoved,
+  stepperTapOpensEdit,
   wheelStep,
 } from '../../ui/view/stepper';
 
@@ -164,9 +168,49 @@ describe('#83 AC-2 ステッパーの操作の規則', () => {
     }
   });
 
-  it('数値入力の長押しは 450ms・6px（舞台のジェスチャーと同じ値）', () => {
-    expect(EDIT_HOLD_MS).toBe(450);
+  it('数値入力を開かなくなる移動量は 6px（舞台のタップと同じ値）', () => {
     expect(EDIT_MOVE_PX).toBe(6);
+  });
+});
+
+/**
+ * #276（EPIC #281 終了条件 7）: 値を押して離したら数値入力（タップ 1 回・クリック）。動かしたらスクラブで開かない。
+ * 部品（Stepper.tsx）と同じ手順で押下の列を流す: pointerdown → pointermove（stepperMoved を覚える・scrubSteps の段）→ pointerup。
+ */
+describe('#276 値を押したら数値入力', () => {
+  /** 押下の列 → 離したときに開くか（moves は押した位置からの (dx, dy)） */
+  function press(moves: ReadonlyArray<readonly [number, number]>): boolean {
+    let moved = false;
+    let applied = 0;
+    for (const [dx, dy] of moves) {
+      if (!moved && stepperMoved(dx, dy)) moved = true;
+      applied = scrubSteps(dx);
+    }
+    return stepperTapOpensEdit(moved, applied);
+  }
+
+  it('動かさずに離す（タップ・クリック・長押し）→ 開く', () => {
+    expect(press([])).toBe(true);
+    expect(press([[0, 0]])).toBe(true);
+    expect(press([[3, 2]])).toBe(true);
+    expect(press([[-5, 0]])).toBe(true);
+  });
+
+  it('6px 以上動いた・スクラブの段が入った → 開かない（スクラブは残る）', () => {
+    expect(stepperMoved(6, 0)).toBe(true);
+    expect(stepperMoved(0, -6)).toBe(true);
+    expect(stepperMoved(4, 4)).toBe(false);
+    expect(press([[6, 0]])).toBe(false);
+    expect(press([[0, 7]])).toBe(false);
+    expect(press([[SCRUB_PX * 3, 0]])).toBe(false);
+    // 一度動いたら元の位置に戻して離しても開かない
+    expect(
+      press([
+        [10, 0],
+        [0, 0],
+      ]),
+    ).toBe(false);
+    expect(stepperTapOpensEdit(false, 1)).toBe(false);
   });
 });
 
@@ -297,5 +341,63 @@ describe('#144 AC-4 範囲の外の値から 1 段動かしても押した向き
     expect(stepperJump(DX, 'min', 10)).toBe(-90);
     expect(stepperJump(DX, 'max', 10)).toBe(100);
     expect(stepperJump(DX, 'min')).toBe(-90);
+  });
+});
+
+/** #276 レビュー: 値をクリックすると入力欄が開くので、入力欄の中でも ↑↓ で 1 段ずつ動かせる */
+describe('#276 入力欄の中の ↑↓', () => {
+  const k = (
+    key: string,
+    o: Partial<{
+      shift: boolean;
+      ctrl: boolean;
+      meta: boolean;
+      alt: boolean;
+      isComposing: boolean;
+      keyCode: number;
+    }> = {},
+  ) =>
+    editKeySteps({
+      key,
+      shift: false,
+      ctrl: false,
+      meta: false,
+      alt: false,
+      isComposing: false,
+      keyCode: 0,
+      ...o,
+    });
+
+  it('↑ / ↓ ±1（Shift ±10）・PageUp / PageDown ±10、← → Home End・文字は null（カーソルの移動・入力に残す）', () => {
+    expect(k('ArrowUp')).toBe(1);
+    expect(k('ArrowDown')).toBe(-1);
+    expect(k('ArrowUp', { shift: true })).toBe(BIG_STEPS);
+    expect(k('PageDown')).toBe(-BIG_STEPS);
+    for (const key of ['ArrowLeft', 'ArrowRight', 'Home', 'End', 'r', '1', 'Enter']) {
+      expect(k(key)).toBeNull();
+    }
+  });
+
+  it('IME の変換中（isComposing・Process・229）と Ctrl / ⌘ / ⌥ 付きは null（再レビュー R1・R2）', () => {
+    expect(k('ArrowDown', { isComposing: true })).toBeNull();
+    expect(k('Process')).toBeNull();
+    expect(k('ArrowUp', { keyCode: 229 })).toBeNull();
+    expect(k('ArrowUp', { ctrl: true })).toBeNull();
+    expect(k('ArrowUp', { meta: true })).toBeNull();
+    expect(k('PageUp', { alt: true })).toBeNull();
+    expect(k('ArrowUp', { keyCode: 38 })).toBe(1);
+  });
+
+  it('起点: 開いたときのまま → 今の値、書き換えた正しい値 → その値、正しくない → 動かさない', () => {
+    const parse = (t: string) => {
+      const v = Number(t);
+      return Number.isFinite(v) && t.trim() !== ''
+        ? ({ ok: true, value: v } as const)
+        : ({ ok: false, message: '数で' } as const);
+    };
+    expect(editStepOrigin(editOutcome('3', '3', parse), 3.27)).toBe(3.27);
+    expect(editStepOrigin(editOutcome('3', '7', parse), 3.27)).toBe(7);
+    expect(editStepOrigin(editOutcome('3', 'x', parse), 3.27)).toBeNull();
+    expect(stepperMove(DAYS, 7, 1, false)).toBe(8);
   });
 });

@@ -16,7 +16,14 @@ import { atmStrike } from './board';
 import { type MarketAddInput, marketAddLabel, marketAddPlan, monthSegOptions } from './boardPanel';
 import { addMenuModel } from './boxTabs';
 import { GLOSSARY, type TermId, termSearchText } from './glossary';
-import { CHART_KEY, type GlobalKey, type KeySummary, PANEL_KEY, THEME_KEY } from './keys';
+import {
+  CHART_KEY,
+  type GlobalKey,
+  imeComposing,
+  type KeySummary,
+  PANEL_KEY,
+  THEME_KEY,
+} from './keys';
 import { type PinMenuInput, pinMenuRows } from './pins';
 import { evalChips, presetChips, type ScenarioRegionInput } from './scenarioRegion';
 import { CHART_MODES, DOCK_LABELS, type PanelId, type ShellAction } from './shell';
@@ -465,7 +472,7 @@ export function paletteKey(
     shift?: boolean;
   },
 ): PaletteKey | null {
-  if (s.isComposing || s.key === 'Process' || s.keyCode === 229) return null;
+  if (imeComposing(s)) return null;
   if ((s.ctrl || s.meta) && !s.alt && s.shift !== true && s.key.toLowerCase() === 'k') {
     return 'close';
   }

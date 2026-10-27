@@ -10,8 +10,10 @@
  */
 
 import { CRASH_PRESETS, type IvDynamics, type Scenario } from '../../model';
+import type { Domain } from '../chart/scale';
 import type { Action, Parsed } from '../state';
 import { DASH, fmtDateTime, fmtNum, fmtSigned } from './format';
+import { type PnlBase, revealViewport } from './pnlChart';
 import {
   BETA_MAX,
   type DXUnit,
@@ -240,6 +242,23 @@ export function presetChips(input: ScenarioRegionInput): Chip[] {
     action: { type: 'resetScenario' },
   });
   return out;
+}
+
+/**
+ * プリセットを当てた後の表示範囲の action（#276 F-03）: プリセットの点 X₀ × dX% が表示範囲の内側 10% に入るように
+ * 広げる（revealViewport。ΔX の数値入力と同じ規則）。プリセットでない・足が無い・既に内側なら null。
+ * チップとコマンドパレットの両方が、プリセットの action の後に dispatch する。
+ */
+export function presetRevealAction(
+  action: Action | null,
+  base: PnlBase | null,
+  viewport: Domain | null,
+): Action | null {
+  if (action?.type !== 'applyPreset' || !base) return null;
+  const preset = CRASH_PRESETS[action.index];
+  if (!preset) return null;
+  const vp = revealViewport(base, viewport, (action.x0 * preset.dXPct) / 100);
+  return vp ? { type: 'setPnlViewport', viewport: vp } : null;
 }
 
 export interface EvalChip extends Chip {

@@ -219,10 +219,14 @@ export function withScenarioFull(base: PnlBase, full: Domain): PnlBase {
   return full[0] === base.full[0] && full[1] === base.full[1] ? base : { ...base, full };
 }
 
+/** プリセット・ΔX の数値入力の後にシナリオ点を置く表示範囲の内側の割合（端からの幅の比。#276） */
+export const REVEAL_INSET_RATIO = 0.1;
+
 /**
- * 数値欄で確定した ΔX の点 X_s を見せる表示範囲（#144）。今の表示範囲（全域 = scenarioFull で収めたもの）に X_s が
- * 入っていれば null。X_s が全域の外（xLo より下）・非有限でも null。それ以外は X_s の側の端だけを X_s ∓ 0.05X₀
- * （全域の端まで）に動かし、反対側の端は保つ（広げる）。
+ * ΔX の数値欄で確定した点・プリセットを当てた点 X_s を見せる表示範囲（#144・#276）。今の表示範囲（全域 = scenarioFull
+ * で収めたもの）の内側 10%（REVEAL_INSET_RATIO）に X_s が入っていれば null。X_s が全域の外（xLo より下）・非有限でも null。
+ * それ以外は X_s の側の端だけを動かし（反対側の端は保つ = 広げる）、X_s が新しい幅の 10% の位置に来るようにする
+ * （全域の端まで。端に張り付いてハンドル ▼ とラベルが重ならない）。全域の端で広げられず今と同じ範囲になるときも null。
  */
 export function revealViewport(base: PnlBase, viewport: Domain | null, dX: number): Domain | null {
   const xs = base.ctx.x0 + dX;
@@ -230,11 +234,17 @@ export function revealViewport(base: PnlBase, viewport: Domain | null, dX: numbe
   const full = scenarioFull(base, dX);
   if (xs < full[0] || xs > full[1]) return null;
   const cur = clampViewport(viewport ?? base.initial, full, base.minWidth);
-  if (xs >= cur[0] && xs <= cur[1]) return null;
-  const pad = SCENARIO_FULL_PAD_RATIO * base.ctx.x0;
+  const r = REVEAL_INSET_RATIO;
+  const inset = r * (cur[1] - cur[0]);
+  if (xs >= cur[0] + inset && xs <= cur[1] - inset) return null;
+  // 下側: xs − lo = r(hi − lo) → lo = (xs − r·hi) / (1 − r)。上側も同じ形
   const next: Domain =
-    xs < cur[0] ? [Math.max(xs - pad, full[0]), cur[1]] : [cur[0], Math.min(xs + pad, full[1])];
-  return clampViewport(next, full, base.minWidth);
+    xs < cur[0] + inset
+      ? [Math.max((xs - r * cur[1]) / (1 - r), full[0]), cur[1]]
+      : [cur[0], Math.min((xs - r * cur[0]) / (1 - r), full[1])];
+  const out = clampViewport(next, full, base.minWidth);
+  // 全域の端で広げられない（今と同じ範囲）なら null（表示範囲を自動から固定に変えない）
+  return out[0] === cur[0] && out[1] === cur[1] ? null : out;
 }
 
 export type PnlLineKind = 'expiry' | 'date' | 'today';
