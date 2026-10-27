@@ -27,32 +27,21 @@ import { useOverlay } from './overlay';
  *   focusin の守り、ポインタは下敷きで止める）
  * - 閉じ方は 1 か所（finish）: close → 開く前の要素へフォーカスを戻す（無ければ body）→ onClose → onRun
  * - 問い合わせ・行の文字は JSX のテキスト / value だけ（HTML 文字列・style を使わない）。DOM の id は useId + 位置
- * - initialQuery（#167。省略可能）: 開いたときの問い合わせ（⋯ > 用語集… の `?` = 用語だけ）。キャレットは末尾。
- *   省略時は今のまま空
  */
 export function Palette(p: {
   open: boolean;
   items: readonly PaletteItem[];
   onClose: () => void;
   onRun: (run: PaletteRun) => void;
-  initialQuery?: string;
 }) {
   if (!p.open) return null;
-  return (
-    <PaletteBody
-      items={p.items}
-      onClose={p.onClose}
-      onRun={p.onRun}
-      initialQuery={p.initialQuery ?? ''}
-    />
-  );
+  return <PaletteBody items={p.items} onClose={p.onClose} onRun={p.onRun} />;
 }
 
 function PaletteBody(p: {
   items: readonly PaletteItem[];
   onClose: () => void;
   onRun: (run: PaletteRun) => void;
-  initialQuery: string;
 }) {
   const ref = useRef<HTMLDialogElement>(null);
   const boxRef = useRef<HTMLDivElement>(null);
@@ -62,7 +51,7 @@ function PaletteBody(p: {
   const showBgRef = useRef<(() => void) | null>(null);
   const listId = useId();
   const { setOpen } = useOverlay('palette');
-  const [query, setQuery] = useState(p.initialQuery);
+  const [query, setQuery] = useState('');
   const [sel, setSel] = useState(-1);
 
   const view = useMemo(() => paletteView(paletteFilter(p.items, query)), [p.items, query]);
@@ -80,9 +69,6 @@ function PaletteBody(p: {
     setOpen(true);
     const input = inputRef.current;
     input?.focus();
-    // 最初の問い合わせ（用語集… の `?`）の後ろから打てるようにキャレットを末尾へ
-    if (input && input.value !== '')
-      input.setSelectionRange(input.value.length, input.value.length);
     // 背景を読み上げから外す（フォーカスを中へ移した後。#124。./background.ts）
     if (dlg) showBgRef.current = hideBackground(dlg);
     // 非モーダルなので背景は inert でない。フォーカスがパレットの外へ出たら（文書の外から Tab で戻った・背景へ移った）

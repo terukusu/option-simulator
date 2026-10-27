@@ -91,9 +91,9 @@
 //                                          URL をコピー → トースト・クリップボード・新しいコンテキストで同じ足・拒否 = 共有の URL の
 //                                          ダイアログ・?ui=next で開いたページからの URL にも ui なし・上限の確認で前の共有の警告のトーストを消す。1440×900）。
 //                                          全クリアの直後の舞台の格子（#111: 1440 で 4 本以上、390 はシート full のミニで 0）と
-//                                          設定と保存一覧の手順（#87 (C) AC-14: ATM の基準・単位・手数料・縦軸・basis・テーマが
-//                                          すぐ効いて保存に入る、保存 → [上書き]（確認なし）→ [元に戻す] で保存一覧がバイト単位で同じ・
-//                                          削除の確認・開く / 新しいタブで開く / 重ねる・⋯ > 書き出し / 読み込み…・Esc でフォーカスが戻る。
+//                                          設定と保存一覧の手順（#87 (C) AC-14: ATM の基準・単位・手数料がすぐ効いて保存に入る、#275 で
+//                                          縦軸は舞台の ⋯、テーマは ☾（スマホは設定）で確かめる、保存 → [上書き]（確認なし）→ [元に戻す] で保存一覧がバイト単位で同じ・
+//                                          削除の確認・開く / 新しいタブで開く / 重ねる・保存一覧の書き出し / 読み込み…・Esc でフォーカスが戻る。
 //                                          390×844 と 1440×900）とタッチの端末のエミュレーション（AC-19: hasTouch・isMobile の
 //                                          390×844 で帯の横スワイプ（CDP の dispatchTouchEvent）・タップの切替とメニュー・
 //                                          トーストの外とドックが押せる・⋯ からファイルの選択が開く。iPhone の Safari は手動）と
@@ -106,7 +106,7 @@
 //                                          1440×900。390×844 のタッチのエミュレーションで 2 本目の指で押す前に戻りピンチで狭まる）と
 //                                          全体のキーの手順（#89 段 A AC-A4: body から 1〜5 でパネルとスクロールする枠のフォーカス・G で描画域と
 //                                          → の ΔX +100・描画域の 0 はリセット・T で反転と prefs・設定 / ⋯ / 数値入力では効かない・
-//                                          板の行 / 指標のテール表のクリックと 2 / 4 の後の PageDown で枠が動く。
+//                                          板の行 / 指標のテール表のクリックと 1 / 5 の後の PageDown で枠が動く。
 //                                          390×844 と 1440×900、900×1100 は参考）とコマンドパレットの手順（#89 段 B AC-B5:
 //                                          Ctrl + K で開く・↑↓ と押せない行・急落・足の追加と [元に戻す]・ATM へ・テーマ / 設定・
 //                                          Esc / 背景で閉じてフォーカスが戻る・開いている間の 1 / G / T と 2 つ目・メニュー / 設定の上・
@@ -126,7 +126,7 @@
 //                                          その高さの IV・上端で止まる・外れて 0）・キー , . で端の足まで札が svg の内側、390×844 の
 //                                          タッチ（CDP）の長押し 500ms → 横・縦に動かす → 離す → タップで消える・ページとシートが動かない）
 //                                          とドックの IV の既定と保持（390×844・900×1100: 起動 0 回 → IV で IV 推移・1 回 → [スマイル] →
-//                                          別のパネル → IV でスマイルのまま・タブレットのキー 5）
+//                                          別のパネル → IV でスマイルのまま・タブレットのキー 2）
 //                                          先物推移（#190 AC-9）: 4 幅 × ダーク / ライトで先物を開いた状態（PC は市場の Seg、スマホ・
 //                                          タブレットは IV のパネルの [IV 推移 | スマイル | 先物]、スマホは peek / hidden / full）の縦・横・
 //                                          折り返しと IV 推移と同じ部品の検査（シナリオの水準は無い）・十字線の札（円の整数）。
@@ -2557,8 +2557,8 @@ async function closeTermCard(page, label) {
 }
 
 /**
- * 説明カード（#167 AC-9）: 360 / 390 / 900 / 1440 × ダーク / ライト で、(1) パレットの `?追証` → Enter（スマホは ⋯ >
- * 用語集… から）で追証の線、(2) その関連する用語の先頭へ移る、(3) シナリオの ⓘ の「用語: Δs」でスキュー Δs
+ * 説明カード（#167 AC-9）: 360 / 390 / 900 / 1440 × ダーク / ライト で、(1) パレットの `?追証` → Enter（#275 で ⋯ >
+ * 用語集… を外したので、どの幅も Ctrl + K。カードの描き方を幅ごとに測る）で追証の線、(2) その関連する用語の先頭へ移る、(3) シナリオの ⓘ の「用語: Δs」でスキュー Δs
  */
 async function termCardSweep() {
   for (const [w, h] of SIZES) {
@@ -2573,21 +2573,9 @@ async function termCardSweep() {
       await waitReady(page, 'next');
       const tag = `next ${theme} 説明カード`;
       const name = `next-${w}x${h}-${theme}-term`;
-      // (1) パレット（スマホ・タブレットの入口は ⋯ > 用語集…。PC は Ctrl + K で `?` を打つ）
-      if (phone) {
-        await page.click('button[aria-label="メニュー"]');
-        await page.click('header.top > .menu-wrap [role="menuitem"]:has-text("用語集…")');
-        await page.waitForSelector(`${PALETTE} input`, { timeout: 2000 }).catch(() => {});
-        const q = await page.inputValue(`${PALETTE} input`).catch(() => '');
-        if (q !== '?') {
-          failed = true;
-          console.log(`${tag} ${w}x${h}: 用語集… の問い合わせ「${q}」≠「?」  ← NG`);
-        }
-        await page.keyboard.type('追証');
-      } else {
-        await openPalette(page);
-        await page.keyboard.type('?追証');
-      }
+      // (1) パレット（Ctrl + K で `?` を打つ）
+      await openPalette(page);
+      await page.keyboard.type('?追証');
       await page.waitForTimeout(100);
       await page.keyboard.press('Enter');
       await termCardCheck(page, `${tag} パレット`, w, h, `${name}-palette`, '追証の線');
@@ -7189,7 +7177,7 @@ async function bookSettingsFlows(vp) {
   );
 
   // ATM の基準の切替（m0b → m1）は参考。X₀（横軸の原点）が変わり損益の全体を作り直す（旧画面の Header の切替と同じ計算。
-  // #87 (C) で足したものではない）ので、Long Animation Frame は参考として出し、判定は設定を開く + (b)〜(f) の 5 つで行う
+  // #87 (C) で足したものではない）ので、Long Animation Frame は参考として出し、判定は設定を開く + (b)・(c) で行う
   await page.waitForTimeout(200);
   const m1 = await page.evaluate(() => window.__loaf.length);
   const loafAtm = await page.evaluate(
@@ -7222,8 +7210,32 @@ async function bookSettingsFlows(vp) {
   const alert = (await page.textContent(`${SET} .set-row [role="alert"]`).catch(() => null)) ?? '';
   const wsC2 = await savedWorkspace(page);
 
-  // (d) 縦軸を ±N 倍 → 舞台の ⋯ の縦軸も ±N 倍・保存の pnl_y.mode
-  await page.click(seg('縦軸', '±N 倍'));
+  // (d) #275: 別の入口がある行（縦軸・先物の basis・ΔX の単位）が設定に無い。テーマはスマホだけ（☾ を隠す幅の入口）
+  const gone = await page.evaluate(
+    (q) =>
+      [...(document.querySelector(q)?.querySelectorAll('[role="group"]') ?? [])].map((g) =>
+        g.getAttribute('aria-label'),
+      ),
+    SET,
+  );
+  check(
+    `#275 ${tag} 設定に 縦軸・先物の basis・ΔX の単位が無く、テーマは${phoneSize ? 'ある（スマホ）' : '無い'}`,
+    !gone.some((g) => ['縦軸', '先物の basis', 'ΔX の単位'].includes(g)) &&
+      gone.includes('テーマ') === phoneSize,
+    JSON.stringify(gone),
+  );
+  await closeDialog(page);
+  const fSet = await focusLabel(page);
+  const loafSet = await page.evaluate(
+    ([a, b, c]) =>
+      [...window.__loaf.slice(a, b), ...window.__loaf.slice(c)].filter((x) => x > 50).length,
+    [m0, m0b, m1],
+  );
+
+  // (d) 縦軸（#275 で設定から舞台の ⋯ へ）: 舞台の ⋯ で ±N 倍 → 押された表示・保存の pnl_y.mode
+  await page.click('section.stage button[aria-label="グラフの設定"]');
+  await page.waitForSelector('section.stage .stage-pop', { timeout: 3000 }).catch(() => {});
+  await page.click('section.stage .stage-pop [aria-label="縦軸"] button:text-is("±N 倍")');
   await page.waitForTimeout(100);
   const stageY = await page.evaluate(
     () =>
@@ -7232,26 +7244,24 @@ async function bookSettingsFlows(vp) {
       )?.textContent ?? null,
   );
   const wsD = await savedWorkspace(page);
+  await page.keyboard.press('Escape');
   check(
-    `#87 AC-14(d) ${tag} 設定の縦軸を ±N 倍 → 舞台の ⋯ の縦軸も ±N 倍・保存の pnl_y.mode が premium`,
+    `#87 AC-14(d)・#275 ${tag} 舞台の ⋯ の縦軸を ±N 倍 → 押された表示・保存の pnl_y.mode が premium`,
     stageY === '±N 倍' && wsD?.ui?.pnl_y?.mode === 'premium',
     `${stageY}・${wsD?.ui?.pnl_y?.mode}`,
   );
 
-  // (e) 先物の basis を減衰 → 「モデルの前提」の要約も減衰
-  await page.click(seg('先物の basis', '減衰'));
-  await page.waitForTimeout(100);
-  const adv = (await page.textContent('section.scenario details.adv .vals')) ?? '';
-  const wsE = await savedWorkspace(page);
-  check(
-    `#87 AC-14(e) ${tag} 先物の basis を減衰 → モデルの前提の要約が basis 減衰・保存の future_basis が decay`,
-    adv.includes('basis 減衰') && wsE?.ui?.future_basis === 'decay',
-    adv,
-  );
-
-  // (f) テーマをライト → html[data-theme="light"]・prefs
-  await page.click(seg('テーマ', 'ライト'));
-  await page.waitForTimeout(100);
+  // (f) テーマをライト（#275: スマホは設定のテーマ、PC は ☾）→ html[data-theme="light"]・prefs
+  if (phoneSize) {
+    await openFromMore(page, '設定…', SET);
+    await page.click(seg('テーマ', 'ライト'));
+    await page.waitForTimeout(100);
+    await closeDialog(page);
+  } else {
+    await page.click('button[aria-label="テーマ"]');
+    await page.click('[role="menuitemradio"]:has-text("ライト")');
+    await page.waitForTimeout(100);
+  }
   const th = await page.evaluate((k) => {
     let prefs = null;
     try {
@@ -7260,16 +7270,9 @@ async function bookSettingsFlows(vp) {
     return { attr: document.documentElement.dataset.theme ?? null, prefs };
   }, PREFS_KEY);
   check(
-    `#87 AC-14(f) ${tag} テーマをライト → html[data-theme="light"]・prefs の theme が light`,
+    `#87 AC-14(f)・#275 ${tag} テーマをライト（${phoneSize ? '設定' : '☾'}）→ html[data-theme="light"]・prefs の theme が light`,
     th.attr === 'light' && th.prefs === 'light',
     JSON.stringify(th),
-  );
-  await closeDialog(page);
-  const fSet = await focusLabel(page);
-  const loafSet = await page.evaluate(
-    ([a, b, c]) =>
-      [...window.__loaf.slice(a, b), ...window.__loaf.slice(c)].filter((x) => x > 50).length,
-    [m0, m0b, m1],
   );
 
   // (c) の続き: 内訳の注記に 手数料 300 円 / 枚
@@ -7292,7 +7295,7 @@ async function bookSettingsFlows(vp) {
     JSON.stringify(fSet),
   );
   check(
-    `#87 AC-17 ${tag} 設定を開く・5 つの変更（単位・手数料・縦軸・basis・テーマ）の Long Animation Frame 0 件`,
+    `#87 AC-17 ${tag} 設定を開く・2 つの変更（単位・手数料。#275 で縦軸・basis・テーマは設定から外した）の Long Animation Frame 0 件`,
     loafOk && loafSet === 0,
     loafOk ? `${loafSet} 件` : 'observer が使えない',
   );
@@ -7390,37 +7393,49 @@ async function bookSettingsFlows(vp) {
     `${JSON.stringify(fBook)}・${JSON.stringify(fName)}・${JSON.stringify(fChip)}`,
   );
 
-  // (i) ⋯ > 書き出し → ダウンロード + トースト、⋯ > 読み込み… でそのファイル → トースト
+  // (i) #275: 書き出し / 読み込み… は保存一覧のダイアログだけ。[書き出し] → ダウンロード + 知らせ、[読み込み…] で
+  // そのファイル → 知らせ（ダイアログの中の .bk-msg）
   const n = JSON.parse((await bookText(page)) ?? '{"entries":[]}').entries.length;
+  await openFromMore(page, '保存一覧', BOOK);
   const [download] = await Promise.all([
     page.waitForEvent('download', { timeout: 5000 }),
-    openFromMore(page, '書き出し', null),
+    page.click(`${BOOK} button:text-is("書き出し")`),
   ]);
   const file = await download.path();
   await page.waitForTimeout(100);
-  const exToast = (await page.textContent('.toast:not(.note) .txt').catch(() => null)) ?? '';
+  const exMsg = (await page.textContent(`${BOOK} .bk-msg`).catch(() => null)) ?? '';
   const [chooser] = await Promise.all([
     page.waitForEvent('filechooser', { timeout: 5000 }),
-    openFromMore(page, '読み込み…', null),
+    page.click(`${BOOK} label.bk-file`),
   ]);
   await chooser.setFiles(file);
   await page
     .waitForFunction(
-      () => /件を追加/.test(document.querySelector('.toast:not(.note) .txt')?.textContent ?? ''),
-      undefined,
+      (q) => /件を追加/.test(document.querySelector(q)?.textContent ?? ''),
+      `${BOOK} .bk-msg`,
       { timeout: 3000 },
     )
     .catch(() => {});
-  const imToast = (await page.textContent('.toast:not(.note) .txt').catch(() => null)) ?? '';
+  const imMsg = (await page.textContent(`${BOOK} .bk-msg`).catch(() => null)) ?? '';
   const n2 = JSON.parse((await bookText(page)) ?? '{"entries":[]}').entries.length;
+  const moreRows = await (async () => {
+    await closeDialog(page);
+    await page.click(MORE);
+    const t = await page.$$eval('[role="menu"] [role^="menuitem"]', (els) =>
+      els.map((e) => e.textContent?.trim() ?? ''),
+    );
+    await page.keyboard.press('Escape');
+    return t;
+  })();
   check(
-    `#87 AC-14(i) ${tag} ⋯ > 書き出し でダウンロードとトースト、⋯ > 読み込み… でそのファイルを入れるとトースト`,
+    `#87 AC-14(i)・#275 ${tag} 保存一覧の [書き出し] でダウンロードと知らせ、[読み込み…] でそのファイルを入れると知らせ。⋯ に書き出し / 読み込み… が無い`,
     !!file &&
-      exToast === `${n} 件を書き出した` &&
-      imToast === `${n} 件を追加` &&
+      exMsg === `${n} 件を書き出した` &&
+      imMsg === `${n} 件を追加` &&
       n2 === n * 2 &&
-      download.suggestedFilename().startsWith('option-simulator-positions-'),
-    `${exToast}・${imToast}・${n} → ${n2}・${download.suggestedFilename()}`,
+      download.suggestedFilename().startsWith('option-simulator-positions-') &&
+      !moreRows.some((t) => t === '書き出し' || t === '読み込み…'),
+    `${exMsg}・${imMsg}・${n} → ${n2}・${download.suggestedFilename()}・⋯ ${moreRows.join(' / ')}`,
   );
   await ctx.close();
 }
@@ -7717,11 +7732,16 @@ async function surfaceFlows(vp) {
     await page.waitForTimeout(200);
   }
 
-  // (b) ライト: 設定でテーマをライトにして同じ判定
+  // (b) ライト: テーマをライトにして同じ判定（#275: PC・タブレットは ☾、スマホは設定のテーマ）
   {
-    await openFromMore(page, '設定…', SET);
-    await page.click(`${SET} [role="group"][aria-label="テーマ"] button:text-is("ライト")`);
-    await closeDialog(page);
+    if (phoneSize) {
+      await openFromMore(page, '設定…', SET);
+      await page.click(`${SET} [role="group"][aria-label="テーマ"] button:text-is("ライト")`);
+      await closeDialog(page);
+    } else {
+      await page.click('button[aria-label="テーマ"]');
+      await page.click('[role="menuitemradio"]:has-text("ライト")');
+    }
     await page.waitForTimeout(300);
     const px = await surfacePixels(page);
     const j = surfaceColorJudge(px);
@@ -8187,8 +8207,9 @@ async function touchFlows() {
     const page = await ctx.newPage();
     await page.goto(pageUrl('next'));
     await waitReady(page, 'next', { keepNotes: true });
-    await page.tap(MORE);
-    await page.tap(moreItem('全クリア'));
+    // 全クリアはポジションの ⋯（#275 でトップの ⋯ から外した）
+    await page.tap('section.positions button[aria-label="ポジションの操作"]');
+    await page.tap('[role="menuitem"]:has-text("全クリア")');
     await page.waitForSelector('.toast:not(.note)', { timeout: 3000 }).catch(() => {});
     const c = await page.evaluate(() => {
       const box = document.querySelector('.toasts')?.getBoundingClientRect();
@@ -8236,14 +8257,14 @@ async function touchFlows() {
     );
     await ctx.close();
   }
-  // (d) ⋯ > ファイルを開く… / 読み込み… でファイルの選択が開く（タップ）
+  // (d) ⋯ > ファイルを開く… でファイルの選択が開く（タップ。読み込み… は #275 で保存一覧のダイアログだけに）
   {
     const ctx = await touchContext({ [WORKSPACE_KEY]: twoLegs });
     const page = await ctx.newPage();
     await page.goto(pageUrl('next'));
     await waitReady(page, 'next');
     const opens = [];
-    for (const label of ['ファイルを開く…', '読み込み…']) {
+    for (const label of ['ファイルを開く…']) {
       await page.tap(MORE);
       const fc = page.waitForEvent('filechooser', { timeout: 3000 }).then(
         () => true,
@@ -8253,7 +8274,7 @@ async function touchFlows() {
       opens.push(await fc);
     }
     check(
-      `#87 AC-19(d) ${tag} ⋯ > ファイルを開く… / 読み込み… のタップでファイルの選択が開く（Chromium。iPhone の Safari は手動）`,
+      `#87 AC-19(d) ${tag} ⋯ > ファイルを開く… のタップでファイルの選択が開く（Chromium。iPhone の Safari は手動）`,
       opens.every(Boolean),
       opens.join(' / '),
     );
@@ -8262,13 +8283,13 @@ async function touchFlows() {
 }
 
 // ---- #89 段 A 全体のキーの手順（AC-A4。docs/ui-redesign.md §4.6）
-/** 1〜5 → パネル（ui/view/keys.ts の PANEL_KEYS と同じ） */
+/** 1〜5 → パネル（ui/view/keys.ts の PANEL_KEYS と同じ。#275 で板 / IV · スマイル / ポジ / シナリオ / 指標 の順に） */
 const KEY_PANELS = [
-  ['1', 'positions'],
-  ['2', 'board'],
-  ['3', 'scenario'],
-  ['4', 'metrics'],
-  ['5', 'smile'],
+  ['1', 'board'],
+  ['2', 'smile'],
+  ['3', 'positions'],
+  ['4', 'scenario'],
+  ['5', 'metrics'],
 ];
 /** 1〜5 のフォーカスの行き先 = パネルのスクロールする枠（ui/next/useGlobalKeys.ts の PANEL_FOCUS と同じ） */
 const KEY_FOCUS = {
@@ -8335,8 +8356,8 @@ async function keyFlows(vp) {
         tier === 'phone'
           ? 'data-panel がそのパネル・sheet が hidden でない'
           : tier === 'pc'
-            ? '2 / 5 で data-market が board / smile'
-            : '3 以外で data-panel がそのパネル'
+            ? '1 / 2 で data-market が board / smile'
+            : '4 以外で data-panel がそのパネル'
       }・activeElement がそのパネルのスクロールする枠`,
       ok,
       rows.join(' '),
@@ -8421,7 +8442,7 @@ async function keyFlows(vp) {
         same;
       return { ok, detail: `${JSON.stringify(before)} → ${JSON.stringify(after)} focus ${same}` };
     };
-    // (a) の後はスマイル（スマホ・タブレットは data-panel、PC は data-market）= 1 が効けば変わる
+    // (a) の後は指標（スマホ・タブレットは data-panel）・スマイル（PC は data-market）= 1（板）が効けば変わる
 
     await openFromMore(page, '設定…', SET);
     const dlgOpen = (await page.$(SET)) !== null;
@@ -8468,8 +8489,8 @@ async function keyFlows(vp) {
 
   // (f) 回帰（レビュー R1）: パネルの中をクリック → PageDown で枠が縦に動く。1〜5 の直後の PageDown も動く
   for (const [key, panel, cell] of [
-    ['2', 'board', 'tbody tr:nth-child(3) .k'],
-    ['4', 'metrics', 'table.tail thead th'],
+    ['1', 'board', 'tbody tr:nth-child(3) .k'],
+    ['5', 'metrics', 'table.tail thead th'],
   ]) {
     const box = KEY_FOCUS[panel];
     const top = () => page.evaluate((q) => document.querySelector(q)?.scrollTop ?? -1, box);
@@ -8493,7 +8514,9 @@ async function keyFlows(vp) {
     const clickFocus = await activeIs(box);
     await press('PageDown');
     const byClick = await top();
-    // キー（2 / 4）→ PageDown
+    // 板の K は #264 からポップオーバーを開くボタン。開いたままだと次のキー（1〜5）が止まるので閉じる
+    if (await page.$('section.board .popover.kpop')) await press('Escape');
+    // キー（1 / 5）→ PageDown
     await reset();
     await blur();
     await press(key);
@@ -9097,11 +9120,11 @@ async function a11yFlows(vp) {
     },
   );
 
-  // (3) 同じフレームの連打: 1 → 4 を 1 回の evaluate の中で送る = 最後の 4 の行き先へ
+  // (3) 同じフレームの連打: 1 → 5 を 1 回の evaluate の中で送る = 最後の 5（指標。#275 のキーの並び）の行き先へ
   {
     await page.evaluate(() => {
       if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
-      for (const key of ['1', '4']) {
+      for (const key of ['1', '5']) {
         document.body.dispatchEvent(
           new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }),
         );
@@ -9116,7 +9139,7 @@ async function a11yFlows(vp) {
       () => `${document.activeElement?.tagName}.${document.activeElement?.className ?? ''}`,
     );
     check(
-      `#124 ${tag} 1 → 4 を同じフレームで押すと 4 の行き先（指標のスクロールする枠）にフォーカス`,
+      `#124 ${tag} 1 → 5 を同じフレームで押すと 5 の行き先（指標のスクロールする枠）にフォーカス`,
       at,
       now,
     );
@@ -10549,7 +10572,7 @@ async function ivCrossTouchFlow() {
 
 /**
  * スマホ・タブレット（#130 AC-7 (d)）: 起動 → atm_iv 0 回 → ドックの IV で IV 推移・1 回 → [スマイル] → 別のパネル →
- * ドックの IV でスマイルのまま。タブレットはキー 5 でもパネルが開き中身（スマイル）を保つ
+ * ドックの IV でスマイルのまま。タブレットはキー 2（#275）でもパネルが開き中身（スマイル）を保つ
  */
 async function ivDockFlows(vp) {
   const tag = `${vp.width}x${vp.height}`;
@@ -10601,11 +10624,11 @@ async function ivDockFlows(vp) {
     await page.evaluate(() => {
       if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
     });
-    await page.keyboard.press('5');
+    await page.keyboard.press('2');
     await page.waitForTimeout(250);
     const v4 = await view();
     check(
-      `#130 AC-7(d) ${tag} キー 5 で IV のパネルが開き、中身はスマイルのまま`,
+      `#130 AC-7(d) ${tag} キー 2（#275 の並び）で IV のパネルが開き、中身はスマイルのまま`,
       v4.panel === 'smile' && v4.name === 'スマイル' && v4.smile,
       `${v4.panel}・${v4.name}`,
     );

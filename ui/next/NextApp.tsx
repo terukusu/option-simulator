@@ -1,7 +1,6 @@
 import type { ComponentChildren } from 'preact';
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'preact/hooks';
 import { defaultName } from '../book';
-import type { Domain } from '../chart/scale';
 import { loadIvStatsData } from '../components/ivStatsData';
 import { loadTechnicalsData } from '../components/technicalsData';
 import {
@@ -57,7 +56,7 @@ import {
   chartMode,
   futVisible,
   holdMapVisible,
-  INITIAL_SHELL,
+  initialShell,
   ivVisible,
   layoutTier,
   metricsVisible,
@@ -65,7 +64,7 @@ import {
   shellReduce,
   smileView,
 } from '../view/shell';
-import { bookIoToast, overwrittenText, restoreEntryFailText } from '../view/topMenu';
+import { overwrittenText, restoreEntryFailText } from '../view/topMenu';
 import { BookDialog } from './BookDialog';
 import type { MarketAdd } from './market/BoardMonth';
 import { FutHistory } from './market/FutHistory';
@@ -138,7 +137,8 @@ export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
   const { state, dispatch } = c;
   const theme = useTheme(userPrefs.prefs.theme, userPrefs.setTheme);
   const tier = layoutTier(useMediaQuery(PHONE_QUERY), useMediaQuery(PC_QUERY));
-  const [shell, send] = useReducer(shellReduce, INITIAL_SHELL);
+  // 足 0 本で開いたらドックの既定は板（#275）
+  const [shell, send] = useReducer(shellReduce, c.curLegs.length, initialShell);
   const ivEndpoint =
     import.meta.env.DEV && state.sourceLabel !== API_LABEL ? '/fixtures/atm_iv' : '/api/atm_iv';
   const iv = useIvHistory(ivVisible(shell, tier), ivEndpoint);
@@ -240,12 +240,9 @@ export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
     ],
   );
   // 全体のキー 1〜5・G・T・Ctrl / ⌘ + K（#89。パレットの行の実行も同じ ctx）
-  // paletteQuery = 開いたときの問い合わせ（null = 閉。Ctrl / ⌘ + K は空、⋯ > 用語集… は `?` = 用語だけ。#167）
-  const [paletteQuery, setPaletteQuery] = useState<string | null>(null);
-  const paletteOpen = paletteQuery !== null;
-  const onPalette = useCallback(() => setPaletteQuery(''), []);
-  const onOpenGlossary = useCallback(() => setPaletteQuery('?'), []);
-  const closePalette = useCallback(() => setPaletteQuery(null), []);
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  const onPalette = useCallback(() => setPaletteOpen(true), []);
+  const closePalette = useCallback(() => setPaletteOpen(false), []);
   const keyCtx: GlobalKeysCtx = {
     tier,
     send,
@@ -260,8 +257,6 @@ export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
   const [dXUnit, setDXUnit] = useState<DXUnit>('pct');
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [bookFocusName, setBookFocusName] = useState(false);
-  // 今の縦軸の範囲（舞台が描くたびに入れる。設定の縦軸を手動に切り替えたときの初期値）
-  const yNow = useRef<Domain | null>(null);
   // 足が消えたら選択を外す
   const selectedLeg = picked !== null && c.curLegs.some((l) => l.id === picked) ? picked : null;
   const onChart = useCallback((chart: ChartMode) => send({ type: 'chart', chart }), []);
@@ -403,7 +398,7 @@ export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
     },
     [dispatch, push],
   );
-  // 全クリア（トップの ⋯ とポジションの ⋯）: 押した時点の state で写しを作り、[元に戻す] 付きのトースト（#84 と同じ）
+  // 全クリア（ポジションの ⋯ とパレット。#275 でトップの ⋯ から外した）: 押した時点の state で写しを作り、[元に戻す] 付きのトースト（#84 と同じ）
   const onClearLegs = useCallback(() => {
     const u = clearUndo(stateRef.current);
     if (!u) return;
@@ -417,7 +412,7 @@ export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
     });
   }, [dispatch, push]);
   // 保存一覧・設定（#87 (C)）
-  const { openBook, onBookExport, onBookImport, onBookOverwriteForUndo, onBookRestoreEntry } = c;
+  const { openBook, onBookOverwriteForUndo, onBookRestoreEntry } = c;
   const onOpenBook = useCallback(() => {
     setBookFocusName(false);
     openBook();
@@ -428,16 +423,6 @@ export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
   }, [openBook]);
   const onOpenSettings = useCallback(() => setSettingsOpen(true), []);
   const closeSettings = useCallback(() => setSettingsOpen(false), []);
-  const onExport = useCallback(() => {
-    const m = onBookExport();
-    if (m) push(bookIoToast(m));
-  }, [onBookExport, push]);
-  const onImport = useCallback(
-    (file: File) => {
-      void onBookImport(file).then((m) => push(bookIoToast(m)));
-    },
-    [onBookImport, push],
-  );
   // 保存一覧の [上書き]: 即実行 + [元に戻す]（続けて上書きしたら同じ kind の置き換えで最後の 1 つだけ戻せる）
   const onBookOverwrite = useCallback(
     (id: string) => {
@@ -633,7 +618,7 @@ export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
         c.pinCurrent();
         return;
       case 'atm':
-        // 板を見せて（2 と同じ）、板の [ATM] と同じジャンプ
+        // 板を見せて（キー 1 と同じ）、板の [ATM] と同じジャンプ
         runGlobalKey({ kind: 'panel', panel: 'board' }, keyCtx);
         setAtmJump((n) => n + 1);
         return;
@@ -695,14 +680,9 @@ export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
         shareSupported={shareOk}
         onShareResult={onShareResult}
         bookCount={c.bookCount}
-        bookState={c.bookRead.kind}
         onOpenBook={onOpenBook}
         onSaveToBook={onSaveToBook}
         onOpenSettings={onOpenSettings}
-        onOpenGlossary={onOpenGlossary}
-        onExport={onExport}
-        onImport={onImport}
-        onClearLegs={onClearLegs}
         aiOpen={benchView(shell) === 'ai'}
         onAi={onAi}
       />
@@ -721,7 +701,6 @@ export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
             theme={theme.resolved}
             onPickLeg={onPickLeg}
             onChangeStrike={onChangeStrike}
-            yNow={yNow}
           />
         }
         scenario={<Scenario c={c} dXUnit={dXUnit} onDXUnit={setDXUnit} />}
@@ -870,15 +849,10 @@ export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
         atmBasis={state.atmBasis}
         metricsUnit={state.metricsUnit}
         feePerLot={state.feePerLot}
-        pnlY={state.pnlY}
-        futureBasis={state.futureBasis}
-        dXUnit={dXUnit}
-        x0={c.positions?.ctx.x0 ?? Number.NaN}
-        theme={theme.pref}
         header={c.header}
-        yNow={yNow}
         dispatch={dispatch}
-        onDXUnit={setDXUnit}
+        tier={tier}
+        theme={theme.pref}
         onTheme={theme.choose}
         margin={userPrefs.prefs.margin}
         onMargin={userPrefs.setMargin}
@@ -915,13 +889,7 @@ export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
         focusName={bookFocusName}
       />
       {!c.bookOpen && <ToastSlot host={toastHost} />}
-      <Palette
-        open={paletteOpen}
-        items={items}
-        onClose={closePalette}
-        onRun={runPalette}
-        initialQuery={paletteQuery ?? ''}
-      />
+      <Palette open={paletteOpen} items={items} onClose={closePalette} onRun={runPalette} />
       <TermCard />
     </div>
   );

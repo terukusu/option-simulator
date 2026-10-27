@@ -46,7 +46,7 @@ interface Props {
   /** 行の詳細を開いたらその足を舞台でも選ぶ */
   onSelectLeg: (id: number) => void;
   push: (t: ToastInput) => void;
-  /** 全クリア（#87 (C): トップの ⋯ と同じ処理 = NextApp。[元に戻す] 付きのトースト） */
+  /** 全クリア（#87 (C)。処理は NextApp = パレットと同じ。[元に戻す] 付きのトースト。#275 でトップの ⋯ から外した） */
   onClear: () => void;
 }
 
@@ -105,7 +105,7 @@ export function Positions(p: Props) {
     p.onClear();
     setOpen(new Set());
   };
-  // 足が 0 本になったら開いた行の集合を空にする（トップの ⋯ の全クリアの後の [元に戻す] で行が開いたまま戻らない）
+  // 足が 0 本になったら開いた行の集合を空にする（パレットの全クリアの後の [元に戻す] で行が開いたまま戻らない）
   const empty = rows.length === 0;
   useEffect(() => {
     if (empty) setOpen((o) => (o.size === 0 ? o : new Set()));
@@ -125,7 +125,8 @@ export function Positions(p: Props) {
   };
 
   const items: MenuItem[] = [
-    { key: 'clear', label: '全クリア', disabled: rows.length === 0, onSelect: onClear },
+    // 足の本数で決める（板が読めず行が無いときも消せる = #275 でトップの ⋯ の全クリアを外したため）
+    { key: 'clear', label: '全クリア', disabled: c.curLegs.length === 0, onSelect: onClear },
     { key: 'add', label: '足を追加…', disabled: !hasChain, onSelect: () => setDialog('leg') },
     {
       key: 'hedge',

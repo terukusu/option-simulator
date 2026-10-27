@@ -362,7 +362,7 @@ export const GLOSSARY: readonly GlossaryTerm[] = [
     formula: 'F_i′ = X′ + basis_i（basis_i = F_i − X₀）',
     example:
       '例（架空の値）: 2 限月の F が X₀ より 75 円高ければ、X が動いても 2 限月の F は常に X + 75',
-    where: ['シナリオの「モデルの前提」の先物の basis', '⋯ > 設定…', '満期の線の折れ点'],
+    where: ['シナリオの「モデルの前提」の先物の basis', '満期の線の折れ点'],
     guide: G_AXIS,
     related: ['forward', 'dx', 'sticky'],
   },

@@ -100,15 +100,6 @@
   font-size: var(--fs-sm);
 }
 
-/* 縦軸の欄（舞台の ⋯ と同じ YAxisFields。行の見出しがあるので欄の中の「縦軸」は出さない） */
-.stage-pop.set-y {
-  min-width: 0;
-}
-
-.stage-pop.set-y > .row:first-child > .lbl {
-  display: none;
-}
-
 /* ===== 保存一覧 ===== */
 /* 見出しの ⓘ のポップオーバーをダイアログの外（窓の中）へ出せるように切らない（中身は .sheet-body がスクロール） */
 dialog.sheet.book {

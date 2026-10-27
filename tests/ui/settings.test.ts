@@ -1,5 +1,6 @@
 /**
- * #87 (C) AC-7: 設定のダイアログの表示モデル（settingsModel）と手数料の欄（feeField）。
+ * #87 (C) AC-7: 設定のダイアログの表示モデル（settingsModel）と手数料の欄（feeField）。#275 で縦軸・basis・ΔX の単位・
+ * テーマの行を外した。
  * 板は合成の板（fixtures/synthetic の latest。架空の値）。
  */
 import { describe, expect, it } from 'vitest';
@@ -7,10 +8,9 @@ import { buildCalendar, normalizeChain } from '../../data';
 import bundledJson from '../../data/calendar/calendar.json';
 import { DEFAULT_TECH_PARAMS, TECH_PARAM_KEYS } from '../../model';
 import { CALENDAR } from '../../ui/calendar';
-import { DEFAULT_MARGIN_PREFS, THEME_PREFS } from '../../ui/prefs';
+import { DEFAULT_MARGIN_PREFS } from '../../ui/prefs';
 import { parseFee } from '../../ui/state';
 import { headerModel } from '../../ui/view/header';
-import { DEFAULT_PNL_Y } from '../../ui/view/pnlChart';
 import {
   AI_PROFILE_NOTES,
   aiProfileCount,
@@ -27,6 +27,7 @@ import {
   marginLongValue,
   SETTINGS_NO_BOARD_TEXT,
   type SettingsInput,
+  settingsHasTheme,
   settingsModel,
   TECH_EMA_ORDER_ERROR,
   TECH_FIELD_ERROR,
@@ -43,36 +44,38 @@ const chain = normalizeChain(fixture('latest'));
 const base: SettingsInput = {
   atmBasis: 'B',
   metricsUnit: 'auto',
-  pnlY: DEFAULT_PNL_Y,
-  futureBasis: 'fixed',
-  dXUnit: 'pct',
-  x0: 68_000,
-  theme: 'auto',
   header: headerModel(chain, 'B', CALENDAR),
 };
 
 describe('settingsModel（#87 AC-7）', () => {
-  it('選択中の値が入力の値と一致する（代表 8 通り）', () => {
+  it('選択中の値が入力の値と一致する', () => {
     const cases: Partial<SettingsInput>[] = [
       {},
       { atmBasis: 'A' },
       { metricsUnit: 'yen' },
-      { metricsUnit: 'thousand', theme: 'dark' },
-      { pnlY: { ...DEFAULT_PNL_Y, mode: 'premium', n: 3 } },
-      { pnlY: { mode: 'manual', manual: [-100_000, 50_000], n: 2 }, futureBasis: 'decay' },
-      { dXUnit: 'yen', theme: 'light' },
-      { atmBasis: 'A', metricsUnit: 'yen', futureBasis: 'decay', dXUnit: 'yen', theme: 'dark' },
+      { atmBasis: 'A', metricsUnit: 'thousand' },
     ];
     for (const c of cases) {
       const i = { ...base, ...c };
       const v = settingsModel(i);
       expect(v.basis.value).toBe(i.atmBasis);
       expect(v.unit.value).toBe(i.metricsUnit);
-      expect(v.yMode).toBe(i.pnlY.mode);
-      expect(v.futureBasis.value).toBe(i.futureBasis);
-      expect(v.dXUnit.value).toBe(i.dXUnit);
-      expect(v.theme.value).toBe(i.theme);
     }
+  });
+
+  it('#275: 別の入口がある行（縦軸・先物の basis・ΔX の単位・テーマ）を持たない', () => {
+    expect(Object.keys(settingsModel(base)).sort()).toEqual([
+      'assumptions',
+      'basis',
+      'noBoard',
+      'unit',
+    ]);
+  });
+
+  it('#275: テーマの行はスマホだけ（☾ を隠す幅の入口）', () => {
+    expect(settingsHasTheme('phone')).toBe(true);
+    expect(settingsHasTheme('tablet')).toBe(false);
+    expect(settingsHasTheme('pc')).toBe(false);
   });
 
   it('選択肢の並びと文', () => {
@@ -86,23 +89,6 @@ describe('settingsModel（#87 AC-7）', () => {
       ['yen', '円'],
       ['thousand', '千円'],
     ]);
-    expect(v.futureBasis.options.map((o) => [o.value, o.text])).toEqual([
-      ['fixed', '固定'],
-      ['decay', '減衰'],
-    ]);
-    expect(v.dXUnit.options.map((o) => [o.value, o.text, o.disabled])).toEqual([
-      ['pct', '%', undefined],
-      ['yen', '円', undefined],
-    ]);
-    expect(v.theme.options.map((o) => o.value)).toEqual([...THEME_PREFS]);
-    expect(v.theme.options.map((o) => o.text)).toEqual(['端末に合わせる', 'ダーク', 'ライト']);
-  });
-
-  it('X₀ が決まらない（NaN・0・負）と ΔX の単位はどちらも押せない（シナリオと同じ条件）', () => {
-    for (const x0 of [Number.NaN, 0, -1, Number.POSITIVE_INFINITY]) {
-      const v = settingsModel({ ...base, x0 });
-      expect(v.dXUnit.options.every((o) => o.disabled === true)).toBe(true);
-    }
   });
 
   it('前提の行は headerModel.assumptions と同じ文・同じ順（期限内は warn なし）', () => {

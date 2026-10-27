@@ -339,7 +339,7 @@ const BoardTable = pure(function BoardTable(p: TableProps) {
     // biome-ignore lint/a11y/useSemanticElements: 1〜5 の行き先のスクロールする枠に名前を付ける（fieldset にしない）
     <div
       class={p.visible ? 'board-wrap' : 'board-wrap side-hidden'}
-      // 全体のキー 2 の行き先・クリックで ↓・PageDown がこの枠を動かす（#89。隠している側は持たない）
+      // 全体のキー 1（板）の行き先・クリックで ↓・PageDown がこの枠を動かす（#89。隠している側は持たない）
       tabIndex={p.visible ? -1 : undefined}
       role="group"
       aria-label={p.visible ? PANEL_FOCUS_LABEL.board : undefined}

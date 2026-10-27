@@ -170,7 +170,7 @@ IV 推移は ATM IV（30 日固定）、先物推移は日経225 先物（ラー
 
 ### 9. スマホ: ドックとシート
 
-舞台（損益グラフ）は常に上に。下のドック（ポジ / 板 / シナリオ / 指標 / IV / AI）でパネルを選び、シートを peek / full / 隠すの 3 段階で。幅 360px でも横スクロールしません。
+舞台（損益グラフ）は常に上に。下のドック（板 / IV / ポジ / シナリオ / 指標 / AI）でパネルを選び、シートを peek / full / 隠すの 3 段階で。幅 360px でも横スクロールしません。
 
 <p align="center"><img src="docs/images/phone-dark.webp" alt="スマホのダーク 3 台。ポジション、シナリオ、指標 · テールのシート"></p>
 <p align="center"><img src="docs/images/phone-light.webp" alt="スマホのライト 3 台。板、スマイル、先物推移（EMA の 3 本と RSI・MACD の段）のシート"></p>
