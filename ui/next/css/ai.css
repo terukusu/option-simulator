@@ -559,3 +559,9 @@ section.ai .ai-body {
     padding: 0 4px;
   }
 }
+
+/* 返答の「確かめるとよいこと」のチップ（#278）: 定型の質問と同じく折り返す（全部が見える。チップの文字は折らない） */
+.ai-checks .chiprow {
+  flex-wrap: wrap;
+  overflow: visible;
+}

@@ -26,6 +26,7 @@ import {
   sendBlocked,
   sentShown,
 } from '../../view/aiChat';
+import { type AiCheck, aiCheckChips, CHECKS_LABEL } from '../../view/aiChecks';
 import {
   AI_EVAL_KEEP_LABEL,
   AI_EVAL_NOTE_PROMPT,
@@ -79,6 +80,9 @@ export interface AiApply {
 /** 提案のカードの [適用]（#139。ツールの入力と結果をそのまま渡す。反映の検査は NextApp） */
 export type AiProposeApply = (input: Record<string, unknown>, result: unknown) => void;
 
+/** 返答の「確かめるとよいこと」のチップ（#278。振り分けは NextApp） */
+export type AiCheckApply = (c: AiCheck) => void;
+
 /** パレット（NextApp）が読む口（AiPanel が描くたびに入れる） */
 export interface AiPanelApi {
   diagnose: () => void;
@@ -128,6 +132,7 @@ function AiPanelView(p: {
   onDisclaimerSeen: () => void;
   onApplyScenario: (s: AiApply) => void;
   onApplyProposal: AiProposeApply;
+  onCheck: AiCheckApply;
   apiRef: { current: AiPanelApi | null };
 }) {
   const chat = useAiChat(p.visible, p.base, p.env, p.tech, p.ivStats, p.evalSource);
@@ -206,6 +211,7 @@ function AiPanelView(p: {
       onDisclaimerSeen={p.onDisclaimerSeen}
       onApplyScenario={p.onApplyScenario}
       onApplyProposal={p.onApplyProposal}
+      onCheck={p.onCheck}
       draft={draft}
       {...(p.evalSource && { onKeep: (key: string) => void keep(key) })}
       keepNote={keepNote}
@@ -230,6 +236,7 @@ export function AiChat(p: {
   onDisclaimerSeen: () => void;
   onApplyScenario: (s: AiApply) => void;
   onApplyProposal: AiProposeApply;
+  onCheck: AiCheckApply;
   /** [AI に聞く] で送れなかった質問（#136。入力欄に入れる。フォーカスは動かさない = スマホでキーボードを出さない） */
   draft?: AiDraft | null;
   /** 返答の行の [評価に残す]（#159。返答の行の key） */
@@ -346,6 +353,7 @@ export function AiChat(p: {
       x0={p.x0}
       onApply={p.onApplyScenario}
       onPropose={p.onApplyProposal}
+      onCheck={p.onCheck}
       onRetry={chat.retry}
       canRetry={sendReason === null}
       {...(p.onKeep && keepable.has(it.key) && { onKeep: p.onKeep })}
@@ -564,6 +572,7 @@ function ChatRow(p: {
   x0: number;
   onApply: (s: AiApply) => void;
   onPropose: AiProposeApply;
+  onCheck: AiCheckApply;
   onRetry: () => void;
   canRetry: boolean;
   onKeep?: (key: string) => void;
@@ -588,6 +597,7 @@ function ChatRow(p: {
       return (
         <div class="ai-msg answer" data-ai-live={it.live ? 'true' : undefined}>
           {it.text !== '' && <AnswerText text={it.text} sources={p.sources} live={it.live} />}
+          {!it.live && it.failed === null && <AnswerChecks text={it.text} onCheck={p.onCheck} />}
           {p.onKeep && (
             <details class="ai-more">
               <summary aria-label={ANSWER_MENU_LABEL} title={ANSWER_MENU_LABEL}>
@@ -733,6 +743,24 @@ function AnswerText(p: { text: string; sources: readonly unknown[]; live: boolea
         }
         return null;
       })}
+    </div>
+  );
+}
+
+/**
+ * 返答の「確かめるとよいこと」のチップ（#278。ui/view/aiChecks.ts）。終わった返答だけ（流れている間・失敗は出さない）。
+ * 文から作るのは text が変わったときだけ
+ */
+function AnswerChecks(p: { text: string; onCheck: AiCheckApply }) {
+  const chips = useMemo(() => aiCheckChips(p.text), [p.text]);
+  if (chips.length === 0) return null;
+  return (
+    <div class="ai-checks" data-ai="checks">
+      <ChipRow label={CHECKS_LABEL}>
+        {chips.map((c) => (
+          <Chip key={c.key} text={c.label} onClick={() => p.onCheck(c.check)} />
+        ))}
+      </ChipRow>
     </div>
   );
 }

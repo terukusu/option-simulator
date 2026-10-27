@@ -11701,6 +11701,41 @@ async function aiFlows(vp) {
     (hs) => hs.filter((h) => h.textContent.startsWith('弱点')).length,
   );
   check(`${tag} 返答の弱点の見出しが 3 つ`, weak === 3, `${weak}`);
+  // #278: 「確かめるとよいこと」のチップ（偽の SSE の診断 = 急落のプリセット・ピン）が窓の中で切れない →
+  // [シナリオ: 急落] で Δσ +20 が入る → [元に戻す] で戻る
+  const chips = await page.$$eval('section.ai [data-ai="checks"] .chip', (xs) =>
+    xs.map((x) => {
+      const r = x.getBoundingClientRect();
+      return {
+        text: x.textContent,
+        ok: r.left >= 0 && r.right <= window.innerWidth + 0.5 && x.scrollWidth <= x.clientWidth,
+      };
+    }),
+  );
+  check(
+    `${tag} #278 返答の「確かめるとよいこと」のチップが 1 つ以上・窓の中で切れない`,
+    chips.length >= 1 && chips.every((x) => x.ok),
+    chips.map((x) => x.text).join(' / '),
+  );
+  const scOf = (ws) => ws?.tabs?.[ws.active ?? 0]?.position?.scenario ?? null;
+  const wsNow = () =>
+    page.evaluate((k) => JSON.parse(localStorage.getItem(k) ?? '{}'), WORKSPACE_KEY);
+  const crash = page.locator('section.ai [data-ai="checks"] .chip', { hasText: '急落' });
+  if ((await crash.count()) > 0) {
+    const sc0 = scOf(await wsNow());
+    await crash.first().click();
+    await page.waitForTimeout(900);
+    const sc1 = scOf(await wsNow());
+    const undo = await page.$('.toast button:has-text("元に戻す")');
+    if (undo) await undo.click();
+    await page.waitForTimeout(900);
+    const sc2 = scOf(await wsNow());
+    check(
+      `${tag} #278 [シナリオ: 急落] で Δσ +20 → [元に戻す] で戻る`,
+      sc1?.dSigma === 20 && undo !== null && sc2?.dSigma === sc0?.dSigma && sc2?.dX === sc0?.dX,
+      `${sc0?.dSigma} → ${sc1?.dSigma} → ${sc2?.dSigma}`,
+    );
+  } else check(`${tag} #278 [シナリオ: 急落] のチップがある`, false);
   // (b) 中止
   await page.click('section.ai button[data-ai="diagnose"]');
   await page

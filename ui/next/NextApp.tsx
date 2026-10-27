@@ -14,10 +14,11 @@ import { useHoldMap } from '../components/useHoldMap';
 import { useFutureBars, useIvHistory } from '../components/useIvHistory';
 import { useMediaQuery } from '../components/useMediaQuery';
 import { API_LABEL, loaderNote } from '../load';
-import { MAX_PINS } from '../pins';
+import { MAX_PINS, pinAddError } from '../pins';
 import type { PrefsRead } from '../prefs';
 import { shareSupported } from '../share';
-import { legAtStrike, MAX_TABS, restoreTabAction } from '../state';
+import { type Action, legAtStrike, MAX_TABS, restoreTabAction } from '../state';
+import { aiCheckRun, CHECK_NO_LEGS_TEXT } from '../view/aiChecks';
 import { aiEnvFromState } from '../view/aiContext';
 import { aiEvalSource } from '../view/aiEvalCase';
 import {
@@ -75,7 +76,13 @@ import { Palette } from './parts/Palette';
 import { TermCard } from './parts/TermCard';
 import { ToastSlot, useToastHost, useToasts } from './parts/Toast';
 import { openTerm } from './parts/termCard';
-import { type AiApply, AiPanel, type AiPanelApi, type AiProposeApply } from './regions/AiChat';
+import {
+  type AiApply,
+  type AiCheckApply,
+  AiPanel,
+  type AiPanelApi,
+  type AiProposeApply,
+} from './regions/AiChat';
 import { Board } from './regions/Board';
 import type { HoldBundle } from './regions/HoldMap';
 import { Metrics } from './regions/Metrics';
@@ -303,16 +310,14 @@ export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
   const aiApi = useRef<AiPanelApi | null>(null);
   const aiBase =
     import.meta.env.DEV && state.sourceLabel !== API_LABEL ? '/fixtures/ai' : '/api/ai';
-  const onAiApply = useCallback(
-    (sc: AiApply) => {
+  // シナリオを変えて [元に戻す] つきの知らせ（[シナリオに適用]・返答のチップ（#278）で共通。戻すのは押す前のシナリオ）
+  const applyScenarioUndo = useCallback(
+    (action: Action, text: string) => {
       const before = stateRef.current.scenario;
-      dispatch({
-        type: 'setScenario',
-        patch: { days: sc.days, dX: sc.dX, dSigma: sc.dSigma, skew: sc.skew, ivShift: 'absolute' },
-      });
+      dispatch(action);
       push({
         kind: 'ai-apply',
-        text: 'AI が計算したシナリオを入れた',
+        text,
         undo: () =>
           dispatch({
             type: 'setScenario',
@@ -327,6 +332,23 @@ export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
       });
     },
     [dispatch, push],
+  );
+  const onAiApply = useCallback(
+    (sc: AiApply) =>
+      applyScenarioUndo(
+        {
+          type: 'setScenario',
+          patch: {
+            days: sc.days,
+            dX: sc.dX,
+            dSigma: sc.dSigma,
+            skew: sc.skew,
+            ivShift: 'absolute',
+          },
+        },
+        'AI が計算したシナリオを入れた',
+      ),
+    [applyScenarioUndo],
   );
   // 提案のカード（#139）: 押した時点の state で作り直し、今のタブは足を丸ごと置き換え（[元に戻す] は前の足へ）、
   // 新しいタブは足して切り替える（[元に戻す] は足したタブを閉じる。タブの切り替えで閉じない keep のトースト）
@@ -651,6 +673,32 @@ export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
         return;
     }
   };
+  // 返答の「確かめるとよいこと」のチップ（#278）: 押した時点の画面で動作を決める（ui/view/aiChecks.ts）。プリセット・
+  // 評価時刻は [シナリオに適用] と同じ（[元に戻す] つき）、ピンは「今の線を残す」、パネルはキー 1〜6 と同じ開き方。
+  // AiPanel は pure なので渡す関数は変えない（中身は毎回の描画で最新の c・keyCtx を見る）
+  const aiCheckRef = useRef<AiCheckApply>(() => {});
+  aiCheckRef.current = (check) => {
+    const r = aiCheckRun(
+      check,
+      scenarioInputOf(c, dXUnit),
+      c.pnlBase === null ? CHECK_NO_LEGS_TEXT : pinAddError(c.pins),
+    );
+    switch (r.kind) {
+      case 'scenario':
+        applyScenarioUndo(r.action, r.text);
+        return;
+      case 'pin':
+        c.pinCurrent();
+        return;
+      case 'panel':
+        runGlobalKey({ kind: 'panel', panel: r.panel }, keyCtx);
+        return;
+      case 'blocked':
+        push({ kind: 'ai-check', text: r.text, note: 'info' });
+        return;
+    }
+  };
+  const onAiCheck = useCallback<AiCheckApply>((check) => aiCheckRef.current(check), []);
   // 保存一覧を開いている間はそのダイアログの中に置く（1 か所だけ = 読み上げも 1 回。箱は同じ要素を移す = #124）
   const toastHost = useToastHost({
     toasts: toasts.toasts,
@@ -824,6 +872,7 @@ export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
             onDisclaimerSeen={userPrefs.setAiDisclaimerSeen}
             onApplyScenario={onAiApply}
             onApplyProposal={onAiPropose}
+            onCheck={onAiCheck}
             apiRef={aiApi}
           />
         }
