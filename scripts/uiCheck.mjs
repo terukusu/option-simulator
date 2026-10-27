@@ -108,7 +108,7 @@
 //                                          1440×900。390×844 のタッチのエミュレーションで 2 本目の指で押す前に戻りピンチで狭まる）と
 //                                          全体のキーの手順（#89 段 A AC-A4: body から 1〜5 でパネルとスクロールする枠のフォーカス・G で描画域と
 //                                          → の ΔX +100・描画域の 0 はリセット・T で反転と prefs・設定 / ⋯ / 数値入力では効かない・
-//                                          板の行 / 指標のテール表のクリックと 1 / 5 の後の PageDown で枠が動く。
+//                                          板の行 / 指標のテール表のクリックと 1 / 5 の後・板の K のボタン（#282）の後の PageDown で枠が動く。
 //                                          390×844 と 1440×900、900×1100 は参考）とコマンドパレットの手順（#89 段 B AC-B5:
 //                                          Ctrl + K で開く・↑↓ と押せない行・急落・足の追加と [元に戻す]・ATM へ・テーマ / 設定・
 //                                          Esc / 背景で閉じてフォーカスが戻る・開いている間の 1 / G / T と 2 つ目・メニュー / 設定の上・
@@ -8834,9 +8834,10 @@ async function keyFlows(vp) {
     );
   }
 
-  // (f) 回帰（レビュー R1）: パネルの中をクリック → PageDown で枠が縦に動く。1〜5 の直後の PageDown も動く
+  // (f) 回帰（レビュー R1）: パネルの中をクリック → PageDown で枠が縦に動く。1〜5 の直後の PageDown も動く。
+  // 板の K は #264 からボタンなので、ボタンでない所は IV のセル（#282）。K のボタンは下の (g)
   for (const [key, panel, cell] of [
-    ['1', 'board', 'tbody tr:nth-child(3) .k'],
+    ['1', 'board', 'tbody tr:nth-child(3) td.iv'],
     ['5', 'metrics', 'table.tail thead th'],
   ]) {
     const box = KEY_FOCUS[panel];
@@ -8861,8 +8862,6 @@ async function keyFlows(vp) {
     const clickFocus = await activeIs(box);
     await press('PageDown');
     const byClick = await top();
-    // 板の K は #264 からポップオーバーを開くボタン。開いたままだと次のキー（1〜5）が止まるので閉じる
-    if (await page.$('section.board .popover.kpop')) await press('Escape');
     // キー（1 / 5）→ PageDown
     await reset();
     await blur();
@@ -8879,6 +8878,35 @@ async function keyFlows(vp) {
       `#89 R1 ${ref}${tag} ${what}をクリック → PageDown・${key} → PageDown で枠の scrollTop が増える`,
       clickFocus && byClick > 0 && byKey > 0,
       `余白 ${room}px・クリックでフォーカス ${clickFocus}・scrollTop ${byClick} / ${byKey}`,
+    );
+  }
+
+  // (g) 板の K のボタン（#264）をクリック → ポップオーバーが開き、フォーカスは K のボタン（Esc で戻す先）のまま。
+  // それでも枠はボタンの祖先なので PageDown で動く（#282）
+  {
+    const box = KEY_FOCUS.board;
+    const kbtn = `${box} tbody tr:nth-child(3) .kbtn`;
+    await blur();
+    await press('1');
+    await page.waitForTimeout(200);
+    await page.evaluate((q) => {
+      const el = document.querySelector(q);
+      if (el) el.scrollTop = 0;
+    }, box);
+    await blur();
+    await page.click(kbtn);
+    await page.waitForTimeout(120);
+    const popOpen = (await page.$(`${box} .popover.kpop`)) !== null;
+    const onK = await activeIs(kbtn);
+    const before = await page.evaluate((q) => document.querySelector(q)?.scrollTop ?? -1, box);
+    await press('PageDown');
+    const after = await page.evaluate((q) => document.querySelector(q)?.scrollTop ?? -1, box);
+    // 開いたままだと次の手順のキー（1〜5）が止まるので閉じる
+    if (popOpen) await press('Escape');
+    check(
+      `#89 R1 ${ref}${tag} 板の K のボタンをクリック → ポップオーバーが開きフォーカスは K → PageDown で枠の scrollTop が増える`,
+      popOpen && onK && after > before,
+      `ポップオーバー ${popOpen}・フォーカス K ${onK}・scrollTop ${before} → ${after}`,
     );
   }
   await ctx.close();
