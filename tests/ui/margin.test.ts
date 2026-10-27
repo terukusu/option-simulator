@@ -39,6 +39,7 @@ import {
   FULL_MAX_ROWS,
   ivScaleText,
   MARGIN_CALL_MARK,
+  MARGIN_FULL_LABEL,
   MARGIN_GROUP_LABEL,
   MARGIN_HINT,
   MARGIN_POINT_NOW_TEXT,
@@ -55,6 +56,7 @@ import {
   metricsPanel,
   metricTiles,
   multipleText,
+  ROOM_FULL_LABEL,
   ROOM_NO_CAPITAL_TEXT,
   ROOM_TILE_LABEL,
 } from '../../ui/view/metricsPanel';
@@ -279,14 +281,22 @@ describe('計算の単位（ui/view/margin.ts）', () => {
 });
 
 describe('タイル（#131 AC14）', () => {
-  it('タイル 8 枚: 証拠金の 2 枚は末尾、見出しに「概算」', () => {
+  it('タイル 6 枚: 証拠金の 2 枚は末尾、「概算」は全文の 1 行目とパネルの見出しの副題（#274）', () => {
     const m = metricsOf(putSell);
-    const tiles = metricTiles(m, viewOf(putSell, withCapital(20_000_000)));
-    expect(tiles).toHaveLength(8);
-    expect(tiles.slice(6).map((t) => t.key)).toEqual(['margin', 'room']);
+    const mv = viewOf(putSell, withCapital(20_000_000));
+    const tiles = metricTiles(m, mv);
+    expect(tiles).toHaveLength(6);
+    expect(tiles.slice(4).map((t) => t.key)).toEqual(['margin', 'room']);
     expect(tile(tiles, 'margin').k).toBe(MARGIN_TILE_LABEL);
     expect(tile(tiles, 'room').k).toBe(ROOM_TILE_LABEL);
-    for (const t of tiles.slice(6)) expect(t.k).toContain('概算');
+    expect(MARGIN_TILE_LABEL).toBe('必要証拠金');
+    expect(ROOM_TILE_LABEL).toBe('余力');
+    for (const t of tiles.slice(4)) expect(t.full[0]?.k).toBe(`${t.k}（概算）`);
+    expect(MARGIN_FULL_LABEL).toBe('必要証拠金（概算）');
+    expect(ROOM_FULL_LABEL).toBe('余力（概算）');
+    const view = metricsPanel(m, putSell.feePerLot, mv);
+    expect(view.headSub).toBe(`${view.unitSub} · 証拠金は概算`);
+    expect(metricsPanel(m, putSell.feePerLot, null).headSub).toBe(view.unitSub);
     expect(MARGIN_GROUP_LABEL).toContain('概算');
     expect(MARGIN_TAIL_TITLE).toContain('概算');
     expect(MARGIN_HINT).toContain('概算');
@@ -321,8 +331,8 @@ describe('タイル（#131 AC14）', () => {
     expect(Number.isFinite(now.multiple)).toBe(true);
     expect(tr.s).toBe(`今 ${fmtAmount(now.room, u)} · ${fmtNum(now.multiple)} 倍`);
     // 全文: 1 行目は見出し + 値。前提の行は内訳の証拠金の群の末尾（#161 でタイルの全文から外した）
-    expect(tm.full[0]).toEqual({ k: MARGIN_TILE_LABEL, v: `${tm.v} 千円` });
-    expect(tr.full[0]).toEqual({ k: ROOM_TILE_LABEL, v: `${tr.v} 千円` });
+    expect(tm.full[0]).toEqual({ k: MARGIN_FULL_LABEL, v: `${tm.v} 千円` });
+    expect(tr.full[0]).toEqual({ k: ROOM_FULL_LABEL, v: `${tr.v} 千円` });
     const bd = metricsBreakdown(m, mv).map((r) => ({ k: r.k, v: r.v }));
     expect(bd.slice(-5)).toEqual([
       { k: '値動き幅 R', v: '±5%' },
@@ -535,27 +545,30 @@ describe('#164 シナリオの点の印・#161 タイルの全文の行', () => 
     patch: { days: 2, dX: 1500, dSigma: -3, skew: -0.5 },
   });
 
-  it('#164 点の文字列: すべて 0 なら「今」、0 でない d・ΔX・Δσ・Δs だけを順に（ΔX は % が 0.0 に丸まると円）', () => {
+  it('#164 点の文字列: すべて 0 なら「今」、0 でない d・ΔX・Δσ・Δs だけを順に（ΔX は % が 0.0 に丸まると円）。#274 でタイルの見出しは短い形', () => {
     expect(marginPointParts(zero)).toEqual([]);
     expect(marginPointText(zero)).toBe(MARGIN_POINT_NOW_TEXT);
     expect(MARGIN_POINT_NOW_TEXT).toBe('今');
-    expect(marginPointText({ ...zero, days: 7 })).toBe('d 7 日');
-    expect(marginPointText({ ...zero, days: 1.5 })).toBe('d 1.5 日');
-    expect(marginPointText({ ...zero, days: 0.25 })).toBe('d 0.25 日');
-    expect(marginPointText({ ...zero, dX: -3000, dXPct: -4.42 })).toBe('ΔX −4.4%');
-    expect(marginPointText({ ...zero, dX: 1000, dXPct: 1.5 })).toBe('ΔX +1.5%');
+    expect(marginPointText({ ...zero, days: 7 })).toBe('d7');
+    expect(marginPointText({ ...zero, days: 1.5 })).toBe('d1.5');
+    expect(marginPointText({ ...zero, days: 0.25 })).toBe('d0.25');
+    expect(marginPointText({ ...zero, dX: -3000, dXPct: -4.42 })).toBe('−4.4%');
+    expect(marginPointText({ ...zero, dX: 1000, dXPct: 1.5 })).toBe('+1.5%');
     // % が 0.0 に丸まる小さな ΔX は円で（0 でないのに 0 に見えない）
-    expect(marginPointText({ ...zero, dX: 20, dXPct: 0.03 })).toBe('ΔX +20 円');
-    expect(marginPointText({ ...zero, dX: -25, dXPct: -0.04 })).toBe('ΔX −25 円');
-    expect(marginPointText({ ...zero, dSigma: 5 })).toBe('Δσ +5.0 pt');
-    expect(marginPointText({ ...zero, dSigma: -2.5 })).toBe('Δσ −2.5 pt');
-    expect(marginPointText({ ...zero, skew: 1 })).toBe('Δs +1.0');
+    expect(marginPointText({ ...zero, dX: 20, dXPct: 0.03 })).toBe('+20円');
+    expect(marginPointText({ ...zero, dX: -25, dXPct: -0.04 })).toBe('−25円');
+    expect(marginPointText({ ...zero, dSigma: 5 })).toBe('Δσ+5.0');
+    expect(marginPointText({ ...zero, dSigma: -2.5 })).toBe('Δσ−2.5');
+    expect(marginPointText({ ...zero, skew: 1 })).toBe('Δs+1.0');
     // IV の動かし方が relative なら Δσ は %（Scenario.dSigma の単位）
-    expect(marginPointText({ ...zero, dSigma: 10, dSigmaUnit: '%' })).toBe('Δσ +10.0%');
+    expect(marginPointText({ ...zero, dSigma: 10, dSigmaUnit: '%' })).toBe('Δσ+10.0%');
+    // レビューの例（d 10 日・ΔX −2.2%）
+    expect(marginPointText({ ...zero, days: 10, dX: -1500, dXPct: -2.2 })).toBe('d10 · −2.2%');
+    // 全文・内訳の行は長い形のまま
     expect(
       marginPointParts({ ...zero, days: 7, dX: -3000, dXPct: -4.42, dSigma: 5, skew: -0.5 }),
     ).toEqual(['d 7 日', 'ΔX −4.4%', 'Δσ +5.0 pt', 'Δs −0.5']);
-    expect(marginPointText({ ...zero, days: 7, dSigma: 5 })).toBe('d 7 日 · Δσ +5.0 pt');
+    expect(marginPointText({ ...zero, days: 7, dSigma: 5 })).toBe('d7 · Δσ+5.0');
     // 位置の数: d は clampDays、非有限は 0、dXPct = ΔX / X₀ × 100
     const base = baseOf(putSellDown);
     const at = marginPointAt(base, putSellDown.scenario);
@@ -582,7 +595,7 @@ describe('#164 シナリオの点の印・#161 タイルの全文の行', () => 
     ).toEqual({ ...zero, days: base.maxDays });
   });
 
-  it('#164 タイルの見出しの点: 必要証拠金・余力は「· 」+ 点の文字列、他の 6 枚と証拠金なしは空', () => {
+  it('#164 タイルの見出しの点: 必要証拠金・余力は「· 」+ 点の文字列、他の 4 枚と証拠金なしは空', () => {
     for (const s of [putSell, putSellDown, putSellAll]) {
       const m = metricsOf(s);
       const mv = viewOf(s, withCapital(50_000_000));
@@ -597,9 +610,9 @@ describe('#164 シナリオの点の印・#161 タイルの全文の行', () => 
     expect(tile(metricTiles(m0, viewOf(putSell, withCapital(null))), 'margin').at).toBe('· 今');
     expect(tile(metricTiles(m0, viewOf(putSell, withCapital(null))), 'room').at).toBe('· 今');
     const md = metricsOf(putSellDown);
-    const dPct = marginPointParts(viewOf(putSellDown, withCapital(null)).at)[1];
+    const dPct = marginPointParts(viewOf(putSellDown, withCapital(null)).at)[1]?.replace('ΔX ', '');
     expect(tile(metricTiles(md, viewOf(putSellDown, withCapital(null))), 'room').at).toBe(
-      `· d 1 日 · ${dPct} · Δσ +5.0 pt`,
+      `· d1 · ${dPct} · Δσ+5.0`,
     );
     for (const t of metricTiles(m0)) expect(t.at, t.key).toBe('');
   });
@@ -646,14 +659,14 @@ describe('#164 シナリオの点の印・#161 タイルの全文の行', () => 
     expect(MARGIN_HINT).toContain('「今」');
   });
 
-  it('#161 タイルの全文は FULL_MAX_ROWS 行以下（8 枚 × 売り・買いだけ・資金あり / なし・シナリオの 4 つとも 0 でない）', () => {
+  it('#161 タイルの全文は FULL_MAX_ROWS 行以下（6 枚 × 売り・買いだけ・資金あり / なし・シナリオの 4 つとも 0 でない）', () => {
     expect(FULL_MAX_ROWS).toBe(12);
     let longest = 0;
     for (const s of [putSellAll, buyOnlyAll, putSell, buyOnly]) {
       for (const c of [50_000_000, null]) {
         const m = metricsOf(s);
         const tiles = metricTiles(m, viewOf(s, withCapital(c)));
-        expect(tiles).toHaveLength(8);
+        expect(tiles).toHaveLength(6);
         for (const t of tiles) {
           expect(t.full.length, `${t.key}`).toBeLessThanOrEqual(FULL_MAX_ROWS);
           longest = Math.max(longest, t.full.length);
@@ -687,7 +700,7 @@ describe('#164 シナリオの点の印・#161 タイルの全文の行', () => 
     const m = metricsOf(putSellAll);
     const tiles = metricTiles(m, viewOf(putSellAll, withCapital(50_000_000)));
     expect(tile(tiles, 'margin').full.map((r) => r.k)).toEqual([
-      MARGIN_TILE_LABEL,
+      MARGIN_FULL_LABEL,
       MARGIN_POINT_ROW_LABEL,
       '',
       '',
@@ -700,7 +713,7 @@ describe('#164 シナリオの点の印・#161 タイルの全文の行', () => 
       '',
     ]);
     expect(tile(tiles, 'room').full.map((r) => r.k)).toEqual([
-      ROOM_TILE_LABEL,
+      ROOM_FULL_LABEL,
       MARGIN_POINT_ROW_LABEL,
       '',
       '',

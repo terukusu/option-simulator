@@ -37,7 +37,7 @@ interface Props {
 }
 
 /**
- * タイル（§5 の .tile）。8 枚とも押せて、タップ / Enter / Space で全文のポップオーバー（#107。中身は表示モデルの full）。
+ * タイル（§5 の .tile）。6 枚とも押せて、タップ / Enter / Space で全文のポップオーバー（#107。中身は表示モデルの full）。
  * 外側の div は格子の 1 枠（余白・背景はボタン .tile-btn）。ボタンの中は phrasing content だけ（span）。
  * 見出しの行 .kh = 見出し .k + 点の印 .at（#164。必要証拠金・余力だけ。入らなければ .at だけ省略記号）。
  * 全文の末尾に [AI に聞く]（#136。質問の文は押したときに作る）
@@ -111,8 +111,8 @@ function TailCell({ c }: { c: TailCellView }) {
 }
 
 /**
- * 指標 · テール（docs/ui-redesign.md §2・§3・§5・§5.2・§9。#86）: 見出し行（単位の副題・ⓘ）→ タイル 6 枚 →
- * 「内訳」の折りたたみ（旧画面の指標の全項目。既定は閉・保存しない）→ テール表（損益のバー付き）→ テールの証拠金の表 →
+ * 指標 · テール（docs/ui-redesign.md §2・§3・§5・§5.2・§9。#86）: 見出し行（単位と「証拠金は概算」の副題・ⓘ）→ タイル 6 枚 →
+ * 「内訳」の折りたたみ（旧画面の指標の全項目。既定は閉・保存しない）→ テール表（損益のバー付き。指定日の列の説明は ⓘ だけ。#274）→ テールの証拠金の表 →
  * 「追証マップ」の折りたたみ（#152。regions/HoldMap.tsx。既定は閉・開閉は ShellState）。タイルの全文・2 つの表の見出しの
  * 行に [AI に聞く]（#136）。
  * 表示モデルは ui/view/metricsPanel.ts。action は dispatch しない（単位・手数料の入力は #87 の設定）。
@@ -123,7 +123,7 @@ function MetricsView({ model, feePerLot, margin, hold }: Props) {
   const kvId = useId();
   return (
     <>
-      <PanelHead title="指標 · テール" sub={view.unitSub}>
+      <PanelHead title="指標 · テール" sub={view.headSub}>
         <Popover label="金額の単位・テール表・証拠金" button="ⓘ">
           <p>{UNIT_HINT}</p>
           <p>{TAIL_HINT}</p>
@@ -186,7 +186,6 @@ function MetricsView({ model, feePerLot, margin, hold }: Props) {
               <AskAi topic="tail.pnl" label="テール表" make={() => askTail(view)} />
             </div>
             <p class="mx-note">{view.tailCaption}</p>
-            <p class="mx-note">{TAIL_HINT}</p>
             <table class="tail">
               <thead>
                 <tr>

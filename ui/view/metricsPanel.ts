@@ -4,8 +4,9 @@
  * 入力は useAppController の `metrics`（ui/view/metrics.ts の metricsModel の出力）と `state.feePerLot` だけで、
  * metricsModel を呼び直さず数値を作り直さない（fmtAmount・fmtRatio・fmtNum・fmtSigned の出力を連ねるだけ）。
  *
- * - タイル 8 枚: 満期 最大利益・満期 最大損失・満期 BEP・受取 − 支払 or 掛け金・指定日 + シナリオ・合計グリーク・
- *   必要証拠金（概算）・余力（概算）（#131。値はシナリオの点、副題は今。計算は ui/view/margin.ts の MarginView）
+ * - タイル 6 枚: 満期 最大利益・満期 最大損失・満期 BEP・受取 − 支払 or 掛け金・必要証拠金・余力（#131。値はシナリオの点、
+ *   副題は今。計算は ui/view/margin.ts の MarginView）。指定日 + シナリオ・合計グリークは読み取りの帯と同じ値なので
+ *   タイルにしない（#274。内訳には残る）。「概算」は見出し行の副題に 1 回（headSub）
  * - 内訳: 旧画面の内訳の dl（#91 で削除）の項目を同じ順・同じ桁で 2 列の行に + 証拠金の群（#131）
  * - テール表: 5 行 × {SQ, 指定日 + シナリオ}。損益の大きさのバーの長さ（10 セルの |損益| の最大で正規化）
  * - テールの証拠金の表（#131）: 5 行 × {必要証拠金, 余力}。余力 < 0 は loss の色と「追証」の印
@@ -28,17 +29,10 @@ import {
 } from './metrics';
 
 export type Tone = 'gain' | 'loss' | null;
-export type TileKey =
-  | 'maxProfit'
-  | 'maxLoss'
-  | 'bep'
-  | 'premium'
-  | 'scenario'
-  | 'greeks'
-  | 'margin'
-  | 'room';
+/** タイル 6 枚（#274 で 指定日 + シナリオ・合計グリークを外した = 読み取りの帯と同じ値を出さない） */
+export type TileKey = 'maxProfit' | 'maxLoss' | 'bep' | 'premium' | 'margin' | 'room';
 
-/** 全文（タイル・読み取りのポップオーバー）の 1 行。見出しと値（値は内訳と同じ関数・同じ桁の文字列） */
+/** 全文（タイルのポップオーバー）の 1 行。見出しと値（値は内訳と同じ関数・同じ桁の文字列） */
 export interface FullRow {
   k: string;
   v: string;
@@ -49,7 +43,7 @@ export interface MetricTile {
   /** 見出し */
   k: string;
   /**
-   * 見出しの横に小さく出す点の印（#164。必要証拠金・余力だけ `· d 7 日 · ΔX −4.4%` / `· 今`、他は空。
+   * 見出しの横に小さく出す点の印（#164。必要証拠金・余力だけ `· d7 · −4.4%` / `· 今`（#274 で短い形）、他は空。
    * 入らなければ省略記号 = 全文のシナリオ点の行で読む）
    */
   at: string;
@@ -123,8 +117,10 @@ export interface MarginTailRowView {
 
 export interface MetricsPanelView {
   empty: boolean;
-  /** 見出し行の副題（`千円（自動）` / `円（固定）`） */
+  /** 金額の単位（`千円（自動）` / `円（固定）`。内訳の注記・[AI に聞く] の文） */
   unitSub: string;
+  /** 見出し行の副題（unitSub。証拠金があれば ` · 証拠金は概算` を足す。#274） */
+  headSub: string;
   tiles: MetricTile[];
   breakdown: BreakdownRow[];
   /** 内訳の末尾の注記（`金額の単位 … · 手数料 N 円 / 枚`） */
@@ -145,9 +141,14 @@ export const UNIT_HINT =
 export const TAIL_HINT =
   '指定日の列 = d・Δσ・Δs・β・動き方はシナリオのまま、原資産だけを各行の値にして再評価（β は行ごとの下落率で IV を上げる）';
 
-/** 証拠金のタイル・表の見出し（「概算」を常に出す。#131） */
-export const MARGIN_TILE_LABEL = '必要証拠金（概算）';
-export const ROOM_TILE_LABEL = '余力（概算）';
+/** 証拠金のタイルの見出し（#274 で「（概算）」はパネルの見出しの副題に 1 回 = MARGIN_APPROX_SUB） */
+export const MARGIN_TILE_LABEL = '必要証拠金';
+export const ROOM_TILE_LABEL = '余力';
+/** 証拠金のタイルの全文の 1 行目（「概算」を常に出す。#131） */
+export const MARGIN_FULL_LABEL = '必要証拠金（概算）';
+export const ROOM_FULL_LABEL = '余力（概算）';
+/** 見出し行の副題の末尾（証拠金があるとき。#274） */
+export const MARGIN_APPROX_SUB = ' · 証拠金は概算';
 export const MARGIN_GROUP_LABEL = '証拠金（概算・保守寄り）';
 export const MARGIN_TAIL_TITLE = '証拠金（概算。指定日 + シナリオ）';
 /** 資金が未設定のときの余力のタイルの副題 */
@@ -185,10 +186,20 @@ export function marginPointParts(at: MarginPointAt): string[] {
   return out;
 }
 
-/** タイルの見出しの点の文字列（#164。4 つとも 0 なら「今」、他は ` · ` でつなぐ） */
+/**
+ * タイルの見出しの点の文字列（#164。#274 で短い形 = 2 列のタイルで切れない）: 0 でない d・ΔX・Δσ・Δs を `d10`・`−2.2%`
+ * （% が 0 に丸まるなら `+20円`）・`Δσ+3.0`（% の単位なら `Δσ+3.0%`）・`Δs−1.0` にして ` · ` でつなぐ。4 つとも 0 なら「今」
+ */
 export function marginPointText(at: MarginPointAt): string {
-  const parts = marginPointParts(at);
-  return parts.length === 0 ? MARGIN_POINT_NOW_TEXT : parts.join(' · ');
+  const out: string[] = [];
+  if (at.days !== 0) out.push(`d${fmtDays(at.days)}`);
+  if (at.dX !== 0) {
+    const pct = fmtSigned(at.dXPct, 1);
+    out.push(/^0(\.0+)?$/.test(pct) ? `${fmtSigned(at.dX, 0)}円` : `${pct}%`);
+  }
+  if (at.dSigma !== 0) out.push(`Δσ${fmtSigned(at.dSigma, 1)}${at.dSigmaUnit === '%' ? '%' : ''}`);
+  if (at.skew !== 0) out.push(`Δs${fmtSigned(at.skew, 1)}`);
+  return out.length === 0 ? MARGIN_POINT_NOW_TEXT : out.join(' · ');
 }
 
 /** 原資産の点の並び（旧 Metrics と同じ: 無ければ「なし」、` / ` 区切り） */
@@ -255,7 +266,7 @@ function maxLossRows(m: MetricsModel, withX: boolean): FullRow[] {
   return rows;
 }
 
-/** 指定日 + シナリオの d と X の行（内訳と全文で共用） */
+/** 指定日 + シナリオの d と X の行（内訳） */
 function scenarioRows(m: MetricsModel): FullRow[] {
   const sp = m.scenarioPoint;
   return [
@@ -264,7 +275,7 @@ function scenarioRows(m: MetricsModel): FullRow[] {
   ];
 }
 
-/** 合計グリーク（シナリオ点）の 4 行（内訳と全文で共用） */
+/** 合計グリーク（シナリオ点）の 4 行（内訳） */
 function greekRows(m: MetricsModel): FullRow[] {
   const g = m.scenarioPoint.total;
   const A = (v: number) => amountText(v, m.unit, true);
@@ -277,7 +288,7 @@ function greekRows(m: MetricsModel): FullRow[] {
 }
 
 /**
- * 掛け金 / 受取 − 支払の全文（タイルと舞台の読み取りの premium で共用。値は内訳と同じ桁）。
+ * 掛け金 / 受取 − 支払の全文（タイル。値は内訳と同じ桁）。
  * 支払超は掛け金（支払 − 受取 + 手数料）・支払・受取・手数料の合計、受取超は受取 − 支払・受取・支払・手数料の合計
  */
 export function premiumFullRows(p: MetricsModel['premium'], u: AmountUnit): FullRow[] {
@@ -440,7 +451,7 @@ const roomFullRows = (g: MarginGroups): FullRow[] => [
 function marginTiles(mv: MarginView | null, u: AmountUnit): MetricTile[] {
   const ul = AMOUNT_UNIT_LABEL[u];
   if (!mv) {
-    const none = (key: TileKey, k: string): MetricTile => ({
+    const none = (key: TileKey, k: string, fullK: string): MetricTile => ({
       key,
       k,
       at: '',
@@ -448,9 +459,12 @@ function marginTiles(mv: MarginView | null, u: AmountUnit): MetricTile[] {
       unit: '',
       s: '',
       tone: null,
-      full: [{ k, v: DASH }],
+      full: [{ k: fullK, v: DASH }],
     });
-    return [none('margin', MARGIN_TILE_LABEL), none('room', ROOM_TILE_LABEL)];
+    return [
+      none('margin', MARGIN_TILE_LABEL, MARGIN_FULL_LABEL),
+      none('room', ROOM_TILE_LABEL, ROOM_FULL_LABEL),
+    ];
   }
   const g = marginGroups(mv, u);
   const at = `· ${marginPointText(mv.at)}`;
@@ -463,7 +477,7 @@ function marginTiles(mv: MarginView | null, u: AmountUnit): MetricTile[] {
     unit: amountUnitFor(mV, ul),
     s: `今 ${fmtAmount(marginOf(mv.now), u)}`,
     tone: null,
-    full: [{ k: MARGIN_TILE_LABEL, v: amountText(marginOf(mv.point), u) }, ...marginFullRows(g)],
+    full: [{ k: MARGIN_FULL_LABEL, v: amountText(marginOf(mv.point), u) }, ...marginFullRows(g)],
   };
   const room = roomOf(mv.point);
   const rV = mv.capital === null ? DASH : fmtAmount(room, u);
@@ -479,20 +493,19 @@ function marginTiles(mv: MarginView | null, u: AmountUnit): MetricTile[] {
         : `今 ${fmtAmount(roomOf(mv.now), u)} · ${multipleText(mv.now?.multiple ?? null)}`,
     tone: roomTone(room),
     full: [
-      { k: ROOM_TILE_LABEL, v: mv.capital === null ? DASH : amountText(room, u) },
+      { k: ROOM_FULL_LABEL, v: mv.capital === null ? DASH : amountText(room, u) },
       ...roomFullRows(g),
     ],
   };
   return [marginTile, roomTile];
 }
 
-/** タイル 8 枚（§5 の `.tile`。証拠金の 2 枚は #131）。empty なら空 */
+/** タイル 6 枚（§5 の `.tile`。証拠金の 2 枚は #131。#274 で 8 → 6 枚）。empty なら空 */
 export function metricTiles(m: MetricsModel, margin: MarginView | null = null): MetricTile[] {
   if (m.empty) return [];
   const u = m.unit;
   const ul = AMOUNT_UNIT_LABEL[u];
-  const { expiry, scenarioPoint: sp, premium } = m;
-  const g = sp.total;
+  const { expiry, premium } = m;
   const amountTile = (
     key: TileKey,
     k: string,
@@ -561,23 +574,6 @@ export function metricTiles(m: MetricsModel, margin: MarginView | null = null): 
       ],
     },
     prem,
-    amountTile(
-      'scenario',
-      '指定日 + シナリオ',
-      fmtAmount(sp.pnl, u, true),
-      `d ${fmtNum(m.days, 2)} · X ${fmtNum(sp.x)} (${fmtSigned(sp.dXPct, 1)}%)`,
-      [{ k: '指定日 + シナリオ', v: amountText(sp.pnl, u, true) }, ...scenarioRows(m)],
-    ),
-    {
-      key: 'greeks',
-      k: '合計グリーク',
-      at: '',
-      v: `Δ ${fmtSigned(g.deltaLarge, 2)} (${fmtSigned(g.deltaMini, 1)})`,
-      unit: '',
-      s: `Θ ${fmtAmount(g.thetaPerDay, u, true)} · V ${fmtAmount(g.vegaPerPt, u, true)}`,
-      tone: null,
-      full: greekRows(m),
-    },
     ...marginTiles(margin, u),
   ];
 }
@@ -709,11 +705,13 @@ export function metricsPanel(
   margin: MarginView | null = null,
 ): MetricsPanelView {
   const unitSub = unitSubOf(m);
+  const headSub = margin ? `${unitSub}${MARGIN_APPROX_SUB}` : unitSub;
   const breakdownNote = `金額の単位 ${unitSub} · 手数料 ${fmtNum(feePerLot)} 円 / 枚`;
   if (m.empty) {
     return {
       empty: true,
       unitSub,
+      headSub,
       tiles: [],
       breakdown: [],
       breakdownNote,
@@ -730,6 +728,7 @@ export function metricsPanel(
   return {
     empty: false,
     unitSub,
+    headSub,
     tiles: metricTiles(m, margin),
     breakdown: metricsBreakdown(m, margin),
     breakdownNote,

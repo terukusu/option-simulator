@@ -11,10 +11,10 @@ import {
   ASK_WHAT,
   askIvHistory,
   askMarginTail,
-  askReadout,
   askTail,
   askTile,
   docsLine,
+  TILE_TOPIC,
 } from '../../ui/view/aiAsk';
 import { MAX_USER_TEXT } from '../../ui/view/aiChat';
 import { fmtIvPt, ivReadout } from '../../ui/view/ivHistory';
@@ -31,8 +31,6 @@ import { metricsModel } from '../../ui/view/metrics';
 import { MARGIN_TAIL_TITLE, metricsPanel } from '../../ui/view/metricsPanel';
 import { pnlDomains } from '../../ui/view/pnlChart';
 import { positionModel } from '../../ui/view/position';
-import { readoutModel } from '../../ui/view/readout';
-import { bigReadout } from '../../ui/view/stage';
 import { fixture } from '../support/fixtures';
 
 /**
@@ -93,12 +91,6 @@ function marginOf(s: State): MarginView {
 const base = baseOf(strangle);
 const mm = metricsModel({ base, scenario: strangle.scenario, unit: 'auto' });
 const view = metricsPanel(mm, strangle.feePerLot, marginOf(strangle));
-const items = bigReadout(
-  readoutModel({ base, metrics: mm, scenario: strangle.scenario }),
-  mm.premium,
-  base.ctx.evalTime,
-  strangle.scenario.dSigma,
-);
 
 // ---------------------------------------------------------------- 文書の索引（docs.py の parse と同じ規則）
 
@@ -232,14 +224,12 @@ function expectShape(
 }
 
 describe('#136 AC1 質問の文（表示モデルの文字列のまま）', () => {
-  it('タイル 8 枚: 見出し・全文の全部の行（値は表示のまま）・金額の単位・説明の節', () => {
+  it('タイル 6 枚: 見出し・全文の全部の行（値は表示のまま）・金額の単位・説明の節', () => {
     expect(view.tiles.map((t) => t.key)).toEqual([
       'maxProfit',
       'maxLoss',
       'bep',
       'premium',
-      'scenario',
-      'greeks',
       'margin',
       'room',
     ]);
@@ -262,28 +252,13 @@ describe('#136 AC1 質問の文（表示モデルの文字列のまま）', () =
     expect(a.text).toContain('マニュアル 8.4「証拠金（概算）」');
   });
 
-  it('合計グリークの全文の Δ・Γ・Θ・V が入る', () => {
-    const t = view.tiles.find((x) => x.key === 'greeks');
-    if (!t) throw new Error('greeks が無い');
-    const a = askTile(t, view.unitSub);
-    for (const k of ['Γ', 'Θ', 'V']) expect(a.text).toMatch(new RegExp(`- ${k}: `));
-  });
-
-  it('読み取り: 全文のある 4 項目だけ（Θ・V は null）', () => {
-    const asks = items.map((it) => ({ key: it.key, a: askReadout(it) }));
-    expect(asks.filter((x) => x.a !== null).map((x) => x.key)).toEqual([
-      'date',
-      'expiry',
-      'delta',
-      'premium',
-    ]);
-    for (const it of items) {
-      const a = askReadout(it);
-      if (!a || !it.full) continue;
-      expect(a.topic).toBe(`readout.${it.key}`);
-      expectShape(a.text, '損益グラフの読み取り（シナリオ点）', it.label, a.topic);
-      for (const r of it.full) expect(a.text).toContain(r.v);
+  it('#274: 外したタイル・読み取りの場所は画面から送らない（許可リストには古い画面との互換で残る）', () => {
+    const used = new Set(view.tiles.map((t) => TILE_TOPIC[t.key]));
+    for (const t of ['tile.scenario', 'tile.greeks'] as const) {
+      expect(used.has(t)).toBe(false);
+      expect(AI_ASK_TOPICS).toContain(t);
     }
+    expect(Object.values(TILE_TOPIC)).toHaveLength(6);
   });
 
   it('テール表: 5 行の原資産・SQ・指定日 + シナリオと倍率、表の注記', () => {

@@ -137,12 +137,13 @@ export const QUOTE_QUESTIONS: (Question & { text: string; mentions: RegExp })[] 
 
 /** [AI に聞く]（#136）: 質問の文は画面と同じ表示モデルから作る */
 export const ASK_QUESTIONS: (Question & {
-  where: 'tile' | 'readout' | 'tail' | 'iv';
+  where: 'tile' | 'tail' | 'iv';
   key?: string;
 })[] = [
   { id: 'tile-maxloss', case: 'put_sell', where: 'tile', key: 'maxLoss' },
-  { id: 'tile-greeks', case: 'iron_condor', where: 'tile', key: 'greeks' },
-  { id: 'readout-delta', case: 'strangle_sell', where: 'readout', key: 'delta' },
+  // #274: 合計グリークのタイル・読み取りの [AI に聞く] をやめたので、残るタイル（BEP・受取 − 支払）に差し替えた
+  { id: 'tile-bep', case: 'iron_condor', where: 'tile', key: 'bep' },
+  { id: 'tile-premium', case: 'strangle_sell', where: 'tile', key: 'premium' },
   { id: 'tail', case: 'put_sell', where: 'tail' },
   { id: 'iv', case: 'put_sell', where: 'iv' },
 ];

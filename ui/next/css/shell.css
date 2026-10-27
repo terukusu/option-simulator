@@ -179,7 +179,9 @@ section.panel .board-wrap:focus-visible {
 @media (min-width: 1200px) {
   .layout {
     grid-template-columns: minmax(340px, 30%) minmax(0, 1fr) minmax(360px, min(28%, 420px));
-    grid-template-rows: minmax(0, 1fr) minmax(0, 1.3fr) auto;
+    /* 1 行目はポジションの中身の高さ（#274。足が少なければ指標を上へ。上限は下の max-height）。舞台は 1・2 行目に
+       またがるので、舞台の高さはポジションの高さによらない（= 窓 − シナリオ） */
+    grid-template-rows: auto minmax(0, 1fr) auto;
     grid-template-areas:
       "market stage positions"
       "market stage metrics"
@@ -197,7 +199,14 @@ section.panel .board-wrap:focus-visible {
 
   section.positions {
     grid-area: positions;
+    /* 足が多いときは中（.panel-body）だけスクロール。前の 1fr : 1.3fr の割合（作業台の約 43%）に近い上限 */
+    max-height: calc((100dvh - var(--top-h)) * 0.42);
     border-left: 1px solid var(--line);
+  }
+
+  /* 中身の高さを行の高さにする（basis 0% の flex: 1 だと 0% を中身の高さとして扱わない古い WebKit で見出しだけに潰れうる） */
+  section.positions > .panel-body {
+    flex: 1 1 auto;
   }
 
   section.metrics {

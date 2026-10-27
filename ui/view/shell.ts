@@ -163,9 +163,12 @@ export function metricsVisible(s: ShellState, tier: Tier): boolean {
   return tier === 'tablet' || s.sheet !== 'hidden';
 }
 
-/** 追証マップが見えているか（#152。見えている間だけ計算する）: 開いていて、指標のパネルが見えている */
-export function holdMapVisible(s: ShellState, tier: Tier): boolean {
-  return !!s.holdMap && metricsVisible(s, tier);
+/**
+ * 追証マップのマスを計算するか（#274。折りたたみの開閉によらない = 見出しの結論のため）: 指標のパネルが実際に
+ * 見えているとき。metricsVisible（過去の値の先読みの時機）と違い、PC で作業台が AI に替わっている間は計算しない
+ */
+export function holdMapActive(s: ShellState, tier: Tier): boolean {
+  return metricsVisible(s, tier) && !(tier === 'pc' && benchView(s) === 'ai');
 }
 
 /** 舞台のグラフの表示（既定 line） */

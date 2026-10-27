@@ -3,8 +3,8 @@ import { askAi } from './aiAsk';
 import { closeOverlay } from './overlay';
 
 /**
- * [AI に聞く] のボタン（#136。docs/ui-redesign.md §5）。指標のタイル・読み取りの全文の吹き出しの末尾、テール表の見出しの
- * 行、IV 推移のツールの行に置く。質問の文（ui/view/aiAsk.ts）は押したときに make で作る（描くたびに作らない）。
+ * [AI に聞く] のボタン（#136。docs/ui-redesign.md §5）。指標のタイルの全文の吹き出しの末尾（読み取りは #274 でやめた）、
+ * テール表の見出しの行、IV 推移のツールの行に置く。質問の文（ui/view/aiAsk.ts）は押したときに make で作る（描くたびに作らない）。
  * 押すと開いている吹き出しを閉じ（./overlay.ts）、./aiAsk.ts の口へ渡す（NextApp が AI のパネルを開いて送る）。
  * short: 狭い枠では文字を「AI に」に縮める（.ask-long をコンテナクエリで隠す。読み上げ名は常に全文。#277: ドックの
  * [AI]（パネルを開く）と同じ字にしない）

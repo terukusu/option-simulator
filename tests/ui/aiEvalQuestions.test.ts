@@ -28,13 +28,7 @@ describe('問の id', () => {
       'stoch-rsi-4h',
       'ema-trend',
     ]);
-    expect(QUESTION_IDS.ask).toEqual([
-      'tile-maxloss',
-      'tile-greeks',
-      'readout-delta',
-      'tail',
-      'iv',
-    ]);
+    expect(QUESTION_IDS.ask).toEqual(['tile-maxloss', 'tile-bep', 'tile-premium', 'tail', 'iv']);
   });
 
   it('aiEval.mjs の rows.push はどれも id を持つ（文書の問の id は aiEvalDocs.ts）', () => {

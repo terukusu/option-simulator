@@ -792,7 +792,7 @@ describe('性能（#82 AC-8: 舞台の 1 フレーム）', () => {
     const fill = stageFill(m);
     const ms = legMarkers(uiLegs, base, m, { selected: 1, drag: null });
     const r = readoutModel({ base, metrics: mm, scenario });
-    const items = bigReadout(r, mm.premium, base?.ctx.evalTime ?? null, scenario.dSigma);
+    const items = bigReadout(r, base?.ctx.evalTime ?? null);
     return (
       m.lines.length +
       labels.length +
@@ -889,7 +889,7 @@ describe('性能（#83 AC-6: シナリオの 1 回）', () => {
     const fill = stageFill(m);
     const ms = legMarkers(uiLegs, base, m, { selected: 1, drag: null });
     const r = readoutModel({ base, metrics: mm, scenario });
-    const items = bigReadout(r, mm.premium, base?.ctx.evalTime ?? null, scenario.dSigma);
+    const items = bigReadout(r, base?.ctx.evalTime ?? null);
     return (
       views.length +
       (beta.hot ? 1 : 0) +
@@ -1098,7 +1098,7 @@ describe('性能（#86 AC-5: 指標パネル）', () => {
       });
       const mm = metricsModel({ base, scenario, unit: s.metricsUnit });
       const r = readoutModel({ base, metrics: mm, scenario });
-      const items = bigReadout(r, mm.premium, base.ctx.evalTime, scenario.dSigma);
+      const items = bigReadout(r, base.ctx.evalTime);
       return m.lines.length + items.length + panelSize(metricsPanel(mm, s.feePerLot));
     };
     expect(once()).toBeGreaterThan(20);
@@ -1333,7 +1333,7 @@ describe('性能（#88 AC-8: 面モードの 1 フレーム）', () => {
     }
     const ms = legMarkers(uiLegs, base, m, { selected: 1, drag: null });
     const r = readoutModel({ base, metrics: mm, scenario });
-    const items = bigReadout(r, mm.premium, base.ctx.evalTime, scenario.dSigma);
+    const items = bigReadout(r, base.ctx.evalTime);
     return acc + m.lines.length + (h ? 1 : 0) + ms.length + mm.tail.rows.length + items.length;
   }
 
@@ -1423,7 +1423,7 @@ describe('性能（#88 AC-8: 面モードの 1 フレーム）', () => {
     });
     const ms = legMarkers(state10.legs, base10, m, { selected: 1, drag: null });
     const r = readoutModel({ base: base10, metrics: mm, scenario });
-    const items = bigReadout(r, mm.premium, base10.ctx.evalTime, scenario.dSigma);
+    const items = bigReadout(r, base10.ctx.evalTime);
     return (
       acc +
       g.values.length +

@@ -204,11 +204,22 @@ export interface DetailItem {
   field?: 'qty' | 'entry' | 'iv';
 }
 
+/** グリークの 1 行（#274。部品は parts を ` · ` の区切りで並べ、幅が足りなければ項目の境目で折り返す） */
+export interface GreekLine {
+  /** 見出し（`グリーク（シナリオ 0）· 円` / `シナリオ点（足別）· 千円`） */
+  head: string;
+  parts: string[];
+}
+
 export interface LegDetailView {
-  /** 足の項目（商品・売買・枚数・建値・IV・グリーク（シナリオ 0）・建値ずれ・スプレッドコスト・理論価格・SQ 日） */
+  /** 上段の編集の 3 欄（枚数・建値・IV。先物の IV は —） */
+  fields: DetailItem[];
+  /** グリーク（シナリオ 0）の 1 行（Δ ラージ（ミニ）・Γ / 100 円・Θ 円 / 日・V 円 / pt） */
+  greeks: GreekLine;
+  /** 足別のシナリオ点の 1 行（IV・Δ・Γ・Θ・V・状態。求められなければ —） */
+  scenario: GreekLine;
+  /** 残りの項目（商品・限月・売買・建値ずれ・スプレッドコスト・理論価格・SQ 日） */
   items: DetailItem[];
-  /** 足別のシナリオ点（IV・Δ・Γ・Θ・V・状態。求められなければ —） */
-  scenario: DetailItem[];
   /** 印の全文（markLabels・warnings・error。説明文） */
   marks: { text: string; warn: boolean }[];
   /** IV の欄は空欄にできない（手入力の足） */
@@ -229,7 +240,10 @@ function mismatchText(row: PositionRow): string {
   return row.mismatchNote ? fmtSigned(row.mismatchYen, 0) : '0';
 }
 
-/** 行の詳細（項目と書式は旧 Positions の詳細と同じ + スプレッドコスト + 足別のシナリオ点）。 */
+/**
+ * 行の詳細（項目と書式は旧 Positions の詳細と同じ + スプレッドコスト + 足別のシナリオ点）。#274 で上段に編集の 3 欄、
+ * グリーク（シナリオ 0）と足別のシナリオ点をそれぞれ 1 行に畳んだ（2 列の壁にしない）。
+ */
 export function legDetail(
   row: PositionRow,
   scen: LegMetrics | null,
@@ -239,16 +253,7 @@ export function legDetail(
 ): LegDetailView {
   const g = row.greeks;
   const u = AMOUNT_UNIT_LABEL[unit];
-  const items: DetailItem[] = [
-    {
-      key: 'product',
-      label: '商品・限月',
-      value:
-        row.optionType === null
-          ? `${row.productLabel} ${row.month}`
-          : `${row.productLabel} ${row.month} ${row.optionType} ${fmtNum(row.strike)}`,
-    },
-    { key: 'side', label: '売買', value: row.sideLabel },
+  const fields: DetailItem[] = [
     { key: 'qty', label: '枚数', value: String(row.qty), field: 'qty' },
     { key: 'entry', label: '建値', value: String(row.entry), field: 'entry' },
     row.kind === 'option'
@@ -260,14 +265,26 @@ export function legDetail(
           ...(row.ivEdited && { tag: '編集' }),
         }
       : { key: 'iv', label: 'IV %', value: DASH },
+  ];
+  const greeks: GreekLine = {
+    head: 'グリーク（シナリオ 0）· 円',
+    parts: [
+      `Δ ${fmtSigned(g?.deltaLarge, 3)}（ミニ ${fmtSigned(g?.deltaMini, 2)}）`,
+      `Γ ${fmtSigned(g?.gammaPer100, 4)} / 100 円`,
+      `Θ ${fmtSigned(g?.thetaPerDay, 0)} / 日`,
+      `V ${fmtSigned(g?.vegaPerPt, 0)} / pt`,
+    ],
+  };
+  const items: DetailItem[] = [
     {
-      key: 'delta',
-      label: 'Δ ラージ（ミニ）',
-      value: `${fmtSigned(g?.deltaLarge, 3)}（${fmtSigned(g?.deltaMini, 2)}）`,
+      key: 'product',
+      label: '商品・限月',
+      value:
+        row.optionType === null
+          ? `${row.productLabel} ${row.month}`
+          : `${row.productLabel} ${row.month} ${row.optionType} ${fmtNum(row.strike)}`,
     },
-    { key: 'gamma', label: 'Γ / 100 円', value: fmtSigned(g?.gammaPer100, 4) },
-    { key: 'theta', label: 'Θ 円 / 日', value: fmtSigned(g?.thetaPerDay, 0) },
-    { key: 'vega', label: 'V 円 / pt', value: fmtSigned(g?.vegaPerPt, 0) },
+    { key: 'side', label: '売買', value: row.sideLabel },
     {
       key: 'mismatch',
       label: '建値ずれ 円',
@@ -297,37 +314,38 @@ export function legDetail(
   ];
   const d = scen?.display;
   const state = scen ? LEG_STATE_LABEL[scen.state] : '';
-  const scenario: DetailItem[] = [
-    {
-      key: 's-iv',
-      label: 'IV %',
-      value: scen && scen.sigma !== null ? fmtIv(scen.sigma) : DASH,
-    },
-    { key: 's-delta', label: 'Δ ラージ', value: fmtSigned(d?.deltaLarge, 3) },
-    { key: 's-gamma', label: 'Γ / 100 円', value: fmtSigned(d?.gammaPer100, 4) },
-    { key: 's-theta', label: `Θ ${u} / 日`, value: fmtAmount(d?.thetaPerDay, unit, true) },
-    { key: 's-vega', label: `V ${u} / pt`, value: fmtAmount(d?.vegaPerPt, unit, true) },
-  ];
-  // 状態は満期直前・満期・SQ 済み・F なしのときだけ（旧 Metrics の足別と同じ。live は出さない）
-  if (state) scenario.push({ key: 's-state', label: '状態', value: state });
+  const scenario: GreekLine = {
+    head: `シナリオ点（足別）· ${u}`,
+    parts: [
+      `IV ${scen && scen.sigma !== null ? fmtIv(scen.sigma) : DASH}`,
+      `Δ ${fmtSigned(d?.deltaLarge, 3)}`,
+      `Γ ${fmtSigned(d?.gammaPer100, 4)}`,
+      `Θ ${fmtAmount(d?.thetaPerDay, unit, true)} / 日`,
+      `V ${fmtAmount(d?.vegaPerPt, unit, true)} / pt`,
+      // 状態は満期直前・満期・SQ 済み・F なしのときだけ（旧 Metrics の足別と同じ。live は出さない）
+      ...(state ? [state] : []),
+    ],
+  };
   const marks = [
     ...row.markLabels.map((m) => ({ text: m, warn: m === 'IV 不安定' })),
     ...row.warnings.map((w) => ({ text: w, warn: true })),
     ...(row.error ? [{ text: row.error, warn: true }] : []),
   ];
-  return { items, scenario, marks, ivRequired: row.marks.includes('no_board') };
+  return {
+    fields,
+    greeks,
+    scenario,
+    items,
+    marks,
+    ivRequired: row.marks.includes('no_board'),
+  };
 }
 
 // ---------------------------------------------------------------- 見出し行
 
-/** 見出しの副題（`2 本 · 受取 1,575 千円` / `2 本 · 掛け金 …` / `2 本`、0 本は `足なし`）。 */
-export function headSub(rowCount: number, metrics: MetricsModel): string {
-  if (rowCount === 0) return '足なし';
-  const { premium: p, unit } = metrics;
-  const u = AMOUNT_UNIT_LABEL[unit];
-  if (p.stake !== null) return `${rowCount} 本 · 掛け金 ${fmtAmount(p.stake, unit)} ${u}`;
-  if (p.net > 0) return `${rowCount} 本 · 受取 ${fmtAmount(p.net, unit)} ${u}`;
-  return `${rowCount} 本`;
+/** 見出しの副題（`2 本`、0 本は `足なし`）。受取 / 掛け金は指標のタイルに 1 つ（#274） */
+export function headSub(rowCount: number): string {
+  return rowCount === 0 ? '足なし' : `${rowCount} 本`;
 }
 
 // ---------------------------------------------------------------- トーストと [元に戻す]
@@ -551,7 +569,7 @@ function fmtTarget(v: number): string {
   return fmtNum(v, Math.min(3, Math.max(1, frac.length)));
 }
 
-/** デルタヘッジの節（値は hedgeModel の出力のまま）。 */
+/** ヘッジのダイアログの中身（評価点ごとのミニ / ラージの行と注記。値は hedgeModel の出力のまま。#274 で節からダイアログへ）。 */
 export function hedgeSection(model: HedgeModel): HedgeSectionView {
   const cur = model.current;
   const head = `現在 Δ ${cur ? fmtSigned(cur.large, 2) : DASH}（ミニ ${cur ? fmtSigned(cur.mini, 1) : DASH}）→ 目標 ${fmtTarget(model.target)}`;
@@ -608,6 +626,52 @@ export function hedgeSection(model: HedgeModel): HedgeSectionView {
     lines,
     common: commonReason ? HEDGE_REASON_LABEL[commonReason] : null,
     notes,
+  };
+}
+
+export interface HedgeSummaryView {
+  /**
+   * 全文 `現在 Δ −0.06（ミニ −0.6） → ミニ +1 枚`（評価点がシナリオ時点なら `シナリオ時点 Δ …`、目標 ≠ 0 なら
+   * `→ 目標 N · ミニ …`、ミニの段に理由があれば末尾に ` · 理由`）。= delta + ' ' + action + why（title・読み上げ）
+   */
+  text: string;
+  /** 前半（今の Δ。入らなければここだけ省略記号）。共通の理由があれば `現在 Δ … · 理由` の全部 */
+  delta: string;
+  /** 結論 `→ [目標 N · ]ミニ N 枚`（縮めない = 360px でも枚数が読める。#274 再レビュー R5）。共通の理由があれば空 */
+  action: string;
+  /** ミニの段の理由（` · 枚数が上限…`。無ければ空。入らなければ省略記号） */
+  why: string;
+  /** [追加] に使うミニの行（全行に共通の理由があれば null = [追加] を出さない） */
+  line: HedgeLineView | null;
+  /** 理由（共通・ミニの段）があって枚数を出せない */
+  warn: boolean;
+}
+
+/**
+ * デルタヘッジの常設の 1 行（#274。docs/ui-redesign.md §3）: 足 0 本は null（行ごと出さない）。ミニの枚数と [追加] だけを
+ * 出し、評価点の切替・ラージ・注記・目標・限月はヘッジのダイアログ（[⋯]）。文の値は hedgeSection と同じ書式
+ */
+export function hedgeSummary(model: HedgeModel, legCount: number): HedgeSummaryView | null {
+  if (legCount === 0) return null;
+  const v = hedgeSection(model);
+  const cur = model.current;
+  // Δ はラージ換算とミニ換算の両方（数値の約束）
+  const delta = `${model.at === 'scenario' ? 'シナリオ時点' : '現在'} Δ ${cur ? `${fmtSigned(cur.large, 2)}（ミニ ${fmtSigned(cur.mini, 1)}）` : DASH}`;
+  if (v.common !== null) {
+    const all = `${delta} · ${v.common}`;
+    return { text: all, delta: all, action: '', why: '', line: null, warn: true };
+  }
+  const mini = v.lines.find((l) => l.product === 'fut_mini') ?? null;
+  const goal = model.target === 0 ? '' : `目標 ${fmtTarget(model.target)} · `;
+  const action = `→ ${goal}ミニ ${mini ? mini.lots : DASH}`;
+  const why = mini?.reason ? ` · ${mini.reason}` : '';
+  return {
+    text: `${delta} ${action}${why}`,
+    delta,
+    action,
+    why,
+    line: mini,
+    warn: mini?.reason != null,
   };
 }
 

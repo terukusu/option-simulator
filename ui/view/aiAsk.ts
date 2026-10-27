@@ -12,8 +12,11 @@
 
 import { DASH } from './format';
 import type { FullRow, MetricsPanelView, MetricTile, TileKey } from './metricsPanel';
-import type { BigReadoutItem, BigReadoutKey } from './stage';
 
+/**
+ * tile.scenario・tile.greeks・readout.* は #274 で画面から送らなくなった（タイル 6 枚・読み取りは押せない）。中継の許可リストと
+ * 同じ並びのまま残す（開いたままの古い画面からの要求を拒まない）
+ */
 export const AI_ASK_TOPICS = [
   'tile.maxProfit',
   'tile.maxLoss',
@@ -103,7 +106,6 @@ export function docsLine(topic: AiAskTopic): string {
 }
 
 const PANEL_METRICS = '指標 · テール';
-const PANEL_READOUT = '損益グラフの読み取り（シナリオ点）';
 const PANEL_IV = 'IV 推移';
 
 /** 全文の行 → 箇条（続きの行（見出しが空）は前の行の続き） */
@@ -134,8 +136,6 @@ export const TILE_TOPIC: Record<TileKey, AiAskTopic> = {
   maxLoss: 'tile.maxLoss',
   bep: 'tile.bep',
   premium: 'tile.premium',
-  scenario: 'tile.scenario',
-  greeks: 'tile.greeks',
   margin: 'tile.margin',
   room: 'tile.room',
 };
@@ -146,21 +146,6 @@ export function askTile(t: MetricTile, unitSub: string): AiAsk {
     ? `画面の表示（金額の単位: ${unitSub}・値の点: ${t.at.replace(/^·\s*/, '')}）:`
     : `画面の表示（金額の単位: ${unitSub}）:`;
   return compose(TILE_TOPIC[t.key], PANEL_METRICS, t.k, head, rowLines(t.full));
-}
-
-/** 読み取りの場所（全文のある項目だけ） */
-export const READOUT_TOPIC: Partial<Record<BigReadoutKey, AiAskTopic>> = {
-  date: 'readout.date',
-  expiry: 'readout.expiry',
-  delta: 'readout.delta',
-  premium: 'readout.premium',
-};
-
-/** 舞台の読み取り（全文のある項目だけ。theta・vega・空は null） */
-export function askReadout(it: BigReadoutItem): AiAsk | null {
-  const topic = READOUT_TOPIC[it.key];
-  if (!topic || !it.full) return null;
-  return compose(topic, PANEL_READOUT, it.label, '画面の表示:', rowLines(it.full));
 }
 
 /** 金額の単位の文字（`千円（自動）` → `千円`） */
