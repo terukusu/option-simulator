@@ -96,7 +96,11 @@ export interface PillFull {
   rows: PillRow[];
   reasonNote: string | null;
   months: PillMonth[];
-  assumptions: { text: string; warn: boolean }[];
+  /**
+   * カレンダー期限切れの警告の文（headerModel.calendarWarning。期限内・板なしは null）。前提の一覧（金利・評価時刻・
+   * カレンダー）は設定の末尾の「前提」にあるのでポップオーバーには出さない（#279 V-06）
+   */
+  calendarWarning: string | null;
   /** 旧 Header の ⓘ「計算の前提」の文（板があるときだけ） */
   hint: string | null;
   loaderNote: string | null;
@@ -201,7 +205,7 @@ function fullModel(header: HeaderModel | null, curId: string | null, load: PillL
       rows: [],
       reasonNote: null,
       months: [],
-      assumptions: [],
+      calendarWarning: null,
       hint: null,
       loaderNote,
       error,
@@ -253,7 +257,7 @@ function fullModel(header: HeaderModel | null, curId: string | null, load: PillL
       atm: m.atm,
       noAtm: m.noAtm,
     })),
-    assumptions: header.assumptions.map((a) => ({ text: a, warn: a === header.calendarWarning })),
+    calendarWarning: header.calendarWarning,
     hint: ASSUMPTION_HINT_TEXT,
     loaderNote,
     error,

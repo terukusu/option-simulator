@@ -90,7 +90,8 @@ function SmileView(p: SmileRegionProps) {
 
   return (
     <>
-      <PanelHead title="スマイル">
+      {/* 見出しの文字は読み上げだけ（Seg の「スマイル」が見出しを兼ねる。1440 の市場の列で `スマ…` に切れた。#279 D-06） */}
+      <PanelHead title="スマイル" titleHidden>
         {/* biome-ignore lint/a11y/useSemanticElements: fieldset は既定の枠・余白と flex の癖があるので div + role="group"（Seg と同じ） */}
         <div class="seg zoom" role="group" aria-label="拡大">
           <button type="button" aria-label="縮小" disabled={empty} onClick={() => zoomBy(2)}>

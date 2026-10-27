@@ -118,8 +118,6 @@ describe('AC-4(b) 凡例', () => {
     const items = smileLegend('B', null);
     expect(items.map((i) => i.text)).toEqual([
       '● mid',
-      '● bid',
-      '● ask',
       '─ 節点',
       '┄ 補間・外挿',
       '× IV 不安定',
@@ -131,8 +129,8 @@ describe('AC-4(b) 凡例', () => {
     const items = smileLegend('A', 67500);
     expect(items.at(-1)).toEqual({
       key: 'atm2',
-      text: '┆ シナリオ ATM 67,500',
-      short: '┆シナリオ',
+      text: '│ シナリオ ATM 67,500',
+      short: '│シナリオ',
       cls: SMILE_LINE_CLASS.scenario,
     });
     expect(items.at(-2)?.text).toBe('┆ ATM（A）');
@@ -144,16 +142,25 @@ describe('レビュー S2 凡例は隠さず短くする', () => {
     const items = smileLegend('B', 67500);
     expect(items.map((i) => i.short)).toEqual([
       '●mid',
-      '●bid',
-      '●ask',
       '─節点',
       '┄補間',
       '×不安定',
       '┆ATM',
-      '┆シナリオ',
+      '│シナリオ',
     ]);
     for (const i of items) expect(i.short.length).toBeLessThanOrEqual(i.text.length);
-    for (const s of ['mid', '節点', '補間・外挿', 'IV 不安定', 'ATM', 'シナリオ ATM']) {
+    // bid / ask は凡例に出さず（板と同じ色。#279 D-07）、意味は ⓘ に残す
+    expect(items.some((i) => i.key === 'bid' || i.key === 'ask')).toBe(false);
+    for (const s of [
+      'mid',
+      'bid',
+      'ask',
+      '節点',
+      '補間・外挿',
+      'IV 不安定',
+      'ATM',
+      'シナリオ ATM',
+    ]) {
       expect(SMILE_LEGEND_HINT).toContain(s);
     }
   });

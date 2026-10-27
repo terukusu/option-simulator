@@ -62,7 +62,10 @@ function Summary({ m, tier, noTag }: { m: MarketPillModel; tier: Tier; noTag: bo
   );
 }
 
-/** ポップオーバーの中身（旧 Header の全部 + 前提の ⓘ の文 + 表示中 + 失敗の詳細）。値はすべて JSX のテキスト */
+/**
+ * ポップオーバーの中身（旧 Header の全部 + 前提の ⓘ の文 + 表示中 + 失敗の詳細）。値はすべて JSX のテキスト。
+ * 前提の一覧は設定の末尾にあるので出さず、カレンダー期限切れの警告の文だけ（#279 V-06）
+ */
 function Full({ f }: { f: PillFull }) {
   return (
     <div class="pill-full">
@@ -111,18 +114,7 @@ function Full({ f }: { f: PillFull }) {
           </p>
         </section>
       ))}
-      {f.assumptions.length > 0 && (
-        <>
-          <p class="pf-sub">前提</p>
-          <ul class="pf-list">
-            {f.assumptions.map((a) => (
-              <li key={a.text} class={a.warn ? 'warn' : undefined}>
-                {a.text}
-              </li>
-            ))}
-          </ul>
-        </>
-      )}
+      {f.calendarWarning && <p class="pf-note warn">{f.calendarWarning}</p>}
       {f.hint && <p class="pf-note">{f.hint}</p>}
       {f.loaderNote && <p class="pf-note">{f.loaderNote}</p>}
       {f.error && (

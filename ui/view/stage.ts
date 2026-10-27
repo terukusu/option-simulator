@@ -295,6 +295,11 @@ const MARK_FONT_RATIO = 1.15;
 const MARK_HALF_H = 7;
 /** 線・他のラベルを避けるときに試す縦のずれの刻み（px。近い順に描画域の高さまで） */
 const MARK_STEP = 9;
+/**
+ * ラベルの箱と線（満期・指定日・今日）の間に空ける縦の間隔（px）。文字の縁取り（3px の --s1）が線を削って見えないように
+ * （#279 V-03）。他のラベル・避ける箱には足さない
+ */
+export const MARK_LINE_CLEAR = 3;
 /** 元の位置から近いとみなす縦のずれ（px）。この中で見つからなければ、縦線の反対側も同じ近さで試してから遠くへ */
 const MARK_NEAR = 45;
 
@@ -339,7 +344,7 @@ function lineCrosses(l: LinePx, x0: number, x1: number, y0: number, y1: number):
 
 /**
  * 交点のラベルの位置（§8）: ハンドルから 16px 離し（各ラベルの x を向きに 12px 足す。描画域から出るならそのまま）、
- * 縦は線（満期・指定日・今日）と他のラベルに重ならない位置を探す。順は (1) 同じ側で元の位置から ±45px（9px 刻み・近い順）
+ * 縦は線（満期・指定日・今日。線とは MARK_LINE_CLEAR 空ける）と他のラベルに重ならない位置を探す。順は (1) 同じ側で元の位置から ±45px（9px 刻み・近い順）
  * (2) 縦線の反対側で同じ範囲 (3) 描画域の高さまで広げて同じ側・反対側を近い順。反対側は描画域に入るときだけ。
  * 見つからなければ他のラベルと重ならない位置、それも無ければ元の位置。文言は同じ（scenarioMarks の出力は変えない）。
  * obstacles（IV レールの吹き出しの箱など）は他のラベルと同じく必ず避ける。
@@ -426,7 +431,15 @@ export function stageMarkLabels(
       if (clashes(x0, x1, c.y)) return false;
       return (
         !withLines ||
-        !lines.some((l) => lineCrosses(l, x0, x1, c.y - MARK_HALF_H, c.y + MARK_HALF_H))
+        !lines.some((l) =>
+          lineCrosses(
+            l,
+            x0,
+            x1,
+            c.y - MARK_HALF_H - MARK_LINE_CLEAR,
+            c.y + MARK_HALF_H + MARK_LINE_CLEAR,
+          ),
+        )
       );
     };
     const pick = cands.find((c) => ok(c, true)) ??

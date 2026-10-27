@@ -222,7 +222,7 @@ describe('marketPill の要約', () => {
         m.refB.time,
         m.atm,
       ]),
-      ...h.assumptions,
+      h.calendarWarning ?? '',
       ASSUMPTION_HINT_TEXT,
       '表示中: pre_open.json',
       error.message,
@@ -234,10 +234,27 @@ describe('marketPill の要約', () => {
       expect(s).not.toBe('');
       expect(text).toContain(s);
     }
-    expect(p.full.assumptions.find((a) => a.warn)?.text).toBe(h.calendarWarning);
+    expect(p.full.calendarWarning).toBe(h.calendarWarning);
     expect(p.full.months.filter((m) => m.current).map((m) => m.id)).toEqual([h.months[0]?.id]);
     expect(h.source).not.toBeNull();
     expect(text).toContain(h.source ?? '');
+  });
+
+  it('#279 V-06 前提の一覧（金利・評価時刻）は出さず（設定の末尾にある）、カレンダー期限切れの警告の文だけ', () => {
+    const chain = normalizeChain(fixture('latest'));
+    const ok = headerModel(chain, 'B', CALENDAR);
+    const p = marketPill(ok, null, IDLE);
+    const text = fullText(p);
+    for (const a of ok.assumptions) expect(text).not.toContain(a);
+    expect(p.full.calendarWarning).toBeNull();
+    const cal = buildCalendar({ ...bundledJson, covered_until: '2026-10-12' }, 'bundled');
+    const expired = headerModel(chain, 'B', cal);
+    const q = marketPill(expired, null, IDLE);
+    expect(expired.calendarWarning).not.toBeNull();
+    expect(q.full.calendarWarning).toBe(expired.calendarWarning);
+    for (const a of expired.assumptions) {
+      if (a !== expired.calendarWarning) expect(fullText(q)).not.toContain(a);
+    }
   });
 
   it('全文の欠損: 取得・データ元・理由の行が無ければ出さない', () => {

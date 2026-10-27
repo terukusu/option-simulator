@@ -510,10 +510,10 @@ section.stage > .panel-body.stage-main {
   stroke-dasharray: 2 3;
 }
 
+/* シナリオ ATM: --pin2 の細い実線（スマイルの .smile-wrap .atm2 と同じ。#279） */
 .chart .atm2 {
   stroke: var(--pin2);
   stroke-width: 1;
-  stroke-dasharray: 2 3;
 }
 
 /* 追証の線（#131。資金を設定したときだけ。余力 = 0 の X。操作中は隠れ、止まって 120ms で出る） */

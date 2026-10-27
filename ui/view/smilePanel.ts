@@ -9,7 +9,7 @@ import { type FairView, fairView } from './fairValue';
 import { fmtIv, fmtNum } from './format';
 import { smilePickRow } from './smile';
 
-/** 縦線の種類（CSS: ATM = --handle の破線、シナリオ ATM = --pin2 の点線、選択 = --ink） */
+/** 縦線の種類（CSS: ATM = --ink-3 の点線、シナリオ ATM = --pin2 の細い実線（舞台と同じ）、選択 = --ink。#279） */
 export const SMILE_LINE_CLASS = { atm: 'atm', scenario: 'atm2', pick: 'sel' } as const;
 
 /** 操作行の未選択の案内 */
@@ -83,7 +83,8 @@ export interface SmileLegendItem {
 }
 
 /**
- * 凡例（ΔX ≠ 0 = シナリオ ATM の K があれば、ATM の後にシナリオ ATM）。売りの効率の線（#163）を重ねているとき（eff）は
+ * 凡例（ΔX ≠ 0 = シナリオ ATM の K があれば、ATM の後にシナリオ ATM）。bid / ask の点は板の気配と同じ色なので凡例に
+ * 出さない（意味は ⓘ の SMILE_LEGEND_HINT。#279 D-07）。売りの効率の線（#163）を重ねているとき（eff）は
  * 最後に効率の線（シナリオの点 = 実線、今の線があれば（eff.now）今 = 破線。#259 S-1）
  */
 export function smileLegend(
@@ -93,8 +94,6 @@ export function smileLegend(
 ): SmileLegendItem[] {
   const items: SmileLegendItem[] = [
     { key: 'mid', text: '● mid', short: '●mid', cls: 'mid' },
-    { key: 'bid', text: '● bid', short: '●bid', cls: 'bid' },
-    { key: 'ask', text: '● ask', short: '●ask', cls: 'ask' },
     { key: 'node', text: '─ 節点', short: '─節点', cls: 'node' },
     { key: 'interp', text: '┄ 補間・外挿', short: '┄補間', cls: 'interp' },
     { key: 'x', text: '× IV 不安定', short: '×不安定', cls: 'x' },
@@ -103,8 +102,8 @@ export function smileLegend(
   if (scenarioAtmK !== null) {
     items.push({
       key: 'atm2',
-      text: `┆ シナリオ ATM ${fmtNum(scenarioAtmK, 0)}`,
-      short: '┆シナリオ',
+      text: `│ シナリオ ATM ${fmtNum(scenarioAtmK, 0)}`,
+      short: '│シナリオ',
       cls: SMILE_LINE_CLASS.scenario,
     });
   }
@@ -121,7 +120,7 @@ export const SMILE_HINT =
 
 /** ⓘ の印の意味（凡例は狭い列で短い形になるので全文はここ） */
 export const SMILE_LEGEND_HINT =
-  '● mid / bid / ask = OTM 側の IV · ─ 節点の区間 · ┄ 補間・外挿の区間 · × IV 不安定 · ┆ ATM（基準 A / B） · ┆ シナリオ ATM（ΔX ≠ 0 のとき） · ─ 効率（シナリオ点）/ ┄ 効率（今）= [効率] の売りの効率の線（右の目盛り %）';
+  '● mid / bid / ask = OTM 側の IV · ─ 節点の区間 · ┄ 補間・外挿の区間 · × IV 不安定 · ┆ ATM（基準 A / B） · │ シナリオ ATM（ΔX ≠ 0 のとき。損益グラフと同じ線） · ─ 効率（シナリオ点）/ ┄ 効率（今）= [効率] の売りの効率の線（右の目盛り %）';
 
 /** 描画域の操作の説明（今の Smile の aria-label） */
 export const SMILE_PLOT_LABEL =

@@ -850,7 +850,8 @@ describe('追証の線（#131 AC16）', () => {
         viewport,
         pnlY: DEFAULT_PNL_Y,
         plotWidth: 600,
-        plotHeight: 220,
+        // 交点のラベルが札の高さに来る大きさ（#279 で線から 3px 空けたので 220 → 200。避けないと重なる形を保つ）
+        plotHeight: 200,
         marginLine: [line],
       });
     const hits = (
