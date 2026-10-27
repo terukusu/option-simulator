@@ -72,7 +72,7 @@ def test_presets_has_each_preset_section():
     from simulator_api.ai import allowlist
 
     text = skills.skill_path("presets").read_text(encoding="utf-8")
-    names = ("崩れ方", "反論", "板の前提", "ヘッジ案", "出口", "今の IV は売り時？")
+    names = ("崩れ方", "反論", "板の前提", "ヘッジ案", "出口", "IV の位置")
     assert len(names) == len(allowlist.PRESET_TOPICS)
     for name in names:
         assert f"\n## {name}\n" in text
