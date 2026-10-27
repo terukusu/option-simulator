@@ -25,7 +25,7 @@ describe('#140 AC1 定型の質問の表', () => {
       '板の前提',
       'ヘッジ案',
       '出口',
-      '今の IV は売り時？',
+      'IV の位置',
     ]);
   });
 
@@ -45,7 +45,7 @@ describe('#140 AC1 定型の質問の表', () => {
     }
   });
 
-  it('[反論] は理由を三つ、[今の IV は売り時？] は材料だけ（判断は本人）を頼む', () => {
+  it('[反論] は理由を三つ、[IV の位置] は材料だけ（判断は本人）を頼む', () => {
     const by = new Map(AI_PRESETS.map((p) => [p.id, p.text]));
     expect(by.get('rebut')).toContain('三つ');
     expect(by.get('iv')).toContain('材料');

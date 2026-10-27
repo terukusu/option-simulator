@@ -19,8 +19,11 @@ import {
   DIAGNOSE_TEXT,
   decodeAiChat,
   diagnoseBlocked,
+  diagnoseProminent,
   encodeAiChat,
   footReason,
+  HOLD_END_RATIO,
+  holdAfterDone,
   INITIAL_AI_CHAT,
   MAX_MESSAGES,
   MAX_TOOL_ROUNDS,
@@ -37,6 +40,14 @@ import {
 import { checkNumbers } from '../../ui/view/aiNumbers';
 import { AI_PRESETS, presetBlocked } from '../../ui/view/aiPresets';
 import { toolCard } from '../../ui/view/aiTools';
+
+/** Node の fs（@types/node を足さないため型はここで最小限に書く。tests/ui/aiAsk.test.ts と同じ） */
+const fs = (
+  globalThis as unknown as {
+    process: { getBuiltinModule(id: 'node:fs'): { readFileSync(p: URL, enc: 'utf8'): string } };
+  }
+).process.getBuiltinModule('node:fs');
+const read = (p: string) => fs.readFileSync(new URL(`../../${p}`, import.meta.url), 'utf8');
 
 /**
  * #135 AC8: AI のチャットの状態（ui/view/aiChat.ts）。送信・イベント・ツールの往復・失敗・中止・保存の形・押せない理由。
@@ -865,5 +876,109 @@ describe('#140 照合の出所: 利用者の発言の数と AI のツールの�
       ),
     );
     expect(checkNumbers('−1,000 千円・−3,000 千円', src).unmatched).toBe(2);
+  });
+});
+
+describe('#277 AI パネルの整理（利用者の画面に常に出る開発者向けの要素は残りだけ）', () => {
+  /** 2 回目: thinking → ツール → 結果 → thinking → 返答（ツールの往復で thinking が 2 つ） */
+  const twoRounds = (() => {
+    const s1 = run(
+      first,
+      { type: 'begin', kind: 'chat', text: '−6% なら？', now: 2000 },
+      { type: 'send', context: CTX(0), key: 'k0' },
+      ev({
+        type: 'done',
+        stop_reason: 'tool_use',
+        content: [
+          { type: 'thinking', thinking: '計算を頼む', signature: 'c2ln' },
+          { type: 'tool_use', id: 't1', name: 'evaluate_scenario', input: { dx_pct: -6 } },
+        ],
+        remaining_usd: 2.4,
+      }),
+    );
+    return aiChatReduce(s1, {
+      type: 'toolResults',
+      blocks: [
+        {
+          type: 'tool_result',
+          tool_use_id: 't1',
+          content: [{ type: 'text', text: '{"pnl_yen":-1}' }],
+        },
+      ],
+    });
+  })();
+  const kinds = (s: AiChatState) => chatGroups(chatItems(s)).map((g) => g.items.map((i) => i.kind));
+
+  it('考えた要約は 1 返答に 1 つ（ツールの往復の thinking を最初の位置に段落でつなぐ）', () => {
+    const streaming = run(
+      twoRounds,
+      { type: 'send', context: CTX(0), key: 'k0' },
+      ev({ type: 'thinking', text: '結果を読む' }),
+    );
+    // 流れの間: 前の往復の thinking に流れの thinking をつなぐ（key は最初の thinking のまま）
+    const live = chatGroups(chatItems(streaming)).at(-1)?.items ?? [];
+    expect(live.map((i) => i.kind)).toEqual(['user', 'thinking', 'tool']);
+    expect(live[1]).toMatchObject({ text: '計算を頼む\n\n結果を読む', live: true, key: 'm3b0' });
+    const done = aiChatReduce(
+      streaming,
+      ev({
+        type: 'done',
+        stop_reason: 'end_turn',
+        content: [
+          { type: 'thinking', thinking: '結果を読む', signature: 'c2ln' },
+          { type: 'text', text: '−6% で −1 円' },
+        ],
+        remaining_usd: 2.3,
+      }),
+    );
+    expect(kinds(done)).toEqual([
+      ['user', 'thinking', 'answer'],
+      ['user', 'thinking', 'tool', 'answer'],
+    ]);
+    const th = chatGroups(chatItems(done))[1]?.items[1];
+    expect(th).toMatchObject({
+      kind: 'thinking',
+      text: '計算を頼む\n\n結果を読む',
+      live: false,
+      key: 'm3b0',
+    });
+    // 発言ごとに 1 つ（前の発言の thinking とはつながない）
+    for (const g of chatGroups(chatItems(done)))
+      expect(g.items.filter((i) => i.kind === 'thinking')).toHaveLength(1);
+  });
+
+  it('今日の残りは出したまま（オーナー判断 2026-10-27）', () => {
+    expect(remainingText(STATUS, 2.3)).toBe('残り $2.30 / $3.00');
+  });
+
+  it('[このポジションを診断] の大きいボタンは会話が空のときだけ（以後は定型の質問の先頭のチップ）', () => {
+    expect(diagnoseProminent(chatItems(INITIAL_AI_CHAT))).toBe(true);
+    expect(diagnoseProminent(chatItems(first))).toBe(false);
+    const noBoard = run(
+      INITIAL_AI_CHAT,
+      { type: 'begin', kind: 'chat', text: '日数', now: 3 },
+      { type: 'fail', code: 'no_board' },
+    );
+    expect(diagnoseProminent(chatItems(noBoard))).toBe(false);
+  });
+
+  it('#263 の空白: 返答の後、塊の中身が枠の 55% 未満なら下詰めを縮める（それ以上は上端に合わせたまま）', () => {
+    expect(HOLD_END_RATIO).toBe(0.55);
+    expect(holdAfterDone(200, 700)).toBe('end');
+    expect(holdAfterDone(0.55 * 700 - 1, 700)).toBe('end');
+    expect(holdAfterDone(0.55 * 700, 700)).toBe('true');
+    expect(holdAfterDone(900, 700)).toBe('true');
+    // 枠が見えない（高さ 0）ときは縮めない
+    expect(holdAfterDone(10, 0)).toBe('true');
+  });
+
+  it('[評価に残す] は返答の末尾の ⋯（details.ai-more）の中だけ', () => {
+    const src = read('ui/next/regions/AiChat.tsx');
+    const at = src.indexOf('{AI_EVAL_KEEP_LABEL}');
+    expect(at).toBeGreaterThan(0);
+    expect(src.indexOf('AI_EVAL_KEEP_LABEL}')).toBe(src.lastIndexOf('AI_EVAL_KEEP_LABEL}'));
+    const open = src.lastIndexOf('<details class="ai-more">', at);
+    expect(open).toBeGreaterThan(0);
+    expect(src.slice(open, at)).not.toContain('</details>');
   });
 });

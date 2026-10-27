@@ -146,6 +146,8 @@
 //                                          偽の返答）、縦・横 0px。AI が無効なら送らずに入力欄に質問の文と理由。
 //                                          #263: 送った吹き出しの上端が枠の内側の上端 ±4px（送った直後と返答の後）・返答の
 //                                          流れる間の枠の scrollTop の変化 ≤ 1px（末尾に追従しない）
+//                                          #277: 返答の後の空白が枠の内側の半分以下（返答が短く下詰めを縮めた
+//                                          data-hold="end" のときだけ、返答の後の上端の下がりは枠の 55% まで）
 //   --ai                                   #135・#136 の項目だけ（既定の検査・--flows とも。手元の確かめ用）。
 //                                          #242 のツールの結果を待つ間のカードは --ai（--flows なし）でだけ
 //   --cross                                #217 の十字線の項目だけ（既定の検査・--flows とも。--flows は #201・#130・#207 のタッチの流れも。手元の確かめ用）
@@ -10912,7 +10914,8 @@ async function aiCheck(page, label, w) {
       remainingOk: inWin(sub) && !cut(sub),
       diagnose: inWin(sec?.querySelector('button[data-ai="diagnose"]')),
       presets: inWin(sec?.querySelector('[data-ai="presets"]')),
-      presetChips: sec?.querySelectorAll('[data-ai="presets"] .chip').length ?? 0,
+      presetChips:
+        sec?.querySelectorAll('[data-ai="presets"] .chip:not([data-ai="diagnose"])').length ?? 0,
       presetsOver: (() => {
         const row = sec?.querySelector('[data-ai="presets"]');
         return !!row && row.scrollWidth > row.clientWidth + 0.5;
@@ -10959,10 +10962,17 @@ async function aiDiagnoseDone(page) {
  * 書いて OK → ai-eval-*.json がダウンロードされ、版 1 の形・メモ・発言の列（診断）・作り直しの材料（板・ポジション）を持つ
  */
 async function aiKeepCheck(page, tag) {
-  const btn = page.locator('section.ai .ai-msg.answer button[data-ai="keep"]').last();
+  // #277: [評価に残す] は返答の末尾の ⋯ の中（開くまで見えない）
+  const more = page.locator('section.ai .ai-msg.answer details.ai-more').last();
+  const btn = more.locator('button[data-ai="keep"]');
+  const bad = [];
+  if (await btn.isVisible().catch(() => false)) bad.push('⋯ を開く前から見える');
+  await more
+    .locator('summary')
+    .click()
+    .catch(() => bad.push('⋯ が無い'));
   const box = await btn.boundingBox().catch(() => null);
   const vw = page.viewportSize()?.width ?? 0;
-  const bad = [];
   if (!box) bad.push('ボタンが無い');
   else if (box.x < 0 || box.x + box.width > vw + 0.5) bad.push('ボタンが窓の外');
   if (box) {
@@ -11217,11 +11227,12 @@ const askButtonInfo = (page, sel) =>
 
 /**
  * #263: 送った吹き出しが会話に入ってから、フレームごとに .ai-body の scrollTop と、吹き出しの上端と枠の内側の上端
- * （枠の上端 + 内側の余白）の差を採る（枠が見えている間だけ）。止めると { tops, gaps } を返す
+ * （枠の上端 + 内側の余白）の差を採る（枠が見えている間だけ。scrollTop と flowGaps は進み具合がある間だけ）。止めると
+ * { tops, gaps, flowGaps, hold, blank, frame } を返す
  */
 const watchSentScroll = (page, n) =>
   page.evaluate((n) => {
-    const rec = { tops: [], gaps: [], stop: false };
+    const rec = { tops: [], gaps: [], flowGaps: [], stop: false };
     window.__aiSentScroll = rec;
     const tick = () => {
       if (rec.stop) return;
@@ -11231,8 +11242,13 @@ const watchSentScroll = (page, n) =>
         const u = users[users.length - 1];
         const pad = Number.parseFloat(getComputedStyle(body).paddingTop) || 0;
         const top = body.getBoundingClientRect().top + body.clientTop + pad;
-        rec.tops.push(body.scrollTop);
-        rec.gaps.push(u.getBoundingClientRect().top - top);
+        // scrollTop は流れの間（進み具合がある間）だけ。終わった後の下詰めの縮み（#277）は gaps と空白で見る
+        const gap = u.getBoundingClientRect().top - top;
+        if (document.querySelector('section.ai .ai-progress')) {
+          rec.tops.push(body.scrollTop);
+          rec.flowGaps.push(gap);
+        }
+        rec.gaps.push(gap);
       }
       requestAnimationFrame(tick);
     };
@@ -11240,10 +11256,51 @@ const watchSentScroll = (page, n) =>
   }, n);
 const stopSentScroll = (page) =>
   page.evaluate(() => {
-    const rec = window.__aiSentScroll ?? { tops: [], gaps: [] };
+    const rec = window.__aiSentScroll ?? { tops: [], gaps: [], flowGaps: [] };
     rec.stop = true;
-    return { tops: rec.tops, gaps: rec.gaps };
+    // #277: 返答の後の最後の塊の下詰め（data-hold）と、枠の内側の高さに対する返答の後の空白の割合
+    const body = document.querySelector('section.ai .ai-body');
+    const tail = body?.querySelector('.ai-tail[data-last]');
+    const end = tail?.lastElementChild;
+    let blank = Number.NaN;
+    let frame = Number.NaN;
+    if (body && end && body.clientHeight > 0) {
+      const cs = getComputedStyle(body);
+      const pt = Number.parseFloat(cs.paddingTop) || 0;
+      const pb = Number.parseFloat(cs.paddingBottom) || 0;
+      frame = body.clientHeight - pt - pb;
+      const bottom = body.getBoundingClientRect().top + body.clientTop + pt + frame;
+      blank = Math.max(0, bottom - end.getBoundingClientRect().bottom) / frame;
+    }
+    return {
+      tops: rec.tops,
+      gaps: rec.gaps,
+      flowGaps: rec.flowGaps,
+      hold: tail?.getAttribute('data-hold') ?? null,
+      blank,
+      frame,
+    };
   });
+
+/**
+ * #263・#277: 送った吹き出しの上端が送った直後に枠の内側の上端 ±4px、流れの間の scrollTop の変化 ≤ 1px、返答の後も
+ * 上端 ±4px（返答が短く下詰めを縮めた data-hold="end" のときだけ、下がりは枠の 55% まで）、返答の後の空白が枠の半分以下
+ */
+function sentKept(sc) {
+  const span = sc.tops.length > 0 ? Math.max(...sc.tops) - Math.min(...sc.tops) : Number.NaN;
+  // 送った直後 = 流れの最初のフレーム（[もう一度] の前の失敗の行の吹き出しは、返答の後の下詰めで上端からずれうる）
+  const g0 = sc.flowGaps[0] ?? sc.gaps[0] ?? Number.NaN;
+  const g1 = sc.gaps.at(-1) ?? Number.NaN;
+  const after =
+    sc.hold === 'end'
+      ? // 縮めたときは下に 45cqh だけ空ける = 空白は 45% 前後（余白・間隔の分だけ多い）
+        g1 >= -4 && g1 <= 0.55 * sc.frame + 4 && sc.blank >= 0.4
+      : Math.abs(g1) <= 4;
+  const ok = Math.abs(g0) <= 4 && span <= 1 && after && sc.blank <= 0.5;
+  const px = (v) => (Number.isFinite(v) ? v.toFixed(1) : '—');
+  const detail = `送った吹き出しの上端 ${px(g0)} → ${px(g1)}px（data-hold ${sc.hold}）・流れの間の scrollTop の変化 ${px(span)}px（${sc.tops.length} フレーム）・返答の後の空白 ${Number.isFinite(sc.blank) ? Math.round(sc.blank * 100) : '—'}%`;
+  return { ok, detail };
+}
 
 /**
  * 押す → AI のパネルが見え、最後の user の吹き出しに want、返答（偽の SSE）が終わる。
@@ -11269,10 +11326,7 @@ async function askAndWait(page, sel, want) {
     .catch(() => {});
   await page.waitForTimeout(150);
   const sc = await stopSentScroll(page);
-  const span = sc.tops.length > 0 ? Math.max(...sc.tops) - Math.min(...sc.tops) : Number.NaN;
-  const gap0 = sc.gaps[0] ?? Number.NaN;
-  const gap1 = sc.gaps.at(-1) ?? Number.NaN;
-  const seen = Math.abs(gap0) <= 4 && Math.abs(gap1) <= 4 && span <= 1;
+  const { ok: seen, detail: kept } = sentKept(sc);
   const r = await page.evaluate(() => {
     const users = [...document.querySelectorAll('section.ai .ai-msg.user .ai-bubble')];
     const answers = [...document.querySelectorAll('section.ai .ai-msg.answer')];
@@ -11291,10 +11345,9 @@ async function askAndWait(page, sel, want) {
     !r.error &&
     r.popOpen === 0 &&
     seen;
-  const px = (v) => (Number.isFinite(v) ? v.toFixed(1) : '—');
   return {
     ok,
-    detail: `${shown ? '' : 'AI のパネルが見えない・'}吹き出し「${r.user.split('\n')[0]}」・返答 ${r.answer ? 'あり' : 'なし'}${r.error ? '・失敗' : ''}${r.popOpen ? `・吹き出しが ${r.popOpen} 個開いたまま` : ''}・送った吹き出しの上端 ${px(gap0)} → ${px(gap1)}px・流れの間の scrollTop の変化 ${px(span)}px（${sc.tops.length} フレーム）${seen ? '' : '（#263 NG）'}`,
+    detail: `${shown ? '' : 'AI のパネルが見えない・'}吹き出し「${r.user.split('\n')[0]}」・返答 ${r.answer ? 'あり' : 'なし'}${r.error ? '・失敗' : ''}${r.popOpen ? `・吹き出しが ${r.popOpen} 個開いたまま` : ''}・${kept}${seen ? '' : '（#263 / #277 NG）'}`,
   };
 }
 
@@ -11604,13 +11657,11 @@ async function aiFlows(vp) {
       .catch(() => {});
     await page.waitForTimeout(150);
     const sc = await stopSentScroll(page);
-    const span = sc.tops.length > 0 ? Math.max(...sc.tops) - Math.min(...sc.tops) : Number.NaN;
-    const g0 = sc.gaps[0] ?? Number.NaN;
-    const g1 = sc.gaps.at(-1) ?? Number.NaN;
+    const k = sentKept(sc);
     check(
-      `${tag} #263 [もう一度] で送り直した吹き出しの上端が枠の上端・流れで動かない`,
-      Math.abs(g0) <= 4 && Math.abs(g1) <= 4 && span <= 1,
-      `上端 ${g0.toFixed(1)} → ${g1.toFixed(1)}px・scrollTop の変化 ${span.toFixed(1)}px（${sc.tops.length} フレーム）`,
+      `${tag} #263 [もう一度] で送り直した吹き出しの上端が枠の上端・流れで動かない（#277 返答の後の空白 ≤ 50%）`,
+      k.ok,
+      k.detail,
     );
   }
   // (d) 追加の質問 → ツールのカード → [シナリオに適用] → [元に戻す]

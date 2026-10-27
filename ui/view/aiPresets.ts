@@ -59,7 +59,7 @@ export const AI_PRESETS: readonly AiPreset[] = [
   ),
   preset(
     'iv',
-    '今の IV は売り時？',
+    'IV の位置',
     '今の IV が売り時かを考える材料を並べてください。判断は自分でします。',
     false,
   ),

@@ -596,7 +596,48 @@ export function chatItems(s: AiChatState): ChatItem[] {
       remainingUsd: f.remainingUsd,
     });
   }
+  return oneThinking(out);
+}
+
+/**
+ * 考えた要約は 1 返答に 1 つ（#277）: ツールの往復ごとの thinking を、発言の塊（次の user の項目まで）の最初の
+ * thinking の位置に段落を空けてつなぐ。key は最初の thinking の key（流れの間に作り直さない）、live はどれかが流れの途中
+ */
+function oneThinking(items: ChatItem[]): ChatItem[] {
+  const out: ChatItem[] = [];
+  let at = -1;
+  for (const it of items) {
+    if (it.kind === 'user') at = -1;
+    if (it.kind !== 'thinking') {
+      out.push(it);
+      continue;
+    }
+    const prev = out[at];
+    if (at < 0 || prev?.kind !== 'thinking') {
+      at = out.length;
+      out.push(it);
+      continue;
+    }
+    out[at] = { ...prev, text: `${prev.text}\n\n${it.text}`, live: prev.live || it.live };
+  }
   return out;
+}
+
+/**
+ * 返答が終わった後の最後の塊の下詰め（#277。#263 の空白を減らす）。流れの間は枠の高さ（100cqh）の min-height で、
+ * 送った発言を枠の上端に合わせる。終わったとき塊の中身が枠の HOLD_END_RATIO より低ければ、min-height をやめて
+ * 下に 1 − HOLD_END_RATIO（ui/next/css/ai.css の .ai-tail[data-hold="end"] の padding-bottom 45cqh）だけ空ける
+ * = 返答の後の空白は枠の 45% + 余白まで。そのとき送った発言は（HOLD_END_RATIO − 中身の割合）だけ下がる
+ */
+export const HOLD_END_RATIO = 0.55;
+
+export function holdAfterDone(contentPx: number, framePx: number): 'true' | 'end' {
+  return framePx > 0 && contentPx < HOLD_END_RATIO * framePx ? 'end' : 'true';
+}
+
+/** [このポジションを診断] を大きいボタンで出すか（#277。会話が空のときだけ。以後は定型の質問のチップの先頭） */
+export function diagnoseProminent(items: readonly ChatItem[]): boolean {
+  return items.length === 0;
 }
 
 /** 今の発言（turn）の user の発言が会話に入ったか（#263。computing の間 = 文脈を作る前は false） */

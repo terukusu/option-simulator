@@ -29,7 +29,10 @@ export function Chip(p: {
   );
 }
 
-/** チップの行（overflow-x: auto、スクロールバー非表示。折り返さない） */
+/**
+ * チップの行（overflow-x: auto、スクロールバー非表示。折り返さない）。例外: AI の定型の質問の行は ui/next/css/ai.css で
+ * 折り返す（#277。全部を見せる。チップの文字は折らない）
+ */
 export function ChipRow(p: { label: string; children: ComponentChildren }) {
   return (
     // biome-ignore lint/a11y/useSemanticElements: fieldset は既定の枠・余白と flex の癖があるので div + role="group"

@@ -135,7 +135,7 @@ const PRESET_QUESTIONS = [
   },
   { id: 'iv', case: 'iron_condor', want: ['iv_stats'], noCall: true },
 ];
-/** 売り時・買い時の断定（[今の IV は売り時？] で書かない） */
+/** 売り時・買い時の断定（[IV の位置] で書かない） */
 export const SELL_CALL_RE =
   /(売り時です|売り時だ(?!と)|売り時と言え(る|ます)|売るべき|買い時です|買うべき|売りに有利な局面です)/;
 

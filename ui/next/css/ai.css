@@ -16,20 +16,53 @@ section.ai .ai-body {
   padding: var(--sp-2) var(--sp-3);
 }
 
+/* 免責の文（初回だけ。#277: 見出しの下の薄いバー。右上の × で閉じる） */
 .ai-disclaimer {
   display: flex;
-  flex-direction: column;
   align-items: flex-start;
-  gap: var(--sp-2);
-  padding: var(--sp-2) var(--sp-3);
-  border: 1px solid var(--line-2);
-  border-radius: var(--r-sm);
+  gap: var(--sp-1);
+  padding: 4px 4px 4px var(--sp-2);
+  border-left: 2px solid var(--line-2);
   background: var(--s2);
   color: var(--ink-2);
-  font-size: var(--fs-sub);
+  font-size: var(--fs-sm);
+  line-height: 1.5;
 }
 
-.ai-empty,
+.ai-disclaimer p {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.ai-disclaimer-close {
+  flex: 0 0 auto;
+  width: 24px;
+  height: 24px;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: none;
+  color: var(--ink-3);
+  font: inherit;
+  font-size: var(--fs-body);
+  line-height: 1;
+  cursor: pointer;
+}
+
+.ai-disclaimer-close:hover {
+  background: var(--s3);
+  color: var(--ink);
+}
+
+/* 空の AI パネル（#277: 1 行目が見出し、2 行目が手段） */
+.ai-empty h3 {
+  margin: 0 0 2px;
+  color: var(--ink);
+  font-size: var(--fs-body);
+  font-weight: 600;
+}
+
+.ai-empty p,
 .ai-note {
   color: var(--ink-3);
   font-size: var(--fs-sub);
@@ -55,8 +88,16 @@ section.ai .ai-body {
   min-width: 0;
 }
 
-.ai-tail[data-hold] {
+.ai-tail[data-hold="true"] {
   min-height: 100cqh;
+}
+
+/*
+ * 返答が終わり、塊の中身が枠の 55% より低いとき（#277。ui/view/aiChat.ts の holdAfterDone・HOLD_END_RATIO）: min-height を
+ * やめて下に 45cqh だけ空ける = 返答の後の空白を枠の半分以下にする（送った発言は 55% − 中身の割合 だけ下がる）
+ */
+.ai-tail[data-hold="end"] {
+  padding-bottom: 45cqh;
 }
 
 .ai-msg {
@@ -311,11 +352,40 @@ section.ai .ai-body {
   overflow-wrap: anywhere;
 }
 
-/* 返答の行の末尾の [評価に残す]（#159。目立たせない小さな文字ボタン。右寄せ・当たりは高さ 24px） */
+/* 返答の行の末尾の ⋯（#277。開くと [評価に残す]（#159）。右寄せ・当たりは 24px） */
+.ai-more {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  margin-top: 2px;
+}
+
+.ai-more summary {
+  min-width: 24px;
+  height: 20px;
+  padding: 0 var(--sp-1);
+  border-radius: var(--r-sm);
+  color: var(--ink-3);
+  font-size: var(--fs-sm);
+  line-height: 20px;
+  text-align: center;
+  list-style: none;
+  cursor: pointer;
+}
+
+.ai-more summary::-webkit-details-marker {
+  display: none;
+}
+
+.ai-more summary:hover,
+.ai-more[open] summary {
+  background: var(--s3);
+  color: var(--ink-2);
+}
+
 .ai-keep {
   display: block;
   min-height: 24px;
-  margin: 2px 0 0 auto;
   padding: 0 var(--sp-1);
   border: 0;
   background: none;
@@ -396,6 +466,12 @@ section.ai .ai-body {
   flex: 1 1 auto;
 }
 
+/* 定型の質問（#277: 横スクロールをやめ、入らなければ折る = 全部が見える） */
+.ai-presets .chiprow {
+  flex-wrap: wrap;
+  overflow: visible;
+}
+
 .ai-input {
   display: flex;
   align-items: flex-end;
@@ -461,12 +537,14 @@ section.ai .ai-body {
 }
 
 /*
- * 狭い枠（IV 推移のツールの行。PC の左の列 ≈ 431px・スマホ 360px）は「AI」だけ（読み上げ名は全文）。足の Seg の左右の
- * 余白と間隔を 1px ずつ詰めて 1 行に入れる
+ * 狭い枠（IV 推移のツールの行。PC の左の列 ≈ 431px・スマホ 360px）は「AI に」だけ（読み上げ名は全文）。足の Seg の左右の
+ * 余白と間隔を詰めて 1 行に入れる（#277 で「AI に」にした分、間隔をもう 1px 詰めた）
  */
 @container (max-width: 519.98px) {
+  /* 「AI に」（#277。ドックの [AI] と同じ字にしない）は小さい字・詰めた余白で 1 行に入れる */
   .ai-ask.short {
-    padding: 0 5px;
+    padding: 0 4px;
+    font-size: var(--fs-sm);
   }
 
   .ai-ask.short .ask-long {
@@ -474,7 +552,7 @@ section.ai .ai-body {
   }
 
   .iv-tools:has(.ai-ask) {
-    gap: 3px;
+    gap: 2px;
   }
 
   .iv-tools:has(.ai-ask) .seg > button {

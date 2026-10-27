@@ -15,7 +15,9 @@ import {
   chatItems,
   DRAFT_KEPT_TEXT,
   diagnoseBlocked,
+  diagnoseProminent,
   footReason,
+  holdAfterDone,
   MAX_USER_TEXT,
   nearLimit,
   numberSources,
@@ -49,8 +51,14 @@ import { openTerm } from '../parts/termCard';
 /** 免責の文（端末で最初の 1 回だけ。AI の返答には書かせない。#135） */
 export const AI_DISCLAIMER =
   'AI の説明は、このシミュレーターの計算結果をもとにした検討材料です。投資の助言ではありません。売買の判断はご自身で行ってください。';
+/** 空の AI パネルの見出しと手段（#277。A-07） */
+export const AI_EMPTY_TITLE = 'このポジションの弱点を AI に聞く';
 export const AI_EMPTY_TEXT =
-  '今のポジションの弱点を、AI が simulator の計算の数字で説明します。[このポジションを診断] か下の定型の質問（崩れ方・反論など）を押すか、質問を入れてください。';
+  '[このポジションを診断]・下の定型の質問を押すか、質問を入れてください。数字はこのシミュレーターの計算から取ります。';
+/** [このポジションを診断] の文字（会話が空のときの大きいボタン・以後の定型の質問の先頭のチップ。#277） */
+const DIAGNOSE_LABEL = 'このポジションを診断';
+/** 返答の ⋯ の読み上げ名（#277。中に [評価に残す]） */
+const ANSWER_MENU_LABEL = '返答のその他の操作';
 /** 定型の質問のチップの行の名前（#140） */
 const PRESETS_LABEL = '定型の質問';
 const UNMATCHED_LABEL = '計算結果に無い数字';
@@ -208,9 +216,10 @@ function AiPanelView(p: {
 export const AiPanel = pure(AiPanelView);
 
 /**
- * AI のチャット（#135。docs/ui-redesign.md 2 章・docs/design.md 14 章）。見出し行（残り・[新しい会話]）→ 免責の文
- * （初回だけ）→ 会話（user の吹き出し・考え中の要約（折りたたみ）・返答（aiText の木）・ツールのカード）→ 進み具合・
- * 押せない理由 → [このポジションを診断]・定型の質問のチップ（#140。行の中を横にスクロール）と入力欄。返答・入力は JSX のテキストだけ（HTML を入れない・style 属性を使わない）。
+ * AI のチャット（#135。docs/ui-redesign.md 2 章・docs/design.md 14 章）。見出し行（残り・[新しい会話]）→ 会話が空なら
+ * 見出しと手段・免責の文（初回だけ。薄いバー）→ 会話（user の吹き出し・考え中の要約（折りたたみ。1 返答に 1 つ）・返答
+ * （aiText の木。末尾の ⋯ に [評価に残す]）・ツールのカード）→ 進み具合・押せない理由 → [このポジションを診断]（会話が
+ * 空のときだけ大きいボタン、以後は定型の質問の先頭のチップ。#277）・定型の質問のチップ（#140。狭い幅は 2 行に折る）と入力欄。返答・入力は JSX のテキストだけ（HTML を入れない・style 属性を使わない）。
  * 照合できない数字（ui/view/aiNumbers.ts）は class の印（点線の下線）。
  */
 export function AiChat(p: {
@@ -263,6 +272,10 @@ export function AiChat(p: {
   // sent: この表示で発言を送った（塊に枠の高さの min-height = 上端まで上げられる）。[新しい会話] で戻す
   const sent = useRef(false);
   const anchor = useRef(false);
+  // 返答が終わった後の下詰め（#277。holdAfterDone）: 縮めた発言の startedAt（次の発言を始めたら外れる = 'true'）
+  const [endFor, setEndFor] = useState<number | null>(null);
+  const lastStart = useRef<number | null>(null);
+  const measured = useRef(false);
   // 送る前（戻した会話・開き直し）は今までどおり末尾へ（利用者が上へ戻して読んでいるときは動かさない）
   const stick = useRef(true);
   // 描く前に決める（吹き出しが入る描き直しで塊に min-height が付いている = 上端まで上げられる）
@@ -271,8 +284,11 @@ export function AiChat(p: {
   if (startedAt !== undefined && startedAt !== seenAt.current) {
     sent.current = true;
     anchor.current = true;
+    measured.current = false;
+    lastStart.current = startedAt;
   }
   seenAt.current = startedAt;
+  const hold = endFor !== null && endFor === lastStart.current ? 'end' : 'true';
   const ready = sentShown(state);
   useLayoutEffect(() => {
     const el = logRef.current;
@@ -285,6 +301,38 @@ export function AiChat(p: {
     const top = el.getBoundingClientRect().top + el.clientTop + pad;
     el.scrollTop += tail.getBoundingClientRect().top - top;
   });
+  // 返答が終わったら塊の中身の高さを測り、低ければ下詰めを縮める（#277。流れの間・合わせる前は測らない）。
+  // 終わった直後に 1 回（描く前）、以後は次の発言まで枠の大きさが変わるたびに測り直す（シートの段・窓の大きさ）
+  const done = sent.current && state.turn === null;
+  const decideHold = () => {
+    const el = logRef.current;
+    if (!sent.current || anchor.current) return false;
+    const tail = el?.querySelector<HTMLElement>('.ai-tail[data-last]');
+    const end = tail?.lastElementChild;
+    if (!el || !tail || !end || el.clientHeight === 0) return false;
+    const cs = getComputedStyle(el);
+    const frame =
+      el.clientHeight -
+      (Number.parseFloat(cs.paddingTop) || 0) -
+      (Number.parseFloat(cs.paddingBottom) || 0);
+    const content = end.getBoundingClientRect().bottom - tail.getBoundingClientRect().top;
+    setEndFor(holdAfterDone(content, frame) === 'end' ? lastStart.current : null);
+    return true;
+  };
+  useLayoutEffect(() => {
+    if (!done || measured.current) return;
+    measured.current = decideHold();
+  });
+  useEffect(() => {
+    const el = logRef.current;
+    if (!done || !el || typeof ResizeObserver === 'undefined') return;
+    // 始めたときの 1 回目は上の測りと同じ結果（同じ値の setState は描き直さない）。隠れていた枠が見えたときも測る
+    const ro = new ResizeObserver(() => {
+      measured.current = decideHold() || measured.current;
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [done]);
   useEffect(() => {
     const el = logRef.current;
     if (el && !sent.current && stick.current) el.scrollTop = el.scrollHeight;
@@ -318,6 +366,7 @@ export function AiChat(p: {
     setText('');
   };
   const long = nearLimit(state);
+  const prominent = diagnoseProminent(items);
   return (
     <>
       <PanelHead title="AI" {...(remaining !== null && { sub: remaining })}>
@@ -330,6 +379,8 @@ export function AiChat(p: {
             sent.current = false;
             anchor.current = false;
             stick.current = true;
+            measured.current = false;
+            setEndFor(null);
             chat.reset();
           }}
         >
@@ -348,15 +399,26 @@ export function AiChat(p: {
           stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 24;
         }}
       >
+        {items.length === 0 && (
+          <div class="ai-empty">
+            <h3>{AI_EMPTY_TITLE}</h3>
+            <p>{AI_EMPTY_TEXT}</p>
+          </div>
+        )}
         {!p.disclaimerSeen && (
           <div class="ai-disclaimer" data-ai="disclaimer">
             <p>{AI_DISCLAIMER}</p>
-            <button type="button" class="btn sm" onClick={p.onDisclaimerSeen}>
-              閉じる
+            <button
+              type="button"
+              class="ai-disclaimer-close"
+              aria-label="免責の文を閉じる"
+              title="閉じる"
+              onClick={p.onDisclaimerSeen}
+            >
+              ×
             </button>
           </div>
         )}
-        {items.length === 0 && <p class="ai-empty">{AI_EMPTY_TEXT}</p>}
         <div class="ai-log" role="log" aria-live="off">
           {groups.map((g, i) => {
             const last = i === groups.length - 1;
@@ -365,7 +427,7 @@ export function AiChat(p: {
                 key={g.key}
                 class="ai-tail"
                 data-last={last ? 'true' : undefined}
-                data-hold={last && sent.current ? 'true' : undefined}
+                data-hold={last && sent.current ? hold : undefined}
               >
                 {g.items.map(row)}
               </div>
@@ -396,20 +458,34 @@ export function AiChat(p: {
             {DRAFT_KEPT_TEXT}
           </p>
         )}
-        <div class="ai-actions">
-          <button
-            type="button"
-            class="btn primary"
-            data-ai="diagnose"
-            disabled={diagnoseReason !== null}
-            title={diagnoseReason ?? undefined}
-            onClick={chat.diagnose}
-          >
-            このポジションを診断
-          </button>
-        </div>
+        {prominent && (
+          <div class="ai-actions">
+            <button
+              type="button"
+              class="btn primary"
+              data-ai="diagnose"
+              disabled={diagnoseReason !== null}
+              title={diagnoseReason ?? undefined}
+              onClick={chat.diagnose}
+            >
+              {DIAGNOSE_LABEL}
+            </button>
+          </div>
+        )}
         <div class="ai-presets" data-ai="presets">
           <ChipRow label={PRESETS_LABEL}>
+            {!prominent && (
+              <button
+                type="button"
+                class="chip"
+                data-ai="diagnose"
+                disabled={diagnoseReason !== null}
+                title={diagnoseReason ?? undefined}
+                onClick={chat.diagnose}
+              >
+                {DIAGNOSE_LABEL}
+              </button>
+            )}
             {AI_PRESETS.map((pr) => {
               const why = presetBlocked(state, gate, pr);
               return (
@@ -513,9 +589,19 @@ function ChatRow(p: {
         <div class="ai-msg answer" data-ai-live={it.live ? 'true' : undefined}>
           {it.text !== '' && <AnswerText text={it.text} sources={p.sources} live={it.live} />}
           {p.onKeep && (
-            <button type="button" class="ai-keep" data-ai="keep" onClick={() => p.onKeep?.(it.key)}>
-              {AI_EVAL_KEEP_LABEL}
-            </button>
+            <details class="ai-more">
+              <summary aria-label={ANSWER_MENU_LABEL} title={ANSWER_MENU_LABEL}>
+                ⋯
+              </summary>
+              <button
+                type="button"
+                class="ai-keep"
+                data-ai="keep"
+                onClick={() => p.onKeep?.(it.key)}
+              >
+                {AI_EVAL_KEEP_LABEL}
+              </button>
+            </details>
           )}
           {it.failed !== null && (
             <p class="ai-error" data-ai="error" data-code={it.failed}>
