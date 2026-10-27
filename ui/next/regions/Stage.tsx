@@ -1,6 +1,4 @@
-import type { MutableRef } from 'preact/hooks';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks';
-import type { Domain } from '../../chart/scale';
 import type { AppController } from '../../components/useAppController';
 import { useMarginLine } from '../../components/useMarginLine';
 import { usePnlChartModel } from '../../components/usePnlChartModel';
@@ -56,8 +54,6 @@ export function Stage(p: {
   theme: 'dark' | 'light';
   onPickLeg: (id: number) => void;
   onChangeStrike: (id: number, k: number) => void;
-  /** 今の縦軸の範囲（#87 (C): 設定の縦軸を手動に切り替えたときの初期値。描いた後に入れる = 描き直しは増えない） */
-  yNow?: MutableRef<Domain | null>;
 }) {
   const { c, mini } = p;
   const { state, dispatch, pnlBase: base, metrics } = c;
@@ -116,12 +112,6 @@ export function Stage(p: {
     const id = setTimeout(() => settle((n) => n + 1), LIVE_SETTLE_MS);
     return () => clearTimeout(id);
   });
-  // 描画の後に入れる（描画中に ref へ書かない）
-  const { yNow } = p;
-  const yDomain = model.yDomain;
-  useLayoutEffect(() => {
-    if (yNow) yNow.current = yDomain;
-  }, [yNow, yDomain]);
   // 面モード（#88）: 格子は入力が変わったフレームは粗く、止まったら細かく（usePnlSurface）。ミニ・空は線モードの表示
   const surfaceOn = surfaceActive(p.chart, mini, model.empty);
   const grid = usePnlSurface({

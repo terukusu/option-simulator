@@ -34,23 +34,26 @@ export type GlobalKey =
   | { kind: 'theme' }
   | { kind: 'palette' };
 
-/** 1〜6 → パネル（§4.6: 1 ポジ / 2 板 / 3 シナリオ / 4 指標 / 5 スマイル / 6 AI） */
+/**
+ * 1〜6 → パネル（§4.6: 1 板 / 2 IV · スマイル / 3 ポジ / 4 シナリオ / 5 指標 / 6 AI。#275 でドックの並び = 検討の流れの
+ * 順に揃えた）
+ */
 export const PANEL_KEYS: Readonly<Record<string, PanelId>> = {
-  '1': 'positions',
-  '2': 'board',
-  '3': 'scenario',
-  '4': 'metrics',
-  '5': 'smile',
+  '1': 'board',
+  '2': 'smile',
+  '3': 'positions',
+  '4': 'scenario',
+  '5': 'metrics',
   '6': 'ai',
 };
 
 /** パネル → キー（段 B のパレットの行のキーの表示） */
 export const PANEL_KEY: Readonly<Record<PanelId, string>> = {
-  positions: '1',
-  board: '2',
-  scenario: '3',
-  metrics: '4',
-  smile: '5',
+  board: '1',
+  smile: '2',
+  positions: '3',
+  scenario: '4',
+  metrics: '5',
   ai: '6',
 };
 

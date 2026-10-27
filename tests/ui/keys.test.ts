@@ -42,12 +42,13 @@ const PANEL = (panel: PanelId): GlobalKey => ({ kind: 'panel', panel });
 const ALL_KEYS = ['1', '2', '3', '4', '5', 'g', 'G', 't', 'T'];
 
 describe('globalKey', () => {
-  it('(a) 1〜5 はパネル、g / G は描画域、t / T はテーマ', () => {
-    expect(globalKey(ev('1'))).toEqual(PANEL('positions'));
-    expect(globalKey(ev('2'))).toEqual(PANEL('board'));
-    expect(globalKey(ev('3'))).toEqual(PANEL('scenario'));
-    expect(globalKey(ev('4'))).toEqual(PANEL('metrics'));
-    expect(globalKey(ev('5'))).toEqual(PANEL('smile'));
+  it('(a) 1〜6 はパネル（#275: 板 / IV · スマイル / ポジ / シナリオ / 指標 / AI = ドックと同じ順）、g / G は描画域、t / T はテーマ', () => {
+    expect(globalKey(ev('1'))).toEqual(PANEL('board'));
+    expect(globalKey(ev('2'))).toEqual(PANEL('smile'));
+    expect(globalKey(ev('3'))).toEqual(PANEL('positions'));
+    expect(globalKey(ev('4'))).toEqual(PANEL('scenario'));
+    expect(globalKey(ev('5'))).toEqual(PANEL('metrics'));
+    expect(globalKey(ev('6'))).toEqual(PANEL('ai'));
     expect(globalKey(ev('g'))).toEqual({ kind: 'chart' });
     expect(globalKey(ev('G', { shift: true }))).toEqual({ kind: 'chart' });
     expect(globalKey(ev('t'))).toEqual({ kind: 'theme' });

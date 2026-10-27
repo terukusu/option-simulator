@@ -1,13 +1,8 @@
-import type { MutableRef } from 'preact/hooks';
 import { useEffect, useMemo, useState } from 'preact/hooks';
 import type { AtmBasis, TechParamKey, TechParams } from '../../model';
-import type { Domain } from '../chart/scale';
 import { isMarginYenKey, type MarginPrefKey, type MarginPrefs, type ThemePref } from '../prefs';
 import type { Action, MetricsUnitSetting } from '../state';
 import type { HeaderModel } from '../view/header';
-import type { PnlYSettings } from '../view/pnlChart';
-import type { DXUnit } from '../view/scenario';
-import { basisAction, type FutureBasis } from '../view/scenarioRegion';
 import {
   AI_PROFILE_NOTES,
   AI_PROFILE_PLACEHOLDER,
@@ -23,12 +18,14 @@ import {
   marginFieldText,
   marginLongPatch,
   marginLongValue,
+  settingsHasTheme,
   settingsModel,
   TECH_FIELDS,
   TECH_RESET,
   TECH_SETTINGS_NOTES,
   techField,
 } from '../view/settings';
+import type { Tier } from '../view/shell';
 import {
   DEFAULT_TECH_LINE_WIDTHS,
   TECH_LINE_FIELDS,
@@ -36,9 +33,11 @@ import {
   type TechLineWidths,
   techLinePxOf,
 } from '../view/techLineWidth';
+import { THEMES } from '../view/topMenu';
 import { Dialog } from './parts/Dialog';
 import { Seg } from './parts/Seg';
-import { YAxisFields } from './parts/YAxisFields';
+
+const THEME_OPTIONS = THEMES.map((t) => ({ value: t.theme, text: t.label }));
 
 export interface SettingsDialogProps {
   open: boolean;
@@ -46,17 +45,11 @@ export interface SettingsDialogProps {
   atmBasis: AtmBasis;
   metricsUnit: MetricsUnitSetting;
   feePerLot: number;
-  pnlY: PnlYSettings;
-  futureBasis: FutureBasis;
-  dXUnit: DXUnit;
-  /** 基準原資産 X₀（円。決まらなければ NaN = ΔX の単位を押せない） */
-  x0: number;
-  theme: ThemePref;
   header: HeaderModel | null;
-  /** 今の縦軸の範囲（舞台が描くたびに入れる。手動に切り替えたときの初期値） */
-  yNow: MutableRef<Domain | null>;
   dispatch: (a: Action) => void;
-  onDXUnit: (u: DXUnit) => void;
+  /** 幅の段階（スマホだけテーマの行を出す = settingsHasTheme。#275） */
+  tier: Tier;
+  theme: ThemePref;
   onTheme: (t: ThemePref) => void;
   /** 証拠金（概算）の設定（端末の設定。#131） */
   margin: MarginPrefs;
@@ -73,9 +66,10 @@ export interface SettingsDialogProps {
 }
 
 /**
- * 設定のダイアログ（#87 (C)。docs/ui-redesign.md §3・§11-9）: ATM の基準・金額の単位・手数料・損益グラフの縦軸・
- * 先物の basis・ΔX の単位・テーマ・証拠金（概算。#131）・テクニカル指標（#205。線の太さ = #214）・AI に渡す自分の前提（#156）・前提（読み取り専用）。変えたらすぐ state / prefs に入る（[保存] なし）。
- * 値と選べない理由は ui/view/settings.ts、縦軸の欄は舞台の ⋯ と同じ YAxisFields。開いている間だけ描く。
+ * 設定のダイアログ（#87 (C)。docs/ui-redesign.md §3・§11-9）: ATM の基準・金額の単位・手数料・証拠金（概算。#131）・
+ * テクニカル指標（#205。線の太さ = #214）・AI に渡す自分の前提（#156）・前提（読み取り専用）。変えたらすぐ state / prefs に
+ * 入る（[保存] なし）。#275 で別の入口がある行を外した: 損益グラフの縦軸 = 舞台の ⋯、先物の basis・ΔX の単位 = シナリオの
+ * モデルの前提、テーマ = トップバーの ☾（☾ を隠すスマホだけテーマの行を出す）。値は ui/view/settings.ts。開いている間だけ描く。
  */
 export function SettingsDialog(p: SettingsDialogProps) {
   return (
@@ -259,20 +253,10 @@ function AiProfileField({
 }
 
 function SettingsBody(p: SettingsDialogProps) {
-  const { dispatch, feePerLot, yNow } = p;
+  const { dispatch, feePerLot } = p;
   const v = useMemo(
-    () =>
-      settingsModel({
-        atmBasis: p.atmBasis,
-        metricsUnit: p.metricsUnit,
-        pnlY: p.pnlY,
-        futureBasis: p.futureBasis,
-        dXUnit: p.dXUnit,
-        x0: p.x0,
-        theme: p.theme,
-        header: p.header,
-      }),
-    [p.atmBasis, p.metricsUnit, p.pnlY, p.futureBasis, p.dXUnit, p.x0, p.theme, p.header],
+    () => settingsModel({ atmBasis: p.atmBasis, metricsUnit: p.metricsUnit, header: p.header }),
+    [p.atmBasis, p.metricsUnit, p.header],
   );
   // 手数料の欄（旧画面の指標と同じ規則: 入力ごとに検証、通って値が変わったら入れる。外で値が変わったら欄を戻す）
   const [feeText, setFeeText] = useState(String(feePerLot));
@@ -342,49 +326,19 @@ function SettingsBody(p: SettingsDialogProps) {
         )}
         <p class="set-note">損益・指標・テール表に効く（1 枚あたり × 枚数）</p>
       </div>
-      <div class="set-row">
-        <div class="set-line">
-          <span class="set-k">損益グラフの縦軸</span>
+      {settingsHasTheme(p.tier) && (
+        <div class="set-row">
+          <div class="set-line">
+            <span class="set-k">テーマ</span>
+            <Seg<ThemePref>
+              label="テーマ"
+              value={p.theme}
+              options={THEME_OPTIONS}
+              onChange={p.onTheme}
+            />
+          </div>
         </div>
-        <div class="stage-pop set-y">
-          <YAxisFields pnlY={p.pnlY} current={() => yNow.current} dispatch={dispatch} />
-        </div>
-      </div>
-      <div class="set-row">
-        <div class="set-line">
-          <span class="set-k">先物の basis</span>
-          <Seg<FutureBasis>
-            label="先物の basis"
-            value={v.futureBasis.value}
-            options={v.futureBasis.options}
-            onChange={(b) => dispatch(basisAction(b))}
-          />
-        </div>
-        <p class="set-note">固定 = 先物と原資産の差を一定に / 減衰 = 先物の SQ で 0 へ</p>
-      </div>
-      <div class="set-row">
-        <div class="set-line">
-          <span class="set-k">ΔX の単位</span>
-          <Seg<DXUnit>
-            label="ΔX の単位"
-            value={v.dXUnit.value}
-            options={v.dXUnit.options}
-            onChange={p.onDXUnit}
-          />
-        </div>
-        <p class="set-note">シナリオの ΔX の表示（保存しない）</p>
-      </div>
-      <div class="set-row">
-        <div class="set-line">
-          <span class="set-k">テーマ</span>
-          <Seg<ThemePref>
-            label="テーマ"
-            value={v.theme.value}
-            options={v.theme.options}
-            onChange={p.onTheme}
-          />
-        </div>
-      </div>
+      )}
       <div class="set-row set-margin">
         <div class="set-line">
           <span class="set-k">証拠金（概算）</span>

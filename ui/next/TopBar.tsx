@@ -1,5 +1,4 @@
 import { useLayoutEffect, useRef, useState } from 'preact/hooks';
-import type { BookRead } from '../book';
 import { pure } from '../components/pure';
 import type { ThemePref } from '../prefs';
 import type { ShareMake } from '../share';
@@ -9,18 +8,12 @@ import type { MarketPillModel } from '../view/marketPill';
 import type { WarnTagKind, WarnTagsModel } from '../view/notices';
 import type { Tier } from '../view/shell';
 import type { TabsView } from '../view/tabs';
-import { type TopMenuKey, topMenuModel } from '../view/topMenu';
+import { THEMES, type TopMenuKey, topMenuModel } from '../view/topMenu';
 import { Menu } from './parts/Menu';
 import { BoxTabs, toItems } from './top/BoxTabs';
 import { MarketPill } from './top/MarketPill';
 import { useShareCopy } from './top/useShareCopy';
 import { WarnTags } from './top/WarnTags';
-
-const THEME_ITEMS: readonly { theme: ThemePref; label: string }[] = [
-  { theme: 'auto', label: '端末に合わせる' },
-  { theme: 'dark', label: 'ダーク' },
-  { theme: 'light', label: 'ライト' },
-];
 
 export interface TopBarProps {
   pill: MarketPillModel;
@@ -46,34 +39,26 @@ export interface TopBarProps {
   subscribeShare: (f: () => void) => () => void;
   shareSupported: boolean;
   onShareResult: (r: ShareResult) => void;
-  /** ⋯ の保存一覧・設定・書き出し / 読み込み…・全クリア（#87 (C)。どれも参照が変わらない） */
+  /** ⋯ の保存一覧・設定（#87 (C)。どれも参照が変わらない） */
   bookCount: number | null;
-  bookState: BookRead['kind'];
   onOpenBook: () => void;
   /** タブのメニューの 保存一覧に保存…（名前の欄にフォーカスして開く） */
   onSaveToBook: () => void;
   onOpenSettings: () => void;
-  /** ⋯ の用語集…（#167。用語だけのパレットを開く。参照が変わらない） */
-  onOpenGlossary: () => void;
-  onExport: () => void;
-  onImport: (file: File) => void;
-  onClearLegs: () => void;
   /** PC の [AI]（#135。作業台の列を AI のチャットと入れ替える。参照が変わらない）。aiOpen = 今 AI を出している */
   aiOpen?: boolean;
   onAi?: () => void;
 }
 
 /**
- * トップバー（docs/ui-redesign.md §2.1。#87）: ブランド / BOX タブ / 市場ピル / 警告のタグ /（PC）[AI] / [最新] / テーマ / ⋯。
- * スマホはブランドとテーマのボタンを CSS で隠す（テーマは ⋯ にある）。縮むのは BOX タブの帯だけ（#87 (B)）。
- * ⋯ は 保存一覧（N）… / URL をコピー / 書き出し / 読み込み… / ファイルを開く… /（dev）合成の板 / 全クリア / 用語集… / 設定… /
- * テーマ（#87 (C)。行は ui/view/topMenu.ts）。ファイルを開く…・読み込み… は隠した file input をメニューの選択と
- * 同じイベントの中で click()。
+ * トップバー（docs/ui-redesign.md §2.1。#87）: ブランド / BOX タブ / 市場ピル / 警告のタグ /（PC）[AI] / [最新] / テーマ ☾ / ⋯。
+ * スマホはブランドとテーマのボタンを CSS で隠す（スマホのテーマは設定。#275 で ⋯ のテーマの行を外した）。縮むのは BOX タブの帯だけ（#87 (B)）。
+ * ⋯ は 保存一覧（N）… / URL をコピー / ファイルを開く… /（dev）合成の板 / 設定…（#87 (C)・#275。行は ui/view/topMenu.ts）。
+ * ファイルを開く… は隠した file input をメニューの選択と同じイベントの中で click()。
  * pure: 入力は NextApp の useMemo と参照の変わらない関数だけ（シナリオの操作で描き直さない）。
  */
 function TopBarView(p: TopBarProps) {
   const fileRef = useRef<HTMLInputElement>(null);
-  const importRef = useRef<HTMLInputElement>(null);
   const latestRef = useRef<HTMLButtonElement>(null);
   const topRef = useRef<HTMLElement>(null);
   // 警告のタグの最後の 1 つを閉じたら（タグごと消える）[最新] へ、[最新] が押せない（読み込み中）なら ⋯ へフォーカスを移す
@@ -105,27 +90,19 @@ function TopBarView(p: TopBarProps) {
   const more = toItems<TopMenuKey>(
     topMenuModel({
       bookCount: p.bookCount,
-      bookState: p.bookState,
-      legCount: p.tabs.active.legCount,
       share: share.item,
       fixtures: p.fixtures,
       sourceLabel: p.sourceLabel,
-      theme: p.theme,
     }),
     (k) => {
       if (k === 'book') p.onOpenBook();
       else if (k === 'share') share.copy();
-      else if (k === 'export') p.onExport();
-      else if (k === 'import') importRef.current?.click();
       else if (k === 'file') fileRef.current?.click();
-      else if (k === 'clear') p.onClearLegs();
       else if (k === 'settings') p.onOpenSettings();
-      else if (k === 'glossary') p.onOpenGlossary();
       else if (k.startsWith('fixture:')) p.onFixture(k.slice('fixture:'.length));
-      else if (k.startsWith('theme:')) p.onTheme(k.slice('theme:'.length) as ThemePref);
     },
   );
-  const themeItems = THEME_ITEMS.map((t) => ({
+  const themeItems = THEMES.map((t) => ({
     key: t.theme,
     label: t.label,
     checked: p.theme === t.theme,
@@ -184,20 +161,6 @@ function TopBarView(p: TopBarProps) {
           const file = input.files?.[0];
           if (file) p.onFile(file);
           // 同じファイルをもう一度選べるように空にする（旧 Loader と同じ）
-          input.value = '';
-        }}
-      />
-      <input
-        type="file"
-        class="sr"
-        ref={importRef}
-        tabIndex={-1}
-        aria-hidden="true"
-        accept=".json,application/json"
-        onChange={(e) => {
-          const input = e.currentTarget;
-          const file = input.files?.[0];
-          if (file) p.onImport(file);
           input.value = '';
         }}
       />

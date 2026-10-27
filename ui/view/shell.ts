@@ -57,6 +57,14 @@ export interface ShellState {
 
 export const INITIAL_SHELL: ShellState = { panel: 'positions', sheet: 'peek', market: 'board' };
 
+/**
+ * 開いたときの画面の状態（#275）: 足 0 本ならドックの既定を「板」（流れの最初。空のポジションのシートを飛ばす）、
+ * 足があれば INITIAL_SHELL（ポジ）。PC はパネルを使わない（同じ値のまま）
+ */
+export function initialShell(legCount: number): ShellState {
+  return legCount > 0 ? INITIAL_SHELL : { ...INITIAL_SHELL, panel: 'board' };
+}
+
 /** つまみを離したとき、この距離（px）以上動いていれば 1 段動かす */
 export const SHEET_SNAP_PX = 40;
 /** この距離（px）未満ならタップ（peek ⇄ full） */
@@ -90,8 +98,9 @@ export const DOCK_LABELS: Readonly<Record<PanelId, { text: string; name: string 
   ai: { text: 'AI', name: 'AI に相談' },
 };
 
-const PHONE_DOCK: readonly PanelId[] = ['positions', 'board', 'scenario', 'metrics', 'smile', 'ai'];
-const TABLET_DOCK: readonly PanelId[] = ['positions', 'board', 'metrics', 'smile', 'ai'];
+/** 並びは検討の流れの順（#275: 板 → IV（市場の情報なので板の隣）→ ポジ → シナリオ → 指標 → AI。キー 1〜6 も同じ順） */
+const PHONE_DOCK: readonly PanelId[] = ['board', 'smile', 'positions', 'scenario', 'metrics', 'ai'];
+const TABLET_DOCK: readonly PanelId[] = ['board', 'smile', 'positions', 'metrics', 'ai'];
 
 /** PC の作業台の列（既定 work） */
 export function benchView(s: ShellState): BenchView {

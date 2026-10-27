@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { PANEL_KEY } from '../../ui/view/keys';
 import {
   aiVisible,
   benchView,
@@ -9,6 +10,7 @@ import {
   futVisible,
   holdMapVisible,
   INITIAL_SHELL,
+  initialShell,
   ivVisible,
   layoutTier,
   MARKET_VIEWS,
@@ -137,18 +139,18 @@ describe('shellReduce', () => {
     ]);
     expect(DOCK_LABELS.smile.name).toBe('IV 推移 · スマイル');
     expect(dockPanels('phone').map((id) => DOCK_LABELS[id].text)).toEqual([
-      'ポジ',
       '板',
+      'IV',
+      'ポジ',
       'シナリオ',
       '指標',
-      'IV',
       'AI',
     ]);
     expect(dockPanels('tablet').map((id) => DOCK_LABELS[id].text)).toEqual([
-      'ポジ',
       '板',
-      '指標',
       'IV',
+      'ポジ',
+      '指標',
       'AI',
     ]);
     expect(dockPanels('pc')).toEqual([]);
@@ -215,17 +217,24 @@ describe('layoutTier / visiblePanel / dockPanels', () => {
     expect(visiblePanel(at({ panel: 'board' }), 'tablet')).toBe('board');
   });
 
-  it('ドックのボタン: スマホ 6・タブレット 5（シナリオ無し）・PC 無し', () => {
+  it('ドックのボタン: スマホ 6・タブレット 5（シナリオ無し）・PC 無し。#275: 並びは検討の流れの順でキー 1〜6 と同じ', () => {
     expect(dockPanels('phone')).toEqual([
-      'positions',
       'board',
+      'smile',
+      'positions',
       'scenario',
       'metrics',
-      'smile',
       'ai',
     ]);
-    expect(dockPanels('tablet')).toEqual(['positions', 'board', 'metrics', 'smile', 'ai']);
+    expect(dockPanels('tablet')).toEqual(['board', 'smile', 'positions', 'metrics', 'ai']);
     expect(dockPanels('pc')).toEqual([]);
+    expect(dockPanels('phone').map((id) => PANEL_KEY[id])).toEqual(['1', '2', '3', '4', '5', '6']);
+  });
+
+  it('#275: 開いたときの既定のパネルは足 0 本なら板、足があればポジ（ほかは INITIAL_SHELL のまま）', () => {
+    expect(initialShell(0)).toEqual({ ...INITIAL_SHELL, panel: 'board' });
+    expect(initialShell(1)).toBe(INITIAL_SHELL);
+    expect(initialShell(4).panel).toBe('positions');
   });
 });
 

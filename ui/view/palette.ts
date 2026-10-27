@@ -69,12 +69,13 @@ export const PANEL_NAMES: Readonly<Record<PanelId, string>> = {
   smile: DOCK_LABELS.smile.name,
   ai: DOCK_LABELS.ai.name,
 };
+/** パネルの行の並び（キー 1〜6 の順 = ドックの並び。#275） */
 const PANEL_ORDER: readonly PanelId[] = [
-  'positions',
   'board',
+  'smile',
+  'positions',
   'scenario',
   'metrics',
-  'smile',
   'ai',
 ];
 /** [このポジションを診断] の行の名前（#135） */
