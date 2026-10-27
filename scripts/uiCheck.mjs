@@ -136,7 +136,7 @@
 //                                          増えない）→ 閉じて開き直し 1 → ⟳ 2 → [最新] で増えない、日足で限月交代の印 ≥ 1・線は交代でもつながる（つなぎ足）・読み取りに
 //                                          限月、先物で日足 → IV 推移も日足（足を保つ）。390×844 と 1440×900
 //                                          AI のチャット（#135 AC7）: 360 / 390（AI のシート peek / full）・900（ドックの AI）・1440
-//                                          （トップバーの [AI] で作業台を入れ替え）× ダーク / ライトで縦・横・折り返し・舞台の読み取り、
+//                                          （トップバーの [AI] で左の列（市場）を入れ替え。#280）× ダーク / ライトで縦・横・折り返し・舞台の読み取り、
 //                                          ドック 6 つ（タブレット 5 つ）の文字が切れない、押す前に残り（$）が見出しに見えて切れない、
 //                                          免責の文は初めてだけ（閉じて開き直すと出ない）、偽の SSE の診断の返答を出した状態も測る
 //                                          #135 AC6（--flows）: 390×844 と 1440×900 で [このポジションを診断] → 進み具合が出るまで < 1,000 ms・
@@ -148,6 +148,8 @@
 //                                          偽の返答）、縦・横 0px。AI が無効なら送らずに入力欄に質問の文と理由。
 //                                          #263: 送った吹き出しの上端が枠の内側の上端 ±4px（送った直後と返答の後）・返答の
 //                                          流れる間の枠の scrollTop の変化 ≤ 1px（末尾に追従しない）
+//                                          #280（EPIC #281 終了条件 12）: 1440×900 で AI を開いた直後と返答の後に、AI が左の列・
+//                                          指標のタイル 6 枚とテール表 5 行（18 セル）の下端 ≤ 900px・[AI] がチップ + svg で押されている
 //                                          #277: 返答の後の空白が枠の内側の半分以下（返答が短く下詰めを縮めた
 //                                          data-hold="end" のときだけ、返答の後の上端の下がりは枠の 55% まで）
 //   --ai                                   #135・#136 の項目だけ（既定の検査・--flows とも。手元の確かめ用）。
@@ -3017,6 +3019,7 @@ const ivStats = { pass: 0, total: 0 };
  */
 async function openIv(page, w, sheet = 'peek') {
   if (w >= 1200) {
+    await closeAiPc(page);
     await page.click('section.board .panel-head .seg button:has-text("IV 推移")');
   } else {
     if (w <= PHONE_MAX) await setShell(page, 'smile', sheet === 'hidden' ? 'peek' : sheet);
@@ -8711,6 +8714,25 @@ async function keyFlows(vp) {
     );
   }
 
+  // #280: PC のキー 6 は左の列（市場 ⇄ AI）。3 / 5 は AI を閉じない、1 は市場（板）に戻す、6 で戻すと前の市場の見え方
+  if (tier === 'pc') {
+    const left = () => page.getAttribute('.layout', 'data-left');
+    const seq = [];
+    await press('2');
+    for (const key of ['6', '3', '5', '6', '6', '1']) {
+      await blur();
+      await press(key);
+      const cur = await shellNow();
+      const metrics = await page.isVisible('section.metrics');
+      seq.push(`${key}:${await left()}/${cur.market}${metrics ? '' : ' 指標×'}`);
+    }
+    check(
+      `#280 ${tag} キー 6 で左の列が AI ⇄ 市場（戻すと前の見え方）・3 / 5 で AI のまま・1 で板・指標は見えたまま`,
+      seq.join(' ') === '6:ai/smile 3:ai/smile 5:ai/smile 6:market/smile 6:ai/smile 1:market/board',
+      seq.join(' '),
+    );
+  }
+
   // (b) G → 描画域、→ で ΔX +100
   {
     await blur();
@@ -11231,10 +11253,18 @@ async function ivMoreFlows(vp) {
 // ---- AI のチャット（#135）
 const aiStats = { pass: 0, total: 0 };
 
+/** PC で左の列が AI なら、トップバーの [AI] で市場に戻す（#280） */
+async function closeAiPc(page) {
+  if ((await page.getAttribute('.layout', 'data-left')) === 'ai') {
+    await page.click('.top button[data-ai="top"]');
+    await page.waitForTimeout(120);
+  }
+}
+
 /** AI のパネルを開く（スマホ = ドックの AI でシート sheet、タブレット = ドックの AI、PC = トップバーの [AI]） */
 async function openAi(page, w, sheet = 'peek') {
   if (w >= 1200) {
-    const on = await page.getAttribute('.layout', 'data-bench');
+    const on = await page.getAttribute('.layout', 'data-left');
     if (on !== 'ai') await page.click('.top button[data-ai="top"]');
   } else if (w <= PHONE_MAX) {
     if (!(await setShell(page, 'ai', sheet))) return false;
@@ -11319,6 +11349,60 @@ async function aiCheck(page, label, w) {
   else failed = true;
   console.log(`${label}: AI のパネル ${ok ? 'pass' : `${bad.join('・')}  ← NG`}`);
   return r;
+}
+
+/**
+ * #280（EPIC #281 終了条件 12・AC1・AC2・AC6）: PC 1440×900 で AI を開いている間、AI は左の列（市場の列と入れ替わり、
+ * 板・スマイルは隠れる）、指標のタイル 6 枚とテール表 5 行（18 セル）の下端が窓の中（右の列はスクロールしていない）、
+ * トップバーの [AI] はチップ（.chip）で svg を 1 つ持ち aria-pressed="true"
+ */
+async function aiSideCheck(page, label) {
+  const r = await page.evaluate(() => {
+    const vh = window.innerHeight;
+    const vis = (el) => !!el && el.getClientRects().length > 0;
+    const ai = document.querySelector('section.ai');
+    const sec = document.querySelector('section.metrics');
+    const tiles = [...(sec?.querySelectorAll('.metric-tiles .tile') ?? [])].filter(vis);
+    const cells = [
+      ...(sec?.querySelectorAll(
+        'table.tail:not(.margin-tail) thead th, table.tail:not(.margin-tail) tbody th, table.tail:not(.margin-tail) tbody td',
+      ) ?? []),
+    ];
+    const bottoms = [...tiles, ...cells].map((el) => el.getBoundingClientRect().bottom);
+    const top = document.querySelector('.top button[data-ai="top"]');
+    return {
+      vh,
+      left: ai ? Math.round(ai.getBoundingClientRect().left) : -1,
+      market:
+        vis(document.querySelector('section.board')) ||
+        vis(document.querySelector('section.smile')),
+      positions: vis(document.querySelector('section.positions')),
+      tiles: tiles.length,
+      rows: sec?.querySelectorAll('table.tail:not(.margin-tail) tbody tr').length ?? 0,
+      cells: cells.length,
+      max: bottoms.length ? Math.max(...bottoms) : Number.NaN,
+      scroll: sec?.querySelector('.panel-body')?.scrollTop ?? -1,
+      chip: !!top?.classList.contains('chip') && top.querySelectorAll('svg').length === 1,
+      pressed: top?.getAttribute('aria-pressed') === 'true',
+    };
+  });
+  const bad = [];
+  if (r.left !== 0) bad.push(`AI の左端 ${r.left}px`);
+  if (r.market) bad.push('板 / スマイルが見えている');
+  if (!r.positions) bad.push('ポジションが見えない');
+  if (r.tiles !== 6) bad.push(`タイル ${r.tiles} 枚`);
+  if (r.rows !== 5 || r.cells !== 18) bad.push(`テール表 ${r.rows} 行・${r.cells} セル`);
+  if (!(r.max <= r.vh)) bad.push(`下端の最大 ${Math.round(r.max)}px`);
+  if (r.scroll !== 0) bad.push(`右の列のスクロール ${r.scroll}`);
+  if (!r.chip) bad.push('[AI] がチップ + svg でない');
+  if (!r.pressed) bad.push('[AI] が押されていない');
+  aiStats.total++;
+  const ok = bad.length === 0;
+  if (ok) aiStats.pass++;
+  else failed = true;
+  console.log(
+    `${label}: #280 AI は左の列・タイル ${r.tiles} 枚とテール表 ${r.rows} 行の下端の最大 ${Math.round(r.max)}px（窓 ${r.vh}px）・[AI] はチップ ${ok ? 'pass' : `${bad.join('・')}  ← NG`}`,
+  );
 }
 
 /** 診断を押して返答（done）まで待つ（偽の SSE。dev だけ） */
@@ -11527,6 +11611,7 @@ async function aiSweep() {
         await report(page, lbl, w, h, `ai-${w}x${h}-${theme}-${sheet ?? 'open'}`);
         await readoutCheck(page, lbl, want);
         const r = await aiCheck(page, lbl, w);
+        if (w === 1440 && h === 900) await aiSideCheck(page, lbl);
         if (sheet !== 'full' && !r.disclaimer) {
           failed = true;
           console.log(`${lbl}: 初めて開いたのに免責の文が無い  ← NG`);
@@ -11549,6 +11634,7 @@ async function aiSweep() {
       await report(page, lbl, w, h, `ai-${w}x${h}-${theme}-answer`);
       await readoutCheck(page, lbl, want);
       await aiCheck(page, lbl, w);
+      if (w === 1440 && h === 900) await aiSideCheck(page, lbl);
       await aiTermCheck(page, tag);
       if (theme === 'dark') await aiKeepCheck(page, tag);
       await aiTableCheck(page, tag, w, h, theme, want);
@@ -11562,11 +11648,10 @@ async function aiSweep() {
 const askStats = { pass: 0, total: 0 };
 const ASK_PREFIX = '［AI に聞く］';
 
-/** 指標 · テールを見せる（スマホ = ドックの指標の peek、タブレット = ドックの指標、PC = 作業台を work に） */
+/** 指標 · テールを見せる（スマホ = ドックの指標の peek、タブレット = ドックの指標、PC = 常に見える（#280）） */
 async function showMetrics(page, w) {
   if (w >= 1200) {
-    if ((await page.getAttribute('.layout', 'data-bench')) === 'ai')
-      await page.click('.top button[data-ai="top"]');
+    // AI は左の列（#280）なので指標は隠れない
   } else if (w <= PHONE_MAX) {
     await setShell(page, 'metrics', 'peek');
   } else {

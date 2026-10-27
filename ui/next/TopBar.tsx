@@ -9,6 +9,7 @@ import type { WarnTagKind, WarnTagsModel } from '../view/notices';
 import type { Tier } from '../view/shell';
 import type { TabsView } from '../view/tabs';
 import { THEMES, type TopMenuKey, topMenuModel } from '../view/topMenu';
+import { AiIcon } from './parts/AiIcon';
 import { Menu } from './parts/Menu';
 import { BoxTabs, toItems } from './top/BoxTabs';
 import { MarketPill } from './top/MarketPill';
@@ -45,7 +46,7 @@ export interface TopBarProps {
   /** タブのメニューの 保存一覧に保存…（名前の欄にフォーカスして開く） */
   onSaveToBook: () => void;
   onOpenSettings: () => void;
-  /** PC の [AI]（#135。作業台の列を AI のチャットと入れ替える。参照が変わらない）。aiOpen = 今 AI を出している */
+  /** PC の [AI]（#135。#280 で左の列（市場）を AI のチャットと入れ替える。参照が変わらない）。aiOpen = 今 AI を出している */
   aiOpen?: boolean;
   onAi?: () => void;
 }
@@ -124,15 +125,18 @@ function TopBarView(p: TopBarProps) {
       <MarketPill m={p.pill} tier={p.tier} noTag={p.tier === 'phone' && warn !== null} />
       {warn && <WarnTags m={warn} tier={p.tier} onClose={closeNote} />}
       {p.tier === 'pc' && p.onAi && (
+        // 列を入れ替えるトグル（#280 O-09）: 1 回の操作の [最新]（.btn）と形を分けてチップ + 吹き出しのアイコン
         <button
           type="button"
-          class="btn sm"
+          class="chip ai-toggle"
           data-ai="top"
           aria-pressed={p.aiOpen === true}
-          title="作業台を AI のチャットと入れ替える（6）"
+          title="左の列を AI のチャットと入れ替える（6）"
           onClick={p.onAi}
         >
-          AI
+          <AiIcon />
+          {/* 文字は span に（アイコンと別の行に数えない = ui:check の折り返し） */}
+          <span>AI</span>
         </button>
       )}
       <button

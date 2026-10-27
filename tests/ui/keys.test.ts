@@ -9,7 +9,9 @@ import {
   PANEL_FOCUS_LABEL,
   PANEL_KEY,
   PANEL_KEYS,
+  palettePanelActions,
   panelKeyActions,
+  panelKeyFocus,
   THEME_KEY,
   toggledTheme,
 } from '../../ui/view/keys';
@@ -180,15 +182,16 @@ describe('panelKeyActions', () => {
     ['scenario', 'tablet', []],
     ['metrics', 'tablet', open('metrics', 'tablet')],
     ['smile', 'tablet', open('smile', 'tablet')],
-    ['positions', 'pc', [{ type: 'bench', bench: 'work' }]],
+    // #280: ポジション・指標は常に見える（AI は左の列）。状態は変えずフォーカスだけ
+    ['positions', 'pc', []],
     ['board', 'pc', [{ type: 'market', market: 'board' }]],
     ['scenario', 'pc', []],
-    ['metrics', 'pc', [{ type: 'bench', bench: 'work' }]],
+    ['metrics', 'pc', []],
     ['smile', 'pc', [{ type: 'market', market: 'smile' }]],
-    // #135: AI はスマホ・タブレットは開く、PC は作業台の入れ替え
+    // #135: AI はスマホ・タブレットは開く、PC は左の列（市場）の入れ替え（#280）
     ['ai', 'phone', [{ type: 'open', panel: 'ai', tier: 'phone' }]],
     ['ai', 'tablet', [{ type: 'open', panel: 'ai', tier: 'tablet' }]],
-    ['ai', 'pc', [{ type: 'bench' }]],
+    ['ai', 'pc', [{ type: 'left' }]],
   ];
   it.each(table)('%s / %s', (panel, tier, want) => {
     expect(panelKeyActions(panel, tier)).toEqual(want);
@@ -248,5 +251,27 @@ describe('PANEL_FOCUS_LABEL', () => {
     const labels = Object.values(PANEL_FOCUS_LABEL);
     for (const l of labels) expect(l.trim().length).toBeGreaterThan(0);
     expect(new Set(labels).size).toBe(6);
+  });
+});
+
+describe('#280 レビュー指摘 2・3: パレットの「AI に相談」・キー 6 で閉じたときのフォーカス', () => {
+  it('パレットの AI は入れ替えでなく open（PC で開いていても閉じない）、他のパネルはキーと同じ', () => {
+    for (const tier of ['phone', 'tablet', 'pc'] as const) {
+      expect(palettePanelActions('ai', tier)).toEqual([{ type: 'open', panel: 'ai', tier }]);
+      for (const panel of ['board', 'smile', 'positions', 'scenario', 'metrics'] as const)
+        expect(palettePanelActions(panel, tier)).toEqual(panelKeyActions(panel, tier));
+    }
+    const ai = { ...INITIAL_SHELL, left: 'ai' as const };
+    for (const a of palettePanelActions('ai', 'pc')) expect(shellReduce(ai, a)).toBe(ai);
+  });
+
+  it('PC で AI を出している間の 6 は戻った市場の枠へ（板 → 板、他 → スマイルの枠）。他はそのパネル', () => {
+    const at = (s: Partial<ShellState>): ShellState => ({ ...INITIAL_SHELL, ...s });
+    expect(panelKeyFocus('ai', 'pc', at({ left: 'ai', market: 'board' }))).toBe('board');
+    for (const market of ['smile', 'iv', 'fut'] as const)
+      expect(panelKeyFocus('ai', 'pc', at({ left: 'ai', market }))).toBe('smile');
+    expect(panelKeyFocus('ai', 'pc', at({}))).toBe('ai');
+    expect(panelKeyFocus('ai', 'tablet', at({ left: 'ai' }))).toBe('ai');
+    expect(panelKeyFocus('metrics', 'pc', at({ left: 'ai' }))).toBe('metrics');
   });
 });

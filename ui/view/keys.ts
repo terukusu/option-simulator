@@ -4,7 +4,7 @@
  * 純関数（Preact・DOM に依存しない）。document の keydown は ui/next/useGlobalKeys.ts だけが受ける。
  */
 import type { ThemePref } from '../prefs';
-import type { PanelId, ShellAction, Tier } from './shell';
+import { leftView, type PanelId, type ShellAction, type ShellState, type Tier } from './shell';
 
 /** keydown の要約（KeyboardEvent から作る。editable・blocked は画面が DOM を見て決める） */
 export interface KeySummary {
@@ -115,17 +115,34 @@ export function globalKey(s: KeySummary): GlobalKey | null {
 
 /**
  * 1〜5 で送る画面の状態の action（§4.6 の表。openBoardActions と同じ形）。
- * スマホは全部 open、タブレットはシナリオ（常設）以外 open、PC は板 / スマイルだけ market、AI は作業台の入れ替え
- * （6 を押すたびに AI ⇄ ポジション・指標）、ポジション・指標は作業台を work に戻す（#135）。
+ * スマホは全部 open、タブレットはシナリオ（常設）以外 open、PC は板 / スマイルだけ market（左の列が AI なら市場に
+ * 戻す）、AI は左の列の入れ替え（6 を押すたびに AI ⇄ 市場。#280）、ポジション・シナリオ・指標は常に見えるので何もしない。
  * どの幅でもこのあと画面がそのパネルのスクロールする枠（`.panel-body` / 板は `.board-wrap`）へフォーカスを移す。
  */
 export function panelKeyActions(panel: PanelId, tier: Tier): ShellAction[] {
   if (tier === 'phone') return [{ type: 'open', panel, tier }];
   if (tier === 'tablet') return panel === 'scenario' ? [] : [{ type: 'open', panel, tier }];
   if (panel === 'board' || panel === 'smile') return [{ type: 'market', market: panel }];
-  if (panel === 'ai') return [{ type: 'bench' }];
-  if (panel === 'positions' || panel === 'metrics') return [{ type: 'bench', bench: 'work' }];
+  if (panel === 'ai') return [{ type: 'left' }];
   return [];
+}
+
+/**
+ * キー 1〜6 の後のフォーカスの行き先のパネル（#280 レビュー指摘 3）: PC で AI を出している間の 6 は AI を閉じるので、
+ * 戻った市場の枠（板なら板、スマイル / IV 推移 / 先物ならスマイルの枠）へ。他はそのパネル
+ */
+export function panelKeyFocus(panel: PanelId, tier: Tier, shell: ShellState): PanelId {
+  if (tier !== 'pc' || panel !== 'ai' || leftView(shell) !== 'ai') return panel;
+  return shell.market === 'board' ? 'board' : 'smile';
+}
+
+/**
+ * コマンドパレットのパネルの行の action（#280 レビュー指摘 2）: 「AI に相談」は入れ替えでなく出すだけ（PC で開いて
+ * いても閉じない = [AI に聞く]・「このポジションを診断」と同じ open）。他のパネルはキー 1〜5 と同じ
+ */
+export function palettePanelActions(panel: PanelId, tier: Tier): ShellAction[] {
+  if (panel === 'ai') return [{ type: 'open', panel, tier }];
+  return panelKeyActions(panel, tier);
 }
 
 /** T: 解決済みのテーマの反対を明示の設定にする（「端末に合わせる」から抜ける） */
