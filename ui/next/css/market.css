@@ -516,14 +516,18 @@ table.board .legbadge.buy {
   stroke-width: 1.5;
 }
 
+/*
+ * ATM = 淡い文字色の点線、シナリオ ATM = --pin2 の細い実線（#279 V-04。近くても線種と色で分かれる）。シナリオ ATM は
+ * 舞台（stage.css の .chart .atm2）と同じ見た目（全チャートで一貫）
+ */
 .smile-wrap .atm {
-  stroke: var(--handle);
-  stroke-dasharray: 3 3;
+  stroke: var(--ink-3);
+  stroke-dasharray: 2 3;
 }
 
 .smile-wrap .atm2 {
   stroke: var(--pin2);
-  stroke-dasharray: 2 3;
+  stroke-width: 1;
 }
 
 .smile-wrap .sel {
@@ -575,20 +579,12 @@ table.board .legbadge.buy {
   color: var(--accent);
 }
 
-.smile-legend > .bid {
-  color: var(--bid);
-}
-
-.smile-legend > .ask {
-  color: var(--ask);
-}
-
 .smile-legend > .x {
   color: var(--warn);
 }
 
 .smile-legend > .atm {
-  color: var(--handle);
+  color: var(--ink-3);
 }
 
 .smile-legend > .atm2 {

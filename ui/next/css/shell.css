@@ -237,6 +237,24 @@ section.panel .board-wrap:focus-visible {
   .layout[data-bench="ai"] section.ai {
     display: flex;
   }
+
+  /*
+   * トースト（#279 F-05）: PC はドックが無いので右下（作業台の列の中）。下中央だとシナリオのプリセットの行に重なる。
+   * 幅は作業台の列（minmax(360px, min(28%, 420px))）から左右の余白を引いた分まで
+   */
+  .toasts {
+    right: var(--sp-3);
+    bottom: var(--sp-3);
+    left: auto;
+    align-items: flex-end;
+    max-width: calc(max(360px, min(28vw, 420px)) - 2 * var(--sp-3));
+    transform: none;
+  }
+
+  .toast-alerts,
+  .toast-log {
+    align-items: flex-end;
+  }
 }
 
 /* ===== タブレット 720〜1199: 舞台 + シナリオ | ドック + パネル 1 枚 ===== */

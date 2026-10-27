@@ -357,7 +357,7 @@ table.tail.margin-tail td small.call {
 }
 
 .hm-sw.hm-call {
-  background: var(--loss-fill);
+  background: color-mix(in srgb, var(--loss-fill) 50%, transparent);
   border-color: var(--loss);
 }
 
@@ -467,8 +467,9 @@ table.tail.margin-tail td small.call {
   fill: var(--gain-fill);
 }
 
+/* 追証の側の塗りは --loss-fill の半分（境目の線が主役。マスの格子と混ざって面積が重く見えないように。#279 V-05） */
 .hm-svg .hm-call {
-  fill: var(--loss-fill);
+  fill: color-mix(in srgb, var(--loss-fill) 50%, transparent);
 }
 
 .hm-svg .hm-line {

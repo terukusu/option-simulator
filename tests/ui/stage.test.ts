@@ -36,6 +36,7 @@ import {
   ivRailValue,
   ivRailY,
   legMarkers,
+  MARK_LINE_CLEAR,
   type MarkObstacle,
   railPick,
   STAGE_LABEL_SHIFT,
@@ -578,7 +579,7 @@ describe('stageFrame・stageMarkLabels', () => {
     expect(stageMarkLabels(near, flat)[0]).toEqual(near.marks[0]);
   });
 
-  /** ラベルの箱（11px の文字の見積もり）が線・他のラベルと重ならず、描画域の中 */
+  /** ラベルの箱（11px の文字の見積もり）が線と 3px 以上離れ、他のラベルと重ならず、描画域の中 */
   function expectClear(chart: PnlChartModel, labels: ReturnType<typeof stageMarkLabels>) {
     const { plot } = chart;
     const sx = linear(chart.domain, [plot.left, plot.left + plot.width]);
@@ -588,9 +589,11 @@ describe('stageFrame・stageMarkLabels', () => {
       const x0 = m.anchor === 'start' ? m.labelX : m.labelX - w;
       return { x0, x1: x0 + w, y0: m.labelY - 7, y1: m.labelY + 7 };
     });
-    for (const b of boxes) {
-      expect(b.y0).toBeGreaterThanOrEqual(plot.top - 1e-9);
-      expect(b.y1).toBeLessThanOrEqual(plot.top + plot.height + 1e-9);
+    for (const b0 of boxes) {
+      expect(b0.y0).toBeGreaterThanOrEqual(plot.top - 1e-9);
+      expect(b0.y1).toBeLessThanOrEqual(plot.top + plot.height + 1e-9);
+      // 線とは縦に MARK_LINE_CLEAR（3px）空ける（#279 V-03。縁取りが線を削らない）
+      const b = { ...b0, y0: b0.y0 - MARK_LINE_CLEAR, y1: b0.y1 + MARK_LINE_CLEAR };
       for (const l of chart.lines) {
         // 箱の横の範囲を 1px ごとに線の値で調べる（折れ線の線形補間）
         const px = l.xs.map((x) => sx(x));

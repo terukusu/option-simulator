@@ -82,7 +82,7 @@
 //                                          スマイルの操作。390×844・1440×900・1800×1000。322 行の板の Long Animation Frame・限月の切替の
 //                                          時間。限月・種別・絞り込み・横軸が再読み込みと作業の保存に残る）とトップバーの手順
 //                                          （#87 (A): [最新] の読み込み中 / 失敗（/api/chain を差し替え）・失敗のトーストが成功で消える・
-//                                          ⋯ > ファイルを開く…・限月の切替と旧画面（控え）の F / ATM の一致・全文の数値の列が旧画面（控え）の header.header
+//                                          ⋯ > ファイルを開く…・限月の切替と旧画面（控え）の F / ATM の一致・全文の数値の列が旧画面（控え）の header.header（前提の区間を除く。#279）
 //                                          を含む・復元のトースト 6 秒・壊れた保存の警告のトースト・別のタブの警告のタグ・タブが 6 個の
 //                                          共有を開く確認・タブの切り替えで [元に戻す] だけ消える。390×844 と 1440×900）と BOX タブの手順
 //                                          （#87 (B) AC-12: ＋ の空 / 複製・クリックと ← → Home End・名前を変える…（B2 / 空 / 重複）・
@@ -1222,11 +1222,11 @@ async function marketCheck(page, label, want) {
     if (vis(smile)) {
       test(
         smile.querySelectorAll(
-          '.panel-head > h2, .panel-head .seg > button, .smile-tools, .smile-tools .seg > button, .smile-act, .smile-act > *, .smile-legend, .smile-legend > span',
+          '.panel-head > h2:not(.sr), .panel-head .seg > button, .smile-tools, .smile-tools .seg > button, .smile-act, .smile-act > *, .smile-legend, .smile-legend > span',
         ),
       );
       const plot = smile.querySelector('.smile-month:not(.inactive) .smile-wrap');
-      // 凡例の項目（レビュー S2）: 隠さない = 見えている項目が 7（シナリオ ATM があれば 8）で、どれも凡例の箱の中
+      // 凡例の項目（レビュー S2）: 隠さない = 見えている項目が 5（シナリオ ATM があれば 6。#279 で bid / ask を外した）で、どれも凡例の箱の中
       const lg = smile.querySelector('.smile-legend');
       const lb = lg?.getBoundingClientRect();
       const items = [...(lg?.children ?? [])];
@@ -1238,7 +1238,7 @@ async function marketCheck(page, label, want) {
         height: plot ? Math.round(plot.getBoundingClientRect().height) : 0,
         picked: !!smile.querySelector('.smile-act .k'),
         legend: shown.length,
-        legendWant: lg?.querySelector(':scope > .atm2') ? 8 : 7,
+        legendWant: lg?.querySelector(':scope > .atm2') ? 6 : 5,
       };
     }
     return { ...out, n, bad };
@@ -6644,7 +6644,9 @@ async function topFlows(vp) {
       `${label}／旧 F ${second?.f}・ATM ${second?.atm}`,
     );
     const pop = await popText(page);
-    const oldText = old?.text ?? '';
+    // 前提の一覧（金利・評価時刻・取引カレンダーの値）はピルから設定の末尾へ移した（#279 V-06。tests/ui/settings.test.ts）ので、
+    // 控えの「前提: … ⓘ」の区間は比べない（ⓘ の後の説明の段落はピルに残る）
+    const oldText = (old?.text ?? '').replace(/前提: .*? ⓘ/, '');
     const miss = missingTokens(tokens(oldText), tokens(pop));
     check(
       `#87 AC-11(e) ${tag} ピルの全文の数値の列が旧画面の header.header の列（控え）をすべて含む`,

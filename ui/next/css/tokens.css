@@ -8,7 +8,7 @@
 :root,
 :root[data-theme="dark"] {
   color-scheme: dark;
-  /* 7.1 面と文字 */
+  /* 7.1 面と文字（文字の --ink / --ink-2 / --ink-3 は面 --bg〜--s3 に両テーマとも 4.5:1 以上。#279） */
   --bg: #0e1116;
   --s1: #151921;
   --s2: #1b2029;
@@ -18,7 +18,7 @@
   --line-2: #3a4455;
   --ink: #e6e9ef;
   --ink-2: #a3acbb;
-  --ink-3: #6b7484;
+  --ink-3: #8891a2;
   /* 7.2 意味の色 */
   --expiry: var(--ink);
   --accent: #3987e5;
@@ -64,7 +64,7 @@
   --line-2: #c4cad4;
   --ink: #12161c;
   --ink-2: #4f5867;
-  --ink-3: #8b94a3;
+  --ink-3: #626b79;
   --expiry: var(--ink);
   --accent: #2a78d6;
   --accent-ink: #1c5cab;
@@ -78,7 +78,7 @@
   --gain: #0f8a5c;
   --loss: #d13f3f;
   --gain-fill: rgba(27, 175, 122, 0.14);
-  --loss-fill: rgba(227, 73, 72, 0.14);
+  --loss-fill: rgba(227, 73, 72, 0.1);
   --warn: #a86b00;
   --warn-fill: rgba(168, 107, 0, 0.14);
   --bid: #0f8a5c;

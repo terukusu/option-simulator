@@ -95,14 +95,15 @@
   padding: 0 6px;
   border-radius: 999px;
   background: var(--s4);
-  color: var(--ink-3);
+  /* --s4 の上の 11px の文字は --ink-2（--ink-3 は --s4 に 4.5:1 を切る。tests/ui/cssTokens.test.ts。#279） */
+  color: var(--ink-2);
   font-size: 11px;
   font-variant-numeric: tabular-nums;
   line-height: 16px;
 }
 
 .boxtab[aria-selected="true"] .n {
-  color: var(--ink-2);
+  color: var(--ink);
 }
 
 /* ===== 市場ピル ===== */
@@ -270,15 +271,6 @@
 
 .pf-line.act {
   color: var(--ink);
-}
-
-.pf-sub {
-  color: var(--ink-3);
-}
-
-.pf-list {
-  margin: 0;
-  padding-left: 1.2em;
 }
 
 .pf-error {

@@ -68,7 +68,7 @@ export interface SmilePlotProps {
 
 /**
  * 限月 1 つのスマイルの描画域（#85。旧 Smile の描画と useChartGestures の設定を写した）。高さは残りの高さ（useSize）。
- * 縦線: ATM = .atm（--handle の破線）、シナリオ ATM = .atm2（--pin2 の点線）、選択 = .sel（--ink）+ 上端の K のラベル。
+ * 縦線: ATM = .atm（--ink-3 の点線）、シナリオ ATM = .atm2（--pin2 の細い実線。舞台と同じ。#279）、選択 = .sel（--ink）+ 上端の K のラベル。
  * 十字線（#217。docs/ui-redesign.md §4.1 の共通の規則）: PC のホバー、タッチのタップ（点のタップは選択 + 点に吸着、点の外は
  * 置く / 消す。交点の ±14px をつかんで動かす）。長押しは今のまま選択のスクラブ。カーソルは値の座標のローカル state
  * （smileCrosshair）。横軸を替えたら・ダブルタップで消す。

@@ -8,6 +8,7 @@ import { describe, expect, it } from 'vitest';
  *     （`:root, :root[data-theme="dark"]` と `:root[data-theme="light"]`）の中だけ。color-mix() もトークン同士
  * (b) §7 の表のトークンがダーク・ライトの両方にあり、値が表と一致する
  * (c) var(--x) で使う名前がすべて定義済み
+ * (d) 文字のトークン（--ink / --ink-2 / --ink-3）は面（--bg・--s1〜--s3）に、--ink / --ink-2 は --s4 にも 4.5:1 以上（#279）
  */
 /**
  * 一覧は import.meta.glob の鍵だけ（読み込まない）、中身は Node の fs で読む
@@ -44,7 +45,7 @@ const TABLE: Record<string, readonly [string, string]> = {
   '--line-2': ['#3a4455', '#c4cad4'],
   '--ink': ['#e6e9ef', '#12161c'],
   '--ink-2': ['#a3acbb', '#4f5867'],
-  '--ink-3': ['#6b7484', '#8b94a3'],
+  '--ink-3': ['#8891a2', '#626b79'],
   // 7.2 意味の色
   '--expiry': ['var(--ink)', 'var(--ink)'],
   '--accent': ['#3987e5', '#2a78d6'],
@@ -99,6 +100,36 @@ const NAMED = new Set(
     'yellowgreen'
   ).split(' '),
 );
+
+/** 本文の文字に使うトークンと、文字が載る面。#279 V-01 */
+const TEXT_TOKENS = ['--ink', '--ink-2', '--ink-3'];
+const TEXT_SURFACES = ['--bg', '--s1', '--s2', '--s3'];
+/**
+ * --s4（トースト・バッジの面）に載る文字は --ink と --ink-2 だけ（--ink-3 は --s4 に 4.5:1 を切る）。
+ * BOX タブの件数のバッジ（top.css の .boxtab .n）が --ink-2（#279 のレビュー）
+ */
+const S4_TEXT_TOKENS = ['--ink', '--ink-2'];
+
+const isHex6 = (c: string) => /^#[0-9a-f]{6}$/i.test(c);
+
+/** WCAG 2.x の相対輝度（#rrggbb） */
+function luminance(hex: string): number {
+  const m = /^#([0-9a-f]{6})$/i.exec(hex);
+  if (!m) return Number.NaN;
+  const n = Number.parseInt(m[1] ?? '', 16);
+  const lin = (c: number) => {
+    const v = c / 255;
+    return v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4;
+  };
+  return 0.2126 * lin((n >> 16) & 255) + 0.7152 * lin((n >> 8) & 255) + 0.0722 * lin(n & 255);
+}
+
+/** コントラスト比（1〜21。色が #rrggbb でなければ NaN = 検査が落ちる） */
+function contrast(a: string, b: string): number {
+  const x = luminance(a);
+  const y = luminance(b);
+  return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05);
+}
 
 const stripComments = (css: string) => css.replace(/\/\*[\s\S]*?\*\//g, '');
 
@@ -243,6 +274,41 @@ describe('ui/next の CSS のトークン（§7）', () => {
       }
     }
     expect(missing).toEqual([]);
+  });
+
+  it('(d) 文字のトークンは文字の載る面に両テーマとも 4.5:1 以上（WCAG 2.x の AA。#279 V-01）', () => {
+    for (const [theme, d] of [
+      ['dark', darkDecls],
+      ['light', lightDecls],
+    ] as const) {
+      const pairs = [
+        ...TEXT_TOKENS.flatMap((ink) => TEXT_SURFACES.map((surface) => [ink, surface] as const)),
+        ...S4_TEXT_TOKENS.map((ink) => [ink, '--s4'] as const),
+      ];
+      for (const [ink, surface] of pairs) {
+        const fg = d.get(ink) ?? '';
+        const bg = d.get(surface) ?? '';
+        const what = `${theme} ${ink}(${fg}) / ${surface}(${bg})`;
+        for (const c of [fg, bg]) expect(isHex6(c), `${what}: ${c} が #rrggbb でない`).toBe(true);
+        expect(contrast(fg, bg), what).toBeGreaterThanOrEqual(4.5);
+      }
+    }
+  });
+
+  it('--s4 の上の文字（BOX タブの件数のバッジ）は --ink-3 でない（#279 のレビュー）', () => {
+    const top = stripComments(files['../../ui/next/css/top.css'] ?? '');
+    const badge = blocks(top).find((b) => b.selector === '.boxtab .n');
+    expect(badge, '.boxtab .n').toBeDefined();
+    const d = decls(badge?.body ?? '');
+    expect(d.get('background')).toBe('var(--s4)');
+    expect(S4_TEXT_TOKENS.map((t) => `var(${t})`)).toContain(d.get('color'));
+  });
+
+  it('コントラストの計算そのもの（白 / 黒 = 21、同じ色 = 1、#767676 / 白 ≈ 4.54）', () => {
+    expect(contrast('#ffffff', '#000000')).toBeCloseTo(21, 6);
+    expect(contrast('#123456', '#123456')).toBeCloseTo(1, 6);
+    expect(contrast('#767676', '#ffffff')).toBeCloseTo(4.54, 2);
+    expect(contrast('#8b94a3', '#ffffff')).toBeLessThan(4.5);
   });
 
   it('検査そのものが色を見つけられる（偽の CSS）', () => {
