@@ -6,7 +6,8 @@
  * - 入力か軸が変わったら HOLD_MAP_SETTLE_MS 待ち（開いただけ = 前に見た入力・軸と同じなら待たない。#176 の
  *   holdMapSettleMs）、列（余力と損益）ごとに setTimeout(0) で回す（1 切れ ≤ HOLD_MAP_SLICE_MS。列が単位）。
  *   途中で入力が変わったら捨てて待ち直す。計算中は前のマップを残す（computing = true。部品が薄くして aria-busy）
- * - active（マップが見えている）でなければ計算しない（見えたときに作る）
+ * - active（指標のパネルが見えている = shell.ts の holdMapActive。#274 で折りたたみの開閉によらない = 見出しの結論）でなければ
+ *   計算しない（見えたときに作る）。入力・軸が前に作ったマップと同じなら作り直さない（止まっている間は計算しない）
  */
 
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';

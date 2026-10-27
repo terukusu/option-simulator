@@ -19,6 +19,7 @@ import {
   holdMapCaption,
   holdMapCrosshair,
   holdMapDxX,
+  holdMapHeadSummary,
   holdMapHeight,
   holdMapLegend,
   holdMapNote,
@@ -26,6 +27,7 @@ import {
   holdMapPlot,
   holdMapReadout,
   holdMapReveal,
+  holdMapRevealRange,
   holdMapSelMark,
   holdMapStatusText,
   holdMapStep,
@@ -34,6 +36,7 @@ import {
   holdMapWait,
 } from '../../view/holdMap';
 import type { AmountUnit } from '../../view/metrics';
+import { Popover } from '../parts/Popover';
 import { useSize } from '../useSize';
 
 /**
@@ -210,7 +213,6 @@ function HoldMapPlotView({
   const h = holdMapHeight(width);
   return (
     <>
-      {plot && showMoves && <p class="hm-sum">{holdMapSummary(plot.count)}</p>}
       {legend.length > 0 && (
         <p class="hm-legend">
           {legend.map((k) => (
@@ -333,15 +335,14 @@ function HoldMapPlotView({
       <p class="hm-readout" aria-live={xh ? 'off' : 'polite'}>
         {readout}
       </p>
-      <p class="mx-note">{HOLD_MAP_CALL_NOTE}</p>
-      {showMoves && <p class="mx-note">{holdMapNote(moves, hold.days)}</p>}
     </>
   );
 }
 
 /**
  * 追証マップ（#152。docs/ui-redesign.md §3・docs/design.md 5.11）: 指標 · テールの末尾の折りたたみ（既定は閉・
- * 開閉は ShellState.holdMap = セッション中だけ）。表示モデルは ui/view/holdMap.ts、計算の時機は useHoldMap、
+ * 開閉は ShellState.holdMap = セッション中だけ）。見出しの行に結論（過去 N 回中 M 回が追証の側。閉じていても出す）と ⓘ
+ * （説明・追証の側の注意・過去の点の注記。#274）。表示モデルは ui/view/holdMap.ts、計算の時機は useHoldMap、
  * 過去の点の読み込みは useAtmMoves（どちらも NextApp が持つ）。値は JSX のテキストと SVG の数値の属性だけ。
  */
 export function HoldMap({ hold, unit }: { hold: HoldBundle; unit: AmountUnit }) {
@@ -378,16 +379,25 @@ export function HoldMap({ hold, unit }: { hold: HoldBundle; unit: AmountUnit }) 
     const reveal = () => {
       // 描画域の上端 〜 読み取りの 1 行の下端（#259 H-2。タップの値まで見せる。読み取りは 3 行分の高さで固定）。
       // 資金なし・足なしは描画域が無いので中身（.hm）の全体
+      // #274: 見出しの行（.hm-head = 中身の直前）は描画域と一緒に入る高さなら残す（holdMapRevealRange）
       const top = body.querySelector('.hm-plot') ?? body;
       const bottom = body.querySelector('.hm-readout') ?? top;
+      // 見出しの行の上の罫線（1px）は隠れてよい = 折りたたみのボタンの上端
+      const head = body.previousElementSibling?.querySelector('.hm-toggle') ?? top;
       const oy = getComputedStyle(host).overflowY;
       if (oy !== 'auto' && oy !== 'scroll') return;
       const h = host.getBoundingClientRect();
       const reduced = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
       const t = top.getBoundingClientRect();
-      const b = bottom.getBoundingClientRect();
-      const { delta, behavior } = holdMapReveal(t.top, b.bottom, h.top, h.bottom, reduced);
-      if (delta > 0) host.scrollTo({ top: host.scrollTop + delta, behavior });
+      const r = holdMapRevealRange(
+        head.getBoundingClientRect().top,
+        t.top,
+        t.bottom,
+        bottom.getBoundingClientRect().bottom,
+        h.height,
+      );
+      const { delta, behavior } = holdMapReveal(r.top, r.bottom, h.top, h.bottom, reduced);
+      if (delta !== 0) host.scrollTo({ top: host.scrollTop + delta, behavior });
     };
     const ro = new ResizeObserver(reveal);
     // pointerdown はマウス・タッチ・ペンのどれでも出る
@@ -403,20 +413,34 @@ export function HoldMap({ hold, unit }: { hold: HoldBundle; unit: AmountUnit }) 
     timer = window.setTimeout(stop, HOLD_REVEAL_MS);
     return stop;
   }, [hold.open]);
+  const moves = hold.moves.status === 'ok' ? hold.moves.moves : [];
+  const result = hold.map.result;
+  const summary = useMemo(
+    () => (blocked ? null : holdMapHeadSummary(result, moves)),
+    [blocked, result, moves],
+  );
   return (
     <>
-      <button
-        type="button"
-        class="hm-toggle"
-        aria-expanded={hold.open}
-        aria-controls={id}
-        onClick={hold.onToggle}
-      >
-        <span>{holdMapTitle(hold.days, !blocked)}</span>
-      </button>
+      <div class="hm-head">
+        <button
+          type="button"
+          class="hm-toggle"
+          aria-expanded={hold.open}
+          aria-controls={id}
+          onClick={hold.onToggle}
+        >
+          <span class="hm-title">{holdMapTitle(hold.days, !blocked)}</span>
+          {summary && <span class={hold.map.computing ? 'hm-sum stale' : 'hm-sum'}>{summary}</span>}
+        </button>
+        {/* 説明・追証の側の注意・過去の点の注記は ⓘ に（#274。開いた中は凡例・描画域・触った 1 行だけ） */}
+        <Popover label="追証マップの読み方" button="ⓘ">
+          <p>{holdMapCaption(blocked ? null : hold.allowedLoss)}</p>
+          <p>{HOLD_MAP_CALL_NOTE}</p>
+          {moves.length > 0 && <p>{holdMapNote(moves, hold.days)}</p>}
+        </Popover>
+      </div>
       {hold.open && (
         <div id={id} ref={bodyRef} class="hm">
-          <p class="mx-note">{holdMapCaption(blocked ? null : hold.allowedLoss)}</p>
           {blocked ? (
             <p class="hm-status">{status.main}</p>
           ) : (

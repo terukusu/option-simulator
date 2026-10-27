@@ -35,6 +35,7 @@ import {
   holdMapCellAt,
   holdMapCrosshair,
   holdMapDxX,
+  holdMapHeadSummary,
   holdMapInput,
   holdMapLegend,
   holdMapNote,
@@ -43,6 +44,7 @@ import {
   holdMapReadout,
   holdMapResultOf,
   holdMapReveal,
+  holdMapRevealRange,
   holdMapSettleMs,
   holdMapStatusText,
   holdMapStep,
@@ -354,6 +356,8 @@ describe('#174 待ちの表示・開いたときのスクロール', () => {
     expect(holdMapReveal(200, 500, 100, 500, false).delta).toBe(0);
     // 描画域の上端が既に枠の上端より上でも負にしない
     expect(holdMapReveal(50, 800, 100, 500, false).delta).toBe(0);
+    // #274: 範囲が枠に入るのに上端が隠れている（送りすぎ）→ 上へ戻す（負）
+    expect(holdMapReveal(94, 393, 100, 400, false).delta).toBe(-6);
     // reduced-motion は即時
     expect(holdMapReveal(520, 760, 100, 500, true)).toEqual({ delta: 260, behavior: 'auto' });
     // 有限でない値は動かさない
@@ -566,5 +570,36 @@ describe('#259 見出しの日数・説明の長さ・追証の側の注意', ()
     }
     expect(HOLD_MAP_CALL_NOTE).toContain('引けの清算値');
     expect(HOLD_MAP_CALL_NOTE).toContain('概算');
+  });
+});
+
+describe('#274 AC6 見出しの結論（閉じていても出す）', () => {
+  it('マップができていれば描画域の要約と同じ数え方で `過去 N 回中 M 回が追証の側`', () => {
+    const plot = holdMapPlot(RESULT, MOVES, 600);
+    expect(plot.count.n).toBeGreaterThan(0);
+    expect(holdMapHeadSummary(RESULT, MOVES)).toBe(
+      `過去 ${plot.count.n} 回中 ${plot.count.m} 回が追証の側`,
+    );
+  });
+
+  it('計算前（result なし）・点が無いときは null', () => {
+    expect(holdMapHeadSummary(null, MOVES)).toBeNull();
+    expect(holdMapHeadSummary(RESULT, [])).toBeNull();
+  });
+});
+
+describe('#274 開いたときに枠に入れる範囲（見出しの行と描画域が隣り合う）', () => {
+  // 見出しの行 400〜435、描画域 435〜699（264px）、読み取りの下端 740（架空の座標）
+  it('描画域 + 読み取りが入り、見出しから読み取りまでも入る → 見出し〜読み取り', () => {
+    expect(holdMapRevealRange(400, 435, 699, 740, 400)).toEqual({ top: 400, bottom: 740 });
+  });
+  it('描画域 + 読み取りは入るが見出しまでは入らない → 描画域〜読み取り', () => {
+    expect(holdMapRevealRange(400, 435, 699, 740, 320)).toEqual({ top: 435, bottom: 740 });
+  });
+  it('描画域 + 読み取りが入らないが見出し〜描画域は入る（390 の peek）→ 見出し〜描画域', () => {
+    expect(holdMapRevealRange(400, 435, 699, 740, 300)).toEqual({ top: 400, bottom: 699 });
+  });
+  it('どれも入らない → 描画域の上端を優先', () => {
+    expect(holdMapRevealRange(400, 435, 699, 740, 250)).toEqual({ top: 435, bottom: 699 });
   });
 });

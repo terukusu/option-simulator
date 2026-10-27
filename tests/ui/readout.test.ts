@@ -137,20 +137,19 @@ describe('ΔX の数値欄の端で読み取りの数値が有限（#144）', ()
   }
 });
 
-/** #144 AC-13: 読み取りの副題の ΔX% は |ΔX| ≥ 100% で整数（幅 360px に収める）。全文は小数 1 桁のまま。 */
+/** #144 AC-13: 読み取りの副題の ΔX% は |ΔX| ≥ 100% で整数（幅 360px に収める）。readoutModel の文字列は小数 1 桁のまま。 */
 describe('読み取りの副題の ΔX%（#144）', () => {
   const sub = (dX: number) => {
     const sc: Scenario = { ...ZERO_SCENARIO, dX };
     const metrics = metricsModel({ base, scenario: sc, unit: 'auto' });
     const r = readoutModel({ base, metrics, scenario: sc });
-    const date = bigReadout(r, metrics.premium, null).find((it) => it.key === 'date');
-    return { sub: date?.sub ?? '', pct: r.text.dXPct, full: JSON.stringify(date?.full ?? null) };
+    const date = bigReadout(r, null).find((it) => it.key === 'date');
+    return { sub: date?.sub ?? '', pct: r.text.dXPct };
   };
 
-  it('+900% → 「/+900%)」、−99% → 「/−99.0%)」、−40% → 「/−40.0%)」。全文は小数 1 桁', () => {
+  it('+900% → 「/+900%)」、−99% → 「/−99.0%)」、−40% → 「/−40.0%)」。readoutModel の文字列は小数 1 桁', () => {
     const up = sub(9 * x0);
     expect(up.sub).toMatch(/\/\+900%\)$/);
-    expect(up.full).toContain(`${up.pct}%`);
     expect(up.pct).toBe('+900.0');
     expect(sub(-0.99 * x0).sub).toMatch(/\/−99\.0%\)$/);
     expect(sub(-0.4 * x0).sub).toMatch(/\/−40\.0%\)$/);

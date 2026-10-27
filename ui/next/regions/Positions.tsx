@@ -3,16 +3,16 @@ import type { AppController } from '../../components/useAppController';
 import { type LegPatch, type Parsed, parseEntry, parseIvPct, parseQty } from '../../state';
 import { fmtNum } from '../../view/format';
 import { HINT_TERMS } from '../../view/glossary';
-import type { HedgeAt } from '../../view/hedge';
 import { PANEL_FOCUS_LABEL } from '../../view/keys';
 import { type PositionRow, SIDE_LABEL, toggledSide } from '../../view/position';
 import {
   type DetailItem,
   flipToast,
-  HEDGE_AT_OPTIONS,
-  type HedgeSectionView,
+  type GreekLine,
+  type HedgeLineView,
+  type HedgeSummaryView,
   headSub,
-  hedgeSection,
+  hedgeSummary,
   type LegDetailView,
   type LegRowView,
   legDetail,
@@ -31,7 +31,6 @@ import type { ToastInput } from '../../view/toast';
 import { PanelHead } from '../PanelHead';
 import { Menu, type MenuItem } from '../parts/Menu';
 import { Popover } from '../parts/Popover';
-import { Seg } from '../parts/Seg';
 import { Stepper } from '../parts/Stepper';
 import { TermLinks } from '../parts/TermLinks';
 import { HedgeDialog } from './HedgeDialog';
@@ -54,7 +53,8 @@ const fmtQty = (v: number) => fmtNum(v);
 
 /**
  * ポジション（docs/ui-redesign.md §2・§3・§4.4・§5・§9。#84）: 見出し行（副題・ⓘ・⋯）→ 足 1 本 1 行（本文 / 枚数 / ⇄ ×、
- * 本文を押すと詳細）→ デルタヘッジの節。足の追加・ヘッジの設定はダイアログ。表示モデルは ui/view/positionsRegion.ts、
+ * 本文を押すと詳細）→ デルタヘッジの 1 行（#274。足 0 本は出さない。[⋯] でヘッジのダイアログ = 評価点・ミニ / ラージ・
+ * 注記・目標・限月）。足の追加・ヘッジはダイアログ。表示モデルは ui/view/positionsRegion.ts、
  * 状態は既存の action だけ。行の開閉・入力の下書き・ダイアログはここのローカル（保存しない。NextApp が key = 作業中のタブ）。
  */
 export function Positions(p: Props) {
@@ -66,7 +66,10 @@ export function Positions(p: Props) {
     [model, pnlBase, metrics],
   );
   const spreads = useMemo(() => (model ? legSpreadCosts(model, settings) : []), [model, settings]);
-  const hedge = useMemo(() => (hedgeView ? hedgeSection(hedgeView) : null), [hedgeView]);
+  const hedge = useMemo(
+    () => (hedgeView ? hedgeSummary(hedgeView, rows.length) : null),
+    [hedgeView, rows.length],
+  );
   const [open, setOpen] = useState<ReadonlySet<number>>(() => new Set());
   const [dialog, setDialog] = useState<'leg' | 'hedge' | null>(null);
   const bodyRef = useRef<HTMLDivElement>(null);
@@ -124,13 +127,19 @@ export function Positions(p: Props) {
     setOpen(next);
   };
 
+  const onHedgeAdd = (l: HedgeLineView) => {
+    if (!l.canAdd || !l.input) return;
+    dispatch({ type: 'addFutureLeg', input: l.input });
+    if (l.toast) push({ kind: 'leg-add', text: l.toast });
+  };
+
   const items: MenuItem[] = [
     // 足の本数で決める（板が読めず行が無いときも消せる = #275 でトップの ⋯ の全クリアを外したため）
     { key: 'clear', label: '全クリア', disabled: c.curLegs.length === 0, onSelect: onClear },
     { key: 'add', label: '足を追加…', disabled: !hasChain, onSelect: () => setDialog('leg') },
     {
       key: 'hedge',
-      label: 'ヘッジの設定…',
+      label: 'デルタヘッジ…',
       disabled: hedgeView === null,
       onSelect: () => setDialog('hedge'),
     },
@@ -138,7 +147,7 @@ export function Positions(p: Props) {
 
   return (
     <>
-      <PanelHead title="ポジション" sub={headSub(rows.length, metrics)}>
+      <PanelHead title="ポジション" sub={headSub(rows.length)}>
         <Popover label="ポジションのグリークと建値ずれ" button="ⓘ">
           <p>
             グリークはシナリオ 0（評価時刻 = 板の時刻、X = 基準価格）。建値ずれ = シナリオ 0
@@ -218,19 +227,7 @@ export function Positions(p: Props) {
             })}
           </ul>
         )}
-        {hedge && hedgeView && (
-          <HedgeSection
-            view={hedge}
-            at={hedgeView.at}
-            onAt={(at) => dispatch({ type: 'setHedge', patch: { at } })}
-            onAdd={(i) => {
-              const l = hedge.lines[i];
-              if (!l?.canAdd || !l.input) return;
-              dispatch({ type: 'addFutureLeg', input: l.input });
-              if (l.toast) push({ kind: 'leg-add', text: l.toast });
-            }}
-          />
-        )}
+        {hedge && <HedgeRow view={hedge} onAdd={onHedgeAdd} onMore={() => setDialog('hedge')} />}
       </div>
       <LegDialog
         open={dialog === 'leg'}
@@ -246,6 +243,7 @@ export function Positions(p: Props) {
           onClose={() => setDialog(null)}
           model={hedgeView}
           dispatch={dispatch}
+          onAdd={onHedgeAdd}
         />
       )}
     </>
@@ -402,9 +400,10 @@ function LegDetail(p: {
   );
   return (
     <div class="leg-detail" id={p.id}>
+      <div class="kvs fields">{d.fields.map(kv)}</div>
+      <GreekRow line={d.greeks} />
+      <GreekRow line={d.scenario} />
       <div class="kvs">{d.items.map(kv)}</div>
-      <h4 class="kv-head">シナリオ点（足別）</h4>
-      <div class="kvs">{d.scenario.map(kv)}</div>
       {d.marks.length > 0 && (
         <div class="flags">
           {d.marks.map((m) => (
@@ -414,6 +413,20 @@ function LegDetail(p: {
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+/** グリークの 1 行（#274。項目の境目でだけ折り返す。区切りの「·」は CSS） */
+function GreekRow({ line }: { line: GreekLine }) {
+  return (
+    <div class="gline">
+      <span class="k">{line.head}</span>
+      <span class="v">
+        {line.parts.map((t) => (
+          <span key={t}>{t}</span>
+        ))}
+      </span>
     </div>
   );
 }
@@ -456,51 +469,47 @@ function DetailField(p: {
   );
 }
 
-function HedgeSection(p: {
-  view: HedgeSectionView;
-  at: HedgeAt;
-  onAt: (at: HedgeAt) => void;
-  onAdd: (i: number) => void;
+/**
+ * デルタヘッジの常設の 1 行（#274）: 要約の文 + ミニの [追加] + [⋯]（ヘッジのダイアログ）。共通の理由があれば [追加] なし
+ */
+function HedgeRow(p: {
+  view: HedgeSummaryView;
+  onAdd: (l: HedgeLineView) => void;
+  onMore: () => void;
 }) {
   const { view } = p;
+  const line = view.line;
   return (
-    <section class="sec hedge-sec" aria-label="デルタヘッジ">
-      <div class="sec-head">
-        <h3>デルタヘッジ</h3>
-        <span class="spacer" />
-        <Seg<HedgeAt> label="評価点" value={p.at} options={HEDGE_AT_OPTIONS} onChange={p.onAt} />
-      </div>
-      <div class="hedge">
-        <div class="hl head">{view.head}</div>
-        {view.common !== null ? (
-          <p class="warn">{view.common}</p>
-        ) : (
-          view.lines.map((l, i) => (
-            <div class="hl line" key={l.product} data-product={l.product}>
-              <span class="txt">
-                <b>
-                  {l.label} {l.lots}
-                </b>
-                {l.residual !== null && <span class="faint">（{l.residual}）</span>}
-                {l.reason !== null && <span class="why">{l.reason}</span>}
-              </span>
-              <button
-                type="button"
-                class="btn sm"
-                disabled={!l.canAdd}
-                aria-label={l.aria}
-                onClick={() => p.onAdd(i)}
-              >
-                追加
-              </button>
-            </div>
-          ))
+    <section class="hedge-sec" aria-label="デルタヘッジ">
+      <div class="hedge-row">
+        <span class="lab">ヘッジ</span>
+        {/* 前半（Δ）と理由だけが縮んで省略記号、結論（→ ミニ N 枚）は縮めない（#274 再レビュー R5） */}
+        <span class={view.warn ? 'txt warn' : 'txt'} title={view.text}>
+          <span class="d">{view.delta}</span>
+          {view.action && <span class="act">{view.action}</span>}
+          {view.why && <span class="why">{view.why.trim()}</span>}
+        </span>
+        {line && (
+          <button
+            type="button"
+            class="btn sm"
+            disabled={!line.canAdd}
+            aria-label={line.aria}
+            onClick={() => p.onAdd(line)}
+          >
+            追加
+          </button>
         )}
-        {view.notes.map((n) => (
-          <p class="note" key={n}>
-            {n}
-          </p>
-        ))}
+        <button
+          type="button"
+          class="btn ghost icon sm"
+          aria-haspopup="dialog"
+          aria-label="デルタヘッジの詳細と設定"
+          title="デルタヘッジの詳細と設定"
+          onClick={p.onMore}
+        >
+          ⋯
+        </button>
       </div>
     </section>
   );

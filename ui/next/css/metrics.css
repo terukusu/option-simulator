@@ -293,12 +293,45 @@ table.tail.margin-tail td small.call {
 }
 
 /* ===== 追証マップ（#152。部品は ui/next/regions/HoldMap.tsx。寸法は SVG の width / height 属性） ===== */
+/* 見出しの行（#274）: 折りたたみのボタン（見出し + 結論）+ ⓘ。結論は入らなければ省略記号 */
+.hm-head {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  padding-right: var(--sp-2);
+  border-top: 1px solid var(--line);
+}
+
+.hm-head > .hm-toggle {
+  flex: 1 1 auto;
+  min-width: 0;
+  border-top: 0;
+}
+
+.hm-title {
+  flex: 0 0 auto;
+}
+
+.hm-head .hm-sum {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  padding: 0;
+  color: var(--ink);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  text-overflow: ellipsis;
+}
+
+.hm-head .hm-sum.stale {
+  color: var(--ink-3);
+}
+
 .hm {
   border-top: 1px solid var(--line);
 }
 
 .hm-status,
-.hm-sum,
 .hm-readout {
   padding: 4px var(--sp-3);
   font-size: var(--fs-xs);
@@ -310,11 +343,6 @@ table.tail.margin-tail td small.call {
   align-items: center;
   gap: var(--sp-2);
   color: var(--ink-2);
-}
-
-.hm-sum {
-  color: var(--ink);
-  font-weight: 600;
 }
 
 .hm-legend {

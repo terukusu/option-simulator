@@ -409,6 +409,19 @@ export function holdMapSummary(count: HoldMapCount): string {
   return `過去 ${count.n} 回の 2 営業日の動きのうち ${count.m} 回が追証の側`;
 }
 
+/**
+ * 見出しの結論（#274。折りたたみを閉じていても見出しに出す）: マップができていて数えた点が 1 つ以上なら
+ * `過去 N 回中 M 回が追証の側`、それ以外は null。数え方は描画域の要約（holdMapPlot の count）と同じ holdMapCount
+ */
+export function holdMapHeadSummary(
+  result: HoldMapResult | null,
+  moves: readonly AtmMove[],
+): string | null {
+  if (!result || moves.length === 0) return null;
+  const c = holdMapCount(result.axes, result.rooms, moves);
+  return c.n === 0 ? null : `過去 ${c.n} 回中 ${c.m} 回が追証の側`;
+}
+
 /** 注記（期間は読んだデータの最初と最後の月。d はマップの日数） */
 export function holdMapNote(moves: readonly AtmMove[], days: number): string {
   const first = moves[0];
@@ -602,9 +615,25 @@ export function holdMapWait(o: {
 }
 
 /**
+ * 開いたときに枠に入れる範囲（#274。説明を ⓘ に移して見出しの行と描画域が隣り合ったので）: 下端は描画域 + 読み取りが
+ * 枠に入れば読み取りの下端、入らなければ描画域の下端。上端は見出しの行から下端までが枠に入れば見出しの行の上端、
+ * 入らなければ描画域の上端（描画域の上端を隠さない = holdMapReveal の優先と同じ）
+ */
+export function holdMapRevealRange(
+  headTop: number,
+  plotTop: number,
+  plotBottom: number,
+  readBottom: number,
+  hostHeight: number,
+): { top: number; bottom: number } {
+  const bottom = readBottom - plotTop <= hostHeight ? readBottom : plotBottom;
+  return { top: bottom - headTop <= hostHeight ? headTop : plotTop, bottom };
+}
+
+/**
  * 開いたときのスクロール（#174）: パネルのスクロール枠（host）の中で、描画域（.hm-plot）の上端 〜 下端が見えるように
- * 動かす量（scrollIntoView の block: 'nearest' 相当。下端のはみ出しだけ、描画域の上端を枠の上端より上に隠さない、負に
- * ならない = ui/view/hint.ts の revealDelta）と動かし方（prefers-reduced-motion なら即時 auto、それ以外は smooth）。
+ * 動かす量（scrollIntoView の block: 'nearest' 相当。下端のはみ出しだけ、描画域の上端を枠の上端より上に隠さない
+ * = ui/view/hint.ts の revealDelta。#274: 範囲が枠に入るのに上端が隠れていれば上へ戻す = 負）と動かし方（prefers-reduced-motion なら即時 auto、それ以外は smooth）。
  * 見出しは描画域と一緒に枠に入るときは残り、入らない（スマホの peek）ときだけ上に送られる
  */
 export function holdMapReveal(
@@ -614,8 +643,11 @@ export function holdMapReveal(
   hostBottom: number,
   reduced: boolean,
 ): { delta: number; behavior: 'smooth' | 'auto' } {
+  // #274: 範囲が枠に入るのに上端が枠の上に隠れている（開いた直後の仮の高さで送りすぎた）ときは上へ戻す（負）
+  const up =
+    plotTop < hostTop && plotBottom - plotTop <= hostBottom - hostTop ? plotTop - hostTop : 0;
   return {
-    delta: revealDelta(plotTop, plotBottom, hostTop, hostBottom),
+    delta: up < 0 ? up : revealDelta(plotTop, plotBottom, hostTop, hostBottom),
     behavior: reduced ? 'auto' : 'smooth',
   };
 }

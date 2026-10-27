@@ -8,7 +8,7 @@ import {
   DOCK_LABELS,
   dockPanels,
   futVisible,
-  holdMapVisible,
+  holdMapActive,
   INITIAL_SHELL,
   initialShell,
   ivVisible,
@@ -346,9 +346,22 @@ describe('グラフの表示（#88 AC-5）', () => {
 });
 
 describe('追証マップの開閉と見え方（#152）', () => {
+  it('#274 マスを計算する = 指標のパネルが見えている（開閉によらない）、PC で作業台が AI の間は計算しない', () => {
+    for (const holdMap of [false, true]) {
+      expect(holdMapActive(at({ holdMap, panel: 'positions' }), 'pc')).toBe(true);
+      expect(holdMapActive(at({ holdMap, bench: 'ai' }), 'pc')).toBe(false);
+      expect(metricsVisible(at({ holdMap, bench: 'ai' }), 'pc')).toBe(true);
+      expect(holdMapActive(at({ holdMap, panel: 'metrics', sheet: 'peek' }), 'phone')).toBe(true);
+      expect(holdMapActive(at({ holdMap, panel: 'metrics', sheet: 'hidden' }), 'phone')).toBe(
+        false,
+      );
+      expect(holdMapActive(at({ holdMap, panel: 'board' }), 'tablet')).toBe(false);
+    }
+  });
+
   it('既定は閉、holdMap の action で開閉、同じ値なら同じ参照、他の欄は変わらない', () => {
     const s0 = at({});
-    expect(holdMapVisible(s0, 'pc')).toBe(false);
+    expect(s0.holdMap ?? false).toBe(false);
     const s1 = shellReduce(s0, { type: 'holdMap', open: true });
     expect(s1).toEqual({ ...s0, holdMap: true });
     expect(shellReduce(s1, { type: 'holdMap', open: true })).toBe(s1);
@@ -358,19 +371,7 @@ describe('追証マップの開閉と見え方（#152）', () => {
     expect(shellReduce(s1, { type: 'dock', panel: 'board', tier: 'phone' }).holdMap).toBe(true);
   });
 
-  it('見えている = 開いていて指標のパネルが見えている（PC は常に、タブレットは metrics、スマホはシートが hidden でない）', () => {
-    const open = (s: Partial<ShellState>) => at({ holdMap: true, ...s });
-    expect(holdMapVisible(open({ panel: 'positions' }), 'pc')).toBe(true);
-    expect(holdMapVisible(open({ panel: 'metrics' }), 'tablet')).toBe(true);
-    expect(holdMapVisible(open({ panel: 'board' }), 'tablet')).toBe(false);
-    expect(holdMapVisible(open({ panel: 'metrics', sheet: 'hidden' }), 'tablet')).toBe(true);
-    expect(holdMapVisible(open({ panel: 'metrics', sheet: 'peek' }), 'phone')).toBe(true);
-    expect(holdMapVisible(open({ panel: 'metrics', sheet: 'hidden' }), 'phone')).toBe(false);
-    expect(holdMapVisible(open({ panel: 'scenario' }), 'phone')).toBe(false);
-    expect(holdMapVisible(at({ panel: 'metrics', holdMap: false }), 'phone')).toBe(false);
-  });
-
-  it('#176 指標のパネルが見えている（過去の値の先読み）: 開閉によらない、holdMapVisible = 開いている && これ', () => {
+  it('#176・#274 指標のパネルが見えている（過去の値の先読みと追証マップの計算。#274 で閉じていても計算 = 見出しの結論）: 開閉によらない', () => {
     for (const holdMap of [undefined, false, true]) {
       const s = (p: Partial<ShellState>) => at({ ...p, ...(holdMap !== undefined && { holdMap }) });
       expect(metricsVisible(s({ panel: 'positions' }), 'pc')).toBe(true);
@@ -382,14 +383,6 @@ describe('追証マップの開閉と見え方（#152）', () => {
       expect(metricsVisible(s({ panel: 'metrics', sheet: 'full' }), 'phone')).toBe(true);
       expect(metricsVisible(s({ panel: 'metrics', sheet: 'hidden' }), 'phone')).toBe(false);
       expect(metricsVisible(s({ panel: 'scenario' }), 'phone')).toBe(false);
-      for (const tier of ['phone', 'tablet', 'pc'] as const) {
-        for (const panel of ['positions', 'metrics', 'board'] as const) {
-          for (const sheet of ['peek', 'full', 'hidden'] as const) {
-            const st = s({ panel, sheet });
-            expect(holdMapVisible(st, tier)).toBe(!!st.holdMap && metricsVisible(st, tier));
-          }
-        }
-      }
     }
   });
 });

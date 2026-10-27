@@ -139,10 +139,7 @@ export function Stage(p: {
     [mini, c.pinTargets, c.pinLine, scenarioX, metrics.unit],
   );
   const evalTime = base?.ctx.evalTime ?? null;
-  const items = useMemo(
-    () => bigReadout(c.readout, metrics.empty ? null : metrics.premium, evalTime, scenario.dSigma),
-    [c.readout, metrics, evalTime, scenario.dSigma],
-  );
+  const items = useMemo(() => bigReadout(c.readout, evalTime), [c.readout, evalTime]);
   return (
     <>
       {!mini && (
@@ -205,7 +202,7 @@ export function Stage(p: {
             dispatch={dispatch}
           />
         )}
-        <BigReadout items={items} mini={mini} />
+        <BigReadout items={items} />
       </div>
     </>
   );

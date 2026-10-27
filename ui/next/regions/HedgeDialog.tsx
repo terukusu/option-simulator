@@ -1,10 +1,13 @@
-import { useState } from 'preact/hooks';
+import { useMemo, useState } from 'preact/hooks';
 import { type Action, parseHedgeTarget } from '../../state';
-import type { HedgeModel } from '../../view/hedge';
+import type { HedgeAt, HedgeModel } from '../../view/hedge';
+import { HEDGE_AT_OPTIONS, type HedgeLineView, hedgeSection } from '../../view/positionsRegion';
 import { Dialog } from '../parts/Dialog';
+import { Seg } from '../parts/Seg';
 
 /**
- * ヘッジの設定ダイアログ（docs/ui-redesign.md §3・§4.4・§9 の Hedge。#84）: 目標 Δ（ラージ換算）と限月。
+ * ヘッジのダイアログ（docs/ui-redesign.md §3・§4.4・§9 の Hedge。#84）: 評価点（適用前 / シナリオ時点）・現在 Δ と
+ * ミニ / ラージの枚数・残り・[追加]・注記（#274 でポジションの節から移した。常設はポジションの 1 行だけ）、目標 Δ（ラージ換算）と限月。
  * 目標 Δ は旧 Hedge と同じく入力ごとに parseHedgeTarget → 通れば setHedge { target }、外れたら role="alert"
  * （閉じても反映済みの値は残る）。限月は select の change で setHedge { contract }。保存は既存の hedge の保存。
  */
@@ -13,6 +16,7 @@ export function HedgeDialog(p: {
   onClose: () => void;
   model: HedgeModel;
   dispatch: (a: Action) => void;
+  onAdd: (l: HedgeLineView) => void;
 }) {
   if (!p.open) return null;
   return <HedgeDialogBody {...p} />;
@@ -22,8 +26,10 @@ function HedgeDialogBody(p: {
   onClose: () => void;
   model: HedgeModel;
   dispatch: (a: Action) => void;
+  onAdd: (l: HedgeLineView) => void;
 }) {
   const { model, dispatch } = p;
+  const view = useMemo(() => hedgeSection(model), [model]);
   const [text, setText] = useState(() => String(model.target));
   const [error, setError] = useState<string | null>(null);
   const onTarget = (t: string) => {
@@ -35,7 +41,47 @@ function HedgeDialogBody(p: {
     } else setError(r.message);
   };
   return (
-    <Dialog open title="ヘッジの設定" onClose={p.onClose}>
+    <Dialog open title="デルタヘッジ" onClose={p.onClose}>
+      <div class="hedge">
+        <div class="hl at">
+          <Seg<HedgeAt>
+            label="評価点"
+            value={model.at}
+            options={HEDGE_AT_OPTIONS}
+            onChange={(at) => dispatch({ type: 'setHedge', patch: { at } })}
+          />
+        </div>
+        <div class="hl head">{view.head}</div>
+        {view.common !== null ? (
+          <p class="warn">{view.common}</p>
+        ) : (
+          view.lines.map((l) => (
+            <div class="hl line" key={l.product} data-product={l.product}>
+              <span class="txt">
+                <b>
+                  {l.label} {l.lots}
+                </b>
+                {l.residual !== null && <span class="faint">（{l.residual}）</span>}
+                {l.reason !== null && <span class="why">{l.reason}</span>}
+              </span>
+              <button
+                type="button"
+                class="btn sm"
+                disabled={!l.canAdd}
+                aria-label={l.aria}
+                onClick={() => p.onAdd(l)}
+              >
+                追加
+              </button>
+            </div>
+          ))
+        )}
+        {view.notes.map((n) => (
+          <p class="note" key={n}>
+            {n}
+          </p>
+        ))}
+      </div>
       <form
         class="pos-form"
         onSubmit={(e) => {

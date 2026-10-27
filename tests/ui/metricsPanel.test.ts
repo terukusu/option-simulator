@@ -32,10 +32,13 @@ import {
   metricsPanel,
   metricTiles,
   TAIL_HINT,
+  type TileKey,
   tailRows,
 } from '../../ui/view/metricsPanel';
 import { pnlDomains } from '../../ui/view/pnlChart';
 import { positionModel } from '../../ui/view/position';
+import { readoutModel } from '../../ui/view/readout';
+import { type BigReadoutKey, bigReadout } from '../../ui/view/stage';
 import { fixture } from '../support/fixtures';
 import { SUB_MAX_UNITS, widthUnits } from '../support/widthUnits';
 
@@ -178,8 +181,8 @@ const amt = (v: number | null, u: AmountUnit, signed = false) => {
 
 // ------------------------------------------------ AC-2 タイル
 
-describe('タイル 8 枚（#86 AC-2・#131）', () => {
-  it('(a) ストラングル売り（受取超）: 1〜6 の値と最大損失の −∞・put 側・SQ = 下端', () => {
+describe('タイル 6 枚（#86 AC-2・#131・#274）', () => {
+  it('(a) ストラングル売り（受取超）: 1〜4 の値と最大損失の −∞・put 側・SQ = 下端', () => {
     const m = metricsOf(strangle);
     const u = m.unit;
     expect(u).toBe('thousand');
@@ -189,8 +192,6 @@ describe('タイル 8 枚（#86 AC-2・#131）', () => {
       'maxLoss',
       'bep',
       'premium',
-      'scenario',
-      'greeks',
       'margin',
       'room',
     ]);
@@ -199,10 +200,8 @@ describe('タイル 8 枚（#86 AC-2・#131）', () => {
       '満期 最大損失',
       '満期 BEP',
       '受取 − 支払',
-      '指定日 + シナリオ',
-      '合計グリーク',
-      '必要証拠金（概算）',
-      '余力（概算）',
+      '必要証拠金',
+      '余力',
     ]);
     const t1 = tile(tiles, 'maxProfit');
     expect(t1.v).toBe(fmtAmount(m.expiry.maxProfit.value, u, true));
@@ -231,22 +230,6 @@ describe('タイル 8 枚（#86 AC-2・#131）', () => {
     expect(t4.s).toBe(
       `受取 ${fmtAmount(m.premium.received, u)} · 支払 ${fmtAmount(m.premium.paid, u)}`,
     );
-    const t5 = tile(tiles, 'scenario');
-    expect(t5.v).toBe(fmtAmount(m.scenarioPoint.pnl, u, true));
-    expect(t5.s).toBe(
-      `d ${fmtNum(m.days, 2)} · X ${fmtNum(m.scenarioPoint.x)} (${fmtSigned(m.scenarioPoint.dXPct, 1)}%)`,
-    );
-    expect(t5.s).toBe(
-      `d 1.50 · X ${fmtNum(m.scenarioPoint.x)} (${fmtSigned(m.scenarioPoint.dXPct, 1)}%)`,
-    );
-    const g = m.scenarioPoint.total;
-    const t6 = tile(tiles, 'greeks');
-    expect(t6.v).toBe(`Δ ${fmtSigned(g.deltaLarge, 2)} (${fmtSigned(g.deltaMini, 1)})`);
-    // #107: Γ は全文（と舞台の Δ の副題）で読む
-    expect(t6.s).toBe(
-      `Θ ${fmtAmount(g.thetaPerDay, u, true)} · V ${fmtAmount(g.vegaPerPt, u, true)}`,
-    );
-    expect(t6.unit).toBe('');
   });
 
   it('最大利益・最大損失が有限なら副題は X（put のクレジットスプレッド）', () => {
@@ -293,22 +276,13 @@ describe('タイル 8 枚（#86 AC-2・#131）', () => {
     );
   });
 
-  it('(c) 色: 正の金額は gain・負は loss・0 と BEP・Δ・掛け金は無色', () => {
+  it('(c) 色: 正の金額は gain・負は loss・0 と BEP・掛け金は無色', () => {
     const m = metricsOf(strangle);
     const tiles = metricTiles(m);
     expect(tile(tiles, 'maxProfit').tone).toBe('gain');
     expect(tile(tiles, 'maxLoss').tone).toBe('loss');
     expect(tile(tiles, 'bep').tone).toBeNull();
     expect(tile(tiles, 'premium').tone).toBe('gain');
-    expect(tile(tiles, 'greeks').tone).toBeNull();
-    const t5 = tile(tiles, 'scenario');
-    expect(t5.tone).toBe(
-      m.scenarioPoint.pnl > 0 && t5.v.startsWith('+')
-        ? 'gain'
-        : m.scenarioPoint.pnl < 0 && t5.v.startsWith('−')
-          ? 'loss'
-          : null,
-    );
     // 負の金額（call 買いの最大損失）
     const cb = metricTiles(metricsOf(callBuy));
     expect(tile(cb, 'maxLoss').v.startsWith('−')).toBe(true);
@@ -325,7 +299,6 @@ describe('タイル 8 枚（#86 AC-2・#131）', () => {
     expect(tile(zt, 'maxProfit').v).toBe(fmtAmount(0.3, m.unit, true));
     expect(tile(zt, 'maxProfit').v).toMatch(/^0(\.0+)?$/);
     expect(tile(zt, 'maxProfit').tone).toBeNull();
-    expect(tile(zt, 'scenario').tone).toBeNull();
   });
 
   it('(d) 単位: 受取 + 支払 99,999 円は円・100,000 円は千円（amountUnit と同じ）、固定 yen が優先で 円（固定）', () => {
@@ -458,6 +431,7 @@ describe('内訳（#86 AC-3: 旧 Metrics と同じ順・同じ値）', () => {
     expect(v).toEqual({
       empty: true,
       unitSub: '円（自動）',
+      headSub: '円（自動）',
       tiles: [],
       breakdown: [],
       breakdownNote: '金額の単位 円（自動） · 手数料 0 円 / 枚',
@@ -620,12 +594,12 @@ describe('全文（#107 AC-1）', () => {
   ];
 
   for (const [name, s] of cases) {
-    it(`${name}: 8 枚とも全文があり、値は内訳の値の文字列の中にある（finite の X・d の行を除く）`, () => {
+    it(`${name}: 6 枚とも全文があり、値は内訳の値の文字列の中にある（finite の X の行を除く）`, () => {
       const m = metricsOf(s);
       const mv = marginOf(s);
       const tiles = metricTiles(m, mv);
       const bd = metricsBreakdown(m, mv);
-      expect(tiles).toHaveLength(8);
+      expect(tiles).toHaveLength(6);
       for (const t of tiles) {
         expect(t.full.length).toBeGreaterThanOrEqual(1);
         for (const r of t.full) {
@@ -635,22 +609,20 @@ describe('全文（#107 AC-1）', () => {
           expect(bd.some((b) => b.v.includes(r.v))).toBe(true);
         }
       }
-      // 1 行目は見出し + 値（合計グリークは Δ の行）
-      for (const t of tiles.filter((x) => x.key !== 'greeks' && x.key !== 'premium')) {
-        expect(t.full[0]?.k).toBe(t.k);
+      // 1 行目は見出し + 値（証拠金の 2 枚は「（概算）」付きの見出し。#274）
+      for (const t of tiles.filter((x) => x.key !== 'premium')) {
+        expect(t.full[0]?.k).toBe(t.key === 'margin' || t.key === 'room' ? `${t.k}（概算）` : t.k);
       }
     });
   }
 
-  it('ストラングル売り: 6 枚の全文の行（内訳と同じ式・同じ桁）', () => {
+  it('ストラングル売り: 4 枚の全文の行（内訳と同じ式・同じ桁）', () => {
     const m = metricsOf(strangle);
     const u = m.unit;
     const A = (v: number | null, signed = false) => amt(v, u, signed);
     const lf = m.expiry.lossFinite;
     if (!lf) throw new Error('lossFinite が無い');
-    const g = m.scenarioPoint.total;
     const p = m.premium;
-    const sp = m.scenarioPoint;
     const tiles = metricTiles(m);
     expect(tile(tiles, 'maxProfit').full).toEqual([
       fr('満期 最大利益', A(m.expiry.maxProfit.value, true)),
@@ -670,26 +642,6 @@ describe('全文（#107 AC-1）', () => {
       fr('支払', A(p.paid)),
       fr('手数料の合計', A(p.fees)),
     ]);
-    expect(tile(tiles, 'scenario').full).toEqual([
-      fr('指定日 + シナリオ', A(sp.pnl, true)),
-      fr('d', `${fmtNum(m.days, 2)} 日`),
-      fr('X', `${fmtNum(sp.x)}（ΔX ${fmtSigned(sp.dXPct, 1)}%）`),
-    ]);
-    expect(tile(tiles, 'greeks').full).toEqual([
-      fr('Δ', `${fmtSigned(g.deltaLarge, 3)} 枚（ミニ ${fmtSigned(g.deltaMini, 2)}）`),
-      fr('Γ', `${fmtSigned(g.gammaPer100, 4)} / 100 円`),
-      fr('Θ', `${A(g.thetaPerDay, true)} / 日`),
-      fr('V', `${A(g.vegaPerPt, true)} / pt`),
-    ]);
-    // 合計グリークの 4 行は内訳の行と同じ（見出しも値も）
-    const bd = metricsBreakdown(m);
-    // （#167: 内訳の行には用語の id が付く）
-    for (const r of tile(tiles, 'greeks').full) {
-      expect(bd.map((b) => ({ k: b.k, v: b.v, group: b.group }))).toContainEqual({
-        ...r,
-        group: false,
-      });
-    }
   });
 
   it('支払超: 掛け金の全文に副題で省いた手数料（内訳の「手数料の合計」と同じ文字列）', () => {
@@ -712,15 +664,14 @@ describe('全文（#107 AC-1）', () => {
     }
   });
 
-  it('円固定 5 枚: 合計グリークの全文に Γ と Θ / V の全桁（円）、最大損失の全文に put 側の全桁', () => {
+  it('円固定 5 枚: 内訳の合計グリークに Γ と Θ / V の全桁（円）、最大損失の全文に put 側の全桁', () => {
     const m = metricsOf(strangleYen);
     expect(m.unit).toBe('yen');
     const g = m.scenarioPoint.total;
-    const t = tile(metricTiles(m), 'greeks');
-    expect(t.s).not.toContain('Γ');
-    expect(t.full).toContainEqual(fr('Γ', `${fmtSigned(g.gammaPer100, 4)} / 100 円`));
-    expect(t.full).toContainEqual(fr('Θ', `${fmtAmount(g.thetaPerDay, 'yen', true)} 円 / 日`));
-    expect(t.full).toContainEqual(fr('V', `${fmtAmount(g.vegaPerPt, 'yen', true)} 円 / pt`));
+    const bd = metricsBreakdown(m).map((b) => ({ k: b.k, v: b.v }));
+    expect(bd).toContainEqual(fr('Γ', `${fmtSigned(g.gammaPer100, 4)} / 100 円`));
+    expect(bd).toContainEqual(fr('Θ', `${fmtAmount(g.thetaPerDay, 'yen', true)} 円 / 日`));
+    expect(bd).toContainEqual(fr('V', `${fmtAmount(g.vegaPerPt, 'yen', true)} 円 / pt`));
     // 円の全桁（千円に丸めない）
     expect(fmtAmount(g.thetaPerDay, 'yen', true).replace(/[^0-9]/g, '').length).toBeGreaterThan(3);
     const lf = m.expiry.lossFinite;
@@ -790,13 +741,26 @@ describe('副題の短縮（#107 AC-2）', () => {
     }
   });
 
-  it(`売り 2 本・買い 2 本（千円・自動）: 8 枚の副題が幅の単位 ${SUB_MAX_UNITS} 以下`, () => {
+  it(`売り 2 本・買い 2 本（千円・自動）: 6 枚の副題が幅の単位 ${SUB_MAX_UNITS} 以下`, () => {
     for (const s of [strangle, buy2]) {
       const m = metricsOf(s);
       expect(m.unitAuto).toBe(true);
       for (const t of metricTiles(m, marginOf(s))) {
         expect(widthUnits(t.s), `${t.key}: ${t.s}`).toBeLessThanOrEqual(SUB_MAX_UNITS);
       }
+    }
+  });
+
+  it(`#274 D-03: d と ΔX を動かした点（d 10・ΔX −1,500）で、証拠金の 2 枚の見出し + 点の印が幅の単位 ${SUB_MAX_UNITS} 以下`, () => {
+    const s = run(strangle, {
+      type: 'setScenario',
+      patch: { days: 10, dX: -1500, dSigma: 0 },
+    });
+    const tiles = metricTiles(metricsOf(s), marginOf(s));
+    for (const t of tiles.filter((x) => x.key === 'margin' || x.key === 'room')) {
+      const kh = `${t.k} ${t.at}`;
+      expect(kh).toMatch(/^(必要証拠金|余力) · d10 · −\d\.\d%$/);
+      expect(widthUnits(kh), kh).toBeLessThanOrEqual(SUB_MAX_UNITS);
     }
   });
 
@@ -839,4 +803,53 @@ describe('内訳の用語（#167 AC-6）', () => {
       expect(metricsBreakdown(metricsOf(s)).filter((r) => r.term !== undefined).length).toBe(4);
     });
   }
+});
+
+/**
+ * #274 AC1（EPIC #281 終了条件 3）: 読み取りの帯とタイルで同じ値を出す項目が 0。帯の項目とタイルの key を「同じ量」の組
+ * （指定日 + シナリオの損益・合計グリーク・受取 − 支払）で突き合わせ、見出しの集合も比べる（PC = 帯 5 つ全部が見える幅）
+ */
+describe('#274 読み取りの帯とタイルで同じ値を出す項目が 0', () => {
+  /** 項目が出す量（帯の key・タイルの key → 量。旧タイル scenario・greeks と旧の帯 premium は帯・タイルの重複だった） */
+  const QUANTITY: Record<BigReadoutKey | TileKey | 'scenario' | 'greeks', string> = {
+    // 帯
+    date: 'scenario-pnl',
+    expiry: 'expiry-pnl',
+    delta: 'greeks',
+    theta: 'greeks',
+    vega: 'greeks',
+    // タイル
+    maxProfit: 'max-profit',
+    maxLoss: 'max-loss',
+    bep: 'bep',
+    premium: 'premium',
+    margin: 'margin',
+    room: 'room',
+    // 旧タイル（#274 で外した。旧の帯の premium は premium と同じ量）
+    scenario: 'scenario-pnl',
+    greeks: 'greeks',
+  };
+
+  it('ストラングル売り・call 買い（証拠金あり）: 量の交差と見出しの交差が空', () => {
+    for (const s of [strangle, callBuy]) {
+      const m = metricsOf(s);
+      const r = readoutModel({ base: baseOf(s), metrics: m, scenario: s.scenario });
+      const ro = bigReadout(r, null);
+      const tiles = metricTiles(m, marginOf(s));
+      expect(ro.map((i) => i.key)).toEqual(['date', 'expiry', 'delta', 'theta', 'vega']);
+      expect(tiles.map((t) => t.key)).toEqual([
+        'maxProfit',
+        'maxLoss',
+        'bep',
+        'premium',
+        'margin',
+        'room',
+      ]);
+      const roQ = new Set(ro.map((i) => QUANTITY[i.key]));
+      const tileQ = tiles.map((t) => QUANTITY[t.key]);
+      expect(tileQ.filter((q) => roQ.has(q))).toEqual([]);
+      const roLabels = new Set(ro.map((i) => i.label));
+      expect(tiles.map((t) => t.k).filter((k) => roLabels.has(k))).toEqual([]);
+    }
+  });
 });

@@ -55,7 +55,7 @@ import {
   type ChartMode,
   chartMode,
   futVisible,
-  holdMapVisible,
+  holdMapActive,
   initialShell,
   ivVisible,
   layoutTier,
@@ -192,22 +192,22 @@ export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
     () => (boardJson ? futNowValue(boardJson, sqHolidays, nonTradingDays) : null),
     [boardJson, sqHolidays, nonTradingDays],
   );
-  // 追証マップ（#152）: 見えている間だけ計算する。過去の値（/api/atm_daily）は指標のパネルが初めて見えたときに 1 回
-  // 先読みする（#176。開く前に読み終える）。
+  // 追証マップ（#152）: 指標のパネルが見えている間は閉じていても計算する（#274。見出しに結論 = 過去 N 回中 M 回が
+  // 追証の側を出す）。過去の値（/api/atm_daily）は指標のパネルが初めて見えたときに 1 回先読みする（#176）。
   // dev の合成の板・ファイルでは dev だけ /fixtures/atm_daily（本番のビルドは常に /api/atm_daily）
   const holdOpen = shell.holdMap ?? false;
-  const holdShown = holdMapVisible(shell, tier);
+  const metricsShown = metricsVisible(shell, tier);
   const { holdMapInput } = c;
   const dailyEndpoint =
     import.meta.env.DEV && state.sourceLabel !== API_LABEL
       ? '/fixtures/atm_daily'
       : '/api/atm_daily';
   const atmMoves = useAtmMoves(
-    metricsVisible(shell, tier) && holdMapInput !== null,
+    metricsShown && holdMapInput !== null,
     dailyEndpoint,
     nonTradingDays,
   );
-  const holdCtl = useHoldMap(holdMapInput, atmMoves.moves, holdShown);
+  const holdCtl = useHoldMap(holdMapInput, atmMoves.moves, holdMapActive(shell, tier));
   const onHoldToggle = useCallback(() => send({ type: 'holdMap', open: !holdOpen }), [holdOpen]);
   const holdX0 = c.positions?.ctx.x0 ?? Number.NaN;
   const holdDXRatio = holdX0 > 0 ? state.scenario.dX / holdX0 : 0;

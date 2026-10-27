@@ -162,8 +162,6 @@ const askMod = await load('ui/view/aiAsk.ts');
 const presetMod = await load('ui/view/aiPresets.ts');
 const metricsMod = await load('ui/view/metrics.ts');
 const panelMod = await load('ui/view/metricsPanel.ts');
-const readoutMod = await load('ui/view/readout.ts');
-const stageMod = await load('ui/view/stage.ts');
 const ivMod = await load('ui/view/ivHistory.ts');
 const evalCaseMod = await load('ui/view/aiEvalCase.ts');
 const { DOC_QUESTIONS } = await load('scripts/aiEvalDocs.ts');
@@ -635,16 +633,6 @@ for (const [qi, q] of (anyOnly && !askOnly ? [] : ASK_QUESTIONS).entries()) {
   if (q.where === 'tile') {
     const t = view.tiles.find((x) => x.key === q.key);
     ask = t ? askMod.askTile(t, view.unitSub) : null;
-  } else if (q.where === 'readout') {
-    const r = readoutMod.readoutModel({ base: env.base, metrics: m, scenario: env.scenario });
-    const items = stageMod.bigReadout(
-      r,
-      m.premium,
-      env.base?.ctx.evalTime ?? null,
-      env.scenario.dSigma,
-    );
-    const it = items.find((x) => x.key === q.key);
-    ask = it ? askMod.askReadout(it) : null;
   } else if (q.where === 'tail') {
     ask = askMod.askTail(view);
   } else {

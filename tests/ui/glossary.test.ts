@@ -99,6 +99,17 @@ function allStrings(v: unknown): string[] {
 }
 
 describe('用語集のデータ（#167 AC-2）', () => {
+  it('#274: 出る場所が無くなったタイル（指定日 + シナリオ・合計グリーク）・読み取りの全文・見出しの「（概算）」を指さない', () => {
+    for (const t of GLOSSARY) {
+      for (const w of t.where) {
+        expect(w, t.id).not.toMatch(
+          /タイル「(合計グリーク|指定日 \+ シナリオ|必要証拠金（概算）|余力（概算）)」/,
+        );
+        expect(w, t.id).not.toMatch(/読み取りの全文/);
+      }
+    }
+  });
+
   it('(a) 24 語の id がすべてあり一意', () => {
     expect(GLOSSARY.map((t) => t.id).sort()).toEqual([...IDS].sort());
     expect(new Set(GLOSSARY.map((t) => t.id)).size).toBe(GLOSSARY.length);

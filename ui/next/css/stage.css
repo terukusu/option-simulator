@@ -901,29 +901,6 @@ section.stage > .panel-body.stage-main {
   min-width: 0;
 }
 
-/* 全文のある項目（#107）: 面・枠を持たない透明なボタン（押すと上に全文のポップオーバー） */
-.ro > .pop-wrap {
-  display: flex;
-  min-width: 0;
-}
-
-.ro-btn {
-  display: block;
-  flex: 1 1 auto;
-  min-width: 0;
-  padding: 0;
-  border: 0;
-  border-radius: var(--r-sm);
-  background: transparent;
-  text-align: left;
-}
-
-.ro-btn > .k,
-.ro-btn > .v,
-.ro-btn > .s {
-  display: block;
-}
-
 /* 見出し・副題は列の幅を決めない（値だけで決める）。入らなければ省略記号 */
 .ro .k,
 .ro .s {
@@ -973,20 +950,13 @@ section.stage > .panel-body.stage-main {
   color: var(--loss);
 }
 
-/* 個数: 舞台の幅 < 480px は 3 つ、480〜599px は 5 つ、≥ 600px は 6 つ（§2.3・§2.4） */
-.readout .ro.x1,
-.readout .ro.x2 {
+/* 個数: 舞台の幅 < 480px は 3 つ、≥ 480px は 5 つ（§2.3・§2.4。#274 で受取 − 支払をタイルだけに） */
+.readout .ro.x1 {
   display: none;
 }
 
 @container stage (min-width: 480px) {
   .readout .ro.x1 {
-    display: block;
-  }
-}
-
-@container stage (min-width: 600px) {
-  .readout .ro.x2 {
     display: block;
   }
 }

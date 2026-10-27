@@ -3,9 +3,8 @@ import { type Chain, normalizeChain } from '../../data';
 import { DEFAULT_SETTINGS, type ModelSettings, type Scenario, ZERO_SCENARIO } from '../../model';
 import { linear } from '../../ui/chart/scale';
 import { type Action, initialState, reduce, type State, type UiLeg } from '../../ui/state';
-import { fmtNum, fmtSigned } from '../../ui/view/format';
-import { fmtAmount, metricsModel } from '../../ui/view/metrics';
-import { metricTiles } from '../../ui/view/metricsPanel';
+import { fmtNum } from '../../ui/view/format';
+import { metricsModel } from '../../ui/view/metrics';
 import {
   axisX,
   DEFAULT_PNL_Y,
@@ -339,27 +338,19 @@ describe('bigReadout（AC-2 d）', () => {
       greeks: { ...r.greeks, deltaLarge: 0.324, deltaMini: 3.24, gammaPer100: -0.0104 },
       text: { ...r.text, pnlDate: '+1,234', pnlExpiry: '−617', pnlToday: '0' },
     };
-    const items = bigReadout(fake, metrics.premium, base.ctx.evalTime, sc.dSigma);
-    expect(items.map((i) => i.key)).toEqual([
-      'date',
-      'expiry',
-      'delta',
-      'theta',
-      'vega',
-      'premium',
-    ]);
-    expect(items.map((i) => i.tier)).toEqual(['base', 'base', 'base', 'x1', 'x1', 'x2']);
+    const items = bigReadout(fake, base.ctx.evalTime);
+    // #274: 受取 − 支払 / 掛け金はタイルに 1 つ（帯は主役 3 つ + Θ / V）
+    expect(items.map((i) => i.key)).toEqual(['date', 'expiry', 'delta', 'theta', 'vega']);
+    expect(items.map((i) => i.tier)).toEqual(['base', 'base', 'base', 'x1', 'x1']);
     const by = Object.fromEntries(items.map((i) => [i.key, i]));
     expect(by.delta?.value).toBe('+0.32 (+3.2)');
     expect(by.delta?.sub).toBe('Γ −0.010 /100円');
     expect(by.delta?.tone).toBeNull();
     expect(by.date).toMatchObject({ value: '+1,234', tone: 'gain', hero: true, unit: r.unitLabel });
     expect(by.expiry).toMatchObject({ value: '−617', tone: 'loss', sub: '今日 0' });
-    expect(
-      bigReadout({ ...fake, text: { ...fake.text, pnlDate: '0' } }, null, null)[0]?.tone,
-    ).toBeNull();
+    expect(bigReadout({ ...fake, text: { ...fake.text, pnlDate: '0' } }, null)[0]?.tone).toBeNull();
     expect(by.date?.label).toMatch(/^損益 · d 3（\d\d\/\d\d）$/);
-    // #107: Δσ は全文（と IV レールの吹き出し）で読む。副題は X と ΔX（円と %）だけ
+    // #107: Δσ は IV レールの吹き出しで読む。副題は X と ΔX（円と %）だけ
     expect(by.date?.sub).toBe(`X ${r.text.x} (${r.text.dX}/${r.text.dXPct}%)`);
     expect(by.delta?.label).toBe('Δ ラージ(ミニ)');
   });
@@ -368,99 +359,41 @@ describe('bigReadout（AC-2 d）', () => {
     const sc = { ...ZERO_SCENARIO, dX: 300 };
     const metrics = metricsModel({ base, scenario: sc, unit: 'auto' });
     const r = readoutModel({ base, metrics, scenario: sc });
-    const by = Object.fromEntries(
-      bigReadout(r, metrics.premium, base.ctx.evalTime).map((i) => [i.key, i]),
-    );
+    const by = Object.fromEntries(bigReadout(r, base.ctx.evalTime).map((i) => [i.key, i]));
     expect(by.date?.value).toBe(r.text.pnlDate);
     expect(by.date?.label).toBe('損益 · 今日（シナリオ 0）');
     expect(by.expiry?.value).toBe(r.text.pnlExpiry);
     expect(by.theta?.value).toBe(r.text.theta);
     expect(by.vega?.value).toBe(r.text.vega);
     expect(r.text.deltaLarge.startsWith(by.delta?.value.slice(0, 4) ?? 'x')).toBe(true);
-    // 売りだけ = 受取超 → 受取 − 支払（符号付き）
-    expect(by.premium?.label).toBe('受取 − 支払');
-    expect(by.premium?.value.startsWith('+')).toBe(true);
   });
 
   it('足 0 本は「—」', () => {
     const metrics = metricsModel({ base: null, scenario: ZERO_SCENARIO, unit: 'auto' });
     const r = readoutModel({ base: null, metrics, scenario: ZERO_SCENARIO });
-    const items = bigReadout(r, null, null);
-    expect(items).toHaveLength(6);
+    const items = bigReadout(r, null);
+    expect(items).toHaveLength(5);
     for (const i of items) expect(i).toMatchObject({ value: '—', sub: '', tone: null, unit: '' });
   });
 });
 
-describe('bigReadout の全文（#107 AC-1・AC-2）', () => {
+describe('bigReadout の副題（#107・#274）', () => {
   const s = strangle();
-  const base = baseOf(s);
   const buy2 = stateWith(
     { type: 'addBoardLeg', expiry: M1, k: 63500, optionType: 'put', side: 'buy' },
     { type: 'addBoardLeg', expiry: M1, k: 71000, optionType: 'call', side: 'buy' },
   );
   const sc = { ...ZERO_SCENARIO, days: 1.5, dX: -400, dSigma: 2 };
-  const itemsOf = (st: State, scenario: Scenario) => {
-    const b = baseOf(st);
-    const metrics = metricsModel({ base: b, scenario, unit: 'auto' });
-    const r = readoutModel({ base: b, metrics, scenario });
-    const items = bigReadout(r, metrics.premium, b.ctx.evalTime, scenario.dSigma);
-    return { r, metrics, by: Object.fromEntries(items.map((i) => [i.key, i])), items };
-  };
 
-  it('date の全文に副題で省いた Δσ（0 でも出す）、X と ΔX（円と %）', () => {
-    const { r, by } = itemsOf(s, sc);
-    expect(by.date?.full).toEqual([
-      { k: by.date?.label, v: `${r.text.pnlDate} ${r.unitLabel}` },
-      { k: 'X', v: r.text.x },
-      { k: 'ΔX', v: `${r.text.dX} / ${r.text.dXPct}%` },
-      { k: 'Δσ', v: '+2.0 pt' },
-    ]);
-    expect(by.date?.sub).not.toContain('Δσ');
-    const zero = itemsOf(s, { ...sc, dSigma: 0 }).by;
-    expect(zero.date?.full?.at(-1)).toEqual({ k: 'Δσ', v: `${fmtSigned(0, 1)} pt` });
-  });
-
-  it('expiry・delta・premium の全文（値は readoutModel の文字列・タイルの全文と同じ）、theta・vega は null', () => {
+  it('全文のポップオーバーが無い（#274）ので、副題のある 3 項目の副題は幅の単位 SUB_MAX_UNITS 以下（売り 2 本・買い 2 本）', () => {
     for (const st of [s, buy2]) {
-      const { r, metrics, by } = itemsOf(st, sc);
-      expect(by.expiry?.full).toEqual([
-        { k: '満期（SQ）', v: `${r.text.pnlExpiry} ${r.unitLabel}` },
-        { k: '今日', v: `${r.text.pnlToday} ${r.unitLabel}` },
-      ]);
-      const g = r.greeks;
-      expect(by.delta?.full).toEqual([
-        { k: 'Δ ラージ(ミニ)', v: by.delta?.value },
-        { k: 'Γ', v: `${fmtSigned(g.gammaPer100, 3)} /100円` },
-      ]);
-      // premium の全文はタイルの掛け金 / 受取 − 支払の全文と同じ行
-      const tile = metricTiles(metrics).find((t) => t.key === 'premium');
-      expect(by.premium?.full).toEqual(tile?.full);
-      expect(by.premium?.full?.at(-1)).toEqual({
-        k: '手数料の合計',
-        v: `${fmtAmount(metrics.premium.fees, r.unit)} ${r.unitLabel}`,
-      });
-      expect(by.theta?.full).toBeNull();
-      expect(by.vega?.full).toBeNull();
-    }
-  });
-
-  it('足 0 本・premium なしは全文 null', () => {
-    const metrics = metricsModel({ base: null, scenario: ZERO_SCENARIO, unit: 'auto' });
-    const r = readoutModel({ base: null, metrics, scenario: ZERO_SCENARIO });
-    for (const i of bigReadout(r, null, null)) expect(i.full).toBeNull();
-    const metricsB = metricsModel({ base, scenario: sc, unit: 'auto' });
-    const rb = readoutModel({ base, metrics: metricsB, scenario: sc });
-    expect(
-      bigReadout(rb, null, base.ctx.evalTime).find((i) => i.key === 'premium')?.full,
-    ).toBeNull();
-  });
-
-  it(`売り 2 本・買い 2 本: 全文のある 4 項目の副題が幅の単位 ${SUB_MAX_UNITS} 以下`, () => {
-    for (const st of [s, buy2]) {
-      const { items } = itemsOf(st, sc);
-      const withFull = items.filter((i) => i.full !== null);
-      expect(withFull.map((i) => i.key)).toEqual(['date', 'expiry', 'delta', 'premium']);
-      for (const i of withFull) {
+      const b = baseOf(st);
+      const metrics = metricsModel({ base: b, scenario: sc, unit: 'auto' });
+      const r = readoutModel({ base: b, metrics, scenario: sc });
+      const items = bigReadout(r, b.ctx.evalTime);
+      const withSub = items.filter((i) => i.sub !== '');
+      expect(withSub.map((i) => i.key)).toEqual(['date', 'expiry', 'delta']);
+      for (const i of withSub) {
         expect(widthUnits(i.sub), `${i.key}: ${i.sub}`).toBeLessThanOrEqual(SUB_MAX_UNITS);
       }
     }

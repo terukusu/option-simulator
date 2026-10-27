@@ -14,7 +14,7 @@ import {
 import { fairView } from '../../ui/view/fairValue';
 import { fmtIv, fmtNum, fmtSigned } from '../../ui/view/format';
 import { HEDGE_REASON_LABEL, hedgeModel } from '../../ui/view/hedge';
-import { AMOUNT_UNIT_LABEL, fmtAmount, metricsModel } from '../../ui/view/metrics';
+import { fmtAmount, metricsModel } from '../../ui/view/metrics';
 import { pnlDomains } from '../../ui/view/pnlChart';
 import {
   fmtEntry,
@@ -34,6 +34,7 @@ import {
   HEDGE_AT_OPTIONS,
   headSub,
   hedgeSection,
+  hedgeSummary,
   legDetail,
   legFairValue,
   legSpreadCosts,
@@ -235,23 +236,14 @@ describe('AC-2 行の表示モデル', () => {
     expect(stepQty(100_000, 1)).toBeNull();
   });
 
-  it('(c) 見出しの副題: 受取超 `N 本 · 受取 …`・支払超 `N 本 · 掛け金 …`・0 本 `足なし`', () => {
+  it('(c) 見出しの副題（#274 AC4）: 受取超・支払超とも `N 本`（受取 / 掛け金はタイルだけ）、0 本 `足なし`', () => {
     const recv = run(loaded(), sellPut(m1.id, k1), sellPut(m2.id, k2));
-    const vr = views(recv).metrics;
-    expect(vr.premium.net).toBeGreaterThan(0);
-    expect(headSub(2, vr)).toBe(
-      `2 本 · 受取 ${fmtAmount(vr.premium.net, vr.unit)} ${AMOUNT_UNIT_LABEL[vr.unit]}`,
-    );
+    expect(views(recv).metrics.premium.net).toBeGreaterThan(0);
+    expect(headSub(2)).toBe('2 本');
     const paid = run(loaded(), buyPut(m1.id, k1));
-    const vp = views(paid).metrics;
-    expect(vp.premium.stake).not.toBeNull();
-    expect(headSub(1, vp)).toBe(
-      `1 本 · 掛け金 ${fmtAmount(vp.premium.stake, vp.unit)} ${AMOUNT_UNIT_LABEL[vp.unit]}`,
-    );
-    expect(headSub(0, views(loaded()).metrics)).toBe('足なし');
-    // 先物だけ（受け払い 0）は本数だけ
-    const fut = run(loaded(), { type: 'addFutureLeg', input: { side: 'buy', qty: 1 } });
-    expect(headSub(1, views(fut).metrics)).toBe('1 本');
+    expect(views(paid).metrics.premium.stake).not.toBeNull();
+    expect(headSub(1)).toBe('1 本');
+    expect(headSub(0)).toBe('足なし');
   });
 
   it('(d) 足別のシナリオ点: 真ん中がエラーの足なら 1 本目と 3 本目に legs[0]・[1]、真ん中は null', () => {
@@ -272,7 +264,7 @@ describe('AC-2 行の表示モデル', () => {
     for (const p of v.base?.legs ?? []) expect(v.pm.prepared).toContain(p);
     // 詳細の足別は null なら —
     const d = legDetail(v.pm.rows[1] as PositionRow, null, null, v.metrics.unit);
-    expect(d.scenario.every((it) => it.value === '—')).toBe(true);
+    expect(d.scenario.parts).toEqual(['IV —', 'Δ —', 'Γ —', 'Θ — / 日', 'V — / pt']);
   });
 
   it('(d) F が NaN の足（先物価格の無い板の、板に無い限月の手入力 OP）は base.legs に無いので null、後ろの足はずれない', () => {
@@ -339,7 +331,7 @@ describe('AC-2 行の表示モデル', () => {
     expect(legSpreadCosts(ve.pm, ve.settings)[0]).toBeNull();
   });
 
-  it('詳細: 旧 Positions の項目と書式（Δ 3 桁（ミニ 2 桁）・Γ 4 桁・Θ / V 0 桁）と足別の書式', () => {
+  it('詳細（#274 AC7）: 先頭に編集の 3 欄、グリーク（Δ 3 桁（ミニ 2 桁）・Γ 4 桁・Θ / V 0 桁）と足別のシナリオ点はそれぞれ 1 行', () => {
     const s = run(three(), { type: 'setScenario', patch: { dX: 300 } });
     const v = views(s);
     const row = v.pm.rows[0] as PositionRow;
@@ -347,23 +339,40 @@ describe('AC-2 行の表示モデル', () => {
     const d = legDetail(row, scen, null, v.metrics.unit);
     const val = (k: string) => d.items.find((i) => i.key === k)?.value;
     const g = row.greeks;
+    expect(d.fields.map((i) => [i.key, i.field])).toEqual([
+      ['qty', 'qty'],
+      ['entry', 'entry'],
+      ['iv', 'iv'],
+    ]);
+    expect(d.items.some((i) => i.field)).toBe(false);
+    expect(d.items.map((i) => i.key)).toEqual([
+      'product',
+      'side',
+      'mismatch',
+      'spread',
+      'fair',
+      'sq',
+    ]);
     expect(val('product')).toBe(`ラージ OP ${m1.id} P ${fmtNum(k1)}`);
     expect(val('side')).toBe('売り');
-    expect(val('delta')).toBe(`${fmtSigned(g?.deltaLarge, 3)}（${fmtSigned(g?.deltaMini, 2)}）`);
-    expect(val('gamma')).toBe(fmtSigned(g?.gammaPer100, 4));
-    expect(val('theta')).toBe(fmtSigned(g?.thetaPerDay, 0));
-    expect(val('vega')).toBe(fmtSigned(g?.vegaPerPt, 0));
     expect(val('sq')).toBe(row.sqDate);
-    expect(d.items.filter((i) => i.field).map((i) => i.field)).toEqual(['qty', 'entry', 'iv']);
-    const sv = (k: string) => d.scenario.find((i) => i.key === k)?.value;
-    expect(sv('s-iv')).toBe(fmtIv(scen?.sigma));
-    expect(sv('s-delta')).toBe(fmtSigned(scen?.display.deltaLarge, 3));
-    expect(sv('s-theta')).toBe(fmtAmount(scen?.display.thetaPerDay, v.metrics.unit, true));
+    expect(d.greeks.head).toBe('グリーク（シナリオ 0）· 円');
+    expect(d.greeks.parts.join(' · ')).toBe(
+      `Δ ${fmtSigned(g?.deltaLarge, 3)}（ミニ ${fmtSigned(g?.deltaMini, 2)}） · Γ ${fmtSigned(g?.gammaPer100, 4)} / 100 円 · Θ ${fmtSigned(g?.thetaPerDay, 0)} / 日 · V ${fmtSigned(g?.vegaPerPt, 0)} / pt`,
+    );
+    expect(d.scenario.head).toBe(`シナリオ点（足別）· ${v.metrics.unit === 'yen' ? '円' : '千円'}`);
+    expect(d.scenario.parts).toEqual([
+      `IV ${fmtIv(scen?.sigma)}`,
+      `Δ ${fmtSigned(scen?.display.deltaLarge, 3)}`,
+      `Γ ${fmtSigned(scen?.display.gammaPer100, 4)}`,
+      `Θ ${fmtAmount(scen?.display.thetaPerDay, v.metrics.unit, true)} / 日`,
+      `V ${fmtAmount(scen?.display.vegaPerPt, v.metrics.unit, true)} / pt`,
+    ]);
     expect(d.ivRequired).toBe(false);
     // 先物の IV は入力欄なし
     const fd = legDetail(v.pm.rows[2] as PositionRow, null, null, v.metrics.unit);
-    expect(fd.items.find((i) => i.key === 'iv')).toMatchObject({ value: '—' });
-    expect(fd.items.find((i) => i.key === 'iv')?.field).toBeUndefined();
+    expect(fd.fields.find((i) => i.key === 'iv')).toMatchObject({ value: '—' });
+    expect(fd.fields.find((i) => i.key === 'iv')?.field).toBeUndefined();
   });
 });
 
@@ -659,6 +668,64 @@ describe('AC-5 足の追加フォームの検証', () => {
       expect(after.legError).toBeNull();
       expect(after.legs).toHaveLength(base.legs.length + 1);
     }
+  });
+});
+
+describe('#274 AC3 デルタヘッジの常設の行（EPIC #281 終了条件 2）', () => {
+  it('足 0 本は 0 行（null）、足 2 本は 1 行（要約の文・ミニの [追加]）', () => {
+    expect(hedgeSummary(views(loaded()).hedge, 0)).toBeNull();
+    const s = run(loaded(), sellPut(m1.id, k1), sellPut(m2.id, k2));
+    const { hedge } = views(s);
+    const v = hedgeSummary(hedge, 2);
+    if (!v) throw new Error('行が無い');
+    const cur = hedge.current as { large: number; mini: number };
+    const mini = hedgeSection(hedge).lines.find((l) => l.product === 'fut_mini');
+    expect(v.text).toBe(
+      `現在 Δ ${fmtSigned(cur.large, 2)}（ミニ ${fmtSigned(cur.mini, 1)}） → ミニ ${mini?.lots}`,
+    );
+    expect(v.text).toMatch(
+      /^現在 Δ [+−]?\d+\.\d{2}（ミニ [+−]?\d+\.\d） → ミニ ([+−]?[\d,]+ 枚|—)$/,
+    );
+    // #274 再レビュー R5: 結論（縮めない）と前半（省略記号）を分けて返す。全文 = 前半 + 結論 + 理由
+    expect(v.delta).toBe(`現在 Δ ${fmtSigned(cur.large, 2)}（ミニ ${fmtSigned(cur.mini, 1)}）`);
+    expect(v.action).toBe(`→ ミニ ${mini?.lots}`);
+    expect(v.why).toBe('');
+    expect(v.text).toBe(`${v.delta} ${v.action}${v.why}`);
+    expect(v.line?.product).toBe('fut_mini');
+    expect(v.line?.input).toBe(mini?.input);
+    expect(v.line?.canAdd).toBe(mini?.canAdd);
+    expect(v.warn).toBe(false);
+  });
+
+  it('評価点がシナリオ時点・目標 ≠ 0・全行に共通の理由の文', () => {
+    const s = run(loaded(), sellPut(m1.id, k1), sellPut(m2.id, k2));
+    const sc = views(reduce(s, { type: 'setHedge', patch: { at: 'scenario', target: 0.5 } })).hedge;
+    expect(hedgeSummary(sc, 2)?.text).toMatch(
+      /^シナリオ時点 Δ [+−]?\d+\.\d{2}（ミニ [+−]?\d+\.\d） → 目標 0\.5 · ミニ ([+−]?[\d,]+ 枚|—)$/,
+    );
+    const c = nullPrice();
+    const np = run(loaded(c), sellPut(c.months[0]?.id as string, k1));
+    const v = hedgeSummary(views(np).hedge, 1);
+    expect(v?.text).toMatch(
+      new RegExp(`^現在 Δ .+ · ${HEDGE_REASON_LABEL.no_price.replace(/[()（）]/g, '.')}$`),
+    );
+    expect(v?.line).toBeNull();
+    expect(v?.warn).toBe(true);
+    expect(v?.action).toBe('');
+    expect(v?.delta).toBe(v?.text);
+  });
+
+  it('ミニの段に理由（上限超え）があれば文の末尾に理由・warn', () => {
+    const s = reduce(loaded(), {
+      type: 'addFutureLeg',
+      input: { product: 'fut_large', side: 'buy', qty: 100_000 },
+    });
+    const v = hedgeSummary(views(s).hedge, 1);
+    expect(v?.text.endsWith(` · ${HEDGE_REASON_LABEL.over_limit}`)).toBe(true);
+    expect(v?.why).toBe(` · ${HEDGE_REASON_LABEL.over_limit}`);
+    expect(v?.action).toMatch(/^→ ミニ /);
+    expect(v?.warn).toBe(true);
+    expect(v?.line?.canAdd).toBe(false);
   });
 });
 
