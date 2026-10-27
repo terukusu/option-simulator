@@ -1,9 +1,11 @@
 /**
  * ステッパー（#81。docs/ui-redesign.md §5・§4.2）の規則。部品は ui/next/parts/Stepper.tsx。
- * #83: スクラブ・ホイール・全キー・Shift の大きな段・端数を保つ段（d）・± の長押しの連続・数値入力の長押し。
+ * #83: スクラブ・ホイール・全キー・Shift の大きな段・端数を保つ段（d）・± の長押しの連続・数値入力。
+ * #276: 数値入力は値を押して離す（タップ 1 回・クリック）で開く（#83 のダブルクリック / タッチの長押しをやめた）。
  */
 
-import { LONG_PRESS_MS, TAP_MOVE_PX } from '../chart/gesture';
+import { TAP_MOVE_PX } from '../chart/gesture';
+import { imeComposing, type KeySummary } from './keys';
 
 export interface StepSpec {
   min: number;
@@ -58,10 +60,21 @@ export const BIG_STEPS = 10;
 export const REPEAT_DELAY_MS = 400;
 /** ± の長押し: 連続の間隔（ms） */
 export const REPEAT_INTERVAL_MS = 80;
-/** 数値入力を開くタッチの長押し（ms。舞台の長押しと同じ） */
-export const EDIT_HOLD_MS = LONG_PRESS_MS;
-/** 長押しを取り消す移動量（px。舞台のタップと同じ） */
+/** 押して離したときに数値入力を開かなくなる移動量（px。舞台のタップと同じ） */
 export const EDIT_MOVE_PX = TAP_MOVE_PX;
+
+/** 押した位置からの移動が EDIT_MOVE_PX 以上か（一度動いたら戻しても「動いた」のまま = 呼ぶ側が覚える） */
+export function stepperMoved(dx: number, dy: number): boolean {
+  return Math.hypot(dx, dy) >= EDIT_MOVE_PX;
+}
+
+/**
+ * 値を押して離したときに数値入力を開くか（#276）: 動いていない（EDIT_MOVE_PX 未満）かつスクラブの段を 1 つも
+ * 入れていない。押していた時間は問わない（長押しも同じ）。数値入力を持たないステッパーは開かない（呼ぶ側）。
+ */
+export function stepperTapOpensEdit(moved: boolean, applied: number): boolean {
+  return !moved && applied === 0;
+}
 
 /** 押した位置からの横の移動量（px）→ 累計の段（0 に向けて切り捨て）。DOM は「今の累計 − 反映済み」だけ動かす */
 export function scrubSteps(dx: number): number {
@@ -176,6 +189,27 @@ export function editOutcome(
   if (text.trim() === opened.trim()) return { type: 'keep' };
   const r = parse(text);
   return r.ok ? { type: 'set', value: r.value } : { type: 'invalid', message: r.message };
+}
+
+/**
+ * 入力欄の中のキーの段（#276。値をクリック / タップすると入力欄が開くので、開いた後もキーボードの ↑↓ で動かせるようにする）:
+ * ↑ / ↓ ±1（Shift で ±10）、PageUp / PageDown ±10。← → Home End は文字のカーソルの移動に残す。ほかは null。
+ * IME の変換中（候補の ↑↓。keys.ts の imeComposing）と Ctrl / ⌘ / ⌥ 付き（値の欄のキーと同じ）は null
+ */
+export function editKeySteps(
+  s: Pick<KeySummary, 'key' | 'isComposing' | 'keyCode' | 'ctrl' | 'meta' | 'alt' | 'shift'>,
+): number | null {
+  if (imeComposing(s) || s.ctrl || s.meta || s.alt) return null;
+  const { key } = s;
+  if (key !== 'ArrowUp' && key !== 'ArrowDown' && key !== 'PageUp' && key !== 'PageDown')
+    return null;
+  const k = stepperKey(key, s.shift);
+  return k && 'n' in k ? k.n : null;
+}
+
+/** 入力欄の中の段の起点: 開いたときのまま（keep）→ 今の値、正しい値 → その値、正しくない → null（動かさない） */
+export function editStepOrigin(o: EditOutcome, current: number): number | null {
+  return o.type === 'keep' ? current : o.type === 'set' ? o.value : null;
 }
 
 /**

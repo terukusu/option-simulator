@@ -89,13 +89,18 @@ export function editableTarget(
   return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT';
 }
 
+/** IME の変換中か（isComposing・key = Process・keyCode 229。画面のキーの判定はすべてこれで止める） */
+export function imeComposing(s: Pick<KeySummary, 'key' | 'isComposing' | 'keyCode'>): boolean {
+  return s.isComposing || s.key === 'Process' || s.keyCode === 229;
+}
+
 /**
  * keydown の要約から全体のキーの動作を決める（無ければ null）。見る順は §4.6:
  * IME の変換中 → defaultPrevented → repeat → 入力欄 → ダイアログ → Ctrl / ⌘ + K → メニュー / ポップオーバー →
  * 修飾 → 1〜5・G・T。
  */
 export function globalKey(s: KeySummary): GlobalKey | null {
-  if (s.isComposing || s.key === 'Process' || s.keyCode === 229) return null;
+  if (imeComposing(s)) return null;
   if (s.defaultPrevented || s.repeat || s.editable || s.blocked) return null;
   const lower = s.key.toLowerCase();
   if ((s.ctrl || s.meta) && !s.alt && !s.shift && lower === 'k') return { kind: 'palette' };

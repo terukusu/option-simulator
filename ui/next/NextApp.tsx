@@ -50,6 +50,7 @@ import { type PaletteRun, paletteAtmK, paletteItems } from '../view/palette';
 import { shareReplaceConfirmText } from '../view/persistNote';
 import { clearUndo } from '../view/positionsRegion';
 import type { DXUnit } from '../view/scenario';
+import { presetRevealAction } from '../view/scenarioRegion';
 import {
   aiVisible,
   benchView,
@@ -630,9 +631,13 @@ export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
       case 'key':
         runGlobalKey(run.key, keyCtx);
         return;
-      case 'action':
+      case 'action': {
+        // プリセットの行はチップと同じく、点が表示範囲の内側 10% に入るように広げる（#276）
+        const reveal = presetRevealAction(run.action, c.pnlBase, state.pnlViewport);
         dispatch(run.action);
+        if (reveal) dispatch(reveal);
         return;
+      }
       case 'shell':
         send(run.action);
         return;
@@ -749,6 +754,8 @@ export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
             theme={theme.resolved}
             onPickLeg={onPickLeg}
             onChangeStrike={onChangeStrike}
+            tipSeen={userPrefs.prefs.stageHintSeen === true}
+            onTipSeen={userPrefs.setStageHintSeen}
           />
         }
         scenario={<Scenario c={c} dXUnit={dXUnit} onDXUnit={setDXUnit} />}

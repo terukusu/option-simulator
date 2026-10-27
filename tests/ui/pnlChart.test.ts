@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { boardOptionLeg, type Chain, type ChainJson, normalizeChain } from '../../data';
 import {
+  CRASH_PRESETS,
   DAY_MS,
   expiryProfile,
   type Leg,
@@ -30,6 +31,7 @@ import {
   pnlChartModel,
   pnlDomains,
   pnlViewDomain,
+  REVEAL_INSET_RATIO,
   revealViewport,
   scenarioFull,
   todayLine,
@@ -38,6 +40,7 @@ import {
   zoomViewport,
 } from '../../ui/view/pnlChart';
 import { positionModel } from '../../ui/view/position';
+import { presetRevealAction } from '../../ui/view/scenarioRegion';
 import { fixture } from '../support/fixtures';
 import { M1, M2, makeMarket } from '../support/market';
 
@@ -1094,32 +1097,73 @@ describe('シナリオ点と横軸の全域・表示範囲（#144）', () => {
     expect(allFinite(m)).toBe(true);
   });
 
-  it('数値欄で確定した点が表示範囲の外なら表示範囲を広げ（反対側の端は保つ）、内側なら null', () => {
+  /** X_s が表示範囲の内側 r の位置より内か（端からの幅の比） */
+  const insetOf = (d: Domain, xs: number) => Math.min(xs - d[0], d[1] - xs) / (d[1] - d[0]);
+
+  it('数値欄で確定した点が表示範囲の内側 10% の外なら表示範囲を広げ（反対側の端は保つ）、内側なら null（#144・#276）', () => {
+    expect(REVEAL_INSET_RATIO).toBe(0.1);
     const cur = pnlViewDomain(base, null);
-    // 内側・非有限
+    const w = cur[1] - cur[0];
+    // 内側 10% の中・非有限
     expect(revealViewport(base, null, 0)).toBeNull();
     expect(revealViewport(base, null, Number.NaN)).toBeNull();
-    expect(revealViewport(base, cur, cur[1] - X)).toBeNull();
-    // 上: +900%
+    expect(revealViewport(base, cur, cur[1] - 0.15 * w - X)).toBeNull();
+    // 端ちょうど・内側 10% の帯の中 → 広げて 10% の位置へ（#276 F-03。#144 は端ちょうどなら動かさなかった）
+    for (const xs of [cur[1], cur[1] - 0.05 * w]) {
+      const r = revealViewport(base, cur, xs - X) as Domain;
+      expect(r).not.toBeNull();
+      expect(r[0]).toBeCloseTo(cur[0], 9);
+      expect(insetOf(r, xs)).toBeCloseTo(0.1, 9);
+    }
+    // 上: +900%（全域の端まで。全域は点の外に 1 格子以上あるので点は端より内）
     const up = revealViewport(base, null, 9 * X) as Domain;
     expect(up).not.toBeNull();
     expect(up[0]).toBeCloseTo(cur[0], 9);
-    expect(up[1]).toBeCloseTo(10 * X + g, 6);
-    expect(10 * X).toBeLessThanOrEqual(up[1]);
+    expect(up[1]).toBeLessThanOrEqual(scenarioFull(base, 9 * X)[1]);
+    expect(up[1] - 10 * X).toBeGreaterThanOrEqual(g - 1e-6);
     // 結果は広げた全域で収めた値と同じ
     const wide = withScenarioFull(base, scenarioFull(base, 9 * X));
     expect(pnlViewDomain(wide, up)).toEqual(up);
-    // 下: 今の表示範囲の下端より下の点
+    // 下: 今の表示範囲の下端より下の点 → 上端は保ち、点は内側 10%
     const xs = cur[0] - 0.2 * X;
     const dn = revealViewport(base, cur, xs - X) as Domain;
     expect(dn[1]).toBeCloseTo(cur[1], 9);
-    expect(dn[0]).toBeLessThanOrEqual(xs);
-    expect(dn[0]).toBeGreaterThanOrEqual(Math.max(xs - g, base.xLo) - 1e-6);
+    expect(dn[0]).toBeGreaterThanOrEqual(base.xLo - 1e-6);
+    expect(insetOf(dn, xs)).toBeCloseTo(0.1, 9);
     // 拡大した表示範囲（一部）の右の外の点 → 左端は保つ
     const vp: Domain = [X - 500, X + 500];
     const r = revealViewport(base, vp, 2_000) as Domain;
     expect(r[0]).toBe(X - 500);
-    expect(r[1]).toBeCloseTo(X + 2_000 + g, 6);
+    expect(insetOf(r, X + 2_000)).toBeCloseTo(0.1, 9);
+  });
+
+  it('急落プリセット（ΔX −10%）の点は既定の表示範囲の内側 10% に入る（#276 F-03）', () => {
+    const dX = -0.1 * X;
+    const vp = revealViewport(base, null, dX);
+    const d = vp ?? pnlViewDomain(base, null);
+    const wide = withScenarioFull(base, scenarioFull(base, dX));
+    expect(pnlViewDomain(wide, d)).toEqual(d);
+    expect(insetOf(d, X + dX)).toBeGreaterThanOrEqual(0.1 - 1e-9);
+  });
+
+  it('プリセットの action の後の表示範囲（presetRevealAction。#276）', () => {
+    const crash = { type: 'applyPreset', index: 0, x0: X } as const;
+    expect(presetRevealAction({ type: 'resetScenario' }, base, null)).toBeNull();
+    expect(presetRevealAction(crash, null, null)).toBeNull();
+    expect(presetRevealAction({ ...crash, index: 99 }, base, null)).toBeNull();
+    // 拡大して X₀ の付近だけを見ている → 急落の点が入るように広げる（右端は保つ）
+    const vp: Domain = [X - 500, X + 500];
+    const a = presetRevealAction(crash, base, vp);
+    expect(a?.type).toBe('setPnlViewport');
+    const d = (a as { viewport: Domain }).viewport;
+    expect(d[1]).toBe(X + 500);
+    expect(insetOf(d, X + (X * (CRASH_PRESETS[0]?.dXPct ?? Number.NaN)) / 100)).toBeCloseTo(0.1, 9);
+  });
+
+  it('内側 10% の帯にあっても全域の端で広げられない（今と同じ範囲）なら null（自動の表示範囲を固定にしない。#276 レビュー）', () => {
+    const full = base.boardFull;
+    const xs = full[1] - 0.01 * (full[1] - full[0]);
+    expect(revealViewport(base, full, xs - X)).toBeNull();
   });
 
   it('点が xLo より下（全域の外）なら表示範囲を動かさない（null）', () => {

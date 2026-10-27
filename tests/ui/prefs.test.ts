@@ -390,6 +390,36 @@ describe('#135 AI の免責の文を見た（ai_disclaimer_seen）', () => {
   });
 });
 
+describe('#276 舞台の操作の案内を出した（stage_hint_seen）', () => {
+  it('無い・true でない → 未（キーを書かない）、true を往復、ほかのキーを変えない、版は 1 のまま', () => {
+    const old = JSON.stringify({
+      schema_version: 1,
+      theme: 'light',
+      capital_yen: 5_000_000,
+      ai_disclaimer_seen: true,
+    });
+    const r = readPrefs(old);
+    expect(r.prefs.stageHintSeen).toBeUndefined();
+    expect(serializePrefs(r.prefs)).not.toContain('stage_hint_seen');
+    for (const v of ['yes', 1, null, false]) {
+      const x = readPrefs(JSON.stringify({ schema_version: 1, theme: 'dark', stage_hint_seen: v }));
+      expect(x.prefs.stageHintSeen).toBeUndefined();
+    }
+    const seen = serializePrefs({ ...r.prefs, stageHintSeen: true });
+    const o = JSON.parse(seen);
+    expect(o.stage_hint_seen).toBe(true);
+    expect(o.schema_version).toBe(PREFS_SCHEMA_VERSION);
+    expect(PREFS_SCHEMA_VERSION).toBe(1);
+    // 足しただけ: 足す前の書き出しのキーと値はそのまま
+    const { stage_hint_seen: _added, ...rest } = o;
+    expect(rest).toEqual(JSON.parse(serializePrefs(r.prefs)));
+    const back = readPrefs(seen).prefs;
+    expect(back.stageHintSeen).toBe(true);
+    expect(back.aiDisclaimerSeen).toBe(true);
+    expect(back.margin.capitalYen).toBe(5_000_000);
+  });
+});
+
 /** #205: テクニカル指標の期間（端末の設定。版は 1 のまま、既定と違う項目だけ書く） */
 describe('テクニカル指標の期間（#205）', () => {
   const T = { ...DEFAULT_TECH_PARAMS };

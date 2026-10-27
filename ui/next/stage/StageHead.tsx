@@ -7,6 +7,7 @@ import type { FullRow } from '../../view/metricsPanel';
 import { PIN_MARK, type PinTarget, pinMenuRows } from '../../view/pins';
 import type { PnlChartModel, PnlYSettings } from '../../view/pnlChart';
 import type { SurfaceLegend } from '../../view/pnlSurface';
+import { KIND_PREFIX } from '../../view/scenarioMarks';
 import { CHART_MODES, type ChartMode } from '../../view/shell';
 import { FullText } from '../parts/FullText';
 import { Menu, type MenuItem } from '../parts/Menu';
@@ -16,6 +17,18 @@ import { TermLinks } from '../parts/TermLinks';
 import { YAxisFields } from '../parts/YAxisFields';
 
 const fmtDays = (v: number) => String(Math.round(v * 100) / 100);
+
+/**
+ * 線の凡例の 1 項目（#276）: 線種 + 名前。舞台の幅 < 560px（stage.css。タブレットの舞台でも省略記号にしない）は十字線・交点のラベルと同じ 1 字（満 / 指 / 今）に替える
+ * （省略記号で意味を消さない。全文は title）
+ */
+const lineLegend = (cls: string, long: string, short: string) => (
+  <span title={long}>
+    <i class={cls} />
+    <span class="lg-long">{long}</span>
+    <span class="lg-short">{short}</span>
+  </span>
+);
 const DYNAMICS_LABEL = { sticky_strike: 'sticky strike', sticky_moneyness: 'sticky moneyness' };
 
 /**
@@ -107,26 +120,15 @@ export function StageHead(p: {
             {legend.vmax && <b class="vmax">{legend.vmax}</b>}
           </span>
         )}
-        {!legend && (
-          <span>
-            <i class="exp" />
-            <span>満期</span>
-          </span>
-        )}
-        {!legend && hasDate && (
-          <span>
-            <i class="sc" />
-            <span>
-              {model.days > 0 ? `指定日（d ${fmtDays(model.days)} 日後）` : 'シナリオ（d = 0）'}
-            </span>
-          </span>
-        )}
-        {!legend && (
-          <span>
-            <i class="td" />
-            <span>今日</span>
-          </span>
-        )}
+        {!legend && lineLegend('exp', '満期', KIND_PREFIX.expiry)}
+        {!legend &&
+          hasDate &&
+          lineLegend(
+            'sc',
+            model.days > 0 ? `指定日（d ${fmtDays(model.days)} 日後）` : 'シナリオ（d = 0）',
+            KIND_PREFIX.date,
+          )}
+        {!legend && lineLegend('td', '今日', KIND_PREFIX.today)}
         {!legend && model.premiumFallback && <span class="tag warn">プレミアム 0 のため自動</span>}
         {model.daysClamped && <span class="tag warn">指定日 d を最遠の SQ に収めた</span>}
       </div>
@@ -206,18 +208,14 @@ export function StageHead(p: {
               </p>
             </>
           ) : (
+            // 線の名前は凡例の行にあるので、ⓘ は指定日と今日の違いの 2 行だけ（#276）
             <>
+              <p>満 = 満期・指 = 指定日・今 = 今日（凡例・交点のラベルの 1 字）</p>
               <p>
-                満期 = SQ の損益。指定日の線 = シナリオ（Δσ {fmtNum(scenario.dSigma, 1)}pt、Δs{' '}
-                {fmtNum(scenario.skew, 1)}）、今日の線 = シナリオ IV なし。どちらも β{' '}
-                {fmtNum(scenario.beta, 1)}pt/1%（横軸の各点）、{DYNAMICS_LABEL[scenario.ivDynamics]}
-                。
+                指定日 = シナリオ（Δσ {fmtNum(scenario.dSigma, 1)}pt・Δs {fmtNum(scenario.skew, 1)}
+                ・β {fmtNum(scenario.beta, 1)}pt/1%・{DYNAMICS_LABEL[scenario.ivDynamics]}）
               </p>
-              <p>
-                縦線上の 満 / 指 / 今 = シナリオ点の満期・指定日・今日の損益。塗り =
-                指定日の線（無ければ今日の線）と 0 の間。横軸の ▲ call / ▼ put = 足（塗り =
-                買い・白抜き = 売り）。◇ = 満期の BEP。凡例の ①②③ を押すとピンの中身。
-              </p>
+              <p>今日 = シナリオの IV の変化なし（β と IV の動き方は同じ）</p>
             </>
           )}
           <TermLinks ids={HINT_TERMS.stage} />
