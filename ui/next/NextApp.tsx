@@ -36,6 +36,7 @@ import { futNowValue } from '../view/futHistory';
 import { keptBoardNote } from '../view/header';
 import { type IndKind, toggleInd } from '../view/indicators';
 import { ivNowValue } from '../view/ivHistory';
+import { palettePanelActions } from '../view/keys';
 import { PC_QUERY, PHONE_QUERY } from '../view/layout';
 import { allowedLossOf } from '../view/margin';
 import { marketPill } from '../view/marketPill';
@@ -53,7 +54,6 @@ import type { DXUnit } from '../view/scenario';
 import { presetRevealAction } from '../view/scenarioRegion';
 import {
   aiVisible,
-  benchView,
   type ChartMode,
   chartMode,
   futVisible,
@@ -61,6 +61,7 @@ import {
   initialShell,
   ivVisible,
   layoutTier,
+  leftView,
   metricsVisible,
   type ShellAction,
   shellReduce,
@@ -133,7 +134,7 @@ import { useTheme } from './useTheme';
  * 常駐の useAtmMoves（指標のパネルが見えたら 1 回だけ /api/atm_daily を先読み。#176）、マスの計算は useHoldMap（止まってから列ごと）。
  * #135 で AI のチャット（regions/AiChat.tsx の AiPanel。会話の状態は AiPanel の中の useAiChat）を入れた。ツールの環境は
  * 送るときに今の state と端末の証拠金の設定から作る（aiEnvFromState）。口は API のときは /api/ai、dev の合成の板は
- * dev だけ /fixtures/ai（偽の SSE）。PC は作業台の列の入れ替え（ShellState.bench・トップバーの [AI]・キー 6）。
+ * dev だけ /fixtures/ai（偽の SSE）。PC は左の列（市場）の入れ替え（#280。ShellState.left・トップバーの [AI]・キー 6）。
  * #136 で数字・パネルの [AI に聞く]（parts/AskAi.tsx → parts/aiAsk.ts の口 → AI のパネルを開いて AiPanelApi.ask）。
  */
 const NO_IND_KINDS: readonly IndKind[] = [];
@@ -253,6 +254,7 @@ export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
   const closePalette = useCallback(() => setPaletteOpen(false), []);
   const keyCtx: GlobalKeysCtx = {
     tier,
+    shell,
     send,
     resolvedTheme: theme.resolved,
     chooseTheme: theme.choose,
@@ -395,8 +397,8 @@ export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
     },
     [dispatch, push],
   );
-  const onAi = useCallback(() => send({ type: 'bench' }), []);
-  // [AI に聞く]（#136）: AI のパネルを見せて（PC は作業台を AI に）その値の質問を送る（パレットの診断と同じ口）
+  const onAi = useCallback(() => send({ type: 'left' }), []);
+  // [AI に聞く]（#136）: AI のパネルを見せて（PC は左の列を AI に）その値の質問を送る（パレットの診断と同じ口）
   useAiAskHandler((a) => {
     send({ type: 'open', panel: 'ai', tier });
     aiApi.current?.ask(a);
@@ -629,6 +631,12 @@ export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
   const runPalette = (run: PaletteRun) => {
     switch (run.kind) {
       case 'key':
+        // パネルの行の「AI に相談」は出すだけ（PC で開いていても閉じない。#280 レビュー指摘 2）
+        if (run.key.kind === 'panel' && run.key.panel === 'ai') {
+          for (const a of palettePanelActions('ai', tier)) send(a);
+          focusPanelLater('ai');
+          return;
+        }
         runGlobalKey(run.key, keyCtx);
         return;
       case 'action': {
@@ -672,7 +680,7 @@ export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
         openTerm(run.id);
         return;
       case 'diagnose':
-        // AI のパネルを見せて（PC は作業台を AI に）[このポジションを診断]
+        // AI のパネルを見せて（PC は左の列を AI に）[このポジションを診断]
         send({ type: 'open', panel: 'ai', tier });
         aiApi.current?.diagnose();
         return;
@@ -736,7 +744,7 @@ export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
         onOpenBook={onOpenBook}
         onSaveToBook={onSaveToBook}
         onOpenSettings={onOpenSettings}
-        aiOpen={benchView(shell) === 'ai'}
+        aiOpen={leftView(shell) === 'ai'}
         onAi={onAi}
       />
       <Shell

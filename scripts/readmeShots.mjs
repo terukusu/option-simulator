@@ -79,6 +79,8 @@ const prefs = (theme, capital = CAPITAL, allowedLoss = 0) =>
   JSON.stringify({
     schema_version: 1,
     theme,
+    // 舞台の操作の案内（#276。初めての 1 回だけ）は README の画像に入れない
+    stage_hint_seen: true,
     ...(capital ? { capital_yen: capital } : {}),
     ...(allowedLoss ? { allowed_loss_yen: allowedLoss } : {}),
   });
@@ -237,7 +239,7 @@ async function composite(pngs, theme) {
 async function openAi(opts) {
   const o = await open(opts);
   const { page } = o;
-  if ((await page.getAttribute('.layout', 'data-bench')) !== 'ai') {
+  if ((await page.getAttribute('.layout', 'data-left')) !== 'ai') {
     await page.click('.top button[data-ai="top"]');
   }
   await page.waitForSelector('section.ai .ai-foot', { state: 'visible', timeout: 5000 });

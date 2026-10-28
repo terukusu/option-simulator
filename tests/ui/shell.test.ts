@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest';
 import { PANEL_KEY } from '../../ui/view/keys';
 import {
   aiVisible,
-  benchView,
   CHART_MODES,
   chartMode,
   DOCK_LABELS,
@@ -13,6 +12,7 @@ import {
   initialShell,
   ivVisible,
   layoutTier,
+  leftView,
   MARKET_VIEWS,
   metricsVisible,
   SHEET_SNAP_PX,
@@ -238,35 +238,76 @@ describe('layoutTier / visiblePanel / dockPanels', () => {
   });
 });
 
-describe('#135 AI のパネル（スマホ・タブレットはドックの 1 枚、PC は作業台の入れ替え）', () => {
-  it('bench: 既定 work、入れ替え・指定・変わらなければ同じ参照', () => {
+describe('#135 AI のパネル（スマホ・タブレットはドックの 1 枚、PC は左の列（市場）の入れ替え。#280）', () => {
+  it('left: 既定 market、入れ替え・指定・変わらなければ同じ参照', () => {
     const s = at({});
-    expect(benchView(s)).toBe('work');
-    const ai = shellReduce(s, { type: 'bench' });
-    expect(benchView(ai)).toBe('ai');
-    expect(benchView(shellReduce(ai, { type: 'bench' }))).toBe('work');
-    expect(shellReduce(ai, { type: 'bench', bench: 'ai' })).toBe(ai);
-    expect(benchView(shellReduce(ai, { type: 'bench', bench: 'work' }))).toBe('work');
+    expect(leftView(s)).toBe('market');
+    const ai = shellReduce(s, { type: 'left' });
+    expect(leftView(ai)).toBe('ai');
+    expect(leftView(shellReduce(ai, { type: 'left' }))).toBe('market');
+    expect(shellReduce(ai, { type: 'left', left: 'ai' })).toBe(ai);
+    expect(leftView(shellReduce(ai, { type: 'left', left: 'market' }))).toBe('market');
   });
 
-  it('PC の open: ai → 作業台を ai、ポジション・指標 → work、板・スマイルはそのまま', () => {
+  it('#280 戻すと前の市場の見え方のまま（板 / スマイル / IV 推移 / 先物）', () => {
+    for (const { value } of MARKET_VIEWS) {
+      const ai = shellReduce(at({ market: value }), { type: 'left' });
+      expect(ai.market).toBe(value);
+      expect(shellReduce(ai, { type: 'left' }).market).toBe(value);
+    }
+  });
+
+  it('#280 PC の open: ai → 左の列を ai、ポジション・シナリオ・指標は AI を閉じない（同じ参照）、板・スマイル → market', () => {
     const s = at({});
     const ai = shellReduce(s, { type: 'open', panel: 'ai', tier: 'pc' });
-    expect(benchView(ai)).toBe('ai');
-    expect(benchView(shellReduce(ai, { type: 'open', panel: 'positions', tier: 'pc' }))).toBe(
-      'work',
-    );
-    expect(shellReduce(ai, { type: 'open', panel: 'board', tier: 'pc' })).toBe(ai);
+    expect(leftView(ai)).toBe('ai');
+    for (const panel of ['positions', 'scenario', 'metrics'] as const)
+      expect(shellReduce(ai, { type: 'open', panel, tier: 'pc' })).toBe(ai);
+    for (const panel of ['board', 'smile'] as const)
+      expect(leftView(shellReduce(ai, { type: 'open', panel, tier: 'pc' }))).toBe('market');
+    expect(shellReduce(s, { type: 'open', panel: 'board', tier: 'pc' })).toBe(s);
   });
 
-  it('見えているか: PC = 作業台が ai、タブレット = パネルが ai、スマホ = それに加えて hidden でない', () => {
-    expect(aiVisible(at({ bench: 'ai' }), 'pc')).toBe(true);
+  it('#280 市場の見え方を選ぶ（キー 1・2・板から足す）と左の列を市場に戻す。同じ見え方でも戻す', () => {
+    const ai = at({ left: 'ai', market: 'iv' });
+    const board = shellReduce(ai, { type: 'market', market: 'board' });
+    expect(board.market).toBe('board');
+    expect(leftView(board)).toBe('market');
+    const same = shellReduce(ai, { type: 'market', market: 'iv' });
+    expect(same.market).toBe('iv');
+    expect(leftView(same)).toBe('market');
+    // 市場のままなら同じ見え方は同じ参照
+    const s = at({ market: 'iv' });
+    expect(shellReduce(s, { type: 'market', market: 'iv' })).toBe(s);
+  });
+
+  it('#280 スマホ・タブレットの open / dock は left を変えない', () => {
+    const ai = at({ left: 'ai' });
+    for (const tier of ['phone', 'tablet'] as const) {
+      expect(leftView(shellReduce(ai, { type: 'open', panel: 'metrics', tier }))).toBe('ai');
+      expect(leftView(shellReduce(ai, { type: 'dock', panel: 'board', tier }))).toBe('ai');
+      expect(leftView(shellReduce(at({}), { type: 'open', panel: 'ai', tier }))).toBe('market');
+    }
+  });
+
+  it('見えているか: PC = 左の列が ai、タブレット = パネルが ai、スマホ = それに加えて hidden でない', () => {
+    expect(aiVisible(at({ left: 'ai' }), 'pc')).toBe(true);
     expect(aiVisible(at({}), 'pc')).toBe(false);
+    expect(aiVisible(at({ left: 'ai' }), 'tablet')).toBe(false);
     expect(aiVisible(at({ panel: 'ai' }), 'tablet')).toBe(true);
     expect(aiVisible(at({ panel: 'ai', sheet: 'hidden' }), 'tablet')).toBe(true);
     expect(aiVisible(at({ panel: 'ai', sheet: 'peek' }), 'phone')).toBe(true);
     expect(aiVisible(at({ panel: 'ai', sheet: 'hidden' }), 'phone')).toBe(false);
     expect(aiVisible(at({ panel: 'board' }), 'phone')).toBe(false);
+  });
+
+  it('#280 PC で AI を出している間は IV 推移・先物推移は見えていない（市場に戻すと見える）', () => {
+    expect(ivVisible(at({ market: 'iv' }), 'pc')).toBe(true);
+    expect(ivVisible(at({ market: 'iv', left: 'ai' }), 'pc')).toBe(false);
+    expect(futVisible(at({ market: 'fut' }), 'pc')).toBe(true);
+    expect(futVisible(at({ market: 'fut', left: 'ai' }), 'pc')).toBe(false);
+    // スマホ・タブレットは left を見ない
+    expect(ivVisible(at({ panel: 'smile', left: 'ai' }), 'tablet')).toBe(true);
   });
 });
 
@@ -346,11 +387,11 @@ describe('グラフの表示（#88 AC-5）', () => {
 });
 
 describe('追証マップの開閉と見え方（#152）', () => {
-  it('#274 マスを計算する = 指標のパネルが見えている（開閉によらない）、PC で作業台が AI の間は計算しない', () => {
+  it('#274 マスを計算する = 指標のパネルが見えている（開閉によらない）、#280 PC は AI を開いても計算する', () => {
     for (const holdMap of [false, true]) {
       expect(holdMapActive(at({ holdMap, panel: 'positions' }), 'pc')).toBe(true);
-      expect(holdMapActive(at({ holdMap, bench: 'ai' }), 'pc')).toBe(false);
-      expect(metricsVisible(at({ holdMap, bench: 'ai' }), 'pc')).toBe(true);
+      expect(holdMapActive(at({ holdMap, left: 'ai' }), 'pc')).toBe(true);
+      expect(metricsVisible(at({ holdMap, left: 'ai' }), 'pc')).toBe(true);
       expect(holdMapActive(at({ holdMap, panel: 'metrics', sheet: 'peek' }), 'phone')).toBe(true);
       expect(holdMapActive(at({ holdMap, panel: 'metrics', sheet: 'hidden' }), 'phone')).toBe(
         false,

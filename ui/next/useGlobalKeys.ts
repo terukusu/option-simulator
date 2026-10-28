@@ -5,13 +5,16 @@ import {
   type GlobalKey,
   globalKey,
   panelKeyActions,
+  panelKeyFocus,
   toggledTheme,
 } from '../view/keys';
-import type { PanelId, ShellAction, Tier } from '../view/shell';
+import type { PanelId, ShellAction, ShellState, Tier } from '../view/shell';
 import { openOverlayId } from './parts/overlay';
 
 export interface GlobalKeysCtx {
   tier: Tier;
+  /** 今の画面の状態（キー 6 で PC の AI を閉じたときのフォーカスの行き先。#280） */
+  shell: ShellState;
   send: (a: ShellAction) => void;
   resolvedTheme: 'dark' | 'light';
   chooseTheme: (t: ThemePref) => void;
@@ -80,7 +83,7 @@ export function runGlobalKey(action: GlobalKey, ctx: GlobalKeysCtx): boolean {
   switch (action.kind) {
     case 'panel': {
       for (const a of panelKeyActions(action.panel, ctx.tier)) ctx.send(a);
-      focusLater(PANEL_FOCUS[action.panel]);
+      focusLater(PANEL_FOCUS[panelKeyFocus(action.panel, ctx.tier, ctx.shell)]);
       return true;
     }
     case 'chart': {

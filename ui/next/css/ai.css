@@ -500,11 +500,19 @@ section.ai .ai-body {
   margin: 0;
 }
 
-/* PC のトップバーの [AI]（作業台を入れ替えている間） */
-.top .btn[data-ai="top"][aria-pressed="true"] {
-  border-color: var(--accent);
-  background: var(--accent-fill);
-  color: var(--accent-ink);
+/*
+ * PC のトップバーの [AI]（#280 O-09）: 左の列を入れ替えるトグル。チップの形（押されている間の色は .chip[aria-pressed]）+
+ * 吹き出しのアイコン。高さは隣の [最新]（.btn.sm）にそろえる
+ */
+.top .ai-toggle {
+  height: 26px;
+  padding: 0 var(--sp-2);
+}
+
+.top .ai-toggle .ic-line {
+  display: block;
+  width: 14px;
+  height: 14px;
 }
 
 /*
