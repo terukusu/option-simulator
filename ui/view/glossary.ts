@@ -63,11 +63,11 @@ export interface GlossaryTerm {
 const G_STEPPER = { anchor: 'ステッパー', title: '6 章 シナリオ > ステッパー' };
 const G_MODEL_PREMISE = { anchor: 'モデルの前提', title: '6 章 シナリオ > モデルの前提' };
 const G_LINES = { anchor: '線と印', title: '4 章 舞台（損益グラフ）> 線と印' };
-const G_BREAKDOWN = { anchor: '内訳', title: '8 章 作業台: 指標 · テール > 内訳' };
-const G_MARGIN = { anchor: '証拠金概算', title: '8 章 作業台: 指標 · テール > 証拠金（概算）' };
+const G_BREAKDOWN = { anchor: '内訳', title: '8 章 指標 · テール > 内訳' };
+const G_MARGIN = { anchor: '証拠金概算', title: '8 章 指標 · テール > 証拠金（概算）' };
 const G_HOLD = {
   anchor: '追証マップ',
-  title: '8 章 作業台: 指標 · テール > 追証マップ',
+  title: '8 章 指標 · テール > 追証マップ',
 };
 const G_IV_HISTORY = {
   anchor: 'iv-推移atm-iv-の-30-日固定',
