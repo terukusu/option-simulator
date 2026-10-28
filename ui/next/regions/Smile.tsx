@@ -28,6 +28,7 @@ import { MonthSeg } from '../market/MonthSeg';
 import { SmilePlot } from '../market/SmilePlot';
 import { PanelHead } from '../PanelHead';
 import { Chip } from '../parts/Chip';
+import { Icon } from '../parts/Icon';
 import { Popover } from '../parts/Popover';
 import { Seg } from '../parts/Seg';
 
@@ -95,10 +96,10 @@ function SmileView(p: SmileRegionProps) {
         {/* biome-ignore lint/a11y/useSemanticElements: fieldset は既定の枠・余白と flex の癖があるので div + role="group"（Seg と同じ） */}
         <div class="seg zoom" role="group" aria-label="拡大">
           <button type="button" aria-label="縮小" disabled={empty} onClick={() => zoomBy(2)}>
-            −
+            <Icon name="minus" />
           </button>
           <button type="button" aria-label="拡大" disabled={empty} onClick={() => zoomBy(0.5)}>
-            ＋
+            <Icon name="plus" />
           </button>
           <button
             type="button"
@@ -106,11 +107,11 @@ function SmileView(p: SmileRegionProps) {
             disabled={empty}
             onClick={() => dispatch({ type: 'setViewport', viewport: null })}
           >
-            ⟲
+            <Icon name="reset" />
           </button>
         </div>
         {p.marketSeg}
-        <Popover label="スマイルの操作" button="ⓘ">
+        <Popover label="スマイルの操作" button={<Icon name="info" />}>
           <p>{SMILE_HINT}</p>
           <p>{SMILE_LEGEND_HINT}</p>
           <p>{SMILE_EFF_HINT}</p>
@@ -209,7 +210,7 @@ function SmileView(p: SmileRegionProps) {
                 aria-label="選択を消す"
                 onClick={() => dispatch({ type: 'pickSmile', pick: null })}
               >
-                ×
+                <Icon name="close" />
               </button>
             </>
           )}

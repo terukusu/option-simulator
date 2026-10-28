@@ -7,6 +7,7 @@
 import { useState } from 'preact/hooks';
 import { Chip, ChipRow } from '../parts/Chip';
 import { Dialog } from '../parts/Dialog';
+import { Icon } from '../parts/Icon';
 import { Menu, type MenuItem } from '../parts/Menu';
 import { Popover } from '../parts/Popover';
 import { Seg } from '../parts/Seg';
@@ -151,10 +152,10 @@ export function PartsGallery() {
         <div class="gal-head">
           <h2>メニュー · ポップオーバー</h2>
           <span class="gal-spacer" />
-          <Popover label="ポップオーバーの説明" button="ⓘ">
+          <Popover label="ポップオーバーの説明" button={<Icon name="info" />}>
             説明文は折り返してよい（§5.1）。外側のタップ・Esc で閉じ、同時に開くのは 1 つだけ。
           </Popover>
-          <Menu label="タブの操作" button="⋯" items={items} />
+          <Menu label="タブの操作" button={<Icon name="more" />} items={items} />
         </div>
         <p class="gal-note">選んだ項目: {picked}</p>
         <div class="menu gal-static" role="presentation">

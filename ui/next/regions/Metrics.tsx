@@ -20,6 +20,7 @@ import {
 import { PanelHead } from '../PanelHead';
 import { AskAi } from '../parts/AskAi';
 import { FullText } from '../parts/FullText';
+import { Icon } from '../parts/Icon';
 import { Popover } from '../parts/Popover';
 import { TermLinks } from '../parts/TermLinks';
 import { openTerm } from '../parts/termCard';
@@ -124,7 +125,7 @@ function MetricsView({ model, feePerLot, margin, hold }: Props) {
   return (
     <>
       <PanelHead title="指標 · テール" sub={view.headSub}>
-        <Popover label="金額の単位・テール表・証拠金" button="ⓘ">
+        <Popover label="金額の単位・テール表・証拠金" button={<Icon name="info" />}>
           <p>{UNIT_HINT}</p>
           <p>{TAIL_HINT}</p>
           <p>{MARGIN_HINT}</p>
@@ -156,6 +157,7 @@ function MetricsView({ model, feePerLot, margin, hold }: Props) {
               aria-controls={kvId}
               onClick={() => setOpen((v) => !v)}
             >
+              <Icon name="chevron" />
               <span>内訳</span>
             </button>
             {open && (

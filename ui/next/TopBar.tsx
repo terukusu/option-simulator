@@ -10,6 +10,7 @@ import type { Tier } from '../view/shell';
 import type { TabsView } from '../view/tabs';
 import { THEMES, type TopMenuKey, topMenuModel } from '../view/topMenu';
 import { AiIcon } from './parts/AiIcon';
+import { Icon } from './parts/Icon';
 import { Menu } from './parts/Menu';
 import { BoxTabs, toItems } from './top/BoxTabs';
 import { MarketPill } from './top/MarketPill';
@@ -150,9 +151,14 @@ function TopBarView(p: TopBarProps) {
         最新
       </button>
       <span class="top-theme">
-        <Menu label="テーマ" button="☾" items={themeItems} />
+        <Menu label="テーマ" button={<Icon name="moon" />} items={themeItems} />
       </span>
-      <Menu label="メニュー" button="⋯" items={more} onOpenChange={setMoreOpen} />
+      <Menu
+        label="メニュー"
+        button={<Icon name="more" />}
+        items={more}
+        onOpenChange={setMoreOpen}
+      />
       <input
         type="file"
         class="sr"

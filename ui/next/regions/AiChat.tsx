@@ -47,6 +47,7 @@ import { type AiToolEnv, scenarioOfResult, toolCard } from '../../view/aiTools';
 import { PANEL_FOCUS_LABEL } from '../../view/keys';
 import { PanelHead } from '../PanelHead';
 import { Chip, ChipRow } from '../parts/Chip';
+import { Icon } from '../parts/Icon';
 import { openTerm } from '../parts/termCard';
 
 /** 免責の文（端末で最初の 1 回だけ。AI の返答には書かせない。#135） */
@@ -423,7 +424,7 @@ export function AiChat(p: {
               title="閉じる"
               onClick={p.onDisclaimerSeen}
             >
-              ×
+              <Icon name="close" />
             </button>
           </div>
         )}
@@ -589,7 +590,10 @@ function ChatRow(p: {
     case 'thinking':
       return (
         <details class="ai-thinking">
-          <summary>{it.live ? '考え中の要約' : '考えた要約'}</summary>
+          <summary>
+            <Icon name="chevron" />
+            <span>{it.live ? '考え中の要約' : '考えた要約'}</span>
+          </summary>
           <p>{it.text}</p>
         </details>
       );
@@ -601,7 +605,7 @@ function ChatRow(p: {
           {p.onKeep && (
             <details class="ai-more">
               <summary aria-label={ANSWER_MENU_LABEL} title={ANSWER_MENU_LABEL}>
-                ⋯
+                <Icon name="more" />
               </summary>
               <button
                 type="button"

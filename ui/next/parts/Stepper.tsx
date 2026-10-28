@@ -21,6 +21,7 @@ import {
   wheelStep,
 } from '../../view/stepper';
 import { livePulse } from '../live';
+import { Icon } from './Icon';
 
 /** タッチで離した後に click を待つ時間（ms。来なければ長押しとみなして入力欄を開く。#276） */
 const TAP_CLICK_WAIT_MS = 350;
@@ -293,7 +294,7 @@ export function Stepper(p: Props) {
       aria-disabled={disabled ? 'true' : undefined}
     >
       <button type="button" aria-label={`${p.label}を減らす`} {...btn(-1)}>
-        −
+        <Icon name="minus" />
       </button>
       <div
         class="val"
@@ -463,7 +464,7 @@ export function Stepper(p: Props) {
         )}
       </div>
       <button type="button" aria-label={`${p.label}を増やす`} {...btn(1)}>
-        +
+        <Icon name="plus" />
       </button>
     </div>
   );

@@ -14,6 +14,7 @@ import {
 } from '../view/bookList';
 import { TABS_FULL_TEXT } from '../view/tabs';
 import { Dialog } from './parts/Dialog';
+import { Icon } from './parts/Icon';
 import { Popover } from './parts/Popover';
 
 export interface BookDialogProps {
@@ -63,7 +64,7 @@ export function BookDialog(p: BookDialogProps) {
       class="book"
       onClose={p.onClose}
       head={
-        <Popover label="保存したポジション" button="ⓘ">
+        <Popover label="保存したポジション" button={<Icon name="info" />}>
           <p>
             この端末（ブラウザ）にだけ保存する。別の端末へは [書き出し] / [読み込み…]。評価損益 =
             保存した建値のまま{MARK_BASIS_TEXT}で評価し、その項目の手数料（1 枚あたり ×

@@ -1,5 +1,6 @@
 import type { ComponentChildren } from 'preact';
 import { useId, useLayoutEffect, useRef } from 'preact/hooks';
+import { Icon } from './Icon';
 
 /**
  * ダイアログ（docs/ui-redesign.md §5）。<dialog class="sheet"> + showModal()。
@@ -71,7 +72,7 @@ function DialogBody(p: {
         <h2 id={titleId}>{p.title}</h2>
         {p.head}
         <button type="button" class="btn ghost icon" aria-label="閉じる" onClick={p.onClose}>
-          ×
+          <Icon name="close" />
         </button>
       </div>
       <div class="sheet-body">{p.children}</div>

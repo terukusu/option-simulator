@@ -25,6 +25,7 @@ import {
 } from '../../view/scenarioRegion';
 import { PanelHead } from '../PanelHead';
 import { Chip, ChipRow } from '../parts/Chip';
+import { Icon } from '../parts/Icon';
 import { Popover } from '../parts/Popover';
 import { Seg } from '../parts/Seg';
 import { Stepper } from '../parts/Stepper';
@@ -133,7 +134,7 @@ export function Scenario(p: { c: AppController; dXUnit: DXUnit; onDXUnit: (u: DX
   return (
     <>
       <PanelHead title="シナリオ">
-        <Popover label="シナリオの操作" button="ⓘ">
+        <Popover label="シナリオの操作" button={<Icon name="info" />}>
           <p>
             ステッパー: [−][＋] で 1 段（Shift で 10
             段、押し続けると連続）。値の上を左右にドラッグ（8px で 1
@@ -180,6 +181,7 @@ export function Scenario(p: { c: AppController; dXUnit: DXUnit; onDXUnit: (u: DX
         </div>
         <details class="adv">
           <summary>
+            <Icon name="chevron" />
             <span class="ttl">モデルの前提</span>
             <span class="vals">{view.summary}</span>
           </summary>

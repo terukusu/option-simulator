@@ -83,13 +83,28 @@ details.adv summary::-webkit-details-marker {
   display: none;
 }
 
-details.adv summary::before {
-  content: "▸";
+/* 折りたたみの印（#292）: chevron（Icon）を開いたら 90° 回す。reduce では --dur-fast が 0ms（tokens.css） */
+details.adv > summary > svg.ic {
+  width: 12px;
+  height: 12px;
   color: var(--ink-3);
+  transition: transform var(--dur-fast) var(--ease);
 }
 
-details.adv[open] summary::before {
-  content: "▾";
+details.adv[open] > summary > svg.ic {
+  transform: rotate(90deg);
+}
+
+/* スマホ（#292）: 行の高さ 36px 以上・印 16px（PC・タブレットは 33px・12px のまま） */
+@media (max-width: 719.98px) {
+  details.adv summary {
+    min-height: 36px;
+  }
+
+  details.adv > summary > svg.ic {
+    width: 16px;
+    height: 16px;
+  }
 }
 
 details.adv summary .ttl {

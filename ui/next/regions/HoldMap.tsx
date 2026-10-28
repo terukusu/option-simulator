@@ -36,6 +36,7 @@ import {
   holdMapWait,
 } from '../../view/holdMap';
 import type { AmountUnit } from '../../view/metrics';
+import { Icon } from '../parts/Icon';
 import { Popover } from '../parts/Popover';
 import { useSize } from '../useSize';
 
@@ -429,11 +430,12 @@ export function HoldMap({ hold, unit }: { hold: HoldBundle; unit: AmountUnit }) 
           aria-controls={id}
           onClick={hold.onToggle}
         >
+          <Icon name="chevron" />
           <span class="hm-title">{holdMapTitle(hold.days, !blocked)}</span>
           {summary && <span class={hold.map.computing ? 'hm-sum stale' : 'hm-sum'}>{summary}</span>}
         </button>
         {/* 説明・追証の側の注意・過去の点の注記は ⓘ に（#274。開いた中は凡例・描画域・触った 1 行だけ） */}
-        <Popover label="追証マップの読み方" button="ⓘ">
+        <Popover label="追証マップの読み方" button={<Icon name="info" />}>
           <p>{holdMapCaption(blocked ? null : hold.allowedLoss)}</p>
           <p>{HOLD_MAP_CALL_NOTE}</p>
           {moves.length > 0 && <p>{holdMapNote(moves, hold.days)}</p>}

@@ -26,6 +26,7 @@ import {
 import { type IvLoadState, ivInProgress, ivLoadView } from '../../view/ivLoad';
 import { PanelHead } from '../PanelHead';
 import { AskAi } from '../parts/AskAi';
+import { Icon } from '../parts/Icon';
 import { Popover } from '../parts/Popover';
 import { Seg } from '../parts/Seg';
 import { TermLinks } from '../parts/TermLinks';
@@ -116,7 +117,7 @@ function IvHistoryView(p: IvHistoryProps) {
     <>
       <PanelHead title="IV 推移">
         {p.seg}
-        <Popover label="IV 推移の操作" button="ⓘ">
+        <Popover label="IV 推移の操作" button={<Icon name="info" />}>
           <p>{IV_HINT}</p>
           <p>{IV_NOTE}</p>
           <TermLinks ids={HINT_TERMS.ivHistory} />
@@ -139,7 +140,7 @@ function IvHistoryView(p: IvHistoryProps) {
             disabled={loading || !load.opened}
             onClick={p.onRefresh}
           >
-            ⟳
+            <Icon name="refresh" />
           </button>
         </div>
         <div class={ro.progress ? 'iv-readout progress' : 'iv-readout'} aria-live="off">

@@ -10,6 +10,7 @@ import type { SurfaceLegend } from '../../view/pnlSurface';
 import { KIND_PREFIX } from '../../view/scenarioMarks';
 import { CHART_MODES, type ChartMode } from '../../view/shell';
 import { FullText } from '../parts/FullText';
+import { Icon } from '../parts/Icon';
 import { Menu, type MenuItem } from '../parts/Menu';
 import { Popover } from '../parts/Popover';
 import { Seg } from '../parts/Seg';
@@ -85,7 +86,7 @@ export function StageHead(p: {
         disabled={model.empty}
         onClick={() => p.onZoom(1.25)}
       >
-        −
+        <Icon name="minus" />
       </button>
       <button
         type="button"
@@ -95,7 +96,7 @@ export function StageHead(p: {
         disabled={model.empty}
         onClick={() => p.onZoom(0.8)}
       >
-        ＋
+        <Icon name="plus" />
       </button>
       <button
         type="button"
@@ -105,7 +106,7 @@ export function StageHead(p: {
         disabled={model.empty}
         onClick={() => dispatch({ type: 'setPnlViewport', viewport: null })}
       >
-        ⟲
+        <Icon name="reset" />
       </button>
     </>
   );
@@ -160,7 +161,7 @@ export function StageHead(p: {
                 title="外す"
                 onClick={() => dispatch({ type: 'removePin', no: t.no })}
               >
-                ×
+                <Icon name="close" />
               </button>
             </span>
           ))}
@@ -175,7 +176,7 @@ export function StageHead(p: {
           items={pinItems}
         />
         <span class="zb">{zoomButtons}</span>
-        <Popover label="グラフの設定" button="⋯" buttonClass="btn ghost icon sm">
+        <Popover label="グラフの設定" button={<Icon name="more" />} buttonClass="btn ghost icon sm">
           <div class="stage-pop">
             <div class="row cm-in">
               <span class="lbl">グラフ</span>
@@ -192,7 +193,7 @@ export function StageHead(p: {
             </div>
           </div>
         </Popover>
-        <Popover label="損益グラフの前提" button="ⓘ">
+        <Popover label="損益グラフの前提" button={<Icon name="info" />}>
           {surf ? (
             <>
               <p>
