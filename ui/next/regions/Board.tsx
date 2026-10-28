@@ -23,6 +23,7 @@ import { BoardMonth, type Flash, type MarketAdd } from '../market/BoardMonth';
 import { MonthSeg } from '../market/MonthSeg';
 import { PanelHead } from '../PanelHead';
 import { Chip, ChipRow } from '../parts/Chip';
+import { Icon } from '../parts/Icon';
 import { Popover } from '../parts/Popover';
 import { Seg } from '../parts/Seg';
 
@@ -302,7 +303,7 @@ function BoardView(p: BoardRegionProps) {
     <>
       <PanelHead title="板">
         {p.marketSeg}
-        <Popover label="板の使い方" button="ⓘ">
+        <Popover label="板の使い方" button={<Icon name="info" />}>
           {BOARD_HINT.map((t) => (
             <p key={t}>{t}</p>
           ))}

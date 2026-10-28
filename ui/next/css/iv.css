@@ -25,8 +25,10 @@
 }
 
 @container (max-width: 399.98px) {
+  /* 左右の余白を詰める（#292: スマホの記号ボタン 32px の ⟳ を 360px に収める） */
   .iv-tools {
     gap: 4px;
+    padding-inline: var(--sp-2);
   }
 
   .iv-tools .seg > button {

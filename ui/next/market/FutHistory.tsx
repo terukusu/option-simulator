@@ -43,6 +43,7 @@ import { type IvLoadState, ivInProgress, ivLoadView } from '../../view/ivLoad';
 import type { TechLineWidths } from '../../view/techLineWidth';
 import { PanelHead } from '../PanelHead';
 import { Chip } from '../parts/Chip';
+import { Icon } from '../parts/Icon';
 import { Popover } from '../parts/Popover';
 import { Seg } from '../parts/Seg';
 import { TermLinks } from '../parts/TermLinks';
@@ -225,7 +226,7 @@ function FutHistoryView(p: FutHistoryProps) {
     <>
       <PanelHead title="先物推移">
         {p.seg}
-        <Popover label="先物推移の操作" button="ⓘ">
+        <Popover label="先物推移の操作" button={<Icon name="info" />}>
           <p>{FUT_HINT}</p>
           <p>{FUT_PANE_HINT}</p>
           <p>{FUT_NOTE}</p>
@@ -246,7 +247,7 @@ function FutHistoryView(p: FutHistoryProps) {
             disabled={loading || !load.opened}
             onClick={p.onRefresh}
           >
-            ⟳
+            <Icon name="refresh" />
           </button>
         </div>
         <div class={ro.progress ? 'iv-readout progress' : 'iv-readout'} aria-live="off">

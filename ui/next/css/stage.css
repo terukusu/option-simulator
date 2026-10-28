@@ -260,6 +260,11 @@ section.stage {
   line-height: 1;
 }
 
+.pin-chip .pin-x svg.ic {
+  width: 14px;
+  height: 14px;
+}
+
 .pin-chip .pin-x:hover {
   background: var(--s3);
   color: var(--ink);

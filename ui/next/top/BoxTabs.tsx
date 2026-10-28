@@ -11,6 +11,7 @@ import {
   tabMenuModel,
 } from '../../view/boxTabs';
 import { type TabsView, tabKeyTarget } from '../../view/tabs';
+import { Icon } from '../parts/Icon';
 import { type MenuItem, useMenu } from '../parts/Menu';
 import { RenameDialog } from './RenameDialog';
 import { useShareCopy } from './useShareCopy';
@@ -173,7 +174,7 @@ function BoxTabsView(p: BoxTabsProps) {
           disabled={!view.canAdd}
           {...addMenu.buttonProps}
         >
-          ＋
+          <Icon name="plus" />
         </button>
         {addMenu.list}
       </span>

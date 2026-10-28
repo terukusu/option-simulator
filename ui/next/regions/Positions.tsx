@@ -29,6 +29,7 @@ import {
 import type { ShellAction, Tier } from '../../view/shell';
 import type { ToastInput } from '../../view/toast';
 import { PanelHead } from '../PanelHead';
+import { Icon } from '../parts/Icon';
 import { Menu, type MenuItem } from '../parts/Menu';
 import { Popover } from '../parts/Popover';
 import { Stepper } from '../parts/Stepper';
@@ -148,7 +149,7 @@ export function Positions(p: Props) {
   return (
     <>
       <PanelHead title="ポジション" sub={headSub(rows.length)}>
-        <Popover label="ポジションのグリークと建値ずれ" button="ⓘ">
+        <Popover label="ポジションのグリークと建値ずれ" button={<Icon name="info" />}>
           <p>
             グリークはシナリオ 0（評価時刻 = 板の時刻、X = 基準価格）。建値ずれ = シナリオ 0
             の理論損益への影響（手数料は含めない）。
@@ -160,7 +161,7 @@ export function Positions(p: Props) {
           </p>
           <TermLinks ids={HINT_TERMS.positions} />
         </Popover>
-        <Menu label="ポジションの操作" button="⋯" items={items} />
+        <Menu label="ポジションの操作" button={<Icon name="more" />} items={items} />
       </PanelHead>
       {/* biome-ignore lint/a11y/useSemanticElements: 1〜5 の行き先のスクロールする枠に名前を付ける（fieldset にしない） */}
       <div
@@ -315,7 +316,7 @@ function LegItem(p: {
             aria-label={`${v.name} を${SIDE_LABEL[to]}に切り替え`}
             onClick={p.onFlip}
           >
-            ⇄
+            <Icon name="swap" />
           </button>
           <button
             type="button"
@@ -325,7 +326,7 @@ function LegItem(p: {
             aria-label={`${v.name} の足を削除`}
             onClick={p.onRemove}
           >
-            ×
+            <Icon name="close" />
           </button>
         </span>
       </div>
@@ -508,7 +509,7 @@ function HedgeRow(p: {
           title="デルタヘッジの詳細と設定"
           onClick={p.onMore}
         >
-          ⋯
+          <Icon name="more" />
         </button>
       </div>
     </section>

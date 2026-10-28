@@ -167,6 +167,9 @@
 }
 
 .stepper > button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
   height: 100%;
   border: 0;
   background: transparent;
@@ -389,6 +392,9 @@
 }
 
 .hintbtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   width: 18px;
   height: 18px;
   padding: 0;
@@ -396,8 +402,6 @@
   border-radius: 50%;
   background: transparent;
   color: var(--ink-3);
-  font-size: var(--fs-sm);
-  line-height: 16px;
 }
 
 .hintbtn:hover {
@@ -573,4 +577,51 @@ dialog.sheet::backdrop {
 .full .lead {
   color: var(--ink);
   font-weight: 600;
+}
+
+/*
+ * ===== ボタンのアイコン（#292。ui/next/parts/Icon.tsx） =====
+ * 記号のボタン（⟳ ⟲ ＋ − × ⋯ ⇄ ⓘ ☾）と折りたたみの印を 18 の格子の SVG で描く。色は currentColor（親の文字色）。
+ * セレクタは svg.ic（ドックの字形のアイコンの span.ic と分ける）。箱の大きさは今のまま、中のアイコンを箱に合わせる
+ * （.btn.icon 16px・.btn.icon.sm 14px・.hintbtn 12px・ステッパーと Seg 14px）。スマホ（< 720px）だけ記号ボタン
+ * .btn.icon.sm を 32px・中のアイコンを 18px にする（docs/ui-redesign.md §2.2・§5）
+ */
+svg.ic {
+  display: block;
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+  /* 当たりは親のボタン（elementFromPoint・イベントの target を svg / path にしない） */
+  pointer-events: none;
+}
+
+.hintbtn svg.ic {
+  width: 12px;
+  height: 12px;
+}
+
+/* スマイルの拡大（.seg.zoom）: Seg のボタンの display は変えず、アイコンを margin で真ん中に置く */
+.stepper > button > svg.ic,
+.seg > button > svg.ic {
+  width: 14px;
+  height: 14px;
+  margin: auto;
+}
+
+.btn.icon.sm svg.ic {
+  width: 14px;
+  height: 14px;
+}
+
+@media (max-width: 719.98px) {
+  .btn.icon.sm {
+    width: 32px;
+    height: 32px;
+  }
+
+  .btn.icon svg.ic,
+  .btn.icon.sm svg.ic {
+    width: 18px;
+    height: 18px;
+  }
 }

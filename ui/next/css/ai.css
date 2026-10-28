@@ -36,7 +36,10 @@ section.ai .ai-body {
 }
 
 .ai-disclaimer-close {
+  display: inline-flex;
   flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
   width: 24px;
   height: 24px;
   border: 0;
@@ -47,6 +50,11 @@ section.ai .ai-body {
   font-size: var(--fs-body);
   line-height: 1;
   cursor: pointer;
+}
+
+.ai-disclaimer-close svg.ic {
+  width: 14px;
+  height: 14px;
 }
 
 .ai-disclaimer-close:hover {
@@ -256,8 +264,17 @@ section.ai .ai-body {
   font-size: var(--fs-sub);
 }
 
+/* 折りたたみの印（#292）: ブラウザ既定の三角をやめ、指標・シナリオと同じ chevron を回す */
 .ai-thinking summary {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+  list-style: none;
   cursor: pointer;
+}
+
+.ai-thinking summary::-webkit-details-marker {
+  display: none;
 }
 
 .ai-thinking p {
@@ -361,6 +378,9 @@ section.ai .ai-body {
 }
 
 .ai-more summary {
+  display: flex;
+  align-items: center;
+  justify-content: center;
   min-width: 24px;
   height: 20px;
   padding: 0 var(--sp-1);
@@ -375,6 +395,22 @@ section.ai .ai-body {
 
 .ai-more summary::-webkit-details-marker {
   display: none;
+}
+
+.ai-more summary svg.ic {
+  width: 14px;
+  height: 14px;
+}
+
+/* 考えた要約の折りたたみの印（#292。上の .ai-thinking summary）。開いたら 90° */
+.ai-thinking summary > svg.ic {
+  width: 12px;
+  height: 12px;
+  transition: transform var(--dur-fast) var(--ease);
+}
+
+details.ai-thinking[open] > summary > svg.ic {
+  transform: rotate(90deg);
 }
 
 .ai-more summary:hover,
@@ -565,6 +601,16 @@ section.ai .ai-body {
 
   .iv-tools:has(.ai-ask) .seg > button {
     padding: 0 4px;
+  }
+}
+
+/*
+ * スマホの 360px（#292）: 記号ボタンが 32px になる分、IV 推移のツールの行の Seg の左右をさらに 3px に詰める
+ * （iv.css より後に読まれるここに置く。iv.css に置くと上の 4px の規則に負ける）
+ */
+@container (max-width: 399.98px) {
+  .iv-tools:has(.ai-ask) .seg > button {
+    padding: 0 3px;
   }
 }
 

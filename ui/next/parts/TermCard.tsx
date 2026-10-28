@@ -1,6 +1,7 @@
 import { useId, useLayoutEffect, useRef } from 'preact/hooks';
 import { type TermCardView, termCardView } from '../../view/glossary';
 import { hideBackground } from './background';
+import { Icon } from './Icon';
 import { useOverlay } from './overlay';
 import { closeTerm, openTerm, useTermCard } from './termCard';
 
@@ -135,7 +136,7 @@ function TermCardBody({ view }: { view: TermCardView }) {
             {view.title}
           </h2>
           <button type="button" class="btn ghost icon" aria-label="閉じる" onClick={closeTerm}>
-            ×
+            <Icon name="close" />
           </button>
         </div>
         <div class="tc-body" ref={bodyRef} tabIndex={-1}>

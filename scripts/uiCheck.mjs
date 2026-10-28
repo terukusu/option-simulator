@@ -152,8 +152,13 @@
 //                                          指標のタイル 6 枚とテール表 5 行（18 セル）の下端 ≤ 900px・[AI] がチップ + svg で押されている
 //                                          #277: 返答の後の空白が枠の内側の半分以下（返答が短く下詰めを縮めた
 //                                          data-hold="end" のときだけ、返答の後の上端の下がりは枠の 55% まで）
+//                                          ボタンのアイコン（#292 AC-7・AC-8）: 360×780・390×844 × ダーク / ライトで見えている記号ボタン
+//                                          .btn.icon.sm が 32px 以上・中の svg.ic 18px・窓の中、IV 推移・先物推移のツールの行が切れず ⟳ が
+//                                          内容の箱の中（既定 / 実機相当の字幅）、指標の内訳・追証マップ・モデルの前提の行 ≥ 36px、
+//                                          1440×900 で 26px・svg 14px のまま。390 と 1440 で開閉の印が 90° 回り transition 0s
 //   --ai                                   #135・#136 の項目だけ（既定の検査・--flows とも。手元の確かめ用）。
 //                                          #242 のツールの結果を待つ間のカードは --ai（--flows なし）でだけ
+//   --icons                                #292 のボタンのアイコンの項目だけ（既定の検査。手元の確かめ用）
 //   --cross                                #217 の十字線の項目だけ（既定の検査・--flows とも。--flows は #201・#130・#207 のタッチの流れも。手元の確かめ用）
 //   --url <base>                           dev サーバーを起こさず、その URL を使う（例 http://127.0.0.1:5173/?parts）
 //   --dom <file>                           body の下の要素の tag.class の並びを書き出す（DOM の変化の比較用）
@@ -219,6 +224,7 @@ const known = new Set([
   '--ai',
   '--cross',
   '--quotes-only',
+  '--icons',
 ]);
 for (const a of args) {
   if (a.startsWith('--') && !known.has(a)) {
@@ -240,6 +246,7 @@ const parts = flag('--parts') || urlParams.has('parts');
 const flows = flag('--flows');
 const aiOnly = flag('--ai');
 const crossOnly = flag('--cross');
+const iconsOnly = flag('--icons');
 const quotesOnly = flag('--quotes-only');
 const mode = parts ? 'parts' : 'next';
 
@@ -1518,6 +1525,8 @@ async function measureAll() {
     await aiSweep();
     // 数字・パネルから [AI に聞く]（#136 AC4）
     await aiAskSweep();
+    // ボタンのアイコン（#292 AC-7・AC-8）
+    await iconSweep();
   }
   // 旧のクラス名（#91・EPIC #92 の終了条件 8）: report を通ったすべての状態の合計
   console.log(
@@ -13225,6 +13234,257 @@ async function smileGrabFlow() {
   await ctx.close();
 }
 
+// ---- ボタンのアイコン（#292 AC-7・AC-8）
+const iconStats = { pass: 0, total: 0, skip: 0 };
+
+/** 判定の 1 行（detail は NG のときだけ出す） */
+function iconRecord(label, ok, detail = '') {
+  iconStats.total++;
+  if (ok) iconStats.pass++;
+  else failed = true;
+  console.log(`${label}: ${ok ? 'pass' : `${detail}  ← NG`}`);
+}
+
+/** 見えている .btn.icon.sm（箱の大きさ・中の svg.ic の大きさ・右端）と窓の幅 */
+const iconButtons = (page) =>
+  page.evaluate(() => {
+    const list = [];
+    for (const b of document.querySelectorAll('.btn.icon.sm')) {
+      const r = b.getBoundingClientRect();
+      if (b.getClientRects().length === 0 || r.width === 0 || r.height === 0) continue;
+      const ic = b.querySelector('svg.ic');
+      const ir = ic?.getBoundingClientRect();
+      list.push({
+        name: b.getAttribute('aria-label') ?? '',
+        w: r.width,
+        h: r.height,
+        right: r.right,
+        icW: ir?.width ?? 0,
+        icH: ir?.height ?? 0,
+      });
+    }
+    return { list, vw: window.innerWidth };
+  });
+
+/**
+ * (a) / (d): 見えている .btn.icon.sm がすべて want.box px 以上（PC は want.exact で等しい）で中の svg.ic が want.ic px、
+ * 右端 ≤ 窓の幅。want.names の aria-label を含む
+ */
+async function iconButtonsCheck(page, label, want) {
+  const r = await iconButtons(page);
+  const bad = [];
+  const px = (v) => Math.round(v * 10) / 10;
+  for (const b of r.list) {
+    const boxOk = want.exact
+      ? Math.abs(b.w - want.box) < 0.5 && Math.abs(b.h - want.box) < 0.5
+      : b.w >= want.box - 0.5 && b.h >= want.box - 0.5;
+    const icOk = Math.abs(b.icW - want.ic) < 0.5 && Math.abs(b.icH - want.ic) < 0.5;
+    if (!boxOk || !icOk || b.right > r.vw + 0.5)
+      bad.push(
+        `「${b.name}」${px(b.w)}×${px(b.h)}・svg ${px(b.icW)}×${px(b.icH)}・右端 ${px(b.right)}`,
+      );
+  }
+  const names = r.list.map((b) => b.name);
+  for (const n of want.names ?? []) if (!names.includes(n)) bad.push(`「${n}」が見えない`);
+  iconRecord(
+    `${label} 記号ボタン ${r.list.length} 個（${want.exact ? '' : '≥ '}${want.box}px・svg ${want.ic}px）`,
+    r.list.length > 0 && bad.length === 0,
+    bad.join('・') || '見えるボタンが無い',
+  );
+}
+
+/** (b): 見えている .iv-tools の切れ（scrollWidth ≤ clientWidth）と ⟳ の右端 ≤ ツールの行の内容の箱の右端 */
+async function ivToolsIconCheck(page, label) {
+  const r = await page.evaluate(() => {
+    const t = [...document.querySelectorAll('section.smile .iv-tools')].find(
+      (e) => e.getClientRects().length > 0,
+    );
+    const b = t?.querySelector('.iv-refresh');
+    if (!t || !b) return null;
+    const tr = t.getBoundingClientRect();
+    const inner = tr.right - (Number.parseFloat(getComputedStyle(t).paddingRight) || 0);
+    return {
+      sw: t.scrollWidth,
+      cw: t.clientWidth,
+      right: b.getBoundingClientRect().right,
+      inner,
+      vw: window.innerWidth,
+    };
+  });
+  if (!r) {
+    iconRecord(`${label} ツールの行`, false, 'ツールの行 / ⟳ が見えない');
+    return;
+  }
+  const ok = r.sw <= r.cw && r.right <= r.inner + 0.5 && r.right <= r.vw + 0.5;
+  iconRecord(
+    `${label} ツールの行 ${r.sw}/${r.cw}・⟳ の右端 ${Math.round(r.right * 10) / 10}（内容の箱 ${Math.round(r.inner * 10) / 10}・窓 ${r.vw}）`,
+    ok,
+    '切れ / ⟳ が内容の箱の外',
+  );
+}
+
+/** (c): 折りたたみの行の高さ（見えているものの最小）≥ 36px */
+async function foldRowHeights(page, sel) {
+  return page.evaluate((sel) => {
+    const hs = [...document.querySelectorAll(sel)]
+      .filter((e) => e.getClientRects().length > 0)
+      .map((e) => e.getBoundingClientRect().height);
+    return hs;
+  }, sel);
+}
+
+/** 印（svg.ic-chevron）の computed transform が 90°（matrix(0, 1, -1, 0, 0, 0)。±1e-6）か none か */
+function chevronAngle(t) {
+  if (t === 'none') return 0;
+  const m = /^matrix\(([^)]+)\)$/.exec(t);
+  if (!m) return null;
+  const [a, b, c, d] = m[1].split(',').map(Number);
+  const near = (x, y) => Math.abs(x - y) < 1e-6;
+  if (near(a, 0) && near(b, 1) && near(c, -1) && near(d, 0)) return 90;
+  if (near(a, 1) && near(b, 0) && near(c, 0) && near(d, 1)) return 0;
+  return null;
+}
+
+/**
+ * AC-8: 開閉の印。trigger を押す前後で state（aria-expanded / details の open）が false → true、印の transform が
+ * none → 90°、transition-duration が 0s（既定の実行は reducedMotion: reduce）。押し直して閉じたら元に戻る
+ */
+async function chevronFlipCheck(page, label, trigger, stateOf) {
+  const read = () =>
+    page.evaluate(
+      ({ trigger, stateOf }) => {
+        const t = [...document.querySelectorAll(trigger)].find(
+          (e) => e.getClientRects().length > 0,
+        );
+        const ic = t?.querySelector('svg.ic-chevron');
+        if (!t || !ic) return null;
+        const cs = getComputedStyle(ic);
+        const open =
+          stateOf === 'details'
+            ? (t.closest('details')?.open ?? false)
+            : t.getAttribute('aria-expanded') === 'true';
+        return { open, transform: cs.transform, dur: cs.transitionDuration };
+      },
+      { trigger, stateOf },
+    );
+  const before = await read();
+  if (!before) {
+    iconRecord(`${label} 開閉の印`, false, '押す所 / 印が見えない');
+    return;
+  }
+  await page.locator(trigger).filter({ visible: true }).first().click();
+  await page.waitForTimeout(120);
+  const after = await read();
+  await page.locator(trigger).filter({ visible: true }).first().click();
+  await page.waitForTimeout(120);
+  const back = await read();
+  const ok =
+    before.open === false &&
+    chevronAngle(before.transform) === 0 &&
+    after?.open === true &&
+    chevronAngle(after.transform) === 90 &&
+    back?.open === false &&
+    chevronAngle(back.transform) === 0 &&
+    (REDUCED_MOTION !== 'reduce' || before.dur === '0s');
+  iconRecord(
+    `${label} 開閉の印 ${before.open} → ${after?.open} → ${back?.open}・transform ${before.transform} → ${after?.transform} → ${back?.transform}・transition ${before.dur}`,
+    ok,
+    '開閉 / 向き / 時間が違う',
+  );
+}
+
+/**
+ * #292 AC-7・AC-8: スマホ（360×780・390×844 × ダーク / ライト）で (a) 見えている記号ボタン .btn.icon.sm が 32×32px 以上・中の
+ * svg.ic 18px・窓の中（舞台 + ポジションの peek・IV 推移・先物推移）、(b) IV 推移・先物推移のツールの行が切れず ⟳ が内容の箱の中
+ * （既定の字幅と実機相当の字幅）、(c) 指標の「内訳」・追証マップ・シナリオの「モデルの前提」の行の高さ ≥ 36px、
+ * (d) 1440×900 で .btn.icon.sm 26×26px・svg 14px（PC の密度は不変）、AC-8: 390×844 と 1440×900 で開閉の印が 90° 回り
+ * transition 0s（reduce）
+ */
+async function iconSweep() {
+  for (const [w, h] of [
+    [360, 780],
+    [390, 844],
+    [1440, 900],
+  ]) {
+    const phone = w <= PHONE_MAX;
+    for (const theme of phone ? ['dark', 'light'] : ['dark']) {
+      const tag = `#292 ${theme} ${w}x${h}`;
+      const ctx = await newContext(
+        { width: w, height: h },
+        { [WORKSPACE_KEY]: twoLegs, [PREFS_KEY]: prefsText(theme) },
+        theme,
+      );
+      const page = await ctx.newPage();
+      await page.goto(pageUrl('next'));
+      await waitReady(page, 'next');
+      const want = phone ? { box: 32, ic: 18 } : { box: 26, ic: 14, exact: true };
+      // 舞台 + ポジション（舞台の ⋯・足の ⇄ ×・ヘッジの ⋯。PC は拡大の − ＋ ⟲ も）
+      if (phone) await setShell(page, 'positions', 'peek');
+      await iconButtonsCheck(page, `${tag} 舞台・ポジション`, {
+        ...want,
+        names: ['グラフの設定', 'デルタヘッジの詳細と設定'],
+      });
+      if (phone) {
+        // IV 推移・先物推移（ツールの行の ⟳）
+        await openIv(page, w);
+        await iconButtonsCheck(page, `${tag} IV 推移`, { ...want, names: ['最新化'] });
+        await ivToolsIconCheck(page, `${tag} IV 推移 既定の字幅`);
+        await openFut(page, w);
+        await iconButtonsCheck(page, `${tag} 先物推移`, { ...want, names: ['最新化'] });
+        await ivToolsIconCheck(page, `${tag} 先物推移 既定の字幅`);
+        if (await realMonoAvailable(page)) {
+          await useRealMono(page);
+          await openIv(page, w);
+          await ivToolsIconCheck(page, `${tag} IV 推移 実機相当の字幅`);
+          await openFut(page, w);
+          await ivToolsIconCheck(page, `${tag} 先物推移 実機相当の字幅`);
+        } else {
+          iconStats.skip++;
+          console.log(`${tag} 実機相当の字幅: DejaVu Sans Mono が無いので skip`);
+        }
+        // (c) 折りたたみの行の高さ
+        await setShell(page, 'metrics', 'full');
+        for (const sel of ['section.metrics .mx-toggle', 'section.metrics .hm-toggle']) {
+          const hs = await foldRowHeights(page, sel);
+          iconRecord(
+            `${tag} ${sel} 高さ ${hs.map((v) => Math.round(v * 10) / 10).join(', ') || '—'}px`,
+            hs.length > 0 && hs.every((v) => v >= 35.5),
+            hs.length ? '36px 未満' : '見えない',
+          );
+        }
+        if (w === 390)
+          await chevronFlipCheck(page, `${tag} 指標の内訳`, 'section.metrics .mx-toggle', 'aria');
+        await setShell(page, 'scenario', 'full');
+        const hs = await foldRowHeights(page, 'section.scenario details.adv > summary');
+        iconRecord(
+          `${tag} details.adv > summary 高さ ${hs.map((v) => Math.round(v * 10) / 10).join(', ') || '—'}px`,
+          hs.length > 0 && hs.every((v) => v >= 35.5),
+          hs.length ? '36px 未満' : '見えない',
+        );
+        if (w === 390)
+          await chevronFlipCheck(
+            page,
+            `${tag} シナリオのモデルの前提`,
+            'section.scenario details.adv > summary',
+            'details',
+          );
+      } else {
+        await chevronFlipCheck(page, `${tag} 指標の内訳`, 'section.metrics .mx-toggle', 'aria');
+        await chevronFlipCheck(
+          page,
+          `${tag} シナリオのモデルの前提`,
+          'section.scenario details.adv > summary',
+          'details',
+        );
+      }
+      await ctx.close();
+    }
+  }
+  console.log(
+    `アイコンの検査（#292）: ${iconStats.pass} / ${iconStats.total} で pass${iconStats.skip ? `（skip ${iconStats.skip}）` : ''}`,
+  );
+}
+
 // 開く URL（#91: 既定はクエリなし。--parts は ?parts）
 console.log(`URL: ${pageUrl(mode)}`);
 try {
@@ -13247,6 +13507,8 @@ try {
         `十字線（スマイル・追証マップ・面）の検査（#217）: ${cross217Stats.pass} / ${cross217Stats.total} 状態で pass`,
       );
     }
+  } else if (iconsOnly && !parts && !flows) {
+    await iconSweep();
   } else if (aiOnly && !parts) {
     if (flows)
       for (const vp of [
