@@ -240,7 +240,7 @@ describe('説明の語（#167 AC-4）', () => {
     expect(t && termSearchText(t)).toContain('持ちこたえ');
     expect(t?.guide).toEqual({
       anchor: '追証マップ',
-      title: '8 章 作業台: 指標 · テール > 追証マップ',
+      title: '8 章 指標 · テール > 追証マップ',
     });
     expect(text('hold-map')).toContain('原資産と IV が同時に動いたときの余力');
     expect(text('hold-map')).toContain('概算');
