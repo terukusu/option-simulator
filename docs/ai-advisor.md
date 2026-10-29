@@ -4,7 +4,7 @@ EPIC #141（AI アドバイザー）の 1 本目の spike。後続の #133（鍵
 
 本文の価格・ポジション・トークン数・費用の数値例はすべて **架空の値か合成の値**（合成の板 `fixtures/synthetic/` と架空のポジションから作ったもの）で、JPX 由来の実データは写していない。外部の事実（料金・モデル ID・機能・データの保持）の **確認日はすべて 2026-10-19**。リポジトリと本番の観測も同じ日（本番は読み取りだけ。ID・URL は記録しない）。
 
-状態（2026-10-22）: 論点 1〜8 はすべて決定済み（各論点の「オーナー判断」）。EPIC #141 は 2026-10-21 に完了した。決定の後の変更（送り口を Claude Agent SDK に一本化した ADR-0005・ADR-0006 など）を含む今の作りの正は `docs/design.md` 13.1 K15・13.4・14 章で、この文書は決めた当時の比較の記録。
+状態（2026-10-22）: 論点 1〜8 はすべて決定済み（各論点の「オーナー判断」）。EPIC #141 は 2026-10-21 に完了した。決定の後の変更（送信経路を Claude Agent SDK に一本化した ADR-0005・ADR-0006 など）を含む今の構成の正は `docs/design.md` 13.1 K15・13.4・14 章で、この文書は決めた当時の比較の記録。
 
 用語: **ツール**（tool use）= AI が名前と引数を指定して呼び、こちらが計算した結果を返す関数。**中継** = ブラウザと Anthropic API の間に立つ simulator の API（鍵をブラウザに出さないため）。**TTFT**（time to first token）= 要求を送ってから最初の文字が届くまでの時間。**prompt caching** = 要求の前置き（system・ツールの定義など）を Anthropic 側に一時的に置き、次の要求で安く速く読む仕組み。
 
@@ -12,7 +12,7 @@ EPIC #141（AI アドバイザー）の 1 本目の spike。後続の #133（鍵
 
 | 項目 | 観測（2026-10-19、origin/main と本番の読み取り） |
 |---|---|
-| AI の口 | リポジトリ（docs・.claude を除く）に `anthropic` を含むファイルは 0。API のルートは `/healthz`・`/api/chain`・`/api/calendar`・`/api/atm_iv` と静的ファイルだけ |
+| AI のエンドポイント | リポジトリ（docs・.claude を除く）に `anthropic` を含むファイルは 0。API のルートは `/healthz`・`/api/chain`・`/api/calendar`・`/api/atm_iv` と静的ファイルだけ |
 | CSP | `api/src/simulator_api/app.py`: `default-src 'none'; script-src 'self'; … connect-src 'self'; …`。ブラウザから外部の API を直接呼べない（呼ぶなら同じオリジンの中継を通す） |
 | 計算の場所 | 価格モデル `model/` はブラウザの TypeScript の純関数。API は Python（Flask / gunicorn）で板を返すだけ（design.md 8.2） |
 | Cloud Run `simulator` | `infra/prod/simulator.tf`: タイムアウト 60s、同時実行 8（`max_instance_request_concurrency`）、最大 2 インスタンス・最小 0、CPU 1・512Mi、`cpu_idle = true`（CPU は要求を処理している間だけ）、第 1 世代。env は `GCP_PROJECT`・`BQ_DATASET`・`BQ_LOCATION` だけ。本番の describe（読み取り）でもタイムアウト 60・同時実行 8・最大 2 で一致 |
@@ -59,7 +59,7 @@ EPIC #141（AI アドバイザー）の 1 本目の spike。後続の #133（鍵
 | 5 | ツール（simulator の計算）を実行する場所 | オーナー | ブラウザの `model/` を呼ぶ往復 + 定型の 1 アクションは事前計算 |
 | 6 | 会話の状態の持ち方 | 実装時 | ブラウザが履歴を持ち毎回送る。中継は届いた履歴を許可リストで検査 |
 | 7 | 中継の作り方 | 実装時 | 公式の Python SDK `anthropic` を `api/` に足す |
-| 8 | 中継の口の守り | 実装時 | `application/json` だけ受ける + `Sec-Fetch-Site` / `Origin` の検査 |
+| 8 | 中継のエンドポイントの守り | 実装時 | `application/json` だけ受ける + `Sec-Fetch-Site` / `Origin` の検査 |
 
 ## 4. 論点
 
@@ -72,7 +72,7 @@ EPIC #141 の (a)。板そのもの（行の配列・気配の生の値）を送
 
 | 案 | 内容 | 利点 | 欠点 | 費用・影響 |
 |---|---|---|---|---|
-| A | **許可リスト**: 正規化した値だけを送る。限月ごとの F・残存日数・ATM の行使価格・ATM IV・スマイルの要約（決まった moneyness の点の IV か、傾き・曲率）、ポジションの足（種別・限月・K・売買・枚数・建値・建値の側）、シナリオ（日数・IV の平行移動・横軸の範囲）、資金規模の設定（#131 の後）、ツールの出力（損益・グリーク・テール表の数値）。送らないもの: 板の行の配列（`rows`）、気配の生の値（bid / ask・数量・建玉・出来高）、JPX のグリーク・`bid_iv` / `ask_iv`、スナップショットの生 JSON | 読み解き（最優先のニーズ）に要る値が揃う。中継で形を検査できる（終了条件 3 の pytest）。トークンが少ない | 建値は板の bid / ask から既定が入る（D6）ので、A でも「板から来た値」を足 1 本につき 1 つ送る。提案（#139）で AI が板にない行使価格を挙げないよう、候補の生成はツール側でする必要 | 文脈は約 660 トークン（見積もり）。費用への効きは小さい |
+| A | **許可リスト**: 正規化した値だけを送る。限月ごとの F・残存日数・ATM の行使価格・ATM IV・スマイルの要約（決まった moneyness の点の IV か、傾き・曲率）、ポジションの足（種別・限月・K・売買・枚数・建値・建値の側）、シナリオ（日数・IV の平行移動・横軸の範囲）、資金規模の設定（#131 の後）、ツールの出力（損益・グリーク・テール表の数値）。送らないもの: 板の行の配列（`rows`）、気配の生の値（bid / ask・数量・建玉・出来高）、JPX のグリーク・`bid_iv` / `ask_iv`、スナップショットの生 JSON | 読み解き（最優先のニーズ）に要る値が揃う。中継で形式を検査できる（終了条件 3 の pytest）。トークンが少ない | 建値は板の bid / ask から既定が入る（D6）ので、A でも「板から来た値」を足 1 本につき 1 つ送る。提案（#139）で AI が板にない行使価格を挙げないよう、候補の生成はツール側でする必要 | 文脈は約 660 トークン（見積もり）。費用への効きは小さい |
 | B | A + 必要な行使価格だけの気配（提案の候補を AI に選ばせる用） | 提案の精度が上がる | 「気配の生の値」を送るので EPIC のスコープ外に当たる。許可リストの検査が複雑になる | 行使価格 1 本あたり数十トークン |
 | C | 板をまるごと（`/api/chain` の JSON） | 実装が最も簡単 | EPIC のスコープ外。JPX の情報の第三者への提供に最も近い。AI が板から数字を拾い、ツールの値以外の数字が混ざる（終了条件 2 に弱い） | 約 1,100 行 × 2 限月。gzip で数十 KB（design.md 7.1）= 数万トークン / 回 |
 | D | 何も送らない（設計書の説明と一般論だけ） | JPX の情報を外に出さない | 今のポジションの読み解き（最優先のニーズ）ができない。EPIC の価値の大半が無くなる | 最小 |
@@ -90,7 +90,7 @@ EPIC #141 の (a)。板そのもの（行の配列・気配の生の値）を送
 
 #### 推奨
 
-A。送る本文の形は中継で許可リストとして検査する（キー・型・大きさ。外れたら Anthropic を呼ばずに 400。終了条件 3）。B が必要になったら #139 で改めて諮る。上の確かめる事項で「加工した値も送れない」となったら D に落とす（EPIC の範囲を見直す）。
+A。送る本文の形式は中継で許可リストとして検査する（キー・型・大きさ。外れたら Anthropic を呼ばずに 400。終了条件 3）。B が必要になったら #139 で改めて諮る。上の確かめる事項で「加工した値も送れない」となったら D に落とす（EPIC の範囲を見直す）。
 
 #### オーナー判断
 
@@ -105,10 +105,10 @@ EPIC #141 の (b)。Issue と #120 の当初の方針は「Secret Manager に置
 
 | 案 | 内容 | 利点 | 欠点 | 費用・影響 |
 |---|---|---|---|---|
-| A | **Secret Manager を `infra/bootstrap`（所有者の apply）に**: `google_project_service`（secretmanager。`disable_on_destroy = false`）、シークレットの入れ物（値は Terraform に入れない。所有者が `gcloud secrets versions add --data-file=-` で標準入力から投入）、`google_secret_manager_secret_iam_member`（シークレット単位・`roles/secretmanager.secretAccessor`・member は実行 SA `sa-simulator`。追加型）。Cloud Run には `infra/prod` の env の `value_source.secret_key_ref`（版は固定の番号か `latest`）で渡す | 実績のある形。apply SA に Secret Manager の権限を足さない（付録 B の方針のまま）。値は tfstate に入らない | 長命の鍵が存在する（漏れたときの影響が大きい）。発行・投入・ローテーションの手作業が続く。付録 B「API の有効化は simulator 側で宣言しない」の例外になる | 本番の IAM: API の有効化 1 件 + シークレット単位の付与 1 件。Secret Manager の費用は無料枠の範囲の見込み |
+| A | **Secret Manager を `infra/bootstrap`（所有者の apply）に**: `google_project_service`（secretmanager。`disable_on_destroy = false`）、シークレットの入れ物（値は Terraform に入れない。所有者が `gcloud secrets versions add --data-file=-` で標準入力から投入）、`google_secret_manager_secret_iam_member`（シークレット単位・`roles/secretmanager.secretAccessor`・member は実行 SA `sa-simulator`。追加型）。Cloud Run には `infra/prod` の env の `value_source.secret_key_ref`（バージョンは固定の番号か `latest`）で渡す | 実績のある方式。apply SA に Secret Manager の権限を足さない（付録 B の方針のまま）。値は tfstate に入らない | 長命の鍵が存在する（漏れたときの影響が大きい）。発行・投入・ローテーションの手作業が続く。付録 B「API の有効化は simulator 側で宣言しない」の例外になる | 本番の IAM: API の有効化 1 件 + シークレット単位の付与 1 件。Secret Manager の費用は無料枠の範囲の見込み |
 | B | **Secret Manager を `infra/prod`（CI の apply）に** | 変更が CI の承認の流れに乗る | apply SA にプロジェクト単位の `serviceusage.serviceUsageAdmin` と `secretmanager.admin` が要る = 権限が広がり、付録 B「apply SA の権限を絞る」に反する。長命の鍵は A と同じ | 本番の IAM: apply SA への付与が増える |
 | C | **WIF（鍵を持たない）**: Cloud Run の実行 SA のメタデータサーバーから Google の ID トークン（issuer `https://accounts.google.com`、audience `https://api.anthropic.com`、`format=full`）を取り、Anthropic の短命トークンに交換する（F13）。Anthropic 側は Console の「Connect workload」（Google Cloud）で、issuer・Anthropic のサービスアカウント・federation rule（`sub` = 実行 SA の数値の unique ID と `email` を両方固定、audience 固定）を所有者が作る。GCP 側は環境変数でルール ID・組織 ID・サービスアカウント ID・ワークスペース ID を渡すだけ（秘密ではないが個人の値なので、リポジトリに書かず Terraform の変数 / GitHub variables で） | 鍵が存在しないので漏れ・ローテーションが無い。GCP 側の IAM・API の有効化・シークレットが不要。トークンは分単位で失効（ルールの既定 3,600 秒、ウィザードは 600 秒） | Anthropic の組織の admin 権限で所有者が Console のウィザードを回す必要。ID トークンに `email` が入るか（SDK の例の `fetch_id_token` が `format=full` を満たすか）と、Python SDK の `WorkloadIdentityCredentials` が `exclude-newer` の範囲の版（1.8.0 まで。F15）にあるか未確認（論点 7）。clone した人には Anthropic 側の設定の手順が増える。#133 の中身が「Secret Manager を足す」から「WIF の値を env に渡す」に変わる | 本番の IAM の変更なし。Cloud Run の env が数個増える |
-| D | Cloud Run の素の環境変数に鍵（GitHub secret → Terraform の変数） | 最も簡単 | tfstate・plan の出力・Cloud Run の設定（`run.viewer` で読める）に鍵が入る | 不採用の扱い |
+| D | Cloud Run の（Secret を使わない）通常の環境変数に鍵（GitHub secret → Terraform の変数） | 最も簡単 | tfstate・plan の出力・Cloud Run の設定（`run.viewer` で読める）に鍵が入る | 不採用の扱い |
 
 比べる観点: 本番の IAM の変更量（A: API の有効化 + 付与 1 件 / C: なし）、所有者の手作業（A: 鍵の発行・投入・ローテーション / C: Console のウィザード 1 回）、漏れたときの影響（A: 長命の鍵 / C: 短命のトークン）、clone した人の手順の量、SDK の対応。
 
@@ -120,11 +120,11 @@ EPIC #141 の (b)。Issue と #120 の当初の方針は「Secret Manager に置
 
 **決定（2026-10-19、オーナー）**: API キーと OAuth トークン（Claude のサブスクリプションのもの）の **両方** を使えるようにする。トークンを使うときは SDK に **トークンだけ** を渡す（トークンのときはキーを渡さない。**訂正（#134、2026-10-19）**: SDK 1.8.0 はキーを優先するのではなく、両方あると `X-Api-Key` と `Authorization: Bearer` の両方を送る。どちらにしても片方だけを渡す結論は同じ。中継は環境変数を SDK に読ませず選んだ片方を明示で渡し、両方の環境変数があれば AI を無効にする）。WIF は採らない。置き場所は Secret Manager（`infra/bootstrap`、シークレット単位の `secretAccessor`）を基本に #133 で決める。サブスクリプションの OAuth トークンをこの用途で使ってよいかの規約と、トークンの有効期限・更新はオーナーが確かめる（#133）。
 
-#133 で A の形（`infra/bootstrap` に API・シークレット 2 つ・付与、`infra/prod` の変数 `ai_credential` で片方だけを環境変数の参照に）にした。背景は [ADR-0001](adr-0001-ai-credentials-secret-manager.md)、手順は `infra/README.md`「AI の資格情報（Secret Manager）」。
+#133 で A の方式（`infra/bootstrap` に API・シークレット 2 つ・付与、`infra/prod` の変数 `ai_credential` で片方だけを環境変数の参照に）にした。背景は [ADR-0001](adr-0001-ai-credentials-secret-manager.md)、手順は `infra/README.md`「AI の資格情報（Secret Manager）」。
 
-**追記（#184、2026-10-19、オーナー）**: 案 C（Anthropic の WIF）も足す（「WIF は採らない」を改める）。`AI_CREDENTIAL=wif` で、Secret Manager を使わず ID を素の環境変数（GitHub の repository variables から）で渡す。SDK 1.8.0 に `WorkloadIdentityCredentials` があり（F15 の懸念は解消）、ID トークンはメタデータサーバーから `format=full` で取る（`fetch_id_token` ではなく直接 1 回の GET）。費用は `api_key` と同じく実額で数える。ADR-0001 の追補。
+**追記（#184、2026-10-19、オーナー）**: 案 C（Anthropic の WIF）も足す（「WIF は採らない」を改める）。`AI_CREDENTIAL=wif` で、Secret Manager を使わず ID を通常の環境変数（GitHub の repository variables から）で渡す。SDK 1.8.0 に `WorkloadIdentityCredentials` があり（F15 の懸念は解消）、ID トークンはメタデータサーバーから `format=full` で取る（`fetch_id_token` ではなく直接 1 回の GET）。費用は `api_key` と同じく実額で数える。ADR-0001 の追補。
 
-**追記（#186、2026-10-19、オーナー）**: サブスクリプションの OAuth トークンは Messages API の直接呼び出しでは 429 になる（観測）。`oauth_token` の送信路を Claude Agent SDK（同梱の Claude Code CLI）に改め、トークンは子プロセスに `CLAUDE_CODE_OAUTH_TOKEN` としてだけ渡す。本番の既定は `oauth_token`、`wif` とは GitHub の variable で切り替える。規約の文面（Agent SDK の文書・Legal and compliance）と、利用者が自己責任で判断することは [ADR-0005](adr-0005-ai-oauth-via-agent-sdk.md)。
+**追記（#186、2026-10-19、オーナー）**: サブスクリプションの OAuth トークンは Messages API の直接呼び出しでは 429 になる（観測）。`oauth_token` の送信経路を Claude Agent SDK（同梱の Claude Code CLI）に改め、トークンは子プロセスに `CLAUDE_CODE_OAUTH_TOKEN` としてだけ渡す。本番の既定は `oauth_token`、`wif` とは GitHub の variable で切り替える。規約の文面（Agent SDK の文書・Legal and compliance）と、利用者が自己責任で判断することは [ADR-0005](adr-0005-ai-oauth-via-agent-sdk.md)。
 
 ### 論点 3: 費用の 1 日上限・使うモデル・上限を実装する場所
 - 判断者: オーナー
@@ -168,13 +168,13 @@ EPIC #141 の (d)。終了条件 6 の値。計る区間は、中継の構造化
 | A | 最初の文字の p50 ≤ 1,500 ms | 体感がとても速い | Opus 5.5 は thinking を切れず、最初の文字は thinking の後になる。Sonnet 5.5（`between_tools`）か Haiku 5.5 が前提になりやすい | モデルの選択を縛る（論点 3） |
 | B | 最初の文字の p50 ≤ 3,000 ms | Opus 5.5 の effort low〜medium で届く見込み（未計測）。ツールの数字を先に出せば待ちの体感は短い | 見込みは計測ではない（公式に TTFT の数値は無い）。#134 で外れたら詰める作業が要る | 目標を外れたときの代替（Sonnet 5.5・effort low）がある |
 | C | 最初の文字の p50 ≤ 5,000 ms | ほぼ確実に届く | 会話として待ちが長い | 小 |
-| D | 目標を置かず、#134 で測ってから決める | 根拠のある値になる | 終了条件 6 の値が #134 まで決まらない（作りの判断の基準が無いまま進む） | 判断が 1 回増える |
+| D | 目標を置かず、#134 で測ってから決める | 根拠のある値になる | 終了条件 6 の値が #134 まで決まらない（構成の判断の基準が無いまま進む） | 判断が 1 回増える |
 
 根拠と制約:
 
 - 公式の文書に TTFT の数値は無い（Glossary は定義だけ）。Opus 5.5 は thinking を切れない（F3）。thinking の `display` が既定の `omitted` だと thinking の間は空の block しか来ないので、`display: "summarized"` で thinking の要約を先に流す手もある
 - コールドスタートは design.md 9 章で +2〜3 秒を許容している（`min_instance_count = 0`）。p50 は温かいインスタンスで決まる見込み
-- ストリーミングの方式: 同じオリジンの `POST /api/ai/...`（仮の名前）を `fetch` の ReadableStream で読む SSE の形（`text/event-stream`）。`EventSource` は GET だけなので使わない。CSP は `connect-src 'self'` のまま。応答は gzip しない・`Cache-Control: no-store`。中継は Anthropic の SSE（F4）を、画面に要る event（text の差分・ツールの呼び出し・usage・エラー）だけに絞って流す
+- ストリーミングの方式: 同じオリジンの `POST /api/ai/...`（仮の名前）を `fetch` の ReadableStream で読む SSE の形式（`text/event-stream`）。`EventSource` は GET だけなので使わない。CSP は `connect-src 'self'` のまま。応答は gzip しない・`Cache-Control: no-store`。中継は Anthropic の SSE（F4）を、画面に要る event（text の差分・ツールの呼び出し・usage・エラー）だけに絞って流す
 - Cloud Run のタイムアウト 60s はストリーミングでも 1 本の要求の全体に掛かる。同時実行 8 × 最大 2 インスタンス、gunicorn は 1 ワーカー 8 スレッドで、ストリーミングの 1 本はスレッドを 1 本ふさぐ。利用者は 1 人なので本数は足りるが、`/api/chain` などと同じ 8 本を分け合う
 - 出力 2,500 トークン（見積もり）の生成時間は公式の値が無い。出力の速さを **仮定** 30〜100 トークン / 秒とすると 25〜83 秒で、60 秒を超えうる。対策の案: AI の要求だけ `max_tokens` を抑える / サービスのタイムアウトを延ばす（サービス全体に効く）/ 論点 5 の往復で 1 本の要求を短くする
 - 未確認（#134 で確かめる）: gunicorn の `--timeout 60`（gthread のワーカーの無応答の検知）が長いストリームを切るか、IAP（Cloud Run への直接の設定）が SSE をバッファしないか
@@ -190,7 +190,7 @@ B: 最初の文字の p50 ≤ 3,000 ms（温かいインスタンス。中継の
 ### 論点 5: ツール（simulator の計算）を実行する場所
 - 判断者: オーナー
 
-EPIC #141 の前提「計算はすべて simulator（ブラウザの `model/`）。AI に数字を計算させない。任意のコード・クエリを書かせない」をどう実現するか。比べる軸は、数値の出どころ（終了条件 2）、往復の回数とかかる時間、1 本の要求が Cloud Run のタイムアウト 60s に収まるか、実装の重さ、送るデータ（ツールの出力は論点 1 の許可リストの形）。
+EPIC #141 の前提「計算はすべて simulator（ブラウザの `model/`）。AI に数字を計算させない。任意のコード・クエリを書かせない」をどう実現するか。比べる軸は、数値の出どころ（終了条件 2）、往復の回数とかかる時間、1 本の要求が Cloud Run のタイムアウト 60s に収まるか、実装の重さ、送るデータ（ツールの出力は論点 1 の許可リストの形式）。
 
 #### 選択肢
 
@@ -212,15 +212,15 @@ EPIC #141 の前提「計算はすべて simulator（ブラウザの `model/`）
 ### 論点 6: 会話の状態の持ち方
 - 判断者: 実装時
 
-design.md 8.2「計算はブラウザ」と、サーバーに状態を持たない今の作りの延長で決められるので実装時にした。
+design.md 8.2「計算はブラウザ」と、サーバーに状態を持たない今の構成の延長で決められるので実装時にした。
 
 #### 選択肢
 
 | 案 | 内容 | 利点 | 欠点 | 費用・影響 |
 |---|---|---|---|---|
-| A | ブラウザが履歴を持ち、毎回送る（サーバーは状態なし） | 今の作りと同じ。新しい資源・IAM・保持の方針が要らない | 毎回の入力が履歴の分だけ増える（キャッシュで緩和）。届いた履歴を信じられないので検査が要る | キャッシュの読み取りで増分を抑える |
+| A | ブラウザが履歴を持ち、毎回送る（サーバーは状態なし） | 今の構成と同じ。新しい資源・IAM・保持の方針が要らない | 毎回の入力が履歴の分だけ増える（キャッシュで緩和）。届いた履歴を信じられないので検査が要る | キャッシュの読み取りで増分を抑える |
 | B | サーバーが会話 ID で持つ（Firestore など） | 送る量が少ない | 新しい資源・IAM・会話の保持期間の方針が要る。会話の本文をこちらのストレージに残すことになる | 本番の変更が増える |
-| C | Anthropic の Managed Agents のセッション（状態は Anthropic 側） | 状態の管理を任せられる | ZDR の対象外。中継の作りが大きく変わる。ツールをブラウザで動かす形（論点 5）と合わせにくい | 移行が大きい |
+| C | Anthropic の Managed Agents のセッション（状態は Anthropic 側） | 状態の管理を任せられる | ZDR の対象外。中継の構成が大きく変わる。ツールをブラウザで動かす方式（論点 5）と合わせにくい | 移行が大きい |
 
 A の決めごと:
 
@@ -228,7 +228,7 @@ A の決めごと:
 - 端末に保存するか: **決定（#135、オーナー 2026-10-19）**: ブラウザのタブの間だけ（sessionStorage の 1 キー `optsim.ai.v1`。再読み込みでは残り、タブを閉じたら消える）。保存一覧・URL 共有・書き出しには載せない。[新しい会話] で消す
 - 会話の途中で板・ポジション・シナリオが変わったら、最初の文脈は変えずに新しい user の発言に `context_update` の block を足す（中継が `<context_update>` の text にして後ろに置く = 前の履歴のバイト列を変えない。#135）
 - 構造化ログに会話の本文を出さない。出すのは model・トークン数・ms・`stop_reason`・ツールの名前だけ（design.md 9 章のログの規則の延長）
-- 許可リストの検査（終了条件 3）: 中継は届いた履歴を、role（user / assistant）・block の型（text / tool_use / tool_result / thinking）・ツールの名前（決まった集合）・`tool_result` の中身の形（ツールごとの JSON の型。数値と決まったキーだけ）・最初の文脈の形（論点 1 の A）・大きさの上限で検査し、外れたら Anthropic を呼ばずに 400
+- 許可リストの検査（終了条件 3）: 中継は届いた履歴を、role（user / assistant）・block の型（text / tool_use / tool_result / thinking）・ツールの名前（決まった集合）・`tool_result` の中身の形式（ツールごとの JSON の型。数値と決まったキーだけ）・最初の文脈の形式（論点 1 の A）・大きさの上限で検査し、外れたら Anthropic を呼ばずに 400
 
 #### 推奨
 
@@ -264,21 +264,21 @@ A（SDK がある言語では SDK を使い、生の HTTP と混ぜない）。
 
 **実装時に決定（#134、2026-10-19）: A**（公式の Python SDK `anthropic` 1.8.0 を `api/` の依存に固定。`exclude-newer` は据え置き。推移の依存は httpx2・httpcore2・h11・truststore・pydantic・pydantic-core・annotated-types・typing-inspection・jiter・anyio・sniffio・docstring-parser（いずれも MIT / BSD-3-Clause / MIT OR Apache-2.0。`uv.lock` には emscripten だけの httpx2-jsfetch も載るがイメージには入らない）。イメージは約 22 MB 増）。`max_retries=0`、`fallbacks` は付けない。資格情報は中継が選んだ片方を明示で渡す（明示の引数があると SDK は環境変数を読まない）。詳細は design.md 13.4「AI の中継」
 
-**追記（#186、2026-10-19）**: `oauth_token` のときだけ、送信路を Claude Agent SDK（`claude-agent-sdk` 0.2.160、同梱の CLI 2.1.283。MIT・推移の依存 13 個）にした。CLI を要求ごとの子プロセスで動かし、ツールは実行させず（`PreToolUse` フックで止める）、事象は `StreamEvent` から今と同じ形に組み立てる。CLI の内部（transcript の形・未文書の環境変数）に依存するので版を固定し、本物の CLI と 127.0.0.1 の偽の Messages API の結合テストで守る。イメージは約 452 MB。詳細は [ADR-0005](adr-0005-ai-oauth-via-agent-sdk.md)
+**追記（#186、2026-10-19）**: `oauth_token` のときだけ、送信経路を Claude Agent SDK（`claude-agent-sdk` 0.2.160、同梱の CLI 2.1.283。MIT・推移の依存 13 個）にした。CLI を要求ごとの子プロセスで動かし、ツールは実行させず（`PreToolUse` フックで止める）、事象は `StreamEvent` から今と同じ形式に組み立てる。CLI の内部（transcript の形式・未文書の環境変数）に依存するので版を固定し、本物の CLI と 127.0.0.1 の偽の Messages API の結合テストで守る。イメージは約 452 MB。詳細は [ADR-0005](adr-0005-ai-oauth-via-agent-sdk.md)
 
-**追記（#221、2026-10-21）**: 送信路を Claude Agent SDK に一本化した（`api_key`・`wif` も同梱の CLI 経由。`anthropic` SDK と推移の `docstring-parser`・`jiter` を依存から外した。`wif` は本番の一回きりの Job で CLI 経由で動くことを確かめた）。毎回は要らない手順（テクニカル・ポジションの提案）は Agent Skills の `SKILL.md` に切り出し、要るときだけ読む（1 要求で上流を最大 3 回）。決定と理由は [ADR-0006](adr-0006-ai-agent-sdk-only-and-skills.md)、設計は `docs/design.md` 13.4「AI の中継」
+**追記（#221、2026-10-21）**: 送信経路を Claude Agent SDK に一本化した（`api_key`・`wif` も同梱の CLI 経由。`anthropic` SDK と推移の `docstring-parser`・`jiter` を依存から外した。`wif` は本番の一回きりの Job で CLI 経由で動くことを確かめた）。毎回は要らない手順（テクニカル・ポジションの提案）は Agent Skills の `SKILL.md` に切り出し、要るときだけ読む（1 要求で上流を最大 3 回）。決定と理由は [ADR-0006](adr-0006-ai-agent-sdk-only-and-skills.md)、設計は `docs/design.md` 13.4「AI の中継」
 
-### 論点 8: 中継の口の守り
+### 論点 8: 中継のエンドポイントの守り
 - 判断者: 実装時
 
-調べる中で見つけた論点。AI の口は課金が発生する POST。IAP はブラウザのクッキーで通すので、別のサイトのページから利用者のブラウザを経由して「単純な要求」（`text/plain` の POST など、プリフライト（CORS の事前確認）の無い要求）を送られると、IAP を通って費用が使われうる（CSRF = クロスサイトリクエストフォージェリ）。
+調べる中で見つけた論点。AI のエンドポイントは課金が発生する POST。IAP はブラウザのクッキーで通すので、別のサイトのページから利用者のブラウザを経由して「単純な要求」（`text/plain` の POST など、プリフライト（CORS の事前確認）の無い要求）を送られると、IAP を通って費用が使われうる（CSRF = クロスサイトリクエストフォージェリ）。
 
 #### 選択肢
 
 | 案 | 内容 | 利点 | 欠点 | 費用・影響 |
 |---|---|---|---|---|
 | A | `Content-Type: application/json` だけを受ける（別オリジンからはプリフライトが要り、CORS の許可を返さないので届かない）+ `Sec-Fetch-Site: same-origin` と `Origin` の検査 | 実装が小さい。画面の変更が要らない | 古いブラウザは `Sec-Fetch-*` を付けない（`Origin` の検査で補う） | なし |
-| B | CSRF トークン（画面が取得して要求に付ける） | 古典的で確実 | トークンを配る口と状態が要る（サーバーに状態を持たない作りと合わない） | 実装が増える |
+| B | CSRF トークン（画面が取得して要求に付ける） | 古典的で確実 | トークンを配るエンドポイントと状態が要る（サーバーに状態を持たない構成と合わない） | 実装が増える |
 | C | 何もしない（IAP と日の上限だけ） | 実装なし | 上限までは他のサイトから費用を使われうる | 日の上限まで |
 
 ほかに: 1 要求の大きさの上限、連打の制限（design.md 7.1 の `?at=` と同じ考え）。送る内容に利用者の自由文が入るので、プロンプトインジェクションの影響は「AI は決まったツールを呼べるだけ・ツールは計算だけ」で限る。
@@ -343,9 +343,9 @@ A（日の上限は最後の砦）。
 | 終了条件 | 決まる論点 | 判定担当 |
 |---|---|---|
 | 終了条件 2（数字の出どころ） | 論点 5（(iv) / (i) で数字は `model/` の出力）、論点 6（届いた履歴の検査） | #135 |
-| 終了条件 3（送るデータ） | 論点 1（許可リスト）、論点 6（届いた履歴の検査）、論点 7（中継の作り） | #134 |
+| 終了条件 3（送るデータ） | 論点 1（許可リスト）、論点 6（届いた履歴の検査）、論点 7（中継の構成） | #134 |
 | 終了条件 4（費用の上限） | 論点 3（上限の値・数え方・予約と精算・押す前の残り） | #134 |
-| 終了条件 5（鍵と IAP） | 論点 2（WIF / Secret Manager。鍵をブラウザ・ログに出さない）、論点 8（口の守り） | #133・#134 |
+| 終了条件 5（鍵と IAP） | 論点 2（WIF / Secret Manager。鍵をブラウザ・ログに出さない）、論点 8（エンドポイントの守り） | #133・#134 |
 | 終了条件 6（速さ） | 論点 4（p50 の目標・計る区間）、論点 5（往復の回数）、論点 3（モデル） | #134 |
 
 終了条件 1・7〜10（読み解き・根拠つきの説明・[AI に聞く]・IV 推移の解析・組み方の提案）は #132 の対象外で、それぞれの子（#135・#137・#136・#138・#139）で決める。

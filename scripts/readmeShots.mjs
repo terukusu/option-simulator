@@ -349,7 +349,24 @@ const shots = {
   // 指標 · テール
   async metrics() {
     const { ctx, page } = await open({ ...PC_CROP, h: 1760, theme: 'light' });
-    await save('metrics', await shotEl(page, 'section.metrics'));
+    // パネルの枠は窓の高さまで伸びるので、中身（子を持たない要素）の下端で切る（下の余白を写さない。#294）
+    const m = await page.locator('section.metrics').boundingBox();
+    const bottom = await page.evaluate(() => {
+      const els = document.querySelectorAll('section.metrics *');
+      let b = 0;
+      for (const el of els) {
+        if (el.children.length > 0) continue;
+        const r = el.getBoundingClientRect();
+        if (r.height > 0) b = Math.max(b, r.bottom);
+      }
+      return b;
+    });
+    await save(
+      'metrics',
+      await page.screenshot({
+        clip: { x: m.x, y: m.y, width: m.width, height: Math.min(m.height, bottom - m.y + 12) },
+      }),
+    );
     await ctx.close();
   },
   // 追証マップ（過去の点は dev の合成の日次データ）。許容損失の境目・3 色・凡例（#180）

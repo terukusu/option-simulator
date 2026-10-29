@@ -1,4 +1,4 @@
-"""供給元の口（docs/data-sources.md「API の供給元の口」・docs/adr-0003-data-source-abstraction.md。#154）。
+"""供給元のアダプタ（docs/data-sources.md「API の供給元のアダプタ」・docs/adr-0003-data-source-abstraction.md。#154）。
 
 画面が読む /api/chain・/api/calendar・/api/atm_iv・/api/atm_daily・/api/future_bars の中身を返すものを
 「供給元」（DataSource）とし、環境変数 DATA_SOURCE の値 → 実装の対応をこのファイルの BUILDERS 1 か所に置く。

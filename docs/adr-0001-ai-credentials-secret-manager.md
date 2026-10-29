@@ -32,7 +32,7 @@ AI アドバイザー（EPIC #141）の中継（#134）は Cloud Run `simulator`
 | A. Secret Manager を bootstrap に（採択） | apply SA の権限が広がらない。値が state・plan・Cloud Run の設定に入らない。付与をシークレット単位に絞れる | 付録 B の「API の有効化を宣言しない」の例外になる。所有者の手作業（apply・値の登録・ローテーション）が要る |
 | B. Secret Manager を prod（CI の apply）に | 変更が CI の承認の流れに乗る | apply SA にプロジェクト単位の `serviceusage.serviceUsageAdmin`・`secretmanager.admin` が要る |
 | C. Anthropic の WIF（鍵を持たない） | 長命の鍵が無い | OAuth トークンに使えない。K15 で不採用 |
-| D. 素の環境変数（GitHub secret → Terraform の変数） | 最も簡単 | state・plan・Cloud Run の設定（plan SA が読める）に値が入る |
+| D. （Secret を使わない）通常の環境変数（GitHub secret → Terraform の変数） | 最も簡単 | state・plan・Cloud Run の設定（plan SA が読める）に値が入る |
 | E. Secret をボリュームでマウント | 読むたびに最新の版 | SDK は環境変数を読むので中継に読み込みの処理が要る。ローテーションは年 1 程度で利点が小さい |
 | F. キーとトークンを両方とも環境変数に置き、アプリで選ぶ | 切り替えに deploy が要らない | SDK が両方の見出しを送る・取り違える（トークンのつもりでキーの従量課金）。アプリの誤りで両方が使われうる |
 | G. API の有効化を README の手作業（`gcloud services enable`）にする | 付録 B の方針を守れる | clone した人の手順が増え、Terraform で状態を追えない |

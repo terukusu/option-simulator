@@ -1,4 +1,4 @@
-"""口の守り（#134 AC5。docs/ai-advisor.md 論点 8 = A）。どの拒否も送信 0 回・計上 0。"""
+"""エンドポイントの守り（#134 AC5。docs/ai-advisor.md 論点 8 = A）。どの拒否も送信 0 回・計上 0。"""
 
 import threading
 

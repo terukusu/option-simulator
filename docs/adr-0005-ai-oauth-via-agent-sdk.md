@@ -30,7 +30,7 @@ CLI の送信先を `ANTHROPIC_BASE_URL=http://127.0.0.1:<port>` の偽の Messa
 - CLI が messages に足す role=system の message（`mid-conversation-system` beta）: 環境（cwd・git か・OS の版）・モデル名・`<total_tokens>`・日付。`verbatim_prompts=True` でも消えない
 - 安全: `verbatim_prompts=False` だと user の文の `@<パス>` を CLI がファイルとして読み、中身を上流に送った（`tools=[]` でも）。`verbatim_prompts=True` で 0 件
 - 失敗: 既定では CLI が 429 を 100 秒以上再試行する。`CLAUDE_CODE_MAX_RETRIES=0` で上流 1 回。429 → `AssistantMessage.error="rate_limit"`・`ResultMessage(is_error=True, api_error_status=429)`、401 → `authentication_failed`・401。CLI はエラーの文を AssistantMessage の text に入れる（SSE には流さない）
-- 後始末: 公開の `query()` は、呼び出し側が途中で抜けても内側の generator を閉じないので、子（CLI）の後始末が走らない。取り消しは anyio の cancel scope で行う（SDK の close は anyio の shield の中で stdin を閉じ → 5 秒待って SIGTERM → SIGKILL。asyncio の素の `task.cancel()` では段階が飛ばされる）
+- 後始末: 公開の `query()` は、呼び出し側が途中で抜けても内側の generator を閉じないので、子（CLI）の後始末が走らない。取り消しは anyio の cancel scope で行う（SDK の close は anyio の shield の中で stdin を閉じ → 5 秒待って SIGTERM → SIGKILL。asyncio の `task.cancel()` だけでは段階が飛ばされる）
 
 ## 決定
 
@@ -65,25 +65,25 @@ Anthropic の文書には次の記述がある（確認日 2026-10-19。原文�
 - Claude Agent SDK の overview（https://code.claude.com/docs/en/agent-sdk/overview）: 「Unless previously approved, Anthropic does not allow third party developers to offer claude.ai login or rate limits for their products, including agents built on the Claude Agent SDK. Use the API key authentication methods…」
 - Claude Code の Legal and compliance（https://code.claude.com/docs/en/legal-and-compliance）: 「Developers building products or services … including those using the Agent SDK, should use API key authentication … Anthropic does not permit … to route requests through Free, Pro, or Max plan credentials on behalf of their users.」
 
-サブスクリプションの OAuth トークンをこの送信路で使うかは、利用者（デプロイする人）が自分の責任で判断する。このリポジトリのオーナーは自分専用の利用として使うと決めた（2026-10-19）。clone して使う人は自分で規約を確かめ、迷うなら `api_key` か `wif` を使う。
+サブスクリプションの OAuth トークンをこの送信経路で使うかは、利用者（デプロイする人）が自分の責任で判断する。このリポジトリのオーナーは自分専用の利用として使うと決めた（2026-10-19）。clone して使う人は自分で規約を確かめ、迷うなら `api_key` か `wif` を使う。
 
 ## 検討した選択肢
 
 | 案 | 良い点 | 悪い点 |
 |---|---|---|
-| A. Agent SDK（同梱の CLI）を送信路にする（採択） | サブスクリプションのトークンで動く。会話の UX・中継の残りを変えない | 依存とイメージが大きくなる（+14 個、イメージ 約 202 → 452 MB）。CLI の内部の形・未文書の環境変数に依存する。CLI が system・messages に本文を足す。要求ごとに子プロセス（約 1 秒・約 100〜250 MB） |
+| A. Agent SDK（同梱の CLI）を送信経路にする（採択） | サブスクリプションのトークンで動く。会話の UX・中継の残りを変えない | 依存とイメージが大きくなる（+14 個、イメージ 約 202 → 452 MB）。CLI の内部の形式・未文書の環境変数に依存する。CLI が system・messages に本文を足す。要求ごとに子プロセス（約 1 秒・約 100〜250 MB） |
 | B. `anthropic` SDK の直接呼び出しのまま | 依存が増えない | サブスクリプションのトークンでは 429（観測）で動かない |
 | C. 事前計算だけをプロンプトに入れ、ツールの往復をしない | CLI のツールの扱いに依存しない | #135 の追加の質問（tool_use の往復）が変わる。S1 が go なので採らない |
 | D. 会話の履歴を Firestore に置いて CLI の session で続ける | transcript を毎回作らない | #135 の「会話の状態はブラウザが持つ」を変える。オーナー決定 3 で採らない |
-| E. 履歴を文章に平らにして thinking を送り返さない | transcript の形に依存しない | #135 AC4（thinking のバイト一致）を変える。オーナー決定 3 で採らない |
+| E. 履歴を文章に平らにして thinking を送り返さない | transcript の形式に依存しない | #135 AC4（thinking のバイト一致）を変える。オーナー決定 3 で採らない |
 
 ## 結果
 
-- 良い点: `AI_CREDENTIAL` の値だけで `oauth_token`（数えない）と `wif` / `api_key`（数える）を切り替えられる（イメージは両方の送信路を持つ）。会話の UX・SSE の形・中継の残りは変わらない
+- 良い点: `AI_CREDENTIAL` の値だけで `oauth_token`（数えない）と `wif` / `api_key`（数える）を切り替えられる（イメージは両方の送信経路を持つ）。会話の UX・SSE の形式・中継の残りは変わらない
 - 悪い点:
   - イメージが約 2.2 倍（202 MB → 452,204,381 バイト）。冷えた起動・Artifact Registry の容量が増える
   - 要求ごとに CLI の子プロセスを起動する（偽サーバーで約 0.7〜1 秒、最初の要求は import を含めて約 2.8 秒）。`ai_request` の `spawn_ms` で本番の値を見る
-  - SDK を上げるたびに transcript の形・`CLAUDE_CODE_RESUME_*`・ツールの名前・system の block の数が変わりうる。上げる PR では `tests/test_ai_agent_sdk_cli.py` を必ず通し、この ADR の版を直す
+  - SDK を上げるたびに transcript の形式・`CLAUDE_CODE_RESUME_*`・ツールの名前・system の block の数が変わりうる。上げる PR では `tests/test_ai_agent_sdk_cli.py` を必ず通し、この ADR の版を直す
   - 本物のサブスクリプションのトークンで、CLI 経由の任意の system prompt・ツール 6 本が受け付けられるかは手元で確かめられない（デプロイ後に診断・追加の質問で確かめ、認証の失敗・429 なら `wif` に戻す）
   - 同梱の CLI は Anthropic の規約の下で配布される（`claude-agent-sdk` 自体は MIT）
 - 戻し方: GitHub の repository variable `AI_CREDENTIAL` を `wif`（または `api_key`）に戻して deploy する（`infra/README.md`）。コードを戻すときは PR の revert（依存の削除でイメージも戻る）
