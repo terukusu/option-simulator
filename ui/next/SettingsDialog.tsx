@@ -289,7 +289,7 @@ function SettingsBody(p: SettingsDialogProps) {
             onChange={(basis) => dispatch({ type: 'setBasis', basis })}
           />
         </div>
-        <p class="set-note">板の ATM 行・スマイルの ATM・市場ピルの ATM の基準</p>
+        <p class="set-note">板の ATM 行・スマイルの ATM・トップバーの ATM の基準</p>
       </div>
       <div class="set-row">
         <div class="set-line">

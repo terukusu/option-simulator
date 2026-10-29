@@ -60,7 +60,7 @@ export interface AskDoc {
   title: string;
 }
 
-const G_READOUT: AskDoc = { file: 'user-guide', section: '5', title: '読み取り' };
+const G_READOUT: AskDoc = { file: 'user-guide', section: '5', title: 'シナリオ点の数値' };
 const G_TILE: AskDoc = { file: 'user-guide', section: '8.1', title: 'タイル' };
 const G_TAIL: AskDoc = { file: 'user-guide', section: '8.3', title: 'テール表' };
 const G_MARGIN: AskDoc = { file: 'user-guide', section: '8.4', title: '証拠金（概算）' };

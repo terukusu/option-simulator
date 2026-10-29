@@ -461,7 +461,7 @@ export function aiErrorText(code: string, remainingUsd: number | null = null): s
     case 'no_board':
       return '板がありません（板を読んでから送ってください）';
     case 'bad_request':
-      return '送る内容が受け付けられませんでした（形の検査）';
+      return '送る内容が受け付けられませんでした（形式の検査）';
     case 'too_large':
       return '送る内容が大きすぎます。[新しい会話] で始めてください';
     case 'unavailable':

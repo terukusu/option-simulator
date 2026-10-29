@@ -446,14 +446,14 @@ describe('strike_quote（#266）: 任意の行使価格のスマイルの IV・�
     ]);
     // 足・行使価格の語を使わない理由（板に無い行使価格は受け付ける）
     expect(toolCard('strike_quote', {}, { error: 'bad_input' }, 'error').lines).toEqual([
-      '計算できなかった（行使価格・種別・限月の指定の形が違う）',
+      '計算できなかった（行使価格・種別・限月の指定の書式が違う）',
     ]);
     expect(toolCard('strike_quote', {}, { error: 'not_on_board' }, 'error').lines).toEqual([
       '計算できなかった（板に無い限月（またはスマイルが無い））',
     ]);
     // 提案のツールの文は変わらない
     expect(toolCard('strike_scan', {}, { error: 'bad_input' }, 'error').lines).toEqual([
-      '計算できなかった（足の指定の形が違う）',
+      '計算できなかった（足の指定の書式が違う）',
     ]);
   });
 });

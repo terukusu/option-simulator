@@ -499,7 +499,7 @@ const pctText = (v: unknown, signed = true) => {
 export const PROPOSE_ERROR_TEXT: Record<string, string> = {
   not_on_board: '板に無い限月・行使価格',
   no_candidate: '条件に合う行使価格が板に無い',
-  bad_input: '足の指定の形が違う',
+  bad_input: '足の指定の書式が違う',
   no_legs: '足がありません',
   no_data: '板・足を読めない',
   tool_limit: '計算の回数の上限',
@@ -508,7 +508,7 @@ export const PROPOSE_ERROR_TEXT: Record<string, string> = {
 
 /** strike_quote の失敗の理由（#266。板に無い行使価格は受け付けるので、足・行使価格の語を使わない） */
 export const QUOTE_ERROR_TEXT: Record<string, string> = {
-  bad_input: '行使価格・種別・限月の指定の形が違う',
+  bad_input: '行使価格・種別・限月の指定の書式が違う',
   not_on_board: '板に無い限月（またはスマイルが無い）',
 };
 

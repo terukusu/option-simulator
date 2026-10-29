@@ -195,7 +195,7 @@ function IvHistoryView(p: IvHistoryProps) {
             </span>
           )}
           {level !== null && (
-            <span class="sc" title="シナリオの Δσ と β を ATM に当てた水準">
+            <span class="sc" title="シナリオの Δσ と β を ATM に適用した水準">
               ┄ シナリオ {fmtIvPt(level)}
             </span>
           )}

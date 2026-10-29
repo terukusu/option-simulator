@@ -191,6 +191,19 @@ describe('マニュアルの節（#167 AC-3）', () => {
     }
   });
 
+  it('#296: 用語カードの節の名前「N 章 <章> > <節>」がマニュアルの「## N. <章>」と、その章の中の「### <節>」に一致する', () => {
+    for (const t of GLOSSARY) {
+      const m = /^(\d+) 章 (.+) > (.+)$/.exec(t.guide.title);
+      expect(m, `${t.id}: ${t.guide.title}`).not.toBeNull();
+      const [, n, chapter, section] = m ?? [];
+      const ch = SECTIONS.find((s) => s.level === 2 && s.anchor === slug(`${n}. ${chapter}`));
+      expect(ch, `${t.id}: ## ${n}. ${chapter}`).toBeDefined();
+      expect(ch?.body.split('\n')[0], `${t.id}: ## ${n}. ${chapter}`).toBe(`## ${n}. ${chapter}`);
+      expect(ch?.body.includes(`\n### ${section}\n`), `${t.id}: ### ${section}`).toBe(true);
+      expect(slug(section ?? ''), `${t.id}: ${t.guide.anchor}`).toBe(t.guide.anchor);
+    }
+  });
+
   it('マニュアルに用語集の節がある', () => {
     expect(guide).toContain('用語集');
     expect(ANCHORS.has('用語集説明カード')).toBe(true);

@@ -154,7 +154,7 @@ export interface PaletteInput {
 }
 
 export const CHART_NO_LEGS_TEXT = '足が無い';
-export const CHART_MINI_TEXT = '舞台がミニ（シートを下げる）';
+export const CHART_MINI_TEXT = '損益グラフが小さい（シートを下げる）';
 export const ATM_NONE_TEXT = '板が無い';
 
 /** 行を作る（押せない行は run を null にする = disabled と run の対応を 1 か所で守る） */
