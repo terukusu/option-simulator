@@ -9,6 +9,6 @@
 - gateway: 送信先の共通の部品（UpstreamError・SDK のログの置き換え・wif の ID トークン = メタデータサーバー）と、
   偽の送信先（AI_CREDENTIAL=fake・テスト）
 - skills: スキル（必要なときだけ CLI の Skill で読む手順。plugin/skills/<名前>/SKILL.md。#221）
-- guard: 口の守り（同じオリジン・Content-Type・大きさ・同時の本数・1 分の回数）
+- guard: エンドポイントの守り（同じオリジン・Content-Type・大きさ・同時の本数・1 分の回数）
 - relay: エンドポイントの本体（SSE のイベントの生成と、精算・ログ）
 """

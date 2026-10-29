@@ -179,7 +179,8 @@ _AI_ORG_ID_RE = re.compile(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a
 AI_BUDGET_STORES = ("firestore", "memory")
 _AI_LIMIT_RE = re.compile(r"^[0-9]{1,2}(?:\.[0-9]{1,2})?$")
 
-# 供給元（DATA_SOURCE の値）。値 → 実装の表は sources.py の BUILDERS（docs/data-sources.md「API の供給元の口」。#154）
+# 供給元（DATA_SOURCE の値）。値 → 実装の表は sources.py の BUILDERS
+# （docs/data-sources.md「API の供給元のアダプタ」。#154）
 DATA_SOURCES = ("bigquery", "file", "quotes")
 
 

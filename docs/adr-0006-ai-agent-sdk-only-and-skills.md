@@ -17,7 +17,7 @@
 
 | 項目 | 結果 |
 |---|---|
-| Agent Skills を今の作り（`setting_sources=[]`・フックで simulator のツールを止める）のまま使えるか | go。`plugins=[{"type": "local", "path": …}]` + `skills=["<plugin>:<skill>"]` + `tools=["Skill"]` で Skill が呼べ、本文が答えに反映された |
+| Agent Skills を今の構成（`setting_sources=[]`・フックで simulator のツールを止める）のまま使えるか | go。`plugins=[{"type": "local", "path": …}]` + `skills=["<plugin>:<skill>"]` + `tools=["Skill"]` で Skill が呼べ、本文が答えに反映された |
 | Skill と simulator のツールが続けて使えるか | go。フックは `Skill` を通し、`mcp__sim__*` は今までどおり deny + `continue_: False` で止まる |
 | ほかのスキルが見えないか | go。モデルに見える一覧は指定したスキルだけ |
 | `api_key` が CLI 経由で動くか | go（子に `ANTHROPIC_API_KEY` だけを渡す） |
@@ -60,14 +60,14 @@
 
 | 案 | 良い点 | 悪い点 |
 |---|---|---|
-| A. Agent SDK に一本化して Agent Skills を使う（採択） | 仕組みが 1 つ。CLI のスキルの読み込み（遅延・一覧の絞り込み）をそのまま使える。依存とイメージが少し小さくなる | Messages API を直接呼ぶ逃げ道が無くなる。CLI の内部（Skill の入力の形・transcript）への依存が増える |
-| N2. `oauth_token`・`api_key` は Agent SDK、`wif` だけ Messages API でスキルの本文を system に全部入れる | `wif` が CLI で動かなくても済む | `wif` だけ前置きが長い。送り口が 2 つのまま。W1 が go なので採らない |
-| N1. 2 本立てのまま、自前の `load_skill` ツールを両方の送り口に作る | CLI のスキルの仕組みに依存しない | 仕組みが 2 つ要る。中継にサーバー側のツールの往復と turn ごとの精算が増える |
+| A. Agent SDK に一本化して Agent Skills を使う（採択） | 仕組みが 1 つ。CLI のスキルの読み込み（遅延・一覧の絞り込み）をそのまま使える。依存とイメージが少し小さくなる | Messages API を直接呼ぶ逃げ道が無くなる。CLI の内部（Skill の入力の形式・transcript）への依存が増える |
+| N2. `oauth_token`・`api_key` は Agent SDK、`wif` だけ Messages API でスキルの本文を system に全部入れる | `wif` が CLI で動かなくても済む | `wif` だけ前置きが長い。送信経路が 2 つのまま。W1 が go なので採らない |
+| N1. 2 本立てのまま、自前の `load_skill` ツールを両方の送信経路に作る | CLI のスキルの仕組みに依存しない | 仕組みが 2 つ要る。中継にサーバー側のツールの往復と turn ごとの精算が増える |
 | ツールの定義も読み込んだ分だけ足す（遅延読み込み） | 前置きがさらに減る | 要求ごとに tools の組が変わると prompt caching の前置きが切れる。スコープ外（後続） |
 
 ## 結果
 
-- 良い点: 手順を足しても system prompt が伸びない（後続の #137・#138・#158・#140・#156 は SKILL.md を足して `skills.NAMES` に名前を足す）。送り口が 1 つになり、資格情報の切り替えは `AI_CREDENTIAL` だけ。依存が 3 つ減り、イメージは 452 MB → 443 MB
+- 良い点: 手順を足しても system prompt が伸びない（後続の #137・#138・#158・#140・#156 は SKILL.md を足して `skills.NAMES` に名前を足す）。送信経路が 1 つになり、資格情報の切り替えは `AI_CREDENTIAL` だけ。依存が 3 つ減り、イメージは 452 MB → 443 MB
 - 悪い点:
   - **Messages API の逃げ道が無くなる**。CLI の不具合・上げた版の破綻のとき、資格情報の切り替えでは逃げられない（戻し方は PR の revert）
   - スキルを読む質問は上流を 1 回多く呼ぶ（+2〜4 秒。締め切り 50 秒の内）。スキルの本文は読むたびに書き込みの単価（数百〜千トークン）

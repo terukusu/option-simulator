@@ -172,7 +172,7 @@ gh api $R/environments/prod/deployment-branch-policies --jq '[.branch_policies[]
 gh api $R/branches/main/protection --jq '[.required_status_checks.checks[].context] == ["check"]'   # ブランチ保護は変えない
 ```
 
-AI を使うときは repository variable `AI_CREDENTIAL`（`oauth_token`・`api_key`・`wif` のどれか。`wif` は「wif（Anthropic の WIF。鍵なし）」）と、任意で `AI_SECRET_VERSION`（版の番号）も設定する。どちらも秘匿値ではない（種類と版の番号だけ。値は Secret Manager）。未設定なら `none`・`latest` として扱う（「AI の資格情報（Secret Manager）」）。
+AI を使うときは repository variable `AI_CREDENTIAL`（`oauth_token`・`api_key`・`wif` のどれか。`wif` は「wif（Anthropic の WIF。鍵なし）」）と、任意で `AI_SECRET_VERSION`（バージョンの番号）も設定する。どちらも秘匿値ではない（種類とバージョンの番号だけ。値は Secret Manager）。未設定なら `none`・`latest` として扱う（「AI の資格情報（Secret Manager）」）。
 
 ブランチ保護（`main`、必須 check `check`）はこの手順では変えない。Terraform の検査は `check` job の中にあるので名前は変わらない。
 
@@ -207,7 +207,7 @@ $TF -chdir=infra/bootstrap apply -input=false b.tfplan; rm -f infra/bootstrap/b.
 | サービス | `simulator`（`var.region`、既定 `asia-northeast1`）、`iap_enabled = true`、`ingress = INGRESS_TRAFFIC_ALL`（IAP は run.app の URL に掛かる）、`invoker_iam_disabled = false`、`deletion_protection = false` |
 | 実行 | 第 1 世代、CPU 1・512Mi・リクエスト中だけ CPU、同時実行 8、0〜2 インスタンス、60 秒、SA `sa-simulator`、起動プローブ `/healthz`（BigQuery に触れない） |
 | イメージ | `<region>-docker.pkg.dev/<PROJECT_ID>/simulator/simulator`。タグは入力パスの git のハッシュ `src-<20hex>`（`.github/scripts/image.sh simulator tag`）、Cloud Run には digest で渡す。gunicorn 1 ワーカー・8 スレッド（API のキャッシュ・single-flight をインスタンス内で共有）、uid 10001、`STATIC_DIR=/app/static` |
-| 環境変数 | `GCP_PROJECT`・`BQ_DATASET`・`BQ_LOCATION`（Terraform の変数 `project_id`・`bq_dataset`・`bq_location`）。`MAX_BYTES_BILLED`・`DATA_SOURCE` は API の既定。変数 `ai_credential` が `none` 以外のときだけ `AI_CREDENTIAL`（種類）と、`ANTHROPIC_API_KEY` か `ANTHROPIC_AUTH_TOKEN` の片方（Secret Manager の参照。版は `ai_secret_version`） |
+| 環境変数 | `GCP_PROJECT`・`BQ_DATASET`・`BQ_LOCATION`（Terraform の変数 `project_id`・`bq_dataset`・`bq_location`）。`MAX_BYTES_BILLED`・`DATA_SOURCE` は API の既定。変数 `ai_credential` が `none` 以外のときだけ `AI_CREDENTIAL`（種類）と、`ANTHROPIC_API_KEY` か `ANTHROPIC_AUTH_TOKEN` の片方（Secret Manager の参照。バージョンは `ai_secret_version`） |
 | 権限 | `run.invoker` = IAP のサービスエージェント（`service-<番号>@gcp-sa-iap…`。番号は `data "google_project"`）だけ。閲覧者（`iap.httpsResourceAccessor`）は bootstrap の `simulator_iap_members` |
 
 outputs は置かない（サービスの URL はプロジェクト番号由来の文字列を含む）。
@@ -308,19 +308,19 @@ AI アドバイザー（`docs/ai-advisor.md`）が Claude を呼ぶための資�
 
 - `oauth_token`: CLI 経由でだけ使える（Messages API の直接呼び出しはこのトークンでは 429 になる。#186）。費用は数えない（Firestore を使わない）。**サブスクリプションの資格情報をこの用途に使ってよいかは、自分で規約を確かめる**（Anthropic の文書の原文と出典は ADR-0005 の「規約」。使うかはデプロイする人の自己責任。迷うなら `wif` か `api_key`）
 - `wif` / `api_key`: 従量課金で、1 日の上限（既定 $3）を Firestore で数える（「AI の費用の計上」）
-- Terraform の変数 `ai_credential` の既定は `none` のまま（Secret に版が無いまま `oauth_token` にするとインスタンスが起動しないため）。種類は GitHub の repository variable `AI_CREDENTIAL` で選ぶ
+- Terraform の変数 `ai_credential` の既定は `none` のまま（Secret にバージョンが無いまま `oauth_token` にするとインスタンスが起動しないため）。種類は GitHub の repository variable `AI_CREDENTIAL` で選ぶ
 
 | 種類（`AI_CREDENTIAL`） | シークレット | Cloud Run の環境変数 |
 |---|---|---|
 | `none`（既定。未設定も同じ） | — | 何も足さない（AI は無効） |
 | `oauth_token` | `simulator-anthropic-oauth-token` | `AI_CREDENTIAL=oauth_token`、`ANTHROPIC_AUTH_TOKEN`（参照。中継が CLI の子に `CLAUDE_CODE_OAUTH_TOKEN` としてだけ渡す） |
 | `api_key` | `simulator-anthropic-api-key` | `AI_CREDENTIAL=api_key`、`ANTHROPIC_API_KEY`（参照） |
-| `wif`（#184） | —（使わない） | `AI_CREDENTIAL=wif`、`ANTHROPIC_FEDERATION_RULE_ID`・`ANTHROPIC_ORGANIZATION_ID`（必須）・`ANTHROPIC_SERVICE_ACCOUNT_ID`・`ANTHROPIC_WORKSPACE_ID`（任意。空なら載せない）を素の値で |
+| `wif`（#184） | —（使わない） | `AI_CREDENTIAL=wif`、`ANTHROPIC_FEDERATION_RULE_ID`・`ANTHROPIC_ORGANIZATION_ID`（必須）・`ANTHROPIC_SERVICE_ACCOUNT_ID`・`ANTHROPIC_WORKSPACE_ID`（任意。空なら載せない）を Secret を使わない通常の環境変数で |
 
 - シークレットの入れ物 2 つ（東京だけに複製、`deletion_policy = "PREVENT"`）と、シークレット単位の `roles/secretmanager.secretAccessor`（`sa-simulator` だけ）は `infra/bootstrap/ai_credentials.tf`。apply SA・plan SA には Secret Manager の権限を付けない
-- **値（版）は Terraform に入れない**（state・plan・Cloud Run の設定に値が載らない）。所有者が標準入力から登録する
+- **値（バージョン）は Terraform に入れない**（state・plan・Cloud Run の設定に値が載らない）。所有者が標準入力から登録する
 - キーとトークンを同時に環境変数に置かない（両方あるとどちらで送るかの取り違えの元になる。中継（#134）は両方あると AI を無効にし、WARNING `ai_disabled`（`reason: ai_credential_conflict`）を出す）。`infra/prod` の変数 `ai_credential` 1 つで選び、テストで片方だけであることを確かめる
-- Cloud Run は環境変数の参照をインスタンスの起動時に解決する。**参照する版が無い・無効だとインスタンスが起動せず simulator 全体が開けない**。順序は必ず「値の登録 → `AI_CREDENTIAL` の設定」、戻すときは「`none` の deploy → 版の無効化」
+- Cloud Run は環境変数の参照をインスタンスの起動時に解決する。**参照するバージョンが無い・無効だとインスタンスが起動せず simulator 全体が開けない**。順序は必ず「値の登録 → `AI_CREDENTIAL` の設定」、戻すときは「`none` の deploy → バージョンの無効化」
 - deploy 時に Cloud Run は実行 SA（`sa-simulator`）がシークレットを読めるかを検査する。bootstrap の apply より先に `AI_CREDENTIAL` を設定すると deploy が失敗する（動いているリビジョンはそのまま）
 
 **1. bootstrap の apply**（所有者。「共通の変数」を設定してから）
@@ -350,7 +350,7 @@ read -rs V && printf '%s' "$V" | gcloud secrets versions add simulator-anthropic
 
 ```sh
 gh variable set AI_CREDENTIAL -R "$REPO" --body oauth_token  # または api_key
-# 任意: 版を番号で固定する（下の「版の指定」）
+# 任意: バージョンを番号で固定する（下の「バージョンの指定」）
 # gh variable set AI_SECRET_VERSION -R "$REPO" --body 1
 gh workflow run deploy.yml -R "$REPO" --ref main
 ```
@@ -377,20 +377,20 @@ curl -sf -H "Authorization: Bearer $(gcloud auth print-access-token)" \
 
 期待（`oauth_token` のとき）: `AI_CREDENTIAL` が `has_value: true`、`ANTHROPIC_AUTH_TOKEN` が `ref: "simulator-anthropic-oauth-token"`・`has_value: false`、`ANTHROPIC_API_KEY` は無い（`api_key` のときはその逆）。デプロイ後のエラーログ 0 件は prod の「確認」と同じ。`oauth_token` は続けて `api/README.md`「デプロイ後の確認」の `oauth_token` の項（診断・追加の質問・`spawn_ms`）を見る
 
-**5. 版の指定とローテーション**
+**5. バージョンの指定とローテーション**
 
-- 既定の `latest` は、インスタンスが起動したときの最新の版を読む。版を足すと新しいインスタンスから新しい値になり、古いインスタンスはアイドルで消える（最小 0 インスタンス）まで旧値のまま。値の差し替えに deploy が要らない
-- Google は環境変数では版の番号の固定を推奨している。固定するなら `AI_SECRET_VERSION` に番号を入れて deploy する（版を足すたびに variable と deploy が要るが、どの値で動いているかが deploy で決まる）
-- ローテーション: 2 で版を足す → すぐに切り替えたいなら `AI_SECRET_VERSION` を新しい番号にして deploy（`latest` のままなら `gh workflow run` では差分が出ないので、急ぐときは番号で） → 新しい値で動くことを確かめてから旧版を `gcloud secrets versions disable <番号> --secret=<シークレット> --project "$P"`。OAuth トークンは 1 年で切れるので期限の前に作り直す
-- `latest` は「最も新しく作った版」を指し、無効な版を飛ばして古い版に戻らない。**最新の版を無効にする（誤った値を登録して disable するなど）ときは、先に `AI_SECRET_VERSION` を有効な版の番号にして deploy するか `AI_CREDENTIAL=none` で deploy する**（`latest` のままだと新しいインスタンスが起動しない）
+- 既定の `latest` は、インスタンスが起動したときの最新のバージョンを読む。バージョンを足すと新しいインスタンスから新しい値になり、古いインスタンスはアイドルで消える（最小 0 インスタンス）まで旧値のまま。値の差し替えに deploy が要らない
+- Google は環境変数ではバージョンの番号の固定を推奨している。固定するなら `AI_SECRET_VERSION` に番号を入れて deploy する（バージョンを足すたびに variable と deploy が要るが、どの値で動いているかが deploy で決まる）
+- ローテーション: 2 でバージョンを足す → すぐに切り替えたいなら `AI_SECRET_VERSION` を新しい番号にして deploy（`latest` のままなら `gh workflow run` では差分が出ないので、急ぐときは番号で） → 新しい値で動くことを確かめてから旧バージョンを `gcloud secrets versions disable <番号> --secret=<シークレット> --project "$P"`。OAuth トークンは 1 年で切れるので期限の前に作り直す
+- `latest` は「最も新しく作ったバージョン」を指し、無効なバージョンを飛ばして古いバージョンに戻らない。**最新のバージョンを無効にする（誤った値を登録して disable するなど）ときは、先に `AI_SECRET_VERSION` を有効なバージョンの番号にして deploy するか `AI_CREDENTIAL=none` で deploy する**（`latest` のままだと新しいインスタンスが起動しない）
 
 **6. 切り戻し**
 
 | 状況 | 手段 |
 |---|---|
 | deploy 後に起動しない・AI を止めたい | `gh variable set AI_CREDENTIAL -R "$REPO" --body none`（または `gh variable delete AI_CREDENTIAL`）→ `gh workflow run deploy.yml` → 承認（環境変数が 3 つに戻る）。急ぐときは prod の「切り戻し・撤去」の `update-traffic` で旧リビジョンへ |
-| 鍵・トークンが漏れた | **最初に Anthropic 側で失効**（API キーは Claude Console で無効化。トークンは作り直す）→ `AI_CREDENTIAL=none` で deploy → `gcloud secrets versions disable` / `destroy`。順序を逆にする（版を先に無効にする）と、参照している simulator のインスタンスが起動しなくなる |
-| `oauth_token` で認証の失敗・429（`ai_request` の `error` が `upstream_auth` / `upstream_rate_limited`）（#186） | **`wif` に切り替える**（数える資格情報。deploy だけ）: `gh variable set AI_CREDENTIAL -R "$REPO" --body wif` → `gh workflow run deploy.yml -R "$REPO" --ref main` → plan の要約が update 1 なら承認 → `/api/ai/status` が `"credential":"wif","counted":true`。WIF の ID の variables は残したままでよい（下の「wif」）。`api_key` に戻すときは版が登録済みであること。**送信路（Agent SDK・同梱の CLI）そのものの不具合は資格情報の切り替えでは逃げられない**（#221 で Messages API を直接呼ぶ送信路を消した）→ prod の「切り戻し・撤去」の `update-traffic` で旧リビジョンへ、コードは PR の revert |
+| 鍵・トークンが漏れた | **最初に Anthropic 側で失効**（API キーは Claude Console で無効化。トークンは作り直す）→ `AI_CREDENTIAL=none` で deploy → `gcloud secrets versions disable` / `destroy`。順序を逆にする（バージョンを先に無効にする）と、参照している simulator のインスタンスが起動しなくなる |
+| `oauth_token` で認証の失敗・429（`ai_request` の `error` が `upstream_auth` / `upstream_rate_limited`）（#186） | **`wif` に切り替える**（数える資格情報。deploy だけ）: `gh variable set AI_CREDENTIAL -R "$REPO" --body wif` → `gh workflow run deploy.yml -R "$REPO" --ref main` → plan の要約が update 1 なら承認 → `/api/ai/status` が `"credential":"wif","counted":true`。WIF の ID の variables は残したままでよい（下の「wif」）。`api_key` に戻すときはバージョンが登録済みであること。**送信経路（Agent SDK・同梱の CLI）そのものの不具合は資格情報の切り替えでは逃げられない**（#221 で Messages API を直接呼ぶ送信経路を消した）→ prod の「切り戻し・撤去」の `update-traffic` で旧リビジョンへ、コードは PR の revert |
 | 付与の誤り | 修正の PR → 1 と同じ plan / apply。急ぐときは `gcloud secrets remove-iam-policy-binding`（あとで Terraform と揃える） |
 
 **7. 撤去**（この順で）
@@ -402,7 +402,7 @@ curl -sf -H "Authorization: Bearer $(gcloud auth print-access-token)" \
 
 ### wif（Anthropic の WIF。鍵なし）
 
-Cloud Run の実行 SA（`sa-simulator`）の Google の ID トークン（メタデータサーバーから、audience `https://api.anthropic.com`・`format=full` = `email` の claim を含む）を、中継が要求ごとに取って同梱の CLI に `ANTHROPIC_IDENTITY_TOKEN` で渡し、CLI が Anthropic の短命トークンに交換する（#184・#221。公式の手順は Claude のドキュメントの「Use WIF with Google Cloud」）。長命の鍵が無いので、登録・ローテーション・Secret Manager の版の管理が要らない。費用は API の従量課金で、計上（予約・精算・Firestore）は `api_key` と同じ（「AI の費用の計上（Firestore）」の bootstrap が要る）。GCP 側の IAM の付与・API の有効化は要らない（実行 SA は自分の ID トークンをメタデータサーバーから取れる）。
+Cloud Run の実行 SA（`sa-simulator`）の Google の ID トークン（メタデータサーバーから、audience `https://api.anthropic.com`・`format=full` = `email` の claim を含む）を、中継が要求ごとに取って同梱の CLI に `ANTHROPIC_IDENTITY_TOKEN` で渡し、CLI が Anthropic の短命トークンに交換する（#184・#221。公式の手順は Claude のドキュメントの「Use WIF with Google Cloud」）。長命の鍵が無いので、登録・ローテーション・Secret Manager のバージョンの管理が要らない。費用は API の従量課金で、計上（予約・精算・Firestore）は `api_key` と同じ（「AI の費用の計上（Firestore）」の bootstrap が要る）。GCP 側の IAM の付与・API の有効化は要らない（実行 SA は自分の ID トークンをメタデータサーバーから取れる）。
 
 **1. Claude Console**（所有者。Anthropic の組織の admin）: Workload identity の「Connect workload」で Google Cloud のタイルを選び、ウィザードで次を作る。
 
@@ -426,7 +426,7 @@ gh variable set AI_CREDENTIAL -R "$REPO" --body wif
 gh workflow run deploy.yml -R "$REPO" --ref main
 ```
 
-`plan` job の要約が **update 1**（`google_cloud_run_v2_service.simulator`）、他 0 なら `apply` job を承認する。`AI_CREDENTIAL=wif` でルール ID・組織 ID が空、または形が違うと plan が失敗する（動いているリビジョンはそのまま）。`ANTHROPIC_*` の variables は `AI_CREDENTIAL` が `wif` のときだけ環境変数に載り、形の検査も `wif` のときだけなので、残したまま `api_key` / `oauth_token` に切り替えてよい。Terraform は変数の検査に落ちるとエラーに値を表示するので、CI の terraform の job は最初に `.github/scripts/mask-wif-ids.sh`（`::add-mask::`）で ID を伏せ、失敗時のログ末尾の `MASK_SED` も `var.anthropic_* is "…"`・UUID・`fdrl_` などの形を伏せる（`.github/scripts/mask-wif-ids.test.sh`）。
+`plan` job の要約が **update 1**（`google_cloud_run_v2_service.simulator`）、他 0 なら `apply` job を承認する。`AI_CREDENTIAL=wif` でルール ID・組織 ID が空、または形式が違うと plan が失敗する（動いているリビジョンはそのまま）。`ANTHROPIC_*` の variables は `AI_CREDENTIAL` が `wif` のときだけ環境変数に載り、形式の検査も `wif` のときだけなので、残したまま `api_key` / `oauth_token` に切り替えてよい。Terraform は変数の検査に落ちるとエラーに値を表示するので、CI の terraform の job は最初に `.github/scripts/mask-wif-ids.sh`（`::add-mask::`）で ID を伏せ、失敗時のログ末尾の `MASK_SED` も `var.anthropic_* is "…"`・UUID・`fdrl_` などの形式の値を伏せる（`.github/scripts/mask-wif-ids.test.sh`）。
 
 **3. 確認**（ID の値は表示しない）
 
@@ -441,13 +441,13 @@ gcloud logging read 'resource.type="cloud_run_revision" AND resource.labels.serv
   --project "$P" --freshness=30m --format='value(jsonPayload.event,jsonPayload.credential,jsonPayload.error,jsonPayload.error_type,jsonPayload.reason)'
 ```
 
-期待: ブラウザ（IAP のログイン済み）で `/api/ai/status` が `"credential":"wif"`・`"counted":true`。`ai_request` が `wif` で `error` が空。`upstream_auth` で `error_type` が `token_exchange`（`upstream_status` 401 / 403）ならルールの不一致（Console の Workload identity の認証の履歴に理由が出る。多いのは `email` の claim の欠落と `sub` の取り違え）、`IdentityTokenError` ならメタデータサーバーから ID トークンが取れていない。`ai_disabled` の `reason` が `ai_credential_conflict` なら `ANTHROPIC_API_KEY` / `ANTHROPIC_AUTH_TOKEN` が残っている、`ai_credential_missing` / `ai_wif_invalid` なら ID が無い・形が違う。
+期待: ブラウザ（IAP のログイン済み）で `/api/ai/status` が `"credential":"wif"`・`"counted":true`。`ai_request` が `wif` で `error` が空。`upstream_auth` で `error_type` が `token_exchange`（`upstream_status` 401 / 403）ならルールの不一致（Console の Workload identity の認証の履歴に理由が出る。多いのは `email` の claim の欠落と `sub` の取り違え）、`IdentityTokenError` ならメタデータサーバーから ID トークンが取れていない。`ai_disabled` の `reason` が `ai_credential_conflict` なら `ANTHROPIC_API_KEY` / `ANTHROPIC_AUTH_TOKEN` が残っている、`ai_credential_missing` / `ai_wif_invalid` なら ID が無い・形式が違う。
 
 **4. 切り戻し**
 
 | 状況 | 手段 |
 |---|---|
-| 交換が通らない・AI を止めたい | `gh variable set AI_CREDENTIAL -R "$REPO" --body none`（または前の `api_key` / `oauth_token`。版が登録済みであること）→ `gh workflow run deploy.yml` → 承認。wif は起動時に何も解決しないので、ID の誤りで simulator 全体が起動しなくなることはない（AI だけが失敗する） |
+| 交換が通らない・AI を止めたい | `gh variable set AI_CREDENTIAL -R "$REPO" --body none`（または前の `api_key` / `oauth_token`。バージョンが登録済みであること）→ `gh workflow run deploy.yml` → 承認。wif は起動時に何も解決しないので、ID の誤りで simulator 全体が起動しなくなることはない（AI だけが失敗する） |
 | SA・ルールを止めたい | Claude Console で federation rule を無効化・削除する（交換したトークンはルールの `token_lifetime_seconds` で切れる）→ `AI_CREDENTIAL=none` で deploy |
 | 撤去 | `AI_CREDENTIAL=none` で deploy → `gh variable delete ANTHROPIC_FEDERATION_RULE_ID`（他の 3 つも）→ Console でルール・サービスアカウントを削除 |
 
@@ -502,7 +502,7 @@ Cloud Run のサービスを作るには、プロジェクト単位の `roles/ru
 
 - `sa-sim-tf-apply` を借用できるのは Environment `prod`（`main` のみ・所有者の承認必須）の job だけ（WIF の subject で固定）
 - state を分ける（simulator の prod の state には optionchan のリソースが入らないので、Terraform が optionchan のサービスを変えることはない）。plan の要約に optionchan のサービスが出たら承認しない
-- `sa-sim-tf-plan` の `roles/run.viewer` もプロジェクト単位なので、optionchan の Cloud Run の設定（環境変数の名前・値を含む）を読める（optionchan の plan SA と同等。秘匿値は環境変数の値に置かない。AI の資格情報は Secret Manager の参照だけで、plan SA が読めるのは参照の名前と版だけ）
+- `sa-sim-tf-plan` の `roles/run.viewer` もプロジェクト単位なので、optionchan の Cloud Run の設定（環境変数の名前・値を含む）を読める（optionchan の plan SA と同等。秘匿値は環境変数の値に置かない。AI の資格情報は Secret Manager の参照だけで、plan SA が読めるのは参照の名前とバージョンだけ）
 - `sa-sim-tf-apply` は `run.admin` と `sa-simulator` の `serviceAccountUser` を持つので、承認済みの deploy で任意のイメージを `sa-simulator` で動かせば AI の資格情報を読める。新しい付与ではなく既存の信頼境界（Environment `prod` の承認）の内側（`docs/adr-0001-ai-credentials-secret-manager.md`）
 
 ## 切り戻し・撤去
