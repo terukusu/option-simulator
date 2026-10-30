@@ -198,6 +198,7 @@ export function Stage(p: {
             legs={c.curLegs}
             legCount={c.curLegs.length}
             selectedLeg={p.selectedLeg}
+            legsLocked={c.tabsView.active.held}
             mini={mini}
             surfaceOn={surfaceOn}
             surface={grid}

@@ -26,16 +26,7 @@ import {
   type Side,
   ZERO_SCENARIO,
 } from '../../model';
-import type { Domain } from '../chart/scale';
-import {
-  type Action,
-  legAtStrike,
-  QTY_MAX,
-  reduce,
-  type State,
-  sameUiLeg,
-  type UiLeg,
-} from '../state';
+import { legAtStrike, QTY_MAX, type UiLeg } from '../state';
 import { fin, greeksOf, legId, r1, r2, yen } from './aiRound';
 import type { AiToolEnv, ToolError, ToolResult } from './aiTools';
 import { fmtNum } from './format';
@@ -900,8 +891,15 @@ const callsText = (s: Record<string, unknown>) => {
   return ok.length === 0 ? null : ok.map((x) => fmtNum(x)).join(' · ');
 };
 
-/** propose_position の結果 → カード（失敗・形が違えば null = カードを出さない） */
-export function proposalCard(input: Record<string, unknown>, result: unknown): ProposalCard | null {
+/**
+ * propose_position の結果 → カード（失敗・形が違えば null = カードを出さない）。held = 作業中のタブが保有（#301）:
+ * 今のタブ向けの提案もボタンを「新しいタブに入れる」にする（title・差分は今のタブとの比較のまま）
+ */
+export function proposalCard(
+  input: Record<string, unknown>,
+  result: unknown,
+  held = false,
+): ProposalCard | null {
   if (!isObj(result) || typeof result.error === 'string') return null;
   const target =
     result.target === 'new_tab' ? 'new_tab' : result.target === 'current' ? 'current' : null;
@@ -948,8 +946,17 @@ export function proposalCard(input: Record<string, unknown>, result: unknown): P
     title: target === 'current' ? 'ポジションの提案（今のタブ）' : 'ポジションの提案（新しいタブ）',
     lines,
     metrics,
-    button: target === 'current' ? '今のタブに適用' : '新しいタブに入れる',
+    button:
+      proposeApplyTarget(target, held) === 'current' ? '今のタブに適用' : '新しいタブに入れる',
   };
+}
+
+/**
+ * 提案を入れる先（#301）: 作業中のタブが保有なら、今のタブ向けの提案も新しいタブ（検討中）に入れる（保有のタブの
+ * 足の記録を一括で書き換えない）。足の組は今のタブに適用したときと同じ
+ */
+export function proposeApplyTarget(target: ProposeTarget, held: boolean): ProposeTarget {
+  return held && target === 'current' ? 'new_tab' : target;
 }
 
 // ---------------------------------------------------------------- 反映（[今のタブに適用] / [新しいタブに入れる]）
@@ -1008,71 +1015,8 @@ export const newTabFullText = (max: number) =>
 
 // ---------------------------------------------------------------- 新しいタブの [元に戻す]（#139 レビュー B1）
 
-/** [新しいタブに入れる] の控え（押した時点の作業中のタブ・横軸の表示範囲・入れた足） */
-export interface NewTabUndo {
-  /** 足したタブ */
-  tab: number;
-  /** 押したときに開いていたタブ */
-  from: number;
-  viewport: Domain | null;
-  /** 足したタブに入った足（reducer を通した後。id は除く） */
-  legs: ReadonlyArray<Omit<UiLeg, 'id'>>;
-}
-
-/**
- * [新しいタブに入れる] の action と控え（タブが上限なら null）。入った足は reducer を通した結果（足の市場の作り直しを含む）
- * で控える = [元に戻す] の照合が反映のときと同じ形になる
- */
-export function newTabPlan(
-  st: State,
-  legs: readonly UiLeg[],
-): { action: Action; undo: NewTabUndo } | null {
-  const action: Action = {
-    type: 'openPositionInNewTab',
-    legs: legs.map(({ id: _id, ...rest }) => rest),
-    scenario: null,
-    feePerLot: null,
-    futureBasis: null,
-  };
-  const next = reduce(st, action);
-  if (next === st || next.tabs.length === st.tabs.length) return null;
-  return {
-    action,
-    undo: {
-      tab: next.activeTab,
-      from: st.activeTab,
-      viewport: st.pnlViewport,
-      legs: next.legs.map(({ id: _id, ...rest }) => rest),
-    },
-  };
-}
-
-const sameLegs = (
-  a: ReadonlyArray<Omit<UiLeg, 'id'>>,
-  b: ReadonlyArray<Omit<UiLeg, 'id'>>,
-): boolean =>
-  a.length === b.length &&
-  a.every((l, i) => sameUiLeg({ ...l, id: 0 }, { ...(b[i] as Omit<UiLeg, 'id'>), id: 0 }));
-
-/**
- * [新しいタブに入れる] の [元に戻す]: 押したときのタブに戻り、足したタブだけを閉じ、横軸の表示範囲を戻す。足したタブの
- * 足が反映のときと違う（利用者が編集した）なら戻さない（edited = 編集を黙って捨てない）。足したタブがもう無ければ gone
- */
-export function newTabUndoActions(s: State, u: NewTabUndo): Action[] | 'edited' | 'gone' {
-  const slot = s.tabs.find((t) => t.id === u.tab);
-  if (!slot) return 'gone';
-  const cur = slot.saved
-    ? slot.saved.legs
-    : s.legs.map(({ id: _id, ...rest }) => rest as Omit<UiLeg, 'id'>);
-  if (!sameLegs(cur, u.legs)) return 'edited';
-  const out: Action[] = [];
-  if (u.from !== u.tab && s.tabs.some((t) => t.id === u.from)) {
-    out.push({ type: 'switchTab', id: u.from });
-  }
-  out.push({ type: 'closeTab', id: u.tab });
-  if (out[0]?.type === 'switchTab') out.push({ type: 'setPnlViewport', viewport: u.viewport });
-  return out;
-}
+// 仕組みは ui/view/newTab.ts（#301 で保有のタブの建て直しの写しと共用にした）。import 先を変えないよう再び公開する
+export { type NewTabUndo, newTabPlan, newTabUndoActions } from './newTab';
 
 /** [元に戻す] できないときの文 */
 export const NEW_TAB_UNDO_TEXT = {

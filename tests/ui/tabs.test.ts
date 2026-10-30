@@ -76,6 +76,22 @@ describe('tabsModel', () => {
     expect(v.tabs[0]?.name).toBe('<b>x</b>');
     expect(v.tabs[0]?.label).toBe('<b>x</b>（足 1 本）');
   });
+
+  it('#301 AC15: 保有のタブは印（held）と「保有」を含む label。印なしは今の文字列', () => {
+    const held = (t: TabSlot): TabSlot => ({ ...t, held: true });
+    const v = tabsModel([held(slot(1, 'A', 3)), slot(2, 'B', null), held(slot(3, 'C', 0))], 2, 2);
+    expect(v.tabs.map((t) => t.held)).toEqual([true, false, true]);
+    expect(v.tabs.map((t) => t.label)).toEqual([
+      'A（保有・足 3 本）',
+      'B（足 2 本）',
+      'C（保有・足なし）',
+    ]);
+    expect(v.active.held).toBe(false);
+    expect(tabsModel([held(slot(1, 'A', null))], 1, 2).active).toMatchObject({
+      held: true,
+      label: 'A（保有・足 2 本）',
+    });
+  });
 });
 
 describe('closeConfirmText', () => {

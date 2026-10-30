@@ -76,7 +76,8 @@ function BoxTabsView(p: BoxTabsProps) {
         // 新しい作業中のチップへフォーカス（閉じると同じ。ロービングのフォーカスを作業中のチップに保つ）
         focusNext.current = true;
         dispatch({ type: 'addTab', mode: 'copy' });
-      } else if (k === 'save') p.onSaveToBook();
+      } else if (k === 'held') dispatch({ type: 'setTabHeld', held: !active.held });
+      else if (k === 'save') p.onSaveToBook();
       else if (k === 'share') share.copy();
       else {
         focusNext.current = true;
@@ -160,6 +161,12 @@ function BoxTabsView(p: BoxTabsProps) {
               : { onClick: () => dispatch({ type: 'switchTab', id: t.id }) })}
           >
             <span class="nm">{t.name}</span>
+            {/* 保有の印（#301）: 色だけに頼らない文字のタグ。読み上げは aria-label の「保有」 */}
+            {t.held && (
+              <span class="hd" aria-hidden="true">
+                保
+              </span>
+            )}
             {t.countText !== null && <span class="n">{t.countText}</span>}
           </button>
         ))}

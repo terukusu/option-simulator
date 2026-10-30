@@ -23,6 +23,9 @@
  * 保存（作業のキー・保存一覧・URL・書き出したファイル）を「新しい版」として読まなくなる）。revert した画面は
  * `opened_at` を書かないので、保存し直すと建てた日時は落ち、保存一覧の変更判定（savedLeg の比較）が一度ずれる
  * （新しい画面で保存した項目が「変更あり」に見える。読めなくはならない）。
+ * 同じ例外: position の `held`（#301 の保有の印。true のときだけ書き、true 以外は印なしで読む）。古い画面は印の無い
+ * = 検討中として読む。revert した画面は `held` を書かないので、保存し直すと印が落ちる（保存一覧は 1 回の書き込みで
+ * 全項目を組み立て直すので全項目の印が落ちる）。
  */
 
 import {
@@ -47,6 +50,7 @@ import type {
 } from '../model';
 import type { Domain } from './chart/scale';
 import {
+  activeHeld,
   FEE_MAX,
   initialState,
   isContractId,
@@ -128,6 +132,8 @@ export interface SavedPositionV1 {
   board_snapshot_at: string | null;
   legs: SavedLegV1[];
   scenario: Scenario;
+  /** 保有の印（#301。true のときだけ書く。版据え置きの例外 = 冒頭のコメント） */
+  held?: true;
 }
 
 export interface SavedUiV1 {
@@ -268,6 +274,9 @@ function tabScenario(state: State, t: TabSlot): Scenario {
 const isoOrNull = (t: number | null): string | null =>
   t === null ? null : new Date(t).toISOString();
 
+/** 保有の印の部分（#301。印なしは何も書かない = 印なしの保存・変更の判定の文字列は今までと同じ） */
+const heldPart = (held: boolean): { held?: true } => (held ? { held: true } : {});
+
 /** 全タブの position（作業中のタブは state の足・シナリオ・今の板の時刻）。 */
 function tabsBody(state: State, b: ReturnType<typeof body>): SavedTabV2[] {
   return state.tabs.map((t) => ({
@@ -278,11 +287,13 @@ function tabsBody(state: State, b: ReturnType<typeof body>): SavedTabV2[] {
             board_snapshot_at: state.chain ? state.chain.snapshotAtText : null,
             legs: b.legs,
             scenario: b.scenario,
+            ...heldPart(t.held === true),
           }
         : {
             board_snapshot_at: isoOrNull(t.saved.boardSnapshotAt),
             legs: t.saved.legs.map(toSavedLeg),
             scenario: tabScenario(state, t),
+            ...heldPart(t.held === true),
           },
   }));
 }
@@ -300,6 +311,7 @@ export function persistKey(state: State): string {
       name: t.name,
       legs: t.position.legs.map((l) => l.leg),
       scenario: t.position.scenario,
+      ...heldPart(t.position.held === true),
     })),
     ui: b.ui,
   });
@@ -334,6 +346,7 @@ export function toSaved(state: State, now: number): SavedWorkspaceV1 {
       board_snapshot_at: state.chain ? state.chain.snapshotAtText : null,
       legs: b.legs,
       scenario: b.scenario,
+      ...heldPart(activeHeld(state)),
     },
     ui: b.ui,
   };
@@ -369,6 +382,8 @@ export interface Workspace {
     boardSnapshotAt: number | null;
     legs: Array<Omit<UiLeg, 'id'>>;
     scenario: Scenario;
+    /** 保有の印（#301。true のときだけ） */
+    held?: true;
   } | null;
   ui: UiPrefs;
 }
@@ -622,7 +637,9 @@ function readPosition(v: unknown): Workspace['position'] {
   const scenario = readScenario(own(v, 'scenario'));
   if (!scenario) return null;
   const snap = own(v, 'board_snapshot_at');
-  return { boardSnapshotAt: readTime(snap), legs, scenario };
+  const position = { boardSnapshotAt: readTime(snap), legs, scenario };
+  // 保有の印（#301）: true のときだけ。それ以外の値は印なし（足・position は捨てない）
+  return own(v, 'held') === true ? { ...position, held: true } : position;
 }
 
 function readPnlY(v: unknown): PnlYSettings {
@@ -882,6 +899,8 @@ export function savedFromWorkspace(ws: Workspace, fallbackTime: number): SavedWo
       board_snapshot_at: snap === null ? null : new Date(snap).toISOString(),
       legs: b.legs,
       scenario: b.scenario,
+      // 保存一覧は書き込みのたびに全項目をここで組み立て直す。印を書かないと全項目の印が落ちる（#301）
+      ...heldPart(ws.position?.held === true),
     },
     ui: b.ui,
   };
@@ -917,11 +936,16 @@ export function restoreWorkspace(base: State, saved: TabsWorkspace): State {
     return { ...s, tabs: [{ id: 1, name: 'A', saved: null }], activeTab: 1, nextTabId: 2 };
   }
   const activeAt = saved.tabs.indexOf(active);
-  const tabs: TabSlot[] = saved.tabs.map((t, i) => ({
-    id: i + 1,
-    name: t.name,
-    saved: i === activeAt ? null : t.position,
-  }));
+  const tabs: TabSlot[] = saved.tabs.map((t, i) => {
+    // 印の正は slot（#301）。退避した position には held を持たせない
+    const { held, ...position } = t.position;
+    return {
+      id: i + 1,
+      name: t.name,
+      saved: i === activeAt ? null : position,
+      ...(held === true ? { held: true as const } : {}),
+    };
+  });
   return { ...s, tabs, activeTab: activeAt + 1, nextTabId: tabs.length + 1 };
 }
 

@@ -93,6 +93,7 @@ describe('noticeRoute', () => {
       name: 'A',
       savedAt: null,
       boardSnapshotAt: null,
+      held: false,
     };
     const ok = must(shareNote({ kind: 'ok', shared }, 'newTab'));
     expect(toastOf(ok)).toEqual({ kind: 'note-shared', text: ok.text, note: 'info' });

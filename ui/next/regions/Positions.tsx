@@ -28,7 +28,7 @@ import {
 } from '../../view/positionsRegion';
 import type { ShellAction, Tier } from '../../view/shell';
 import type { ToastInput } from '../../view/toast';
-import { REBASE_LABEL, rebaseBlockedText } from '../../view/topMenu';
+import { clearBlockedText, rebaseBlockedText, rebaseLabel } from '../../view/topMenu';
 import { PanelHead } from '../PanelHead';
 import { Icon } from '../parts/Icon';
 import { Menu, type MenuItem } from '../parts/Menu';
@@ -137,13 +137,22 @@ export function Positions(p: Props) {
     if (l.toast) push({ kind: 'leg-add', text: l.toast });
   };
 
-  const rebaseBlocked = rebaseBlockedText(hasChain, c.curLegs.length);
+  // 保有のタブ（#301）: 全クリアは押せない・建て直しは写し（パレットと同じ関数）
+  const { held } = c.tabsView.active;
+  const rebaseBlocked = rebaseBlockedText(hasChain, c.curLegs.length, held, c.tabsView.canAdd);
+  const clearBlocked = clearBlockedText(c.curLegs.length, held);
   const items: MenuItem[] = [
     // 足の本数で決める（板が読めず行が無いときも消せる = #275 でトップの ⋯ の全クリアを外したため）
-    { key: 'clear', label: '全クリア', disabled: c.curLegs.length === 0, onSelect: onClear },
+    {
+      key: 'clear',
+      label: '全クリア',
+      disabled: clearBlocked !== null,
+      ...(clearBlocked === null ? {} : { title: clearBlocked }),
+      onSelect: onClear,
+    },
     {
       key: 'rebase',
-      label: REBASE_LABEL,
+      label: rebaseLabel(held),
       disabled: rebaseBlocked !== null,
       ...(rebaseBlocked === null ? {} : { title: rebaseBlocked }),
       onSelect: p.onRebase,

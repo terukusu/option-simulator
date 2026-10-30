@@ -846,6 +846,8 @@ export function useAppController(boot: Boot = NO_BOOT, margin: MarginPrefs = DEF
         scenario: e.ws.position.scenario,
         feePerLot: e.ws.ui.feePerLot,
         futureBasis: e.ws.ui.futureBasis,
+        // 保有の印は項目の値になる（#301）
+        held: e.ws.position.held === true,
       });
       setBookOpen(false);
       return true;
@@ -917,6 +919,8 @@ export function useAppController(boot: Boot = NO_BOOT, margin: MarginPrefs = DEF
   );
   // 一覧の要約は開いている間だけ（板・項目・ATM 基準・単位が変わったときだけ作り直す）
   const { legs: curLegs, scenario: curScenario } = state;
+  // 作業中のタブの保有の印（#301。印の正は TabSlot.held）
+  const curHeld = savedTabs.some((t) => t.id === activeTab && t.held === true);
   const bookView = useMemo(
     () =>
       bookOpen
@@ -926,8 +930,9 @@ export function useAppController(boot: Boot = NO_BOOT, margin: MarginPrefs = DEF
             atmBasis,
             calendar,
             unitSetting: metricsUnit,
-            currentKey: bookKey(curLegs, curScenario, feePerLot, futureBasis),
+            currentKey: bookKey(curLegs, curScenario, feePerLot, futureBasis, curHeld),
             legCount: curLegs.length,
+            held: curHeld,
           })
         : null,
     [
@@ -941,6 +946,7 @@ export function useAppController(boot: Boot = NO_BOOT, margin: MarginPrefs = DEF
       curScenario,
       feePerLot,
       futureBasis,
+      curHeld,
     ],
   );
   // 作業中のポジションのタブ（#71）。PnlChart は浅い比較で描き直しを省くので、表示モデルが変わったときだけ要素を作る

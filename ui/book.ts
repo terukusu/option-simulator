@@ -160,26 +160,34 @@ export function copyName(name: string): string {
 // ---------------------------------------------------------------- 変更の判定
 
 /**
- * 「作業中の内容と同じ項目か」の判定に使う文字列: 足の入力値・シナリオ・手数料・先物の basis
- * （開いたときに戻す範囲。表示の設定・足の市場・保存の時刻は含めない）。
+ * 「作業中の内容と同じ項目か」の判定に使う文字列: 足の入力値・シナリオ・手数料・先物の basis・保有の印（#301）
+ * （開いたときに戻す範囲。表示の設定・足の市場・保存の時刻は含めない）。印なしは印の無かったころと同じ文字列。
  */
 export function bookKey(
   legs: ReadonlyArray<{ leg: Leg }>,
   scenario: Scenario,
   feePerLot: number,
   futureBasis: 'fixed' | 'decay',
+  held = false,
 ): string {
   return JSON.stringify({
     legs: legs.map((l) => savedLeg(l.leg)),
     scenario: savedScenario(scenario),
     fee: feePerLot,
     basis: futureBasis,
+    ...(held ? { held: true } : {}),
   });
 }
 
 export function entryKey(e: OkEntry): string {
   const { position, ui } = e.ws;
-  return bookKey(position.legs, position.scenario, ui.feePerLot, ui.futureBasis);
+  return bookKey(
+    position.legs,
+    position.scenario,
+    ui.feePerLot,
+    ui.futureBasis,
+    position.held === true,
+  );
 }
 
 // ---------------------------------------------------------------- 読み取り・検証
@@ -387,7 +395,17 @@ export function duplicateEntry(book: Book, id: string, now: number, newId: strin
   const i = indexOf(book, id);
   const cur = book.entries[i];
   if (cur?.status !== 'ok') return { ok: false, reason: 'notFound' };
-  const copy: OkEntry = { ...cur, id: newId, name: copyName(cur.name), createdAt: now };
+  // 写しは検討中（#301 オーナー判断 4）: 保有の印を落とす
+  const { held: _wh, ...wsPosition } = cur.ws.position;
+  const { held: _sh, ...savedPosition } = cur.saved.position;
+  const copy: OkEntry = {
+    ...cur,
+    id: newId,
+    name: copyName(cur.name),
+    createdAt: now,
+    saved: { ...cur.saved, position: savedPosition },
+    ws: { ...cur.ws, position: wsPosition },
+  };
   const entries = [...book.entries];
   entries.splice(i + 1, 0, copy);
   return finish(book, { entries });

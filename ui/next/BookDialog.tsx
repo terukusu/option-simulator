@@ -131,7 +131,7 @@ function BookBody(props: BookDialogProps & { view: BookListView }) {
     props.onSave(name);
   };
   const open = (row: BookRowView) => {
-    const next = requestOpen(view.unsaved, row.id);
+    const next = requestOpen(view.unsaved, row.id, view.held);
     if (next === 'open') done(props.onOpen(row.id));
     else ask(next);
   };

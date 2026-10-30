@@ -67,7 +67,10 @@
 //                                          ドラッグのパン・長押しのシナリオ点）、390 のタッチ（タップで置く・交点のドラッグ・読み取りの
 //                                          タップで消す・長押しのシナリオ点・パン・描画域の外のタップで消す）
 //   npm run ui:check -- --parts            部品の見本（?parts。dev だけ）
-//   npm run ui:check -- --flows            保存・共有・テーマ・キーボードの手順（#81 AC-11・AC-12）と入口の手順（#91: クエリなし・
+//   npm run ui:check -- --flows            保有の印の手順（#301: 360×780 と 1440×900 で保有のチップの「保」・タブのメニュー・
+//                                          ポジションの ⋯ の写しの建て直しと押せない全クリア・保存一覧の「保有」のタグ。折り返し・切れ・
+//                                          ページのスクロール 0px。--shots で held-*.png）と
+//                                          保存・共有・テーマ・キーボードの手順（#81 AC-11・AC-12）と入口の手順（#91: クエリなし・
 //                                          古い ?ui=next と旧画面を開いていた ui の値で同じ画面・部品の見本の ?parts・旧画面のときの
 //                                          保存（版 1 / 2）を開く）と舞台の手順
 //                                          （#82: ハンドル・IV / 時間レール・キー・足マーカー・Long Animation Frame）とシナリオの手順
@@ -3679,6 +3682,9 @@ async function runFlows() {
     { width: 390, height: 844 },
   ])
     await futPanePeekTouchFlow(vp);
+
+  // #301 保有の印（チップ・タブのメニュー・ポジションの ⋯・保存一覧の行。360px と PC）
+  for (const vp of [{ width: 360, height: 780 }, pc]) await heldFlows(vp);
 
   // (a) 開いただけでは作業の保存を書き換えない・ドックのバッジ
   {
@@ -7492,6 +7498,184 @@ const focusLabel = (page) =>
     cls: document.activeElement?.getAttribute('class') ?? null,
   }));
 const bookText = (page) => page.evaluate((k) => localStorage.getItem(k), BOOK_KEY_LS);
+
+// ---- 保有の印（#301 AC18）: 360×780・1440×900 で、保有のタブのチップの印・タブのメニュー・ポジションの ⋯（写しの建て直し・
+// 全クリアが押せない）・保存一覧の行の「保有」のタグが切れず折り返さず、ページの縦・横スクロールが 0px
+/** 作業のキーのタブ A（足 2 本）に保有の印を付けたもの（fixture は変えない。ここで組み立てる） */
+const heldLegs = JSON.stringify({
+  ...fixture,
+  active: 0,
+  tabs: [{ ...fixture.tabs[0], position: { ...fixture.tabs[0].position, held: true } }],
+});
+
+/** scope の中で 2 行以上に折り返した文字（measure と同じ規則）と、文字が切れた要素（scrollWidth > clientWidth） */
+function scopeWraps(page, scope) {
+  return page.evaluate((sel) => {
+    const wraps = [];
+    const cut = [];
+    for (const root of document.querySelectorAll(sel)) {
+      for (const el of [root, ...root.querySelectorAll('*')]) {
+        const cs = getComputedStyle(el);
+        if (cs.display === 'none' || cs.visibility === 'hidden') continue;
+        const txt = [...el.childNodes]
+          .filter((c) => c.nodeType === 3)
+          .map((c) => c.textContent)
+          .join('')
+          .trim();
+        if (!txt) continue;
+        const range = document.createRange();
+        range.selectNodeContents(el);
+        const lines = new Set(
+          [...range.getClientRects()].filter((r) => r.width > 0).map((r) => Math.round(r.top)),
+        );
+        if (lines.size > 1) wraps.push(`${el.tagName}.${el.getAttribute('class') ?? ''}「${txt}」`);
+        // 名前は省略（…）してよい（.nm・.bk-name）。それ以外の文字が切れていないか
+        const ellipsis = cs.textOverflow === 'ellipsis';
+        if (!ellipsis && el.scrollWidth > el.clientWidth + 1 && cs.overflowX !== 'visible')
+          cut.push(`${el.tagName}.${el.getAttribute('class') ?? ''}「${txt}」`);
+      }
+    }
+    return { wraps, cut };
+  }, scope);
+}
+
+async function heldFlows(vp) {
+  const tag = `#301 ${vp.width}x${vp.height}`;
+  const phoneSize = vp.width <= PHONE_MAX;
+  const ctx = await newContext(vp, { [WORKSPACE_KEY]: heldLegs });
+  const page = await ctx.newPage();
+  await page.goto(pageUrl('next'));
+  await waitReady(page, 'next');
+  const shot = async (name) => {
+    if (shotsDir) await page.screenshot({ path: join(shotsDir, `held-${vp.width}-${name}.png`) });
+  };
+  const scroll0 = async (what) => {
+    const r = await measure(page);
+    check(
+      `${tag} ${what}: ページの縦・横スクロール 0px`,
+      r.v === 0 && r.h === 0,
+      `縦 ${r.v} 横 ${r.h}`,
+    );
+  };
+  const ws = () =>
+    page.evaluate((k) => {
+      try {
+        return JSON.parse(localStorage.getItem(k) ?? 'null');
+      } catch {
+        return null;
+      }
+    }, WORKSPACE_KEY);
+
+  // (1) 帯のチップ: 文字「保」の印・aria-label に保有。帯の中で折り返さない
+  const chip = await page.evaluate((sel) => {
+    const c = document.querySelector(sel);
+    return {
+      hd: c?.querySelector('.hd')?.textContent ?? null,
+      label: c?.getAttribute('aria-label') ?? '',
+    };
+  }, CHIP);
+  const strip = await scopeWraps(page, '.boxtabs');
+  check(
+    `${tag} 保有のチップに「保」の印・aria-label に保有、帯の折り返し 0・切れ 0`,
+    chip.hd === '保' &&
+      chip.label.includes('保有') &&
+      strip.wraps.length === 0 &&
+      strip.cut.length === 0,
+    `${JSON.stringify(chip)}・${[...strip.wraps, ...strip.cut].join(' / ')}`,
+  );
+  await scroll0('保有のチップ');
+  await shot('chip');
+
+  // (2) タブのメニュー: 「保有を外す」。メニューの行が折り返さない・切れない
+  await page.click(CHIP);
+  await page.waitForSelector('[role="menu"]', { timeout: 3000 }).catch(() => {});
+  const menuRows = await page.evaluate(() =>
+    [...document.querySelectorAll('[role="menu"] [role^="menuitem"]')].map((m) => m.textContent),
+  );
+  const mw = await scopeWraps(page, '[role="menu"]');
+  check(
+    `${tag} タブのメニューに「保有を外す」・折り返し 0・切れ 0`,
+    menuRows.includes('保有を外す') && mw.wraps.length === 0 && mw.cut.length === 0,
+    `${menuRows.join('・')}・${[...mw.wraps, ...mw.cut].join(' / ')}`,
+  );
+  await scroll0('タブのメニュー');
+  await shot('tabmenu');
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(100);
+
+  // (3) ポジションの ⋯: 全クリアが押せない・「写しを今の板で建て直す」
+  if (phoneSize) await setShell(page, 'positions', 'full');
+  const P = 'section.positions';
+  await page.click(`${P} button[aria-label="ポジションの操作"]`);
+  await page.waitForSelector('[role="menu"]', { timeout: 3000 }).catch(() => {});
+  const items = await page.evaluate(() =>
+    [...document.querySelectorAll('[role="menu"] [role^="menuitem"]')].map((m) => ({
+      text: m.textContent,
+      off: m.getAttribute('aria-disabled') === 'true',
+      title: m.getAttribute('title'),
+    })),
+  );
+  const pw = await scopeWraps(page, '[role="menu"]');
+  const clear = items.find((i) => i.text === '全クリア');
+  const copy = items.find((i) => i.text === '写しを今の板で建て直す');
+  check(
+    `${tag} ポジションの ⋯: 全クリアが押せない（理由つき）・「写しを今の板で建て直す」が押せる・折り返し 0`,
+    clear?.off === true && !!clear?.title && copy?.off === false && pw.wraps.length === 0,
+    `${JSON.stringify(items)}・${pw.wraps.join(' / ')}`,
+  );
+  await shot('posmenu');
+  // 押す → タブが 1 個増えて切り替わる。元のタブの足（建値・建てた日時）は同じ・印が残る。新しいタブは印なし
+  const before = await ws();
+  await page.click('[role="menuitem"]:has-text("写しを今の板で建て直す")');
+  await page.waitForTimeout(800); // 自動保存（500ms の debounce）
+  const after = await ws();
+  const origBefore = before?.tabs?.[0]?.position;
+  const origAfter = after?.tabs?.[0]?.position;
+  const toast = await page
+    .locator('.toast:not(.note)', { hasText: '写し' })
+    .locator('button', { hasText: '元に戻す' })
+    .count();
+  check(
+    `${tag} 写しの建て直し: タブ ${before?.tabs?.length} → ${after?.tabs?.length}・元のタブの足が同じで保有のまま・新しいタブは印なし・[元に戻す] あり`,
+    after?.tabs?.length === 2 &&
+      after?.active === 1 &&
+      JSON.stringify(origAfter?.legs?.map((l) => l.leg)) ===
+        JSON.stringify(origBefore?.legs?.map((l) => l.leg)) &&
+      origAfter?.held === true &&
+      after?.tabs?.[1]?.position?.held === undefined &&
+      toast === 1,
+    `toast ${toast}`,
+  );
+  await scroll0('写しの建て直しの後');
+  await shot('rebased');
+  if (phoneSize) await setShell(page, 'positions', 'hidden');
+
+  // (4) 保有のタブに戻り、保存一覧に保存 → 行に「保有」のタグ。行が切れない・タグが折り返さない
+  await page.click('.boxtabs .boxtab:first-child');
+  await page.waitForTimeout(150);
+  await openFromMore(page, '保存一覧', BOOK);
+  await page.fill(`${BOOK} .bk-save input`, '保有の検査');
+  await page.click(`${BOOK} .bk-save button:has-text("保存")`);
+  await page.waitForTimeout(150);
+  const tags = await page.evaluate(
+    (sel) =>
+      [...document.querySelectorAll(`${sel} .bk-row .bk-head`)].map((h) => ({
+        tags: [...h.querySelectorAll('.tag')].map((t) => t.textContent),
+      })),
+    BOOK,
+  );
+  const bw = await scopeWraps(page, `${BOOK} .bk-head`);
+  check(
+    `${tag} 保存一覧の行に「保有」「作業中」のタグ・行の見出しの折り返し 0・切れ 0`,
+    tags.some((t) => t.tags[0] === '保有' && t.tags.includes('作業中')) &&
+      bw.wraps.length === 0 &&
+      bw.cut.length === 0,
+    `${JSON.stringify(tags)}・${[...bw.wraps, ...bw.cut].join(' / ')}`,
+  );
+  await scroll0('保存一覧（保有の行）');
+  await shot('book');
+  await ctx.close();
+}
 
 async function bookSettingsFlows(vp) {
   const tag = `${vp.width}x${vp.height}`;

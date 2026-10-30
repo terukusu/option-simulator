@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { AI_EVAL_CASES, caseMargin, caseState } from '../../scripts/aiEvalCases';
-import { reduce, type State, type UiLeg } from '../../ui/state';
+import { activeHeld, reduce, type State, type UiLeg } from '../../ui/state';
 import { aiEnvFromState } from '../../ui/view/aiContext';
 import {
   newTabPlan,
@@ -8,6 +8,7 @@ import {
   planProposal,
   proposalApply,
   proposalCard,
+  proposeApplyTarget,
   SCAN_MAX_ROWS,
   STRUCTURES,
   strikeWidths,
@@ -272,6 +273,32 @@ describe('カードと反映（AC4）', () => {
     expect(proposalCard({ ...input, target: 'new_tab' }, result)).toBeNull();
   });
 
+  it('#301 AC5: 保有のタブでは今のタブ向けの提案も新しいタブ（印なし）に入れ、保有のタブは変えない', () => {
+    // カードのボタン（title・差分は今のタブとの比較のまま）
+    const card = proposalCard(input, result, true);
+    expect(card?.title).toBe('ポジションの提案（今のタブ）');
+    expect(card?.button).toBe('新しいタブに入れる');
+    expect(proposalCard(input, result, false)?.button).toBe('今のタブに適用');
+    // 入れる先
+    expect(proposeApplyTarget('current', true)).toBe('new_tab');
+    expect(proposeApplyTarget('current', false)).toBe('current');
+    expect(proposeApplyTarget('new_tab', true)).toBe('new_tab');
+    expect(proposeApplyTarget('new_tab', false)).toBe('new_tab');
+    // 画面（NextApp.onAiPropose）と同じ経路: 作り直した足を newTabPlan で新しいタブに
+    const held = reduce(s, { type: 'setTabHeld', held: true });
+    const r = proposalApply(envOf('put_ratio', held), input, result);
+    if ('error' in r) throw new Error(r.error);
+    expect(proposeApplyTarget(r.target, activeHeld(held))).toBe('new_tab');
+    const plan = newTabPlan(held, r.legs);
+    if (!plan) throw new Error('plan');
+    const next = reduce(held, plan.action);
+    const orig = next.tabs.find((t) => t.id === held.activeTab);
+    expect(orig?.held).toBe(true);
+    expect(orig?.saved?.legs).toEqual(held.legs.map(({ id: _id, ...rest }) => rest));
+    expect(activeHeld(next)).toBe(false);
+    expect(next.legs.map((l) => l.leg)).toEqual(r.legs.map((l) => l.leg));
+  });
+
   it('反映: 押した時点の state から作り直して置き換え、[元に戻す] で戻る', () => {
     const r = proposalApply(env, input, result);
     if ('error' in r) throw new Error(r.error);
@@ -441,6 +468,12 @@ describe('[新しいタブに入れる] の [元に戻す]（#139 レビュー B
       'edited',
     );
     expect(newTabUndoActions(reduce(applied, { type: 'closeTab', id: 3 }), plan.undo)).toBe('gone');
+  });
+
+  it('#301: 足したタブを利用者が保有にしていたら戻さない（edited。黙って閉じない）', () => {
+    const held = reduce(applied, { type: 'setTabHeld', held: true });
+    expect(newTabUndoActions(held, plan.undo)).toBe('edited');
+    expect(newTabUndoActions(reduce(held, { type: 'switchTab', id: 1 }), plan.undo)).toBe('edited');
   });
 
   it('タブが上限なら計画は null', () => {

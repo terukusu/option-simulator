@@ -77,6 +77,30 @@ export interface TabSlot {
   name: string;
   /** 作業中のタブは null（中身は State の legs / scenario）、他のタブは退避した position */
   saved: TabPosition | null;
+  /**
+   * 保有の印（#301。設計 13.4「BOX タブ」）。作業中のタブも退避したタブも slot に持つ（切り替え・退避で保たれる）。
+   * true のときだけ持つ（false は持たずキーごと消す）。保存形式は position.held（ui/persist.ts）
+   */
+  held?: true;
+}
+
+/** 作業中のタブの印を held にする（同じなら同じ参照） */
+function setActiveHeld(state: State, held: boolean): State {
+  const tabs = state.tabs.map((t) => (t.id === state.activeTab ? withHeld(t, held) : t));
+  return tabs.every((t, i) => t === state.tabs[i]) ? state : { ...state, tabs };
+}
+
+/** 作業中のタブが保有か（#301。印の正は TabSlot.held） */
+export function activeHeld(state: State): boolean {
+  return state.tabs.some((t) => t.id === state.activeTab && t.held === true);
+}
+
+/** slot の印を held にする（false はキーごと消す。同じなら同じ参照） */
+function withHeld(slot: TabSlot, held: boolean): TabSlot {
+  if (held) return slot.held === true ? slot : { ...slot, held: true };
+  if (slot.held === undefined) return slot;
+  const { held: _h, ...rest } = slot;
+  return rest;
 }
 
 export interface LoadErrorView {
@@ -270,6 +294,11 @@ export type Action =
   | { type: 'replaceLegs'; legs: readonly UiLeg[]; expect: readonly UiLeg[]; tab: number }
   | { type: 'removeLeg'; id: number }
   | { type: 'clearLegs' }
+  /**
+   * 作業中のタブの保有の印を付ける / 外す（#301。タブのメニュー）。足 0 本のタブには付けない（state のまま）。
+   * 付けたあと足が 0 本になっても外さない
+   */
+  | { type: 'setTabHeld'; held: boolean }
   | { type: 'clearLegError' }
   | { type: 'setHedge'; patch: Partial<HedgeSettings> }
   /**
@@ -284,6 +313,8 @@ export type Action =
       futureBasis: ModelSettings['futureBasis'] | null;
       /** 開いたタブの名前（URL 共有 #72。renameTab と同じ規則: 正規化して空・他のタブと同じなら今の名前のまま） */
       name?: string;
+      /** 保有の印（#301）。作業中のタブの印をこの値にする（省略 = 印なし） */
+      held?: boolean;
     }
   /** 保存一覧の項目・URL 共有を新しいタブで開く（#71・#72。上限なら何もしない。作業中のタブは残す） */
   | {
@@ -293,6 +324,8 @@ export type Action =
       feePerLot: number | null;
       futureBasis: ModelSettings['futureBasis'] | null;
       name?: string;
+      /** 保有の印（#301）。新しいタブに true のときだけ付ける（作業中だったタブの印は変えない） */
+      held?: boolean;
     }
   /** タブを足す（作業中のタブの右隣。empty = 足 0 本、copy = 作業中の足の写し）。上限なら何もしない */
   | { type: 'addTab'; mode: 'empty' | 'copy' }
@@ -477,11 +510,12 @@ function addTabWith(
   state: State,
   legs: ReadonlyArray<Omit<UiLeg, 'id'>>,
   scenario: Scenario | null,
+  held = false,
 ): State | null {
   if (state.tabs.length >= MAX_TABS) return null;
   const stash = stashActive(state);
   const id = state.nextTabId;
-  const slot: TabSlot = { id, name: nextTabName(state.tabs), saved: null };
+  const slot: TabSlot = withHeld({ id, name: nextTabName(state.tabs), saved: null }, held);
   const at = state.tabs.findIndex((t) => t.id === state.activeTab);
   const tabs = state.tabs.map((t) => (t.id === state.activeTab ? { ...t, saved: stash } : t));
   tabs.splice(at + 1, 0, slot);
@@ -508,6 +542,8 @@ export interface RestoreTabAction {
   index: number;
   active: boolean;
   viewport: Domain | null;
+  /** 閉じる前のタブの保有の印（#301。戻したタブに付ける） */
+  held?: true;
 }
 
 /**
@@ -528,6 +564,7 @@ export function restoreTabAction(state: State, id: number): RestoreTabAction | n
     index,
     active,
     viewport: state.pnlViewport,
+    ...(slot.held === true ? { held: true as const } : {}),
   };
 }
 
@@ -540,14 +577,14 @@ function restoreTab(state: State, a: RestoreTabAction): State {
   const id = state.nextTabId;
   if (!a.active) {
     const tabs = state.tabs.slice();
-    tabs.splice(at, 0, { id, name, saved: a.position });
+    tabs.splice(at, 0, withHeld({ id, name, saved: a.position }, a.held === true));
     return { ...state, tabs, nextTabId: id + 1 };
   }
   const stash = stashActive(state);
   const tabs: TabSlot[] = state.tabs.map((t) =>
     t.id === state.activeTab ? { ...t, saved: stash } : t,
   );
-  tabs.splice(at, 0, { id, name, saved: null });
+  tabs.splice(at, 0, withHeld({ id, name, saved: null }, a.held === true));
   const loaded = loadLegs(state, a.position.legs, SCENARIO_PER_TAB ? a.position.scenario : null);
   return {
     ...loaded,
@@ -721,6 +758,8 @@ export function reduce(state: State, action: Action): State {
         ),
       };
     case 'changeLegStrike': {
+      // 保有のタブの足の K は変えない（#301。画面は足マーカーをつかませない。reducer でも守る）
+      if (activeHeld(state)) return state;
       const i = state.legs.findIndex((l) => l.id === action.id);
       const cur = state.legs[i];
       const next = cur ? legAtStrike(state.chain, cur, action.k) : null;
@@ -772,7 +811,13 @@ export function reduce(state: State, action: Action): State {
       return { ...state, legs, pnlViewport: legs.length === 0 ? null : state.pnlViewport };
     }
     case 'clearLegs':
+      // 保有のタブは全クリアしない（#301。画面は押せない。reducer でも守る）
+      if (activeHeld(state)) return state;
       return { ...state, legs: [], pnlViewport: null };
+    case 'setTabHeld': {
+      if (action.held && state.legs.length === 0) return state;
+      return setActiveHeld(state, action.held);
+    }
     case 'clearLegError':
       return state.legError === null ? state : { ...state, legError: null };
     case 'openPosition':
@@ -781,8 +826,8 @@ export function reduce(state: State, action: Action): State {
       const { feePerLot, futureBasis } = action;
       const next =
         action.type === 'openPosition'
-          ? loadLegs(state, action.legs, action.scenario)
-          : addTabWith(state, action.legs, action.scenario);
+          ? setActiveHeld(loadLegs(state, action.legs, action.scenario), action.held === true)
+          : addTabWith(state, action.legs, action.scenario, action.held === true);
       if (next === null) return state;
       const named = action.name === undefined ? next : renameActive(next, action.name);
       return {

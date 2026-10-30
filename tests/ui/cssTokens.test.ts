@@ -304,6 +304,15 @@ describe('ui/next の CSS のトークン（§7）', () => {
     expect(S4_TEXT_TOKENS.map((t) => `var(${t})`)).toContain(d.get('color'));
   });
 
+  it('BOX タブの保有の印（.boxtab .hd。#301）は面を塗らず、文字は --ink / --ink-2（帯の面に 4.5:1）', () => {
+    const top = stripComments(files['../../ui/next/css/top.css'] ?? '');
+    const tag = blocks(top).find((b) => b.selector === '.boxtab .hd');
+    expect(tag, '.boxtab .hd').toBeDefined();
+    const d = decls(tag?.body ?? '');
+    expect(d.get('background')).toBeUndefined();
+    expect(['var(--ink)', 'var(--ink-2)']).toContain(d.get('color'));
+  });
+
   it('コントラストの計算そのもの（白 / 黒 = 21、同じ色 = 1、#767676 / 白 ≈ 4.54）', () => {
     expect(contrast('#ffffff', '#000000')).toBeCloseTo(21, 6);
     expect(contrast('#123456', '#123456')).toBeCloseTo(1, 6);

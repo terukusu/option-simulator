@@ -166,6 +166,7 @@ describe('shareNote', () => {
     name: '<b>偽の知らせ</b>',
     savedAt: SAVED,
     boardSnapshotAt: SNAP,
+    held: false,
   };
 
   it('開いた: 開いた先・足の本数・共有の時刻・板の時刻。名前は入れない', () => {
@@ -184,6 +185,16 @@ describe('shareNote', () => {
     });
     expect(bare?.text).toMatch(/^URL のポジションを作業中のタブで開いた（足 3 本）。/);
     expect(n?.text).not.toContain('偽');
+  });
+
+  it('保有の印つき（#301 AC16）: 保有と分かる文言・印の外し方。印なしは今の文のまま', () => {
+    const n = shareNote({ kind: 'ok', shared: { ...shared, held: true } }, 'newTab');
+    expect(n).toEqual({
+      kind: 'shared',
+      text: 'URL のポジション（保有）を新しいタブで開いた（足 3 本。共有 2026-11-02 21:47、そのときの板 2026-11-02 21:31）。建値は共有時のまま。シナリオ・手数料・先物の basis は今のまま（URL の値は使わない）。保有の印はタブのメニューで外せる',
+      warn: false,
+    });
+    expect(shareNote({ kind: 'ok', shared }, 'newTab')?.text).not.toContain('保有');
   });
 
   it('読めない理由ごとの注意（作業は変えていない）。#p= でなければ出さない', () => {

@@ -965,3 +965,112 @@ describe('ΔX の範囲を広げた後の保存（#144）', () => {
     expect(bootState(readWorkspace(text)).scenario.dX).not.toBe(1000001);
   });
 });
+
+/** 文字列の SHA-256（16 進。Web Crypto） */
+async function sha256Hex(text: string): Promise<string> {
+  const d = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
+  return Array.from(new Uint8Array(d), (b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+/** #301: 保有の印（position.held。版据え置きの例外）の保存・読み取り */
+describe('保有の印（#301）', () => {
+  const chain = normalizeChain(fixture('latest'));
+  const m0 = chain.months[0];
+  if (!m0) throw new Error('限月が無い');
+  const k0 = m0.rows[Math.floor(m0.rows.length / 2)]?.k ?? 0;
+  const sell: Action = {
+    type: 'addBoardLeg',
+    expiry: m0.id,
+    k: k0,
+    optionType: 'put',
+    side: 'sell',
+  };
+  const HOLD: Action = { type: 'setTabHeld', held: true };
+  const heldOf = (s: State) => s.tabs.map((t) => t.held === true);
+  /** 保有のタブ A（退避）・検討中の B・保有の C（作業中） */
+  const three = () =>
+    run(
+      initialState,
+      { type: 'loaded', chain, label: 'latest' },
+      sell,
+      HOLD,
+      { type: 'addTab', mode: 'empty' },
+      sell,
+      { type: 'addTab', mode: 'copy' },
+      HOLD,
+    );
+
+  it('AC13: 印なしの state の persistKey は変更前と同じ文字列（v2 の fixture。変更前の値の sha256 を固定）', async () => {
+    const s = bootState(readWorkspace(JSON.stringify(v2)));
+    const sha = await sha256Hex(persistKey(s));
+    expect(sha).toBe('40917d246e99ea71220ea1e2ed116d9359d52726481a6180d8680faebb3fe537');
+    expect(persistKey(s)).not.toContain('held');
+  });
+
+  it('AC13: 印の付け外しで persistKey が変わる（自動保存が書く）', () => {
+    const s = run(initialState, { type: 'loaded', chain, label: 'latest' }, sell);
+    const h = reduce(s, HOLD);
+    expect(persistKey(h)).not.toBe(persistKey(s));
+    expect(persistKey(reduce(h, { type: 'setTabHeld', held: false }))).toBe(persistKey(s));
+    // 退避したタブの印も含める
+    const other = reduce(h, { type: 'addTab', mode: 'empty' });
+    const plainOther = run(s, { type: 'addTab', mode: 'empty' });
+    expect(persistKey(other)).not.toBe(persistKey(plainOther));
+  });
+
+  it('AC10: 作業のキー（版 2）の往復で全タブの印が戻る。印は true のときだけ書く', () => {
+    const s = three();
+    expect(heldOf(s)).toEqual([true, false, true]);
+    const text = serializeWorkspace(s, NOW);
+    const raw = JSON.parse(text) as { tabs: Array<{ position: Rec }> };
+    expect(raw.tabs.map((t) => t.position.held)).toEqual([true, undefined, true]);
+    const back = bootState(readWorkspace(text));
+    expect(heldOf(back)).toEqual([true, false, true]);
+    expect(back.tabs).toEqual(s.tabs);
+    expect(persistKey(back)).toBe(persistKey(s));
+    // 退避した position は held を持たない（印の正は slot）
+    expect(back.tabs[0]?.saved && 'held' in back.tabs[0].saved).toBe(false);
+  });
+
+  it('AC10: 1 ポジションの文書（toSaved → readPositionDoc → savedFromWorkspace）の往復で印が戻る', () => {
+    const s = three();
+    const doc = toSaved(s, NOW);
+    expect(doc.position.held).toBe(true);
+    const { saved } = ok(readPositionDoc(JSON.stringify(doc)));
+    expect(saved.position?.held).toBe(true);
+    // 保存一覧の書き直し（全項目を組み立て直す）でも印が落ちない
+    expect(savedFromWorkspace(saved, NOW).position.held).toBe(true);
+    // 印なしのタブは held を書かない（今までと同じ形）
+    const plain = toSaved(reduce(s, { type: 'switchTab', id: 2 }), NOW);
+    expect('held' in plain.position).toBe(false);
+    const plainBack = ok(readPositionDoc(JSON.stringify(plain))).saved;
+    expect(plainBack.position && 'held' in plainBack.position).toBe(false);
+    expect('held' in savedFromWorkspace(plainBack, NOW).position).toBe(false);
+  });
+
+  it('AC12: held が true 以外（false・文字列・数・オブジェクト・null）は印なしで読み、足・position は捨てない', () => {
+    for (const bad of [false, 'true', 1, {}, null, []]) {
+      const text = v1With((o) => Object.assign(o.position, { held: bad }));
+      const { saved, dropped } = ok(readPositionDoc(text));
+      expect(dropped, String(bad)).toBe(false);
+      expect(saved.position?.legs.length, String(bad)).toBe(v1.position.legs.length);
+      expect(saved.position && 'held' in saved.position, String(bad)).toBe(false);
+      // 作業のキー（版 2）の各タブも同じ
+      const ws = JSON.parse(JSON.stringify(v2)) as { tabs: Array<{ position: Rec }> };
+      for (const t of ws.tabs) t.position.held = bad;
+      const back = bootState(readWorkspace(JSON.stringify(ws)));
+      expect(back.tabs.map((t) => t.held === true)).toEqual([false, false, false]);
+      expect(back.tabs.map((t) => t.saved?.legs.length ?? back.legs.length)).toEqual([2, 2, 0]);
+    }
+    // true は印
+    const yes = ok(readPositionDoc(v1With((o) => Object.assign(o.position, { held: true }))));
+    expect(yes.saved.position?.held).toBe(true);
+  });
+
+  it('AC11: 既存の fixture（tests/ui/saved/。変更しない）は全部印なしで読める', () => {
+    expect(ok(readPositionDoc(JSON.stringify(v1))).saved.position?.held).toBeUndefined();
+    const s = bootState(readWorkspace(JSON.stringify(v2)));
+    expect(s.tabs.some((t) => 'held' in t)).toBe(false);
+    expect(bootState(readWorkspace(JSON.stringify(v1))).tabs.some((t) => 'held' in t)).toBe(false);
+  });
+});

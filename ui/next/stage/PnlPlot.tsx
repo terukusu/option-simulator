@@ -95,6 +95,8 @@ export function PnlPlot(p: {
   legs: readonly UiLeg[];
   legCount: number;
   selectedLeg: number | null;
+  /** 保有のタブ（#301）: 足マーカーをつかませない */
+  legsLocked: boolean;
   mini: boolean;
   /** 面モード（ミニでは false。#88） */
   surfaceOn: boolean;
@@ -145,8 +147,13 @@ export function PnlPlot(p: {
     [model, surfaceOn],
   );
   const markers = useMemo(
-    () => legMarkers(p.legs, base, model, { selected: p.selectedLeg, drag: dragK }),
-    [p.legs, base, model, p.selectedLeg, dragK],
+    () =>
+      legMarkers(p.legs, base, model, {
+        selected: p.selectedLeg,
+        drag: dragK,
+        locked: p.legsLocked,
+      }),
+    [p.legs, base, model, p.selectedLeg, dragK, p.legsLocked],
   );
   // 交点のラベルは IV レールの吹き出し（描画域の右に重ねて描く。レールは同じ高さで右隣）も避ける
   const dSigma = scenario.dSigma;

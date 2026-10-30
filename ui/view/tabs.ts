@@ -15,7 +15,9 @@ export interface TabView {
   /** 足の本数の表示（0 本なら null = 出さない） */
   countText: string | null;
   active: boolean;
-  /** aria-label・title（名前の全文 + 足の本数。帯では名前を省略することがある） */
+  /** 保有の印（#301。帯のチップに「保」） */
+  held: boolean;
+  /** aria-label・title（名前の全文 + 保有 + 足の本数。帯では名前を省略することがある） */
   label: string;
 }
 
@@ -43,13 +45,16 @@ export function tabsModel(
   const views = tabs.map((t): TabView => {
     const active = t.id === activeTab;
     const legCount = active ? activeLegCount : (t.saved?.legs.length ?? 0);
+    const held = t.held === true;
+    const legs = legCount > 0 ? `足 ${legCount} 本` : '足なし';
     return {
       id: t.id,
       name: t.name,
       legCount,
       countText: legCount > 0 ? String(legCount) : null,
       active,
-      label: legCount > 0 ? `${t.name}（足 ${legCount} 本）` : `${t.name}（足なし）`,
+      held,
+      label: held ? `${t.name}（保有・${legs}）` : `${t.name}（${legs}）`,
     };
   });
   const canAdd = tabs.length < MAX_TABS;

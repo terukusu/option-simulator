@@ -264,6 +264,8 @@ export interface SharedPosition {
   savedAt: number | null;
   /** 共有したときの板の時刻（無ければ null） */
   boardSnapshotAt: number | null;
+  /** 保有の印（#301。文書の position.held が true のときだけ true。オーナー判断 3 = URL で渡す） */
+  held: boolean;
 }
 
 export type ShareRead =
@@ -306,6 +308,7 @@ export function readSharedText(text: string): ShareRead {
       name: SHARE_CARRIES_NAME && typeof rawName === 'string' ? sanitizeTabName(rawName) : '',
       savedAt,
       boardSnapshotAt: position.boardSnapshotAt,
+      held: position.held === true,
     },
   };
 }
@@ -349,7 +352,7 @@ export function shareOpenMode(
 }
 
 /**
- * 共有を開く reducer の操作。URL から入れるのは**足と名前だけ**（main の決定）: シナリオ・手数料・先物の basis は
+ * 共有を開く reducer の操作。URL から入れるのは**足・名前・保有の印だけ**（main の決定。印は #301）: シナリオ・手数料・先物の basis は
  * null（受け手の今の値のまま。全タブ共通の値を他人の URL で変えない）。表示の設定はもともと開く操作で変えない。
  * URL の文書には保存一覧と同じくシナリオ等が入っているが、この経路では使わない（保存一覧の [開く] は従来どおり適用）。
  */
@@ -361,6 +364,7 @@ export function shareOpenAction(shared: SharedPosition, mode: 'replace' | 'newTa
     feePerLot: null,
     futureBasis: null,
     name: shared.name,
+    held: shared.held,
   };
 }
 

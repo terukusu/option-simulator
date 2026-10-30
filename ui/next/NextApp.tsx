@@ -17,7 +17,7 @@ import { API_LABEL, loaderNote } from '../load';
 import { MAX_PINS, pinAddError } from '../pins';
 import type { PrefsRead } from '../prefs';
 import { shareSupported } from '../share';
-import { type Action, legAtStrike, MAX_TABS, restoreTabAction } from '../state';
+import { type Action, activeHeld, legAtStrike, MAX_TABS, restoreTabAction } from '../state';
 import { aiCheckRun, CHECK_NO_LEGS_TEXT } from '../view/aiChecks';
 import { aiEnvFromState } from '../view/aiContext';
 import { aiEvalSource } from '../view/aiEvalCase';
@@ -28,6 +28,7 @@ import {
   newTabUndoActions,
   PROPOSAL_APPLY_ERROR,
   proposalApply,
+  proposeApplyTarget,
 } from '../view/aiPropose';
 import { marketAddPlan, marketAddToast } from '../view/boardPanel';
 import { closedTabText, restoreTabError, type ShareResult, shareResultView } from '../view/boxTabs';
@@ -49,7 +50,7 @@ import {
 } from '../view/notices';
 import { type PaletteRun, paletteAtmK, paletteItems } from '../view/palette';
 import { shareReplaceConfirmText } from '../view/persistNote';
-import { clearUndo, rebasePlan } from '../view/positionsRegion';
+import { clearUndo, REBASE_COPY_UNDO_TEXT, rebasePlan } from '../view/positionsRegion';
 import type { DXUnit } from '../view/scenario';
 import { presetRevealAction } from '../view/scenarioRegion';
 import {
@@ -363,7 +364,9 @@ export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
         push({ kind: 'ai-propose', text: PROPOSAL_APPLY_ERROR[r.error], note: 'info' });
         return;
       }
-      if (r.target === 'current') {
+      // 保有のタブ（#301）: 今のタブ向けの提案も新しいタブ（検討中）に入れる（保有のタブの足は変えない）
+      const held = activeHeld(st);
+      if (proposeApplyTarget(r.target, held) === 'current') {
         const before = st.legs;
         const tab = st.activeTab;
         dispatch({ type: 'replaceLegs', legs: r.legs, expect: before, tab });
@@ -382,7 +385,10 @@ export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
       dispatch(plan.action);
       push({
         kind: 'ai-propose',
-        text: `AI の提案を新しいタブに入れた（足 ${r.legs.length} 本）`,
+        text:
+          held && r.target === 'current'
+            ? `AI の提案を新しいタブに入れた（足 ${r.legs.length} 本・保有のタブは変えない）`
+            : `AI の提案を新しいタブに入れた（足 ${r.legs.length} 本）`,
         keep: true,
         undo: () => {
           // 押したときのタブに戻り、足したタブだけを閉じる。編集していたら戻さない（#139 レビュー B1）
@@ -438,11 +444,29 @@ export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
   }, [dispatch, push]);
   // 建値を今の板に合わせる（#298。ポジションの ⋯ とパレット）: 押した時点の state で建て直し、建値が変わった足があれば
   // 作業中のタブの足を丸ごと置き換える（[元に戻す] は逆向きの replaceLegs。AI の提案の [今のタブに適用] と同じ）
+  // 保有のタブ（#301）は写し: 建て直した足を新しいタブに入れて切り替える（[元に戻す] は足したタブを閉じる。タブが
+  // 変わっても消えない keep のトースト = AI の [新しいタブに入れる] と同じ）
   const onRebaseLegs = useCallback(() => {
     const p = rebasePlan(stateRef.current);
     if (!p) return;
-    const { apply, undo } = p;
+    const { apply, undo, copy } = p;
     if (apply) dispatch(apply);
+    if (copy) {
+      push({
+        kind: p.kind,
+        text: p.text,
+        keep: true,
+        undo: () => {
+          const acts = newTabUndoActions(stateRef.current, copy);
+          if (typeof acts === 'string') {
+            push({ kind: p.kind, text: REBASE_COPY_UNDO_TEXT[acts], note: 'info' });
+            return;
+          }
+          for (const a of acts) dispatch(a);
+        },
+      });
+      return;
+    }
     push(
       undo
         ? { kind: p.kind, text: p.text, undo: () => dispatch(undo) }
@@ -527,6 +551,8 @@ export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
   }, [state.activeTab, dropUndo]);
   const onChangeStrike = useCallback(
     (id: number, k: number) => {
+      // 保有のタブ（#301）: 足マーカーはつかめない（舞台の表示モデル）。reducer も守る。ここでも何もしない
+      if (activeHeld(state)) return;
       const index = state.legs.findIndex((l) => l.id === id);
       const before = state.legs[index];
       const after = before ? legAtStrike(state.chain, before, k) : null;
@@ -540,7 +566,7 @@ export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
         undo: () => dispatch({ type: 'restoreLeg', leg: before, index, expect: after, tab }),
       });
     },
-    [state.legs, state.chain, state.activeTab, dispatch, push],
+    [state.legs, state.chain, state.activeTab, state.tabs, dispatch, push],
   );
   // 板・スマイルから足を入れる: 入る足を先に求め（reducer と同じ boardOptionLeg）、addBoardLeg は必ず送る
   // （作れなければ reducer が legError を入れる = 今と同じ「足を追加できない: …」）
@@ -905,6 +931,7 @@ export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
             onApplyScenario={onAiApply}
             onApplyProposal={onAiPropose}
             onCheck={onAiCheck}
+            held={c.tabsView.active.held}
             apiRef={aiApi}
           />
         }

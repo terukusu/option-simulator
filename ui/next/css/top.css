@@ -106,6 +106,22 @@
   color: var(--ink);
 }
 
+/* 保有の印（#301）: 枠線の小さな文字のタグ（件数のバッジ .n と形で区別する。色だけに頼らない）。面はチップのまま
+   = 文字は --ink-2（--s3 / 帯の面に 4.5:1。tests/ui/cssTokens.test.ts） */
+.boxtab .hd {
+  flex: 0 0 auto;
+  padding: 0 3px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-sm);
+  color: var(--ink-2);
+  font-size: 11px;
+  line-height: 14px;
+}
+
+.boxtab[aria-selected="true"] .hd {
+  color: var(--ink);
+}
+
 /* ===== 市場ピル ===== */
 .top .pill {
   display: flex;
