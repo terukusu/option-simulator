@@ -77,7 +77,11 @@ POSITION_SUMMARY = Obj({
                              "put_side_max_loss_yen", "put_side_max_loss_x"})),
     "greeks_now": GREEKS,
     "scenario_point": Obj({"days": DAYS, "dx_pct": PCT, "x": LEVEL, "pnl_yen": YEN, "greeks": GREEKS}),
-})
+    # #302: pnl_now_yen = シナリオ 0 の損益（手数料込み。保有のタブか前の板で建てた足があるときだけ）、unrealized_yen =
+    # 含み損益（手数料の前。前の板で建てた足があるときだけ）。古い JS は送らないので任意
+    "pnl_now_yen": YEN,
+    "unrealized_yen": YEN,
+}, frozenset({"pnl_now_yen", "unrealized_yen"}))
 
 TAIL_TABLE = Obj({
     "days": DAYS,

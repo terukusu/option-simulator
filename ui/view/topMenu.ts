@@ -9,7 +9,7 @@ import { BOOK_FAIL_TEXT } from './bookList';
 import type { MenuRow, ShareItemState } from './boxTabs';
 import { TABS_FULL_TEXT } from './tabs';
 
-export type TopMenuKey = 'book' | 'share' | 'file' | `fixture:${string}` | 'settings';
+export type TopMenuKey = 'holdings' | 'book' | 'share' | 'file' | `fixture:${string}` | 'settings';
 
 export interface TopMenuInput {
   /** 保存一覧の件数（読めない・新しい版なら null） */
@@ -67,14 +67,18 @@ export const THEMES: readonly { theme: ThemePref; label: string }[] = [
   { theme: 'light', label: 'ライト' },
 ];
 
+/** 保有ポジションの一覧（#302）の項目名（⋯ とパレット。件数は出さない = ⋯ を開くたびに判定しない） */
+export const HOLDINGS_LABEL = '保有ポジション…';
+
 /**
- * ⋯ の行（#275 で入口を 1 本に絞った）: 保存一覧（N）… / URL をコピー /（区切り）ファイルを開く… /（dev）合成の板 /
+ * ⋯ の行（#275 で入口を 1 本に絞った）: 保有ポジション…（#302。ほかの入口はパレットだけ）/ 保存一覧（N）… / URL をコピー /（区切り）ファイルを開く… /（dev）合成の板 /
  * （区切り）設定…。ほかの入口は 1 か所ずつ: 書き出し / 読み込み… = 保存一覧のダイアログ、全クリア = ポジションの ⋯、
  * テーマ = トップバーの ☾（とキー T）、用語集 = ⓘ の末尾・内訳・AI の用語（PC はパレットの `?`）。
  * 押せない: URL をコピー = shareItemState のまま。
  */
 export function topMenuModel(i: TopMenuInput): MenuRow<TopMenuKey>[] {
   return [
+    { key: 'holdings', label: HOLDINGS_LABEL },
     { key: 'book', label: i.bookCount === null ? '保存一覧…' : `保存一覧（${i.bookCount}）…` },
     {
       key: 'share',

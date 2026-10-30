@@ -22,7 +22,7 @@ docs/design.md 14 章）。
 import json
 from dataclasses import dataclass
 
-from .shape import DATE, INSTANT, MONTH, Arr, Bad, Bool, Enum, Map, Num, Obj, Str, Text
+from .shape import DATE, INSTANT, MONTH, Arr, Bad, Bool, Enum, Map, Num, Obj, Str, Text, TrueOnly
 from .tools import Registry
 
 SCHEMA_VERSION = 1
@@ -71,10 +71,16 @@ EXPIRY = Obj({
     "smile": Arr(Obj({"m": Num(-2, 2), "iv": IV}), MAX_SMILE),
     "rows": Arr(ROW, MAX_ROWS),
 }, frozenset({"rows"}))
+# opened_days は #302 で足した任意のキー（前の板で建てた足だけ。建ててから今の板までの暦日）。デプロイ前に開いた画面
+# （古い JS）は送らない
 LEG = Obj({
     "product": Enum(("op", "fut_large", "fut_mini", "fut_micro")), "type": OPT_TYPE, "expiry": MONTH, "k": POS,
     "side": Enum(("buy", "sell")), "qty": Num(1, MAX_QTY, integer=True), "price": NONNEG,
-}, frozenset({"type", "k"}))
+    "opened_days": Num(0, 10_000, integer=True),
+}, frozenset({"type", "k", "opened_days"}))
+# held（作業中のタブが保有のときだけ true）・other_held（ほかの保有の数。1 以上のときだけ）は #302 で足した任意のキー
+POSITION = Obj({"legs": Arr(LEG, MAX_LEGS), "held": TrueOnly(), "other_held": Num(1, 200, integer=True)},
+               frozenset({"held", "other_held"}))
 SNAPSHOT = Obj({"snapshot_at": INSTANT, "source": Enum(("bigquery", "file", "synthetic", "manual")),
                 "delayed_minutes": Num(0, 60, integer=True)})
 # dx_yen・skew_pt・beta・iv_mode は #135 で足した任意のキー（iv_mode が relative なら iv_shift_pt は %）
@@ -95,7 +101,7 @@ def context_shape(registry: Registry) -> Obj:
     return Obj({
         "snapshot": SNAPSHOT,
         "expiries": Arr(EXPIRY, MAX_EXPIRIES),
-        "position": Obj({"legs": Arr(LEG, MAX_LEGS)}),
+        "position": POSITION,
         "scenario": SCENARIO,
         "capital": CAPITAL,
         "profile": PROFILE,

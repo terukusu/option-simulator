@@ -303,6 +303,33 @@ def test_position_summary_put_side_keys():
     shape.check(cur, "r")
 
 
+def test_position_summary_held_keys():
+    """#302 AC13: pnl_now_yen・unrealized_yen は任意（古い画面は送らない）。型の外は 400"""
+    shape = REGISTRY["position_summary"].result_shape
+    held = [c for c in SAMPLE["cases"] if c["context"].get("position", {}).get("held") is True]
+    assert held, "合成のケースに保有の文脈が無い"
+    for c in held:
+        ps = c["context"]["precomputed"]["position_summary"]
+        assert isinstance(ps["pnl_now_yen"], int) and isinstance(ps["unrealized_yen"], int)
+        assert c["context"]["position"]["other_held"] >= 1
+        assert any("opened_days" in leg for leg in c["context"]["position"]["legs"])
+    # 保有でない文脈には無い（変更前と同じ形）
+    for c in SAMPLE["cases"]:
+        if c in held:
+            continue
+        ps = c["context"]["precomputed"]["position_summary"]
+        assert "pnl_now_yen" not in ps and "unrealized_yen" not in ps
+    cur = copy.deepcopy(held[0]["context"]["precomputed"]["position_summary"])
+    old = copy.deepcopy(cur)
+    old.pop("pnl_now_yen")
+    old.pop("unrealized_yen")
+    shape.check(old, "r")
+    shape.check({**cur, "unrealized_yen": None}, "r")
+    with pytest.raises(Bad) as e:
+        shape.check({**cur, "pnl_now_yen": "1"}, "r")
+    assert (e.value.path, e.value.reason) == ("r.pnl_now_yen", "type")
+
+
 def test_proposal_summary_widths_optional():
     """#260: 提案の要約の形の幅（put_width_x・call_width_x・short_gap_x）。古い画面（キーなし）も通す"""
     from simulator_api.ai.tools import SUMMARY

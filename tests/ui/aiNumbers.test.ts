@@ -40,6 +40,22 @@ describe('collectValues', () => {
     expect(cls(-5.2)).toEqual(['ratio']);
     expect(cls(2)).toEqual(['lots']);
   });
+
+  it('#302 保有の値: opened_days は日、pnl_now_yen・unrealized_yen は円（既存の規則のまま照合の出所になる）', () => {
+    const vs = collectValues([
+      { position: { legs: [{ opened_days: 13 }], other_held: 1 } },
+      { pnl_now_yen: -123456, unrealized_yen: -120456 },
+    ]);
+    const cls = (v: number) => vs.filter((x) => x.value === v).map((x) => x.cls);
+    expect(cls(13)).toEqual(['days']);
+    expect(cls(-123456)).toEqual(['money']);
+    expect(cls(-120456)).toEqual(['money']);
+    expect(
+      checkNumbers('含み損益は −120,456 円、建ててから 13 日', [
+        { opened_days: 13, unrealized_yen: -120456 },
+      ]).unmatched,
+    ).toBe(0);
+  });
 });
 
 describe('checkNumbers', () => {

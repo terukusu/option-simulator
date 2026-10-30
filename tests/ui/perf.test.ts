@@ -49,6 +49,7 @@ import { bookListModel } from '../../ui/view/bookList';
 import { FUT_SERIES, futEmaOverlays, futRollMarks } from '../../ui/view/futHistory';
 import { headerModel, keptBoardNote } from '../../ui/view/header';
 import { hedgeModel } from '../../ui/view/hedge';
+import { type HoldingsInput, holdingsModel } from '../../ui/view/holdings';
 import { holdMapCalcOf, holdMapInput, holdMapPlot, holdMapResultOf } from '../../ui/view/holdMap';
 import { futPaneDrag, futPaneLayout, indPaneModel } from '../../ui/view/indicators';
 import {
@@ -456,6 +457,91 @@ describe('性能（#70 ポジ帳の一覧の要約）', () => {
     expect(v.rows[0]?.note).toBeNull();
     expectWithinBudget('#70 ポジ帳の一覧（50 件 × 足 10 本）', list, { warmup: 20, runs: 30 });
     console.info(`#70 ポジ帳の一覧（50 件 × 足 10 本）: ${read.chars} 字`);
+  });
+});
+
+/**
+ * #302 AC10: 保有ポジションの一覧（保有のタブ 6 × 足 10 本 + 保存一覧の保有 10 件 × 足 10 本。指紋が重ならない = 合計
+ * 160 本）の行と合計（必要証拠金・余力・Δ）の表示モデルが予算以内。合計の追証までの距離（marginLine）は開いた描画の後に
+ * 作るので記録のみ。一覧はダイアログを開いている間・入力が変わったときだけ走る（シナリオの操作では走らない）。
+ */
+describe('性能（#302 保有ポジションの一覧）', () => {
+  const chain = normalizeChain(buildWideChainJson());
+  const [m1, m2] = chain.months;
+  if (!m1 || !m2) throw new Error('限月が足りない');
+  const ids: Record<string, string> = { [M1.id]: m1.id, [M2.id]: m2.id, FUT: chain.future.id };
+  const base10 = refreshLegMarkets(
+    chain,
+    PERF_LEGS.map((leg, i) => ({
+      id: i + 1,
+      leg:
+        leg.kind === 'option'
+          ? { ...leg, expiry: ids[leg.expiry] ?? leg.expiry }
+          : { ...leg, contract: ids[leg.contract] ?? leg.contract },
+      marks: [],
+    })),
+    CALENDAR.holidays,
+  ).map(({ id: _id, ...rest }) => rest);
+  // 源ごとに建てた日時を変える（指紋が重ならない = 全部を合計に入れる）
+  const legsOf = (n: number) =>
+    base10.map((l) => ({
+      ...l,
+      leg: { ...l.leg, openedAt: chain.snapshotAt - (n + 1) * 3_600_000 },
+    }));
+  const open = (type: 'openPosition' | 'openPositionInNewTab', n: number): Action => ({
+    type,
+    legs: legsOf(n),
+    scenario: null,
+    feePerLot: 0,
+    futureBasis: 'fixed',
+    held: true,
+  });
+  const loaded = reduce(initialState, { type: 'loaded', chain, label: 'perf' });
+  let state = reduce(loaded, open('openPosition', 0));
+  for (let i = 1; i < 6; i++) state = reduce(state, open('openPositionInNewTab', i));
+  let book: Book = EMPTY_BOOK;
+  for (let i = 0; i < 10; i++) {
+    const one = reduce(loaded, open('openPosition', 6 + i));
+    const r = addEntry(book, toSaved(one, i), `H${i}`, i, `h${i}`);
+    if (!r.ok) throw new Error(r.reason);
+    book = r.book;
+  }
+  const read: BookRead = { kind: 'ok', book, chars: serializeBook(book).length };
+  const input: HoldingsInput = {
+    chain,
+    tabs: state.tabs,
+    activeTab: state.activeTab,
+    legs: state.legs,
+    read,
+    atmBasis: 'B',
+    calendar: CALENDAR,
+    feePerLot: 0,
+    futureBasis: 'fixed',
+    unitSetting: 'auto',
+    nowScenario: ZERO_SCENARIO,
+    params: DEFAULT_MARGIN_PARAMS,
+    capital: 10_000_000_000,
+  };
+  const list = () => holdingsModel(input).rows.length;
+
+  it(`保有のタブ 6 + 保存一覧の保有 10（足 10 本ずつ）の一覧の表示モデルが ${BUDGET_MS} ms 以内（30 回の最小値）`, () => {
+    expect(state.tabs.filter((t) => t.held === true)).toHaveLength(6);
+    const v = holdingsModel(input);
+    expect(v.rows).toHaveLength(16);
+    expect(v.rows.every((r) => r.counted && r.note === null)).toBe(true);
+    expect(v.total?.count).toBe(16);
+    expect(v.total?.values.margin).not.toBeNull();
+    expectWithinBudget('#302 保有ポジションの一覧（16 行 × 足 10 本 + 合計 160 本）', list, {
+      warmup: 10,
+      runs: 30,
+    });
+    const line = v.total?.line;
+    if (!line) throw new Error('線の入力が無い');
+    record(
+      '#302 保有ポジションの合計の追証までの距離（marginLine。160 本）',
+      () => marginLine(line.base, line.scenario, line.params, line.capital, line.holidays).length,
+      { warmup: 1, runs: RECORD_RUNS },
+    );
   });
 });
 

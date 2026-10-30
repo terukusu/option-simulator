@@ -35,6 +35,7 @@ import { closedTabText, restoreTabError, type ShareResult, shareResultView } fro
 import { fmtNum } from '../view/format';
 import { futNowValue } from '../view/futHistory';
 import { keptBoardNote } from '../view/header';
+import { otherHeldCount } from '../view/holdings';
 import { type IndKind, toggleInd } from '../view/indicators';
 import { ivNowValue } from '../view/ivHistory';
 import { palettePanelActions } from '../view/keys';
@@ -70,6 +71,7 @@ import {
 } from '../view/shell';
 import { overwrittenText, restoreEntryFailText } from '../view/topMenu';
 import { BookDialog } from './BookDialog';
+import { HoldingsDialog } from './HoldingsDialog';
 import type { MarketAdd } from './market/BoardMonth';
 import { FutHistory } from './market/FutHistory';
 import { IvHistory } from './market/IvHistory';
@@ -289,13 +291,29 @@ export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
   // AI に渡す自分の前提（#156）も送るときの端末の設定を読む（文脈の profile）
   const profileRef = useRef(userPrefs.prefs.aiProfile);
   profileRef.current = userPrefs.prefs.aiProfile;
+  // ほかの保有の数（#302。文脈の position.other_held）は送るときの state と保存一覧の読みから数える（評価しない）
+  const bookReadRef = useRef(c.bookRead);
+  bookReadRef.current = c.bookRead;
   const aiEnv = useCallback(
-    () => aiEnvFromState(stateRef.current, marginRef.current, profileRef.current),
+    () =>
+      aiEnvFromState(
+        stateRef.current,
+        marginRef.current,
+        profileRef.current,
+        otherHeldCount(stateRef.current, bookReadRef.current),
+      ),
     [],
   );
   // 評価に残す（#159）: 押した時点の state・証拠金の設定・前提から文脈の作り直しの材料を作る（ダウンロードだけ）
   const aiEvalSrc = useCallback(
-    () => aiEvalSource(stateRef.current, marginRef.current, profileRef.current, Date.now()),
+    () =>
+      aiEvalSource(
+        stateRef.current,
+        marginRef.current,
+        profileRef.current,
+        Date.now(),
+        otherHeldCount(stateRef.current, bookReadRef.current),
+      ),
     [],
   );
   // technicals のツール（#200）: 先物推移と同じ口から日足・1 時間足を読む（呼ばれたときだけ・10 分覚える）
@@ -699,6 +717,9 @@ export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
       case 'add':
         onMarketAdd(run.add.expiry, run.add.k, run.add.type, run.add.side);
         return;
+      case 'holdings':
+        c.openHoldings();
+        return;
       case 'book':
         onOpenBook();
         return;
@@ -784,6 +805,7 @@ export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
         onShareResult={onShareResult}
         bookCount={c.bookCount}
         onOpenBook={onOpenBook}
+        onOpenHoldings={c.openHoldings}
         onSaveToBook={onSaveToBook}
         onOpenSettings={onOpenSettings}
         aiOpen={leftView(shell) === 'ai'}
@@ -996,7 +1018,28 @@ export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
         toasts={c.bookOpen ? <ToastSlot host={toastHost} /> : null}
         focusName={bookFocusName}
       />
-      {!c.bookOpen && <ToastSlot host={toastHost} />}
+      <HoldingsDialog
+        open={c.holdingsOpen}
+        chain={chain}
+        tabs={state.tabs}
+        activeTab={state.activeTab}
+        legs={c.curLegs}
+        read={c.bookRead}
+        atmBasis={state.atmBasis}
+        calendar={state.calendar}
+        feePerLot={state.feePerLot}
+        futureBasis={state.futureBasis}
+        unitSetting={state.metricsUnit}
+        nowScenario={c.nowScenario}
+        params={c.marginParams}
+        capital={c.capital}
+        message={c.holdingsMsg}
+        onClose={c.closeHoldings}
+        onSwitchTab={c.onHoldingSwitchTab}
+        onOpenNewTab={c.onHoldingOpenNewTab}
+        toasts={c.holdingsOpen ? <ToastSlot host={toastHost} /> : null}
+      />
+      {!c.bookOpen && !c.holdingsOpen && <ToastSlot host={toastHost} />}
       <Palette open={paletteOpen} items={items} onClose={closePalette} onRun={runPalette} />
       <TermCard />
     </div>

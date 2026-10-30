@@ -6,25 +6,18 @@
  * - 入力が変わった描画では線を隠し（空）、MARGIN_LINE_SETTLE_MS 変わらなければ 1 回だけ作る（d・Δσ・Δs・β の連続の
  *   操作の間は作らない。1 回 ≈ 格子 30 点 × (分割 + 二分法) の評価で、スライダーの 1 フレームに入らないため）
  * - 入力が null（資金が未設定・足なし）なら空
+ * - useMarginLineState は作っている間を null で返す（保有ポジションの一覧の「計算中…」。#302）
  */
 
 import { useEffect, useState } from 'preact/hooks';
-import type { Holidays, MarginParams, Scenario } from '../../model';
-import { MARGIN_LINE_SETTLE_MS, marginLine } from '../view/margin';
-import type { PnlBase } from '../view/pnlChart';
+import { MARGIN_LINE_SETTLE_MS, type MarginLineInput, marginLine } from '../view/margin';
 
-export interface MarginLineInput {
-  base: PnlBase;
-  /** ΔX 以外のシナリオ（ΔX は見ない） */
-  scenario: Scenario;
-  params: MarginParams;
-  capital: number;
-  holidays: Holidays;
-}
+export type { MarginLineInput };
 
 const NONE: readonly number[] = [];
 
-export function useMarginLine(input: MarginLineInput | null): readonly number[] {
+/** 追証の線の X。null = 入力があってまだ作っていない（計算中）。入力が null なら空 */
+export function useMarginLineState(input: MarginLineInput | null): readonly number[] | null {
   const [line, setLine] = useState<{ key: MarginLineInput; xs: readonly number[] } | null>(null);
   useEffect(() => {
     if (!input) return;
@@ -35,6 +28,11 @@ export function useMarginLine(input: MarginLineInput | null): readonly number[] 
     }, MARGIN_LINE_SETTLE_MS);
     return () => clearTimeout(id);
   }, [input]);
-  // 作った時の入力と今の入力が違えば隠す（入力が変わった描画で前の線を残さない）
-  return input && line && line.key === input ? line.xs : NONE;
+  if (!input) return NONE;
+  // 作った時の入力と今の入力が違えば計算中（入力が変わった描画で前の線を残さない）
+  return line && line.key === input ? line.xs : null;
+}
+
+export function useMarginLine(input: MarginLineInput | null): readonly number[] {
+  return useMarginLineState(input) ?? NONE;
 }

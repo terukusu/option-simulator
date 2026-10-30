@@ -3,12 +3,15 @@
  * （scripts/aiEvalCases.ts）で、画面と同じ組み立て（ui/view/aiContext.ts の aiEnvFromState・buildAiContext）の文脈
  * （事前計算 5 本を含む）と evaluate_scenario の結果・失敗を書く。中継の pytest（api/tests/test_ai_tools.py）が
  * 名前の集合・結果の形・文脈の形を tools.py / allowlist.py に通す = 言語をまたぐ契約。値はすべて架空。
+ * 末尾に保有の文脈の組（#302。put の売りを保有にして t₀ + 3 日の板を読んだ作業中のタブ）を足す。
  */
 
 import { validateAtmDailyJson } from '../data/atmDaily';
 import { validateAtmIvJson } from '../data/atmIv';
 import type { ChainJson } from '../data/chainTypes';
+import { normalizeChain } from '../data/normalize';
 import { ivNowOf } from '../ui/components/ivStatsData';
+import { reduce } from '../ui/state';
 import { aiEnvFromState, buildAiContext } from '../ui/view/aiContext';
 import type { IvStatsData } from '../ui/view/aiIvStats';
 import { STRUCTURES } from '../ui/view/aiPropose';
@@ -68,11 +71,15 @@ function fail(): never {
   throw new Error('ツールの環境を作れない');
 }
 
-export function buildAiToolsFixture(latest: ChainJson): string {
-  const cases = AI_TOOLS_FIXTURE_CASES.map((name) => {
-    const c = AI_EVAL_CASES.find((x) => x.name === name);
-    if (!c) throw new Error(`評価の組が無い: ${name}`);
-    const env = aiEnvFromState(caseState(latest, c), caseMargin(c));
+/** 保有の文脈（#302）の組の名前: put の売りを latest で建てて保有にし、後の板（t₀ + 3 日）を読んだ作業中のタブ */
+export const AI_TOOLS_HELD_CASE = 'put_sell_held';
+
+/**
+ * later = 後の板（scripts/synthBoard.ts の buildLaterChainJson）。渡せば保有の文脈（held・other_held・opened_days・
+ * pnl_now_yen・unrealized_yen）の組を末尾に足す（中継の pytest が新しいキーを許可リストに通す）
+ */
+export function buildAiToolsFixture(latest: ChainJson, later?: ChainJson): string {
+  const caseOf = (name: string, env: ReturnType<typeof aiEnvFromState>) => {
     if (!env) throw new Error(`ツールの環境を作れない: ${name}`);
     return {
       name,
@@ -86,7 +93,20 @@ export function buildAiToolsFixture(latest: ChainJson): string {
         result: runTool('evaluate_scenario', input, env),
       })),
     };
+  };
+  const cases = AI_TOOLS_FIXTURE_CASES.map((name) => {
+    const c = AI_EVAL_CASES.find((x) => x.name === name);
+    if (!c) throw new Error(`評価の組が無い: ${name}`);
+    return caseOf(name, aiEnvFromState(caseState(latest, c), caseMargin(c)));
   });
+  if (later) {
+    const c = AI_EVAL_CASES.find((x) => x.name === 'put_sell');
+    if (!c) throw new Error('評価の組が無い: put_sell');
+    let s = reduce(caseState(latest, c), { type: 'setTabHeld', held: true });
+    s = reduce(s, { type: 'loaded', chain: normalizeChain(later), label: 'later' });
+    // ほかの保有 1 つ（保有ポジションの一覧の「合計に入れる」行のうち作業中のタブ以外）
+    cases.push(caseOf(AI_TOOLS_HELD_CASE, aiEnvFromState(s, caseMargin(c), undefined, 1)));
+  }
   // technicals（#200）: 合成の先物の足（scripts/synthFutBars.ts。架空の値）
   const techEnv = {
     ...(aiEnvFromState(

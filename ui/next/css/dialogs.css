@@ -102,11 +102,13 @@
 
 /* ===== 保存一覧 ===== */
 /* 見出しの ⓘ のポップオーバーをダイアログの外（窓の中）へ出せるように切らない（中身は .sheet-body がスクロール） */
-dialog.sheet.book {
+dialog.sheet.book,
+dialog.sheet.holdings {
   overflow: visible;
 }
 
-dialog.sheet.book .sheet-head .popover {
+dialog.sheet.book .sheet-head .popover,
+dialog.sheet.holdings .sheet-head .popover {
   max-width: min(320px, calc(100vw - 96px));
   white-space: normal;
 }
@@ -311,7 +313,30 @@ p.bk-state {
   color: var(--loss);
 }
 
+/* ===== 保有ポジション（#302。行は保存一覧の bk-* を使い回す） ===== */
+/* 重なりのタグ（名前を含む長い文）は名前の後の行へ回し、タグの中でも折り返す（360px で横にはみ出さない） */
+dialog.sheet.holdings .bk-head {
+  flex-wrap: wrap;
+  row-gap: 4px;
+}
+
+dialog.sheet.holdings .bk-head .tag {
+  flex: 0 1 auto;
+  max-width: 100%;
+  white-space: normal;
+}
+
+/* 合計の行（保有全部）: 上の罫線を太く・見出しを太字 */
+.hl-total {
+  border-top: 2px solid var(--line-2);
+}
+
+.hl-total .bk-name {
+  font-weight: 700;
+}
+
 /* ⓘ の段落の間（詳細度が高いので末尾） */
+dialog.sheet.holdings .sheet-head .popover p + p,
 dialog.sheet.book .sheet-head .popover p + p {
   margin-top: var(--sp-2);
 }

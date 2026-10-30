@@ -175,6 +175,9 @@ export function useAppController(boot: Boot = NO_BOOT, margin: MarginPrefs = DEF
   const [bookRead, setBookRead] = useState(() => loadBook(storage));
   const [bookOpen, setBookOpen] = useState(false);
   const [bookMsg, setBookMsg] = useState<BookMessage | null>(null);
+  // ---- 保有ポジションの一覧（#302）。開くときに保存一覧を読み直す（表示モデルはダイアログの中の memo だけ）
+  const [holdingsOpen, setHoldingsOpen] = useState(false);
+  const [holdingsMsg, setHoldingsMsg] = useState<BookMessage | null>(null);
   // 読み込みの失敗で保存した板を使うかの判定に、その時点の板の有無を読む
   const chainRef = useRef(state.chain);
   chainRef.current = state.chain;
@@ -823,23 +826,18 @@ export function useAppController(boot: Boot = NO_BOOT, margin: MarginPrefs = DEF
       ),
     [commit],
   );
-  const openEntry = useCallback(
-    (id: string, type: 'openPosition' | 'openPositionInNewTab') => {
-      // [新しいタブで開く] でタブが上限なら一覧を閉じずに理由を出す（reducer は上限で何もしないため）
+  // 開く芯: 開けたら true、開けなければ理由（一覧の中の知らせの文）。呼び出し側が知らせの置き場を選ぶ（#302）
+  const openEntryCore = useCallback(
+    (id: string, type: 'openPosition' | 'openPositionInNewTab'): true | BookMessage => {
+      // [新しいタブで開く] でタブが上限なら理由を出す（reducer は上限で何もしないため）
       const full =
         type === 'openPositionInNewTab' ? openInNewTabError(stateRef.current.tabs.length) : null;
-      if (full !== null) {
-        setBookMsg({ text: full, warn: true });
-        return false;
-      }
+      if (full !== null) return { text: full, warn: true };
       // 開く直前に読み直す（別のタブで変わった・消えた項目を開かない）
       const read = loadBook(storage);
       setBookRead(read);
       const e = read.kind === 'ok' ? read.book.entries.find((x) => x.id === id) : undefined;
-      if (e?.status !== 'ok') {
-        setBookMsg({ text: BOOK_FAIL_TEXT.notFound, warn: true });
-        return false;
-      }
+      if (e?.status !== 'ok') return { text: BOOK_FAIL_TEXT.notFound, warn: true };
       dispatch({
         type,
         legs: e.ws.position.legs,
@@ -849,10 +847,22 @@ export function useAppController(boot: Boot = NO_BOOT, margin: MarginPrefs = DEF
         // 保有の印は項目の値になる（#301）
         held: e.ws.position.held === true,
       });
-      setBookOpen(false);
       return true;
     },
     [storage],
+  );
+  const openEntry = useCallback(
+    (id: string, type: 'openPosition' | 'openPositionInNewTab') => {
+      const r = openEntryCore(id, type);
+      if (r !== true) {
+        // 一覧を閉じずに理由を出す
+        setBookMsg(r);
+        return false;
+      }
+      setBookOpen(false);
+      return true;
+    },
+    [openEntryCore],
   );
   // [開く] は作業中のタブを置き換える。[新しいタブで開く] はタブを足す（#71。上限なら一覧に理由を出して開かない）
   const onBookOpenEntry = useCallback((id: string) => openEntry(id, 'openPosition'), [openEntry]);
@@ -860,6 +870,31 @@ export function useAppController(boot: Boot = NO_BOOT, margin: MarginPrefs = DEF
     (id: string) => openEntry(id, 'openPositionInNewTab'),
     [openEntry],
   );
+  // 保有ポジションの一覧（#302）: 開くときに保存一覧を読み直す（保存一覧のダイアログと同じ）
+  const openHoldings = useCallback(() => {
+    setBookRead(loadBook(storage));
+    setHoldingsMsg(null);
+    setHoldingsOpen(true);
+  }, [storage]);
+  const closeHoldings = useCallback(() => setHoldingsOpen(false), []);
+  // [新しいタブで開く]（保存一覧と同じ action = 印ごと）。開けなければ一覧の中に理由、開けたら閉じる
+  const onHoldingOpenNewTab = useCallback(
+    (id: string) => {
+      const r = openEntryCore(id, 'openPositionInNewTab');
+      if (r !== true) {
+        setHoldingsMsg(r);
+        return false;
+      }
+      setHoldingsOpen(false);
+      return true;
+    },
+    [openEntryCore],
+  );
+  // [このタブへ]: 切り替えて閉じる
+  const onHoldingSwitchTab = useCallback((id: number) => {
+    dispatch({ type: 'switchTab', id });
+    setHoldingsOpen(false);
+  }, []);
   // [重ねる]（#22）: 保存した足の写しを今の板・今のシナリオ・今の設定で重ねる（ピンが上限なら一覧に理由を出す）
   const onBookOverlay = useCallback(
     (id: string) => {
@@ -991,6 +1026,15 @@ export function useAppController(boot: Boot = NO_BOOT, margin: MarginPrefs = DEF
     bookRead,
     bookOpen,
     bookMsg,
+    holdingsOpen,
+    holdingsMsg,
+    openHoldings,
+    closeHoldings,
+    onHoldingOpenNewTab,
+    onHoldingSwitchTab,
+    nowScenario,
+    marginParams,
+    capital,
     onFixture,
     onFile,
     onLatest,

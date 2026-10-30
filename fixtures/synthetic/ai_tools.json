@@ -2817,6 +2817,626 @@
      }
     }
    ]
+  },
+  {
+   "name": "put_sell_held",
+   "context": {
+    "snapshot": {
+     "snapshot_at": "2026-10-16T21:31:00+09:00",
+     "source": "synthetic",
+     "delayed_minutes": 15
+    },
+    "expiries": [
+     {
+      "expiry": "2026-11",
+      "sq_date": "2026-11-13",
+      "t_days": 27.48,
+      "forward": 66929.5,
+      "atm_k": 66875,
+      "atm_iv": 27,
+      "smile": [
+       {
+        "m": -0.2,
+        "iv": 42
+       },
+       {
+        "m": -0.15,
+        "iv": 38
+       },
+       {
+        "m": -0.1,
+        "iv": 34
+       },
+       {
+        "m": -0.05,
+        "iv": 30
+       },
+       {
+        "m": -0.025,
+        "iv": 28.3
+       },
+       {
+        "m": 0,
+        "iv": 27
+       },
+       {
+        "m": 0.025,
+        "iv": 26.2
+       },
+       {
+        "m": 0.05,
+        "iv": 25.9
+       },
+       {
+        "m": 0.1,
+        "iv": 26.3
+       },
+       {
+        "m": 0.15,
+        "iv": 27.4
+       },
+       {
+        "m": 0.2,
+        "iv": 28.7
+       }
+      ]
+     },
+     {
+      "expiry": "2026-12",
+      "sq_date": "2026-12-11",
+      "t_days": 55.48,
+      "forward": 67001.5,
+      "atm_k": 67000,
+      "atm_iv": 27.5,
+      "smile": [
+       {
+        "m": -0.2,
+        "iv": 39
+       },
+       {
+        "m": -0.15,
+        "iv": 36
+       },
+       {
+        "m": -0.1,
+        "iv": 32.9
+       },
+       {
+        "m": -0.05,
+        "iv": 29.9
+       },
+       {
+        "m": -0.025,
+        "iv": 28.6
+       },
+       {
+        "m": 0,
+        "iv": 27.5
+       },
+       {
+        "m": 0.025,
+        "iv": 26.7
+       },
+       {
+        "m": 0.05,
+        "iv": 26.3
+       },
+       {
+        "m": 0.1,
+        "iv": 25.9
+       },
+       {
+        "m": 0.15,
+        "iv": 26.1
+       },
+       {
+        "m": 0.2,
+        "iv": 26.6
+       }
+      ]
+     }
+    ],
+    "position": {
+     "legs": [
+      {
+       "product": "op",
+       "type": "P",
+       "expiry": "2026-11",
+       "k": 64000,
+       "side": "sell",
+       "qty": 1,
+       "price": 780,
+       "opened_days": 3
+      }
+     ],
+     "held": true,
+     "other_held": 1
+    },
+    "scenario": {
+     "days": 0,
+     "iv_shift_pt": 0,
+     "x_range": [
+      61881,
+      68268
+     ],
+     "dx_yen": 0,
+     "skew_pt": 0,
+     "beta": 1,
+     "iv_mode": "absolute"
+    },
+    "capital": {
+     "capital_yen": 5000000
+    },
+    "precomputed": {
+     "position_summary": {
+      "x0": 66930,
+      "max_days": 27.5,
+      "n_legs": 1,
+      "legs": [
+       {
+        "leg_no": 1,
+        "product": "op",
+        "type": "P",
+        "expiry": "2026-11",
+        "k": 64000,
+        "side": "sell",
+        "qty": 1,
+        "entry_yen": 780,
+        "iv_pct": 29.6,
+        "days_to_sq": 27.5,
+        "delta_large": 0.28,
+        "delta_mini": 2.77
+       }
+      ],
+      "premium": {
+       "received_yen": 780000,
+       "paid_yen": 0,
+       "net_yen": 780000,
+       "fees_yen": 0,
+       "net_after_fees_yen": 780000
+      },
+      "expiry": {
+       "max_profit_yen": 780000,
+       "max_profit_x": 64000,
+       "max_profit_unbounded": false,
+       "max_loss_yen": -63220000,
+       "max_loss_x": 0,
+       "max_loss_unbounded": false,
+       "put_side_max_profit_yen": null,
+       "put_side_max_profit_x": null,
+       "put_side_max_loss_yen": null,
+       "put_side_max_loss_x": null,
+       "breakevens_x": [
+        63220
+       ]
+      },
+      "greeks_now": {
+       "delta_large": 0.28,
+       "delta_mini": 2.77,
+       "gamma_per100": -0.006,
+       "theta_yen_per_day": 33115,
+       "vega_yen_per_pt": -61482
+      },
+      "scenario_point": {
+       "days": 0,
+       "dx_pct": 0,
+       "x": 66930,
+       "pnl_yen": -190000,
+       "greeks": {
+        "delta_large": 0.28,
+        "delta_mini": 2.77,
+        "gamma_per100": -0.006,
+        "theta_yen_per_day": 33115,
+        "vega_yen_per_pt": -61482
+       }
+      },
+      "pnl_now_yen": -190000,
+      "unrealized_yen": -190000
+     },
+     "tail_table": {
+      "days": 0,
+      "base": {
+       "kind": "received",
+       "amount_yen": 780000
+      },
+      "rows": [
+       {
+        "shock_pct": -5,
+        "x": 63583,
+        "sq_pnl_yen": 363028,
+        "sq_ratio": 0.5,
+        "scenario_pnl_yen": -1849182,
+        "scenario_ratio": -2.4,
+        "margin_yen": 2985279,
+        "room_yen": 165539
+       },
+       {
+        "shock_pct": -10,
+        "x": 60237,
+        "sq_pnl_yen": -2983447,
+        "sq_ratio": -3.8,
+        "scenario_pnl_yen": -4199420,
+        "scenario_ratio": -5.4,
+        "margin_yen": 3232638,
+        "room_yen": -2432058
+       },
+       {
+        "shock_pct": -20,
+        "x": 53544,
+        "sq_pnl_yen": -9676398,
+        "sq_ratio": -12.4,
+        "scenario_pnl_yen": -10026565,
+        "scenario_ratio": -12.9,
+        "margin_yen": 3080122,
+        "room_yen": -8106687
+       },
+       {
+        "shock_pct": -30,
+        "x": 46851,
+        "sq_pnl_yen": -16369348,
+        "sq_ratio": -21,
+        "scenario_pnl_yen": -16459823,
+        "scenario_ratio": -21.1,
+        "margin_yen": 2643627,
+        "room_yen": -14103450
+       },
+       {
+        "shock_pct": -40,
+        "x": 40158,
+        "sq_pnl_yen": -23062298,
+        "sq_ratio": -29.6,
+        "scenario_pnl_yen": -23076554,
+        "scenario_ratio": -29.6,
+        "margin_yen": 2181441,
+        "room_yen": -20257996
+       }
+      ]
+     },
+     "margin_summary": {
+      "capital_yen": 5000000,
+      "params": {
+       "range_pct": 5,
+       "iv_up_pct": 50,
+       "iv_down_pct": 25,
+       "factor_pct": 100,
+       "ignore_long_options": true
+      },
+      "now": {
+       "x": 66930,
+       "margin_yen": 2341388,
+       "requirement_yen": 3311388,
+       "nov_yen": -970000,
+       "room_yen": 2468612,
+       "multiple": 1,
+       "multiple_unbounded": false
+      },
+      "point": {
+       "x": 66930,
+       "margin_yen": 2341388,
+       "requirement_yen": 3311388,
+       "nov_yen": -970000,
+       "room_yen": 2468612,
+       "multiple": 1,
+       "multiple_unbounded": false
+      },
+      "call_levels_x": [
+       63360
+      ]
+     },
+     "scenario_grid": {
+      "beta": 1,
+      "skew_pt": 0,
+      "days": [
+       0,
+       26.5
+      ],
+      "dx_pct": [
+       -10,
+       -5,
+       -3,
+       0,
+       3,
+       5,
+       10
+      ],
+      "x": [
+       60237,
+       63583,
+       64922,
+       66930,
+       68937,
+       70276,
+       73622
+      ],
+      "iv_shift_pt": [
+       -5,
+       0,
+       5,
+       10
+      ],
+      "pnl_yen": [
+       [
+        [
+         -3915433,
+         -4199420,
+         -4494835,
+         -4798451
+        ],
+        [
+         -1501484,
+         -1849182,
+         -2197010,
+         -2544870
+        ],
+        [
+         -741037,
+         -1088119,
+         -1436488,
+         -1785639
+        ],
+        [
+         108174,
+         -190000,
+         -504195,
+         -828738
+        ],
+        [
+         582215,
+         389707,
+         154695,
+         -109806
+        ],
+        [
+         719971,
+         608593,
+         442826,
+         234649
+        ],
+        [
+         779835,
+         774646,
+         747829,
+         683893
+        ]
+       ],
+       [
+        [
+         -2983500,
+         -2983967,
+         -2985343,
+         -2988298
+        ],
+        [
+         146407,
+         85454,
+         23295,
+         -39678
+        ],
+        [
+         703233,
+         659607,
+         610807,
+         558325
+        ],
+        [
+         779954,
+         779491,
+         777631,
+         773101
+        ],
+        [
+         780000,
+         780000,
+         779999,
+         779987
+        ],
+        [
+         780000,
+         780000,
+         780000,
+         780000
+        ],
+        [
+         780000,
+         780000,
+         780000,
+         780000
+        ]
+       ]
+      ]
+     },
+     "smile_position": {
+      "expiries": [
+       {
+        "expiry": "2026-11",
+        "sq_date": "2026-11-13",
+        "t_days": 27.5,
+        "forward": 66930,
+        "atm_k": 66875,
+        "atm_iv_pct": 27,
+        "put5_iv_pct": 30.1,
+        "call5_iv_pct": 25.9,
+        "put5_minus_atm_pt": 3.1,
+        "call5_minus_atm_pt": -1.1
+       },
+       {
+        "expiry": "2026-12",
+        "sq_date": "2026-12-11",
+        "t_days": 55.5,
+        "forward": 67001,
+        "atm_k": 67000,
+        "atm_iv_pct": 27.5,
+        "put5_iv_pct": 29.9,
+        "call5_iv_pct": 26.3,
+        "put5_minus_atm_pt": 2.4,
+        "call5_minus_atm_pt": -1.2
+       }
+      ],
+      "legs": [
+       {
+        "expiry": "2026-11",
+        "type": "P",
+        "k": 64000,
+        "side": "sell",
+        "qty": 1,
+        "moneyness_pct": -4.4,
+        "iv_pct": 29.6,
+        "atm_iv_pct": 27,
+        "iv_minus_atm_pt": 2.6
+       }
+      ]
+     }
+    }
+   },
+   "evaluate": [
+    {
+     "input": {
+      "dx_pct": -6,
+      "days": 3,
+      "iv_shift_pt": 5
+     },
+     "result": {
+      "scenario": {
+       "days": 3,
+       "dx_pct": -6,
+       "x": 62914,
+       "iv_shift_pt": 5,
+       "skew_pt": 0,
+       "days_clamped": false
+      },
+      "pnl_yen": -2458484,
+      "expiry_pnl_yen": -306267,
+      "greeks": {
+       "delta_large": 0.54,
+       "delta_mini": 5.44,
+       "gamma_per100": -0.006,
+       "theta_yen_per_day": 53531,
+       "vega_yen_per_pt": -64583
+      },
+      "legs": [
+       {
+        "product": "op",
+        "type": "P",
+        "expiry": "2026-11",
+        "k": 64000,
+        "side": "sell",
+        "qty": 1,
+        "pnl_yen": -2458484,
+        "iv_pct": 40.6
+       }
+      ]
+     }
+    },
+    {
+     "input": {
+      "x": 66000,
+      "days": 0,
+      "iv_shift_pt": 0,
+      "skew_pt": 1
+     },
+     "result": {
+      "scenario": {
+       "days": 0,
+       "dx_pct": -1.4,
+       "x": 66000,
+       "iv_shift_pt": 0,
+       "skew_pt": 1,
+       "days_clamped": false
+      },
+      "pnl_yen": -597004,
+      "expiry_pnl_yen": 780000,
+      "greeks": {
+       "delta_large": 0.34,
+       "delta_mini": 3.45,
+       "gamma_per100": -0.006,
+       "theta_yen_per_day": 38133,
+       "vega_yen_per_pt": -66671
+      },
+      "legs": [
+       {
+        "product": "op",
+        "type": "P",
+        "expiry": "2026-11",
+        "k": 64000,
+        "side": "sell",
+        "qty": 1,
+        "pnl_yen": -597004,
+        "iv_pct": 31.4
+       }
+      ]
+     }
+    },
+    {
+     "input": {
+      "dx_pct": 4,
+      "days": 120,
+      "iv_shift_pt": -3
+     },
+     "result": {
+      "scenario": {
+       "days": 27.5,
+       "dx_pct": 4,
+       "x": 69607,
+       "iv_shift_pt": -3,
+       "skew_pt": 0,
+       "days_clamped": true
+      },
+      "pnl_yen": 780000,
+      "expiry_pnl_yen": 780000,
+      "greeks": {
+       "delta_large": 0,
+       "delta_mini": 0,
+       "gamma_per100": 0,
+       "theta_yen_per_day": 0,
+       "vega_yen_per_pt": 0
+      },
+      "legs": [
+       {
+        "product": "op",
+        "type": "P",
+        "expiry": "2026-11",
+        "k": 64000,
+        "side": "sell",
+        "qty": 1,
+        "pnl_yen": 780000,
+        "iv_pct": null
+       }
+      ]
+     }
+    }
+   ],
+   "errors": [
+    {
+     "input": {
+      "dx_pct": -80,
+      "days": 0,
+      "iv_shift_pt": 0
+     },
+     "result": {
+      "error": "out_of_range"
+     }
+    },
+    {
+     "input": {
+      "days": 0,
+      "iv_shift_pt": 0
+     },
+     "result": {
+      "error": "bad_input"
+     }
+    },
+    {
+     "input": {
+      "dx_pct": 1,
+      "x": 66000,
+      "days": 0,
+      "iv_shift_pt": 0
+     },
+     "result": {
+      "error": "bad_input"
+     }
+    }
+   ]
   }
  ],
  "technicals": {

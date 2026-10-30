@@ -44,6 +44,8 @@ export interface TopBarProps {
   /** ⋯ の保存一覧・設定（#87 (C)。どれも参照が変わらない） */
   bookCount: number | null;
   onOpenBook: () => void;
+  /** ⋯ の保有ポジション…（#302。参照が変わらない） */
+  onOpenHoldings: () => void;
   /** タブのメニューの 保存一覧に保存…（名前の欄にフォーカスして開く） */
   onSaveToBook: () => void;
   onOpenSettings: () => void;
@@ -55,7 +57,7 @@ export interface TopBarProps {
 /**
  * トップバー（docs/ui-redesign.md §2.1。#87）: ブランド / BOX タブ / 市場ピル / 警告のタグ /（PC）[AI] / [最新] / テーマ ☾ / ⋯。
  * スマホはブランドとテーマのボタンを CSS で隠す（スマホのテーマは設定。#275 で ⋯ のテーマの行を外した）。縮むのは BOX タブの帯だけ（#87 (B)）。
- * ⋯ は 保存一覧（N）… / URL をコピー / ファイルを開く… /（dev）合成の板 / 設定…（#87 (C)・#275。行は ui/view/topMenu.ts）。
+ * ⋯ は 保有ポジション…（#302）/ 保存一覧（N）… / URL をコピー / ファイルを開く… /（dev）合成の板 / 設定…（#87 (C)・#275。行は ui/view/topMenu.ts）。
  * ファイルを開く… は隠した file input をメニューの選択と同じイベントの中で click()。
  * pure: 入力は NextApp の useMemo と参照の変わらない関数だけ（シナリオの操作で描き直さない）。
  */
@@ -97,7 +99,8 @@ function TopBarView(p: TopBarProps) {
       sourceLabel: p.sourceLabel,
     }),
     (k) => {
-      if (k === 'book') p.onOpenBook();
+      if (k === 'holdings') p.onOpenHoldings();
+      else if (k === 'book') p.onOpenBook();
       else if (k === 'share') share.copy();
       else if (k === 'file') fileRef.current?.click();
       else if (k === 'settings') p.onOpenSettings();

@@ -315,18 +315,32 @@ describe('paletteItems（AC-B2）', () => {
   it('(g) 足 0 本で全クリアが押せない（理由は ⋯ と同じ）。作業の行の並び', () => {
     const rows = ofGroup(paletteItems(inputOf(loaded)), 'work');
     expect(rows.map((r) => r.label)).toEqual([
+      '保有ポジション…',
       '保存一覧（2）…',
       '保存一覧に保存…',
       '全クリア',
       '建値を今の板に合わせる',
       '設定…',
     ]);
-    const clear = rows[2];
+    const clear = rows[3];
     expect(clear?.disabled).toBe(true);
     expect(clear?.title).toBe(CLEAR_NO_LEGS_TEXT);
-    expect(ofGroup(items, 'work')[2]?.disabled).toBe(false);
+    expect(ofGroup(items, 'work')[3]?.disabled).toBe(false);
     const unread = ofGroup(paletteItems(inputOf(loaded, { bookCount: null })), 'work');
-    expect(unread[0]?.label).toBe('保存一覧…');
+    expect(unread[1]?.label).toBe('保存一覧…');
+  });
+
+  it('#302 AC9: 作業の「保有ポジション…」は保存一覧の前。板が無くても押せる', () => {
+    for (const input of [inputOf(loaded), inputOf(twoLegs, { chain: null })]) {
+      const rows = ofGroup(paletteItems(input), 'work');
+      expect(rows[0]).toMatchObject({
+        id: 'work:holdings',
+        label: '保有ポジション…',
+        disabled: false,
+        run: { kind: 'holdings' },
+      });
+      expect(rows[1]?.id).toBe('work:book');
+    }
   });
 
   it('#298 AC9: 作業の「建値を今の板に合わせる」は板なし・足 0 本で押せない（理由つき）、それ以外は押せる', () => {
