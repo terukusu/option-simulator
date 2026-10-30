@@ -18,6 +18,11 @@
  *   ファイル・#72 の単位。toSaved / readWorkspaceValue / readPositionDoc / savedFromWorkspace / restoreState
  *   （作業のキーの版を上げても、保存一覧・ファイルはこちらの版のままなので古い画面でも読める）
  * 項目を足すときはどちらかの版を上げ、読み替えを足し、tests/ui/saved/ の古い版の fixture は変えない。
+ * 例外: 省略可能で、古い画面が無視しても今までの扱いになるだけの項目は版を据え置いてよい（#299 の足の `opened_at`。
+ * 古い画面は既知のキーだけ読むので建てた日時の無い足 = 今までの評価になる。版を上げると revert した画面が利用者の
+ * 保存（作業のキー・保存一覧・URL・書き出したファイル）を「新しい版」として読まなくなる）。revert した画面は
+ * `opened_at` を書かないので、保存し直すと建てた日時は落ち、保存一覧の変更判定（savedLeg の比較）が一度ずれる
+ * （新しい画面で保存した項目が「変更あり」に見える。読めなくはならない）。
  */
 
 import {
@@ -94,6 +99,8 @@ export interface SavedOptionLegV1 {
   entry: number;
   iv?: number;
   mid?: number | null;
+  /** 建てた日時（ISO 8601。省略可能・版は据え置き。#299） */
+  opened_at?: string;
 }
 
 export interface SavedFutureLegV1 {
@@ -103,6 +110,8 @@ export interface SavedFutureLegV1 {
   side: Side;
   qty: number;
   entry: number;
+  /** 建てた日時（ISO 8601。省略可能・版は据え置き。#299） */
+  opened_at?: string;
 }
 
 export interface SavedLegV1 {
@@ -166,9 +175,13 @@ export interface SavedWorkspaceV2 {
 
 /** 足の入力値の保存形（キーの順を固定する。#70 のポジ帳の変更判定も使う）。 */
 export function savedLeg(leg: Leg): SavedOptionLegV1 | SavedFutureLegV1 {
+  // 建てた日時はキーの順の最後（#299。持たない足・書けない値は書かない）
+  const opened = openedIso(leg.openedAt);
   if (leg.kind === 'future') {
     const { product, contract, side, qty, entry } = leg;
-    return { kind: 'future', product, contract, side, qty, entry };
+    const out: SavedFutureLegV1 = { kind: 'future', product, contract, side, qty, entry };
+    if (opened !== null) out.opened_at = opened;
+    return out;
   }
   const out: SavedOptionLegV1 = {
     kind: 'option',
@@ -182,7 +195,15 @@ export function savedLeg(leg: Leg): SavedOptionLegV1 | SavedFutureLegV1 {
   };
   if (leg.iv !== undefined) out.iv = leg.iv;
   if (leg.mid !== undefined) out.mid = leg.mid;
+  if (opened !== null) out.opened_at = opened;
   return out;
+}
+
+/** 建てた日時 → ISO 8601（持たない・Date で表せない値は null = 書かない）。 */
+function openedIso(t: number | undefined): string | null {
+  if (t === undefined) return null;
+  const d = new Date(t);
+  return Number.isFinite(d.getTime()) ? d.toISOString() : null;
 }
 
 const finiteOrNull = (v: number): number | null => (Number.isFinite(v) ? v : null);
@@ -443,7 +464,9 @@ function readOptionLeg(o: Obj): OptionLeg | null {
   const entry = own(o, 'entry');
   const iv = own(o, 'iv');
   const mid = own(o, 'mid');
+  const opened = readOpenedAt(own(o, 'opened_at'));
   if (
+    opened === null ||
     own(o, 'product') !== 'op_large' ||
     !oneOf(type, OPTION_TYPES) ||
     !isContractId(expiry) ||
@@ -468,7 +491,17 @@ function readOptionLeg(o: Obj): OptionLeg | null {
   };
   if (iv !== undefined) leg.iv = iv;
   if (mid !== undefined) leg.mid = mid;
+  if (opened !== undefined) leg.openedAt = opened;
   return leg;
+}
+
+/**
+ * 足の建てた日時（#299）: 無い（undefined）→ undefined = 持たない足（古い保存）。読めない値（文字列でない・
+ * 読めない日時・長すぎる）は null = 不正（position ごと捨てる）。
+ */
+function readOpenedAt(v: unknown): number | undefined | null {
+  if (v === undefined) return undefined;
+  return readTime(v);
 }
 
 function readFutureLeg(o: Obj): FutureLeg | null {
@@ -477,7 +510,9 @@ function readFutureLeg(o: Obj): FutureLeg | null {
   const side = own(o, 'side');
   const qty = own(o, 'qty');
   const entry = own(o, 'entry');
+  const opened = readOpenedAt(own(o, 'opened_at'));
   if (
+    opened === null ||
     !oneOf(product, FUTURE_PRODUCTS) ||
     !isContractId(contract) ||
     !oneOf(side, SIDES) ||
@@ -486,7 +521,9 @@ function readFutureLeg(o: Obj): FutureLeg | null {
   ) {
     return null;
   }
-  return { kind: 'future', product, contract, side, qty, entry };
+  const leg: FutureLeg = { kind: 'future', product, contract, side, qty, entry };
+  if (opened !== undefined) leg.openedAt = opened;
+  return leg;
 }
 
 function readLeg(v: unknown): Omit<UiLeg, 'id'> | null {

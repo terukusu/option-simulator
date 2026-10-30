@@ -215,6 +215,7 @@ export function Stage(p: {
             days={scenario.days}
             maxDays={base?.maxDays ?? 0}
             evalTime={evalTime}
+            heldDays={c.positions?.heldDays ?? null}
             targets={c.targets}
             dispatch={dispatch}
           />

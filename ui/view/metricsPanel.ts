@@ -635,7 +635,8 @@ export function metricsBreakdown(
       for (const mm of premium.multiples) xsRows(`${mm.n} 倍`, mm.xs);
     }
   }
-  // 8 スプレッドコスト / 建値ずれ
+  // 8 含み損益（前の板で建てた足があるときだけ。#299）/ スプレッドコスト / 建値ずれ
+  if (premium.markedLegs > 0) row('含み損益', A(premium.unrealized, true));
   row('スプレッドコスト', A(premium.spreadCost, true));
   row('建値ずれ', A(premium.entryMismatch, true));
   // 9 証拠金（概算。#131）

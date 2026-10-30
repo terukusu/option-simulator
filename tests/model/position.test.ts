@@ -9,15 +9,22 @@ import {
   evaluatePosition,
   type Leg,
   type LegEvaluation,
+  legValue,
+  type MarketContext,
+  type ModelSettings,
+  type PreparedLeg,
   premiumSummary,
   prepareLeg,
   preparePosition,
+  theoreticalPnl,
 } from '../../model/position';
 import { type Scenario, ZERO_SCENARIO } from '../../model/scenario';
 import { DAY_MS, sqInstant, T_MIN_YEARS } from '../../model/time';
 import { FUT, M1, M2, makeMarket, quoteOf } from '../support/market';
+import { rng } from '../support/synthChain';
 
 const { ctx, rows } = makeMarket();
+const EVAL = ctx.evalTime;
 const rows1 = rows[M1.id] as NonNullable<(typeof rows)[string]>;
 const rows2 = rows[M2.id] as NonNullable<(typeof rows)[string]>;
 
@@ -351,5 +358,291 @@ describe('% モード（basisMode = pct）の Δ・Γ の定義（#260。設計 
       noSlope += ((p.sign * p.leg.qty * p.multiplier * g.gamma) / 1000) * 100;
     }
     expect(Math.abs(e.total.gammaPer100 - noSlope)).toBeGreaterThan(1e-6);
+  });
+});
+
+// ---------------------------------------------------------------- 前の板で建てた足の時価評価（#299）
+
+describe('今の値段を渡した足（前の板で建てた足の時価評価。#299）', () => {
+  const T1 = M1.days / 365;
+  const putSell = (entry: number): Leg & { kind: 'option' } => ({
+    kind: 'option',
+    product: 'op_large',
+    type: 'put',
+    expiry: M1.id,
+    strike: 64000,
+    side: 'sell',
+    qty: 1,
+    entry,
+  });
+  const fees = { ...DEFAULT_SETTINGS, feePerLot: 50 };
+
+  it('AC1: シナリオ 0 の評価価格 = 今の値段（1e-6）、損益 = 符号 × 枚数 × 乗数 × (今の値段 − 建値) − 手数料', () => {
+    // 架空の例: 740 で売った P が今の板で 500
+    const p = prepareLeg(putSell(740), ctx, fees, 500);
+    expect(p.mark).toBe(500);
+    expect(p.option?.anchorSource).toBe('mark');
+    expect(p.option?.mismatch).toBe(0);
+    expect(Math.abs(legValue(p, ctx.x0, ZERO_SCENARIO, ctx, fees) - 500)).toBeLessThan(1e-6);
+    const e = evaluateLeg(p, ctx.x0, ZERO_SCENARIO, ctx, fees);
+    expect(Math.abs(e.value - 500)).toBeLessThan(1e-6);
+    const want = -1 * 1 * 1000 * (500 - 740) - 50;
+    expect(e.pnl).toBeCloseTo(want, 6);
+    expect(theoreticalPnl([p], ctx.x0, ZERO_SCENARIO, ctx, fees)).toBeCloseTo(want, 6);
+    const s = premiumSummary([p], fees);
+    expect(s.unrealized).toBeCloseTo(240_000, 9);
+    expect(s.markedLegs).toBe(1);
+  });
+
+  /** 足の格子の評価（シナリオの格子の全点） */
+  const GRID: Array<{ s: Scenario; settings: ModelSettings }> = [];
+  for (const days of [0, 1, 5.5, 20, 400])
+    for (const dX of [-3000, 0, 2500])
+      for (const dSigma of [-5, 0, 8])
+        for (const skew of [0, 0.6])
+          for (const beta of [0, 1])
+            for (const ivDynamics of ['sticky_strike', 'sticky_moneyness'] as const)
+              for (const basisMode of ['yen', 'pct'] as const)
+                GRID.push({
+                  s: { days, dX, dSigma, skew, beta, ivDynamics, ivShift: 'absolute' },
+                  settings: { ...DEFAULT_SETTINGS, basisMode, feePerLot: 30 },
+                });
+
+  it('AC2 性質: 今の値段 m の足 = 建値 m の今の板の足 + 符号 × 枚数 × 乗数 × (m − 建値)（rng(299) 400 通り × 格子）', () => {
+    const rand = rng(299);
+    const smile = ctx.options[M1.id]?.smile ?? null;
+    let checked = 0;
+    const bad: unknown[] = [];
+    const sources = new Set<string>();
+    for (let n = 0; n < 400; n++) {
+      const F = 55000 + rand() * 25000;
+      // T: ほとんどは 0.5〜200 日、1 割は T_min 付近（(0, 2 T_min]）
+      const T = rand() < 0.1 ? T_MIN_YEARS * (0.05 + rand() * 1.95) : (0.5 + rand() * 199.5) / 365;
+      const type = rand() < 0.5 ? 'put' : 'call';
+      const strike = Math.round((F * (0.7 + rand() * 0.6)) / 125) * 125;
+      const sigma = 0.08 + rand() * 0.6;
+      const r = 0.005;
+      // 今の値段: 8 割は Black-76 の値（逆算できる）、1 割は 0（深い OTM の気配なし相当）、1 割は割引本源的価値未満
+      const u = rand();
+      const intrinsic = discountedIntrinsic(type, F, strike, T, r);
+      const m =
+        u < 0.8
+          ? black76Price(type, F, strike, T, sigma, r)
+          : u < 0.9
+            ? 0
+            : Math.max(intrinsic - 1 - rand() * 50, 0);
+      const entry = Math.max(m * (0.3 + rand() * 1.4) + (rand() - 0.5) * 100, 0);
+      const side = rand() < 0.5 ? 'buy' : 'sell';
+      const qty = 1 + Math.floor(rand() * 20);
+      const withSmile = rand() < 0.8;
+      const c: MarketContext = {
+        evalTime: EVAL,
+        r,
+        x0: F * (0.99 + rand() * 0.02),
+        options: {
+          X: { sqTime: EVAL + T * 365 * DAY_MS, forward: F, smile: withSmile ? smile : null },
+        },
+        futures: {},
+      };
+      const leg: Leg = {
+        kind: 'option',
+        product: 'op_large',
+        type,
+        expiry: 'X',
+        strike,
+        side,
+        qty,
+        entry,
+      };
+      const held = prepareLeg(leg, c, DEFAULT_SETTINGS, m);
+      const fresh = prepareLeg({ ...leg, entry: m }, c, DEFAULT_SETTINGS);
+      expect(held.mark).toBe(m);
+      sources.add(held.option?.anchorSource ?? 'none');
+      const sgn = side === 'buy' ? 1 : -1;
+      const shift = sgn * qty * 1000 * (m - entry);
+      for (const { s, settings } of GRID) {
+        const a = theoreticalPnl([held], c.x0 + s.dX, s, c, settings);
+        const b = theoreticalPnl([fresh], c.x0 + s.dX, s, c, settings) + shift;
+        // 格子の全点を見てから 1 回だけ expect する（expect を 28 万回呼ばない）
+        const ok = Number.isFinite(a) && Math.abs(a - b) <= 1e-6 * Math.max(1, Math.abs(b));
+        if (!ok) bad.push({ n, a, b, s, settings });
+        checked++;
+      }
+    }
+    expect(bad.slice(0, 3)).toEqual([]);
+    expect(checked).toBe(400 * GRID.length);
+    // 逆算できる・スマイルに落ちる・σ_min の 3 通りを含む
+    expect([...sources].sort()).toEqual(['mark', 'none', 'smile']);
+  }, 30_000);
+
+  it('AC3 恒等式: シナリオ 0 の損益 = 含み損益 + 建値ずれ − 手数料（スマイル落ち・IV 編集・T₀ ≤ T_min・前の板の先物を含む）', () => {
+    const tiny = {
+      ...ctx,
+      options: {
+        ...ctx.options,
+        NEAR: {
+          sqTime: ctx.evalTime + T_MIN_YEARS * 0.5 * 365 * DAY_MS,
+          forward: M1.F,
+          smile: ctx.options[M1.id]?.smile ?? null,
+        },
+      },
+    };
+    const itmCall = 62000;
+    const intrinsic = discountedIntrinsic('call', M1.F, itmCall, T1, ctx.r);
+    const cases: Array<[Leg, number | undefined]> = [
+      // 逆算できる今の値段
+      [putSell(740), 500],
+      // 今の値段 ≤ 割引本源的価値 → スマイル（差は建値ずれ）
+      [
+        {
+          kind: 'option',
+          product: 'op_large',
+          type: 'call',
+          expiry: M1.id,
+          strike: itmCall,
+          side: 'buy',
+          qty: 2,
+          entry: 5000,
+        },
+        Math.floor(intrinsic) - 10,
+      ],
+      // IV を編集した足（今の値段があっても編集した IV）
+      [{ ...putSell(700), iv: 0.4, qty: 3 }, 520],
+      // T₀ ≤ T_min
+      [{ ...putSell(10), expiry: 'NEAR', strike: 68000, side: 'buy' }, 250],
+      // 前の板で建てた先物の足（今の値段 = 評価に使う先物価格）
+      [
+        {
+          kind: 'future',
+          product: 'fut_mini',
+          contract: FUT.id,
+          side: 'sell',
+          qty: 4,
+          entry: 68500,
+        },
+        FUT.price,
+      ],
+      // 今の板で入れた足（今の値段なし）
+      [opLeg(M2, 'call', 72000, 'sell'), undefined],
+    ];
+    const settings = { ...DEFAULT_SETTINGS, feePerLot: 30 };
+    const prepared = cases.map(([l, m]) => prepareLeg(l, tiny, settings, m));
+    expect(prepared[1]?.option?.anchorSource).toBe('smile');
+    expect(prepared[2]?.option?.anchorSource).toBe('manual');
+    expect(prepared[3]?.mark).toBe(250);
+    const pnl0 = theoreticalPnl(prepared, tiny.x0, ZERO_SCENARIO, tiny, settings);
+    const s = premiumSummary(prepared, settings);
+    expect(s.markedLegs).toBe(5);
+    expect(pnl0).toBeCloseTo(s.unrealized + s.entryMismatch - s.fees, 6);
+    // 足ごとにも（evaluatePosition と合計が一致）
+    const ev = evaluatePosition(prepared, ZERO_SCENARIO, tiny, settings);
+    expect(ev.pnl).toBeCloseTo(pnl0, 6);
+  });
+
+  it('AC4: 今の値段を渡さない・使えない値（NaN・負・Infinity）は今と同じ', () => {
+    const leg = opLeg(M1, 'put', 64000, 'sell');
+    const base = prepareLeg(leg, ctx);
+    expect(base.mark).toBeNull();
+    for (const bad of [Number.NaN, -1, Number.POSITIVE_INFINITY, undefined]) {
+      const p = prepareLeg(leg, ctx, DEFAULT_SETTINGS, bad);
+      expect(p.mark).toBeNull();
+      expect(p.option?.anchorSource).toBe(base.option?.anchorSource);
+      expect(p.option?.anchor).toBe(base.option?.anchor);
+      expect(p.option?.mismatch).toBe(base.option?.mismatch);
+      for (const { s, settings } of GRID.slice(0, 40)) {
+        expect(theoreticalPnl([p], ctx.x0 + s.dX, s, ctx, settings)).toBe(
+          theoreticalPnl([base], ctx.x0 + s.dX, s, ctx, settings),
+        );
+      }
+    }
+    const s = premiumSummary([base]);
+    expect(s.unrealized).toBe(0);
+    expect(s.markedLegs).toBe(0);
+  });
+
+  it('AC5: IV を編集した足は今の値段があっても編集した IV がアンカー。先物の足の評価は今の値段の有無で同じ', () => {
+    const p = prepareLeg({ ...putSell(740), iv: 0.33 }, ctx, DEFAULT_SETTINGS, 500);
+    expect(p.option?.anchorSource).toBe('manual');
+    expect(p.option?.anchor).toBe(0.33);
+    expect(p.mark).toBe(500);
+    const theo = black76Price('put', M1.F, 64000, T1, 0.33, ctx.r);
+    expect(p.option?.mismatch).toBeCloseTo(500 - theo, 9);
+    const fl: Leg = {
+      kind: 'future',
+      product: 'fut_large',
+      contract: FUT.id,
+      side: 'buy',
+      qty: 2,
+      entry: 69000,
+    };
+    const a = prepareLeg(fl, ctx);
+    const b = prepareLeg(fl, ctx, DEFAULT_SETTINGS, FUT.price);
+    expect(b.mark).toBe(FUT.price);
+    for (const { s, settings } of GRID) {
+      expect(evaluateLeg(b, ctx.x0 + s.dX, s, ctx, settings)).toEqual(
+        evaluateLeg(a, ctx.x0 + s.dX, s, ctx, settings),
+      );
+    }
+  });
+
+  it('AC6: SQ を過ぎた足（T₀ ≤ 0）は今の値段を使わず、満期損益は今と同じ', () => {
+    const past = {
+      ...ctx,
+      options: {
+        ...ctx.options,
+        PAST: { sqTime: ctx.evalTime - DAY_MS, forward: M1.F, smile: null },
+      },
+      futures: { ...ctx.futures, PASTF: { sqTime: ctx.evalTime - DAY_MS, price: M1.F } },
+    };
+    const leg = { ...putSell(740), expiry: 'PAST', strike: 68000 };
+    const a = prepareLeg(leg, past);
+    const b = prepareLeg(leg, past, DEFAULT_SETTINGS, 500);
+    expect(b.mark).toBeNull();
+    const fl: Leg = {
+      kind: 'future',
+      product: 'fut_mini',
+      contract: 'PASTF',
+      side: 'buy',
+      qty: 1,
+      entry: 67000,
+    };
+    expect(prepareLeg(fl, past, DEFAULT_SETTINGS, M1.F).mark).toBeNull();
+    for (const x of [60000, 67000, 68000, 75000]) {
+      const ea = evaluateLeg(a, x, ZERO_SCENARIO, past);
+      const eb = evaluateLeg(b, x, ZERO_SCENARIO, past);
+      expect(eb).toEqual(ea);
+      expect(eb.state).toBe('expired');
+    }
+  });
+
+  it('極限: 深い OTM の今の値段 0・スマイルなし・F が決まらない・T → 0 で NaN を出さない', () => {
+    const noSmile = makeMarket({ withSmile: false }).ctx;
+    const noF = {
+      ...ctx,
+      options: {
+        ...ctx.options,
+        BAD: { sqTime: ctx.evalTime + 30 * DAY_MS, forward: Number.NaN, smile: null },
+      },
+    };
+    const legs: Array<[Leg, MarketContext]> = [
+      [{ ...putSell(5), strike: 40000 }, ctx],
+      [{ ...putSell(5), strike: 40000 }, noSmile],
+      [{ ...putSell(800), expiry: 'BAD' }, noF],
+    ];
+    for (const [leg, c] of legs) {
+      const p: PreparedLeg = prepareLeg(leg, c, DEFAULT_SETTINGS, 0);
+      for (const { s, settings } of GRID) {
+        const v = theoreticalPnl([p], c.x0 + s.dX, s, c, settings);
+        expect(Number.isFinite(v)).toBe(true);
+      }
+      expect(Number.isFinite(premiumSummary([p]).unrealized)).toBe(true);
+    }
+    // F が決まらない足は今の値段を使わない（含み損益に入れない）
+    expect(
+      prepareLeg({ ...putSell(800), expiry: 'BAD' }, noF, DEFAULT_SETTINGS, 500).mark,
+    ).toBeNull();
+    // スマイルなしで逆算できない → σ_min
+    const p0 = prepareLeg({ ...putSell(5), strike: 40000 }, noSmile, DEFAULT_SETTINGS, 0);
+    expect(p0.option?.anchorSource).toBe('none');
   });
 });

@@ -9,9 +9,9 @@ import {
   type BookRowView,
   CONFIRM_LABEL,
   confirmText,
-  MARK_BASIS_TEXT,
   requestOpen,
 } from '../view/bookList';
+import { MARK_BASIS_TEXT } from '../view/mark';
 import { TABS_FULL_TEXT } from '../view/tabs';
 import { Dialog } from './parts/Dialog';
 import { Icon } from './parts/Icon';

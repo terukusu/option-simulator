@@ -7,6 +7,8 @@
  *   手入力の足の市場（optionMarket）は保つ。手入力の足も限月・行使価格が今の板にあれば同じ規則
  * - 先物の足: data/legs.ts の futureLeg の初期値と同じ（板の先物の限月は先物価格、限月違いはその月の合成先物か
  *   先物価格）。建値だけを変え、印・市場は保つ（板を読んだときに今の板に合わせ済み）
+ * - 建てた日時（#299）: 建て直せた足は今の板の時刻にする（建値が同じでも。OP は boardOptionLeg、先物は明示）。
+ *   前の板で建てた足の時価評価をやめて、今の板で入れた足（シナリオ 0 の損益 0）に戻す。据え置きの足は保つ
  * - 据え置き: 必要な側の気配が無い行（気配なし・逆転を含む）、板に無い限月・行使価格、先物価格なし。
  *   その足は何も変えない（同じ参照を返す）。気配なしの行の建値の既定（ask − 呼値など）は使わない
  */
@@ -20,6 +22,10 @@ export interface RebaseResult {
   legs: UiLeg[];
   /** 建値が変わった本数 */
   changed: number;
+  /** 建てた日時が変わった本数（建値が同じでも数える。#299） */
+  reopened: number;
+  /** 建て直した本数（建値か建てた日時の少なくとも一方が変わった足。トーストの本数） */
+  rebuilt: number;
   /** 建て直せず据え置いた本数（建て直せたが建値が同じ足はどちらにも数えない） */
   kept: number;
 }
@@ -48,7 +54,9 @@ function rebaseLeg(chain: Chain, ui: UiLeg, holidays: Holidays): UiLeg | null {
       { product: leg.product, contract: leg.contract, side: leg.side, qty: leg.qty },
       holidays,
     );
-    return { ...ui, leg: { ...leg, entry: built.leg.entry } };
+    const next = { ...leg, entry: built.leg.entry };
+    if (built.leg.openedAt !== undefined) next.openedAt = built.leg.openedAt;
+    return { ...ui, leg: next };
   } catch {
     return null;
   }
@@ -56,15 +64,17 @@ function rebaseLeg(chain: Chain, ui: UiLeg, holidays: Holidays): UiLeg | null {
 
 /**
  * 足の建値を今の板に合わせる。板が無ければ全部を据え置く（例外を投げない）。
- * 冪等: 結果をもう一度通すと changed は 0。
+ * 冪等: 結果をもう一度通すと changed・reopened は 0。
  */
 export function rebaseLegs(
   chain: Chain | null,
   legs: readonly UiLeg[],
   holidays: Holidays,
 ): RebaseResult {
-  if (!chain) return { legs: legs.slice(), changed: 0, kept: legs.length };
+  if (!chain) return { legs: legs.slice(), changed: 0, reopened: 0, rebuilt: 0, kept: legs.length };
   let changed = 0;
+  let reopened = 0;
+  let rebuilt = 0;
   let kept = 0;
   const out = legs.map((ui) => {
     const next = rebaseLeg(chain, ui, holidays);
@@ -73,7 +83,9 @@ export function rebaseLegs(
       return ui;
     }
     if (next.leg.entry !== ui.leg.entry) changed += 1;
+    if (next.leg.openedAt !== ui.leg.openedAt) reopened += 1;
+    if (next.leg.entry !== ui.leg.entry || next.leg.openedAt !== ui.leg.openedAt) rebuilt += 1;
     return next;
   });
-  return { legs: out, changed, kept };
+  return { legs: out, changed, reopened, rebuilt, kept };
 }

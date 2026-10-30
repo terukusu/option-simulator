@@ -233,6 +233,8 @@ describe('[追加] の足の中身（AC-5）', () => {
       side: 'sell',
       qty: Math.abs(ln.lots),
       entry: chain.future.price,
+      // 建てた日時 = 板のスナップショット時刻（#299）
+      openedAt: chain.snapshotAt,
     });
     expect(leg?.marks).toEqual([]);
   });

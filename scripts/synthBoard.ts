@@ -527,6 +527,43 @@ export function buildWideChainJson(): ChainJson {
   });
 }
 
+/** 'YYYY-MM-DD' に暦日を足す（UTC の暦で数える。時差に依らない）。 */
+function addDays(date: string, days: number): string {
+  const t = Date.parse(`${date}T00:00:00Z`) + days * 86_400_000;
+  return new Date(t).toISOString().slice(0, 10);
+}
+
+/**
+ * 建ててから時間がたった板（#299。前の板で建てた足の時価評価の確認・テスト用。値は架空）: latest の days 日後
+ * （既定 3 日 = 2026-10-16 21:31）の板。F・先物を約 1.3% 下げ、ATM の IV を 2pt 上げ、乱数の種を変える。
+ * 行使価格は latest と同じ（latest で入れた足の行が残る）。fixtures/synthetic/ には入れない
+ * （`npm run fixtures -- --later` は fixtures/local/synthetic_later.json に書く）。
+ */
+export function buildLaterChainJson(days = 3): ChainJson {
+  const base = SPECS.find((s) => s.name === 'latest') as ChainSpec;
+  const shift = 0.987;
+  const move = (v: number) => Math.round((v * shift) / 5) * 5;
+  return buildChainJson({
+    ...base,
+    name: 'synthetic_later',
+    snapshot: { ...base.snapshot, date: addDays(base.snapshot.date, days) },
+    spot: { ...base.spot, price: move(base.spot.price), date: addDays(base.spot.date, days) },
+    future: { ...base.future, price: base.future.price === null ? null : move(base.future.price) },
+    quotationDate: base.quotationDate === null ? null : addDays(base.quotationDate, days),
+    months: base.months.map((m) => ({
+      ...m,
+      F: move(m.F),
+      atmVol: m.atmVol + 0.02,
+      seed: m.seed + 1000,
+      // latest と同じ行使価格（翼の比は latest の F で決めた本数のまま）
+      strikes: fixtureStrikes(m.F, m.lowPct, m.highPct, [
+        ...m.callWing.twoSided,
+        ...m.callWing.askOnly,
+      ]),
+    })),
+  });
+}
+
 /**
  * 気配だけの供給元で欠けうる側の項目（docs/data-sources.md 2 章。#154・#272）: 気配の IV・約定・約定 IV・JPX グリーク・
  * 取引高・建玉・清算値・ATM の表示

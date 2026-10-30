@@ -52,6 +52,7 @@ import {
   legBadges,
   legName,
   legSummary,
+  MARK_MISSING_TEXT,
   type PositionModel,
   type PositionRow,
   PRODUCT_LABEL,
@@ -242,6 +243,48 @@ function mismatchText(row: PositionRow): string {
 }
 
 /**
+ * 建てた日の文言（`YYYY-MM-DD（N 日前）`、同じ日は `（当日）`、今の板より後（古い板を表示）は `（今の板より後）`。
+ * 建てた日時の無い足は null）
+ */
+export function openedText(row: PositionRow): string | null {
+  if (row.openedDate === null || row.daysSinceOpen === null) return null;
+  if (row.openedAfterBoard) return `${row.openedDate}（今の板より後）`;
+  return row.daysSinceOpen > 0
+    ? `${row.openedDate}（${row.daysSinceOpen} 日前）`
+    : `${row.openedDate}（当日）`;
+}
+
+/** 今の値段の文言（OP は mid / 理論価格、先物は先物価格 / 代用。#299） */
+export function heldMarkText(row: PositionRow): string | null {
+  const m = row.heldMark;
+  if (!m) return null;
+  if (row.kind === 'future') return `${fmtEntry(m.price)} · ${m.theoretical ? '代用' : '先物価格'}`;
+  // mid は建値と同じ書式、理論価格は 100 円未満だけ小数 1 桁（理論価格の行と同じ）
+  return m.theoretical
+    ? `${fmtNum(m.price, m.price < 100 ? 1 : 0)} · 理論価格`
+    : `${fmtEntry(m.price)} · mid`;
+}
+
+/** 詳細の建てた日・今の値段・含み損益の項目（#299） */
+function heldItems(row: PositionRow, unit: AmountUnit): DetailItem[] {
+  const out: DetailItem[] = [];
+  const opened = openedText(row);
+  if (opened !== null) out.push({ key: 'opened', label: '建てた日', value: opened });
+  const mark = heldMarkText(row);
+  if (mark !== null) {
+    out.push({ key: 'mark', label: '今の値段', value: mark });
+    out.push({
+      key: 'unrealized',
+      label: `含み損益 ${AMOUNT_UNIT_LABEL[unit]}`,
+      value: fmtAmount(row.unrealizedYen, unit, true),
+    });
+  } else if (row.markMissing) {
+    out.push({ key: 'mark', label: '今の値段', value: DASH, note: MARK_MISSING_TEXT });
+  }
+  return out;
+}
+
+/**
  * 行の詳細（項目と書式は旧 Positions の詳細と同じ + スプレッドコスト + 足別のシナリオ点）。#274 で上段に編集の 3 欄、
  * グリーク（シナリオ 0）と足別のシナリオ点をそれぞれ 1 行に畳んだ（2 列の壁にしない）。
  */
@@ -286,6 +329,8 @@ export function legDetail(
           : `${row.productLabel} ${row.month} ${row.optionType} ${fmtNum(row.strike)}`,
     },
     { key: 'side', label: '売買', value: row.sideLabel },
+    // 建てた日・今の値段・含み損益（#299。前の板で建てた足だけ今の値段と含み損益）
+    ...heldItems(row, unit),
     {
       key: 'mismatch',
       label: '建値ずれ 円',
@@ -389,10 +434,12 @@ export function clearUndo(state: State): UndoToast | null {
 
 /** 建値を今の板に合わせる（#298）: 押したときの action と トースト。 */
 export interface RebasePlan {
-  /** 建て直したとき 'leg-rebase'（[元に戻す] 付き）、建値が 1 本も変わらないとき 'leg-rebase-same' */
+  /**
+   * 建て直したとき 'leg-rebase'（[元に戻す] 付き）、建値も建てた日時も 1 本も変わらないとき 'leg-rebase-same'
+   */
   kind: 'leg-rebase' | 'leg-rebase-same';
   text: string;
-  /** 作業中のタブの足を丸ごと置き換える（建値が 1 本も変わらなければ null = dispatch しない） */
+  /** 作業中のタブの足を丸ごと置き換える（建値も建てた日時も 1 本も変わらなければ null = dispatch しない） */
   apply: Action | null;
   /** [元に戻す]: apply の逆向きの replaceLegs（apply が null なら null） */
   undo: Action | null;
@@ -400,14 +447,21 @@ export interface RebasePlan {
 
 /**
  * 建値を今の板に合わせる（ui/legRebase.ts）の action とトーストの文（360px で [元に戻す] と並んで切れない長さ）。板が無い・足 0 本は null（押せない）。
- * 建値が 1 本も変わらなければ dispatch しない（mid・印だけの差は捨てる）。[元に戻す] のトーストを
+ * 建値も建てた日時（#299）も 1 本も変わらなければ dispatch しない（mid・印だけの差は捨てる）。建値が同じでも
+ * 前の板で建てた足は建てた日時を今にする（時価評価をやめてシナリオ 0 の損益を 0 に戻す）。[元に戻す] のトーストを
  * 消さないよう、そのときの知らせは別の kind にする（2 回続けて押しても 1 回目を戻せる）。
  */
 export function rebasePlan(state: State): RebasePlan | null {
   if (state.chain === null || state.legs.length === 0) return null;
   const before = state.legs;
-  const { legs: after, changed, kept } = rebaseLegs(state.chain, before, state.calendar.holidays);
-  if (changed === 0) {
+  const {
+    legs: after,
+    changed,
+    reopened,
+    rebuilt,
+    kept,
+  } = rebaseLegs(state.chain, before, state.calendar.holidays);
+  if (changed === 0 && reopened === 0) {
     return {
       kind: 'leg-rebase-same',
       text:
@@ -424,9 +478,15 @@ export function rebasePlan(state: State): RebasePlan | null {
   return {
     kind: 'leg-rebase',
     text:
-      kept === 0
-        ? `建値を今の板に合わせた（${changed} 本）`
-        : `建値を合わせた ${changed} 本・据え置き ${kept} 本`,
+      changed === 0
+        ? // 建値は今の板と同じで、建てた日時だけ今にした（前の板で建てた足の時価評価をやめる。#299）
+          kept === 0
+          ? `建値は同じ・建てた日時を今に（${reopened} 本）`
+          : `建てた日時を今に ${reopened} 本・据え置き ${kept} 本`
+        : // 本数は建て直した本数（建値が変わった足 + 建値は同じで建てた日時だけ今にした足）
+          kept === 0
+          ? `建値を今の板に合わせた（${rebuilt} 本）`
+          : `建値を合わせた ${rebuilt} 本・据え置き ${kept} 本`,
     apply: { type: 'replaceLegs', legs: after, expect: before.slice(), tab },
     undo: { type: 'replaceLegs', legs: before.slice(), expect: after, tab },
   };

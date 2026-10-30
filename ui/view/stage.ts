@@ -22,6 +22,7 @@ import {
   X_TICK_OPTIONS,
   xTickLabel,
 } from './pnlChart';
+import { heldDaysText } from './position';
 import type { ReadoutModel } from './readout';
 import {
   daysToTarget,
@@ -847,18 +848,32 @@ export function railPick(
 
 const WEEKDAYS = '日月火水木金土';
 
+/** 時間レールの幅がこれ未満なら「建ててから」を出すときに時刻を省く（#299。360px に収める） */
+export const TIME_RAIL_COMPACT_PX = 480;
+
 /**
  * 時間レールの現在値の文言（§5.2）: 「d N 日 · MM/DD HH:mm（曜）」。日時は評価時刻 + d の JST。
- * 評価時刻が無ければ「d N 日」だけ。
+ * 評価時刻が無ければ「d N 日」だけ。前の板で建てた足があれば（heldDays。最も古い足の建ててからの暦日）
+ * 末尾に「 · 建ててから N + d 日」（#299。表示だけ。計算の d は今の板から数える）。compact（レールの幅 <
+ * TIME_RAIL_COMPACT_PX）のときだけ「建ててから」を出すと時刻を省く。aria-valuetext は compact にしない（全文）。
  */
-export function timeRailText(days: number, evalTime: number | null): string {
+export function timeRailText(
+  days: number,
+  evalTime: number | null,
+  heldDays: number | null = null,
+  compact = false,
+): string {
+  const held = heldDaysText(heldDays, days);
+  const tail = held === null ? '' : ` · ${held}`;
   const d = Number.isFinite(days) ? Math.round(days * 100) / 100 : 0;
-  if (evalTime === null || !Number.isFinite(evalTime)) return `d ${d} 日`;
+  if (evalTime === null || !Number.isFinite(evalTime)) return `d ${d} 日${tail}`;
   const t = evalInstant(evalTime, Number.isFinite(days) ? days : 0);
   const s = fmtDateTime(t);
-  if (s === DASH) return `d ${d} 日`;
+  if (s === DASH) return `d ${d} 日${tail}`;
   const wd = WEEKDAYS[new Date(t + 9 * 3_600_000).getUTCDay()] ?? '';
-  return `d ${d} 日 · ${s.slice(5, 7)}/${s.slice(8, 10)} ${s.slice(11)}（${wd}）`;
+  // 狭いレールで「建ててから」を足すときは時刻を省く（360px でも収める。時刻はステッパーの副題・読み上げで読む）
+  const hm = held !== null && compact ? '' : ` ${s.slice(11)}`;
+  return `d ${d} 日 · ${s.slice(5, 7)}/${s.slice(8, 10)}${hm}（${wd}）${tail}`;
 }
 
 /**

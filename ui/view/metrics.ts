@@ -155,6 +155,8 @@ function emptyModel(unit: MetricsUnitSetting): MetricsModel {
       netAfterFees: 0,
       spreadCost: 0,
       entryMismatch: 0,
+      unrealized: 0,
+      markedLegs: 0,
       stake: null,
       multiples: [],
     },

@@ -723,6 +723,23 @@ describe('timeRailText', () => {
     expect(timeRailText(1.5, t)).toBe('d 1.5 日 · 11/14 21:00（土）');
     expect(timeRailText(2, null)).toBe('d 2 日');
   });
+
+  it('前の板で建てた足があれば末尾に「建ててから N + d 日」（#299 AC17）。360px のレールの幅に収まる', () => {
+    const t = Date.UTC(2026, 10, 5, 0, 0);
+    // 既定（広いレール・読み上げ）は時刻つき
+    expect(timeRailText(2, t, 3)).toBe('d 2 日 · 11/07 09:00（土） · 建ててから 5 日');
+    // 狭いレール（compact）は時刻を省く（幅に収める。時刻はステッパーの副題・読み上げで読む）
+    expect(timeRailText(2, t, 3, true)).toBe('d 2 日 · 11/07（土） · 建ててから 5 日');
+    expect(timeRailText(0, t, 3, true)).toBe('d 0 日 · 11/05（木） · 建ててから 3 日');
+    expect(timeRailText(2, null, 3)).toBe('d 2 日 · 建ててから 5 日');
+    // 前の板の足が無ければ compact でも今までどおり時刻つき
+    expect(timeRailText(2, t, null, true)).toBe('d 2 日 · 11/07 09:00（土）');
+    // 最も長い形（d は 2 桁の小数・N は 3 桁）でも 360px の画面のレール（左右の余白を除いて約 330px）に収まる
+    const text = timeRailText(123.45, t, 365, true);
+    const lay = timeRailLayout([], null, 0, text, 330);
+    expect(lay.bubble.x0).toBeGreaterThanOrEqual(0);
+    expect(lay.bubble.x1).toBeLessThanOrEqual(330);
+  });
 });
 
 describe('timeRailNow', () => {
