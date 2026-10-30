@@ -24,7 +24,7 @@ import { positionModel } from '../../ui/view/position';
 import { evalTimeTargets } from '../../ui/view/scenario';
 import { evalChips, presetChips, type ScenarioRegionInput } from '../../ui/view/scenarioRegion';
 import { TABS_FULL_TEXT, tabsModel } from '../../ui/view/tabs';
-import { CLEAR_NO_LEGS_TEXT } from '../../ui/view/topMenu';
+import { CLEAR_NO_LEGS_TEXT, NO_CHAIN_TEXT } from '../../ui/view/topMenu';
 import { fixture } from '../support/fixtures';
 
 /** #89 段 B: コマンドパレットの行・検索・キー（AC-B2・AC-B3）。合成の板（架空の値）。 */
@@ -313,6 +313,7 @@ describe('paletteItems（AC-B2）', () => {
       '保存一覧（2）…',
       '保存一覧に保存…',
       '全クリア',
+      '建値を今の板に合わせる',
       '設定…',
     ]);
     const clear = rows[2];
@@ -321,6 +322,19 @@ describe('paletteItems（AC-B2）', () => {
     expect(ofGroup(items, 'work')[2]?.disabled).toBe(false);
     const unread = ofGroup(paletteItems(inputOf(loaded, { bookCount: null })), 'work');
     expect(unread[0]?.label).toBe('保存一覧…');
+  });
+
+  it('#298 AC9: 作業の「建値を今の板に合わせる」は板なし・足 0 本で押せない（理由つき）、それ以外は押せる', () => {
+    const find = (list: PaletteItem[]) => list.find((i) => i.id === 'work:rebase');
+    const ok = find(items);
+    expect(ok).toMatchObject({ label: '建値を今の板に合わせる', disabled: false });
+    expect(ok?.run).toEqual({ kind: 'rebase' });
+    expect(ok?.title).toBeUndefined();
+    const noLegs = find(paletteItems(inputOf(loaded)));
+    expect(noLegs).toMatchObject({ disabled: true, title: CLEAR_NO_LEGS_TEXT, run: null });
+    const noChain = find(paletteItems(inputOf(twoLegs, { chain: null })));
+    expect(noChain).toMatchObject({ disabled: true, title: NO_CHAIN_TEXT, run: null });
+    expect(paletteFilter(items, '建値').map((r) => r.id)).toContain('work:rebase');
   });
 
   it('テーマの行: 切り替え T・端末に合わせる・ダーク・ライト', () => {

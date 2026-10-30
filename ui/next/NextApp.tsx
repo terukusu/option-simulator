@@ -49,7 +49,7 @@ import {
 } from '../view/notices';
 import { type PaletteRun, paletteAtmK, paletteItems } from '../view/palette';
 import { shareReplaceConfirmText } from '../view/persistNote';
-import { clearUndo } from '../view/positionsRegion';
+import { clearUndo, rebasePlan } from '../view/positionsRegion';
 import type { DXUnit } from '../view/scenario';
 import { presetRevealAction } from '../view/scenarioRegion';
 import {
@@ -436,6 +436,19 @@ export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
       },
     });
   }, [dispatch, push]);
+  // 建値を今の板に合わせる（#298。ポジションの ⋯ とパレット）: 押した時点の state で建て直し、建値が変わった足があれば
+  // 作業中のタブの足を丸ごと置き換える（[元に戻す] は逆向きの replaceLegs。AI の提案の [今のタブに適用] と同じ）
+  const onRebaseLegs = useCallback(() => {
+    const p = rebasePlan(stateRef.current);
+    if (!p) return;
+    const { apply, undo } = p;
+    if (apply) dispatch(apply);
+    push(
+      undo
+        ? { kind: p.kind, text: p.text, undo: () => dispatch(undo) }
+        : { kind: p.kind, text: p.text, note: 'info' },
+    );
+  }, [dispatch, push]);
   // 保存一覧・設定（#87 (C)）
   const { openBook, onBookOverwriteForUndo, onBookRestoreEntry } = c;
   const onOpenBook = useCallback(() => {
@@ -669,6 +682,9 @@ export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
       case 'clear':
         onClearLegs();
         return;
+      case 'rebase':
+        onRebaseLegs();
+        return;
       case 'settings':
         onOpenSettings();
         return;
@@ -777,6 +793,7 @@ export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
             onSelectLeg={setPicked}
             push={push}
             onClear={onClearLegs}
+            onRebase={onRebaseLegs}
           />
         }
         metrics={

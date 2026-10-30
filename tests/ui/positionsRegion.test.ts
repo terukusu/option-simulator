@@ -43,6 +43,7 @@ import {
   optionForm,
   positionRows,
   qtySpec,
+  rebasePlan,
   removeUndo,
   revealScrollTop,
   scenarioLegsByRow,
@@ -466,6 +467,87 @@ describe('AC-3 × と全クリアの [元に戻す]', () => {
     expect(dropUndoToasts(next)).toBe(next);
     const empty: Toast[] = [];
     expect(dropUndoToasts(empty)).toBe(empty);
+  });
+});
+
+describe('#298 建値を今の板に合わせる（rebasePlan）', () => {
+  /** three() の建値を板と違う値にした state（売り 2 本 + ミニ先物の買い） */
+  const stale = () =>
+    run(
+      three(),
+      { type: 'editLeg', id: 1, patch: { entry: 123 } },
+      { type: 'editLeg', id: 2, patch: { entry: 456, iv: 0.3 } },
+      { type: 'editLeg', id: 3, patch: { entry: 60000 } },
+    );
+
+  it('板が無い・足 0 本は null（押せない）', () => {
+    expect(rebasePlan(loaded())).toBeNull();
+    expect(rebasePlan(initialState)).toBeNull();
+  });
+
+  it('AC6: 建値が 1 本も変わらなければ dispatch しない（apply / undo は null）', () => {
+    const p = rebasePlan(three());
+    expect(p).toEqual({
+      kind: 'leg-rebase-same',
+      text: '建値は今の板と同じ',
+      apply: null,
+      undo: null,
+    });
+    // 全部の足が据え置き（先物価格の無い板の先物の足 1 本）
+    const np = nullPrice();
+    const s = run(loaded(np), { type: 'addFutureLeg', input: { side: 'buy', entry: 67000 } });
+    expect(rebasePlan(s)).toMatchObject({
+      kind: 'leg-rebase-same',
+      text: '気配が無く建値を据え置き（1 本）',
+      apply: null,
+    });
+  });
+
+  it('変わった足があれば [元に戻す] 付き。据え置きがあれば本数を文に出す', () => {
+    expect(rebasePlan(stale())?.text).toBe('建値を今の板に合わせた（3 本）');
+    const np = nullPrice();
+    const s = run(
+      loaded(np),
+      sellPut(m1.id, k1),
+      { type: 'editLeg', id: 1, patch: { entry: 123 } },
+      { type: 'addFutureLeg', input: { side: 'buy', entry: 67000 } },
+    );
+    const p = rebasePlan(s);
+    expect(p?.kind).toBe('leg-rebase');
+    expect(p?.text).toBe('建値を合わせた 1 本・据え置き 1 本');
+    // 合わせた後にもう一度: 変わる足が無く、一部が据え置き
+    if (!p?.apply) throw new Error('建て直しが無い');
+    expect(rebasePlan(reduce(s, p.apply))).toMatchObject({
+      kind: 'leg-rebase-same',
+      text: '建値は今の板と同じ（据え置き 1 本）',
+      apply: null,
+    });
+  });
+
+  it('AC7: apply → undo の replaceLegs で足（建値・IV の編集・印・mid・id・並び）と nextId が元と等しい', () => {
+    const s = stale();
+    const p = rebasePlan(s);
+    if (!p?.apply || !p.undo) throw new Error('建て直しが無い');
+    const after = reduce(s, p.apply);
+    expect(after.legs).not.toEqual(s.legs);
+    expect(after.legs[1]?.leg).toMatchObject({ iv: 0.3 });
+    expect(after.legs.map((l) => l.id)).toEqual(s.legs.map((l) => l.id));
+    const back = reduce(after, p.undo);
+    expect(back.legs).toEqual(s.legs);
+    expect(back.nextId).toBe(s.nextId);
+  });
+
+  it('AC8: タブを替えた後・板を読み直して印が変わった後の [元に戻す] は何もしない', () => {
+    const s = stale();
+    const p = rebasePlan(s);
+    if (!p?.apply || !p.undo) throw new Error('建て直しが無い');
+    const after = reduce(s, p.apply);
+    const other = run(after, { type: 'addTab', mode: 'empty' });
+    expect(reduce(other, p.undo)).toBe(other);
+    // 板を読み直して先物の足に「先物価格なし」の印が付いた
+    const reloaded = reduce(after, { type: 'loaded', chain: nullPrice(), label: 'y' });
+    expect(reloaded.legs[2]?.marks).toContain('no_price');
+    expect(reduce(reloaded, p.undo)).toBe(reloaded);
   });
 });
 

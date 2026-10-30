@@ -23,6 +23,18 @@ export interface TopMenuInput {
 /** 足 0 本で全クリアが押せない理由（ポジションの ⋯ とパレット） */
 export const CLEAR_NO_LEGS_TEXT = '足が無い';
 
+/** 板が無くて押せない理由（パレットの ATM・建値を今の板に合わせる） */
+export const NO_CHAIN_TEXT = '板が無い';
+
+/** 建値を今の板に合わせる（#298）の項目名（ポジションの ⋯ とパレット） */
+export const REBASE_LABEL = '建値を今の板に合わせる';
+
+/** 建値を今の板に合わせる が押せない理由（押せるなら null）。板が無い・足 0 本 */
+export function rebaseBlockedText(hasChain: boolean, legCount: number): string | null {
+  if (!hasChain) return NO_CHAIN_TEXT;
+  return legCount === 0 ? CLEAR_NO_LEGS_TEXT : null;
+}
+
 /** テーマの選択肢（トップバーの ☾ とコマンドパレットのテーマの行） */
 export const THEMES: readonly { theme: ThemePref; label: string }[] = [
   { theme: 'auto', label: '端末に合わせる' },

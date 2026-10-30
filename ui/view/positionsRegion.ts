@@ -25,6 +25,7 @@ import {
   premiumSummary,
   type Side,
 } from '../../model';
+import { rebaseLegs } from '../legRebase';
 import {
   type Action,
   parseContract,
@@ -383,6 +384,51 @@ export function clearUndo(state: State): UndoToast | null {
       expect: null,
       tab,
     })),
+  };
+}
+
+/** 建値を今の板に合わせる（#298）: 押したときの action と トースト。 */
+export interface RebasePlan {
+  /** 建て直したとき 'leg-rebase'（[元に戻す] 付き）、建値が 1 本も変わらないとき 'leg-rebase-same' */
+  kind: 'leg-rebase' | 'leg-rebase-same';
+  text: string;
+  /** 作業中のタブの足を丸ごと置き換える（建値が 1 本も変わらなければ null = dispatch しない） */
+  apply: Action | null;
+  /** [元に戻す]: apply の逆向きの replaceLegs（apply が null なら null） */
+  undo: Action | null;
+}
+
+/**
+ * 建値を今の板に合わせる（ui/legRebase.ts）の action とトーストの文（360px で [元に戻す] と並んで切れない長さ）。板が無い・足 0 本は null（押せない）。
+ * 建値が 1 本も変わらなければ dispatch しない（mid・印だけの差は捨てる）。[元に戻す] のトーストを
+ * 消さないよう、そのときの知らせは別の kind にする（2 回続けて押しても 1 回目を戻せる）。
+ */
+export function rebasePlan(state: State): RebasePlan | null {
+  if (state.chain === null || state.legs.length === 0) return null;
+  const before = state.legs;
+  const { legs: after, changed, kept } = rebaseLegs(state.chain, before, state.calendar.holidays);
+  if (changed === 0) {
+    return {
+      kind: 'leg-rebase-same',
+      text:
+        kept === 0
+          ? '建値は今の板と同じ'
+          : kept === before.length
+            ? `気配が無く建値を据え置き（${kept} 本）`
+            : `建値は今の板と同じ（据え置き ${kept} 本）`,
+      apply: null,
+      undo: null,
+    };
+  }
+  const tab = state.activeTab;
+  return {
+    kind: 'leg-rebase',
+    text:
+      kept === 0
+        ? `建値を今の板に合わせた（${changed} 本）`
+        : `建値を合わせた ${changed} 本・据え置き ${kept} 本`,
+    apply: { type: 'replaceLegs', legs: after, expect: before.slice(), tab },
+    undo: { type: 'replaceLegs', legs: before.slice(), expect: after, tab },
   };
 }
 

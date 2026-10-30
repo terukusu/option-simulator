@@ -115,6 +115,34 @@ export function boardOptionLegOnly(chain: Chain, input: BoardOptionLegInput): Op
   };
 }
 
+/**
+ * 売買に必要な側の気配（売り = bid、買い = ask。円、丸めない）。建値を今の板に合わせる操作（#298）が使う。
+ * 必要な側の気配があれば片側気配でも使う（売りは two_sided / bid_only、買いは two_sided / ask_only）。
+ * 板から足を入れるときの既定（boardOptionLegOnly: 両側気配のときだけ bid / ask）とは別の規則。
+ * 板に無い限月・行使価格、必要な側が無い行（気配なし・逆転を含む）は null（例外を投げない）。
+ */
+export function quotedSidePrice(
+  chain: Chain,
+  input: { expiry: string; k: number; type: OptionType; side: Side },
+): number | null {
+  const month = monthOf(chain, input.expiry);
+  if (!month) return null;
+  const idx = month.rows.findIndex((r) => r.k === input.k);
+  const row = month.rows[idx];
+  const info = month.strikes[idx];
+  if (!row || !info) return null;
+  const q = row[input.type];
+  const state = info[input.type].quote;
+  if (input.side === 'sell') {
+    return (state === 'two_sided' || state === 'bid_only') && q.bid !== null && q.bid > 0
+      ? q.bid
+      : null;
+  }
+  return (state === 'two_sided' || state === 'ask_only') && q.ask !== null && q.ask > 0
+    ? q.ask
+    : null;
+}
+
 /** 板の行から足を作る。 */
 export function boardOptionLeg(chain: Chain, input: BoardOptionLegInput): BuiltLeg<OptionLeg> {
   const leg = boardOptionLegOnly(chain, input);
