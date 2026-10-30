@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { evaluatePosition, theoreticalPnl, ZERO_SCENARIO } from '../../model';
+import { DEFAULT_SETTINGS, evaluatePosition, theoreticalPnl, ZERO_SCENARIO } from '../../model';
 import { AI_EVAL_CASES, caseMargin, caseState } from '../../scripts/aiEvalCases';
 import { DEFAULT_MARGIN_PREFS } from '../../ui/prefs';
+import { type Action, initialState, reduce } from '../../ui/state';
 import { aiEnvFromState } from '../../ui/view/aiContext';
 import {
   AI_TOOL_NAMES,
@@ -20,7 +21,9 @@ import { fmtNum } from '../../ui/view/format';
 import { marginNow, marginPoint, marginTail } from '../../ui/view/margin';
 import { metricsModel } from '../../ui/view/metrics';
 import { todayScenario } from '../../ui/view/pnlChart';
+import { positionModel } from '../../ui/view/position';
 import { fixture } from '../support/fixtures';
+import { boardsT0AndLater } from '../support/laterChain';
 
 /**
  * #135 AC3: AI のツール（ui/view/aiTools.ts）。合成の板（fixtures/synthetic/latest.json）と合成のポジション 10 通り
@@ -455,5 +458,27 @@ describe('strike_quote（#266）: 任意の行使価格のスマイルの IV・�
     expect(toolCard('strike_scan', {}, { error: 'bad_input' }, 'error').lines).toEqual([
       '計算できなかった（足の指定の書式が違う）',
     ]);
+  });
+});
+
+describe('前の板で建てた足（#299 AC11）: position_summary のシナリオ点の損益 = 画面のシナリオ 0 の損益', () => {
+  it('t₀ で建てて t₀ + 3 日の板で見る（含み損益から）', () => {
+    const { t0, later } = boardsT0AndLater();
+    const acts: Action[] = [
+      { type: 'loaded', chain: t0, label: 't0' },
+      { type: 'addBoardLeg', expiry: '2026-11', k: 64000, optionType: 'put', side: 'sell' },
+      { type: 'addBoardLeg', expiry: '2026-12', k: 70000, optionType: 'call', side: 'buy' },
+      { type: 'addFutureLeg', input: { side: 'buy', qty: 1 } },
+      { type: 'loaded', chain: later, label: 'later' },
+    ];
+    const s = acts.reduce(reduce, { ...initialState, feePerLot: 25 });
+    const env = aiEnvFromState(s, DEFAULT_MARGIN_PREFS);
+    if (!env?.base) throw new Error('環境が無い');
+    const settings = { ...DEFAULT_SETTINGS, feePerLot: 25 };
+    const pm = positionModel(later, s.legs, s.atmBasis, s.calendar, settings);
+    const screen = evaluatePosition(pm.prepared, ZERO_SCENARIO, pm.ctx, settings).pnl;
+    expect(Math.abs(screen)).toBeGreaterThan(1000);
+    const r = run(env, 'position_summary');
+    expect(r.scenario_point.pnl_yen).toBe(yen(screen));
   });
 });

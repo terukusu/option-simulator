@@ -2,8 +2,10 @@ import { describe, expect, it } from 'vitest';
 import { buildCalendar, buildMarketContext, normalizeChain } from '../../data';
 import bundledJson from '../../data/calendar/calendar.json';
 import {
+  DEFAULT_SETTINGS,
   discountedIntrinsic,
   evaluatePosition,
+  jstInstant,
   monthlyExpiry,
   prepareLeg,
   theoreticalPnl,
@@ -11,17 +13,23 @@ import {
 } from '../../model';
 import { CALENDAR } from '../../ui/calendar';
 import { type Action, initialState, reduce, type State } from '../../ui/state';
+import { markPrice } from '../../ui/view/mark';
 import {
+  daysSinceOpen,
   fmtEntry,
+  heldDaysText,
+  jstDay,
   legBadges,
   legName,
   legSummary,
+  openedBeforeBoard,
   type PositionRow,
   positionModel,
   stepQty,
   toggledSide,
 } from '../../ui/view/position';
 import { fixture } from '../support/fixtures';
+import { boardsT0AndLater, laterJson } from '../support/laterChain';
 
 /** AC-12・AC-13: ポジション一覧（AC27・AC17）と建値ずれ。合成の板（架空の値）。 */
 const chain = normalizeChain(fixture('latest'));
@@ -329,6 +337,14 @@ describe('1 行の簡易表示（#62）', () => {
       calendarUnconfirmed: false,
       state: null,
       error: null,
+      openedAt: null,
+      openedDate: null,
+      daysSinceOpen: null,
+      heldBefore: false,
+      heldMark: null,
+      unrealizedYen: null,
+      markMissing: false,
+      openedAfterBoard: false,
       ...over,
     };
   }
@@ -431,5 +447,238 @@ describe('1 行の簡易表示（#62）', () => {
     expect(Math.abs(before.mismatchYen as number)).toBeGreaterThan(1);
     expect(after.mismatchYen).toBeCloseTo(-(before.mismatchYen as number), 6);
     expect(legSummary(after).startsWith('買 P')).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------- 前の板で建てた足（#299）
+
+describe('前の板で建てた足を今の板で時価評価する（#299。t₀ と t₀ + 3 日の合成の板）', () => {
+  const { t0, later } = boardsT0AndLater();
+  const settings = { ...DEFAULT_SETTINGS, feePerLot: 20 };
+  const load = (s: State, c: typeof t0) => reduce(s, { type: 'loaded', chain: c, label: 'x' });
+  // t₀ で入れる足: 両側気配の売り P・後の板で気配が無くなる行の売り P（今の値段 = スマイルの理論価格）・
+  // 買い C（2 枚）・板の先物の買い
+  const opened = [
+    { type: 'addBoardLeg', expiry: '2026-11', k: 64000, optionType: 'put', side: 'sell' },
+    { type: 'addBoardLeg', expiry: '2026-11', k: 59000, optionType: 'put', side: 'sell' },
+    { type: 'addBoardLeg', expiry: '2026-12', k: 70000, optionType: 'call', side: 'buy' },
+    { type: 'addFutureLeg', input: { side: 'buy', qty: 1 } },
+  ] as const satisfies readonly Action[];
+  const atT0 = [
+    ...opened,
+    { type: 'editLeg', id: 3, patch: { qty: 2 } },
+  ] as const satisfies readonly Action[];
+  const s0 = atT0.reduce<State>(reduce, load(initialState, t0));
+  const s3 = reduce(load(s0, later), {
+    type: 'addBoardLeg',
+    expiry: '2026-11',
+    k: 66000,
+    optionType: 'put',
+    side: 'sell',
+  });
+  const model = positionModel(later, s3.legs, 'B', CALENDAR, settings);
+  const ev = evaluatePosition(model.prepared, ZERO_SCENARIO, model.ctx, settings);
+
+  it('前提: t₀ の足は t₀ の板の時刻、後で入れた足は後の板の時刻。判定は建てた日時 < 今の板の時刻', () => {
+    expect(s3.legs.map((l) => l.leg.openedAt)).toEqual([
+      t0.snapshotAt,
+      t0.snapshotAt,
+      t0.snapshotAt,
+      t0.snapshotAt,
+      later.snapshotAt,
+    ]);
+    expect(s3.legs.map((l) => openedBeforeBoard(l.leg, later))).toEqual([
+      true,
+      true,
+      true,
+      true,
+      false,
+    ]);
+    // t₀ の板で見れば前の板の足は無い
+    expect(s0.legs.some((l) => openedBeforeBoard(l.leg, t0))).toBe(false);
+    expect(positionModel(t0, s0.legs, 'B', CALENDAR).heldDays).toBeNull();
+  });
+
+  it('AC7: 各 OP の足のシナリオ 0 の損益 = (今の板の mid か理論価格 − 建値) × 符号 × 枚数 × 乗数 − 手数料、後で入れた足は 0', () => {
+    expect(model.rows.every((r) => r.error === null)).toBe(true);
+    const theoretical: boolean[] = [];
+    for (const [i, ui] of s3.legs.entries()) {
+      const leg = ui.leg;
+      const e = ev.legs[i];
+      if (!e) throw new Error('評価が無い');
+      const fee = settings.feePerLot * leg.qty;
+      const sign = leg.side === 'buy' ? 1 : -1;
+      const mult = leg.kind === 'option' ? 1000 : 100;
+      if (i === 4) {
+        // 後の板で入れた足: 建値から逆算（シナリオ 0 の損益 0 − 手数料）
+        expect(e.pnl).toBeCloseTo(-fee, 6);
+        expect(model.rows[i]?.heldMark).toBeNull();
+        continue;
+      }
+      const m =
+        leg.kind === 'option'
+          ? markPrice(later, leg)
+          : { price: later.future.price as number, theoretical: false };
+      if (!m) throw new Error('今の値段が無い');
+      theoretical.push(m.theoretical);
+      expect(e.pnl).toBeCloseTo(sign * leg.qty * mult * (m.price - leg.entry) - fee, 4);
+      expect(model.rows[i]?.unrealizedYen).toBeCloseTo(
+        sign * leg.qty * mult * (m.price - leg.entry),
+        6,
+      );
+      expect(model.rows[i]?.heldMark).toEqual(m);
+      expect(model.rows[i]?.anchorSource ?? 'future').not.toBe('smile');
+    }
+    // mid の足とスマイルの理論価格の足の両方を含む
+    expect(theoretical.slice(0, 3)).toEqual([false, true, false]);
+    // 合計 = 含み損益 + 建値ずれ − 手数料（AC3 の恒等式）
+    const sum = s3.legs.reduce((a, ui) => a + settings.feePerLot * ui.leg.qty, 0);
+    const unreal = model.rows.reduce((a, r) => a + (r.unrealizedYen ?? 0), 0);
+    const mism = model.rows.reduce((a, r) => a + (r.mismatchYen ?? 0), 0);
+    expect(ev.pnl).toBeCloseTo(unreal + mism - sum, 4);
+    expect(Math.abs(unreal)).toBeGreaterThan(1000);
+  });
+
+  it('AC7: 足の詳細の行に建てた日・N 日前・今の値段（mid / 理論価格）', () => {
+    const r = model.rows;
+    expect(r[0]).toMatchObject({
+      openedAt: t0.snapshotAt,
+      openedDate: '2026-10-13',
+      daysSinceOpen: 3,
+      heldBefore: true,
+      markMissing: false,
+    });
+    expect(r[4]).toMatchObject({
+      openedDate: '2026-10-16',
+      daysSinceOpen: 0,
+      heldBefore: false,
+      unrealizedYen: null,
+    });
+    expect(model.heldDays).toBe(3);
+  });
+
+  it('AC9: 今の値段が取れない足（板に無い限月の手入力の足・スマイル無し）は建値で評価し、印が出る', () => {
+    const input = {
+      product: 'op_large' as const,
+      expiry: '2027-03',
+      type: 'put' as const,
+      k: 60000,
+      side: 'sell' as const,
+      entry: 300,
+      iv: 0.3,
+    };
+    const a = reduce(load(initialState, t0), { type: 'addManualLeg', input });
+    const b = load(a, later);
+    const m = positionModel(later, b.legs, 'B', CALENDAR);
+    const row = m.rows[0] as PositionRow;
+    expect(row.heldBefore).toBe(true);
+    expect(row.markMissing).toBe(true);
+    expect(row.heldMark).toBeNull();
+    expect(row.unrealizedYen).toBeNull();
+    expect(m.prepared[0]?.mark).toBeNull();
+    expect(legBadges(row)).toContainEqual({ text: '今の値段なし', warn: true });
+    // 評価は今までどおり（今の板で入れた同じ足と同じ）
+    const fresh = reduce(load(initialState, later), { type: 'addManualLeg', input });
+    const mf = positionModel(later, fresh.legs, 'B', CALENDAR);
+    const e1 = evaluatePosition(m.prepared, ZERO_SCENARIO, m.ctx);
+    const e2 = evaluatePosition(mf.prepared, ZERO_SCENARIO, mf.ctx);
+    expect(e1.pnl).toBe(e2.pnl);
+    expect(legBadges(mf.rows[0] as PositionRow).some((b) => b.text === '今の値段なし')).toBe(false);
+  });
+
+  it('前の板で建てた先物の足で、今の板に先物価格が無い（先物価格なし）: 今の値段なし（建値で代用した値を今の先物価格に見せない）', () => {
+    const j = laterJson();
+    j.future.price = null;
+    j.future.price_time = null;
+    const noPrice = normalizeChain(j);
+    const a = reduce(load(initialState, t0), {
+      type: 'addFutureLeg',
+      input: { side: 'buy', qty: 1 },
+    });
+    const b = load(a, noPrice);
+    expect(b.legs[0]?.marks).toContain('no_price');
+    const m = positionModel(noPrice, b.legs, 'B', CALENDAR);
+    const row = m.rows[0] as PositionRow;
+    expect(row.heldBefore).toBe(true);
+    expect(row.heldMark).toBeNull();
+    expect(row.unrealizedYen).toBeNull();
+    expect(row.markMissing).toBe(true);
+    expect(m.prepared[0]?.mark).toBeNull();
+    expect(legBadges(row)).toContainEqual({ text: '今の値段なし', warn: true });
+  });
+
+  it('AC10: 建てた日時が今の板より後の足（保存した古い板を表示）は今の板の足と同じ扱い、N は 0', () => {
+    const s = (opened as readonly Action[]).reduce<State>(reduce, load(initialState, later));
+    const back = load(s, t0);
+    const m = positionModel(t0, back.legs, 'B', CALENDAR);
+    expect(m.rows.every((r) => !r.heldBefore && r.heldMark === null)).toBe(true);
+    expect(m.rows[0]?.daysSinceOpen).toBe(0);
+    expect(m.heldDays).toBeNull();
+    const plain = positionModel(
+      t0,
+      back.legs.map((l) => {
+        const { openedAt: _o, ...leg } = l.leg;
+        return { ...l, leg };
+      }),
+      'B',
+      CALENDAR,
+    );
+    expect(evaluatePosition(m.prepared, ZERO_SCENARIO, m.ctx).pnl).toBe(
+      evaluatePosition(plain.prepared, ZERO_SCENARIO, plain.ctx).pnl,
+    );
+  });
+
+  it('AC15: 建てた日時の無い足（古い保存）は今までどおり建値から（シナリオ 0 の損益 0）', () => {
+    const legs = s0.legs.map((l) => {
+      const { openedAt: _o, ...leg } = l.leg;
+      return { ...l, leg };
+    });
+    const m = positionModel(later, legs, 'B', CALENDAR);
+    expect(m.heldDays).toBeNull();
+    expect(m.rows.every((r) => r.openedDate === null && !r.heldBefore)).toBe(true);
+    const e = evaluatePosition(m.prepared, ZERO_SCENARIO, m.ctx);
+    // OP の足は 0、先物の足は (今の先物価格 − 建値)（今までと同じ）
+    const fut = legs[3]?.leg;
+    expect(e.pnl).toBeCloseTo(100 * ((later.future.price as number) - (fut?.entry as number)), 4);
+  });
+});
+
+describe('建ててから N 日（#299。JST の暦日）', () => {
+  it('AC17: 2026-11-02 23:59 JST → 2026-11-05 00:00 JST は 3、2026-11-03 00:00 JST は 2', () => {
+    const snap = jstInstant('2026-11-05', 0, 0);
+    expect(daysSinceOpen(jstInstant('2026-11-02', 23, 59), snap)).toBe(3);
+    expect(daysSinceOpen(jstInstant('2026-11-03', 0, 0), snap)).toBe(2);
+    expect(jstDay(jstInstant('2026-11-03', 0, 0)) - jstDay(jstInstant('2026-11-02', 23, 59))).toBe(
+      1,
+    );
+    // 建てた日時が今の板より後は 0
+    expect(daysSinceOpen(jstInstant('2026-11-06', 9, 0), snap)).toBe(0);
+  });
+
+  it('AC17: 建てた日 2026-11-02・今の板 2026-11-05・d = 2 で「建ててから 5 日」。前の板の足が無ければ出ない', () => {
+    expect(heldDaysText(3, 2)).toBe('建ててから 5 日');
+    expect(heldDaysText(3, 0)).toBe('建ててから 3 日');
+    expect(heldDaysText(3, 1.256)).toBe('建ててから 4.26 日');
+    expect(heldDaysText(null, 2)).toBeNull();
+    expect(heldDaysText(0, Number.NaN)).toBe('建ててから 0 日');
+  });
+
+  it('AC17: 足ごとに違うときは最も古い足の N（heldDays）', () => {
+    const { t0, later } = boardsT0AndLater(5);
+    const mid = boardsT0AndLater(2).later;
+    const load = (s: State, c: typeof t0) => reduce(s, { type: 'loaded', chain: c, label: 'x' });
+    const leg = {
+      type: 'addBoardLeg',
+      expiry: '2026-12',
+      k: 64000,
+      optionType: 'put',
+      side: 'sell',
+    } as const;
+    let s = reduce(load(initialState, t0), leg);
+    s = reduce(load(s, mid), { ...leg, k: 65000 });
+    s = load(s, later);
+    const m = positionModel(later, s.legs, 'B', CALENDAR);
+    expect(m.rows.map((r) => r.daysSinceOpen)).toEqual([5, 3]);
+    expect(m.heldDays).toBe(5);
   });
 });

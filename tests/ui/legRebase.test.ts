@@ -251,8 +251,20 @@ describe('建値を今の板に合わせる（rebaseLegs。#298）', () => {
   });
 
   it('AC10: 足 0 本・板なしでも例外を投げない', () => {
-    expect(rebaseLegs(a, [], holidays)).toEqual({ legs: [], changed: 0, kept: 0 });
-    expect(rebaseLegs(null, [], holidays)).toEqual({ legs: [], changed: 0, kept: 0 });
+    expect(rebaseLegs(a, [], holidays)).toEqual({
+      legs: [],
+      changed: 0,
+      reopened: 0,
+      rebuilt: 0,
+      kept: 0,
+    });
+    expect(rebaseLegs(null, [], holidays)).toEqual({
+      legs: [],
+      changed: 0,
+      reopened: 0,
+      rebuilt: 0,
+      kept: 0,
+    });
     const s = stale();
     const r = rebaseLegs(null, s.legs, holidays);
     expect(r).toMatchObject({ changed: 0, kept: 2 });

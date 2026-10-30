@@ -68,7 +68,7 @@ export const DOC_QUESTIONS: DocQuestion[] = [
     text: '足の IV（アンカー IV）はどう決まる？シナリオを全部 0 にすると足の理論価格はどうなる？',
     expect: ['design:5.3', 'design:5.4', 'user-guide:7', 'user-guide:7.4'],
     points:
-      '足を入れた時点の建値から逆算した IV。原資産が動くとスマイルに沿って相対的に動かす（σ_base = σ_anchor + σ_smile(x) − σ_smile(x₀)）。シナリオ 0（sticky strike）では理論価格は必ず建値に戻る。逆算できない建値はスマイルの IV と建値ずれ',
+      '今の板で入れた足は建値から逆算した IV。原資産が動くとスマイルに沿って相対的に動かす（σ_base = σ_anchor + σ_smile(x) − σ_smile(x₀)）。シナリオ 0（sticky strike）では理論価格は建値に戻る。逆算できない建値はスマイルの IV と建値ずれ。前の板で建てた足は今の値段（mid）から逆算し、シナリオ 0 の損益は含み損益から始まる',
   },
   {
     id: 'time',

@@ -349,6 +349,8 @@ describe('AC-2 行の表示モデル', () => {
     expect(d.items.map((i) => i.key)).toEqual([
       'product',
       'side',
+      // 建てた日（#299。今の板で入れた足は「当日」だけ。今の値段・含み損益は前の板で建てた足だけ）
+      'opened',
       'mismatch',
       'spread',
       'fair',
@@ -356,6 +358,7 @@ describe('AC-2 行の表示モデル', () => {
     ]);
     expect(val('product')).toBe(`ラージ OP ${m1.id} P ${fmtNum(k1)}`);
     expect(val('side')).toBe('売り');
+    expect(val('opened')).toBe(`${row.openedDate}（当日）`);
     expect(val('sq')).toBe(row.sqDate);
     expect(d.greeks.head).toBe('グリーク（シナリオ 0）· 円');
     expect(d.greeks.parts.join(' · ')).toBe(

@@ -74,6 +74,14 @@ export interface BoardOptionLegInput {
   entry?: number;
 }
 
+/**
+ * 建てた日時 = 足を入れた板のスナップショット時刻（#299。ブラウザの時計ではない）。足を作る所（板の足・手入力の足・
+ * 先物の足）がすべてこれで付ける（K の変更・建値を今の板に合わせる・AI の提案も builder 経由で今の板の時刻になる）。
+ */
+export function openedAtOf(chain: Chain | null): { openedAt?: number } {
+  return chain && Number.isFinite(chain.snapshotAt) ? { openedAt: chain.snapshotAt } : {};
+}
+
 function requireMonth(chain: Chain, id: string): ChainMonth {
   const m = monthOf(chain, id);
   if (!m) throw new Error(`板に無い限月: ${id}`);
@@ -112,6 +120,7 @@ export function boardOptionLegOnly(chain: Chain, input: BoardOptionLegInput): Op
     qty: input.qty ?? 1,
     entry,
     mid: sideInfo.mid,
+    ...openedAtOf(chain),
   };
 }
 
@@ -229,6 +238,8 @@ export function manualOptionLeg(
     entry: input.entry,
     iv: input.iv,
     mid: null,
+    // 板が無いときは持たない（今までどおりの扱い）
+    ...openedAtOf(chain),
   };
   const onBoard = chain ? monthOf(chain, input.expiry) : undefined;
   if (onBoard) {
@@ -304,7 +315,15 @@ export function futureLeg(
     price = input.entry;
   }
   return {
-    leg: { kind: 'future', product, contract, side: input.side, qty, entry: input.entry ?? price },
+    leg: {
+      kind: 'future',
+      product,
+      contract,
+      side: input.side,
+      qty,
+      entry: input.entry ?? price,
+      ...openedAtOf(chain),
+    },
     marks,
     market: { sqTime, price },
   };

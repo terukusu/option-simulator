@@ -48,6 +48,11 @@ export interface OptionLeg {
   iv?: number;
   /** 足を入れたときの板の mid（スプレッドコスト用。無ければ null） */
   mid?: number | null;
+  /**
+   * 建てた日時（足を入れた・建て直したときの板のスナップショット時刻の epoch ミリ秒。#299）。UI 由来の項目で、
+   * model の評価は読まない（前の板で建てたかの判定と今の値段は表示モデルが求めて prepareLeg に渡す）
+   */
+  openedAt?: number;
 }
 
 export interface FutureLeg {
@@ -58,6 +63,8 @@ export interface FutureLeg {
   side: Side;
   qty: number;
   entry: number;
+  /** 建てた日時（OptionLeg.openedAt と同じ。UI 由来・model の評価は読まない。#299） */
+  openedAt?: number;
 }
 
 export type Leg = OptionLeg | FutureLeg;
@@ -106,7 +113,11 @@ export const DEFAULT_SETTINGS: ModelSettings = {
   tMin: T_MIN_YEARS,
 };
 
-export type AnchorSource = 'entry' | 'manual' | 'smile' | 'none';
+/**
+ * アンカー IV の出どころ: entry = 建値から逆算、mark = 今の値段から逆算（前の板で建てた足。#299）、
+ * manual = 編集した IV、smile = スマイルの σ(x₀)（逆算できない）、none = σ_min
+ */
+export type AnchorSource = 'entry' | 'mark' | 'manual' | 'smile' | 'none';
 
 export interface PreparedLeg {
   leg: Leg;
@@ -121,30 +132,53 @@ export interface PreparedLeg {
   expiryTime: number;
   /** 評価時刻での T */
   T0: number;
+  /**
+   * 時価評価に使った今の値段（円。前の板で建てた足。#299）。使わなかったら null（今の板で入れた足・
+   * 渡さなかった・使えない = OP で F が決まらない・SQ を過ぎた）。含み損益 = 符号 × 枚数 × 乗数 × (mark − 建値)
+   */
+  mark: number | null;
   /** オプションの足だけ */
   option?: {
     anchor: number;
     anchorSource: AnchorSource;
     x0: number;
     sigmaBase: SigmaBase;
-    /** 建値ずれ = 建値 − アンカー IV の理論価格（価格単位。entry で決まった足は 0） */
+    /**
+     * 建値ずれ = 基準の値段 − アンカー IV の理論価格（価格単位。基準は今の値段（mark がある足）か建値。
+     * entry・mark で決まった足は 0）
+     */
     mismatch: number;
   };
 }
 
 export const sideSign = (side: Side): 1 | -1 => (side === 'buy' ? 1 : -1);
 
-/** 足を入れた時点の値（アンカー IV・basis）を決める。 */
+const validMark = (v: number | undefined): v is number =>
+  v !== undefined && Number.isFinite(v) && v >= 0;
+
+/**
+ * 足を入れた時点の値（アンカー IV・basis）を決める。
+ *
+ * mark（省略可。#299）: 前の板で建てた足の今の値段（円。OP はプレミアム、先物は価格）。呼び出し側が今の板から
+ * 求めて渡す（model は板・時計を読まない）。OP の足は mark が有限 ≥ 0・F 有限・T₀ > 0 のときだけ使い、
+ * IV を編集していなければアンカー IV を mark から逆算する（シナリオ 0 の理論価格 = mark、損益 = 含み損益）。
+ * 逆算できなければスマイルの σ(x₀)（無ければ σ_min）で、差 mark − 理論価格 が建値ずれ。IV を編集した足は
+ * 編集した IV がアンカー（建値ずれ = mark − 理論価格）。先物の足の評価は変えない（PreparedLeg.mark に写すだけ。
+ * 呼び出し側は評価に使う先物価格 = ctx.futures の価格を渡す）。
+ * 使えない mark（NaN・負・Infinity、F が決まらない、SQ を過ぎた）は渡さないのと同じ（mark: null。例外を投げない）。
+ */
 export function prepareLeg(
   leg: Leg,
   ctx: MarketContext,
   settings: ModelSettings = DEFAULT_SETTINGS,
+  mark?: number,
 ): PreparedLeg {
   const multiplier = PRODUCTS[leg.product].multiplier;
   const sign = sideSign(leg.side);
   if (leg.kind === 'future') {
     const m = ctx.futures[leg.contract];
     if (!m) throw new Error(`先物の限月が無い: ${leg.contract}`);
+    const T0 = yearFraction(ctx.evalTime, m.sqTime);
     return {
       leg,
       multiplier,
@@ -152,7 +186,9 @@ export function prepareLeg(
       F: m.price,
       basis: m.price - ctx.x0,
       expiryTime: m.sqTime,
-      T0: yearFraction(ctx.evalTime, m.sqTime),
+      T0,
+      // 先物の SQ を過ぎた足は評価が X' になる（今の価格でない）ので使わない
+      mark: validMark(mark) && T0 > 0 ? mark : null,
     };
   }
   const m = ctx.options[leg.expiry];
@@ -170,10 +206,16 @@ export function prepareLeg(
       basis: 0,
       expiryTime: m.sqTime,
       T0,
+      mark: null,
       option: { anchor, anchorSource: 'none', x0: 0, sigmaBase: () => anchor, mismatch: 0 },
     };
   }
   const x0 = Math.log(leg.strike / F);
+  // 今の値段を使うのは SQ 前だけ（SQ を過ぎた足は満期損益 = 今と同じ。AC6）
+  const usedMark = validMark(mark) && T0 > 0 ? mark : null;
+  // アンカー IV の基準の値段: 今の値段（前の板で建てた足）か建値
+  const basePrice = usedMark ?? leg.entry;
+  const fromBase: AnchorSource = usedMark !== null ? 'mark' : 'entry';
   let anchor: number;
   let anchorSource: AnchorSource;
   const theo = (s: number) =>
@@ -184,12 +226,14 @@ export function prepareLeg(
     anchor = leg.iv;
     anchorSource = 'manual';
   } else {
-    const res = impliedVol(leg.type, leg.entry, F, leg.strike, T0, ctx.r, { tMin: settings.tMin });
+    const res = impliedVol(leg.type, basePrice, F, leg.strike, T0, ctx.r, {
+      tMin: settings.tMin,
+    });
     if (res.ok) {
       anchor = res.sigma;
-      anchorSource = 'entry';
+      anchorSource = fromBase;
     } else if (m.smile) {
-      // 建値 ≤ 割引本源的価値など: σ_anchor = σ_smile(x₀)、差は建値ずれとして別に出す
+      // 基準の値段 ≤ 割引本源的価値など: σ_anchor = σ_smile(x₀)、差は建値ずれとして別に出す
       anchor = m.smile.sigma(x0);
       anchorSource = 'smile';
     } else {
@@ -197,7 +241,7 @@ export function prepareLeg(
       anchorSource = 'none';
     }
   }
-  const mismatch = anchorSource === 'entry' ? 0 : leg.entry - theo(anchor);
+  const mismatch = anchorSource === fromBase ? 0 : basePrice - theo(anchor);
   return {
     leg,
     multiplier,
@@ -206,6 +250,7 @@ export function prepareLeg(
     basis: F - ctx.x0,
     expiryTime: m.sqTime,
     T0,
+    mark: usedMark,
     option: { anchor, anchorSource, x0, sigmaBase: legSigmaBase(anchor, x0, m.smile), mismatch },
   };
 }
@@ -531,9 +576,17 @@ export interface PremiumSummary {
   spreadCost: number;
   /**
    * 建値ずれ（円）= シナリオ 0 の理論損益への影響 Σ −(建値 − 理論価格) × 売買符号 × 枚数 × 乗数（不利なら負。
-   * 足の詳細の建値ずれの合計と同じ向き。手数料は含めない。#260）
+   * 足の詳細の建値ずれの合計と同じ向き。手数料は含めない。#260）。前の板で建てた足は建値の代わりに今の値段（#299）
    */
   entryMismatch: number;
+  /**
+   * 含み損益（円）= Σ 売買符号 × 枚数 × 乗数 × (今の値段 − 建値)（今の値段を使った足 = PreparedLeg.mark がある足
+   * だけ。OP・先物とも。#299）。恒等式: シナリオ 0 の損益 = unrealized + entryMismatch − fees
+   * （今の板で入れた足は今の板で建値を編集した先物の足を除く）
+   */
+  unrealized: number;
+  /** 今の値段を使った足の本数（0 なら含み損益の行を出さない） */
+  markedLegs: number;
 }
 
 export function premiumSummary(
@@ -546,9 +599,15 @@ export function premiumSummary(
   let optionFees = 0;
   let spreadCost = 0;
   let entryMismatch = 0;
+  let unrealized = 0;
+  let markedLegs = 0;
   for (const p of legs) {
     const fee = settings.feePerLot * p.leg.qty;
     fees += fee;
+    if (p.mark !== null) {
+      unrealized += p.sign * p.leg.qty * p.multiplier * (p.mark - p.leg.entry);
+      markedLegs += 1;
+    }
     if (p.leg.kind !== 'option') continue;
     optionFees += fee;
     const amount = p.leg.entry * p.leg.qty * p.multiplier;
@@ -568,5 +627,7 @@ export function premiumSummary(
     spreadCost,
     // || 0: −0 を 0 にする
     entryMismatch: entryMismatch || 0,
+    unrealized: unrealized || 0,
+    markedLegs,
   };
 }

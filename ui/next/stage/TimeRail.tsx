@@ -3,6 +3,7 @@ import type { Action } from '../../state';
 import type { EvalTimeTarget } from '../../view/scenario';
 import {
   railPick,
+  TIME_RAIL_COMPACT_PX,
   TIME_RAIL_PAD,
   timeRailLayout,
   timeRailNow,
@@ -18,7 +19,8 @@ const MOVE_PX = 6;
 const HEIGHT = 44;
 
 /**
- * 時間レール（舞台の下。docs/ui-redesign.md §5・§8。#82）: 今 → 最遠の SQ。ドラッグは 1 日刻み、目盛り（取引最終日・SQ）の
+ * 時間レール（舞台の下。docs/ui-redesign.md §5・§8。#82）: 今 → 最遠の SQ。前の板で建てた足があれば現在値の吹き出しに
+ * 「建ててから N + d 日」を足す（#299）。ドラッグは 1 日刻み、目盛り（取引最終日・SQ）の
  * タップでその時刻ぴったり（daysToTarget。端数あり）、← → で ±1 日。足 0 本（上限 0）は無効。
  * 位置は SVG の属性（ui/view/stage.ts）。setDays は 1 フレーム 1 回。touch-action: none。
  */
@@ -26,6 +28,8 @@ export function TimeRail(p: {
   days: number;
   maxDays: number;
   evalTime: number | null;
+  /** 前の板で建てた足の建ててからの暦日（最も古い足。無ければ null。#299） */
+  heldDays: number | null;
   targets: readonly EvalTimeTarget[];
   dispatch: (a: Action) => void;
 }) {
@@ -62,7 +66,9 @@ export function TimeRail(p: {
 
   const shown = Math.min(Math.max(Number.isFinite(days) ? days : 0, 0), Math.max(maxDays, 0));
   const kx = timeRailX(shown, width, maxDays);
-  const text = timeRailText(shown, p.evalTime);
+  const text = timeRailText(shown, p.evalTime, p.heldDays, width < TIME_RAIL_COMPACT_PX);
+  // 読み上げは幅によらず時刻つきの全文
+  const ariaText = timeRailText(shown, p.evalTime, p.heldDays);
   // 吹き出しはつまみの下の文字の行（描画域の目盛りの文字に重ねない）。重なる目盛りの文字・「今」は出さない
   const lay = timeRailLayout(ticks, now, kx, text, width);
   return (
@@ -75,7 +81,7 @@ export function TimeRail(p: {
       aria-valuemin={0}
       aria-valuemax={Math.max(maxDays, 0)}
       aria-valuenow={shown}
-      aria-valuetext={text}
+      aria-valuetext={ariaText}
       aria-disabled={disabled ? true : undefined}
       onPointerDown={(e) => {
         if (disabled || (e.pointerType === 'mouse' && e.button !== 0)) return;

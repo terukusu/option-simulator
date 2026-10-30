@@ -12,6 +12,7 @@ import {
   marginRoom,
   premiumSummary,
   TAIL_SHOCKS,
+  ZERO_SCENARIO,
 } from '../../model';
 import { CALENDAR } from '../../ui/calendar';
 import { PIN_SETTLE_MS } from '../../ui/pins';
@@ -78,6 +79,7 @@ import {
   stageMarkLabels,
 } from '../../ui/view/stage';
 import { fixture } from '../support/fixtures';
+import { boardsT0AndLater } from '../support/laterChain';
 import { SUB_MAX_UNITS, widthUnits } from '../support/widthUnits';
 
 /** #131 AC14: 証拠金の概算の表示モデル（タイル・内訳・テールの証拠金の表）。合成の板・架空の値。 */
@@ -986,5 +988,29 @@ describe('#149 買いの OP の設定', () => {
     expect(metricsPanel(m, 0, vOn).marginTailCaption).toContain('· 買い OP 除く');
     expect(metricsPanel(m, 0, vOff).marginTailCaption).not.toContain('買い OP');
     expect(marginParamsText(vOff.params)).toBe('R ±5% · IV ×1.5 / ×0.75 · 2 営業日 · 掛け目 100%');
+  });
+});
+
+describe('前の板で建てた足の NOV（#299 AC11）', () => {
+  it('NOV は今の値段ベース（Σ 符号 × 枚数 × 乗数 × 今の値段）', () => {
+    const { t0, later } = boardsT0AndLater();
+    const s = [
+      { type: 'loaded', chain: t0, label: 't0' },
+      { type: 'addBoardLeg', expiry: '2026-11', k: 64000, optionType: 'put', side: 'sell' },
+      { type: 'addBoardLeg', expiry: '2026-12', k: 70000, optionType: 'call', side: 'buy' },
+      { type: 'loaded', chain: later, label: 'later' },
+    ].reduce<State>((a, x) => reduce(a, x as Action), initialState);
+    const pm = positionModel(later, s.legs, 'B', CALENDAR);
+    const base = pnlDomains(later, pm.prepared, pm.ctx, DEFAULT_SETTINGS);
+    if (!base) throw new Error('基礎が作れない');
+    const params = marginParamsOf(DEFAULT_MARGIN_PREFS);
+    const now = marginNow(base, ZERO_SCENARIO, params, null, CALENDAR.holidays);
+    // 既定は買いの OP を M に入れない（ignoreLongOptions）ので売りの足だけ
+    expect(params.ignoreLongOptions).toBe(true);
+    const want = pm.rows
+      .filter((r) => r.side === 'sell')
+      .reduce((a, r) => a - r.qty * 1000 * (r.heldMark?.price as number), 0);
+    expect(pm.rows.every((r) => r.heldMark !== null)).toBe(true);
+    expect(now?.result.nov).toBeCloseTo(want, 3);
   });
 });

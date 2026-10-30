@@ -30,14 +30,15 @@ import {
   exportDoneText,
   INVALID_ROW_TEXT,
   importDoneText,
-  markPrice,
   markToBoard,
   NEWER_ROW_TEXT,
   requestOpen,
 } from '../../ui/view/bookList';
+import { markPrice } from '../../ui/view/mark';
 import { pnlDomains } from '../../ui/view/pnlChart';
 import { positionModel } from '../../ui/view/position';
 import { fixture } from '../support/fixtures';
+import { boardsT0AndLater } from '../support/laterChain';
 import bookV1 from './saved/book-v1.json';
 
 const NOW = Date.parse('2026-10-16T03:00:00.000Z');
@@ -431,5 +432,36 @@ describe('確認・知らせ（AC6・AC7）', () => {
     );
     // 開く以外の文言はタブの名前で変わらない
     expect(confirmText({ kind: 'remove', id: 'x' }, 'P', 0, 'B')).toBe('「P」を削除する？');
+  });
+});
+
+describe('画面のシナリオ 0 の損益 = 保存一覧の評価損益（#299 AC8。t₀ で建てて t₀ + 3 日の板で見る）', () => {
+  it('markToBoard と positionModel → evaluatePosition の差が 1 円未満', () => {
+    const { t0, later } = boardsT0AndLater();
+    const fee = 30;
+    const s0 = run(
+      { ...initialState, feePerLot: fee },
+      { type: 'loaded', chain: t0, label: 't0' },
+      { type: 'addBoardLeg', expiry: '2026-11', k: 64000, optionType: 'put', side: 'sell' },
+      { type: 'addBoardLeg', expiry: '2026-11', k: 59000, optionType: 'put', side: 'sell' },
+      { type: 'addBoardLeg', expiry: '2026-12', k: 70000, optionType: 'call', side: 'buy' },
+      { type: 'addBoardLeg', expiry: '2026-12', k: 66000, optionType: 'put', side: 'buy' },
+      { type: 'addFutureLeg', input: { side: 'sell', qty: 2 } },
+      { type: 'editLeg', id: 3, patch: { qty: 3 } },
+    );
+    const s3 = run(s0, { type: 'loaded', chain: later, label: 'later' });
+    const settings = { ...DEFAULT_SETTINGS, feePerLot: fee };
+    const m = positionModel(later, s3.legs, 'B', CALENDAR, settings);
+    const screen = evaluatePosition(m.prepared, ZERO_SCENARIO, m.ctx, settings).pnl;
+    const book = markToBoard(
+      later,
+      s3.legs.map((l) => l.leg),
+      fee,
+    );
+    expect(book.missing).toBe(0);
+    expect(book.theoretical).toBe(true);
+    expect(Math.abs(screen - (book.pnl as number))).toBeLessThan(1);
+    // 含み損益がある（0 から始まらない）
+    expect(Math.abs(screen)).toBeGreaterThan(1000);
   });
 });

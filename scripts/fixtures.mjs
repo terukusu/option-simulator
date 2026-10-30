@@ -1,6 +1,8 @@
 // 合成の板 JSON を fixtures/synthetic/ に書き出す（`npm run fixtures`）。
 // `--check` はコミット済みのファイルと一致するかだけを見て、違えば失敗する（`npm run fixtures:check`。CI）。
 // `--wide` は 322 行 × 2 限月の板を fixtures/local/synthetic_wide.json に書く（gitignore。コミットしない）。
+// `--later` は latest の 3 日後の板（F・IV を動かした別の板。#299 の前の板で建てた足の確認用）を
+// fixtures/local/synthetic_later.json に書く（gitignore。コミットしない）。
 // TypeScript の生成器（scripts/synthBoard.ts）は Vite のモジュールランナーで読む（依存を増やさない）。
 
 import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
@@ -12,6 +14,7 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const outDir = join(root, 'fixtures', 'synthetic');
 const check = process.argv.includes('--check');
 const wide = process.argv.includes('--wide');
+const later = process.argv.includes('--later');
 
 const { module } = await runnerImport(join(root, 'scripts', 'synthBoard.ts'), {
   configFile: false,
@@ -27,6 +30,14 @@ if (wide) {
   await mkdir(localDir, { recursive: true });
   await writeFile(join(localDir, 'synthetic_wide.json'), content);
   console.log(`wrote fixtures/local/synthetic_wide.json (${content.length} bytes。コミットしない)`);
+} else if (later) {
+  const localDir = join(root, 'fixtures', 'local');
+  const content = module.serializeChainJson(module.buildLaterChainJson());
+  await mkdir(localDir, { recursive: true });
+  await writeFile(join(localDir, 'synthetic_later.json'), content);
+  console.log(
+    `wrote fixtures/local/synthetic_later.json (${content.length} bytes。コミットしない)`,
+  );
 } else if (check) {
   const problems = [];
   for (const [name, content] of Object.entries(files)) {

@@ -252,6 +252,8 @@ describe('先物の足', () => {
       side: 'buy',
       qty: 1,
       entry: 67880,
+      // 建てた日時 = 板のスナップショット時刻（#299）
+      openedAt: chain.snapshotAt,
     });
     expect(f.marks).toEqual([]);
     expect(f.market).toEqual({ sqTime: chain.future.sqTime, price: 67880 });

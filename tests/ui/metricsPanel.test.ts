@@ -40,6 +40,7 @@ import { positionModel } from '../../ui/view/position';
 import { readoutModel } from '../../ui/view/readout';
 import { type BigReadoutKey, bigReadout } from '../../ui/view/stage';
 import { fixture } from '../support/fixtures';
+import { boardsT0AndLater } from '../support/laterChain';
 import { SUB_MAX_UNITS, widthUnits } from '../support/widthUnits';
 
 /** #86 AC-2〜AC-4: 新しい画面の指標パネルの表示モデル。合成の板・架空の値。 */
@@ -851,5 +852,48 @@ describe('#274 読み取りの帯とタイルで同じ値を出す項目が 0', 
       const roLabels = new Set(ro.map((i) => i.label));
       expect(tiles.map((t) => t.k).filter((k) => roLabels.has(k))).toEqual([]);
     }
+  });
+});
+
+describe('含み損益の行（#299 AC11。t₀ で建てて t₀ + 3 日の板で見る）', () => {
+  const { t0, later } = boardsT0AndLater();
+  const s0 = run(
+    { ...initialState, feePerLot: 40 },
+    { type: 'loaded', chain: t0, label: 't0' },
+    { type: 'addBoardLeg', expiry: '2026-11', k: 64000, optionType: 'put', side: 'sell' },
+    { type: 'addBoardLeg', expiry: '2026-11', k: 70500, optionType: 'call', side: 'sell' },
+    { type: 'addFutureLeg', input: { side: 'buy', qty: 1 } },
+  );
+  const s3 = run(s0, { type: 'loaded', chain: later, label: 'later' });
+  const metricsAt = (c: Chain, s: State) => {
+    const settings: ModelSettings = { ...DEFAULT_SETTINGS, feePerLot: s.feePerLot };
+    const pm = positionModel(c, s.legs, s.atmBasis, CALENDAR, settings);
+    const base = pnlDomains(c, pm.prepared, pm.ctx, settings);
+    if (!base) throw new Error('基礎が作れない');
+    return { pm, m: metricsModel({ base, scenario: ZERO_SCENARIO, unit: 'yen' }) };
+  };
+
+  it('内訳に「含み損益」の行（スプレッドコストの前）、合計 = シナリオ 0 の損益 − 建値ずれ + 手数料', () => {
+    const { pm, m } = metricsAt(later, s3);
+    const rows = metricsBreakdown(m);
+    const i = rows.findIndex((r) => r.k === '含み損益');
+    expect(i).toBeGreaterThan(0);
+    expect(rows[i + 1]?.k).toBe('スプレッドコスト');
+    expect(rows[i]?.v).toBe(amt(m.premium.unrealized, 'yen', true));
+    expect(m.premium.markedLegs).toBe(3);
+    // AC7 と同じ合計（行の含み損益の和）・恒等式
+    const sum = pm.rows.reduce((a, r) => a + (r.unrealizedYen ?? 0), 0);
+    expect(m.premium.unrealized).toBeCloseTo(sum, 6);
+    expect(m.scenarioPoint.pnl).toBeCloseTo(
+      m.premium.unrealized + m.premium.entryMismatch - m.premium.fees,
+      4,
+    );
+    expect(Math.abs(m.scenarioPoint.pnl)).toBeGreaterThan(1000);
+  });
+
+  it('前の板で建てた足が無ければ含み損益の行は出ない', () => {
+    const { m } = metricsAt(t0, s0);
+    expect(m.premium.markedLegs).toBe(0);
+    expect(metricsBreakdown(m).some((r) => r.k === '含み損益')).toBe(false);
   });
 });
