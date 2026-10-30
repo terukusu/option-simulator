@@ -57,11 +57,15 @@ export interface ShareItemState {
   title: string;
 }
 
-export type TabMenuKey = 'rename' | 'copy' | 'save' | 'share' | 'close';
+export type TabMenuKey = 'rename' | 'copy' | 'held' | 'save' | 'share' | 'close';
+
+/** 保有にできない理由（#301。足 0 本のタブ） */
+export const HELD_NO_LEGS_TEXT = '足が無い';
 
 /**
- * 作業中のタブのメニュー: 名前を変える… / 複製 / 保存一覧に保存…（#87 (C)。常に押せる = 保存一覧を開くだけ）/
- * URL をコピー /（区切り）閉じる（最後の 1 個では出さない）。
+ * 作業中のタブのメニュー: 名前を変える… / 複製 / 保有にする・保有を外す（#301。足 0 本では付けられない。外すのは
+ * いつでも）/ 保存一覧に保存…（#87 (C)。常に押せる = 保存一覧を開くだけ）/ URL をコピー /（区切り）閉じる
+ * （最後の 1 個では出さない）。
  */
 export function tabMenuModel(view: TabsView, share: ShareItemState): MenuRow<TabMenuKey>[] {
   const rows: MenuRow<TabMenuKey>[] = [
@@ -69,6 +73,11 @@ export function tabMenuModel(view: TabsView, share: ShareItemState): MenuRow<Tab
     view.canAdd
       ? { key: 'copy', label: '複製' }
       : { key: 'copy', label: '複製', disabled: true, title: TABS_FULL_TEXT },
+    view.active.held
+      ? { key: 'held', label: '保有を外す' }
+      : view.active.legCount > 0
+        ? { key: 'held', label: '保有にする' }
+        : { key: 'held', label: '保有にする', disabled: true, title: HELD_NO_LEGS_TEXT },
     { key: 'save', label: '保存一覧に保存…' },
     { key: 'share', label: 'URL をコピー', disabled: share.disabled, title: share.title },
   ];

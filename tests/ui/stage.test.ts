@@ -304,6 +304,28 @@ describe('legMarkers（AC-2 c）', () => {
     const [m] = legMarkers([manual], base, chart, { selected: null, drag: null });
     expect(m?.draggable).toBe(false);
   });
+
+  it('#301 AC6: 保有のタブ（locked）では全部の足マーカーが draggable false。検討中は今のまま', () => {
+    const base = baseOf(withQty);
+    const chart = chartOf(base, ZERO_SCENARIO);
+    const free = legMarkers(withQty.legs, base, chart, { selected: null, drag: null });
+    expect(free.length).toBeGreaterThan(0);
+    expect(free.every((m) => m.draggable)).toBe(true);
+    const unlocked = legMarkers(withQty.legs, base, chart, {
+      selected: null,
+      drag: null,
+      locked: false,
+    });
+    expect(unlocked).toEqual(free);
+    const locked = legMarkers(withQty.legs, base, chart, {
+      selected: null,
+      drag: null,
+      locked: true,
+    });
+    expect(locked.map((m) => m.draggable)).toEqual(free.map(() => false));
+    // つかめないだけで、位置・選択などは同じ
+    expect(locked.map((m) => ({ ...m, draggable: true }))).toEqual(free);
+  });
 });
 
 describe('strikeAtPx', () => {

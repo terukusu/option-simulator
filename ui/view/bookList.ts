@@ -206,6 +206,8 @@ export interface BookListView {
   rows: BookRowView[];
   /** 作業中の足があり、同じ内容の項目が無い（開くときに確認する） */
   unsaved: boolean;
+  /** 作業中のタブが保有（#301。同じ内容の項目があっても [開く] で確認する） */
+  held: boolean;
 }
 
 export interface BookListInput {
@@ -218,6 +220,8 @@ export interface BookListInput {
   currentKey: string;
   /** 作業中の足の本数 */
   legCount: number;
+  /** 作業中のタブが保有（#301） */
+  held?: boolean;
 }
 
 export const INVALID_ROW_TEXT = '読めない項目（この画面では開けない。削除だけできる）';
@@ -236,6 +240,7 @@ export function bookListModel(input: BookListInput): BookListView {
     boardText,
     rows: [] as BookRowView[],
     unsaved: input.legCount > 0,
+    held: input.held === true,
     nearFull: false,
   };
   if (read.kind === 'invalid') return { ...base, state: 'invalid', count: 0, sizeText: '' };
@@ -280,6 +285,8 @@ export function bookListModel(input: BookListInput): BookListView {
     const current = input.legCount > 0 && entryKey(e) === input.currentKey;
     currentFound ||= current;
     const tags: BookTag[] = [];
+    // 保有の印（#301）。「作業中」の前（印は項目の性質、作業中は今の作業との関係）
+    if (e.ws.position.held === true) tags.push({ text: '保有', warn: false });
     if (current) tags.push({ text: '作業中', warn: false });
     if (s.offBoard > 0) tags.push({ text: `板に無い足 ${s.offBoard}`, warn: true });
     let markText: string;
@@ -330,10 +337,20 @@ export function bookListModel(input: BookListInput): BookListView {
 // ---------------------------------------------------------------- 確認・知らせの文言
 
 /** ダイアログ内の確認（1 つだけ。別の操作・閉じるで消える） */
-export type BookConfirm = { kind: 'open' | 'overwrite' | 'remove'; id: string } | { kind: 'clear' };
+export type BookConfirm =
+  /**
+   * held = 作業中のタブが保有（#301。確認の文に書く）。'unsaved' = 保有で、同じ内容の項目も無い（足の本数も書く）
+   */
+  | { kind: 'open'; id: string; held?: 'saved' | 'unsaved' }
+  | { kind: 'overwrite' | 'remove'; id: string }
+  | { kind: 'clear' };
 
-/** [開く] を押したとき: 未保存の作業があれば確認、無ければすぐ開く。 */
-export function requestOpen(unsaved: boolean, id: string): BookConfirm | 'open' {
+/**
+ * [開く] を押したとき: 未保存の作業があるか、作業中のタブが保有（#301。同じ内容の項目があっても置き換えると印が
+ * 項目の値になる）なら確認、無ければすぐ開く。
+ */
+export function requestOpen(unsaved: boolean, id: string, held = false): BookConfirm | 'open' {
+  if (held) return { kind: 'open', id, held: unsaved ? 'unsaved' : 'saved' };
   return unsaved ? { kind: 'open', id } : 'open';
 }
 
@@ -349,6 +366,15 @@ export function confirmText(
 ): string {
   switch (c.kind) {
     case 'open':
+      if (c.held !== undefined) {
+        const tab = tabName === undefined ? '作業中のタブ' : `作業中のタブ ${tabName}`;
+        // 同じ内容の項目が無ければ本数も書く。同じ内容があっても保有なら確認する
+        const what =
+          c.held === 'unsaved'
+            ? `は保有のタブで、足 ${legCount} 本は保存一覧に無い`
+            : 'は保有のタブ';
+        return `${tab} ${what}。「${name}」を開くとこのタブが置き換わる（残すなら [新しいタブで開く]）`;
+      }
       return tabName === undefined
         ? `作業中の足 ${legCount} 本は保存一覧に無い。「${name}」を開くと置き換わる（作業の自動保存は 1 つだけ）`
         : `作業中のタブ ${tabName} の足 ${legCount} 本は保存一覧に無い。「${name}」を開くとこのタブが置き換わる（残すなら [新しいタブで開く]）`;

@@ -7,6 +7,7 @@ import type { CommitFail } from '../bookIo';
 import type { ThemePref } from '../prefs';
 import { BOOK_FAIL_TEXT } from './bookList';
 import type { MenuRow, ShareItemState } from './boxTabs';
+import { TABS_FULL_TEXT } from './tabs';
 
 export type TopMenuKey = 'book' | 'share' | 'file' | `fixture:${string}` | 'settings';
 
@@ -26,13 +27,37 @@ export const CLEAR_NO_LEGS_TEXT = '足が無い';
 /** 板が無くて押せない理由（パレットの ATM・建値を今の板に合わせる） */
 export const NO_CHAIN_TEXT = '板が無い';
 
+/** 保有のタブで全クリアが押せない理由（#301。ポジションの ⋯ とパレット） */
+export const CLEAR_HELD_TEXT = '保有のタブ（保有を外すと消せる）';
+
+/** 全クリアが押せない理由（押せるなら null）。足が無い → 保有のタブ（#301） */
+export function clearBlockedText(legCount: number, held = false): string | null {
+  if (legCount === 0) return CLEAR_NO_LEGS_TEXT;
+  return held ? CLEAR_HELD_TEXT : null;
+}
+
 /** 建値を今の板に合わせる（#298）の項目名（ポジションの ⋯ とパレット） */
 export const REBASE_LABEL = '建値を今の板に合わせる';
 
-/** 建値を今の板に合わせる が押せない理由（押せるなら null）。板が無い・足 0 本 */
-export function rebaseBlockedText(hasChain: boolean, legCount: number): string | null {
+/** 保有のタブの建て直しの項目名（#301。保有のタブはそのまま、写しを新しいタブで建て直す） */
+export const REBASE_COPY_LABEL = '写しを今の板で建て直す';
+
+/** 建て直しの項目名（保有のタブなら写し。#301） */
+export const rebaseLabel = (held: boolean): string => (held ? REBASE_COPY_LABEL : REBASE_LABEL);
+
+/**
+ * 建値を今の板に合わせる が押せない理由（押せるなら null）。板が無い → 足 0 本 → 保有のタブでタブが上限（写しの
+ * タブを足せない。#301）の順
+ */
+export function rebaseBlockedText(
+  hasChain: boolean,
+  legCount: number,
+  held = false,
+  canAddTab = true,
+): string | null {
   if (!hasChain) return NO_CHAIN_TEXT;
-  return legCount === 0 ? CLEAR_NO_LEGS_TEXT : null;
+  if (legCount === 0) return CLEAR_NO_LEGS_TEXT;
+  return held && !canAddTab ? TABS_FULL_TEXT : null;
 }
 
 /** テーマの選択肢（トップバーの ☾ とコマンドパレットのテーマの行） */

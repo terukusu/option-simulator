@@ -335,7 +335,16 @@ describe('壊れた・危ない URL でも落ちずに知らせる', () => {
     expect('evil' in (r.legs[0]?.leg ?? {})).toBe(false);
     expect(({} as Record<string, unknown>).polluted).toBeUndefined();
     expect(Object.keys(r).sort()).toEqual(
-      ['boardSnapshotAt', 'feePerLot', 'futureBasis', 'legs', 'name', 'savedAt', 'scenario'].sort(),
+      [
+        'boardSnapshotAt',
+        'feePerLot',
+        'futureBasis',
+        'held',
+        'legs',
+        'name',
+        'savedAt',
+        'scenario',
+      ].sort(),
     );
   });
 
@@ -372,6 +381,35 @@ describe('壊れた・危ない URL でも落ちずに知らせる', () => {
     };
     expect(await encodeShareUrl(doc, 'A', BASE, throwing)).toEqual({ kind: 'failed' });
     expect(await readShareHash(FIXTURE_HASH, throwing)).toEqual({ kind: 'invalid' });
+  });
+});
+
+describe('保有の印（#301。オーナー判断 3 = URL で渡す）', () => {
+  it('AC10: 作る → 読むで印が戻り、開くと開いたタブに印が付く（replace / newTab）', async () => {
+    const s = run(withLegs(2), { type: 'setTabHeld', held: true });
+    const m = made(await encodeShareUrl(toSaved(s, NOW), '保有', BASE));
+    const r = shared(await readShareHash(hashOf(m.url)));
+    expect(r.held).toBe(true);
+    expect(shareOpenAction(r, 'replace')).toMatchObject({ type: 'openPosition', held: true });
+    const a = reduce(initialState, shareOpenAction(r, 'replace'));
+    expect(a.tabs[0]?.held).toBe(true);
+    const b = reduce(withLegs(1), shareOpenAction(r, 'newTab'));
+    expect(b.tabs.map((t) => t.held === true)).toEqual([false, true]);
+  });
+
+  it('印なしの URL・既存の fixture は印なしで開く。true 以外の held は印なし', async () => {
+    const plain = shared(await readShareHash(FIXTURE_HASH));
+    expect(plain.held).toBe(false);
+    expect(reduce(initialState, shareOpenAction(plain, 'replace')).tabs[0]).not.toHaveProperty(
+      'held',
+    );
+    const doc = toSaved(withLegs(1), NOW);
+    for (const bad of [false, 'true', 1, {}]) {
+      const raw = JSON.stringify({ ...doc, position: { ...doc.position, held: bad } });
+      const r = shared(await readShareHash(`#p=1.${await gzipText(raw)}`));
+      expect(r.held, String(bad)).toBe(false);
+      expect(r.legs).toHaveLength(1);
+    }
   });
 });
 

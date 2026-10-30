@@ -435,6 +435,78 @@ describe('確認・知らせ（AC6・AC7）', () => {
   });
 });
 
+describe('保有の印（#301）', () => {
+  const s = strangle(50);
+  const held = run(s, { type: 'setTabHeld', held: true });
+  const input = {
+    chain,
+    atmBasis: 'B' as const,
+    calendar: CALENDAR,
+    unitSetting: 'yen' as const,
+  };
+  const keyOf = (st: State, h: boolean) =>
+    bookKey(st.legs, st.scenario, st.feePerLot, st.futureBasis, h);
+
+  it('AC14: 印のある項目だけ行のタグに「保有」（「作業中」の前）', () => {
+    const h = entryOf(held, '保有', 'h');
+    const p = entryOf(s, '検討', 'p');
+    const v = bookListModel({
+      ...input,
+      read: readOf(h, p),
+      currentKey: keyOf(held, true),
+      legCount: 2,
+      held: true,
+    });
+    expect(v.rows[0]?.tags).toEqual([
+      { text: '保有', warn: false },
+      { text: '作業中', warn: false },
+    ]);
+    expect(v.rows[1]?.tags).toEqual([]);
+    expect(v.held).toBe(true);
+    expect(v.unsaved).toBe(false);
+  });
+
+  it('AC13: 印だけ違うタブと項目は「作業中」にならず未保存', () => {
+    const p = entryOf(s, '検討', 'p');
+    const v = bookListModel({
+      ...input,
+      read: readOf(p),
+      currentKey: keyOf(held, true),
+      legCount: 2,
+      held: true,
+    });
+    expect(v.rows[0]?.current).toBe(false);
+    expect(v.unsaved).toBe(true);
+    const h = entryOf(held, '保有', 'h');
+    const v2 = bookListModel({
+      ...input,
+      read: readOf(h),
+      currentKey: keyOf(s, false),
+      legCount: 2,
+    });
+    expect(v2.rows[0]?.current).toBe(false);
+    expect(v2.rows[0]?.tags).toEqual([{ text: '保有', warn: false }]);
+    expect(v2.held).toBe(false);
+  });
+
+  it('AC8: 保有のタブで [開く] は同じ内容の項目があっても確認。検討中は今のまま', () => {
+    expect(requestOpen(false, 'x', true)).toEqual({ kind: 'open', id: 'x', held: 'saved' });
+    expect(requestOpen(true, 'x', true)).toEqual({ kind: 'open', id: 'x', held: 'unsaved' });
+    expect(requestOpen(false, 'x', false)).toBe('open');
+    expect(requestOpen(false, 'x')).toBe('open');
+    expect(requestOpen(true, 'x', false)).toEqual({ kind: 'open', id: 'x' });
+  });
+
+  it('AC8: 確認の文に保有（同じ内容があれば本数を書かない）', () => {
+    expect(confirmText({ kind: 'open', id: 'x', held: 'saved' }, 'P', 2, 'B')).toBe(
+      '作業中のタブ B は保有のタブ。「P」を開くとこのタブが置き換わる（残すなら [新しいタブで開く]）',
+    );
+    expect(confirmText({ kind: 'open', id: 'x', held: 'unsaved' }, 'P', 2, 'B')).toBe(
+      '作業中のタブ B は保有のタブで、足 2 本は保存一覧に無い。「P」を開くとこのタブが置き換わる（残すなら [新しいタブで開く]）',
+    );
+  });
+});
+
 describe('画面のシナリオ 0 の損益 = 保存一覧の評価損益（#299 AC8。t₀ で建てて t₀ + 3 日の板で見る）', () => {
   it('markToBoard と positionModel → evaluatePosition の差が 1 円未満', () => {
     const { t0, later } = boardsT0AndLater();

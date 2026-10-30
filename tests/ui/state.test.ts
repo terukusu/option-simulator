@@ -12,6 +12,7 @@ import { BUNDLED_CALENDAR } from '../../ui/calendar';
 import { serializeWorkspace } from '../../ui/persist';
 import {
   type Action,
+  activeHeld,
   initialState,
   type LegPatch,
   legAtStrike,
@@ -27,6 +28,7 @@ import {
   parseStrike,
   parseYRange,
   reduce,
+  restoreTabAction,
   SCENARIO_PER_TAB,
   type State,
   sameUiLeg,
@@ -1403,5 +1405,251 @@ describe('行使価格の変更と足の復元（#82 AC-6: changeLegStrike・res
     expect(sameUiLeg(a, { ...a, marks: [...a.marks, 'no_quote'] })).toBe(false);
     expect(sameUiLeg(a, { ...a, id: 9 })).toBe(false);
     expect(sameUiLeg(a, { ...a, leg: { ...a.leg, qty: 3 } })).toBe(false);
+  });
+});
+
+describe('保有の印（#301）', () => {
+  const chain = normalizeChain(fixture('latest'));
+  const m0 = chain.months[0];
+  if (!m0) throw new Error('限月が無い');
+  const ks = m0.rows.map((r) => r.k);
+  const mid = Math.floor(ks.length / 2);
+  const k = (i: number) => ks[mid + i] ?? 0;
+  const board = (i: number, optionType: OptionType, side: 'buy' | 'sell'): Action => ({
+    type: 'addBoardLeg',
+    expiry: m0.id,
+    k: k(i),
+    optionType,
+    side,
+  });
+  const HOLD: Action = { type: 'setTabHeld', held: true };
+  const UNHOLD: Action = { type: 'setTabHeld', held: false };
+  const heldOf = (s: State) => s.tabs.map((t) => [t.name, t.held === true]);
+
+  /** 不変条件（#71 と同じ）+ 印は true か無い（false を持たない） */
+  function invariant(s: State): void {
+    const active = s.tabs.filter((t) => t.id === s.activeTab);
+    expect(active).toHaveLength(1);
+    expect(active[0]?.saved).toBeNull();
+    for (const t of s.tabs) if (t.id !== s.activeTab) expect(t.saved).not.toBeNull();
+    expect(s.tabs.length).toBeGreaterThanOrEqual(1);
+    expect(s.tabs.length).toBeLessThanOrEqual(MAX_TABS);
+    for (const t of s.tabs) expect('held' in t ? t.held : true).toBe(true);
+  }
+
+  /** タブ A（足 2 本・保有）と B（足 1 本・検討中。作業中） */
+  function heldAThenB(): State {
+    return run(
+      loaded(chain),
+      board(-2, 'put', 'sell'),
+      board(2, 'call', 'sell'),
+      HOLD,
+      { type: 'addTab', mode: 'empty' },
+      board(0, 'put', 'buy'),
+    );
+  }
+
+  it('AC1: 付けると作業中のタブだけ印が付き、他のタブ・足・シナリオは同じ参照', () => {
+    const s0 = run(
+      loaded(chain),
+      board(-2, 'put', 'sell'),
+      { type: 'addTab', mode: 'empty' },
+      board(2, 'call', 'sell'),
+    );
+    const s1 = reduce(s0, HOLD);
+    invariant(s1);
+    expect(heldOf(s1)).toEqual([
+      ['A', false],
+      ['B', true],
+    ]);
+    expect(activeHeld(s1)).toBe(true);
+    expect(s1.tabs[0]).toBe(s0.tabs[0]);
+    expect(s1.legs).toBe(s0.legs);
+    expect(s1.scenario).toBe(s0.scenario);
+    expect(s1.pins).toBe(s0.pins);
+    // 付いているのに付けても同じ参照
+    expect(reduce(s1, HOLD)).toBe(s1);
+    // 外すとキーごと消える
+    const s2 = reduce(s1, UNHOLD);
+    expect(s2.tabs[1]).toEqual({ id: s1.activeTab, name: 'B', saved: null });
+    expect('held' in (s2.tabs[1] ?? {})).toBe(false);
+    expect(activeHeld(s2)).toBe(false);
+    expect(reduce(s2, UNHOLD)).toBe(s2);
+  });
+
+  it('AC1: 足 0 本のタブには付けられない（state のまま）。付けたあと × で 0 本にしても印は残る', () => {
+    const empty = loaded(chain);
+    expect(reduce(empty, HOLD)).toBe(empty);
+    const s = run(loaded(chain), board(-2, 'put', 'sell'), HOLD, { type: 'removeLeg', id: 1 });
+    expect(s.legs).toHaveLength(0);
+    expect(activeHeld(s)).toBe(true);
+    // 0 本でも外せる
+    expect(activeHeld(reduce(s, UNHOLD))).toBe(false);
+  });
+
+  it('AC2: タブの切り替えで印を保つ（退避したタブも作業中のタブも）', () => {
+    const s = heldAThenB();
+    invariant(s);
+    expect(heldOf(s)).toEqual([
+      ['A', true],
+      ['B', false],
+    ]);
+    const back = reduce(s, { type: 'switchTab', id: 1 });
+    invariant(back);
+    expect(heldOf(back)).toEqual([
+      ['A', true],
+      ['B', false],
+    ]);
+    expect(activeHeld(back)).toBe(true);
+  });
+
+  it('AC2: 閉じたタブの [元に戻す] で印が戻る（作業中・退避の両方）', () => {
+    const s = heldAThenB();
+    // 退避した保有のタブ A を閉じて戻す
+    const a = restoreTabAction(s, 1);
+    expect(a?.held).toBe(true);
+    const back = run(s, { type: 'closeTab', id: 1 }, a as Action);
+    invariant(back);
+    expect(heldOf(back)).toEqual([
+      ['A', true],
+      ['B', false],
+    ]);
+    // 作業中の保有のタブ A を閉じて戻す
+    const s2 = reduce(s, { type: 'switchTab', id: 1 });
+    const a2 = restoreTabAction(s2, 1);
+    expect(a2?.held).toBe(true);
+    const back2 = run(s2, { type: 'closeTab', id: 1 }, a2 as Action);
+    invariant(back2);
+    expect(activeHeld(back2)).toBe(true);
+    // 印なしのタブの控えは held を持たない
+    expect(restoreTabAction(s, s.activeTab)).not.toHaveProperty('held');
+  });
+
+  it('AC2: タブの複製（メニュー・＋ の「このタブを複製」= addTab copy）と空のタブは印なし', () => {
+    const s = reduce(heldAThenB(), { type: 'switchTab', id: 1 });
+    for (const mode of ['copy', 'empty'] as const) {
+      const n = reduce(s, { type: 'addTab', mode });
+      invariant(n);
+      expect(activeHeld(n)).toBe(false);
+      expect(n.tabs.find((t) => t.id === 1)?.held).toBe(true);
+    }
+  });
+
+  it('AC2: openPosition は作業中のタブの印を項目の値にする（省略 = 印なし）', () => {
+    const s = reduce(heldAThenB(), { type: 'switchTab', id: 1 });
+    const open = (held?: boolean): Action => ({
+      type: 'openPosition',
+      legs: [],
+      scenario: null,
+      feePerLot: null,
+      futureBasis: null,
+      ...(held === undefined ? {} : { held }),
+    });
+    expect(activeHeld(reduce(s, open()))).toBe(false);
+    expect(activeHeld(reduce(s, open(false)))).toBe(false);
+    const fromPlain = reduce(s, { type: 'switchTab', id: 2 });
+    expect(activeHeld(reduce(fromPlain, open(true)))).toBe(true);
+    invariant(reduce(fromPlain, open(true)));
+  });
+
+  it('AC2: openPositionInNewTab は新しいタブに true のときだけ付け、元のタブの印は変えない', () => {
+    const s = heldAThenB();
+    const open = (held?: boolean): Action => ({
+      type: 'openPositionInNewTab',
+      legs: [],
+      scenario: null,
+      feePerLot: null,
+      futureBasis: null,
+      ...(held === undefined ? {} : { held }),
+    });
+    const a = reduce(s, open(true));
+    invariant(a);
+    expect(heldOf(a)).toEqual([
+      ['A', true],
+      ['B', false],
+      ['C', true],
+    ]);
+    const b = reduce(reduce(s, { type: 'switchTab', id: 1 }), open());
+    expect(heldOf(b)).toEqual([
+      ['A', true],
+      ['C', false],
+      ['B', false],
+    ]);
+  });
+
+  it('AC2: renameTab・closeTab は残るタブの印を変えない', () => {
+    const s = heldAThenB();
+    expect(heldOf(reduce(s, { type: 'renameTab', id: 1, name: 'Z' }))).toEqual([
+      ['Z', true],
+      ['B', false],
+    ]);
+    expect(heldOf(reduce(s, { type: 'closeTab', id: 2 }))).toEqual([['A', true]]);
+  });
+
+  it('AC3: 印があっても不変条件が保たれる（ランダムな操作列）', () => {
+    const r = rng(301);
+    let s = loaded(chain);
+    const acts: Action[] = [
+      board(-1, 'put', 'sell'),
+      board(1, 'call', 'buy'),
+      HOLD,
+      UNHOLD,
+      { type: 'addTab', mode: 'copy' },
+      { type: 'addTab', mode: 'empty' },
+      { type: 'removeLeg', id: 1 },
+      { type: 'clearLegs' },
+    ];
+    for (let i = 0; i < 300; i++) {
+      const n = Math.floor(r() * (acts.length + 2));
+      const ids = s.tabs.map((t) => t.id);
+      const id = ids[Math.floor(r() * ids.length)] ?? 1;
+      const a: Action =
+        n < acts.length
+          ? (acts[n] as Action)
+          : n === acts.length
+            ? { type: 'switchTab', id }
+            : { type: 'closeTab', id };
+      s = reduce(s, a);
+      invariant(s);
+    }
+  });
+
+  it('守り: 保有のタブでは clearLegs・changeLegStrike は state のまま（検討中のタブでは効く）', () => {
+    const plain = run(loaded(chain), board(-2, 'put', 'sell'));
+    const held = reduce(plain, HOLD);
+    expect(reduce(held, { type: 'clearLegs' })).toBe(held);
+    expect(reduce(held, { type: 'changeLegStrike', id: 1, k: k(-3) })).toBe(held);
+    expect(reduce(plain, { type: 'clearLegs' }).legs).toHaveLength(0);
+    expect(reduce(plain, { type: 'changeLegStrike', id: 1, k: k(-3) })).not.toBe(plain);
+  });
+
+  it('AC9: 保有のタブでも足の追加・×・建値 / 枚数 / 売買 / IV の編集・restoreLeg・replaceLegs は印なしと同じ結果', () => {
+    const plain = run(loaded(chain), board(-2, 'put', 'sell'), board(2, 'call', 'sell'));
+    const held = reduce(plain, HOLD);
+    const leg1 = plain.legs[0] as UiLeg;
+    const cases: Array<[string, Action]> = [
+      ['板の足の追加', board(0, 'put', 'buy')],
+      ['先物の足の追加', { type: 'addFutureLeg', input: { side: 'buy', entry: 67000 } }],
+      ['×', { type: 'removeLeg', id: 1 }],
+      ['建値', { type: 'editLeg', id: 1, patch: { entry: 123 } }],
+      ['枚数', { type: 'editLeg', id: 1, patch: { qty: 3 } }],
+      ['売買', { type: 'editLeg', id: 1, patch: { side: 'buy' } }],
+      ['IV', { type: 'editLeg', id: 1, patch: { iv: 0.25 } }],
+      [
+        'restoreLeg',
+        { type: 'restoreLeg', leg: { ...leg1, id: 9 }, index: 0, expect: null, tab: 1 },
+      ],
+      [
+        'replaceLegs',
+        { type: 'replaceLegs', legs: [leg1], expect: plain.legs.slice(), tab: plain.activeTab },
+      ],
+    ];
+    for (const [what, a] of cases) {
+      const p = reduce(plain, a);
+      const h = reduce(held, a);
+      expect(h.legs, what).toEqual(p.legs);
+      expect(h.legs, what).not.toBe(held.legs);
+      expect(activeHeld(h), what).toBe(true);
+    }
   });
 });

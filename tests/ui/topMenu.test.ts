@@ -4,9 +4,18 @@
 import { describe, expect, it } from 'vitest';
 import type { CommitFail } from '../../ui/bookIo';
 import { BOOK_FAIL_TEXT } from '../../ui/view/bookList';
+import { TABS_FULL_TEXT } from '../../ui/view/tabs';
 import {
+  CLEAR_HELD_TEXT,
+  CLEAR_NO_LEGS_TEXT,
+  clearBlockedText,
+  NO_CHAIN_TEXT,
   overwrittenText,
+  REBASE_COPY_LABEL,
+  REBASE_LABEL,
   RESTORE_ENTRY_CHANGED_TEXT,
+  rebaseBlockedText,
+  rebaseLabel,
   restoreEntryFailText,
   type TopMenuInput,
   topMenuModel,
@@ -96,5 +105,30 @@ describe('上書きを戻すトースト', () => {
       );
     }
     expect(RESTORE_ENTRY_CHANGED_TEXT).toBe('戻せなかった（保存一覧が変わった）');
+  });
+});
+
+describe('#301 保有のタブの全クリア・建て直しの理由と名前（ポジションの ⋯ とパレットが共用）', () => {
+  it('建て直しの理由の順: 板が無い → 足が無い → 保有のタブでタブが上限', () => {
+    expect(rebaseBlockedText(false, 0, true, false)).toBe(NO_CHAIN_TEXT);
+    expect(rebaseBlockedText(true, 0, true, false)).toBe(CLEAR_NO_LEGS_TEXT);
+    expect(rebaseBlockedText(true, 2, true, false)).toBe(TABS_FULL_TEXT);
+    expect(rebaseBlockedText(true, 2, true, true)).toBeNull();
+    // 検討中のタブは上限でも押せる（今のタブを建て直す。#298 のまま）
+    expect(rebaseBlockedText(true, 2, false, false)).toBeNull();
+    expect(rebaseBlockedText(true, 2)).toBeNull();
+  });
+
+  it('全クリアの理由: 足が無い → 保有のタブ', () => {
+    expect(clearBlockedText(0, true)).toBe(CLEAR_NO_LEGS_TEXT);
+    expect(clearBlockedText(0, false)).toBe(CLEAR_NO_LEGS_TEXT);
+    expect(clearBlockedText(2, true)).toBe(CLEAR_HELD_TEXT);
+    expect(clearBlockedText(2, false)).toBeNull();
+  });
+
+  it('建て直しの名前: 保有のタブは「写しを今の板で建て直す」', () => {
+    expect(rebaseLabel(true)).toBe(REBASE_COPY_LABEL);
+    expect(REBASE_COPY_LABEL).toBe('写しを今の板で建て直す');
+    expect(rebaseLabel(false)).toBe(REBASE_LABEL);
   });
 });

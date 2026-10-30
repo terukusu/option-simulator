@@ -28,6 +28,7 @@ import {
 import { rebaseLegs } from '../legRebase';
 import {
   type Action,
+  activeHeld,
   parseContract,
   parseEntry,
   parseIvPct,
@@ -46,6 +47,7 @@ import {
   type LegMetrics,
   type MetricsModel,
 } from './metrics';
+import { type NewTabUndo, newTabPlan } from './newTab';
 import type { PnlBase } from './pnlChart';
 import {
   fmtEntry,
@@ -415,9 +417,12 @@ export function removeUndo(state: State, row: PositionRow): UndoToast | null {
   };
 }
 
-/** 全クリアの [元に戻す]: 足ごとの restoreLeg を元の順に（0 本は null）。 */
+/**
+ * 全クリアの [元に戻す]: 足ごとの restoreLeg を元の順に（0 本は null）。保有のタブ（#301）も null（reducer は
+ * clearLegs を無視するので、消していない足のトーストを出さない）
+ */
 export function clearUndo(state: State): UndoToast | null {
-  if (state.legs.length === 0) return null;
+  if (state.legs.length === 0 || activeHeld(state)) return null;
   const tab = state.activeTab;
   return {
     kind: 'leg-clear',
@@ -439,17 +444,23 @@ export interface RebasePlan {
    */
   kind: 'leg-rebase' | 'leg-rebase-same';
   text: string;
-  /** 作業中のタブの足を丸ごと置き換える（建値も建てた日時も 1 本も変わらなければ null = dispatch しない） */
+  /**
+   * 作業中のタブの足を丸ごと置き換える（建値も建てた日時も 1 本も変わらなければ null = dispatch しない）。
+   * 保有のタブ（#301）は建て直した足を新しいタブに入れる openPositionInNewTab（保有のタブの足は変えない）
+   */
   apply: Action | null;
-  /** [元に戻す]: apply の逆向きの replaceLegs（apply が null なら null） */
+  /** [元に戻す]: apply の逆向きの replaceLegs（apply が null・写しなら null） */
   undo: Action | null;
+  /** 保有のタブの写し（#301）の [元に戻す] の控え（newTabUndoActions に渡す）。検討中のタブ・apply が null なら null */
+  copy: NewTabUndo | null;
 }
 
 /**
- * 建値を今の板に合わせる（ui/legRebase.ts）の action とトーストの文（360px で [元に戻す] と並んで切れない長さ）。板が無い・足 0 本は null（押せない）。
+ * 建値を今の板に合わせる（ui/legRebase.ts）の action とトーストの文（360px で [元に戻す] と並んで切れない長さ）。板が無い・足 0 本・保有のタブでタブが上限は null（押せない）。
  * 建値も建てた日時（#299）も 1 本も変わらなければ dispatch しない（mid・印だけの差は捨てる）。建値が同じでも
  * 前の板で建てた足は建てた日時を今にする（時価評価をやめてシナリオ 0 の損益を 0 に戻す）。[元に戻す] のトーストを
  * 消さないよう、そのときの知らせは別の kind にする（2 回続けて押しても 1 回目を戻せる）。
+ * 保有のタブ（#301）は写し: 建て直した足を新しいタブ（印なし）に入れて切り替える（[元に戻す] は copy で足したタブを閉じる）。
  */
 export function rebasePlan(state: State): RebasePlan | null {
   if (state.chain === null || state.legs.length === 0) return null;
@@ -472,6 +483,26 @@ export function rebasePlan(state: State): RebasePlan | null {
             : `建値は今の板と同じ（据え置き ${kept} 本）`,
       apply: null,
       undo: null,
+      copy: null,
+    };
+  }
+  if (activeHeld(state)) {
+    // 保有のタブ（#301。オーナー判断 2）: 保有のタブはそのまま、建て直した足を写しのタブ（印なし）に入れる。上限なら押せない
+    const plan = newTabPlan(state, after);
+    if (plan === null) return null;
+    return {
+      kind: 'leg-rebase',
+      text:
+        changed === 0
+          ? kept === 0
+            ? `写しで建てた日時を今に（${reopened} 本）`
+            : `写しで建てた日時を今に ${reopened} 本・据え置き ${kept} 本`
+          : kept === 0
+            ? `写しを新しいタブで建て直した（${rebuilt} 本）`
+            : `写しで建て直した ${rebuilt} 本・据え置き ${kept} 本`,
+      apply: plan.action,
+      undo: null,
+      copy: plan.undo,
     };
   }
   const tab = state.activeTab;
@@ -489,8 +520,15 @@ export function rebasePlan(state: State): RebasePlan | null {
           : `建値を合わせた ${rebuilt} 本・据え置き ${kept} 本`,
     apply: { type: 'replaceLegs', legs: after, expect: before.slice(), tab },
     undo: { type: 'replaceLegs', legs: before.slice(), expect: after, tab },
+    copy: null,
   };
 }
+
+/** 保有のタブの写し（#301）の [元に戻す] ができないときの文（AI の NEW_TAB_UNDO_TEXT と同じ形） */
+export const REBASE_COPY_UNDO_TEXT = {
+  edited: '写しのタブを編集したので戻しません（タブは × で閉じられます）',
+  gone: '写しのタブはもう閉じています',
+} as const;
 
 /** ⇄ のトースト（[元に戻す] なし）。 */
 export function flipToast(row: PositionRow): { kind: 'leg-flip'; text: string } {

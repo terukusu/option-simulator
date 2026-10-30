@@ -597,3 +597,63 @@ describe('BOX タブ（#71）との関係', () => {
     });
   });
 });
+
+/** #301: 保有の印（position.held）と保存一覧 */
+describe('保有の印（#301）', () => {
+  const held = () => run(strangle(), { type: 'setTabHeld', held: true });
+  const key = (st: State, h = false) =>
+    bookKey(st.legs, st.scenario, st.feePerLot, st.futureBasis, h);
+
+  it('AC13: 印なしの bookKey は変更前と同じ文字列（変更前の値の sha256 を固定）。印だけ違えば違う key', async () => {
+    const s = strangle();
+    const d = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(key(s)));
+    const hex = Array.from(new Uint8Array(d), (b) => b.toString(16).padStart(2, '0')).join('');
+    expect(hex).toBe('6cf8f15f91229b9e69e32d082da0117441432fcfb28abf266b36e10c430c81f4');
+    expect(key(s, false)).toBe(bookKey(s.legs, s.scenario, s.feePerLot, s.futureBasis));
+    expect(key(s, true)).not.toBe(key(s));
+    // 項目の entryKey は印に従う
+    const plain = okEntryAt(okOp(addEntry(EMPTY_BOOK, savedOf(s), 'a', NOW, 'a')).book, 0);
+    const h = okEntryAt(okOp(addEntry(EMPTY_BOOK, savedOf(held()), 'h', NOW, 'h')).book, 0);
+    expect(entryKey(plain)).toBe(key(s));
+    expect(entryKey(h)).toBe(key(s, true));
+    expect(entryKey(h)).not.toBe(entryKey(plain));
+  });
+
+  it('AC10: 保存一覧の書き込み → 読み（serializeBook → readBook）で印が残る。他の項目の書き込みでも落ちない', () => {
+    const byId = (b: Book, id: string) => {
+      const e = b.entries.find((x) => x.id === id);
+      if (e?.status !== 'ok') throw new Error(`項目 ${id} が読めない`);
+      return e;
+    };
+    let book = okOp(addEntry(EMPTY_BOOK, savedOf(held()), '保有', NOW, 'h')).book;
+    book = okOp(addEntry(book, savedOf(strangle()), '検討', NOW, 'p')).book;
+    const read1 = okRead(readBook(serializeBook(book))).book;
+    expect(byId(read1, 'h').ws.position.held).toBe(true);
+    expect(byId(read1, 'p').ws.position.held).toBeUndefined();
+    // 別の項目の名前の変更（全項目を書き直す）の後も印が残る
+    const renamed = okOp(renameEntry(read1, 'p', '検討2')).book;
+    const read2 = okRead(readBook(serializeBook(renamed))).book;
+    expect(byId(read2, 'h').ws.position.held).toBe(true);
+    expect(byId(read2, 'h').saved.position.held).toBe(true);
+  });
+
+  it('AC10: 書き出し → 読み込み（JSON）で印が残る', () => {
+    const book = okOp(addEntry(EMPTY_BOOK, savedOf(held()), '保有', NOW, 'h')).book;
+    const out = exportBook(book, NOW);
+    const r = okOp(importIntoBook(EMPTY_BOOK, out.text, NOW, newId));
+    expect(okEntryAt(r.book, 0).ws.position.held).toBe(true);
+  });
+
+  it('AC2: 保存一覧の [複製] は印を落とす（写しは検討中。オーナー判断 4）。元の項目の印は残る', () => {
+    const book = okOp(addEntry(EMPTY_BOOK, savedOf(held()), '保有', NOW, 'h')).book;
+    const dup = okOp(duplicateEntry(book, 'h', NOW, 'd')).book;
+    const orig = okEntryAt(dup, 0);
+    const copy = okEntryAt(dup, 1);
+    expect(orig.ws.position.held).toBe(true);
+    expect('held' in copy.ws.position).toBe(false);
+    expect('held' in copy.saved.position).toBe(false);
+    expect(entryKey(copy)).toBe(key(strangle()));
+    const back = okRead(readBook(serializeBook(dup))).book;
+    expect(okEntryAt(back, 1).ws.position.held).toBeUndefined();
+  });
+});

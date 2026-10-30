@@ -28,13 +28,7 @@ import { type PinMenuInput, pinMenuRows } from './pins';
 import { evalChips, presetChips, type ScenarioRegionInput } from './scenarioRegion';
 import { CHART_MODES, DOCK_LABELS, type PanelId, type ShellAction } from './shell';
 import type { TabsView } from './tabs';
-import {
-  CLEAR_NO_LEGS_TEXT,
-  NO_CHAIN_TEXT,
-  REBASE_LABEL,
-  rebaseBlockedText,
-  THEMES,
-} from './topMenu';
+import { clearBlockedText, NO_CHAIN_TEXT, rebaseBlockedText, rebaseLabel, THEMES } from './topMenu';
 
 export type PaletteGroup =
   | 'panel'
@@ -336,7 +330,15 @@ export function paletteItems(input: PaletteInput): PaletteItem[] {
     );
   }
   // 作業（⋯ と同じ）
-  const rebaseBlocked = rebaseBlockedText(input.chain !== null, input.legCount);
+  // 保有のタブ（#301）: 全クリアは押せない・建て直しは写し（タブが上限なら押せない）。⋯ と同じ関数
+  const held = input.tabs.active.held;
+  const rebaseBlocked = rebaseBlockedText(
+    input.chain !== null,
+    input.legCount,
+    held,
+    input.tabs.canAdd,
+  );
+  const clearBlocked = clearBlockedText(input.legCount, held);
   out.push(
     item(
       'work',
@@ -352,12 +354,12 @@ export function paletteItems(input: PaletteInput): PaletteItem[] {
       'clear',
       '全クリア',
       { kind: 'clear' },
-      { disabled: input.legCount === 0, title: CLEAR_NO_LEGS_TEXT },
+      { disabled: clearBlocked !== null, title: clearBlocked ?? undefined },
     ),
     item(
       'work',
       'rebase',
-      REBASE_LABEL,
+      rebaseLabel(held),
       { kind: 'rebase' },
       {
         disabled: rebaseBlocked !== null,

@@ -145,9 +145,12 @@ export function shareNote(
         shared.boardSnapshotAt === null
           ? ''
           : `、そのときの板 ${fmtDateTime(shared.boardSnapshotAt)}`;
+      // 保有の印（#301）を渡した URL は、開いたタブも保有になると分かる文言にする
+      const what = shared.held ? 'URL のポジション（保有）' : 'URL のポジション';
+      const tail = shared.held ? '。保有の印はタブのメニューで外せる' : '';
       return {
         kind: 'shared',
-        text: `URL のポジションを${where}開いた（足 ${shared.legs.length} 本${at}${board}）。建値は共有時のまま。シナリオ・手数料・先物の basis は今のまま（URL の値は使わない）`,
+        text: `${what}を${where}開いた（足 ${shared.legs.length} 本${at}${board}）。建値は共有時のまま。シナリオ・手数料・先物の basis は今のまま（URL の値は使わない）${tail}`,
         warn: false,
       };
     }

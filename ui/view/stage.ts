@@ -168,12 +168,13 @@ export const MARKER_BAND_PX = 14;
 /**
  * 足マーカー（§8）: OP の足ごとに横軸の上の ▲ call / ▼ put。位置は満期の折れ点と同じ写像（axisX）。
  * 先物の足・F が決まらない足・表示範囲の外は出さない。drag 中の足は drag.k の位置に出す。
+ * locked = 保有のタブ（#301）: どの足もつかめない（K を変えるドラッグは建値と建てた日時を今にするため）。
  */
 export function legMarkers(
   legs: readonly UiLeg[],
   base: PnlBase | null,
   chart: PnlChartModel,
-  opts: { selected: number | null; drag: { id: number; k: number } | null },
+  opts: { selected: number | null; drag: { id: number; k: number } | null; locked?: boolean },
 ): LegMarker[] {
   if (!base || chart.empty) return [];
   const { plot } = chart;
@@ -203,7 +204,7 @@ export function legMarkers(
       qty: leg.qty,
       times: leg.qty > 1 ? `×${leg.qty}` : null,
       selected: opts.selected === ui.id,
-      draggable: ui.optionMarket === undefined,
+      draggable: opts.locked !== true && ui.optionMarket === undefined,
       path,
     });
   }

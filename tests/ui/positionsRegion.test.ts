@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { type Chain, type ChainJson, normalizeChain } from '../../data';
 import { DEFAULT_SETTINGS, type ModelSettings, premiumSummary, smileFairValue } from '../../model';
+import { rebaseLegs } from '../../ui/legRebase';
 import {
   type Action,
   initialState,
+  MAX_TABS,
   parseContract,
   parseIvPct,
   parseQty,
@@ -15,6 +17,7 @@ import { fairView } from '../../ui/view/fairValue';
 import { fmtIv, fmtNum, fmtSigned } from '../../ui/view/format';
 import { HEDGE_REASON_LABEL, hedgeModel } from '../../ui/view/hedge';
 import { fmtAmount, metricsModel } from '../../ui/view/metrics';
+import { newTabUndoActions } from '../../ui/view/newTab';
 import { pnlDomains } from '../../ui/view/pnlChart';
 import {
   fmtEntry,
@@ -43,13 +46,16 @@ import {
   optionForm,
   positionRows,
   qtySpec,
+  REBASE_COPY_UNDO_TEXT,
   rebasePlan,
   removeUndo,
   revealScrollTop,
   scenarioLegsByRow,
 } from '../../ui/view/positionsRegion';
 import { isHot, stepBy } from '../../ui/view/stepper';
+import { TABS_FULL_TEXT } from '../../ui/view/tabs';
 import { pushToast, type Toast } from '../../ui/view/toast';
+import { rebaseBlockedText } from '../../ui/view/topMenu';
 import { fixture } from '../support/fixtures';
 
 /**
@@ -495,6 +501,7 @@ describe('#298 建値を今の板に合わせる（rebasePlan）', () => {
       text: '建値は今の板と同じ',
       apply: null,
       undo: null,
+      copy: null,
     });
     // 全部の足が据え置き（先物価格の無い板の先物の足 1 本）
     const np = nullPrice();
@@ -554,6 +561,88 @@ describe('#298 建値を今の板に合わせる（rebasePlan）', () => {
   });
 });
 
+describe('#301 保有のタブの建て直し（写し）', () => {
+  const stale = () =>
+    run(
+      three(),
+      { type: 'editLeg', id: 1, patch: { entry: 123 } },
+      { type: 'editLeg', id: 2, patch: { entry: 456, iv: 0.3 } },
+      { type: 'editLeg', id: 3, patch: { entry: 60000 } },
+    );
+  const HOLD: Action = { type: 'setTabHeld', held: true };
+  const noId = (legs: readonly UiLeg[]) => legs.map(({ id: _id, ...rest }) => rest);
+
+  it('AC4: 保有のタブの足は 1 つも変わらず、新しいタブ（印なし）に rebaseLegs と同じ足が入って作業中になる', () => {
+    const s = run(stale(), HOLD);
+    const p = rebasePlan(s);
+    if (!p?.apply || !p.copy) throw new Error('写しが無い');
+    expect(p.kind).toBe('leg-rebase');
+    expect(p.undo).toBeNull();
+    expect(p.apply.type).toBe('openPositionInNewTab');
+    expect(p.text).toBe('写しを新しいタブで建て直した（3 本）');
+    const next = reduce(s, p.apply);
+    expect(next.tabs).toHaveLength(2);
+    const orig = next.tabs.find((t) => t.id === s.activeTab);
+    // 保有のタブ: 足（建値・建てた日時・mid・IV の編集・印）と保有の印がそのまま
+    expect(orig?.held).toBe(true);
+    expect(orig?.saved?.legs).toEqual(noId(s.legs));
+    // 新しいタブ: 作業中・印なし・建て直した足
+    expect(next.activeTab).not.toBe(s.activeTab);
+    expect(next.tabs.find((t) => t.id === next.activeTab)?.held).toBeUndefined();
+    const want = rebaseLegs(s.chain, s.legs, s.calendar.holidays).legs;
+    expect(next.legs.map((l) => l.leg)).toEqual(want.map((l) => l.leg));
+    expect(noId(next.legs)).toEqual(p.copy.legs);
+  });
+
+  it('AC4: [元に戻す]（newTabUndoActions）で足したタブが閉じて保有のタブに戻る', () => {
+    const s = run(stale(), HOLD);
+    const p = rebasePlan(s);
+    if (!p?.apply || !p.copy) throw new Error('写しが無い');
+    const next = reduce(s, p.apply);
+    const acts = newTabUndoActions(next, p.copy);
+    if (typeof acts === 'string') throw new Error(acts);
+    const back = run(next, ...acts);
+    expect(back.tabs.map((t) => [t.id, t.name, t.held === true])).toEqual(
+      s.tabs.map((t) => [t.id, t.name, t.held === true]),
+    );
+    expect(back.activeTab).toBe(s.activeTab);
+    expect(back.legs).toEqual(s.legs.map((l, i) => ({ ...l, id: i + 1 })));
+    // 写しを編集した / 保有にした / 閉じたあとは戻さない
+    const edited = reduce(next, { type: 'editLeg', id: 1, patch: { qty: 5 } });
+    expect(newTabUndoActions(edited, p.copy)).toBe('edited');
+    expect(newTabUndoActions(reduce(next, HOLD), p.copy)).toBe('edited');
+    const gone = reduce(next, { type: 'closeTab', id: p.copy.tab });
+    expect(newTabUndoActions(gone, p.copy)).toBe('gone');
+    expect(REBASE_COPY_UNDO_TEXT.edited).toContain('写し');
+  });
+
+  it('AC4: 1 本も変わらなければ今と同じ「同じ」の知らせ（タブを足さない）', () => {
+    expect(rebasePlan(run(three(), HOLD))).toEqual({
+      kind: 'leg-rebase-same',
+      text: '建値は今の板と同じ',
+      apply: null,
+      undo: null,
+      copy: null,
+    });
+  });
+
+  it(`AC4: タブが ${MAX_TABS} 個なら null（押せない）。理由は rebaseBlockedText のタブの上限`, () => {
+    let s = stale();
+    for (let i = 1; i < MAX_TABS; i++) s = reduce(s, { type: 'addTab', mode: 'copy' });
+    s = run(s, HOLD);
+    expect(s.tabs).toHaveLength(MAX_TABS);
+    expect(rebasePlan(s)).toBeNull();
+    expect(rebaseBlockedText(true, s.legs.length, true, false)).toBe(TABS_FULL_TEXT);
+  });
+
+  it('AC4: 検討中のタブは今の動き（replaceLegs・[元に戻す] は逆向き・copy は null）', () => {
+    const p = rebasePlan(stale());
+    expect(p?.apply?.type).toBe('replaceLegs');
+    expect(p?.undo?.type).toBe('replaceLegs');
+    expect(p?.copy).toBeNull();
+  });
+});
+
 describe('AC-4 トーストの文', () => {
   const s = three();
   const rows = views(s).pm.rows as PositionRow[];
@@ -571,6 +660,14 @@ describe('AC-4 トーストの文', () => {
     list = pushToast(list, { kind: u?.kind ?? '', text: u?.text ?? '', undo: () => {} }, 1, 0);
     list = pushToast(list, { kind: u2?.kind ?? '', text: u2?.text ?? '', undo: () => {} }, 2, 0);
     expect(list).toHaveLength(2);
+  });
+
+  it('#301: 保有のタブでは全クリアのトーストを作らない（null）。外せば今どおり', () => {
+    const held = reduce(s, { type: 'setTabHeld', held: true });
+    expect(clearUndo(held)).toBeNull();
+    expect(clearUndo(reduce(held, { type: 'setTabHeld', held: false }))?.text).toBe(
+      '足 3 本を消した',
+    );
   });
 
   it('全クリア → `足 3 本を消した`', () => {

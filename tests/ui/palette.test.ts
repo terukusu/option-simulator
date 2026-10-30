@@ -24,7 +24,12 @@ import { positionModel } from '../../ui/view/position';
 import { evalTimeTargets } from '../../ui/view/scenario';
 import { evalChips, presetChips, type ScenarioRegionInput } from '../../ui/view/scenarioRegion';
 import { TABS_FULL_TEXT, tabsModel } from '../../ui/view/tabs';
-import { CLEAR_NO_LEGS_TEXT, NO_CHAIN_TEXT } from '../../ui/view/topMenu';
+import {
+  CLEAR_HELD_TEXT,
+  CLEAR_NO_LEGS_TEXT,
+  NO_CHAIN_TEXT,
+  REBASE_COPY_LABEL,
+} from '../../ui/view/topMenu';
 import { fixture } from '../support/fixtures';
 
 /** #89 段 B: コマンドパレットの行・検索・キー（AC-B2・AC-B3）。合成の板（架空の値）。 */
@@ -335,6 +340,28 @@ describe('paletteItems（AC-B2）', () => {
     const noChain = find(paletteItems(inputOf(twoLegs, { chain: null })));
     expect(noChain).toMatchObject({ disabled: true, title: NO_CHAIN_TEXT, run: null });
     expect(paletteFilter(items, '建値').map((r) => r.id)).toContain('work:rebase');
+  });
+
+  it('#301 AC4・AC7: 保有のタブでは全クリアが押せず（理由つき）、建て直しは「写しを今の板で建て直す」。タブが上限なら押せない', () => {
+    const held = reduce(twoLegs, { type: 'setTabHeld', held: true });
+    const rows = ofGroup(paletteItems(inputOf(held)), 'work');
+    const clear = rows.find((r) => r.id === 'work:clear');
+    expect(clear).toMatchObject({ disabled: true, title: CLEAR_HELD_TEXT, run: null });
+    const rebase = rows.find((r) => r.id === 'work:rebase');
+    expect(rebase).toMatchObject({ label: REBASE_COPY_LABEL, disabled: false });
+    expect(rebase?.run).toEqual({ kind: 'rebase' });
+    let full = held;
+    while (full.tabs.length < MAX_TABS) full = reduce(full, { type: 'addTab', mode: 'empty' });
+    full = reduce(full, { type: 'switchTab', id: 1 });
+    const fullRebase = ofGroup(paletteItems(inputOf(full)), 'work').find(
+      (r) => r.id === 'work:rebase',
+    );
+    expect(fullRebase).toMatchObject({ disabled: true, title: TABS_FULL_TEXT, run: null });
+    // 保有を外すと今まで通り
+    const plain = reduce(held, { type: 'setTabHeld', held: false });
+    const plainRows = ofGroup(paletteItems(inputOf(plain)), 'work');
+    expect(plainRows.find((r) => r.id === 'work:clear')?.disabled).toBe(false);
+    expect(plainRows.find((r) => r.id === 'work:rebase')?.label).toBe('建値を今の板に合わせる');
   });
 
   it('テーマの行: 切り替え T・端末に合わせる・ダーク・ライト', () => {

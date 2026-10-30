@@ -134,6 +134,8 @@ function AiPanelView(p: {
   onApplyScenario: (s: AiApply) => void;
   onApplyProposal: AiProposeApply;
   onCheck: AiCheckApply;
+  /** 作業中のタブが保有（#301。今のタブ向けの提案のボタンを「新しいタブに入れる」に） */
+  held?: boolean;
   apiRef: { current: AiPanelApi | null };
 }) {
   const chat = useAiChat(p.visible, p.base, p.env, p.tech, p.ivStats, p.evalSource);
@@ -213,6 +215,7 @@ function AiPanelView(p: {
       onApplyScenario={p.onApplyScenario}
       onApplyProposal={p.onApplyProposal}
       onCheck={p.onCheck}
+      held={p.held === true}
       draft={draft}
       {...(p.evalSource && { onKeep: (key: string) => void keep(key) })}
       keepNote={keepNote}
@@ -238,6 +241,8 @@ export function AiChat(p: {
   onApplyScenario: (s: AiApply) => void;
   onApplyProposal: AiProposeApply;
   onCheck: AiCheckApply;
+  /** 作業中のタブが保有（#301） */
+  held?: boolean;
   /** [AI に聞く] で送れなかった質問（#136。入力欄に入れる。フォーカスは動かさない = スマホでキーボードを出さない） */
   draft?: AiDraft | null;
   /** 返答の行の [評価に残す]（#159。返答の行の key） */
@@ -354,6 +359,7 @@ export function AiChat(p: {
       x0={p.x0}
       onApply={p.onApplyScenario}
       onPropose={p.onApplyProposal}
+      held={p.held === true}
       onCheck={p.onCheck}
       onRetry={chat.retry}
       canRetry={sendReason === null}
@@ -573,6 +579,8 @@ function ChatRow(p: {
   x0: number;
   onApply: (s: AiApply) => void;
   onPropose: AiProposeApply;
+  /** 作業中のタブが保有（#301） */
+  held: boolean;
   onCheck: AiCheckApply;
   onRetry: () => void;
   canRetry: boolean;
@@ -632,7 +640,7 @@ function ChatRow(p: {
     case 'tool': {
       const prop =
         it.name === 'propose_position' && it.status === 'ok'
-          ? proposalCard(it.input, it.result)
+          ? proposalCard(it.input, it.result, p.held)
           : null;
       if (prop) {
         return (

@@ -4,6 +4,7 @@ import { MAX_TABS, type TabSlot } from '../../ui/state';
 import {
   addMenuModel,
   closedTabText,
+  HELD_NO_LEGS_TEXT,
   revealScrollLeft,
   shareItemState,
   shareResultView,
@@ -35,7 +36,7 @@ const okShare = { disabled: false, title: 't' };
 describe('tabMenuModel', () => {
   it('タブ 1 個: 閉じるが無い', () => {
     const rows = tabMenuModel(view(1), okShare);
-    expect(rows.map((r) => r.key)).toEqual(['rename', 'copy', 'save', 'share']);
+    expect(rows.map((r) => r.key)).toEqual(['rename', 'copy', 'held', 'save', 'share']);
     expect(rows.find((r) => r.key === 'copy')?.disabled).toBeUndefined();
   });
 
@@ -44,11 +45,12 @@ describe('tabMenuModel', () => {
     expect(rows.map((r) => r.label)).toEqual([
       '名前を変える…',
       '複製',
+      '保有にする',
       '保存一覧に保存…',
       'URL をコピー',
       '閉じる',
     ]);
-    expect(rows[4]?.sep).toBe(true);
+    expect(rows[5]?.sep).toBe(true);
   });
 
   it(`タブ ${MAX_TABS} 個: 複製を押せない（理由は title）`, () => {
@@ -57,8 +59,33 @@ describe('tabMenuModel', () => {
   });
 
   it('URL をコピーの状態をそのまま映す', () => {
-    const share = tabMenuModel(view(2), { disabled: true, title: '足が無い' })[3];
+    const share = tabMenuModel(view(2), { disabled: true, title: '足が無い' })[4];
     expect(share).toMatchObject({ key: 'share', disabled: true, title: '足が無い' });
+  });
+});
+
+describe('tabMenuModel の 保有にする / 保有を外す（#301 AC15）', () => {
+  const tabsOf = (held: boolean): TabSlot[] => [
+    { id: 1, name: 'A', saved: null, ...(held ? { held: true as const } : {}) },
+    { id: 2, name: 'B', saved: pos as unknown as TabSlot['saved'] },
+  ];
+  const heldRow = (held: boolean, legCount: number) =>
+    tabMenuModel(tabsModel(tabsOf(held), 1, legCount), okShare).find((r) => r.key === 'held');
+
+  it('印なし・足あり: 保有にする（押せる）', () => {
+    expect(heldRow(false, 2)).toEqual({ key: 'held', label: '保有にする' });
+  });
+  it('印なし・足 0 本: 保有にするを押せない（理由 = 足が無い）', () => {
+    expect(heldRow(false, 0)).toEqual({
+      key: 'held',
+      label: '保有にする',
+      disabled: true,
+      title: HELD_NO_LEGS_TEXT,
+    });
+  });
+  it('保有: 保有を外す（足 0 本でも外せる）', () => {
+    expect(heldRow(true, 2)).toEqual({ key: 'held', label: '保有を外す' });
+    expect(heldRow(true, 0)).toEqual({ key: 'held', label: '保有を外す' });
   });
 });
 
@@ -155,7 +182,9 @@ describe('tabMenuModel の 保存一覧に保存…（#87 (C)）', () => {
     for (const n of [1, 2, MAX_TABS]) {
       const rows = tabMenuModel(view(n), okShare);
       const i = rows.findIndex((r) => r.key === 'save');
-      expect(rows[i - 1]?.key).toBe('copy');
+      // 複製の次は保有の行（#301）、その次が保存一覧に保存…
+      expect(rows[i - 2]?.key).toBe('copy');
+      expect(rows[i - 1]?.key).toBe('held');
       expect(rows[i]).toEqual({ key: 'save', label: '保存一覧に保存…' });
     }
   });
