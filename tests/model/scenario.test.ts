@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   applyPreset,
+  betaAddPt,
   boardSigmaBase,
   CRASH_PRESETS,
   legSigmaBase,
@@ -34,20 +35,21 @@ describe('急落プリセット / β（AC23）', () => {
   const preset = CRASH_PRESETS[0] as (typeof CRASH_PRESETS)[number];
   const sc = applyPreset({ ...ZERO_SCENARIO, beta: 1 }, preset, X0);
 
-  it('プリセット「−10% / +20pt / +3」を β = 1 で: ATM は +30pt（+20 と β の +10 は独立に加算）', () => {
+  it('プリセット「−10% / +20pt / +3」を β = 1 で: ATM は +39.45pt（+20 と β の g(−10%) = +19.45 は独立に加算）', () => {
     expect(sc.dX).toBeCloseTo(-6781, 9);
     const s = scenarioIvShift(at(X0, sc));
-    expect(s.betaPt).toBeCloseTo(10, 12);
+    // g(−10%) = 0.25 × 3 + 0.9 × 3 + 4 × 4 = 19.45（BETA_SHAPE。設計 5.13）
+    expect(s.betaPt).toBeCloseTo(19.45, 9);
     expect(s.xEff).toBe(0);
-    expect(Math.abs(s.shiftPt - 30)).toBeLessThan(1e-6);
-    expect(scenarioSigma(at(X0, sc)) - smile.sigma(0)).toBeCloseTo(0.3, 12);
+    expect(Math.abs(s.shiftPt - 39.45)).toBeLessThan(1e-6);
+    expect(scenarioSigma(at(X0, sc)) - smile.sigma(0)).toBeCloseTo(0.3945, 9);
   });
 
-  it('10% OTM の put は +33.16pt（Δs × x_eff / 0.1 の +3.16pt が加わる。x_eff = ln 0.9 ≒ −0.105）', () => {
+  it('10% OTM の put は +42.61pt（Δs × x_eff / 0.1 の +3.16pt が加わる。x_eff = ln 0.9 ≒ −0.105）', () => {
     const k = X0 * 0.9;
     const s = scenarioIvShift(at(k, sc));
-    expect(Math.abs(s.shiftPt - (30 - (3 * Math.log(0.9)) / 0.1))).toBeLessThan(1e-6);
-    expect(Math.abs(s.shiftPt - 33.1608)).toBeLessThan(1e-4);
+    expect(Math.abs(s.shiftPt - (39.45 - (3 * Math.log(0.9)) / 0.1))).toBeLessThan(1e-6);
+    expect(Math.abs(s.shiftPt - 42.6108)).toBeLessThan(1e-4);
   });
 
   it("β = 0 なら連動なし、sticky moneyness では x_eff が F_i' 基準になる", () => {
@@ -56,7 +58,29 @@ describe('急落プリセット / β（AC23）', () => {
     const sm = scenarioIvShift(at(X0, { ...sc, ivDynamics: 'sticky_moneyness' }));
     // F が 10% 下がると固定 K の moneyness は ln(1/0.9) > 0（call 側）→ スキューは IV を下げる向き
     expect(sm.xEff).toBeCloseTo(-Math.log(0.9), 12);
-    expect(sm.shiftPt).toBeCloseTo(30 + (3 * Math.log(0.9)) / 0.1, 12);
+    expect(sm.shiftPt).toBeCloseTo(39.45 + (3 * Math.log(0.9)) / 0.1, 9);
+  });
+
+  it('sigmaAt と scenarioIvShift は同じ Δσ_β（式は betaAddPt の 1 か所）', () => {
+    for (const pct of [-40, -12, -6, -4.5, -3, -1, 0, 2, 8]) {
+      const s: Scenario = { ...sc, dX: (X0 * pct) / 100, dSigma: 0, skew: 0, beta: 1.7 };
+      const shift = scenarioIvShift(at(X0, s));
+      expect(shift.betaPt).toBeCloseTo(betaAddPt(pct, 1.7), 9);
+      expect(scenarioSigma(at(X0, s)) - smile.sigma(0)).toBeCloseTo(shift.betaPt / 100, 12);
+    }
+  });
+
+  it('β = 0 は連動なしの今までの価格と同じ（回帰）。上げでも下げでも σ_base + Δσ − Δs × x_eff / 0.1', () => {
+    for (const pct of [-50, -10, -2, 0, 3, 30]) {
+      for (const k of [X0 * 0.85, X0, X0 * 1.1]) {
+        const s: Scenario = { ...sc, dX: (X0 * pct) / 100, beta: 0 };
+        const xEff = Math.log(k / X0);
+        expect(scenarioSigma(at(k, s))).toBeCloseTo(
+          smile.sigma(xEff) + (20 - (3 * xEff) / 0.1) / 100,
+          14,
+        );
+      }
+    }
   });
 });
 

@@ -686,14 +686,14 @@ describe('AC11: 「今」の 1 点', () => {
 
 describe('AC11: シナリオの水準', () => {
   const x0 = 41000;
-  it('ΔX = 0・Δσ = +5 → 今 + 5pt、ΔX = −10%・Δσ = +5・β = 1.0 → 今 + 15pt', () => {
+  it('ΔX = 0・Δσ = +5 → 今 + 5pt、ΔX = −10%・Δσ = +5・β = 1.0 → 今 + 5 + g(−10%) = 今 + 24.45pt', () => {
     expect(ivScenarioLevel(20, { ...ZERO_SCENARIO, dSigma: 5 }, x0)).toBeCloseTo(25, 9);
     expect(
       ivScenarioLevel(20, { ...ZERO_SCENARIO, dX: -0.1 * x0, dSigma: 5, beta: 1 }, x0),
-    ).toBeCloseTo(35, 9);
+    ).toBeCloseTo(44.45, 9);
   });
 
-  it('スキュー Δs は効かない（x_eff = 0）、相対モードは base·(1 + Δσ/100) + Δσ_β、下限 1%', () => {
+  it('スキュー Δs は効かない（x_eff = 0）、相対モードは base·(1 + Δσ/100) + Δσ_β（上げでは g = 0）、下限 1%', () => {
     expect(ivScenarioLevel(20, { ...ZERO_SCENARIO, dSigma: 5, skew: 3 }, x0)).toBeCloseTo(25, 9);
     expect(
       ivScenarioLevel(20, { ...ZERO_SCENARIO, dSigma: 10, ivShift: 'relative' }, x0),
@@ -704,7 +704,14 @@ describe('AC11: シナリオの水準', () => {
         { ...ZERO_SCENARIO, dX: 0.05 * x0, dSigma: 10, beta: 2, ivShift: 'relative' },
         x0,
       ),
-    ).toBeCloseTo(12, 9);
+    ).toBeCloseTo(22, 9);
+    expect(
+      ivScenarioLevel(
+        20,
+        { ...ZERO_SCENARIO, dX: -0.05 * x0, dSigma: 10, beta: 2, ivShift: 'relative' },
+        x0,
+      ),
+    ).toBeCloseTo(22 + 2 * (0.75 + 1.8), 9);
     expect(ivScenarioLevel(20, { ...ZERO_SCENARIO, dSigma: -40 }, x0)).toBeCloseTo(1, 9);
   });
 

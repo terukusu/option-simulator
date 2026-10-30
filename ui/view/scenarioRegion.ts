@@ -9,7 +9,7 @@
  * - 「モデルの前提」の要約 1 行
  */
 
-import { CRASH_PRESETS, type IvDynamics, type Scenario } from '../../model';
+import { BETA_SHAPE, betaAddPt, CRASH_PRESETS, type IvDynamics, type Scenario } from '../../model';
 import type { Domain } from '../chart/scale';
 import type { Action, Parsed } from '../state';
 import { DASH, fmtDateTime, fmtNum, fmtSigned } from './format';
@@ -122,7 +122,8 @@ export function stepperSub(
     case 'skew':
       return 'pt / 10%';
     case 'beta':
-      return 'pt / 1%';
+      // 倍率の大きさを代表の点（−10%）の上乗せで見せる（Δσ_β = β × g(ΔX%)）
+      return fin(v) === 0 ? '連動なし' : `−10% ${fmtSigned(betaAddPt(-10, fin(v)), 1)}pt`;
   }
 }
 
@@ -303,12 +304,32 @@ export function evalChips(input: ScenarioRegionInput): EvalChip[] {
 
 // ---------------------------------------------------------------- モデルの前提
 
-/** 「モデルの前提」の要約 1 行（`β 1.0 · sticky strike · basis 固定 · ΔX %`） */
+/** β の代表の点（下げ幅 %） */
+const BETA_NOTE_POINTS = [-3, -6, -10] as const;
+
+/**
+ * β の説明（シナリオの ⓘ）。数は BETA_SHAPE から作る（文と定数をずらさない）。
+ * 例: `β（IV–原資産連動）: 実測の形 g(ΔX%) の倍率。Δσ_β = β × g。β 1.0 = 2018-10〜2026-10 の実測の中央値の形（測った日 …）: −3% +0.75・−6% +3.45・−10% +19.45pt（上げでは 0）。…`
+ */
+export function betaNote(): string {
+  const pts = BETA_NOTE_POINTS.map((x) => `${fmtNum(x, 0)}% ${fmtSigned(betaAddPt(x, 1), 2)}`).join(
+    '・',
+  );
+  const up =
+    BETA_SHAPE.upSlope === 0 ? '上げでは 0' : `上げ +5% で ${fmtSigned(betaAddPt(5, 1), 2)}pt`;
+  return (
+    `β（IV–原資産連動）: 実測の形 g(ΔX%) の倍率。Δσ_β = β × g。β 1.0 = ${BETA_SHAPE.period} の実測の中央値の形` +
+    `（測った日 ${BETA_SHAPE.measuredOn}）: ${pts}pt（${up}、上乗せは最大 ${fmtNum(BETA_SHAPE.capPt, 0)}pt）。` +
+    '0 で連動なし、2 で 2 倍。形は sticky strike（既定）用。'
+  );
+}
+
+/** 「モデルの前提」の要約 1 行（`β ×1.0 · sticky strike · basis 固定 · ΔX %`） */
 export function advSummary(input: ScenarioRegionInput): string {
   const s = input.scenario;
   const dyn = s.ivDynamics === 'sticky_moneyness' ? 'sticky moneyness' : 'sticky strike';
   const basis = input.futureBasis === 'decay' ? '減衰' : '固定';
-  return `β ${fmtNum(fin(s.beta), 1)} · ${dyn} · basis ${basis} · ΔX ${input.dXUnit === 'yen' ? '円' : '%'}`;
+  return `β ×${fmtNum(fin(s.beta), 1)} · ${dyn} · basis ${basis} · ΔX ${input.dXUnit === 'yen' ? '円' : '%'}`;
 }
 
 export function dynamicsAction(v: IvDynamics): Action {

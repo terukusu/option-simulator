@@ -8,6 +8,7 @@ import { type DXUnit, fromDisplay } from '../../view/scenario';
 import {
   advSummary,
   basisAction,
+  betaNote,
   betaStepper,
   type Chip as ChipView,
   dynamicsAction,
@@ -143,7 +144,7 @@ export function Scenario(p: { c: AppController; dXUnit: DXUnit; onDXUnit: (u: DX
             で既定値。値をダブルクリック（タッチは長押し）で数値を入力（Enter で確定、Esc
             で戻す）。d の段は端数を保つ。
           </p>
-          <p>β（IV–原資産連動）: Δσ_β = −β × ΔX%（pt / 1%）。既定 1.0、0 で連動なし。</p>
+          <p>{betaNote()}</p>
           <p>
             IV の動き方: sticky strike は原資産が動いても σ(K) を変えない。sticky moneyness
             はスマイルが原資産と一緒に動く。

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { type Chain, normalizeChain } from '../../data';
-import { CRASH_PRESETS, ZERO_SCENARIO } from '../../model';
+import { BETA_SHAPE, CRASH_PRESETS, ZERO_SCENARIO } from '../../model';
 import { CALENDAR } from '../../ui/calendar';
 import { type Action, initialState, reduce, type State } from '../../ui/state';
 import { fmtDateTime } from '../../ui/view/format';
@@ -21,6 +21,7 @@ import {
   advSummary,
   BETA_SPEC,
   basisAction,
+  betaNote,
   betaStepper,
   dynamicsAction,
   editText,
@@ -105,9 +106,26 @@ describe('#83 AC-3 (a) ステッパー 4 つ + β', () => {
       field: 'beta',
       value: 1,
       text: '1.0',
-      sub: 'pt / 1%',
+      // 副題は代表の点（−10%）の上乗せ β × g(−10%) = 19.45 → 小数 1 桁
+      sub: '−10% +19.5pt',
       hot: false,
     });
+    expect(betaStepper({ ...input, scenario: { ...input.scenario, beta: 2 } }).sub).toBe(
+      '−10% +38.9pt',
+    );
+    expect(betaStepper({ ...input, scenario: { ...input.scenario, beta: 0 } }).sub).toBe(
+      '連動なし',
+    );
+  });
+
+  it('β の説明は定数から作る（期間・測った日・代表の点 −3% / −6% / −10%・上げ・上限）', () => {
+    const note = betaNote();
+    expect(note).toContain(`β 1.0 = ${BETA_SHAPE.period} の実測の中央値の形`);
+    expect(note).toContain(`測った日 ${BETA_SHAPE.measuredOn}`);
+    expect(note).toContain('−3% +0.75・−6% +3.45・−10% +19.45pt');
+    expect(note).toContain('上げでは 0');
+    expect(note).toContain('最大 60pt');
+    expect(note).not.toContain('pt / 1%');
   });
 
   it('ΔX の % ⇄ 円の切替は表示だけ（状態の ΔX は同じ円）', () => {
@@ -222,7 +240,7 @@ describe('#83 AC-3 (c) 評価時刻のチップ', () => {
 describe('#83 AC-3 (d) 前提の要約', () => {
   it('β・sticky・basis・ΔX 単位の組み合わせ', () => {
     const input = inputOf(twoLegs);
-    expect(advSummary(input)).toBe('β 1.0 · sticky strike · basis 固定 · ΔX %');
+    expect(advSummary(input)).toBe('β ×1.0 · sticky strike · basis 固定 · ΔX %');
     expect(
       advSummary({
         ...input,
@@ -230,9 +248,9 @@ describe('#83 AC-3 (d) 前提の要約', () => {
         futureBasis: 'decay',
         dXUnit: 'yen',
       }),
-    ).toBe('β 2.5 · sticky moneyness · basis 減衰 · ΔX 円');
+    ).toBe('β ×2.5 · sticky moneyness · basis 減衰 · ΔX 円');
     expect(advSummary({ ...input, scenario: { ...input.scenario, beta: 0 }, dXUnit: 'yen' })).toBe(
-      'β 0.0 · sticky strike · basis 固定 · ΔX 円',
+      'β ×0.0 · sticky strike · basis 固定 · ΔX 円',
     );
   });
 });
@@ -393,8 +411,8 @@ describe('#83 B-1 数値入力を開いて何も打たずに確定しても状�
     expect(editOutcome(opened, '2.5', parse)).toEqual({ type: 'set', value: 2.5 });
     expect(editOutcome(opened, '11', parse)).toEqual({
       type: 'invalid',
-      message: 'β は 0〜10（pt / 1%）',
+      message: 'β は 0〜10（倍）',
     });
-    expect(parseBeta('11')).toEqual({ ok: false, message: 'β は 0〜10（pt / 1%）' });
+    expect(parseBeta('11')).toEqual({ ok: false, message: 'β は 0〜10（倍）' });
   });
 });

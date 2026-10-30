@@ -169,7 +169,7 @@ describe('テール表（AC-2 = AC22）', () => {
 });
 
 describe('急落プリセットと足別 IV（AC-3 = AC23）', () => {
-  it('「−10% / +20pt / +3」で ΔX = −10% × X₀・Δσ = +20・Δs = +3（β・d・動き方は保つ）、足別 IV = σ_anchor + 20 + 10 − 3 × ln(K / F_i) / 0.1', () => {
+  it('「−10% / +20pt / +3」で ΔX = −10% × X₀・Δσ = +20・Δs = +3（β・d・動き方は保つ）、足別 IV = σ_anchor + 20 + g(−10%)（= 19.45）− 3 × ln(K / F_i) / 0.1', () => {
     const before = run(
       loaded(chain),
       add(m1.id, 64_000, 'put', 'sell'),
@@ -195,7 +195,7 @@ describe('急落プリセットと足別 IV（AC-3 = AC23）', () => {
     expect(m.scenarioPoint.dXPct).toBeCloseTo(-10, 9);
     base.legs.forEach((p, i) => {
       if (p.leg.kind !== 'option' || !p.option) throw new Error('OP の足だけ');
-      const want = p.option.anchor + (20 + 10 - (3 * Math.log(p.leg.strike / p.F)) / 0.1) / 100;
+      const want = p.option.anchor + (20 + 19.45 - (3 * Math.log(p.leg.strike / p.F)) / 0.1) / 100;
       expect(want).toBeGreaterThan(0.01); // σ_min に当たらない
       const leg = m.scenarioPoint.legs[i];
       expect(leg?.state).toBe('live');

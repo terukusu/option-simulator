@@ -126,7 +126,7 @@
 //                                          と IV 推移の追加読み込み・重ね（#79 段 C AC-9・AC-11: 左へパンして端から 10 本で左の 1 回分
 //                                          （UTC の 0 時・end = 読み済みの start・読み中は 2 本目なし・左上のバッジ）、前に足しても横の
 //                                          目盛りが同じ、空の左 3 回で止まる、「今」の印 1 個 / 表の last_at が板より後なら 0 個、
-//                                          PC はシナリオの水準 = 今 + 5.00（Δσ +5）→ [急落] で 今 + 30.00（Δσ 20 + β 1 × 10%））
+//                                          PC はシナリオの水準 = 今 + 5.00（Δσ +5）→ [急落] で 今 + 39.45（Δσ 20 + β 1 × g(−10%) = 19.45。#306））
 //                                          と IV 推移の十字線（#130 AC-7: 1440×900 のホバーで十字線・札（横線 = マウスの高さ・縦の札 =
 //                                          その高さの IV・上端で止まる・外れて 0）・キー , . で端の足まで札が svg の内側、390×844 の
 //                                          タッチ（CDP）の長押し 500ms → 横・縦に動かす → 離す → タップで消える・ページとシートが動かない）
@@ -4663,7 +4663,7 @@ async function scenarioFlows(vp) {
     const vals = await page.textContent('section.scenario details.adv .vals');
     check(
       `#83 AC-10(e) ${tag} 前提の要約`,
-      vals === 'β 1.1 · sticky moneyness · basis 減衰 · ΔX 円',
+      vals === 'β ×1.1 · sticky moneyness · basis 減衰 · ΔX 円',
       `${vals}`,
     );
     await page.click('section.scenario .seg[aria-label="ΔX の単位"] button:has-text("%")');
@@ -5326,17 +5326,32 @@ async function metricsFlows(vp) {
       },
       { m: M, re: METRIC_TOKEN },
     );
+    // 控えの作業（タブ A）はシナリオ ΔX −400 円・β 1 なので、シナリオ点の損益（index 8）と合計グリーク（index 10〜12・
+    // 14・15 = Δ・ミニ・Γ・Θ・V）は β の値で変わる。#306 で β を実測の形の倍率にしたので、この 6 個は比べない
+    // （控えは #91 で削除した旧画面から取ったもので作り直せない。シナリオ点の σ・損益・グリークは model のテスト
+    // （tests/model/scenario.test.ts・betaShape.test.ts・pnl.test.ts）で確かめている）。ほかの 17 個（index 13 = Γ の単位「/ 100 円」の 100 を含む）は β が効かない
+    const BETA_TOKENS = new Set([8, 10, 11, 12, 14, 15]);
+    const noBeta = (a) => a.filter((_, i) => !BETA_TOKENS.has(i));
+    const nowTok = noBeta(now.tokens);
+    const oldTok = noBeta(old.tokens);
     check(
-      `#86 AC-10(a) ${tag} 内訳のトークン列が旧画面の dl.metrics-list（控え）と一致（${now.tokens.length} 個）`,
-      now.tokens.length > 20 && same(now.tokens, old.tokens),
-      same(now.tokens, old.tokens) ? '' : `新 ${now.tokens.join(' ')} / 旧 ${old.tokens.join(' ')}`,
+      `#86 AC-10(a) ${tag} 内訳のトークン列が旧画面の dl.metrics-list（控え）と一致（β の効くシナリオ点の損益・グリークの 6 個を除く ${nowTok.length} 個。#306）`,
+      now.tokens.length === old.tokens.length && nowTok.length > 15 && same(nowTok, oldTok),
+      same(nowTok, oldTok) ? '' : `新 ${now.tokens.join(' ')} / 旧 ${old.tokens.join(' ')}`,
     );
+    // テール表は 1 行 6 個（行の見出し 2 個・SQ の列 2 個・指定日の列 2 個）。比べるのは β の効かない行の見出しと満期（SQ）の
+    // 列だけ（5 行 × 4 個 = 20 個）。指定日の列は比べない: #306 で β を実測の形の倍率にしたので指定日の値が変わり、控えは
+    // 旧画面（#91 で削除）から取ったもので作り直せない。指定日の値は model のテスト（tests/model/pnl.test.ts の 6.1 の
+    // ワイヤー・テール表の手計算との一致）で確かめている
+    const sqOnly = (a) => a.filter((_, i) => i % 6 < 4);
+    const nowSq = sqOnly(now.tail);
+    const oldSq = sqOnly(old.tail);
     check(
-      `#86 AC-10(b) ${tag} テール表の 30 個が旧画面（控え）と一致`,
-      now.tail.length === 30 && same(now.tail, old.tail),
-      same(now.tail, old.tail)
-        ? now.tail.slice(0, 6).join(' ')
-        : `新 ${now.tail.join(' ')} / 旧 ${old.tail.join(' ')}`,
+      `#86 AC-10(b) ${tag} テール表の行の見出しと SQ の列の 20 個が旧画面（控え）と一致（指定日の列は β の形が変わったので比べない。#306）`,
+      now.tail.length === 30 && same(nowSq, oldSq),
+      same(nowSq, oldSq)
+        ? nowSq.slice(0, 4).join(' ')
+        : `新 ${nowSq.join(' ')} / 旧 ${oldSq.join(' ')}`,
     );
     check(
       `#86 AC-10(c) ${tag} 内訳の指定日 + シナリオの損益 = 読み取りの指定日の損益（#274 でタイル 5 を外した）`,
@@ -11492,7 +11507,7 @@ async function ivMoreFlows(vp) {
     await ctx.close();
   }
 
-  // (d) PC: シナリオの水準 = 今 + 5.00（ΔX 0・Δσ +5）→ [急落]（ΔX −10%・Δσ 20・β 1）で 今 + 30.00
+  // (d) PC: シナリオの水準 = 今 + 5.00（ΔX 0・Δσ +5）→ [急落]（ΔX −10%・Δσ 20・β 1）で 今 + 39.45（Δσ 20 + g(−10%) 19.45。#306）
   if (isPc) {
     const ws = JSON.parse(twoLegs);
     ws.tabs[0].position.scenario = {
@@ -11528,8 +11543,8 @@ async function ivMoreFlows(vp) {
     const ty2 = await yTicks(page);
     // 水準は縦軸に入る（足より上なら縦軸の上端が広がるので、線の y は上端付近のまま目盛りが変わる）
     check(
-      `#79 AC-11 ${tag} [急落]（ΔX −10%・Δσ 20・β 1）で水準 = 今 + 30.00（${sc2}）、縦軸が水準まで広がる`,
-      Math.abs(sc2 - now - 30) < 0.0051 && y2 !== null && (y2 !== y1 || ty2 !== ty1),
+      `#79 AC-11 ${tag} [急落]（ΔX −10%・Δσ 20・β 1）で水準 = 今 + 39.45（Δσ 20 + g(−10%) 19.45。#306）（${sc2}）、縦軸が水準まで広がる`,
+      Math.abs(sc2 - now - 39.45) < 0.0051 && y2 !== null && (y2 !== y1 || ty2 !== ty1),
       `y ${y1} → ${y2}・縦の目盛り ${ty1} → ${ty2}`,
     );
     if (shotsDir) await page.screenshot({ path: join(shotsDir, `flows-iv-scenario-${tag}.png`) });

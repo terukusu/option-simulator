@@ -201,8 +201,8 @@ export function StageHead(p: {
                 利益・赤 = 損失、濃さ = |損益| ÷ 格子の最大（±vmax）の 0.6 乗、0 付近は透明。
               </p>
               <p>
-                Δσ {fmtNum(scenario.dSigma, 1)}pt・Δs {fmtNum(scenario.skew, 1)}・β{' '}
-                {fmtNum(scenario.beta, 1)}pt/1%・{DYNAMICS_LABEL[scenario.ivDynamics]}{' '}
+                Δσ {fmtNum(scenario.dSigma, 1)}pt・Δs {fmtNum(scenario.skew, 1)}・β ×
+                {fmtNum(scenario.beta, 1)}・{DYNAMICS_LABEL[scenario.ivDynamics]}{' '}
                 は面の全体に効く。点 = シナリオ点（ΔX・d）。点を押して動かすと ΔX と d
                 が同時に動く（離れた所を押すとそこへ。2 本指・横ホイールでパン）。キーは ← → ΔX、[ ]
                 d。
@@ -214,7 +214,7 @@ export function StageHead(p: {
               <p>満 = 満期・指 = 指定日・今 = 今日（凡例・交点のラベルの 1 字）</p>
               <p>
                 指定日 = シナリオ（Δσ {fmtNum(scenario.dSigma, 1)}pt・Δs {fmtNum(scenario.skew, 1)}
-                ・β {fmtNum(scenario.beta, 1)}pt/1%・{DYNAMICS_LABEL[scenario.ivDynamics]}）
+                ・β ×{fmtNum(scenario.beta, 1)}・{DYNAMICS_LABEL[scenario.ivDynamics]}）
               </p>
               <p>今日 = シナリオの IV の変化なし（β と IV の動き方は同じ）</p>
             </>

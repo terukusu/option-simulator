@@ -237,50 +237,50 @@
         "x": 64421,
         "sq_pnl_yen": 780000,
         "sq_ratio": 1,
-        "scenario_pnl_yen": -1503789,
-        "scenario_ratio": -1.9,
-        "margin_yen": 2922553,
-        "room_yen": 573658
+        "scenario_pnl_yen": -1323152,
+        "scenario_ratio": -1.7,
+        "margin_yen": 2851885,
+        "room_yen": 824963
        },
        {
         "shock_pct": -10,
         "x": 61031,
         "sq_pnl_yen": -2189267,
         "sq_ratio": -2.8,
-        "scenario_pnl_yen": -3734421,
-        "scenario_ratio": -4.8,
-        "margin_yen": 3249888,
-        "room_yen": -1984309
+        "scenario_pnl_yen": -4366054,
+        "scenario_ratio": -5.6,
+        "margin_yen": 3479793,
+        "room_yen": -2845848
        },
        {
         "shock_pct": -20,
         "x": 54250,
         "sq_pnl_yen": -8970459,
         "sq_ratio": -11.5,
-        "scenario_pnl_yen": -9453648,
-        "scenario_ratio": -12.1,
-        "margin_yen": 3178244,
-        "room_yen": -7631892
+        "scenario_pnl_yen": -11288485,
+        "scenario_ratio": -14.5,
+        "margin_yen": 4250784,
+        "room_yen": -10539270
        },
        {
         "shock_pct": -30,
         "x": 47468,
         "sq_pnl_yen": -15751652,
         "sq_ratio": -20.2,
-        "scenario_pnl_yen": -15890495,
-        "scenario_ratio": -20.4,
-        "margin_yen": 2749867,
-        "room_yen": -13640362
+        "scenario_pnl_yen": -16587851,
+        "scenario_ratio": -21.3,
+        "margin_yen": 3536628,
+        "room_yen": -15124478
        },
        {
         "shock_pct": -40,
         "x": 40687,
         "sq_pnl_yen": -22532845,
         "sq_ratio": -28.9,
-        "scenario_pnl_yen": -22561843,
-        "scenario_ratio": -28.9,
-        "margin_yen": 2266576,
-        "room_yen": -19828419
+        "scenario_pnl_yen": -22723810,
+        "scenario_ratio": -29.1,
+        "margin_yen": 2669202,
+        "room_yen": -20393012
        }
       ]
      },
@@ -312,7 +312,7 @@
        "multiple_unbounded": false
       },
       "call_levels_x": [
-       63630
+       63458
       ]
      },
      "scenario_grid": {
@@ -349,22 +349,22 @@
       "pnl_yen": [
        [
         [
-         -3410301,
-         -3734421,
-         -4066209,
-         -4403350
+         -4029417,
+         -4366054,
+         -4706677,
+         -5050226
         ],
         [
-         -1135193,
-         -1503789,
-         -1872512,
-         -2241253
+         -954676,
+         -1323152,
+         -1691830,
+         -2060572
         ],
         [
-         -448345,
-         -802469,
-         -1161657,
-         -1524064
+         -291461,
+         -642332,
+         -999538,
+         -1360664
         ],
         [
          282312,
@@ -373,42 +373,42 @@
          -632993
         ],
         [
-         653547,
-         490327,
-         274883,
-         21590
+         562796,
+         366325,
+         126690,
+         -144009
         ],
         [
-         747361,
          662525,
          519411,
-         327298
+         327298,
+         97027
         ],
         [
-         779968,
-         777546,
          759522,
-         708186
+         708186,
+         614730,
+         479248
         ]
        ],
        [
         [
-         -2190284,
-         -2192905,
-         -2198309,
-         -2207268
+         -2197552,
+         -2206093,
+         -2218566,
+         -2235098
         ],
         [
-         574127,
-         513114,
-         450773,
-         387545
+         603324,
+         543214,
+         481453,
+         418618
         ],
         [
-         772101,
-         759186,
-         739040,
-         712199
+         775624,
+         765897,
+         748980,
+         725051
         ],
         [
          780000,
@@ -420,7 +420,7 @@
          780000,
          780000,
          780000,
-         780000
+         779998
         ],
         [
          780000,
@@ -496,14 +496,14 @@
        "skew_pt": 0,
        "days_clamped": false
       },
-      "pnl_yen": -2119796,
+      "pnl_yen": -1941958,
       "expiry_pnl_yen": 523210,
       "greeks": {
-       "delta_large": 0.49,
-       "delta_mini": 4.93,
+       "delta_large": 0.5,
+       "delta_mini": 4.95,
        "gamma_per100": -0.006,
-       "theta_yen_per_day": 50271,
-       "vega_yen_per_pt": -69737
+       "theta_yen_per_day": 47042,
+       "vega_yen_per_pt": -69743
       },
       "legs": [
        {
@@ -513,8 +513,8 @@
         "k": 64000,
         "side": "sell",
         "qty": 1,
-        "pnl_yen": -2119796,
-        "iv_pct": 39.6
+        "pnl_yen": -1941958,
+        "iv_pct": 37.1
        }
       ]
      }
@@ -535,14 +535,14 @@
        "skew_pt": 1,
        "days_clamped": false
       },
-      "pnl_yen": -740585,
+      "pnl_yen": -599305,
       "expiry_pnl_yen": 780000,
       "greeks": {
-       "delta_large": 0.35,
-       "delta_mini": 3.52,
+       "delta_large": 0.34,
+       "delta_mini": 3.45,
        "gamma_per100": -0.006,
-       "theta_yen_per_day": 37007,
-       "vega_yen_per_pt": -70759
+       "theta_yen_per_day": 34420,
+       "vega_yen_per_pt": -70223
       },
       "legs": [
        {
@@ -552,8 +552,8 @@
         "k": 64000,
         "side": "sell",
         "qty": 1,
-        "pnl_yen": -740585,
-        "iv_pct": 31.9
+        "pnl_yen": -599305,
+        "iv_pct": 29.9
        }
       ]
      }
@@ -922,50 +922,50 @@
         "x": 64421,
         "sq_pnl_yen": 111330,
         "sq_ratio": 0.2,
-        "scenario_pnl_yen": -243354,
-        "scenario_ratio": -0.4,
-        "margin_yen": 3165547,
-        "room_yen": -2523014
+        "scenario_pnl_yen": -205259,
+        "scenario_ratio": -0.3,
+        "margin_yen": 3068347,
+        "room_yen": -2155125
        },
        {
         "shock_pct": -10,
         "x": 61031,
         "sq_pnl_yen": -1310000,
         "sq_ratio": -1.9,
-        "scenario_pnl_yen": -565844,
-        "scenario_ratio": -0.8,
-        "margin_yen": 3463256,
-        "room_yen": -5087008
+        "scenario_pnl_yen": -587677,
+        "scenario_ratio": -0.9,
+        "margin_yen": 3897996,
+        "room_yen": -6398595
        },
        {
         "shock_pct": -20,
         "x": 54250,
         "sq_pnl_yen": -1310000,
         "sq_ratio": -1.9,
-        "scenario_pnl_yen": -1015722,
-        "scenario_ratio": -1.5,
-        "margin_yen": 3289176,
-        "room_yen": -10747116
+        "scenario_pnl_yen": -893923,
+        "scenario_ratio": -1.3,
+        "margin_yen": 5435907,
+        "room_yen": -15514852
        },
        {
         "shock_pct": -30,
         "x": 47468,
         "sq_pnl_yen": -1310000,
         "sq_ratio": -1.9,
-        "scenario_pnl_yen": -1209478,
-        "scenario_ratio": -1.8,
-        "margin_yen": 2803334,
-        "room_yen": -16754494
+        "scenario_pnl_yen": -1080211,
+        "scenario_ratio": -1.6,
+        "margin_yen": 4206400,
+        "room_yen": -19032044
        },
        {
         "shock_pct": -40,
         "x": 40687,
         "sq_pnl_yen": -1310000,
         "sq_ratio": -1.9,
-        "scenario_pnl_yen": -1280036,
-        "scenario_ratio": -1.9,
-        "margin_yen": 2291418,
-        "room_yen": -22934459
+        "scenario_pnl_yen": -1226913,
+        "scenario_ratio": -1.8,
+        "margin_yen": 2919533,
+        "room_yen": -23739663
        }
       ]
      },
@@ -1032,22 +1032,22 @@
       "pnl_yen": [
        [
         [
-         -574249,
-         -565844,
-         -573425,
-         -589740
+         -572059,
+         -587677,
+         -607884,
+         -629863
         ],
         [
-         -165527,
-         -243354,
-         -317421,
-         -383990
+         -128678,
+         -205259,
+         -281937,
+         -352393
         ],
         [
-         -629,
-         -122640,
-         -227075,
-         -314525
+         58794,
+         -69776,
+         -182298,
+         -277124
         ],
         [
          174229,
@@ -1056,42 +1056,42 @@
          -246699
         ],
         [
-         142656,
-         -20397,
-         -148573,
-         -250978
+         40020,
+         -100837,
+         -212644,
+         -302844
         ],
         [
-         -63478,
          -154628,
          -236367,
-         -309543
+         -309543,
+         -373991
         ],
         [
-         -1105054,
-         -889141,
          -750296,
-         -672253
+         -672253,
+         -633844,
+         -619630
         ]
        ],
        [
         [
-         -1291062,
-         -1274062,
-         -1251801,
-         -1225413
+         -1254475,
+         -1228477,
+         -1199518,
+         -1168833
         ],
         [
-         -2127,
-         -30973,
-         -55791,
-         -77050
+         13490,
+         -17358,
+         -44110,
+         -67042
         ],
         [
-         603863,
-         557503,
-         509046,
-         461119
+         623066,
+         578825,
+         530916,
+         482500
         ],
         [
          689974,
@@ -1100,22 +1100,22 @@
          681926
         ],
         [
-         685705,
-         670175,
-         642183,
-         604775
+         677968,
+         654721,
+         620618,
+         579433
         ],
         [
-         374253,
          306376,
          241665,
-         184193
+         184193,
+         135036
         ],
         [
-         -1309973,
-         -1309752,
          -1306364,
-         -1294660
+         -1294660,
+         -1272702,
+         -1241739
         ]
        ]
       ]
@@ -1212,14 +1212,14 @@
        "skew_pt": 0,
        "days_clamped": false
       },
-      "pnl_yen": -357951,
+      "pnl_yen": -329222,
       "expiry_pnl_yen": -566790,
       "greeks": {
-       "delta_large": 0.06,
-       "delta_mini": 0.65,
-       "gamma_per100": -0.001,
-       "theta_yen_per_day": 3262,
-       "vega_yen_per_pt": -11202
+       "delta_large": 0.08,
+       "delta_mini": 0.76,
+       "gamma_per100": -0.002,
+       "theta_yen_per_day": 2825,
+       "vega_yen_per_pt": -11290
       },
       "legs": [
        {
@@ -1229,8 +1229,8 @@
         "k": 63000,
         "side": "buy",
         "qty": 1,
-        "pnl_yen": 1866884,
-        "iv_pct": 41.3
+        "pnl_yen": 1691338,
+        "iv_pct": 38.8
        },
        {
         "product": "op",
@@ -1239,8 +1239,8 @@
         "k": 65000,
         "side": "sell",
         "qty": 1,
-        "pnl_yen": -2394670,
-        "iv_pct": 38.5
+        "pnl_yen": -2218554,
+        "iv_pct": 35.9
        },
        {
         "product": "op",
@@ -1249,8 +1249,8 @@
         "k": 71000,
         "side": "sell",
         "qty": 1,
-        "pnl_yen": 296044,
-        "iv_pct": 34.5
+        "pnl_yen": 389173,
+        "iv_pct": 32
        },
        {
         "product": "op",
@@ -1259,8 +1259,8 @@
         "k": 73000,
         "side": "buy",
         "qty": 1,
-        "pnl_yen": -126209,
-        "iv_pct": 35
+        "pnl_yen": -191179,
+        "iv_pct": 32.5
        }
       ]
      }
@@ -1281,14 +1281,14 @@
        "skew_pt": 1,
        "days_clamped": false
       },
-      "pnl_yen": -89677,
+      "pnl_yen": -39305,
       "expiry_pnl_yen": 690000,
       "greeks": {
-       "delta_large": 0.04,
-       "delta_mini": 0.38,
+       "delta_large": 0.05,
+       "delta_mini": 0.47,
        "gamma_per100": -0.003,
-       "theta_yen_per_day": 7387,
-       "vega_yen_per_pt": -24341
+       "theta_yen_per_day": 7332,
+       "vega_yen_per_pt": -25914
       },
       "legs": [
        {
@@ -1298,8 +1298,8 @@
         "k": 63000,
         "side": "buy",
         "qty": 1,
-        "pnl_yen": 645792,
-        "iv_pct": 33.7
+        "pnl_yen": 514023,
+        "iv_pct": 31.7
        },
        {
         "product": "op",
@@ -1308,8 +1308,8 @@
         "k": 65000,
         "side": "sell",
         "qty": 1,
-        "pnl_yen": -852936,
-        "iv_pct": 30.6
+        "pnl_yen": -704213,
+        "iv_pct": 28.6
        },
        {
         "product": "op",
@@ -1318,8 +1318,8 @@
         "k": 71000,
         "side": "sell",
         "qty": 1,
-        "pnl_yen": 262480,
-        "iv_pct": 25.7
+        "pnl_yen": 356081,
+        "iv_pct": 23.7
        },
        {
         "product": "op",
@@ -1328,8 +1328,8 @@
         "k": 73000,
         "side": "buy",
         "qty": 1,
-        "pnl_yen": -145013,
-        "iv_pct": 25.9
+        "pnl_yen": -205196,
+        "iv_pct": 23.9
        }
       ]
      }
@@ -1678,50 +1678,50 @@
         "x": 64421,
         "sq_pnl_yen": 25389,
         "sq_ratio": 0,
-        "scenario_pnl_yen": -1635946,
-        "scenario_ratio": -1.3,
-        "margin_yen": 2813928,
-        "room_yen": 550126
+        "scenario_pnl_yen": -1458941,
+        "scenario_ratio": -1.2,
+        "margin_yen": 2763336,
+        "room_yen": 777723
        },
        {
         "shock_pct": -10,
         "x": 61031,
         "sq_pnl_yen": -3026148,
         "sq_ratio": -2.4,
-        "scenario_pnl_yen": -3914239,
-        "scenario_ratio": -3.1,
-        "margin_yen": 2991671,
-        "room_yen": -1905910
+        "scenario_pnl_yen": -4468944,
+        "scenario_ratio": -3.5,
+        "margin_yen": 3208696,
+        "room_yen": -2677640
        },
        {
         "shock_pct": -20,
         "x": 54250,
         "sq_pnl_yen": -9129221,
         "sq_ratio": -7.2,
-        "scenario_pnl_yen": -9382813,
-        "scenario_ratio": -7.4,
-        "margin_yen": 2803755,
-        "room_yen": -7186568
+        "scenario_pnl_yen": -10936570,
+        "scenario_ratio": -8.6,
+        "margin_yen": 3895128,
+        "room_yen": -9831699
        },
        {
         "shock_pct": -30,
         "x": 47468,
         "sq_pnl_yen": -15232294,
         "sq_ratio": -12,
-        "scenario_pnl_yen": -15298306,
-        "scenario_ratio": -12.1,
-        "margin_yen": 2404734,
-        "room_yen": -12703040
+        "scenario_pnl_yen": -15833797,
+        "scenario_ratio": -12.5,
+        "margin_yen": 3161307,
+        "room_yen": -13995104
        },
        {
         "shock_pct": -40,
         "x": 40687,
         "sq_pnl_yen": -21335367,
         "sq_ratio": -16.9,
-        "scenario_pnl_yen": -21343687,
-        "scenario_ratio": -16.9,
-        "margin_yen": 1990224,
-        "room_yen": -18333912
+        "scenario_pnl_yen": -21454733,
+        "scenario_ratio": -17,
+        "margin_yen": 2346557,
+        "room_yen": -18801290
        }
       ]
      },
@@ -1753,7 +1753,7 @@
        "multiple_unbounded": false
       },
       "call_levels_x": [
-       63639,
+       63471,
        124249
       ]
      },
@@ -1791,22 +1791,22 @@
       "pnl_yen": [
        [
         [
-         -3648580,
-         -3914239,
-         -4200922,
-         -4502752
+         -4168558,
+         -4468944,
+         -4780869,
+         -5101466
         ],
         [
-         -1276009,
-         -1635946,
-         -1999921,
-         -2366438
+         -1101881,
+         -1458941,
+         -1821182,
+         -2186592
         ],
         [
-         -506341,
-         -885323,
-         -1264291,
-         -1643187
+         -335818,
+         -714778,
+         -1093761,
+         -1472696
         ],
         [
          356709,
@@ -1815,22 +1815,22 @@
          -735991
         ],
         [
-         791095,
-         539038,
-         245308,
-         -74413
+         646068,
+         366604,
+         55912,
+         -274793
         ],
         [
-         847953,
          696556,
          480188,
-         218677
+         218677,
+         -73838
         ],
         [
-         586814,
-         581379,
          546558,
-         461120
+         461120,
+         322187,
+         136526
         ]
        ],
        [
@@ -1938,14 +1938,14 @@
        "skew_pt": 0,
        "days_clamped": false
       },
-      "pnl_yen": -2268791,
+      "pnl_yen": -2098778,
       "expiry_pnl_yen": -584918,
       "greeks": {
-       "delta_large": 0.51,
-       "delta_mini": 5.13,
+       "delta_large": 0.52,
+       "delta_mini": 5.23,
        "gamma_per100": -0.006,
-       "theta_yen_per_day": 45653,
-       "vega_yen_per_pt": -66944
+       "theta_yen_per_day": 42190,
+       "vega_yen_per_pt": -66380
       },
       "legs": [
        {
@@ -1963,8 +1963,8 @@
         "k": 66000,
         "side": "sell",
         "qty": 1,
-        "pnl_yen": -2675662,
-        "iv_pct": 37.5
+        "pnl_yen": -2505649,
+        "iv_pct": 35
        }
       ]
      }
@@ -1985,14 +1985,14 @@
        "skew_pt": 1,
        "days_clamped": false
       },
-      "pnl_yen": -794081,
+      "pnl_yen": -641798,
       "expiry_pnl_yen": 1446193,
       "greeks": {
        "delta_large": 0.38,
-       "delta_mini": 3.83,
-       "gamma_per100": -0.007,
-       "theta_yen_per_day": 36699,
-       "vega_yen_per_pt": -75985
+       "delta_mini": 3.84,
+       "gamma_per100": -0.008,
+       "theta_yen_per_day": 34207,
+       "vega_yen_per_pt": -75994
       },
       "legs": [
        {
@@ -2010,8 +2010,8 @@
         "k": 66000,
         "side": "sell",
         "qty": 1,
-        "pnl_yen": -975273,
-        "iv_pct": 29.5
+        "pnl_yen": -822990,
+        "iv_pct": 27.5
        }
       ]
      }
@@ -2339,50 +2339,50 @@
         "x": 64421,
         "sq_pnl_yen": -870000,
         "sq_ratio": -1,
-        "scenario_pnl_yen": 129540,
-        "scenario_ratio": 0.1,
-        "margin_yen": 2186808,
-        "room_yen": -745848
+        "scenario_pnl_yen": 33904,
+        "scenario_ratio": 0,
+        "margin_yen": 2067721,
+        "room_yen": -511015
        },
        {
         "shock_pct": -10,
         "x": 61031,
         "sq_pnl_yen": -870000,
         "sq_ratio": -1,
-        "scenario_pnl_yen": -62937,
-        "scenario_ratio": -0.1,
-        "margin_yen": 1539541,
-        "room_yen": 301934
+        "scenario_pnl_yen": 316959,
+        "scenario_ratio": 0.4,
+        "margin_yen": 2039559,
+        "room_yen": -510203
        },
        {
         "shock_pct": -20,
         "x": 54250,
         "sq_pnl_yen": -870000,
         "sq_ratio": -1,
-        "scenario_pnl_yen": -437893,
-        "scenario_ratio": -0.5,
-        "margin_yen": 705459,
-        "room_yen": 1373252
+        "scenario_pnl_yen": 988573,
+        "scenario_ratio": 1.1,
+        "margin_yen": 2471868,
+        "room_yen": -1179430
        },
        {
         "shock_pct": -30,
         "x": 47468,
         "sq_pnl_yen": -870000,
         "sq_ratio": -1,
-        "scenario_pnl_yen": -664539,
-        "scenario_ratio": -0.8,
-        "margin_yen": 303674,
-        "room_yen": 1817509
+        "scenario_pnl_yen": 124473,
+        "scenario_ratio": 0.1,
+        "margin_yen": 1273428,
+        "room_yen": 668040
        },
        {
         "shock_pct": -40,
         "x": 40687,
         "sq_pnl_yen": -870000,
         "sq_ratio": -1,
-        "scenario_pnl_yen": -782759,
-        "scenario_ratio": -0.9,
-        "margin_yen": 118974,
-        "room_yen": 2009739
+        "scenario_pnl_yen": -508108,
+        "scenario_ratio": -0.6,
+        "margin_yen": 452566,
+        "room_yen": 1655804
        }
       ]
      },
@@ -2414,7 +2414,7 @@
        "multiple_unbounded": false
       },
       "call_levels_x": [
-       62182
+       50304
       ]
      },
      "scenario_grid": {
@@ -2452,22 +2452,22 @@
       "pnl_yen": [
        [
         [
-         -315853,
-         -134886,
-         42122,
-         214497
+         22878,
+         195759,
+         364207,
+         528710
         ],
         [
-         -180623,
-         -9500,
-         155275,
-         315585
+         -267598,
+         -92407,
+         75191,
+         237503
         ],
         [
-         -145078,
-         16314,
-         173558,
-         328124
+         -219742,
+         -55672,
+         103196,
+         258839
         ],
         [
          -150676,
@@ -2476,42 +2476,42 @@
          300552
         ],
         [
-         -280399,
-         -116079,
-         43785,
-         201136
+         -181102,
+         -19784,
+         138425,
+         294741
         ],
         [
-         -446014,
          -258464,
          -81215,
-         89136
+         89136,
+         254941
         ],
         [
-         -785654,
-         -685676,
          -514679,
-         -320994
+         -320994,
+         -125377,
+         66146
         ]
        ],
        [
         [
-         -347920,
-         -144563,
-         58942,
-         259511
+         36669,
+         237632,
+         434739,
+         627843
         ],
         [
-         -148701,
-         51598,
-         244529,
-         431950
+         -250150,
+         -45498,
+         150786,
+         340705
         ],
         [
-         -85571,
-         102542,
-         285295,
-         464543
+         -172784,
+         18710,
+         203577,
+         384234
         ],
         [
          -71707,
@@ -2520,42 +2520,42 @@
          446057
         ],
         [
-         -239906,
-         -47953,
-         137984,
-         320425
+         -123802,
+         64131,
+         247769,
+         428766
         ],
         [
-         -453968,
          -236901,
          -29167,
-         170548
+         170548,
+         364482
         ],
         [
-         -792868,
-         -718824,
          -557919,
-         -352470
+         -352470,
+         -132862,
+         87954
         ]
        ],
        [
         [
          -870000,
-         -870000,
-         -870000,
-         -869999
+         -869999,
+         -869993,
+         -869962
         ],
         [
-         -869994,
-         -869887,
-         -869275,
-         -867372
+         -869999,
+         -869967,
+         -869680,
+         -868525
         ],
         [
-         -868916,
-         -864739,
-         -855271,
-         -839513
+         -869611,
+         -867168,
+         -860278,
+         -847401
         ],
         [
          -635127,
@@ -2564,16 +2564,16 @@
          -426165
         ],
         [
-         -797048,
-         -794916,
-         -787661,
-         -773219
+         -796207,
+         -791353,
+         -779912,
+         -760904
         ],
         [
-         -797262,
          -797261,
          -797218,
-         -796795
+         -796795,
+         -795086
         ],
         [
          -797308,
@@ -2654,14 +2654,14 @@
        "skew_pt": 0,
        "days_clamped": false
       },
-      "pnl_yen": 159741,
+      "pnl_yen": 70882,
       "expiry_pnl_yen": -870000,
       "greeks": {
-       "delta_large": 0.08,
-       "delta_mini": 0.83,
+       "delta_large": 0.09,
+       "delta_mini": 0.86,
        "gamma_per100": -0.001,
-       "theta_yen_per_day": 7215,
-       "vega_yen_per_pt": 34565
+       "theta_yen_per_day": 5891,
+       "vega_yen_per_pt": 35142
       },
       "legs": [
        {
@@ -2671,8 +2671,8 @@
         "k": 68000,
         "side": "sell",
         "qty": 1,
-        "pnl_yen": 856665,
-        "iv_pct": 35.8
+        "pnl_yen": 1001936,
+        "iv_pct": 33.2
        },
        {
         "product": "op",
@@ -2681,8 +2681,8 @@
         "k": 68000,
         "side": "buy",
         "qty": 1,
-        "pnl_yen": -696924,
-        "iv_pct": 36.6
+        "pnl_yen": -931054,
+        "iv_pct": 34
        }
       ]
      }
@@ -2703,14 +2703,14 @@
        "skew_pt": 1,
        "days_clamped": false
       },
-      "pnl_yen": 18462,
+      "pnl_yen": -45034,
       "expiry_pnl_yen": -870000,
       "greeks": {
-       "delta_large": 0.05,
-       "delta_mini": 0.53,
+       "delta_large": 0.06,
+       "delta_mini": 0.57,
        "gamma_per100": -0.002,
-       "theta_yen_per_day": 7360,
-       "vega_yen_per_pt": 31531
+       "theta_yen_per_day": 6538,
+       "vega_yen_per_pt": 31849
       },
       "legs": [
        {
@@ -2720,8 +2720,8 @@
         "k": 68000,
         "side": "sell",
         "qty": 1,
-        "pnl_yen": 580450,
-        "iv_pct": 27.4
+        "pnl_yen": 723638,
+        "iv_pct": 25.4
        },
        {
         "product": "op",
@@ -2730,8 +2730,8 @@
         "k": 68000,
         "side": "buy",
         "qty": 1,
-        "pnl_yen": -561988,
-        "iv_pct": 28.2
+        "pnl_yen": -768672,
+        "iv_pct": 26.2
        }
       ]
      }
@@ -3045,50 +3045,50 @@
         "x": 63583,
         "sq_pnl_yen": 363028,
         "sq_ratio": 0.5,
-        "scenario_pnl_yen": -1849182,
-        "scenario_ratio": -2.4,
-        "margin_yen": 2985279,
-        "room_yen": 165539
+        "scenario_pnl_yen": -1678786,
+        "scenario_ratio": -2.2,
+        "margin_yen": 2927409,
+        "room_yen": 393805
        },
        {
         "shock_pct": -10,
         "x": 60237,
         "sq_pnl_yen": -2983447,
         "sq_ratio": -3.8,
-        "scenario_pnl_yen": -4199420,
-        "scenario_ratio": -5.4,
-        "margin_yen": 3232638,
-        "room_yen": -2432058
+        "scenario_pnl_yen": -4764725,
+        "scenario_ratio": -6.1,
+        "margin_yen": 3440390,
+        "room_yen": -3205115
        },
        {
         "shock_pct": -20,
         "x": 53544,
         "sq_pnl_yen": -9676398,
         "sq_ratio": -12.4,
-        "scenario_pnl_yen": -10026565,
-        "scenario_ratio": -12.9,
-        "margin_yen": 3080122,
-        "room_yen": -8106687
+        "scenario_pnl_yen": -11605526,
+        "scenario_ratio": -14.9,
+        "margin_yen": 4088618,
+        "room_yen": -10694144
        },
        {
         "shock_pct": -30,
         "x": 46851,
         "sq_pnl_yen": -16369348,
         "sq_ratio": -21,
-        "scenario_pnl_yen": -16459823,
-        "scenario_ratio": -21.1,
-        "margin_yen": 2643627,
-        "room_yen": -14103450
+        "scenario_pnl_yen": -17014324,
+        "scenario_ratio": -21.8,
+        "margin_yen": 3359584,
+        "room_yen": -15373908
        },
        {
         "shock_pct": -40,
         "x": 40158,
         "sq_pnl_yen": -23062298,
         "sq_ratio": -29.6,
-        "scenario_pnl_yen": -23076554,
-        "scenario_ratio": -29.6,
-        "margin_yen": 2181441,
-        "room_yen": -20257996
+        "scenario_pnl_yen": -23191858,
+        "scenario_ratio": -29.7,
+        "margin_yen": 2524585,
+        "room_yen": -20716443
        }
       ]
      },
@@ -3120,7 +3120,7 @@
        "multiple_unbounded": false
       },
       "call_levels_x": [
-       63360
+       63054
       ]
      },
      "scenario_grid": {
@@ -3157,22 +3157,22 @@
       "pnl_yen": [
        [
         [
-         -3915433,
-         -4199420,
-         -4494835,
-         -4798451
+         -4461891,
+         -4764725,
+         -5073801,
+         -5387565
         ],
         [
-         -1501484,
-         -1849182,
-         -2197010,
-         -2544870
+         -1331205,
+         -1678786,
+         -2026565,
+         -2374419
         ],
         [
-         -741037,
-         -1088119,
-         -1436488,
-         -1785639
+         -585491,
+         -931731,
+         -1279601,
+         -1628447
         ],
         [
          108174,
@@ -3181,42 +3181,42 @@
          -828738
         ],
         [
-         582215,
-         389707,
-         154695,
-         -109806
+         472712,
+         252856,
+         -1104,
+         -278902
         ],
         [
-         719971,
          608593,
          442826,
-         234649
+         234649,
+         -5308
         ],
         [
-         779835,
-         774646,
          747829,
-         683893
+         683893,
+         577977,
+         432580
         ]
        ],
        [
         [
-         -2983500,
-         -2983967,
-         -2985343,
-         -2988298
+         -2985127,
+         -2987875,
+         -2992772,
+         -3000320
         ],
         [
-         146407,
-         85454,
-         23295,
-         -39678
+         175643,
+         115505,
+         53874,
+         -8737
         ],
         [
-         703233,
-         659607,
-         610807,
-         558325
+         720619,
+         679992,
+         633298,
+         582325
         ],
         [
          779954,
@@ -3227,14 +3227,14 @@
         [
          780000,
          780000,
-         779999,
-         779987
+         779996,
+         779952
         ],
         [
          780000,
          780000,
          780000,
-         780000
+         779999
         ],
         [
          780000,
@@ -3304,14 +3304,14 @@
        "skew_pt": 0,
        "days_clamped": false
       },
-      "pnl_yen": -2458484,
+      "pnl_yen": -2293929,
       "expiry_pnl_yen": -306267,
       "greeks": {
-       "delta_large": 0.54,
-       "delta_mini": 5.44,
+       "delta_large": 0.55,
+       "delta_mini": 5.49,
        "gamma_per100": -0.006,
-       "theta_yen_per_day": 53531,
-       "vega_yen_per_pt": -64583
+       "theta_yen_per_day": 50086,
+       "vega_yen_per_pt": -64476
       },
       "legs": [
        {
@@ -3321,8 +3321,8 @@
         "k": 64000,
         "side": "sell",
         "qty": 1,
-        "pnl_yen": -2458484,
-        "iv_pct": 40.6
+        "pnl_yen": -2293929,
+        "iv_pct": 38.1
        }
       ]
      }
@@ -3343,14 +3343,14 @@
        "skew_pt": 1,
        "days_clamped": false
       },
-      "pnl_yen": -597004,
+      "pnl_yen": -527709,
       "expiry_pnl_yen": 780000,
       "greeks": {
        "delta_large": 0.34,
-       "delta_mini": 3.45,
-       "gamma_per100": -0.006,
-       "theta_yen_per_day": 38133,
-       "vega_yen_per_pt": -66671
+       "delta_mini": 3.41,
+       "gamma_per100": -0.007,
+       "theta_yen_per_day": 36710,
+       "vega_yen_per_pt": -66381
       },
       "legs": [
        {
@@ -3360,8 +3360,8 @@
         "k": 64000,
         "side": "sell",
         "qty": 1,
-        "pnl_yen": -597004,
-        "iv_pct": 31.4
+        "pnl_yen": -527709,
+        "iv_pct": 30.4
        }
       ]
      }
@@ -6081,7 +6081,7 @@
         "call_width_x": null,
         "short_gap_x": null,
         "call_levels_x": [
-         57106
+         59371
         ]
        }
       },
@@ -6143,7 +6143,7 @@
         "call_width_x": null,
         "short_gap_x": null,
         "call_levels_x": [
-         58397
+         60106
         ]
        }
       },
@@ -6205,7 +6205,7 @@
         "call_width_x": null,
         "short_gap_x": null,
         "call_levels_x": [
-         59300
+         60631
         ]
        }
       },
@@ -6267,7 +6267,7 @@
         "call_width_x": null,
         "short_gap_x": null,
         "call_levels_x": [
-         59990
+         61037
         ]
        }
       },
@@ -6329,7 +6329,7 @@
         "call_width_x": null,
         "short_gap_x": null,
         "call_levels_x": [
-         60494
+         61339
         ]
        }
       }
@@ -6406,7 +6406,7 @@
         "call_width_x": null,
         "short_gap_x": null,
         "call_levels_x": [
-         78544
+         77799
         ]
        }
       },
@@ -6468,7 +6468,7 @@
         "call_width_x": null,
         "short_gap_x": null,
         "call_levels_x": [
-         77467
+         76821
         ]
        }
       },
@@ -6530,7 +6530,7 @@
         "call_width_x": null,
         "short_gap_x": null,
         "call_levels_x": [
-         76658
+         76070
         ]
        }
       },
@@ -6592,7 +6592,7 @@
         "call_width_x": null,
         "short_gap_x": null,
         "call_levels_x": [
-         76086
+         75542
         ]
        }
       },
@@ -6654,7 +6654,7 @@
         "call_width_x": null,
         "short_gap_x": null,
         "call_levels_x": [
-         75548
+         75050
         ]
        }
       }
@@ -6741,8 +6741,8 @@
         "call_width_x": null,
         "short_gap_x": 14250,
         "call_levels_x": [
-         57007,
-         78859
+         59866,
+         78097
         ]
        }
       },
@@ -6814,8 +6814,8 @@
         "call_width_x": null,
         "short_gap_x": 11125,
         "call_levels_x": [
-         58203,
-         77936
+         60462,
+         77270
         ]
        }
       },
@@ -6887,8 +6887,8 @@
         "call_width_x": null,
         "short_gap_x": 8750,
         "call_levels_x": [
-         58984,
-         77302
+         60863,
+         76685
         ]
        }
       },
@@ -6960,8 +6960,8 @@
         "call_width_x": null,
         "short_gap_x": 6875,
         "call_levels_x": [
-         59559,
-         76916
+         61155,
+         76336
         ]
        }
       },
@@ -7033,8 +7033,8 @@
         "call_width_x": null,
         "short_gap_x": 5250,
         "call_levels_x": [
-         59916,
-         76563
+         61342,
+         76017
         ]
        }
       }
@@ -7121,8 +7121,8 @@
         "call_width_x": null,
         "short_gap_x": 0,
         "call_levels_x": [
-         60259,
-         75847
+         61534,
+         75343
         ]
        }
       }
@@ -7227,8 +7227,8 @@
         "call_width_x": 2250,
         "short_gap_x": 14250,
         "call_levels_x": [
-         57475,
-         78535
+         60134,
+         77704
         ]
        }
       },
@@ -7318,8 +7318,8 @@
         "call_width_x": 2250,
         "short_gap_x": 11125,
         "call_levels_x": [
-         58873,
-         77452
+         60846,
+         76691
         ]
        }
       },
@@ -7409,8 +7409,8 @@
         "call_width_x": 2125,
         "short_gap_x": 8750,
         "call_levels_x": [
-         59874,
-         76639
+         61372,
+         75899
         ]
        }
       },
@@ -7500,8 +7500,8 @@
         "call_width_x": 2125,
         "short_gap_x": 6875,
         "call_levels_x": [
-         60692,
-         76050
+         61806,
+         75315
         ]
        }
       },
@@ -7591,8 +7591,8 @@
         "call_width_x": 2125,
         "short_gap_x": 5250,
         "call_levels_x": [
-         61278,
-         75505
+         62123,
+         74775
         ]
        }
       }
@@ -7678,7 +7678,7 @@
         "call_width_x": null,
         "short_gap_x": null,
         "call_levels_x": [
-         57434
+         59594
         ]
        }
       },
@@ -7749,7 +7749,7 @@
         "call_width_x": null,
         "short_gap_x": null,
         "call_levels_x": [
-         58855
+         60418
         ]
        }
       },
@@ -7820,7 +7820,7 @@
         "call_width_x": null,
         "short_gap_x": null,
         "call_levels_x": [
-         59877
+         61027
         ]
        }
       },
@@ -7891,7 +7891,7 @@
         "call_width_x": null,
         "short_gap_x": null,
         "call_levels_x": [
-         60700
+         61528
         ]
        }
       },
@@ -7962,7 +7962,7 @@
         "call_width_x": null,
         "short_gap_x": null,
         "call_levels_x": [
-         61323
+         61919
         ]
        }
       }
@@ -8048,7 +8048,7 @@
         "call_width_x": 2250,
         "short_gap_x": null,
         "call_levels_x": [
-         78450
+         77687
         ]
        }
       },
@@ -8119,7 +8119,7 @@
         "call_width_x": 2250,
         "short_gap_x": null,
         "call_levels_x": [
-         77317
+         76646
         ]
        }
       },
@@ -8190,7 +8190,7 @@
         "call_width_x": 2125,
         "short_gap_x": null,
         "call_levels_x": [
-         76431
+         75810
         ]
        }
       },
@@ -8261,7 +8261,7 @@
         "call_width_x": 2125,
         "short_gap_x": null,
         "call_levels_x": [
-         75773
+         75186
         ]
        }
       },
@@ -8332,7 +8332,7 @@
         "call_width_x": 2125,
         "short_gap_x": null,
         "call_levels_x": [
-         75147
+         74604
         ]
        }
       }
@@ -8419,7 +8419,7 @@
         "call_width_x": null,
         "short_gap_x": null,
         "call_levels_x": [
-         63800
+         63520
         ]
        }
       },
@@ -8491,7 +8491,7 @@
         "call_width_x": null,
         "short_gap_x": null,
         "call_levels_x": [
-         64882
+         64464
         ]
        }
       },
@@ -8562,7 +8562,7 @@
         "call_width_x": null,
         "short_gap_x": null,
         "call_levels_x": [
-         65670
+         65288
         ]
        }
       },
@@ -8633,7 +8633,7 @@
         "call_width_x": null,
         "short_gap_x": null,
         "call_levels_x": [
-         66312
+         65994
         ]
        }
       },
@@ -8704,7 +8704,7 @@
         "call_width_x": null,
         "short_gap_x": null,
         "call_levels_x": [
-         66796
+         66587
         ]
        }
       }
@@ -8808,7 +8808,7 @@
       "call_width_x": null,
       "short_gap_x": null,
       "call_levels_x": [
-       65548
+       65160
       ]
      },
      "after": {
@@ -8830,7 +8830,7 @@
       "call_width_x": null,
       "short_gap_x": null,
       "call_levels_x": [
-       65798
+       65408
       ]
      }
     }
@@ -8925,7 +8925,7 @@
       "call_width_x": null,
       "short_gap_x": null,
       "call_levels_x": [
-       65548
+       65160
       ]
      },
      "after": {
@@ -8947,7 +8947,7 @@
       "call_width_x": null,
       "short_gap_x": null,
       "call_levels_x": [
-       60607
+       61529
       ]
      }
     }
@@ -9119,7 +9119,7 @@
       "call_width_x": null,
       "short_gap_x": null,
       "call_levels_x": [
-       63639,
+       63471,
        124249
       ]
      },
@@ -9142,7 +9142,7 @@
       "call_width_x": null,
       "short_gap_x": null,
       "call_levels_x": [
-       64562
+       64274
       ]
      }
     }
@@ -9219,8 +9219,8 @@
       "call_width_x": null,
       "short_gap_x": 14250,
       "call_levels_x": [
-       57007,
-       78859
+       59866,
+       78097
       ]
      }
     }
@@ -9300,7 +9300,7 @@
       "call_width_x": null,
       "short_gap_x": null,
       "call_levels_x": [
-       65548
+       65160
       ]
      },
      "after": {
@@ -9322,7 +9322,7 @@
       "call_width_x": null,
       "short_gap_x": null,
       "call_levels_x": [
-       65798
+       65408
       ]
      }
     }
@@ -9515,8 +9515,8 @@
       "call_width_x": 2250,
       "short_gap_x": 11125,
       "call_levels_x": [
-       58873,
-       77452
+       60846,
+       76691
       ]
      }
     }

@@ -497,7 +497,7 @@ describe('#136 AC2 [AI に聞く]（kind ask と場所の topic）', () => {
   });
 });
 
-describe('#136 照合の出所: [AI に聞く] の質問の表示の値・β の 1% あたり', () => {
+describe('#136 照合の出所: [AI に聞く] の質問の表示の値・β の代表の点の上乗せ', () => {
   const ASK_Q = [
     '［AI に聞く］指標 · テール ›「合計グリーク」',
     '画面の表示（金額の単位: 千円（自動））:',
@@ -541,19 +541,32 @@ describe('#136 照合の出所: [AI に聞く] の質問の表示の値・β の
     // 質問の値と違う数は今どおり不一致
     expect(checkNumbers('Θ は +13 千円 / 日', numberSources(conv('ask', ASK_Q))).unmatched).toBe(1);
   });
-  it('β の定義: 1% あたり β pt（シナリオの β から）は一致し、違う pt は数える', () => {
+  it('β の定義: 実測の形の代表の点の上乗せ β × g（シナリオの β から）は一致し、違う pt は数える', () => {
     const ctx: AiContext = {
       ...CTX(0),
       scenario: { days: 0, iv_shift_pt: 0, x_range: [60000, 70000], beta: 1 },
     };
     const src = numberSources(conv('chat', 'x', ctx));
-    const r = checkNumbers('β = 1 なので下落 1% ごとに IV が +1.0pt 上がります', src);
-    expect(r.tokens.find((t) => t.raw === '+1.0pt')?.status).toBe('matched');
+    // g(−3%) = 0.75・g(−6%) = 3.45・g(−10%) = 19.45（BETA_SHAPE）
+    const r = checkNumbers('β 1.0 なので −10% で IV が +19.45pt、−6% で +3.45pt 上がります', src);
+    expect(r.tokens.find((t) => t.raw === '+19.45pt')?.status).toBe('matched');
+    expect(r.tokens.find((t) => t.raw === '+3.45pt')?.status).toBe('matched');
     expect(
-      checkNumbers('下落 1% ごとに +2.0pt', src).tokens.find((t) => t.raw === '+2.0pt')?.status,
+      checkNumbers('−10% で +19.5pt', src).tokens.find((t) => t.raw === '+19.5pt')?.status,
+    ).toBe('matched');
+    // 直線の読み方（1% あたり β pt = −10% で +10pt）は数える
+    expect(
+      checkNumbers('−10% で +10.0pt', src).tokens.find((t) => t.raw === '+10.0pt')?.status,
     ).toBe('unmatched');
+    // β 2 なら 2 倍
+    const src2 = numberSources(
+      conv('chat', 'x', { ...ctx, scenario: { ...ctx.scenario, beta: 2 } } as AiContext),
+    );
+    expect(checkNumbers('+38.9pt', src2).tokens.find((t) => t.raw === '+38.9pt')?.status).toBe(
+      'matched',
+    );
     // β が無い文脈では足さない
-    expect(checkNumbers('+1.0pt', numberSources(conv('chat', 'x'))).tokens[0]?.status).toBe(
+    expect(checkNumbers('+19.45pt', numberSources(conv('chat', 'x'))).tokens[0]?.status).toBe(
       'unmatched',
     );
   });
