@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest';
+import type { ChainJson } from '../../data';
 import {
   boardOptionLeg,
   buildMarketContext,
   futureLeg,
   manualEntryDefault,
   manualOptionLeg,
+  quotedSidePrice,
 } from '../../data/legs';
 import { normalizeChain } from '../../data/normalize';
 import { evaluatePosition, preparePosition } from '../../model/position';
@@ -81,6 +83,54 @@ describe('板の足', () => {
     expect(() =>
       boardOptionLeg(chain, { expiry: m1.id, k: 64001, type: 'put', side: 'sell' }),
     ).toThrow();
+  });
+});
+
+describe('売買に必要な側の気配（quotedSidePrice。#298）', () => {
+  /** 2026-11 限 K = 64,000 のプットの気配だけを書き換えた板（架空の値） */
+  function withPut(bid: number | null, ask: number | null) {
+    const j: ChainJson = fixture('latest');
+    const row = j.months[0]?.rows.find((r) => r.k === 64000);
+    if (!row) throw new Error('行が無い');
+    row.put.bid = bid;
+    row.put.ask = ask;
+    return normalizeChain(j);
+  }
+  const at = (c: typeof chain, side: 'buy' | 'sell') =>
+    quotedSidePrice(c, { expiry: '2026-11', k: 64000, type: 'put', side });
+
+  it('両側気配: 売り = bid、買い = ask', () => {
+    const c = withPut(780, 805);
+    expect(at(c, 'sell')).toBe(780);
+    expect(at(c, 'buy')).toBe(805);
+  });
+
+  it('片側気配: 必要な側があれば使い、無ければ null', () => {
+    const bidOnly = withPut(780, null);
+    expect(bidOnly.months[0]?.strikes.find((s) => s.k === 64000)?.put.quote).toBe('bid_only');
+    expect(at(bidOnly, 'sell')).toBe(780);
+    expect(at(bidOnly, 'buy')).toBeNull();
+    const askOnly = withPut(null, 805);
+    expect(askOnly.months[0]?.strikes.find((s) => s.k === 64000)?.put.quote).toBe('ask_only');
+    expect(at(askOnly, 'sell')).toBeNull();
+    expect(at(askOnly, 'buy')).toBe(805);
+  });
+
+  it('気配なし・逆転（bid > ask）は両側とも null', () => {
+    for (const c of [withPut(null, null), withPut(0, 0), withPut(830, 805)]) {
+      expect(c.months[0]?.strikes.find((s) => s.k === 64000)?.put.quote).toBe('none');
+      expect(at(c, 'sell')).toBeNull();
+      expect(at(c, 'buy')).toBeNull();
+    }
+  });
+
+  it('板に無い限月・行使価格は null（例外を投げない）', () => {
+    expect(
+      quotedSidePrice(chain, { expiry: '2027-01', k: 64000, type: 'put', side: 'sell' }),
+    ).toBeNull();
+    expect(
+      quotedSidePrice(chain, { expiry: m1.id, k: 64001, type: 'put', side: 'buy' }),
+    ).toBeNull();
   });
 });
 

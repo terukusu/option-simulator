@@ -28,6 +28,7 @@ import {
 } from '../../view/positionsRegion';
 import type { ShellAction, Tier } from '../../view/shell';
 import type { ToastInput } from '../../view/toast';
+import { REBASE_LABEL, rebaseBlockedText } from '../../view/topMenu';
 import { PanelHead } from '../PanelHead';
 import { Icon } from '../parts/Icon';
 import { Menu, type MenuItem } from '../parts/Menu';
@@ -48,6 +49,8 @@ interface Props {
   push: (t: ToastInput) => void;
   /** 全クリア（#87 (C)。処理は NextApp = パレットと同じ。[元に戻す] 付きのトースト。#275 でトップの ⋯ から外した） */
   onClear: () => void;
+  /** 建値を今の板に合わせる（#298。処理は NextApp = パレットと同じ。[元に戻す] 付きのトースト） */
+  onRebase: () => void;
 }
 
 const fmtQty = (v: number) => fmtNum(v);
@@ -134,9 +137,17 @@ export function Positions(p: Props) {
     if (l.toast) push({ kind: 'leg-add', text: l.toast });
   };
 
+  const rebaseBlocked = rebaseBlockedText(hasChain, c.curLegs.length);
   const items: MenuItem[] = [
     // 足の本数で決める（板が読めず行が無いときも消せる = #275 でトップの ⋯ の全クリアを外したため）
     { key: 'clear', label: '全クリア', disabled: c.curLegs.length === 0, onSelect: onClear },
+    {
+      key: 'rebase',
+      label: REBASE_LABEL,
+      disabled: rebaseBlocked !== null,
+      ...(rebaseBlocked === null ? {} : { title: rebaseBlocked }),
+      onSelect: p.onRebase,
+    },
     { key: 'add', label: '足を追加…', disabled: !hasChain, onSelect: () => setDialog('leg') },
     {
       key: 'hedge',

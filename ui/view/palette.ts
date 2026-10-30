@@ -28,7 +28,13 @@ import { type PinMenuInput, pinMenuRows } from './pins';
 import { evalChips, presetChips, type ScenarioRegionInput } from './scenarioRegion';
 import { CHART_MODES, DOCK_LABELS, type PanelId, type ShellAction } from './shell';
 import type { TabsView } from './tabs';
-import { CLEAR_NO_LEGS_TEXT, THEMES } from './topMenu';
+import {
+  CLEAR_NO_LEGS_TEXT,
+  NO_CHAIN_TEXT,
+  REBASE_LABEL,
+  rebaseBlockedText,
+  THEMES,
+} from './topMenu';
 
 export type PaletteGroup =
   | 'panel'
@@ -104,6 +110,8 @@ export type PaletteRun =
   | { kind: 'book' }
   | { kind: 'saveToBook' }
   | { kind: 'clear' }
+  /** 建値を今の板に合わせる（#298） */
+  | { kind: 'rebase' }
   | { kind: 'settings' }
   | { kind: 'theme'; theme: ThemePref }
   /** 用語の説明カードを開く（#167） */
@@ -155,7 +163,7 @@ export interface PaletteInput {
 
 export const CHART_NO_LEGS_TEXT = '足が無い';
 export const CHART_MINI_TEXT = '損益グラフが小さい（シートを下げる）';
-export const ATM_NONE_TEXT = '板が無い';
+export const ATM_NONE_TEXT = NO_CHAIN_TEXT;
 
 /** 行を作る（押せない行は run を null にする = disabled と run の対応を 1 か所で守る） */
 function item(
@@ -328,6 +336,7 @@ export function paletteItems(input: PaletteInput): PaletteItem[] {
     );
   }
   // 作業（⋯ と同じ）
+  const rebaseBlocked = rebaseBlockedText(input.chain !== null, input.legCount);
   out.push(
     item(
       'work',
@@ -344,6 +353,16 @@ export function paletteItems(input: PaletteInput): PaletteItem[] {
       '全クリア',
       { kind: 'clear' },
       { disabled: input.legCount === 0, title: CLEAR_NO_LEGS_TEXT },
+    ),
+    item(
+      'work',
+      'rebase',
+      REBASE_LABEL,
+      { kind: 'rebase' },
+      {
+        disabled: rebaseBlocked !== null,
+        title: rebaseBlocked ?? undefined,
+      },
     ),
     item('work', 'settings', '設定…', { kind: 'settings' }),
   );
