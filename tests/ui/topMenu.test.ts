@@ -31,10 +31,11 @@ const base: TopMenuInput = {
 const row = (i: TopMenuInput, key: string) => topMenuModel(i).find((r) => r.key === key);
 
 describe('topMenuModel', () => {
-  it('#275（EPIC #281 終了条件 4）: 本番（合成の板なし）の行は 6 以下 = 保存一覧… / URL をコピー / ファイルを開く… / 設定…', () => {
+  it('#275（EPIC #281 終了条件 4）: 本番（合成の板なし）の行は 6 以下 = 保有ポジション…（#302）/ 保存一覧… / URL をコピー / ファイルを開く… / 設定…', () => {
     const rows = topMenuModel(base);
     expect(rows.length).toBeLessThanOrEqual(6);
     expect(rows.map((r) => [r.label, r.sep === true])).toEqual([
+      ['保有ポジション…', false],
       ['保存一覧（3）…', false],
       ['URL をコピー', false],
       ['ファイルを開く…', true],
@@ -63,6 +64,7 @@ describe('topMenuModel', () => {
       sourceLabel: 'night_early',
     });
     expect(rows.map((r) => r.key)).toEqual([
+      'holdings',
       'book',
       'share',
       'file',
@@ -77,6 +79,12 @@ describe('topMenuModel', () => {
       ['合成の板 night_early', true, undefined],
       ['合成の板 pre_open', false, undefined],
     ]);
+  });
+
+  it('#302 AC9: 保有ポジション… は保存一覧の上（先頭）。件数を出さず、押せない状態を持たない（板が無くても開ける）', () => {
+    const rows = topMenuModel({ ...base, bookCount: null });
+    expect(rows[0]).toEqual({ key: 'holdings', label: '保有ポジション…' });
+    expect(rows[1]?.key).toBe('book');
   });
 
   it('保存一覧の件数: null → 保存一覧…、0 → 保存一覧（0）…', () => {

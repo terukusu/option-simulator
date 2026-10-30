@@ -60,6 +60,16 @@ class Bool(Spec):
 
 
 @dataclass(frozen=True)
+class TrueOnly(Spec):
+    """true だけ（#302 の印 position.held。無いことが false なので false は送らせない）"""
+
+    def check(self, value, path):
+        if value is not True:
+            raise Bad(path, "type")
+        return True
+
+
+@dataclass(frozen=True)
 class Nullable(Spec):
     """null か inner（#200。真偽値・文字列の null）"""
 

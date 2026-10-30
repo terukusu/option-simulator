@@ -207,6 +207,16 @@ export function marginTail(
   });
 }
 
+/** 追証の線の入力（useMarginLine・保有ポジションの一覧の合計。#302） */
+export interface MarginLineInput {
+  base: PnlBase;
+  /** ΔX 以外のシナリオ（ΔX は見ない） */
+  scenario: Scenario;
+  params: MarginParams;
+  capital: number;
+  holidays: Holidays;
+}
+
 /** 追証の線: 連続の操作が止まってから作るまでの時間（ms。ピンの線の描き直しの PIN_SETTLE_MS と同じ） */
 export const MARGIN_LINE_SETTLE_MS = PIN_SETTLE_MS;
 /** 追証の線: 板の全域の外（ΔX の数値欄で行ける範囲）の片側の分割数（行使価格が無く余力が滑らかな側） */

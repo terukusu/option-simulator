@@ -482,3 +482,39 @@ describe('前の板で建てた足（#299 AC11）: position_summary のシナリ
     expect(r.scenario_point.pnl_yen).toBe(yen(screen));
   });
 });
+
+describe('保有の値（#302 AC15）: position_summary の pnl_now_yen・unrealized_yen', () => {
+  it('pnl_now_yen = シナリオ 0 の損益、unrealized_yen = 指標の内訳の含み損益（前の板で建てた足があるとき）', () => {
+    const { t0, later } = boardsT0AndLater();
+    const acts: Action[] = [
+      { type: 'loaded', chain: t0, label: 't0' },
+      { type: 'addBoardLeg', expiry: '2026-11', k: 64000, optionType: 'put', side: 'sell' },
+      { type: 'addFutureLeg', input: { side: 'buy', qty: 1 } },
+      { type: 'loaded', chain: later, label: 'later' },
+      // 今の板で足した足（含み損益に入らない）
+      { type: 'addBoardLeg', expiry: '2026-12', k: 70000, optionType: 'call', side: 'buy' },
+    ];
+    const s = acts.reduce(reduce, { ...initialState, feePerLot: 25 });
+    const env = aiEnvFromState(s, DEFAULT_MARGIN_PREFS);
+    if (!env?.base) throw new Error('環境が無い');
+    const settings = { ...DEFAULT_SETTINGS, feePerLot: 25 };
+    const pm = positionModel(later, s.legs, s.atmBasis, s.calendar, settings);
+    const screen = evaluatePosition(pm.prepared, ZERO_SCENARIO, pm.ctx, settings).pnl;
+    const m = metricsModel({ base: env.base, scenario: s.scenario, unit: 'yen' });
+    expect(m.premium.markedLegs).toBe(2);
+    const r = run(env, 'position_summary');
+    expect(r.pnl_now_yen).toBe(yen(screen));
+    expect(r.unrealized_yen).toBe(yen(m.premium.unrealized));
+    expect(r.unrealized_yen).not.toBe(r.pnl_now_yen);
+  });
+
+  it('前の板の足が無ければ unrealized_yen は無い。保有でもなければ pnl_now_yen も無い', () => {
+    const env = envOf('put_sell');
+    const r = run(env, 'position_summary');
+    expect('pnl_now_yen' in r).toBe(false);
+    expect('unrealized_yen' in r).toBe(false);
+    const held = run({ ...env, held: { active: true, others: 0 } }, 'position_summary');
+    expect(typeof held.pnl_now_yen).toBe('number');
+    expect('unrealized_yen' in held).toBe(false);
+  });
+});

@@ -7,6 +7,8 @@
  * - 送らないもの: JPX のグリーク・bid_iv / ask_iv・数量・建玉・自由な文字列（タブ名など）
  * - ポジション: 評価できる足（PnlBase の足）だけ。シナリオ: 日数（最遠の SQ に収めた値）・IV の平行移動・ΔX・スキュー・β・
  *   IV の入れ方・横軸の初期範囲。資金: 端末の設定（未設定なら無し）
+ * - 保有（#302）: 作業中のタブが保有なら position.held、ほかの保有の数（1 以上）は position.other_held、前の板で建てた足には
+ *   legs[].opened_days。どれも無い state の文脈は変更前と同じ（指紋が変わらない）
  * - 自分の前提（#156）: 端末の設定の自由記述（前後の空白を除く。空・未設定なら無し）。context の中で唯一の自由な文字列
  * - precomputed: ツール 5 本の事前計算（ui/view/aiTools.ts）
  * - 指紋（contextKey）: 決定的な JSON（キーの順）。会話の途中で変わったら次の発言に context_update を足す（aiChat.ts）
@@ -15,12 +17,12 @@
 import type { AiContext } from '../../data/aiStream';
 import { DEFAULT_SETTINGS, type ModelSettings } from '../../model';
 import { isAiProfile, type MarginPrefs } from '../prefs';
-import type { State, UiLeg } from '../state';
+import { activeHeld, type State, type UiLeg } from '../state';
 import type { DraftEval } from './aiPropose';
 import { type AiToolEnv, legId, precompute, yen } from './aiTools';
 import { capitalOf, marginParamsOf } from './margin';
 import { clampDays, pnlDomains, scenarioFull, withScenarioFull } from './pnlChart';
-import { positionModel } from './position';
+import { daysSinceOpen, openedBeforeBoard, positionModel } from './position';
 
 /** スマイルの要約の点（m = ln(K/F)） */
 export const CONTEXT_SMILE_M = [
@@ -29,6 +31,8 @@ export const CONTEXT_SMILE_M = [
 /** 中継の上限（allowlist.py の MAX_EXPIRIES・MAX_LEGS） */
 export const CONTEXT_MAX_EXPIRIES = 6;
 export const CONTEXT_MAX_LEGS = 20;
+/** ほかの保有の数の上限（allowlist.py の position.other_held。タブ 6 + 保存一覧 100 件より大きい） */
+export const CONTEXT_MAX_OTHER_HELD = 200;
 
 const r = (v: number, d: number) => {
   const f = 10 ** d;
@@ -49,6 +53,7 @@ export function aiEnvFromState(
   state: State,
   margin: MarginPrefs,
   profile?: string,
+  otherHeld = 0,
 ): AiToolEnv | null {
   const chain = state.chain;
   if (!chain) return null;
@@ -75,6 +80,8 @@ export function aiEnvFromState(
     holidays: state.calendar.holidays,
     draft: { legs: state.legs, evalLegs },
     ...(profile !== undefined && { profile }),
+    // 保有（#302）: 作業中のタブの印とほかの保有の数（呼び出し側が holdings.ts の otherHeldCount で数える）
+    held: { active: activeHeld(state), others: otherHeld },
   };
 }
 
@@ -113,7 +120,15 @@ export function buildAiContext(env: AiToolEnv): AiContext {
       legs: base.legs.slice(0, CONTEXT_MAX_LEGS).map((p) => ({
         ...(legId(p) as Omit<NonNullable<AiContext['position']>['legs'][number], 'price'>),
         price: r(Math.max(p.leg.entry, 0), 1),
+        // 建ててからの暦日（#302。前の板で建てた足だけ = 無い足の文脈は変更前と同じ）
+        ...(p.leg.openedAt !== undefined && openedBeforeBoard(p.leg, chain)
+          ? { opened_days: daysSinceOpen(p.leg.openedAt, chain.snapshotAt) }
+          : {}),
       })),
+      ...(env.held?.active === true ? { held: true as const } : {}),
+      ...(env.held && env.held.others >= 1
+        ? { other_held: Math.min(Math.round(env.held.others), CONTEXT_MAX_OTHER_HELD) }
+        : {}),
     };
     const lo = base.initial[0];
     const hi = base.initial[1];

@@ -1,8 +1,11 @@
 import { describe, expect, it } from 'vitest';
+import { normalizeChain } from '../../data';
+import aiTools from '../../fixtures/synthetic/ai_tools.json';
 import { AI_EVAL_CASES, caseMargin, caseState } from '../../scripts/aiEvalCases';
 import { reduce } from '../../ui/state';
 import { aiEnvFromState, buildAiContext, contextKey } from '../../ui/view/aiContext';
 import { fixture } from '../support/fixtures';
+import { laterJson } from '../support/laterChain';
 
 /** #135: AI に送る文脈（ui/view/aiContext.ts）。許可リストのキーだけ・指紋。合成の板・架空の値。 */
 
@@ -80,5 +83,58 @@ describe('自分の前提（#156 AC3）', () => {
     }
     const e = aiEnvFromState(state, margin, 'あ'.repeat(1000));
     expect(e && buildAiContext(e).profile?.text.length).toBe(1000);
+  });
+});
+
+describe('保有の情報（#302 AC14）', () => {
+  const put = AI_EVAL_CASES.find((x) => x.name === 'put_sell');
+  if (!put) throw new Error('組が無い');
+  const plain = caseState(latest, put);
+  const ctxOf = (s: typeof plain, others = 0) => {
+    const e = aiEnvFromState(s, caseMargin(put), undefined, others);
+    if (!e) throw new Error('環境が無い');
+    return buildAiContext(e);
+  };
+  const HELD_KEYS = ['held', 'other_held', 'opened_days', 'pnl_now_yen', 'unrealized_yen'];
+
+  it('保有も前の板の足も無い state の文脈は変更前と同じ（見本 ai_tools.json の文脈と同じ指紋）', () => {
+    const ctx = ctxOf(plain);
+    const keys = keysOf(ctx);
+    for (const k of HELD_KEYS) expect(keys.has(k)).toBe(false);
+    const sample = aiTools.cases.find((x) => x.name === 'put_sell');
+    expect(contextKey(ctx)).toBe(contextKey(sample?.context as unknown as typeof ctx));
+  });
+
+  it('保有の作業中のタブで held: true、検討中のタブでは held のキーが無い', () => {
+    const held = reduce(plain, { type: 'setTabHeld', held: true });
+    expect(ctxOf(held).position?.held).toBe(true);
+    expect(Object.keys(ctxOf(plain).position ?? {})).toEqual(['legs']);
+    // 保有のタブは前の板の足が無くてもシナリオ 0 の損益を送る（含み損益は送らない）
+    const ps = ctxOf(held).precomputed?.position_summary as Record<string, unknown>;
+    expect(typeof ps.pnl_now_yen).toBe('number');
+    expect('unrealized_yen' in ps).toBe(false);
+  });
+
+  it('前の板で建てた足だけに opened_days（建ててから今の板までの暦日）', () => {
+    const later = reduce(reduce(plain, { type: 'setTabHeld', held: true }), {
+      type: 'loaded',
+      chain: normalizeChain(laterJson(3)),
+      label: 'later',
+    });
+    const withNew = reduce(later, {
+      type: 'addBoardLeg',
+      expiry: '2026-11',
+      k: 62000,
+      optionType: 'put',
+      side: 'buy',
+    });
+    const legs = ctxOf(withNew).position?.legs ?? [];
+    expect(legs.map((l) => l.opened_days)).toEqual([3, undefined]);
+  });
+
+  it('ほかの保有があれば other_held（1 以上のときだけ）', () => {
+    expect(ctxOf(plain, 2).position?.other_held).toBe(2);
+    expect(Object.keys(ctxOf(plain, 0).position ?? {})).toEqual(['legs']);
+    expect(contextKey(ctxOf(plain, 0))).toBe(contextKey(ctxOf(plain)));
   });
 });

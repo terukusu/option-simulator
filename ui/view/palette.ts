@@ -28,7 +28,14 @@ import { type PinMenuInput, pinMenuRows } from './pins';
 import { evalChips, presetChips, type ScenarioRegionInput } from './scenarioRegion';
 import { CHART_MODES, DOCK_LABELS, type PanelId, type ShellAction } from './shell';
 import type { TabsView } from './tabs';
-import { clearBlockedText, NO_CHAIN_TEXT, rebaseBlockedText, rebaseLabel, THEMES } from './topMenu';
+import {
+  clearBlockedText,
+  HOLDINGS_LABEL,
+  NO_CHAIN_TEXT,
+  rebaseBlockedText,
+  rebaseLabel,
+  THEMES,
+} from './topMenu';
 
 export type PaletteGroup =
   | 'panel'
@@ -101,6 +108,8 @@ export type PaletteRun =
   | { kind: 'atm' }
   /** 板の bid / ask と同じ足の追加 */
   | { kind: 'add'; add: MarketAddInput }
+  /** 保有ポジションの一覧（#302） */
+  | { kind: 'holdings' }
   | { kind: 'book' }
   | { kind: 'saveToBook' }
   | { kind: 'clear' }
@@ -340,6 +349,7 @@ export function paletteItems(input: PaletteInput): PaletteItem[] {
   );
   const clearBlocked = clearBlockedText(input.legCount, held);
   out.push(
+    item('work', 'holdings', HOLDINGS_LABEL, { kind: 'holdings' }),
     item(
       'work',
       'book',

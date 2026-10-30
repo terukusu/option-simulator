@@ -72,6 +72,8 @@ export interface AiEvalSource {
   calendar: AiEvalCalendar;
   margin: MarginPrefs;
   profile?: string;
+  /** ほかの保有の数（#302。文脈の position.other_held。1 以上のときだけ） */
+  other_held?: number;
   technicals?: TechnicalsData;
   iv_stats?: IvStatsData;
 }
@@ -96,6 +98,7 @@ export function aiEvalSource(
   margin: MarginPrefs,
   profile: string | undefined,
   now: number,
+  otherHeld = 0,
 ): AiEvalSource | null {
   if (!state.chain) return null;
   const c = state.calendar;
@@ -114,6 +117,7 @@ export function aiEvalSource(
     },
     margin: { ...margin },
     ...(profile !== undefined && { profile }),
+    ...(otherHeld >= 1 && { other_held: otherHeld }),
   };
 }
 
@@ -415,6 +419,8 @@ export function readAiEvalCase(raw: unknown): AiEvalCaseFile | null {
       calendar,
       margin: readMargin(s.margin),
       ...(typeof s.profile === 'string' && { profile: s.profile }),
+      ...(Number.isInteger(s.other_held) &&
+        (s.other_held as number) >= 1 && { other_held: s.other_held as number }),
       ...(technicals && { technicals }),
       ...(ivStats && { iv_stats: ivStats }),
     },
@@ -440,7 +446,9 @@ export function aiEnvFromCase(src: AiEvalSource): AiToolEnv {
   if (doc.kind !== 'ok') throw new Error(`ポジションの文書を読めない（${doc.kind}）`);
   let s = restoreState({ ...initialState, calendar }, doc.saved);
   s = reduce(s, { type: 'loaded', chain, label: 'saved' });
-  const env = aiEnvFromState(s, src.margin, src.profile);
+  // 保有の印（#302）: restoreState は印を戻さない（印の正はタブの slot）ので、記録した文書の印を付け直す
+  if (doc.saved.position?.held === true) s = reduce(s, { type: 'setTabHeld', held: true });
+  const env = aiEnvFromState(s, src.margin, src.profile, src.other_held ?? 0);
   if (!env) throw new Error('板を読めない');
   return {
     ...env,

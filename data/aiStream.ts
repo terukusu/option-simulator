@@ -75,7 +75,13 @@ export interface AiContext {
       side: 'buy' | 'sell';
       qty: number;
       price: number;
+      /** 建ててから今の板までの暦日（#302。前の板で建てた足だけ） */
+      opened_days?: number;
     }[];
+    /** 作業中のタブが保有（#302。保有のときだけ true を送る） */
+    held?: true;
+    /** ほかの保有の数（#302。保有ポジションの一覧の「合計に入れる」行のうち作業中のタブ以外。1 以上のときだけ） */
+    other_held?: number;
   };
   scenario?: {
     days: number;

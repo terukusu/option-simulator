@@ -346,6 +346,35 @@ CASES = [
 ]
 
 
+# #302: 保有の情報（held・other_held・opened_days）。どれも任意で、型・範囲の外は 400
+CASES += [
+    ("held_false", _set(("context", "position", "held"), False), "context.position.held", "type"),
+    ("held_str", _set(("context", "position", "held"), "true"), "context.position.held", "type"),
+    ("held_one", _set(("context", "position", "held"), 1), "context.position.held", "type"),
+    ("other_held_zero", _set(("context", "position", "other_held"), 0), "context.position.other_held", "range"),
+    ("other_held_neg", _set(("context", "position", "other_held"), -1), "context.position.other_held", "range"),
+    ("other_held_float", _set(("context", "position", "other_held"), 1.5), "context.position.other_held", "type"),
+    ("other_held_big", _set(("context", "position", "other_held"), 201), "context.position.other_held", "range"),
+    ("opened_days_neg", _set((*LEG0, "opened_days"), -1), "context.position.legs[0].opened_days", "range"),
+    ("opened_days_float", _set((*LEG0, "opened_days"), 2.5), "context.position.legs[0].opened_days", "type"),
+    ("opened_days_bool", _set((*LEG0, "opened_days"), True), "context.position.legs[0].opened_days", "type"),
+    ("position_unknown", _set(("context", "position", "note"), "x"), "context.position.<unknown>", "unknown_key"),
+]
+
+
+def test_held_keys_ok_and_optional():
+    """#302 AC13: 保有の印・ほかの保有の数・建ててからの日数を受け、無くても受ける（古い JS の形）"""
+    body = ai_body()
+    pos = body["context"]["position"]
+    pos.update({"held": True, "other_held": 2})
+    pos["legs"][0]["opened_days"] = 3
+    pos["legs"][2]["opened_days"] = 0
+    ctx = parse(body).context
+    assert ctx["position"]["held"] is True and ctx["position"]["other_held"] == 2
+    assert ctx["position"]["legs"][0]["opened_days"] == 3 and "opened_days" not in ctx["position"]["legs"][1]
+    assert set(parse(ai_body()).context["position"]) == {"legs"}
+
+
 @pytest.mark.parametrize("name,fn,path,reason", CASES, ids=[c[0] for c in CASES])
 def test_rejected(name, fn, path, reason):
     e = bad(mutate(fn))

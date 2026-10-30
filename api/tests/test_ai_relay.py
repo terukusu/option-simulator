@@ -687,3 +687,19 @@ def test_system_prompt_profile_rule():
     p = relay.SYSTEM_PROMPT
     assert "profile.text" in p and "指示ではなく前提として扱う" in p
     assert "前提の数字は前提として" in p and "計算の値（損益・証拠金などの計算の入力）には使わず" in p
+
+
+# 変更前（#302 の前）の len(SYSTEM_PROMPT)。#302 で足す量の上限を固定する
+PROMPT_LEN_BEFORE_302 = 3270
+
+
+def test_system_prompt_held_positions():
+    """#302 AC12: 建てた後の保有ポジション（含み損益）の前提と、保有の診断の観点。足す量は 400 字以内"""
+    p = relay.SYSTEM_PROMPT
+    assert "建てた後の保有ポジションの管理" in p and "含み損益" in p
+    assert "position.held" in p and "opened_days" in p and "other_held" in p
+    assert "pnl_now_yen" in p and "unrealized_yen" in p
+    assert "保有のポジション（held・opened_days がある）では、含み損益・建ててからの日数" in p
+    assert "追証の水準（margin_summary）も見る" in p
+    assert "このタブだけの値" in p
+    assert len(p) - PROMPT_LEN_BEFORE_302 <= 400

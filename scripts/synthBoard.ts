@@ -496,7 +496,11 @@ export function buildFixtureFiles(): Record<string, string> {
   for (const spec of SPECS) out[`${spec.name}.json`] = serializeChainJson(buildChainJson(spec));
   // ツールの出力の見本（#135。中継の pytest が結果の形に通す）
   const latest = SPECS.find((s) => s.name === 'latest') as ChainSpec;
-  out['ai_tools.json'] = buildAiToolsFixture(JSON.parse(out[`${latest.name}.json`] as string));
+  // 保有の文脈（#302）は後の板（t₀ + 3 日）で作る
+  out['ai_tools.json'] = buildAiToolsFixture(
+    JSON.parse(out[`${latest.name}.json`] as string),
+    buildLaterChainJson(),
+  );
   return out;
 }
 

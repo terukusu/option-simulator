@@ -257,3 +257,36 @@ describe('aiEvalCase（#159）', () => {
     expect(noteLine('あ'.repeat(100), 10)).toBe(`${'あ'.repeat(10)}…`);
   });
 });
+
+describe('保有の会話（#302）', () => {
+  it('保有のタブ・ほかの保有の数を記録し、作り直した文脈が元と同じ（held・other_held を含む）', () => {
+    const held = reduce(state, { type: 'setTabHeld', held: true });
+    const envHeld = aiEnvFromState(held, margin, PROFILE, 2);
+    if (!envHeld) throw new Error('env');
+    const ctx = buildAiContext(envHeld);
+    expect(ctx.position?.held).toBe(true);
+    expect(ctx.position?.other_held).toBe(2);
+    const src = aiEvalSource(held, margin, PROFILE, NOW, 2);
+    if (!src) throw new Error('source');
+    expect(src.other_held).toBe(2);
+    const read = readAiEvalCase(
+      JSON.parse(
+        JSON.stringify(
+          aiEvalCase({
+            chat: { ...chat, context: ctx, lastKey: contextKey(ctx) },
+            answerKey: 'm7b0',
+            source: src,
+            note: '',
+            now: NOW,
+            log,
+          }),
+        ),
+      ),
+    );
+    if (!read) throw new Error('read');
+    expect(read.source.other_held).toBe(2);
+    expect(contextKey(buildAiContext(aiEnvFromCase(read.source)))).toBe(contextKey(ctx));
+    // 保有でない記録には other_held を書かない（変更前と同じ形）
+    expect('other_held' in source()).toBe(false);
+  });
+});

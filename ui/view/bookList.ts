@@ -38,7 +38,7 @@ import type { MetricsUnitSetting, UiLeg } from '../state';
 import { DASH, fmtDateTime, fmtNum, fmtSigned } from './format';
 import { markPrice } from './mark';
 import { AMOUNT_UNIT_LABEL, type AmountUnit, amountUnit, fmtAmount } from './metrics';
-import { pnlDomains } from './pnlChart';
+import { type PnlBase, pnlDomains } from './pnlChart';
 import { positionModel } from './position';
 
 // ---------------------------------------------------------------- 今の板での評価損益
@@ -105,6 +105,42 @@ export function entryMonths(legs: readonly Leg[]): string {
   return ms.length >= 3 ? `${ms[0]} ほか ${ms.length - 1}` : ms.join('・');
 }
 
+/** 評価の設定（手数料・先物の basis。ほかは既定） */
+export function settingsOf(
+  feePerLot: number,
+  futureBasis: ModelSettings['futureBasis'],
+): ModelSettings {
+  return { ...DEFAULT_SETTINGS, feePerLot, futureBasis };
+}
+
+/** 保存した足（id なし）の市場を今の板で作り直し、id を 1..n に振る（退避したタブ・保存一覧の項目の評価） */
+export function refreshedLegs(
+  chain: Chain,
+  legs: ReadonlyArray<Omit<UiLeg, 'id'>>,
+  calendar: Calendar,
+): UiLeg[] {
+  return refreshLegMarkets(
+    chain,
+    legs.map((l, i) => ({ ...l, id: i + 1 })),
+    calendar.holidays,
+  );
+}
+
+/**
+ * 足の列を今の板で評価する（ポジションの表示モデル → 損益グラフの基礎。指標・保存一覧の要約・保有ポジションの一覧
+ * （#302）が共用する作り方。useAppController の positions → pnlBoard と同じ）
+ */
+export function evalLegs(
+  chain: Chain,
+  legs: readonly UiLeg[],
+  atmBasis: AtmBasis,
+  calendar: Calendar,
+  settings: ModelSettings,
+): { pm: ReturnType<typeof positionModel>; base: PnlBase | null } {
+  const pm = positionModel(chain, legs, atmBasis, calendar, settings);
+  return { pm, base: pnlDomains(chain, pm.prepared, pm.ctx, settings) };
+}
+
 export interface EntrySummary {
   months: string;
   legCount: number;
@@ -140,19 +176,15 @@ export function entrySummary(
     mark: null,
   };
   if (!chain) return out;
-  const settings: ModelSettings = {
-    ...DEFAULT_SETTINGS,
-    feePerLot: ui.feePerLot,
-    futureBasis: ui.futureBasis,
-  };
-  const uiLegs: UiLeg[] = refreshLegMarkets(
+  const settings = settingsOf(ui.feePerLot, ui.futureBasis);
+  const { pm, base } = evalLegs(
     chain,
-    position.legs.map((l, i) => ({ ...l, id: i + 1 })),
-    calendar.holidays,
+    refreshedLegs(chain, position.legs, calendar),
+    atmBasis,
+    calendar,
+    settings,
   );
-  const pm = positionModel(chain, uiLegs, atmBasis, calendar, settings);
   out.offBoard = pm.rows.filter((r) => r.error !== null).length;
-  const base = pnlDomains(chain, pm.prepared, pm.ctx, settings);
   out.excluded = legs.length - (base?.legs.length ?? 0);
   if (base) {
     out.maxLoss = base.profile.maxLoss.value;

@@ -56,6 +56,11 @@ export interface AiToolEnv {
   draft?: ProposeDraft | null;
   /** AI に渡す自分の前提（#156。端末の設定の自由記述。文脈に載せるだけで、ツールは使わない） */
   profile?: string;
+  /**
+   * 保有（#302）: active = 作業中のタブが保有、others = ほかの保有の数（holdings.ts の otherHeldCount）。
+   * 文脈の position.held・other_held と position_summary の pnl_now_yen の条件
+   */
+  held?: { active: boolean; others: number };
 }
 
 export type ToolResult = Record<string, unknown>;
@@ -132,6 +137,13 @@ function positionSummary(env: AiToolEnv, base: PnlBase): ToolResult {
   const m = metricsModel({ base, scenario: env.scenario, unit: 'yen' });
   // 今（ポジションのパネルの足のグリークと同じ = 今のシナリオを掛けない）
   const now = evaluatePosition(legs, ZERO_SCENARIO, ctx, settings);
+  // 保有の値（#302）: 前の板で建てた足（今の値段を使った足）があれば含み損益（指標の内訳と同じ。手数料の前）、
+  // 保有のタブか前の板の足があればシナリオ 0 の損益（手数料込み）。どちらも無ければ送らない（文脈は変更前と同じ）
+  const marked = m.premium.markedLegs > 0;
+  const heldExtra = {
+    ...(marked || env.held?.active === true ? { pnl_now_yen: yen(now.pnl) } : {}),
+    ...(marked ? { unrealized_yen: yen(m.premium.unrealized) } : {}),
+  };
   const e = m.expiry;
   const profitInf = e.maxProfit.value === Number.POSITIVE_INFINITY;
   const lossInf = e.maxLoss.value === Number.NEGATIVE_INFINITY;
@@ -185,6 +197,7 @@ function positionSummary(env: AiToolEnv, base: PnlBase): ToolResult {
       pnl_yen: yen(m.scenarioPoint.pnl),
       greeks: greeksOf(m.scenarioPoint.total),
     },
+    ...heldExtra,
   };
 }
 

@@ -1462,6 +1462,11 @@ async function measureAll() {
     // トップバー（#87 (A)）: 最も混む作業（タブ 6 個・保存した板 + 読み込みの失敗・別のタブ）と開いた状態
     await topSweep();
     console.log(`トップバーの検査: ${topStats.pass} / ${topStats.total} 状態で pass`);
+    // 保有ポジションの一覧（#302 AC17）
+    await holdingsSweep();
+    console.log(
+      `保有ポジションの一覧の検査（#302）: ${holdingsStats.pass} / ${holdingsStats.total} 状態で pass`,
+    );
     console.log(`見出し h1 の検査（#124）: ${h1Stats.pass} / ${h1Stats.total} 状態で pass`);
     console.log(
       `舞台の凡例の省略の検査（#276）: ${legendStats.pass} / ${legendStats.total} 状態で pass`,
@@ -6788,6 +6793,95 @@ async function topSweep() {
           '.boxtabs-wrap .menu-wrap > [role="menu"]',
         );
         await page.keyboard.press('Escape');
+      }
+      await ctx.close();
+    }
+  }
+}
+
+// ---- 保有ポジションの一覧（#302 AC17）: 4 幅 × ダーク / ライトで、保有 3 行（うち 1 行は重なりで合計に入れない）+ 合計の
+// 行を開いた状態。追証までの距離が「計算中…」でなくなるまで待ってから、ページの縦・横スクロール 0・ダイアログが窓の中で横に
+// はみ出さない・行の値（.bk-sum の span）が折り返さず切れない・名前は省略記号 + title・合計の行がある
+const holdingsStats = { pass: 0, total: 0 };
+/** 保有のタブ 3 つ（12 字の名前。架空の値）: put 売り / call 売り / 両方（put の足が 1 本目と重なる = 合計に入れない） */
+const HOLDING_NAMES = [...'一二三'].map((c) => `長い保有の名前ですね${c}号`);
+const holdingsWorkspace = (() => {
+  const legs = fixture.tabs[0].position.legs;
+  const pos = (ls) => ({ ...fixture.tabs[0].position, legs: ls, held: true });
+  return JSON.stringify({
+    ...fixture,
+    active: 1,
+    tabs: [
+      { name: HOLDING_NAMES[0], position: pos([legs[0]]) },
+      { name: HOLDING_NAMES[1], position: pos([legs[1]]) },
+      { name: HOLDING_NAMES[2], position: pos(legs) },
+    ],
+  });
+})();
+const HOLDINGS = 'dialog.sheet.holdings[open]';
+
+async function holdingsSweep() {
+  for (const [w, h] of SIZES) {
+    for (const theme of ['dark', 'light']) {
+      const ctx = await newContext(
+        { width: w, height: h },
+        {
+          [WORKSPACE_KEY]: holdingsWorkspace,
+          [PREFS_KEY]: prefsText(theme, { capital_yen: 3_000_000 }),
+        },
+      );
+      const page = await ctx.newPage();
+      await page.goto(pageUrl('next'));
+      await waitReady(page, 'next');
+      const label = `next ${theme} 保有ポジション（#302）`;
+      await page.click('button[aria-label="メニュー"]');
+      await page.click('header.top > .menu-wrap [role^="menuitem"]:has-text("保有ポジション…")');
+      await page.waitForSelector(HOLDINGS, { timeout: 3000 }).catch(() => {});
+      await page
+        .waitForFunction(
+          (sel) => {
+            const t = document.querySelector(`${sel} .hl-total`)?.textContent ?? '';
+            return t !== '' && !t.includes('計算中');
+          },
+          HOLDINGS,
+          { timeout: 10000 },
+        )
+        .catch(() => {});
+      const ok = await report(page, label, w, h, `holdings-${w}x${h}-${theme}`);
+      const out = await inWindow(page, HOLDINGS);
+      const view = await page.evaluate((sel) => {
+        const rows = [...document.querySelectorAll(`${sel} .bk-row`)];
+        return {
+          rows: rows.length,
+          total: document.querySelector(`${sel} .hl-total`)?.textContent ?? '',
+          names: rows.map((r) => {
+            const n = r.querySelector('.bk-name');
+            return { title: n?.getAttribute('title') ?? null, text: n?.textContent ?? '' };
+          }),
+          warnTags: [...document.querySelectorAll(`${sel} .tag.warn`)].map((t) => t.textContent),
+        };
+      }, HOLDINGS);
+      const sum = await scopeWraps(page, `${HOLDINGS} .bk-sum`);
+      const head = await scopeWraps(page, `${HOLDINGS} .bk-head .bk-name`);
+      const good =
+        ok &&
+        out === '' &&
+        view.rows === 4 &&
+        view.total.includes('保有全部') &&
+        view.total.includes('追証までの距離') &&
+        !view.total.includes('計算中') &&
+        view.names.slice(0, 3).every((n, i) => n.title === HOLDING_NAMES[i]) &&
+        view.warnTags.some((t) => t.includes('合計に入れない')) &&
+        sum.wraps.length === 0 &&
+        sum.cut.length === 0 &&
+        head.cut.length === 0;
+      holdingsStats.total++;
+      if (good) holdingsStats.pass++;
+      else {
+        failed = true;
+        console.log(
+          `${label} ${w}x${h}: ${out} 行 ${view.rows}・合計「${view.total}」・名前 ${JSON.stringify(view.names)}・警告 ${view.warnTags.join(' / ')}・値の折り返し / 切れ ${[...sum.wraps, ...sum.cut, ...head.cut].join(' / ')}  ← NG`,
+        );
       }
       await ctx.close();
     }
