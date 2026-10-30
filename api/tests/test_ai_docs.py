@@ -278,3 +278,12 @@ def test_eval_doc_questions_expect_sections_exist(idx):
     assert len(expects) >= 10
     missing = [f"{f}:{s}" for f, s in expects if idx.get(f, s) is None]
     assert missing == []
+
+
+# ---- #308: 急落時の IV の実測（設計書 5.12）は 1 回の読みに収まる ----
+
+def test_design_5_12_single_read(idx):
+    sec = idx.get("design", "5.12")
+    assert sec is not None
+    assert len(sec.parts()) == 1
+    assert "sticky strike" in sec.text and "二重" in sec.text

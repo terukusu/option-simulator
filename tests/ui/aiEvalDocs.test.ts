@@ -1,12 +1,12 @@
-// AI の評価の文書の質問（#240、EPIC #141 の終了条件 7）: 計算の前提 10 問・各問に想定の節と答えの要点。
+// AI の評価の文書の質問（#240、EPIC #141 の終了条件 7）: 計算の前提 11 問（#308 で β の実測の 1 問）・各問に想定の節と答えの要点。
 // 想定の節が read_doc の索引にあることは api/tests/test_ai_docs.py が確かめる
 import { describe, expect, it } from 'vitest';
 import { DOC_QUESTIONS } from '../../scripts/aiEvalDocs';
 
 describe('DOC_QUESTIONS', () => {
-  it('計算の前提 10・操作の案内 3・文書に無いこと 1', () => {
+  it('計算の前提 11・操作の案内 3・文書に無いこと 1', () => {
     const n = (k: string) => DOC_QUESTIONS.filter((q) => q.kind === k).length;
-    expect(n('premise')).toBe(10);
+    expect(n('premise')).toBe(11);
     expect(n('howto')).toBe(3);
     expect(n('absent')).toBe(1);
   });

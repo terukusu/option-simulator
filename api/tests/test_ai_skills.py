@@ -87,6 +87,21 @@ def test_volatility_does_not_compute_rates():
     assert "iv_change_median_pct" in text
     assert "結果に無い率" in text and "自分で計算しない" in text
 
+def test_volatility_beta_not_compared_directly():
+    # #308: iv_stats の β の実測（ATM の IV の反応）とシナリオの β（sticky strike の上に足す量）を並べて比べさせない。
+    # 大きさは設計書の節を読ませ、その節が索引にある（番号が変わって黙って外れない）
+    from simulator_api.ai import docs
+
+    text = skills.skill_path("volatility").read_text(encoding="utf-8")
+    assert "並べて、言葉で比べる" not in text
+    assert "sticky strike" in text and "直接比べない" in text
+    nums = re.findall(r"設計書の? ?(5\.[0-9]+)", text)
+    assert nums
+    idx = docs.index()
+    assert idx is not None
+    assert [n for n in nums if idx.get("design", n) is None] == []
+
+
 def test_total_size_under_limit():
     total = sum(skills.skill_path(n).stat().st_size for n in skills.NAMES)
     assert total == skills.total_bytes() <= st.AI_SKILL_MAX_BYTES

@@ -39,6 +39,6 @@ describe('問の id', () => {
       const obj = p.slice(0, p.indexOf('});'));
       expect(obj).toMatch(/\bid: `[a-z_]+:/);
     }
-    expect(DOC_QUESTIONS.length).toBe(14);
+    expect(DOC_QUESTIONS.length).toBe(15);
   });
 });
