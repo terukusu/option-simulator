@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 from support import ai_body
 
-from simulator_api.ai import allowlist
+from simulator_api.ai import allowlist, tools
 from simulator_api.ai.shape import Bad, Obj
 from simulator_api.ai.tools import REGISTRY, definitions
 
@@ -235,6 +235,38 @@ def test_propose_samples_pass_shapes():
         prop.result_shape.check(e["result"], "result")
     for e in [*PROPOSE["scan_errors"], *PROPOSE["candidate_errors"], *PROPOSE["proposal_errors"]]:
         allowlist.TOOL_ERROR.check(e["result"], "result")
+
+
+def test_structures_14_in_screen_order():
+    """#20 第 2 弾: 型は 14 個（ui/view/aiPropose.ts の STRUCTURES と同じ並び。tests/ui/aiPropose.test.ts が
+    突き合わせる）。既存の 8 つの並びは変えず、戦略テンプレートの残りの 6 形を後ろに足した。候補の入力と提案の
+    candidate で同じ enum"""
+    assert tools.STRUCTURES == (
+        "short_put", "short_call", "short_strangle", "short_straddle", "iron_condor", "bull_put", "bear_call",
+        "put_ratio", "long_strangle", "long_straddle", "bull_call", "bear_put", "call_butterfly", "calendar")
+    cand, prop = REGISTRY["structure_candidates"], REGISTRY["propose_position"]
+    assert cand.input_shape.fields["structure"].values == tools.STRUCTURES
+    assert prop.input_shape.fields["candidate"].fields["structure"].values == tools.STRUCTURES
+    schema = cand.definition()["input_schema"]["properties"]["structure"]
+    assert schema["enum"] == list(tools.STRUCTURES)
+    for s in tools.STRUCTURES:
+        assert s in schema["description"]
+
+
+def test_candidate_qty_max_halves_for_mul_2():
+    """#20 レビュー N4: 型の 1 組の枚数は QTY_MAX / 2 まで（倍率 2 の足 = put レシオの売り・バタフライの中心が足の
+    上限を越えない）。structure_candidates と propose_position の candidate で同じ（形式と JSON Schema）"""
+    half = tools.QTY_MAX // 2
+    cand, prop = REGISTRY["structure_candidates"], REGISTRY["propose_position"]
+    cand.input_shape.check({"structure": "call_butterfly", "qty": half}, "input")
+    assert _bad("structure_candidates", {"structure": "call_butterfly", "qty": half + 1}) == "range"
+    ok = {"target": "new_tab", "candidate": {"structure": "put_ratio", "qty": half}}
+    prop.input_shape.check(ok, "input")
+    assert _bad("propose_position", {"target": "new_tab", "candidate": {"structure": "put_ratio",
+                                                                         "qty": half + 1}}) == "range"
+    assert cand.definition()["input_schema"]["properties"]["qty"]["maximum"] == half
+    cand_schema = prop.definition()["input_schema"]["properties"]["candidate"]["properties"]
+    assert cand_schema["qty"]["maximum"] == half
 
 
 def test_propose_round_trip_request():

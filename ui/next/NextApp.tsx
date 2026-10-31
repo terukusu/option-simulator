@@ -23,6 +23,7 @@ import { type Action, activeHeld, legAtStrike, MAX_TABS, restoreTabAction } from
 import { aiCheckRun, CHECK_NO_LEGS_TEXT } from '../view/aiChecks';
 import { aiEnvFromState } from '../view/aiContext';
 import { aiEvalSource } from '../view/aiEvalCase';
+import type { AiPreset } from '../view/aiPresets';
 import {
   NEW_TAB_UNDO_TEXT,
   newTabFullText,
@@ -536,6 +537,18 @@ export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
     // 押したボタン（閉じた吹き出しの中）からフォーカスを AI のパネルへ（キー 6 と同じ行き先。キーボードで続けて読める）
     focusPanelLater('ai');
   });
+  // 形の一覧の [この形で AI に相談]（#20 第 2 弾）: [AI に聞く] と同じく AI のパネルを見せて定型（kind preset・ID shape）を送る
+  const onShapeAi = useCallback(
+    (pr: AiPreset) => {
+      send({ type: 'open', panel: 'ai', tier });
+      aiApi.current?.preset(pr);
+      focusPanelLater('ai');
+    },
+    [tier],
+  );
+  // 押せない理由は AI のパネルが変わるたびに上げてもらう（ダイアログを開いたままでも追従する。#20 レビュー N2）。
+  // undefined = AI のパネルがまだ描かれていない
+  const [shapeAiReason, setShapeAiReason] = useState<string | null | undefined>(undefined);
   const onCloseTab = useCallback(
     (id: number) => {
       const action = restoreTabAction(stateRef.current, id);
@@ -1088,6 +1101,7 @@ export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
             onCheck={onAiCheck}
             held={c.tabsView.active.held}
             apiRef={aiApi}
+            onPresetReason={setShapeAiReason}
           />
         }
       />
@@ -1113,6 +1127,8 @@ export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
         getState={getState}
         push={push}
         onPick={onPickLeg}
+        aiReason={shapeAiReason}
+        onAiAsk={onShapeAi}
       />
       <SettingsDialog
         open={settingsOpen}

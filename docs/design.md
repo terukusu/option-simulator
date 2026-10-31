@@ -1177,7 +1177,8 @@ F の推定・補間・ATM の判定はブラウザ（`model/`）。`sq_date`・
   - 範囲と既定: 距離の種類の既定 [σ]。σ 0.25〜3.0（0.25 刻み・既定 1.0）、|Δ| 0.05〜0.50（0.05 刻み・既定 0.15 = AI の既定）、円 250〜20,000（250 刻み・既定 3,000）、ATM から −10〜+10 本（既定 0）、翼 1〜10%（0.5 刻み・既定 3 = AI の wing_pct）、枚数 1〜50,000（レシオの売り・バタフライの中心は 2 倍）。限月の既定 = 作業中のタブの最初の OP の足の限月、無ければ残存 2 日以上の最初の限月（AI の提案の既定の限月と同じ）。F・スマイルの無い限月は選べない。ダイアログの入力は保存しない（形を替えても限月・距離・翼・枚数は引き継ぐ）
   - 建値は reducer と同じ `boardOptionLeg`（売り = bid・買い = ask。両気配の行だけを選ぶ）。カードの値（受取 − 支払 / 掛け金・満期の最大損失・満期 BEP・必要証拠金（概算））は指標のタイルと同じ関数（`metricsModel` → `metricTiles`。シナリオは今 = d・ΔX・Δσ・Δs = 0、証拠金は `marginNow`）で、その形の足だけを評価した値
   - 適用は既存の action だけ: [このタブに足す] = `replaceLegs { legs: 前 + 形, expect: 前 }`、[元に戻す] = 逆向きの `replaceLegs`（保有のタブにも足せる = 板から足すのと同じ）。[新しいタブに入れる] = `openPositionInNewTab` と `newTabUndoActions`（AI の提案と同じ。タブ 6 個なら押せない）。置き換え・シナリオ ATM の切替・自分の形の保存は入れない
-  - AI の提案の `structure_candidates` の 6 形（put / call の単体の売り以外）は同じ `shapeLegs` に |Δ| の距離と ATM の K を渡して組む（候補・結果は #139 のまま = `tests/ui/aiPropose.test.ts`・`fixtures/synthetic/ai_tools.json` が守る）
+  - AI の提案の `structure_candidates` の 6 形（put / call の単体の売り以外）は同じ `shapeLegs` に |Δ| の距離と ATM の K を渡して組む（候補・結果は #139 のまま = `tests/ui/aiPropose.test.ts`・`fixtures/synthetic/ai_tools.json` が守る）。第 2 弾（2026-11-01）で型に残りの 6 形（`long_strangle`・`long_straddle`・`bull_call`・`bear_put`・`call_butterfly`・`calendar`）を **後ろに足し** 14 にした（画面の `STRUCTURES` と中継の `tools.py` の enum が同じ並び）。組み立ては同じ `shapeLegs`。ATM の型（`short_straddle` と 5 つ）は ATM から 0 本の 1 候補（`target_abs_delta` は null。`abs_delta` は無視）、カレンダーの買いの足は次の限月（候補・`candidate` の足ごとの `expiry`。次の限月が無ければ `not_on_board`）。既存の 8 形の候補・結果は変えない
+  - 形のカードの **[この形で AI に相談]**（第 2 弾）: ダイアログを閉じ、AI のパネルを開いて定型の質問（14 章「定型の質問のチップ」。kind `preset`・ID `shape`。チップには出さない）を送る。文は `［定型］形の相談` / `<名前>（<型の ID>）・限月 <YYYY-MM>` / 頼みごと（候補を比べて提案のカードで）の 3 行で、距離・行使価格・枚数・金額の数字を入れない（候補は simulator が作る。#120 柱 5。名前は数字の無い短い名前 = put レシオは「put レシオ」）。限月の ID は数字の照合（`aiNumbers`）で日付として数えない = 出所にもならない。押せない理由は AI のパネルの自由な質問と同じ（`sendBlocked`。AI が無効・上限・送信中など）と、その限月で組めない（板・F が無い・カレンダーの次の限月が無い）。今の距離で組めないだけなら押せる（AI は距離を選び直せる）。口は `AiPanelApi.preset` / `presetReason`（[AI に聞く] の `aiAsk.ts` のストアは使わない）
 - シナリオ ATM（**決定（2026-10-14、#26）**）
   - 求め方は `ui/view/scenarioAtm.ts`（`scenarioAtmReference` / `scenarioAtm` / 印用の `scenarioAtmMark`。DOM を持たない純関数。`ChainMonth` が `data/` の型なので `model/` ではなく `ui/view/` に置く）。#20 のテンプレートは市場 ATM だけで、シナリオ ATM の切替は入れなかった（2026-11-01）
   - 範囲外の判定は `X₀,i'` < 最小 K または > 最大 K（端の刻みの半分の余裕は持たない。端ちょうどは端の行）。基準価格・X₀ が非有限か 0 以下、ΔX が非有限、行が無い限月も無し（例外・NaN を出さない）
@@ -1423,7 +1424,8 @@ F の推定・補間・ATM の判定はブラウザ（`model/`）。`sq_date`・
   - 聞かれた箇所の記録（#120 のコメントの案）: 場所の ID だけを中継のログ `ai_request` の `topic` に出す（質問の文・値は出さない = 9 章の方針のまま）。保存期間は Cloud Logging の既定（今の `ai_request` と同じ）。ブラウザに新しい保存を作らない。集計は `api/README.md`
   - 評価: `npm run ai:eval -- --ask-only`（5 問: タイル 2・読み取り 1・テール表 1・IV 推移 1）
 - 定型の質問のチップ（#140。#120 の会話の候補）: AI のパネルの [このポジションを診断] の下に、決まった質問を送るだけのチップを 6 つ並べる: [崩れ方]・[反論]・[板の前提]・[ヘッジ案]・[出口]・[IV の位置]
-  - 押すと決まった文（利用者の発言。`ui/view/aiPresets.ts` の純関数の表）を 1 回で送る。文は「［定型］<名前>」の行と質問の 1〜2 行で、数字を含めない（照合の出所にしない）。要求は `kind: "preset"` と定型の ID（`topic`: `crash`・`rebut`・`board`・`hedge`・`exit`・`iv`。中継の許可リスト `PRESET_TOPICS` と同じ並び = vitest が突き合わせる）。中継のログ `ai_request` には kind と ID だけを出す（[AI に聞く] の `topic` と同じ扱い。文は出さない）
+  - 押すと決まった文（利用者の発言。`ui/view/aiPresets.ts` の純関数の表）を 1 回で送る。文は「［定型］<名前>」の行と質問の 1〜2 行で、数字を含めない（照合の出所にしない）。要求は `kind: "preset"` と定型の ID（`topic`: `crash`・`rebut`・`board`・`hedge`・`exit`・`iv`・`shape`。中継の許可リスト `PRESET_TOPICS` と同じ並び = vitest が突き合わせる）。中継のログ `ai_request` には kind と ID だけを出す（[AI に聞く] の `topic` と同じ扱い。文は出さない）
+  - 形の相談（ID `shape`。#20 第 2 弾。13.4「戦略テンプレート」）はチップに出さない（チップは 6 つのまま。AI のパネルに形の入口を置かない = 入口は形のカードの [この形で AI に相談] だけ）。文は形の名前・型の ID・限月の ID だけ（限月は日付として照合に数えない）。スキル `simulator:presets` の「## 形の相談」: `simulator:proposals` も読み、`structure_candidates`（structure・expiry は 2 行目から写す）→ 比べて `propose_position`（target = new_tab・candidate か候補の legs）で 3 案まで、距離の数字を自分で作らない。system prompt の案内は「ヘッジ案・形の相談なら `simulator:proposals` も」
   - 答えは既存のツールと文書・スキルで出す（新しいツール・context のキーは足さない）。手順はスキル `simulator:presets`（定型ごとの節: 使うツールと書き方）に置き、system prompt には「［定型］で始まる発言はこのスキルを読む（ヘッジ案は `simulator:proposals`、板の前提・IV は `simulator:volatility` も）」の案内だけを足す。[反論] は建て方の弱点を 3 つ（見出しつき）、[IV の位置] と [板の前提] は材料を並べるだけで IV の上げ下げ・売り時を断定しない。[板の前提] の「織り込む値動き」は限月ごとの ATM の IV（年率）と残存日数で示し、期間あたりの値幅は書かない（ツールに無い数字 = AI に計算させない）
   - 事前計算は [このポジションを診断] と同じ 5 本（足が無いと smile_position だけ）。定型ごとの事前計算の組は作らない（`docs/ai-advisor.md` 論点 5 の「定型ごとに決める」は、足りない数字をスキルの手順でツールを呼んで補う方式にした）
   - 数字の規則の追加（system prompt。全部の発言に効く）: 金額は円か千円のまま書き、万円・億円に直さない（見出しの中も）。値の符号を自分で裏返さない（V から「IV が 1pt 下がると +…」を作らない。要ればツールで評価する）。照合（`ui/view/aiNumbers.ts`）は「9 割戻し」「9 割は戻っていません」「9 割まではまだ戻っていない」「9 割を戻す」の 9（iv_stats の指標の名前。符号の無い 9 ちょうど = 箇条書きの「- 」の後を含む、で直後が「割（は / が / を / まで / までは）（まだ）戻」のときだけ。「を」は #266）、「日経225」の 225（固有名）、見出しの番号「反論 1」「案 2」を数えない。月 / 日の日付（9/28）は前から数えない。照合の出所に、その会話の利用者の発言の文の数（「最大損失を −1,000 千円に抑える」など。表示の値と同じ読み方）と AI がツールに渡した入力の値（`propose_position` の `max_loss_floor_yen` など。キーの名前で単位）を足す（ほかの会話の値は足さない。`numberSources`。`ai:eval` も同じ）。差・率を自分で出さない規則に例を足し、水準までの距離は `evaluate_scenario` に x を渡して結果の `dx_pct` を書かせる（ツールに無い差・率は照合で許さない）
@@ -1492,6 +1494,11 @@ optionchan-gcp の bootstrap / prod を写すだけでは足りないもの。
 | テスト | `terraform test`（`infra/bootstrap/tests/`・`infra/prod/tests/`、モックのプロバイダ。資格情報なしで CI の `check` job で回る）: bootstrap は公開の拒否、WIF の条件、apply SA の subject、データセットの付与の型と role。prod は IAP 有効・`ingress`・IAM の検査が有効、`run.invoker` が IAP のサービスエージェント 1 件だけ、イメージが digest か `src-<20hex>` のタグ参照だけ、8.3 の値（AC11） |
 
 ## 変更履歴
+
+### 2026-11-01 この形で AI に相談（#20 第 2 弾）
+
+- 13.4「戦略テンプレート」: 形のカードの [この形で AI に相談]（定型 `shape` を送る。押せない理由）と、AI の提案の型に残りの 6 形を後ろに足して 14 に（ATM の型は 1 候補・カレンダーの買いは次の限月。既存の 8 形の候補・結果は変えない = `ai_tools.json` の差分は追加だけ）
+- 14 章「定型の質問のチップ」: 定型の ID に `shape`（チップには出さない）・スキル `simulator:presets` の「## 形の相談」・system prompt の案内。中継の許可リスト・ツールの enum と説明（翼の距離は基準の足の K に対する %）・スキルを変えた（ツールの本数・context のキーは変えない）
 
 ### 2026-11-01 戦略テンプレート（#20 第 1 弾）
 

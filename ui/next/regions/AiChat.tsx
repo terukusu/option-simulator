@@ -39,7 +39,7 @@ import {
   usedTools,
 } from '../../view/aiEvalCase';
 import type { IvStatsData } from '../../view/aiIvStats';
-import { AI_PRESETS, presetBlocked } from '../../view/aiPresets';
+import { AI_PRESETS, type AiPreset, presetBlocked } from '../../view/aiPresets';
 import { proposalCard } from '../../view/aiPropose';
 import type { TechnicalsData } from '../../view/aiTechnicals';
 import { answerModel, type MarkedBlock, type MarkedInline } from '../../view/aiText';
@@ -94,6 +94,13 @@ export interface AiPanelApi {
   ask: (a: AiAsk) => void;
   /** パレットの [このポジションを診断] が押せない理由（状態をまだ読んでいなければ押せる扱い = 開いてから読む） */
   paletteReason: string | null;
+  /**
+   * 定型の質問を送る（#20 第 2 弾の形の相談。kind preset）: 送れるなら送る、状態を読んでいなければ読めてから判定する。
+   * 送れない理由があれば送らない（理由は足元の行に出る。ボタンは presetReason で押せない）
+   */
+  preset: (p: AiPreset) => void;
+  /** 足の要らない定型（形の相談）が押せない理由（自由な質問と同じ。状態をまだ読んでいなければ押せる扱い） */
+  presetReason: string | null;
 }
 
 /** 入力欄に入れた [AI に聞く] の質問（#136。n が変わったら入れる。入れた文のまま送れば ask + topic） */
@@ -140,23 +147,36 @@ function AiPanelView(p: {
   /** 作業中のタブが保有（#301。今のタブ向けの提案のボタンを「新しいタブに入れる」に） */
   held?: boolean;
   apiRef: { current: AiPanelApi | null };
+  /**
+   * 足の要らない定型（形の相談）が押せない理由が変わったら知らせる（#20 レビュー N2。形の一覧を開いたまま送信中 →
+   * 終わりなどで、カードのボタンの押せる / 押せないを追従させる。値が変わったときだけ呼ぶ）
+   */
+  onPresetReason?: (reason: string | null) => void;
 }) {
   const chat = useAiChat(p.visible, p.base, p.env, p.tech, p.ivStats, p.evalSource);
   const gate = { hasChain: p.hasChain, legCount: p.legCount };
   const [draft, setDraft] = useState<AiDraft | null>(null);
   const known = { ...gate, status: chat.status ?? UNKNOWN_STATUS };
   // AI の状態を読み終わるまで待っている [AI に聞く]（#136 レビュー指摘 1。読めたら判定し直す）
-  const pending = useRef<AiAsk | null>(null);
+  // 形の相談（#20 第 2 弾）も同じく待つ（送れない理由が出たら送らない = 入力欄に入れない。kind preset の文を自由な
+  // 質問として送り直させない）
+  const pending = useRef<{ ask: AiAsk } | { preset: AiPreset } | null>(null);
   const decide = (a: AiAsk, plan: ReturnType<typeof askPlan>) => {
     if (plan === 'send') chat.ask(a.text, a.topic);
-    else if (plan === 'wait') pending.current = a;
+    else if (plan === 'wait') pending.current = { ask: a };
     else setDraft((d) => ({ text: a.text, topic: a.topic, n: (d?.n ?? 0) + 1 }));
   };
+  const decidePreset = (pr: AiPreset, plan: ReturnType<typeof askPlan>) => {
+    if (plan === 'send') chat.preset(pr);
+    else if (plan === 'wait') pending.current = { preset: pr };
+  };
   useEffect(() => {
-    const a = pending.current;
-    if (!a || chat.status === null) return;
+    const w = pending.current;
+    if (!w || chat.status === null) return;
     pending.current = null;
-    decide(a, askPlan(chat.state, { ...gate, status: chat.status }));
+    const plan = askPlan(chat.state, { ...gate, status: chat.status });
+    if ('ask' in w) decide(w.ask, plan);
+    else decidePreset(w.preset, plan);
   }, [chat.status]);
   // 評価に残す（#159）: 押した返答までの会話を JSON ファイルに保存する（ダウンロードだけ。サーバーに送らない）。
   // 会話で technicals / iv_stats を呼んでいたら、その材料（読み込みの 10 分の覚え）も入れる
@@ -203,10 +223,16 @@ function AiPanelView(p: {
       setKeepNote(keepFailText('ファイルを作れませんでした'));
     }
   };
+  const presetReason = sendBlocked(chat.state, known);
+  useEffect(() => {
+    p.onPresetReason?.(presetReason);
+  }, [presetReason]);
   p.apiRef.current = {
     diagnose: chat.diagnose,
     ask: (a) => decide(a, askPlan(chat.state, { ...gate, status: chat.status })),
     paletteReason: diagnoseBlocked(chat.state, known),
+    preset: (pr) => decidePreset(pr, askPlan(chat.state, { ...gate, status: chat.status })),
+    presetReason,
   };
   return (
     <AiChat

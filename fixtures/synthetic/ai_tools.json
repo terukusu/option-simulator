@@ -8710,6 +8710,810 @@
       }
      ]
     }
+   },
+   {
+    "input": {
+     "structure": "long_strangle"
+    },
+    "result": {
+     "structure": "long_strangle",
+     "expiry": "2026-11",
+     "forward": 67812,
+     "qty": 1,
+     "wing_pct": 3,
+     "capital_yen": 8000000,
+     "candidates": [
+      {
+       "id": "c1",
+       "target_abs_delta": 0.1,
+       "legs": [
+        {
+         "product": "op",
+         "type": "P",
+         "expiry": "2026-11",
+         "k": 60000,
+         "side": "buy",
+         "qty": 1,
+         "entry_yen": 350
+        },
+        {
+         "product": "op",
+         "type": "C",
+         "expiry": "2026-11",
+         "k": 74250,
+         "side": "buy",
+         "qty": 1,
+         "entry_yen": 222
+        }
+       ],
+       "breakevens_x": [
+        59428,
+        74822
+       ],
+       "shocks": [
+        {
+         "shock_pct": -20,
+         "x": 54250,
+         "sq_pnl_yen": 5178459
+        },
+        {
+         "shock_pct": -10,
+         "x": 61031,
+         "sq_pnl_yen": -572000
+        },
+        {
+         "shock_pct": 10,
+         "x": 74593,
+         "sq_pnl_yen": -228882
+        },
+        {
+         "shock_pct": 20,
+         "x": 81374,
+         "sq_pnl_yen": 6552311
+        }
+       ],
+       "summary": {
+        "n_legs": 2,
+        "premium_net_yen": -572000,
+        "max_profit_yen": null,
+        "max_profit_unbounded": true,
+        "max_loss_yen": -572000,
+        "max_loss_x": 60000,
+        "max_loss_unbounded": false,
+        "margin_yen": 0,
+        "room_yen": 7428000,
+        "multiple": 13,
+        "delta_large": 0,
+        "delta_mini": -0.01,
+        "theta_yen_per_day": -33859,
+        "vega_yen_per_pt": 70007,
+        "put_width_x": null,
+        "call_width_x": null,
+        "short_gap_x": null,
+        "call_levels_x": []
+       }
+      },
+      {
+       "id": "c2",
+       "target_abs_delta": 0.15,
+       "legs": [
+        {
+         "product": "op",
+         "type": "P",
+         "expiry": "2026-11",
+         "k": 61875,
+         "side": "buy",
+         "qty": 1,
+         "entry_yen": 515
+        },
+        {
+         "product": "op",
+         "type": "C",
+         "expiry": "2026-11",
+         "k": 73000,
+         "side": "buy",
+         "qty": 1,
+         "entry_yen": 360
+        }
+       ],
+       "breakevens_x": [
+        61000,
+        73875
+       ],
+       "shocks": [
+        {
+         "shock_pct": -20,
+         "x": 54250,
+         "sq_pnl_yen": 6750459
+        },
+        {
+         "shock_pct": -10,
+         "x": 61031,
+         "sq_pnl_yen": -30733
+        },
+        {
+         "shock_pct": 10,
+         "x": 74593,
+         "sq_pnl_yen": 718118
+        },
+        {
+         "shock_pct": 20,
+         "x": 81374,
+         "sq_pnl_yen": 7499311
+        }
+       ],
+       "summary": {
+        "n_legs": 2,
+        "premium_net_yen": -875000,
+        "max_profit_yen": null,
+        "max_profit_unbounded": true,
+        "max_loss_yen": -875000,
+        "max_loss_x": 61875,
+        "max_loss_unbounded": false,
+        "margin_yen": 0,
+        "room_yen": 7125000,
+        "multiple": 9,
+        "delta_large": 0,
+        "delta_mini": 0.01,
+        "theta_yen_per_day": -42338,
+        "vega_yen_per_pt": 91939,
+        "put_width_x": null,
+        "call_width_x": null,
+        "short_gap_x": null,
+        "call_levels_x": []
+       }
+      },
+      {
+       "id": "c3",
+       "target_abs_delta": 0.2,
+       "legs": [
+        {
+         "product": "op",
+         "type": "P",
+         "expiry": "2026-11",
+         "k": 63250,
+         "side": "buy",
+         "qty": 1,
+         "entry_yen": 685
+        },
+        {
+         "product": "op",
+         "type": "C",
+         "expiry": "2026-11",
+         "k": 72000,
+         "side": "buy",
+         "qty": 1,
+         "entry_yen": 510
+        }
+       ],
+       "breakevens_x": [
+        62055,
+        73195
+       ],
+       "shocks": [
+        {
+         "shock_pct": -20,
+         "x": 54250,
+         "sq_pnl_yen": 7805459
+        },
+        {
+         "shock_pct": -10,
+         "x": 61031,
+         "sq_pnl_yen": 1024267
+        },
+        {
+         "shock_pct": 10,
+         "x": 74593,
+         "sq_pnl_yen": 1398118
+        },
+        {
+         "shock_pct": 20,
+         "x": 81374,
+         "sq_pnl_yen": 8179311
+        }
+       ],
+       "summary": {
+        "n_legs": 2,
+        "premium_net_yen": -1195000,
+        "max_profit_yen": null,
+        "max_profit_unbounded": true,
+        "max_loss_yen": -1195000,
+        "max_loss_x": 63250,
+        "max_loss_unbounded": false,
+        "margin_yen": 0,
+        "room_yen": 6805000,
+        "multiple": 6,
+        "delta_large": 0,
+        "delta_mini": 0.02,
+        "theta_yen_per_day": -48600,
+        "vega_yen_per_pt": 109868,
+        "put_width_x": null,
+        "call_width_x": null,
+        "short_gap_x": null,
+        "call_levels_x": []
+       }
+      },
+      {
+       "id": "c4",
+       "target_abs_delta": 0.25,
+       "legs": [
+        {
+         "product": "op",
+         "type": "P",
+         "expiry": "2026-11",
+         "k": 64375,
+         "side": "buy",
+         "qty": 1,
+         "entry_yen": 880
+        },
+        {
+         "product": "op",
+         "type": "C",
+         "expiry": "2026-11",
+         "k": 71250,
+         "side": "buy",
+         "qty": 1,
+         "entry_yen": 665
+        }
+       ],
+       "breakevens_x": [
+        62830,
+        72795
+       ],
+       "shocks": [
+        {
+         "shock_pct": -20,
+         "x": 54250,
+         "sq_pnl_yen": 8580459
+        },
+        {
+         "shock_pct": -10,
+         "x": 61031,
+         "sq_pnl_yen": 1799267
+        },
+        {
+         "shock_pct": 10,
+         "x": 74593,
+         "sq_pnl_yen": 1798118
+        },
+        {
+         "shock_pct": 20,
+         "x": 81374,
+         "sq_pnl_yen": 8579311
+        }
+       ],
+       "summary": {
+        "n_legs": 2,
+        "premium_net_yen": -1545000,
+        "max_profit_yen": null,
+        "max_profit_unbounded": true,
+        "max_loss_yen": -1545000,
+        "max_loss_x": 64375,
+        "max_loss_unbounded": false,
+        "margin_yen": 0,
+        "room_yen": 6455000,
+        "multiple": 5,
+        "delta_large": 0,
+        "delta_mini": -0.04,
+        "theta_yen_per_day": -53565,
+        "vega_yen_per_pt": 124349,
+        "put_width_x": null,
+        "call_width_x": null,
+        "short_gap_x": null,
+        "call_levels_x": []
+       }
+      },
+      {
+       "id": "c5",
+       "target_abs_delta": 0.3,
+       "legs": [
+        {
+         "product": "op",
+         "type": "P",
+         "expiry": "2026-11",
+         "k": 65250,
+         "side": "buy",
+         "qty": 1,
+         "entry_yen": 1075
+        },
+        {
+         "product": "op",
+         "type": "C",
+         "expiry": "2026-11",
+         "k": 70500,
+         "side": "buy",
+         "qty": 1,
+         "entry_yen": 860
+        }
+       ],
+       "breakevens_x": [
+        63315,
+        72435
+       ],
+       "shocks": [
+        {
+         "shock_pct": -20,
+         "x": 54250,
+         "sq_pnl_yen": 9065459
+        },
+        {
+         "shock_pct": -10,
+         "x": 61031,
+         "sq_pnl_yen": 2284267
+        },
+        {
+         "shock_pct": 10,
+         "x": 74593,
+         "sq_pnl_yen": 2158118
+        },
+        {
+         "shock_pct": 20,
+         "x": 81374,
+         "sq_pnl_yen": 8939311
+        }
+       ],
+       "summary": {
+        "n_legs": 2,
+        "premium_net_yen": -1935000,
+        "max_profit_yen": null,
+        "max_profit_unbounded": true,
+        "max_loss_yen": -1935000,
+        "max_loss_x": 65250,
+        "max_loss_unbounded": false,
+        "margin_yen": 0,
+        "room_yen": 6065000,
+        "multiple": 4,
+        "delta_large": 0,
+        "delta_mini": -0.01,
+        "theta_yen_per_day": -57564,
+        "vega_yen_per_pt": 136181,
+        "put_width_x": null,
+        "call_width_x": null,
+        "short_gap_x": null,
+        "call_levels_x": []
+       }
+      }
+     ]
+    }
+   },
+   {
+    "input": {
+     "structure": "long_straddle"
+    },
+    "result": {
+     "structure": "long_straddle",
+     "expiry": "2026-11",
+     "forward": 67812,
+     "qty": 1,
+     "wing_pct": 3,
+     "capital_yen": 8000000,
+     "candidates": [
+      {
+       "id": "c1",
+       "target_abs_delta": null,
+       "legs": [
+        {
+         "product": "op",
+         "type": "P",
+         "expiry": "2026-11",
+         "k": 67750,
+         "side": "buy",
+         "qty": 1,
+         "entry_yen": 1935
+        },
+        {
+         "product": "op",
+         "type": "C",
+         "expiry": "2026-11",
+         "k": 67750,
+         "side": "buy",
+         "qty": 1,
+         "entry_yen": 1990
+        }
+       ],
+       "breakevens_x": [
+        63825,
+        71675
+       ],
+       "shocks": [
+        {
+         "shock_pct": -20,
+         "x": 54250,
+         "sq_pnl_yen": 9575459
+        },
+        {
+         "shock_pct": -10,
+         "x": 61031,
+         "sq_pnl_yen": 2794267
+        },
+        {
+         "shock_pct": 10,
+         "x": 74593,
+         "sq_pnl_yen": 2918118
+        },
+        {
+         "shock_pct": 20,
+         "x": 81374,
+         "sq_pnl_yen": 9699311
+        }
+       ],
+       "summary": {
+        "n_legs": 2,
+        "premium_net_yen": -3925000,
+        "max_profit_yen": null,
+        "max_profit_unbounded": true,
+        "max_loss_yen": -3925000,
+        "max_loss_x": 67750,
+        "max_loss_unbounded": false,
+        "margin_yen": 0,
+        "room_yen": 4075000,
+        "multiple": 2,
+        "delta_large": 0.04,
+        "delta_mini": 0.39,
+        "theta_yen_per_day": -64297,
+        "vega_yen_per_pt": 156098,
+        "put_width_x": null,
+        "call_width_x": null,
+        "short_gap_x": null,
+        "call_levels_x": []
+       }
+      }
+     ]
+    }
+   },
+   {
+    "input": {
+     "structure": "bull_call"
+    },
+    "result": {
+     "structure": "bull_call",
+     "expiry": "2026-11",
+     "forward": 67812,
+     "qty": 1,
+     "wing_pct": 3,
+     "capital_yen": 8000000,
+     "candidates": [
+      {
+       "id": "c1",
+       "target_abs_delta": null,
+       "legs": [
+        {
+         "product": "op",
+         "type": "C",
+         "expiry": "2026-11",
+         "k": 67750,
+         "side": "buy",
+         "qty": 1,
+         "entry_yen": 1990
+        },
+        {
+         "product": "op",
+         "type": "C",
+         "expiry": "2026-11",
+         "k": 69750,
+         "side": "sell",
+         "qty": 1,
+         "entry_yen": 1080
+        }
+       ],
+       "breakevens_x": [
+        68660
+       ],
+       "shocks": [
+        {
+         "shock_pct": -20,
+         "x": 54250,
+         "sq_pnl_yen": -910000
+        },
+        {
+         "shock_pct": -10,
+         "x": 61031,
+         "sq_pnl_yen": -910000
+        },
+        {
+         "shock_pct": 10,
+         "x": 74593,
+         "sq_pnl_yen": 1090000
+        },
+        {
+         "shock_pct": 20,
+         "x": 81374,
+         "sq_pnl_yen": 1090000
+        }
+       ],
+       "summary": {
+        "n_legs": 2,
+        "premium_net_yen": -910000,
+        "max_profit_yen": 1090000,
+        "max_profit_unbounded": false,
+        "max_loss_yen": -910000,
+        "max_loss_x": 0,
+        "max_loss_unbounded": false,
+        "margin_yen": 2612327,
+        "room_yen": 3397673,
+        "multiple": 1,
+        "delta_large": 0.17,
+        "delta_mini": 1.65,
+        "theta_yen_per_day": -3546,
+        "vega_yen_per_pt": 5176,
+        "put_width_x": null,
+        "call_width_x": 2000,
+        "short_gap_x": null,
+        "call_levels_x": [
+         72360
+        ]
+       }
+      }
+     ]
+    }
+   },
+   {
+    "input": {
+     "structure": "bear_put"
+    },
+    "result": {
+     "structure": "bear_put",
+     "expiry": "2026-11",
+     "forward": 67812,
+     "qty": 1,
+     "wing_pct": 3,
+     "capital_yen": 8000000,
+     "candidates": [
+      {
+       "id": "c1",
+       "target_abs_delta": null,
+       "legs": [
+        {
+         "product": "op",
+         "type": "P",
+         "expiry": "2026-11",
+         "k": 67750,
+         "side": "buy",
+         "qty": 1,
+         "entry_yen": 1935
+        },
+        {
+         "product": "op",
+         "type": "P",
+         "expiry": "2026-11",
+         "k": 65750,
+         "side": "sell",
+         "qty": 1,
+         "entry_yen": 1180
+        }
+       ],
+       "breakevens_x": [
+        66995
+       ],
+       "shocks": [
+        {
+         "shock_pct": -20,
+         "x": 54250,
+         "sq_pnl_yen": 1245000
+        },
+        {
+         "shock_pct": -10,
+         "x": 61031,
+         "sq_pnl_yen": 1245000
+        },
+        {
+         "shock_pct": 10,
+         "x": 74593,
+         "sq_pnl_yen": -755000
+        },
+        {
+         "shock_pct": 20,
+         "x": 81374,
+         "sq_pnl_yen": -755000
+        }
+       ],
+       "summary": {
+        "n_legs": 2,
+        "premium_net_yen": -755000,
+        "max_profit_yen": 1245000,
+        "max_profit_unbounded": false,
+        "max_loss_yen": -755000,
+        "max_loss_x": 67750,
+        "max_loss_unbounded": false,
+        "margin_yen": 2523517,
+        "room_yen": 3541483,
+        "multiple": 1,
+        "delta_large": -0.15,
+        "delta_mini": -1.5,
+        "theta_yen_per_day": -1248,
+        "vega_yen_per_pt": 7114,
+        "put_width_x": 2000,
+        "call_width_x": null,
+        "short_gap_x": null,
+        "call_levels_x": [
+         63129
+        ]
+       }
+      }
+     ]
+    }
+   },
+   {
+    "input": {
+     "structure": "call_butterfly"
+    },
+    "result": {
+     "structure": "call_butterfly",
+     "expiry": "2026-11",
+     "forward": 67812,
+     "qty": 1,
+     "wing_pct": 3,
+     "capital_yen": 8000000,
+     "candidates": [
+      {
+       "id": "c1",
+       "target_abs_delta": null,
+       "legs": [
+        {
+         "product": "op",
+         "type": "C",
+         "expiry": "2026-11",
+         "k": 65750,
+         "side": "buy",
+         "qty": 1,
+         "entry_yen": 3270
+        },
+        {
+         "product": "op",
+         "type": "C",
+         "expiry": "2026-11",
+         "k": 67750,
+         "side": "sell",
+         "qty": 2,
+         "entry_yen": 1970
+        },
+        {
+         "product": "op",
+         "type": "C",
+         "expiry": "2026-11",
+         "k": 69750,
+         "side": "buy",
+         "qty": 1,
+         "entry_yen": 1105
+        }
+       ],
+       "breakevens_x": [
+        66185,
+        69315
+       ],
+       "shocks": [
+        {
+         "shock_pct": -20,
+         "x": 54250,
+         "sq_pnl_yen": -435000
+        },
+        {
+         "shock_pct": -10,
+         "x": 61031,
+         "sq_pnl_yen": -435000
+        },
+        {
+         "shock_pct": 10,
+         "x": 74593,
+         "sq_pnl_yen": -435000
+        },
+        {
+         "shock_pct": 20,
+         "x": 81374,
+         "sq_pnl_yen": -435000
+        }
+       ],
+       "summary": {
+        "n_legs": 3,
+        "premium_net_yen": -435000,
+        "max_profit_yen": 1565000,
+        "max_profit_unbounded": false,
+        "max_loss_yen": -435000,
+        "max_loss_x": 0,
+        "max_loss_unbounded": false,
+        "margin_yen": 6095492,
+        "room_yen": -2470492,
+        "multiple": 0,
+        "delta_large": -0.01,
+        "delta_mini": -0.14,
+        "theta_yen_per_day": 3028,
+        "vega_yen_per_pt": -11953,
+        "put_width_x": null,
+        "call_width_x": null,
+        "short_gap_x": null,
+        "call_levels_x": [
+         51904,
+         59136,
+         65874
+        ]
+       }
+      }
+     ]
+    }
+   },
+   {
+    "input": {
+     "structure": "calendar"
+    },
+    "result": {
+     "structure": "calendar",
+     "expiry": "2026-11",
+     "forward": 67812,
+     "qty": 1,
+     "wing_pct": 3,
+     "capital_yen": 8000000,
+     "candidates": [
+      {
+       "id": "c1",
+       "target_abs_delta": null,
+       "legs": [
+        {
+         "product": "op",
+         "type": "P",
+         "expiry": "2026-11",
+         "k": 67750,
+         "side": "sell",
+         "qty": 1,
+         "entry_yen": 1920
+        },
+        {
+         "product": "op",
+         "type": "P",
+         "expiry": "2026-12",
+         "k": 67750,
+         "side": "buy",
+         "qty": 1,
+         "entry_yen": 2715
+        }
+       ],
+       "breakevens_x": [],
+       "shocks": [
+        {
+         "shock_pct": -20,
+         "x": 54250,
+         "sq_pnl_yen": -867782
+        },
+        {
+         "shock_pct": -10,
+         "x": 61031,
+         "sq_pnl_yen": -867782
+        },
+        {
+         "shock_pct": 10,
+         "x": 74593,
+         "sq_pnl_yen": -795000
+        },
+        {
+         "shock_pct": 20,
+         "x": 81374,
+         "sq_pnl_yen": -795000
+        }
+       ],
+       "summary": {
+        "n_legs": 2,
+        "premium_net_yen": -795000,
+        "max_profit_yen": -795000,
+        "max_profit_unbounded": false,
+        "max_loss_yen": -867782,
+        "max_loss_x": 0,
+        "max_loss_unbounded": false,
+        "margin_yen": 2898748,
+        "room_yen": 2386252,
+        "multiple": 1,
+        "delta_large": 0.01,
+        "delta_mini": 0.09,
+        "theta_yen_per_day": 8238,
+        "vega_yen_per_pt": 29994,
+        "put_width_x": null,
+        "call_width_x": null,
+        "short_gap_x": null,
+        "call_levels_x": [
+         64637
+        ]
+       }
+      }
+     ]
+    }
    }
   ],
   "candidate_errors": [

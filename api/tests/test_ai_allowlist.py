@@ -94,7 +94,7 @@ def test_topic_not_sent_upstream():
 
 def test_ok_preset_with_topic():
     assert "preset" in allowlist.KINDS
-    assert allowlist.PRESET_TOPICS == ("crash", "rebut", "board", "hedge", "exit", "iv")
+    assert allowlist.PRESET_TOPICS == ("crash", "rebut", "board", "hedge", "exit", "iv", "shape")
     for topic in allowlist.PRESET_TOPICS:
         req = parse(ai_body(kind="preset", topic=topic))
         assert req.kind == "preset" and req.topic == topic
@@ -113,6 +113,17 @@ def test_ok_preset_with_topic():
 def test_preset_topic_rejected(body, path, reason):
     e = bad(body)
     assert (e.path, e.reason) == (path, reason)
+
+
+def test_shape_preset_topic():
+    # #20 第 2 弾: 形の一覧の [この形で AI に相談] は kind preset・topic shape（ログ用。Anthropic には送らない）。
+    # shape は preset の ID なので ask・chat では受けない
+    req = parse(ai_body(kind="preset", topic="shape"))
+    assert req.kind == "preset" and req.topic == "shape"
+    sent = json.dumps(allowlist.upstream_messages(req), ensure_ascii=False)
+    assert '"shape"' not in sent and "topic" not in sent
+    assert (bad(ai_body(kind="ask", topic="shape")).reason) == "enum"
+    assert (bad(ai_body(topic="shape")).reason) == "unknown_key"
 
 
 def test_preset_topic_not_sent_upstream():

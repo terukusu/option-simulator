@@ -535,6 +535,13 @@ export const STRUCTURE_LABEL: Record<string, string> = {
   bull_put: 'ブル put スプレッド',
   bear_call: 'ベア call スプレッド',
   put_ratio: 'put のレシオ（1 買 2 売）',
+  // #20 第 2 弾（戦略テンプレートの形の名前と同じ）
+  long_strangle: 'ストラングル買い',
+  long_straddle: 'ストラドル買い',
+  bull_call: 'ブル call スプレッド',
+  bear_put: 'ベア put スプレッド',
+  call_butterfly: 'バタフライ（call）',
+  calendar: 'カレンダー',
 };
 
 export interface ToolCard {

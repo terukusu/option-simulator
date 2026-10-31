@@ -122,7 +122,7 @@ simulator:technicals を読む
 - IV の高さ・過去の IV（分位・スパイクと萎み方・IV の売り時）・下げのときの IV の跳ね方・β の実測・実現ボラ（HV）を\
 聞かれたら、答える前に Skill で simulator:volatility を読む
 - 発言が「{PRESET_PREFIX}」で始まるとき（定型の質問）は、答える前に Skill で simulator:presets を読み、1 行目の名前の\
-節の手順に従う。名前が「ヘッジ案」なら simulator:proposals も、「板の前提」「IV の位置」なら \
+節の手順に従う。名前が「ヘッジ案」「形の相談」なら simulator:proposals も、「板の前提」「IV の位置」なら \
 simulator:volatility も同じ応答で並べて読む
 - 前の発言で読んでいても、この発言で要るなら読み直す（読んだ内容は次の発言に残らない）
 """

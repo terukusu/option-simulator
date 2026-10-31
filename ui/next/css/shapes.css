@@ -251,3 +251,8 @@
   gap: var(--sp-2);
   margin-top: var(--sp-1);
 }
+
+/* [この形で AI に相談]（#20 第 2 弾）: 行の左に寄せる（適用の 2 つは右。入らなければ AI だけ上の行） */
+.shape-acts [data-act="ai"] {
+  margin-right: auto;
+}

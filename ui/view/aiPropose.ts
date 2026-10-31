@@ -60,9 +60,11 @@ export const SCAN_DEFAULT_RANGE = 0.3;
 export const CANDIDATE_DELTAS = [0.1, 0.15, 0.2, 0.25, 0.3] as const;
 /** レシオの買いの足の |Δ| = 売り + これ */
 export const RATIO_BUY_DELTA_GAP = RATIO_GAP;
-/** 翼の距離（F に対する %。既定・範囲） */
+/** 翼の距離（基準の足の K に対する %。既定・範囲） */
 export const WING_PCT_DEFAULT = 3;
 export const WING_PCT_RANGE = [1, 10] as const;
+/** 型の 1 組の枚数の上限（足の倍率の最大 2 = put レシオの売り・バタフライの中心で QTY_MAX を越えない） */
+export const CANDIDATE_QTY_MAX = Math.floor(QTY_MAX / 2);
 /** 候補の SQ 損益を出す原資産の変化（%） */
 export const CANDIDATE_SHOCKS_PCT = [-20, -10, 10, 20] as const;
 /** 追証の水準の個数の上限（結果に入れる） */
@@ -77,8 +79,28 @@ export const STRUCTURES = [
   'bull_put',
   'bear_call',
   'put_ratio',
+  // #20 第 2 弾: 戦略テンプレートの残りの 6 形（後ろに足す = 既存の 8 形の候補・結果は変えない）
+  'long_strangle',
+  'long_straddle',
+  'bull_call',
+  'bear_put',
+  'call_butterfly',
+  'calendar',
 ] as const;
 export type Structure = (typeof STRUCTURES)[number];
+
+/**
+ * ATM で選ぶ型（短い足の |Δ| を使わない。候補は ATM の 1 つ = target_abs_delta は null）。ATM は env.atmBasis の
+ * pick（板・スマイルと同じ）
+ */
+export const ATM_STRUCTURES: ReadonlySet<Structure> = new Set<Structure>([
+  'short_straddle',
+  'long_straddle',
+  'bull_call',
+  'bear_put',
+  'call_butterfly',
+  'calendar',
+]);
 
 type Err = ToolError['error'];
 const err = (e: Err): ToolError => ({ error: e });
@@ -328,7 +350,8 @@ function candidateLegs(env: AiToolEnv, o: unknown): Record<string, unknown>[] | 
   const delta = o.abs_delta ?? 0.15;
   const qty = o.qty ?? 1;
   const wing = o.wing_pct ?? WING_PCT_DEFAULT;
-  if (!isAbsDelta(delta) || !isInt(qty, 1, QTY_MAX)) return 'bad_input';
+  // 1 組の枚数（倍率 2 の足 = put レシオの売り・バタフライの中心が上限を越えない。structure_candidates と同じ上限）
+  if (!isAbsDelta(delta) || !isInt(qty, 1, CANDIDATE_QTY_MAX)) return 'bad_input';
   if (!isNum(wing) || wing < WING_PCT_RANGE[0] || wing > WING_PCT_RANGE[1]) return 'bad_input';
   const m = monthFor(env, o.expiry);
   if (typeof m === 'string') return m;
@@ -338,7 +361,7 @@ function candidateLegs(env: AiToolEnv, o: unknown): Record<string, unknown>[] | 
   return spec.map((x) => ({
     product: 'op',
     type: x.type === 'put' ? 'P' : 'C',
-    expiry: m.id,
+    expiry: x.expiry ?? m.id,
     k: x.k,
     side: x.side,
     qty: x.mul * qty,
@@ -620,11 +643,12 @@ export function strikeScan(env: AiToolEnv, input: Record<string, unknown>) {
 
 // ---------------------------------------------------------------- structure_candidates
 
-type LegSpec = { type: OptionType; k: number; side: Side; mul: number };
+/** 足の仕様（expiry はカレンダーの買いの足 = 次の限月だけ。無ければ候補の限月） */
+type LegSpec = { type: OptionType; k: number; side: Side; mul: number; expiry?: string };
 
 /**
- * 型 × |Δ| の足（put / call の単体の売りはここ、ほかの 6 形は戦略テンプレートの shapeLegs（ui/view/templates.ts。#20 で
- * 共通にした。|Δ| の距離・atmK を渡す = #139 と同じ行を選ぶ））
+ * 型 × |Δ| の足（put / call の単体の売りはここ、ほかの 12 形は戦略テンプレートの shapeLegs（ui/view/templates.ts。#20 で
+ * 共通にした。|Δ| の距離・atmK を渡す = #139 と同じ行を選ぶ。ATM の型は ATM から 0 本））
  */
 function structureLegs(
   chain: Chain,
@@ -651,7 +675,12 @@ function structureLegs(
         wingPct,
         atmK,
       });
-      return r.ok ? r.legs.map(({ type, k, side, mul }) => ({ type, k, side, mul })) : null;
+      // 限月は候補の限月と違う足（カレンダーの買い）だけ持たせる（既存の 8 形の足の仕様 = 重複の判定を変えない）
+      return r.ok
+        ? r.legs.map(({ type, k, side, mul, expiry }) =>
+            expiry === m.id ? { type, k, side, mul } : { type, k, side, mul, expiry },
+          )
+        : null;
     }
   }
 }
@@ -669,14 +698,15 @@ export function structureCandidates(env: AiToolEnv, input: Record<string, unknow
   }
   const qty = input.qty ?? 1;
   const wingPct = input.wing_pct ?? WING_PCT_DEFAULT;
-  // put_ratio の売りは 2 倍の枚数（枚数の上限を越えない）
-  if (!isInt(qty, 1, Math.floor(QTY_MAX / 2))) return err('bad_input');
+  // put_ratio の売り・call_butterfly の中心は 2 倍の枚数（枚数の上限を越えない）
+  if (!isInt(qty, 1, CANDIDATE_QTY_MAX)) return err('bad_input');
   if (!isNum(wingPct) || wingPct < WING_PCT_RANGE[0] || wingPct > WING_PCT_RANGE[1]) {
     return err('bad_input');
   }
   const m = monthFor(env, input.expiry);
   if (typeof m === 'string') return err(m);
-  const deltas = s === 'short_straddle' ? [0.5] : CANDIDATE_DELTAS;
+  const atm = ATM_STRUCTURES.has(s as Structure);
+  const deltas = atm ? [0.5] : CANDIDATE_DELTAS;
   const seen = new Set<string>();
   const out: ToolResult[] = [];
   for (const d of deltas) {
@@ -690,7 +720,14 @@ export function structureCandidates(env: AiToolEnv, input: Record<string, unknow
     for (const [i, x] of spec.entries()) {
       const ui = buildLeg(
         env,
-        { product: 'op', type: x.type, expiry: m.id, k: x.k, side: x.side, qty: x.mul * qty },
+        {
+          product: 'op',
+          type: x.type,
+          expiry: x.expiry ?? m.id,
+          k: x.k,
+          side: x.side,
+          qty: x.mul * qty,
+        },
         i + 1,
       );
       if (typeof ui === 'string') break;
@@ -703,7 +740,7 @@ export function structureCandidates(env: AiToolEnv, input: Record<string, unknow
     const x0 = base.ctx.x0;
     out.push({
       id: `c${out.length + 1}`,
-      target_abs_delta: s === 'short_straddle' ? null : r2(d),
+      target_abs_delta: atm ? null : r2(d),
       legs: legs.map((l) => ({ ...legId(l), entry_yen: Math.round(l.leg.entry * 10) / 10 || 0 })),
       breakevens_x: base.profile.breakevens.slice(0, 4).map(yen),
       shocks: CANDIDATE_SHOCKS_PCT.map((p) => {

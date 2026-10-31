@@ -476,6 +476,27 @@ export function synthAiReply(body) {
       ].join('\n');
       return { thinking: 'テール表を表にまとめる', text, stop: 'end_turn' };
     }
+    if (Array.isArray(r?.candidates) && typeof r?.structure === 'string') {
+      // structure_candidates（形の相談。#20 第 2 弾）の結果: 最初の候補を新しいタブの提案にする（行使価格は simulator が選ぶ）
+      const d = r.candidates[0]?.target_abs_delta;
+      return {
+        thinking: '候補を比べる',
+        text: '',
+        stop: 'tool_use',
+        tool: {
+          id: `toolu_dev_${msgs.length}`,
+          name: 'propose_position',
+          input: {
+            target: 'new_tab',
+            candidate: {
+              structure: r.structure,
+              expiry: r.expiry,
+              ...(typeof d === 'number' && { abs_delta: d }),
+            },
+          },
+        },
+      };
+    }
     if (r?.after && Array.isArray(r?.diff)) {
       // propose_position（#139）の結果: 後の満期の最大損失と必要証拠金だけを引く（架空の値）
       const text = `カードの案を入れると、満期の最大損失は ${thousand(r.after.max_loss_yen)}、必要証拠金は ${thousand(r.after.margin_yen)} です。検討の材料にしてください。`;
@@ -519,6 +540,20 @@ export function synthAiReply(body) {
       'どの足・どの条件から来ているかは、指標 · テールの内訳とテール表で確かめられます。',
     ].join('\n');
     return { thinking: '説明の節を読む', text, stop: 'end_turn' };
+  }
+  if (body?.kind === 'preset' && body?.topic === 'shape') {
+    // 形の相談（#20 第 2 弾）: 2 行目の型の ID と限月で structure_candidates を呼ぶ（距離は simulator が作る）
+    const m = /（([a-z_]+)）・限月 (\d{4}-\d{2})/.exec(userText);
+    return {
+      thinking: 'この形の候補を作る',
+      text: '',
+      stop: 'tool_use',
+      tool: {
+        id: `toolu_dev_${msgs.length}`,
+        name: 'structure_candidates',
+        input: { structure: m?.[1] ?? 'short_strangle', ...(m && { expiry: m[2] }) },
+      },
+    };
   }
   if (userText.includes('根拠')) {
     // 根拠の節（#322）の見本: 番号と見出しが合う / 番号違い（見出しで引く）/ 無い節 / 章 / 設計書（文字のまま）

@@ -310,8 +310,21 @@ MAX_CHANGES = 10
 SCAN_MAX_ROWS = 25
 MAX_CANDIDATES = 5
 CALL_LEVELS_MAX = 4
+# 型（ui/view/aiPropose.ts の STRUCTURES と同じ並び）。後ろの 6 つは #20 の戦略テンプレートの残りの形（組み立ては画面の
+# ui/view/templates.ts の shapeLegs と共通）
 STRUCTURES = ("short_put", "short_call", "short_strangle", "short_straddle", "iron_condor", "bull_put", "bear_call",
-              "put_ratio")
+              "put_ratio", "long_strangle", "long_straddle", "bull_call", "bear_put", "call_butterfly", "calendar")
+# 型の説明（structure_candidates と propose_position の candidate で同じ文）
+STRUCTURES_TEXT = "".join((
+    "型（short_put・short_call・short_strangle・short_straddle（ATM）・iron_condor・bull_put・",
+    "bear_call・put_ratio（1 買 2 売）・long_strangle・long_straddle（ATM）・",
+    "bull_call（ATM の call を買い上の call を売る）・bear_put（ATM の put を買い下の put を売る）・",
+    "call_butterfly（ATM の call を 2 枚売り、上下に同じ幅の call を買う）・",
+    "calendar（ATM の行の OTM 側を expiry の限月で売り、板の次の限月で買う。次の限月が無ければ not_on_board））。",
+    "ATM の型は ATM の 1 候補で abs_delta を使わない",
+))
+WING_TEXT = ("翼の距離（基準の足の行使価格に対する %。iron_condor・bull_put・bear_call は売りの足から、bull_call・"
+             "bear_put は ATM の買いの足から、call_butterfly は中心から上下に同じ幅。省略 = 3）")
 STRIKE = Num(0, 1e8, lo_open=True)
 ENTRY = Num(0, 1e9)
 SUMMARY = Obj({
@@ -354,19 +367,21 @@ STRIKE_SCAN = Obj({
                      "meets_floor": Nullable(Bool())}), SCAN_MAX_ROWS, min_len=1),
 })
 
-CANDIDATES_INPUT = Obj({"structure": Enum(STRUCTURES), "expiry": MONTH, "qty": QTY, "wing_pct": Num(1, 10)},
+# 型の 1 組の枚数の上限（足の倍率の最大 2 = put レシオの売り・バタフライの中心で QTY_MAX を越えない。
+# ui/view/aiPropose.ts の CANDIDATE_QTY_MAX と同じ）
+CANDIDATE_QTY_MAX = QTY_MAX // 2
+CANDIDATE_QTY = Num(1, CANDIDATE_QTY_MAX, integer=True)
+CANDIDATES_INPUT = Obj({"structure": Enum(STRUCTURES), "expiry": MONTH, "qty": CANDIDATE_QTY, "wing_pct": Num(1, 10)},
                        frozenset({"expiry", "qty", "wing_pct"}))
 CANDIDATES_INPUT_SCHEMA = {
     "type": "object",
     "properties": {
-        "structure": {"enum": list(STRUCTURES),
-                      "description": "型（short_put・short_call・short_strangle・short_straddle（ATM）・iron_condor・"
-                                     "bull_put・bear_call・put_ratio（1 買 2 売））"},
+        "structure": {"enum": list(STRUCTURES), "description": STRUCTURES_TEXT},
         "expiry": {"type": "string", "pattern": r"^\d{4}-\d{2}$",
                    "description": "限月 YYYY-MM（省略 = 期近）"},
-        "qty": {"type": "integer", "minimum": 1, "maximum": 100000, "description": "1 組の枚数（省略 = 1）"},
-        "wing_pct": {"type": "number", "minimum": 1, "maximum": 10,
-                     "description": "翼（買いの足）の短い足からの距離（F に対する %。省略 = 3）"},
+        "qty": {"type": "integer", "minimum": 1, "maximum": CANDIDATE_QTY_MAX,
+                "description": "1 組の枚数（省略 = 1。倍率 2 の足は 2 倍）"},
+        "wing_pct": {"type": "number", "minimum": 1, "maximum": 10, "description": WING_TEXT},
     },
     "required": ["structure"],
     "additionalProperties": False,
@@ -389,7 +404,7 @@ ABS_DELTA = Num(0.01, 0.6)
 CHANGE = Obj({"action": Enum(("add", "remove", "set_qty", "move_strike")), "leg_no": Num(1, MAX_LEGS, integer=True),
               **LEG_IN, "max_loss_floor_yen": FLOOR, "abs_delta": ABS_DELTA},
              frozenset({"leg_no", *LEG_IN, "max_loss_floor_yen", "abs_delta"}))
-CANDIDATE_IN = Obj({"structure": Enum(STRUCTURES), "abs_delta": ABS_DELTA, "expiry": MONTH, "qty": QTY,
+CANDIDATE_IN = Obj({"structure": Enum(STRUCTURES), "abs_delta": ABS_DELTA, "expiry": MONTH, "qty": CANDIDATE_QTY,
                     "wing_pct": Num(1, 10)}, frozenset({"abs_delta", "expiry", "qty", "wing_pct"}))
 PROPOSE_INPUT = Obj({
     "target": Enum(("current", "new_tab")),
@@ -442,11 +457,11 @@ PROPOSE_INPUT_SCHEMA = {
             "type": "object", "additionalProperties": False, "required": ["structure"],
             "description": "target=new_tab のとき（legs と片方だけ）。型と短い足の |Δ| を渡すと simulator が"
                            "structure_candidates と同じ規則で板から足を作る",
-            "properties": {"structure": {"enum": list(STRUCTURES)},
+            "properties": {"structure": {"enum": list(STRUCTURES), "description": STRUCTURES_TEXT},
                            "abs_delta": {"type": "number", "minimum": 0.01, "maximum": 0.6,
-                                         "description": "短い足の |Δ|（省略 = 0.15。short_straddle は無視）"},
+                                         "description": "短い足の |Δ|（省略 = 0.15。ATM の型は無視）"},
                            "expiry": {"type": "string", "pattern": r"^\d{4}-\d{2}$"},
-                           "qty": {"type": "integer", "minimum": 1, "maximum": 100000},
+                           "qty": {"type": "integer", "minimum": 1, "maximum": CANDIDATE_QTY_MAX},
                            "wing_pct": {"type": "number", "minimum": 1, "maximum": 10}},
         },
     },
