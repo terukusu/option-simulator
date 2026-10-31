@@ -9,6 +9,9 @@ import { describe, expect, it } from 'vitest';
  * (b) §7 の表のトークンがダーク・ライトの両方にあり、値が表と一致する
  * (c) var(--x) で使う名前がすべて定義済み
  * (d) 文字のトークン（--ink / --ink-2 / --ink-3）は面（--bg・--s1〜--s3）に、--ink / --ink-2 は --s4 にも 4.5:1 以上（#279）
+ * (e) ギリシャ文字の @font-face（#324。docs/ui-redesign.md §7.3・§10.1）: 族は "sim-greek" / "sim-greek-mono" だけ、
+ *     unicode-range は U+0370-03FF ちょうど、src は local("…") だけ（url() を書かない = フォントを読み込まない・同梱しない）。
+ *     面の太さの組・端末ごとの代表の名前・--font / --mono の並び
  */
 /**
  * 一覧は import.meta.glob の鍵だけ（読み込まない）、中身は Node の fs で読む
@@ -208,6 +211,37 @@ function colorHits(css: string): string[] {
   return hits;
 }
 
+/** #324: ギリシャ文字の族の名前と、各面の src に入っていること（太い面は「<名前> Bold」）を確かめる端末ごとの代表 */
+const GREEK_FAMILIES = ['sim-greek', 'sim-greek-mono'];
+/** Android（Roboto）・Apple（Helvetica Neue）・Windows（Segoe UI）・Linux（DejaVu Sans） */
+const SANS_NAMES = ['Roboto', 'Helvetica Neue', 'Segoe UI', 'DejaVu Sans'];
+/** Android（Droid Sans Mono）・Apple（Menlo）・Windows（Consolas）・Linux（DejaVu Sans Mono） */
+const MONO_NAMES = ['Droid Sans Mono', 'Menlo', 'Consolas', 'DejaVu Sans Mono'];
+const SANS_BOLD_NAMES = ['Roboto Bold', 'Helvetica Neue Bold', 'Segoe UI Bold', 'DejaVu Sans Bold'];
+const MONO_BOLD_NAMES = ['Menlo Bold', 'Consolas Bold', 'DejaVu Sans Mono Bold'];
+
+interface FontFace {
+  path: string;
+  family: string;
+  weight: string;
+  src: string[];
+  decls: Map<string, string>;
+}
+const fontFaces: FontFace[] = Object.entries(files).flatMap(([path, raw]) =>
+  blocks(stripComments(raw))
+    .filter((b) => b.selector === '@font-face')
+    .map((b) => {
+      const d = decls(b.body);
+      return {
+        path,
+        family: (d.get('font-family') ?? '').replace(/^"(.*)"$/, '$1'),
+        weight: d.get('font-weight') ?? '',
+        src: (d.get('src') ?? '').split(',').map((x) => x.trim()),
+        decls: d,
+      };
+    }),
+);
+
 describe('ui/next の CSS のトークン（§7）', () => {
   it('CSS のファイルが読めて、tokens.css に 2 つのテーマの定義がある', () => {
     expect(Object.keys(files)).toContain(TOKENS);
@@ -311,6 +345,79 @@ describe('ui/next の CSS のトークン（§7）', () => {
     const d = decls(tag?.body ?? '');
     expect(d.get('background')).toBeUndefined();
     expect(['var(--ink)', 'var(--ink-2)']).toContain(d.get('color'));
+  });
+
+  it('(e) @font-face は "sim-greek" / "sim-greek-mono" の local() だけで、ギリシャ文字（U+0370-03FF）に絞る（#324）', () => {
+    expect(fontFaces.length, '@font-face の数').toBeGreaterThan(0);
+    for (const f of fontFaces) {
+      const what = `${f.path} ${f.family} ${f.weight}`;
+      expect(GREEK_FAMILIES, what).toContain(f.family);
+      expect(f.decls.get('unicode-range'), what).toBe('U+0370-03FF');
+      expect(f.src.length, what).toBeGreaterThan(0);
+      for (const s of f.src) expect(s, what).toMatch(/^local\("[^"]+"\)$/);
+      // local() と unicode-range のほかは族・太さだけ（font-display などを足すなら設計書と一緒に直す）
+      expect([...f.decls.keys()].sort(), what).toEqual(
+        ['font-family', 'font-weight', 'src', 'unicode-range'].sort(),
+      );
+    }
+    for (const [path, raw] of Object.entries(files)) {
+      expect(/\burl\(/.test(stripComments(raw)), `${path} に url( がある`).toBe(false);
+    }
+  });
+
+  it('(e) 面の太さの組（sim-greek: 400・500・600 900、sim-greek-mono: 400・600 900）と端末ごとの代表の名前', () => {
+    const weights = (family: string) =>
+      fontFaces
+        .filter((f) => f.family === family)
+        .map((f) => f.weight)
+        .sort();
+    expect(weights('sim-greek')).toEqual(['400', '500', '600 900']);
+    expect(weights('sim-greek-mono')).toEqual(['400', '600 900']);
+    for (const f of fontFaces) {
+      const mono = f.family === 'sim-greek-mono';
+      const names = f.src.map((s) => s.slice('local("'.length, -2));
+      // どの面も通常の名前を含む（500・太い面は最後に通常の名前を並べる = 太字が無い端末でも和文のギリシャ文字に戻さない）
+      const want = [...(mono ? MONO_NAMES : SANS_NAMES)];
+      // 太い面は Bold の名前を通常の名前より先に（Droid Sans Mono は太字が無いので通常だけ）
+      if (f.weight === '600 900') {
+        const boldNames = mono ? MONO_BOLD_NAMES : SANS_BOLD_NAMES;
+        want.push(...boldNames);
+        const firstRegular = Math.min(
+          ...want.slice(0, -boldNames.length).map((n) => names.indexOf(n)),
+        );
+        for (const n of boldNames)
+          expect(names.indexOf(n), `${f.family} ${f.weight}: ${n} が通常の名前より前`).toBeLessThan(
+            firstRegular,
+          );
+      }
+      for (const n of want) expect(names, `${f.family} ${f.weight}: ${n}`).toContain(n);
+    }
+  });
+
+  it('(e) --font は "Inter" の直後に "sim-greek"、--mono は先頭に "sim-greek-mono", "sim-greek"（ほかの並びは変えない）', () => {
+    const root = tokenBlocks.find((b) => b.selector === ':root' && decls(b.body).has('--font'));
+    const d = decls(root?.body ?? '');
+    const list = (v: string | undefined) => (v ?? '').split(',').map((x) => x.trim());
+    expect(list(d.get('--font'))).toEqual([
+      '"Inter"',
+      '"sim-greek"',
+      '"Hiragino Sans"',
+      '"Noto Sans JP"',
+      'system-ui',
+      '-apple-system',
+      '"Segoe UI"',
+      'sans-serif',
+    ]);
+    expect(list(d.get('--mono'))).toEqual([
+      '"sim-greek-mono"',
+      '"sim-greek"',
+      'ui-monospace',
+      '"SF Mono"',
+      '"JetBrains Mono"',
+      'Menlo',
+      'Consolas',
+      'monospace',
+    ]);
   });
 
   it('コントラストの計算そのもの（白 / 黒 = 21、同じ色 = 1、#767676 / 白 ≈ 4.54）', () => {

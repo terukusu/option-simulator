@@ -642,7 +642,9 @@ export function bigReadout(r: ReadoutModel, evalTime: number | null): BigReadout
   }
   const g = r.greeks;
   const deltaValue = `${fmtSigned(g.deltaLarge, 2)} (${fmtSigned(g.deltaMini, 1)})`;
-  const gamma = `${fmtSigned(g.gammaPer100, 3)} /100円`;
+  // 数字と単位の間を空けない（docs/design.md の帯の例と同じ。#324: ギリシャ文字が端末の欧文の等幅になり Γ が広くなった分、
+  // 900px の 5 つの読み取りで副題が 1px 切れたのを戻す）
+  const gamma = `${fmtSigned(g.gammaPer100, 3)}/100円`;
   return [
     item(
       'date',

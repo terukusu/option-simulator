@@ -170,6 +170,11 @@
 //                                          第 2 弾（説明カードの 1 つ前に戻る）: AI の返答の用語 → 関連の用語 2 つ → 戻る / Esc / [← 戻る] で
 //                                          1 つずつ戻り本文の位置・AI の返答の枠の位置・フォーカスが戻る（AC-0）、ⓘ の吹き出しが下に残る
 //                                          （AC-2-3〜2-5）、360×780 の本文の位置（AC-2-6）、[← 戻る] の見出しの行（AC-2-7）
+//   --fonts                                #324 のギリシャ文字のフォントの項目だけ（既定の検査にも入る）: 360×780・1440×900（ダーク）で
+//                                          ギリシャ文字だけのプローブ（本文 400・本文の太字・.mono 400・.mono の太字）を描いたフォントを
+//                                          CDP の CSS.getPlatformFontsForNode で読み、tokens.css の "sim-greek" / "sim-greek-mono" の
+//                                          local() の名前（太字は PostScript 名に Bold）なら pass。和文（建玉）のフォントと画面の
+//                                          ギリシャ文字の要素の 1 つは記録だけ
 //   --url <base>                           dev サーバーを起こさず、その URL を使う（例 http://127.0.0.1:5173/?parts）
 //   --dom <file>                           body の下の要素の tag.class の並びを書き出す（DOM の変化の比較用）
 //   --shots <dir>                          スクリーンショットを書く（合成の板だけ。リポジトリに入れない）
@@ -236,6 +241,7 @@ const known = new Set([
   '--quotes-only',
   '--icons',
   '--back',
+  '--fonts',
 ]);
 for (const a of args) {
   if (a.startsWith('--') && !known.has(a)) {
@@ -260,6 +266,7 @@ const crossOnly = flag('--cross');
 const iconsOnly = flag('--icons');
 const quotesOnly = flag('--quotes-only');
 const backOnly = flag('--back');
+const fontsOnly = flag('--fonts');
 const mode = parts ? 'parts' : 'next';
 
 // ---- 足 2 本の作業（版 2）: workspace-v2.json のタブ A だけ（fixture は変えない）
@@ -1544,6 +1551,8 @@ async function measureAll() {
     await aiAskSweep();
     // ボタンのアイコン（#292 AC-7・AC-8）
     await iconSweep();
+    // ギリシャ文字のフォント（#324 AC-4）
+    await fontSweep();
   }
   // 旧のクラス名（#91・EPIC #92 の終了条件 8）: report を通ったすべての状態の合計
   console.log(
@@ -14841,6 +14850,151 @@ async function iconSweep() {
   );
 }
 
+/**
+ * #324 AC-4: ギリシャ文字を描いたフォント。360×780・1440×900（ダーク）で、body の下にギリシャ文字だけのプローブ（本文 400・本文の
+ * 太字 <b> = 700（600〜900 の面）・.mono 400・.mono の <b>）と和文のプローブ（「建玉」）を DOM API で足し（style 属性・HTML の
+ * 文字列は使わない）、CDP の CSS.getPlatformFontsForNode で実際に描いたフォントを読む。ok = ギリシャ文字のプローブを描いた
+ * フォントがすべて tokens.css の "sim-greek"（.mono は "sim-greek-mono" か "sim-greek"）の local() に並べた名前（族の名前か
+ * PostScript 名）で、太字は PostScript 名に Bold。和文のプローブのフォントは記録だけ（変更前と同じかは PR で main と比べる）。
+ * 画面に出ているギリシャ文字の要素（指標のタイルなど）の最初の 1 つも参考に出す。プローブは測った後に消す
+ */
+const fontStats = { pass: 0, total: 0 };
+/** tokens.css の @font-face の族ごとの local() の名前 */
+function greekLocalNames() {
+  const css = readFileSync(join(root, 'ui/next/css/tokens.css'), 'utf8').replace(
+    /\/\*[\s\S]*?\*\//g,
+    '',
+  );
+  const out = new Map();
+  for (const m of css.matchAll(/@font-face\s*\{([^}]*)\}/g)) {
+    const fam = /font-family:\s*"([^"]+)"/.exec(m[1])?.[1];
+    if (!fam) continue;
+    const set = out.get(fam) ?? new Set();
+    for (const n of m[1].matchAll(/local\("([^"]+)"\)/g)) set.add(n[1]);
+    out.set(fam, set);
+  }
+  return out;
+}
+async function fontSweep() {
+  const names = greekLocalNames();
+  const sans = names.get('sim-greek') ?? new Set();
+  const mono = new Set([...(names.get('sim-greek-mono') ?? []), ...sans]);
+  const probes = [
+    { key: 'sans-400', label: '本文 400', mono: false, bold: false, text: 'ΔΓΘσβ' },
+    { key: 'sans-700', label: '本文 太字（b）', mono: false, bold: true, text: 'ΔΓΘσβ' },
+    { key: 'mono-400', label: '.mono 400', mono: true, bold: false, text: 'ΔΓΘσβ' },
+    { key: 'mono-700', label: '.mono 太字（b）', mono: true, bold: true, text: 'ΔΓΘσβ' },
+    { key: 'ja', label: '和文（建玉）', mono: false, bold: false, text: '建玉', ja: true },
+  ];
+  for (const [w, h] of [
+    [360, 780],
+    [1440, 900],
+  ]) {
+    const tag = `#324 dark ${w}x${h}`;
+    const ctx = await newContext(
+      { width: w, height: h },
+      { [WORKSPACE_KEY]: twoLegs, [PREFS_KEY]: prefsText('dark') },
+    );
+    const page = await ctx.newPage();
+    await page.goto(pageUrl('next'));
+    await waitReady(page, 'next');
+    await page.evaluate(async (list) => {
+      const box = document.createElement('div');
+      box.setAttribute('data-font-probe', 'box');
+      for (const p of list) {
+        const host = document.createElement('div');
+        if (p.mono) host.className = 'mono';
+        const el = document.createElement(p.bold ? 'b' : 'span');
+        el.setAttribute('data-font-probe', p.key);
+        el.textContent = p.text;
+        host.append(el);
+        box.append(host);
+      }
+      document.body.append(box);
+      await Promise.all(
+        ['400', '700'].flatMap((wt) =>
+          ['"sim-greek"', '"sim-greek-mono"'].map((f) =>
+            document.fonts.load(`${wt} 16px ${f}`, 'Δ'),
+          ),
+        ),
+      );
+      await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+    }, probes);
+    const cdp = await ctx.newCDPSession(page);
+    await cdp.send('DOM.enable');
+    await cdp.send('CSS.enable');
+    const { root: doc } = await cdp.send('DOM.getDocument', { depth: -1 });
+    const fontsOf = async (selector) => {
+      const { nodeId } = await cdp.send('DOM.querySelector', { nodeId: doc.nodeId, selector });
+      if (!nodeId) return null;
+      const { fonts } = await cdp.send('CSS.getPlatformFontsForNode', { nodeId });
+      return fonts;
+    };
+    const show = (fonts) =>
+      fonts
+        ?.map(
+          (f) =>
+            `${f.familyName}（${f.postScriptName}${f.isCustomFont ? '・custom' : ''}）× ${f.glyphCount}`,
+        )
+        .join(' + ') || '—';
+    for (const p of probes) {
+      const fonts = await fontsOf(`[data-font-probe="${p.key}"]`);
+      if (p.ja) {
+        console.log(`${tag} ${p.label}: ${show(fonts)}（記録）`);
+        continue;
+      }
+      const allowed = p.mono ? mono : sans;
+      const bad = (fonts ?? []).filter(
+        (f) =>
+          !(allowed.has(f.familyName) || allowed.has(f.postScriptName)) ||
+          (p.bold && !/bold/i.test(f.postScriptName)),
+      );
+      const ok = !!fonts?.length && bad.length === 0;
+      fontStats.total++;
+      if (ok) fontStats.pass++;
+      else failed = true;
+      console.log(
+        `${tag} ${p.label}: ${show(fonts)}: ${ok ? 'pass' : `local() の名前でない${p.bold ? ' / Bold でない' : ''}  ← NG`}`,
+      );
+    }
+    // 画面に出ているギリシャ文字の要素（参考。英数字と混ざるのでフォントは並べて出すだけ）
+    const found = await page.evaluate(() => {
+      for (const el of document.querySelectorAll('body *:not([data-font-probe])')) {
+        if (el.closest('[data-font-probe]') || !el.getClientRects().length) continue;
+        const own = [...el.childNodes]
+          .filter((n) => n.nodeType === 3)
+          .map((n) => n.textContent)
+          .join('');
+        if (/[\u0370-\u03ff]/.test(own)) {
+          el.setAttribute('data-font-probe-page', '');
+          return `${el.tagName.toLowerCase()}${el.className && typeof el.className === 'string' ? `.${el.className.trim().split(/\s+/).join('.')}` : ''} 「${own.trim().slice(0, 20)}」`;
+        }
+      }
+      return null;
+    });
+    if (found) {
+      const { root: doc2 } = await cdp.send('DOM.getDocument', { depth: -1 });
+      const { nodeId } = await cdp.send('DOM.querySelector', {
+        nodeId: doc2.nodeId,
+        selector: '[data-font-probe-page]',
+      });
+      const fonts = nodeId
+        ? (await cdp.send('CSS.getPlatformFontsForNode', { nodeId })).fonts
+        : null;
+      console.log(`${tag} 画面の ${found}: ${show(fonts)}（参考）`);
+    } else console.log(`${tag} 画面にギリシャ文字の要素が見えない（参考）`);
+    await page.evaluate(() => {
+      document.querySelector('[data-font-probe="box"]')?.remove();
+      document.querySelector('[data-font-probe-page]')?.removeAttribute('data-font-probe-page');
+    });
+    await cdp.detach();
+    await ctx.close();
+  }
+  console.log(
+    `ギリシャ文字のフォントの検査（#324）: ${fontStats.pass} / ${fontStats.total} で pass`,
+  );
+}
+
 // 開く URL（#91: 既定はクエリなし。--parts は ?parts）
 console.log(`URL: ${pageUrl(mode)}`);
 try {
@@ -14865,6 +15019,8 @@ try {
     }
   } else if (iconsOnly && !parts && !flows) {
     await iconSweep();
+  } else if (fontsOnly && !parts && !flows) {
+    await fontSweep();
   } else if (aiOnly && !parts) {
     if (flows)
       for (const vp of [
