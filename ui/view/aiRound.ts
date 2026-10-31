@@ -5,8 +5,10 @@
 
 import type { PreparedLeg } from '../../model';
 
-export const fin = (v: number | null | undefined): v is number =>
-  typeof v === 'number' && Number.isFinite(v);
+import { fin } from './finite';
+
+// fin は共用の ui/view/finite.ts（#20。AI のモジュールの外にも使うため）。import 先を変えないよう再び公開する
+export { fin };
 export const round = (v: number | null | undefined, d: number): number | null => {
   if (!fin(v)) return null;
   const f = 10 ** d;

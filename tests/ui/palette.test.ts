@@ -24,6 +24,7 @@ import { positionModel } from '../../ui/view/position';
 import { evalTimeTargets } from '../../ui/view/scenario';
 import { evalChips, presetChips, type ScenarioRegionInput } from '../../ui/view/scenarioRegion';
 import { TABS_FULL_TEXT, tabsModel } from '../../ui/view/tabs';
+import { SHAPES } from '../../ui/view/templates';
 import {
   CLEAR_HELD_TEXT,
   CLEAR_NO_LEGS_TEXT,
@@ -236,8 +237,8 @@ describe('paletteItems（AC-B2）', () => {
 
   it('(e) 足の行: ラベルの価格は marketAddPlan の建値（売 = bid・買 = ask）、作れない組は出ない、先頭は ATM', () => {
     const month = m1;
-    // 先頭の「板から追加」（#325）を除いた bid / ask の行
-    const legs = ofGroup(items, 'leg').filter((r) => r.id !== 'leg:pick');
+    // 先頭の「板から追加」（#325）・形の行（#20）を除いた bid / ask の行（id が leg:<限月>: で始まる）
+    const legs = ofGroup(items, 'leg').filter((r) => /^leg:\d{4}-\d{2}:/.test(r.id));
     const monthText = monthSegOptions(chain.months).find((o) => o.value === month.id)?.text;
     expect(monthText).toBeTruthy();
     let expected = 0;
@@ -291,8 +292,11 @@ describe('paletteItems（AC-B2）', () => {
   });
 
   it('足の行: 板なし・無い限月は「板から追加」の 1 行だけ（例外を投げない）', () => {
-    // 板なし: 板から追加だけ（押せない・理由は「板が無い」。#325）
-    expect(ofGroup(paletteItems(inputOf(twoLegs, { chain: null })), 'leg')).toEqual([
+    // 板なし: 板から追加だけ（押せない・理由は「板が無い」。#325）。形の行（#20）は別の it
+    const notShape = (r: PaletteItem) => !r.id.startsWith('leg:shape');
+    expect(
+      ofGroup(paletteItems(inputOf(twoLegs, { chain: null })), 'leg').filter(notShape),
+    ).toEqual([
       {
         id: 'leg:pick',
         group: 'leg',
@@ -303,8 +307,52 @@ describe('paletteItems（AC-B2）', () => {
       },
     ]);
     expect(
-      ofGroup(paletteItems(inputOf(twoLegs, { monthId: '1999-01' })), 'leg').map((r) => r.id),
+      ofGroup(paletteItems(inputOf(twoLegs, { monthId: '1999-01' })), 'leg')
+        .filter(notShape)
+        .map((r) => r.id),
     ).toEqual(['leg:pick']);
+  });
+
+  it('#20 「足」の群に「形から組む…」1 件と形ごとの 12 件（板があれば押せる・run は shape）', () => {
+    const legs = ofGroup(items, 'leg');
+    const shapes = legs.filter((r) => r.id.startsWith('leg:shape'));
+    expect(shapes.map((r) => r.id)).toEqual([
+      'leg:shape',
+      ...SHAPES.map((s) => `leg:shape:${s.id}`),
+    ]);
+    // 並びは 板から追加 → 形から組む… → 形 12 件 → 行使価格の行
+    expect(legs.slice(0, 14).map((r) => r.id)).toEqual(['leg:pick', ...shapes.map((r) => r.id)]);
+    expect(shapes[0]).toEqual({
+      id: 'leg:shape',
+      group: 'leg',
+      label: '形から組む…',
+      disabled: false,
+      run: { kind: 'shape', shape: null },
+    });
+    for (const [i, s] of SHAPES.entries()) {
+      const r = shapes[i + 1];
+      expect(r?.label).toBe(`形: ${s.short ?? s.name}`);
+      expect(r?.disabled).toBe(false);
+      expect(r?.run).toEqual({ kind: 'shape', shape: s.id });
+      expect(r?.keywords).toContain(s.keywords);
+    }
+    // 検索: 「ストラングル」で先頭はストラングル売り、英語の読みでも出る
+    expect(paletteFilter(items, 'ストラングル')[0]?.id).toBe('leg:shape:short_strangle');
+    // 「売 P」の先頭は行使価格の行（形の行が先に出ない。#89 AC-B5(d)）
+    expect(paletteFilter(items, '売 P')[0]?.id).toMatch(/^leg:\d{4}-\d{2}:\d+:put:sell$/);
+    expect(paletteFilter(items, 'iron condor').map((r) => r.id)).toContain('leg:shape:iron_condor');
+  });
+
+  it('#20 板が無ければ形の行は押せない（title「板が無い」・run は null）', () => {
+    const shapes = ofGroup(paletteItems(inputOf(twoLegs, { chain: null })), 'leg').filter((r) =>
+      r.id.startsWith('leg:shape'),
+    );
+    expect(shapes).toHaveLength(13);
+    for (const r of shapes) {
+      expect(r.disabled).toBe(true);
+      expect(r.title).toBe('板が無い');
+      expect(r.run).toBeNull();
+    }
   });
 
   it('#325 「足」の群の先頭に「板から追加」が 1 件（板があれば押せる）', () => {

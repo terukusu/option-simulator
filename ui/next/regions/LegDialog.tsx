@@ -14,6 +14,7 @@ import {
 import type { ToastInput } from '../../view/toast';
 import { Dialog } from '../parts/Dialog';
 import { Seg } from '../parts/Seg';
+import { focusIfLost } from '../useGlobalKeys';
 
 type Kind = 'future' | 'option';
 const KINDS = [
@@ -65,6 +66,8 @@ function LegDialogBody(p: {
     }
     p.dispatch(r.action);
     p.onClose();
+    // 空の欄の [手入力…] から開いた（開いたボタンが足で消えた）ならフォーカスは入れた足（最後の行）へ（#20 レビュー N3）
+    focusIfLost('section.positions li.leg:last-child .leg-main');
     p.push({ kind: 'leg-add', text: r.toast });
   };
 

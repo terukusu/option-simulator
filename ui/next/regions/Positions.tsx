@@ -28,6 +28,7 @@ import {
   scenarioLegsByRow,
   type UndoToast,
 } from '../../view/positionsRegion';
+import { SHAPES_LABEL } from '../../view/shapes';
 import type { ToastInput } from '../../view/toast';
 import {
   clearBlockedText,
@@ -61,6 +62,8 @@ interface Props {
   onClear: () => void;
   /** 建値を今の板に合わせる（#298。処理は NextApp = パレットと同じ。[元に戻す] 付きのトースト） */
   onRebase: () => void;
+  /** 形から組む（#20。形の一覧のダイアログは NextApp = パレットの「形: …」と同じ） */
+  onShapes: () => void;
 }
 
 const fmtQty = (v: number) => fmtNum(v);
@@ -153,7 +156,13 @@ export function Positions(p: Props) {
   const clearBlocked = clearBlockedText(c.curLegs.length, held);
   // 並びは足す操作が先・消す操作が最後（#325）。「板から追加」は見出しのボタンにあるので置かない（同じ機能の入口は 1 本）
   const items: MenuItem[] = [
-    // #20: 「形から組む…」はここ（先頭）に足す
+    {
+      key: 'shapes',
+      label: SHAPES_LABEL,
+      disabled: !hasChain,
+      ...(hasChain ? {} : { title: NO_CHAIN_TEXT }),
+      onSelect: p.onShapes,
+    },
     {
       key: 'add',
       label: '手入力で足を追加…',
@@ -230,7 +239,15 @@ export function Positions(p: Props) {
             <p>{EMPTY_LEGS_TEXT}</p>
             <div class="acts">
               {pickButton('btn sm')}
-              {/* #20: [形から組む…] はここ（2 つの間）に足す */}
+              <button
+                type="button"
+                class="btn sm"
+                disabled={!hasChain}
+                title={hasChain ? undefined : NO_CHAIN_TEXT}
+                onClick={p.onShapes}
+              >
+                {SHAPES_LABEL}
+              </button>
               <button
                 type="button"
                 class="btn sm"

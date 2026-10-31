@@ -1,0 +1,253 @@
+/*
+ * 形の一覧（#20。ui/next/regions/ShapeDialog.tsx・docs/ui-redesign.md「形の一覧」）。dialog.sheet.shapes の中身だけ。
+ * 一覧は 2 列（360px でも。左 = 売り・右 = 買い）。形の行 = 名前（行の幅いっぱい）/ 小さな図 + 一言。形の名前・足の行・値・
+ * ボタンは折り返さない（一言は 1 行で省略記号、全文はカードの説明 = <p> と読み上げ名）。色は var(--…) だけ。
+ */
+
+.shape-list {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: var(--sp-2);
+}
+
+.shape-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  min-width: 0;
+}
+
+.shape-gh {
+  margin: 0 0 2px;
+  color: var(--ink-3);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+}
+
+.shape-item {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 2px;
+  min-width: 0;
+  padding: 5px 6px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-sm);
+  background: var(--s1);
+  color: var(--ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.shape-item:hover {
+  background: var(--s3);
+}
+
+.shape-item[aria-pressed="true"] {
+  border-color: var(--accent);
+  background: var(--accent-fill);
+}
+
+.shape-sub {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+}
+
+.shape-fig {
+  flex: 0 0 auto;
+  width: 28px;
+  height: 14px;
+  overflow: visible;
+}
+
+.shape-fig polyline {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 1.6;
+  stroke-linejoin: round;
+}
+
+.shape-fig .zero {
+  stroke: var(--line-2);
+  stroke-width: 1;
+}
+
+.shape-name {
+  min-width: 0;
+  overflow: hidden;
+  font-size: var(--fs-sub);
+  font-weight: 600;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.shape-note {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--ink-3);
+  font-size: var(--fs-xs);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.shape-empty {
+  margin: var(--sp-3) 0 0;
+  color: var(--ink-3);
+  font-size: var(--fs-sub);
+}
+
+/* ===== カード ===== */
+.shape-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  margin-top: var(--sp-3);
+  padding-top: var(--sp-3);
+  border-top: 1px solid var(--line);
+}
+
+.shape-title {
+  margin: 0;
+  font-size: var(--fs-body);
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.shape-desc {
+  margin: 0;
+  color: var(--ink-3);
+  font-size: var(--fs-sm);
+  line-height: 1.45;
+}
+
+.shape-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.shape-fld {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  min-width: 0;
+  white-space: nowrap;
+}
+
+.shape-fld > .lab {
+  flex: 0 0 auto;
+  color: var(--ink-2);
+  font-size: var(--fs-sub);
+}
+
+.shape-fld > .ctl {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.shape-fld .stepper {
+  width: 116px;
+}
+
+.shape-why {
+  margin: 0;
+  color: var(--ink-2);
+  font-size: var(--fs-sub);
+  line-height: 1.45;
+}
+
+.shape-why.warn {
+  color: var(--warn);
+}
+
+.shape-legs {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.shape-legs li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  white-space: nowrap;
+}
+
+.shape-legs .side {
+  padding: 0 5px;
+  border-radius: 4px;
+  font-size: var(--fs-xs);
+  font-weight: 700;
+  line-height: 16px;
+}
+
+.shape-legs .side[data-side="sell"] {
+  background: var(--loss-fill);
+  color: var(--loss);
+}
+
+.shape-legs .side[data-side="buy"] {
+  background: var(--gain-fill);
+  color: var(--gain);
+}
+
+.shape-legs .txt {
+  font-family: var(--mono);
+  font-size: var(--fs-sub);
+}
+
+.shape-vals {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 6px var(--sp-2);
+}
+
+.shape-kv {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  padding: 5px 7px;
+  border-radius: var(--r-sm);
+  background: var(--s1);
+}
+
+.shape-kv .k {
+  overflow: hidden;
+  color: var(--ink-3);
+  font-size: var(--fs-xs);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.shape-kv .v {
+  font-family: var(--mono);
+  font-size: var(--fs-body);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.shape-kv .u {
+  margin-left: 3px;
+  color: var(--ink-3);
+  font-family: var(--font);
+  font-size: var(--fs-xs);
+  font-weight: 400;
+}
+
+.shape-acts {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--sp-2);
+  margin-top: var(--sp-1);
+}

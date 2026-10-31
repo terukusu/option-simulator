@@ -25,10 +25,11 @@ import {
   THEME_KEY,
 } from './keys';
 import { type PinMenuInput, pinMenuRows } from './pins';
-import { PICK_LABEL } from './positionsRegion';
+import { PICK_LABEL, SHAPES_LABEL } from './positionsRegion';
 import { evalChips, presetChips, type ScenarioRegionInput } from './scenarioRegion';
 import { CHART_MODES, DOCK_LABELS, type PanelId, type ShellAction } from './shell';
 import type { TabsView } from './tabs';
+import { SHAPES, type ShapeId } from './templates';
 import {
   clearBlockedText,
   HOLDINGS_LABEL,
@@ -111,6 +112,8 @@ export type PaletteRun =
   | { kind: 'add'; add: MarketAddInput }
   /** 板から追加（#325。ポジションの見出しの [＋ 板から追加] と同じ） */
   | { kind: 'pick' }
+  /** 形の一覧を開く（#20。shape = その形のカードで開く、null = 一覧だけ。ポジションの ⋯ の「形から組む…」と同じ） */
+  | { kind: 'shape'; shape: ShapeId | null }
   /** 保有ポジションの一覧（#302） */
   | { kind: 'holdings' }
   | { kind: 'book' }
@@ -227,6 +230,27 @@ function legItems(chain: Chain | null, monthId: string, atmK: number | null): Pa
   return out;
 }
 
+/**
+ * 形の行（#20）: 「形から組む…」と形ごとの「形: <名前>」（検索の語に英語の読み）。名前は一覧と同じ短い名前（put レシオの
+ * 「（1 買 2 売）」を入れない = 「売 P」の検索で行使価格の行より先に出ない。#89 AC-B5(d)）
+ */
+function shapeItems(hasChain: boolean): PaletteItem[] {
+  const o = { disabled: !hasChain, title: NO_CHAIN_TEXT };
+  const out = [item('leg', 'shape', SHAPES_LABEL, { kind: 'shape', shape: null }, o)];
+  for (const s of SHAPES) {
+    const row = item(
+      'leg',
+      `shape:${s.id}`,
+      `形: ${s.short ?? s.name}`,
+      { kind: 'shape', shape: s.id },
+      o,
+    );
+    row.keywords = `${s.keywords}\n${s.id}`;
+    out.push(row);
+  }
+  return out;
+}
+
 /** パレットの行（並びは PALETTE_GROUPS の順で固定） */
 export function paletteItems(input: PaletteInput): PaletteItem[] {
   const out: PaletteItem[] = [];
@@ -318,7 +342,7 @@ export function paletteItems(input: PaletteInput): PaletteItem[] {
       },
     ),
   );
-  // 足: 先頭に板から追加（#325。板が無ければ押せない）。#20 の「形から組む…」はこの次に足す
+  // 足: 先頭に板から追加（#325）、次に形から組む…と形ごと（#20）。どれも板が無ければ押せない
   out.push(
     item(
       'leg',
@@ -328,6 +352,7 @@ export function paletteItems(input: PaletteInput): PaletteItem[] {
       { disabled: input.chain === null, title: NO_CHAIN_TEXT },
     ),
   );
+  out.push(...shapeItems(input.chain !== null));
   out.push(...legItems(input.chain, input.monthId, input.atmK));
   // タブ（＋ のメニューと同じ）
   for (const r of addMenuModel(input.tabs)) {

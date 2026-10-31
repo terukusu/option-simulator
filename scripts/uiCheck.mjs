@@ -196,6 +196,12 @@
 //                                          足はそのまま、帯 → ドックの [指標] で帯 0 個、足 0 本の空の欄の [板から追加]、帯の上の K の
 //                                          吹き出し（Esc 1 回目は吹き出しだけ・開いたまま bid で戻り履歴のずれ無し）。1440×900 は
 //                                          市場の列が板・帯 0 個（AI の列からでも）。--shots で pick-*.png。既定の実行は「帯を出した板」
+//   --shapes                               #20 の形から組むの項目だけ（--flows にも入る）: 390×844・1440×900 で ⋯ → 形から組む… →
+//                                          ストラングル売り → 2 限 → [このタブに足す] で足 +2（put 売り・call 売り・建値 = bid）・閉じる・
+//                                          トースト [元に戻す] → 前の足、[新しいタブに入れる] でタブ +1 → [元に戻す] で閉じる、タブ 6 個で
+//                                          [新しいタブに入れる] が disabled・title、戻る 1 回・Esc で閉じて ⋯ にフォーカス、足 0 本の
+//                                          空の欄の [形から組む…]、1440×900 のパレット「ストラングル」→ そのカード。--shots で shapes-*.png。
+//                                          既定の実行は「形の一覧（ストラングル売りのカード）」と「足 0 本の空の欄（3 ボタン）」
 //   --url <base>                           dev サーバーを起こさず、その URL を使う（例 http://127.0.0.1:5173/?parts）
 //   --dom <file>                           body の下の要素の tag.class の並びを書き出す（DOM の変化の比較用）
 //   --shots <dir>                          スクリーンショットを書く（合成の板だけ。リポジトリに入れない）
@@ -266,6 +272,7 @@ const known = new Set([
   '--manual',
   '--tabs',
   '--pick',
+  '--shapes',
 ]);
 for (const a of args) {
   if (a.startsWith('--') && !known.has(a)) {
@@ -294,6 +301,7 @@ const manualOnly = flag('--manual');
 const fontsOnly = flag('--fonts');
 const tabsOnly = flag('--tabs');
 const pickOnly = flag('--pick');
+const shapesOnly = flag('--shapes');
 const mode = parts ? 'parts' : 'next';
 
 // ---- 足 2 本の作業（版 2）: workspace-v2.json のタブ A だけ（fixture は変えない）
@@ -1502,6 +1510,9 @@ async function measureAll() {
     console.log(
       `板から追加の帯の検査（#325）: ${pickBandStats.pass} / ${pickBandStats.total} 状態で pass`,
     );
+    // 形の一覧と足 0 本の空の欄の 3 ボタン（#20）
+    await shapesAll();
+    console.log(`形から組むの検査（#20）: ${shapesStats.pass} / ${shapesStats.total} 状態で pass`);
     // 市場の追加の状態（1200 / 1280 / 1800・322 行の板・字幅 2 通り。#85）
     await marketSweep();
     console.log(
@@ -4170,6 +4181,517 @@ async function pickBandAll() {
   }
 }
 
+// ---- #20 形から組む（--shapes と --flows。既定の実行は shapesAll）
+// 形の一覧のダイアログ: 一覧（売り / 買い）→ 形のカード（限月・距離・翼・枚数、組んだ足と値）→ [このタブに足す] / [新しいタブに入れる]
+
+const SHAPES_DLG = 'dialog.sheet.shapes[open]';
+const SHAPES_MENU = '形から組む…';
+/** ダイアログの中で文字が切れない（scrollWidth ≤ clientWidth）・1 行の要素 */
+const SHAPE_ONE_LINE = [
+  '.shape-name',
+  '.shape-title',
+  '.shape-legs li',
+  '.shape-kv .k',
+  '.shape-kv .v',
+  '.shape-acts button',
+  '.shape-fld',
+  '.shape-item',
+];
+
+/** ダイアログの中の切れ・はみ出し（要素ごとに scrollWidth > clientWidth か、文字の行が 2 つ以上）。無ければ空 */
+const shapeCuts = (page) =>
+  page.evaluate(
+    ({ dlg, sels }) => {
+      const root = document.querySelector(dlg);
+      if (!root) return ['ダイアログが無い'];
+      const bad = [];
+      for (const sel of sels) {
+        for (const el of root.querySelectorAll(sel)) {
+          if (el.getClientRects().length === 0) continue;
+          // 文字のノードごとの行の数の最大（字の大きさ・部品の違う子の上端のずれは数えない）
+          let lines = 1;
+          const walk = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+          for (let n = walk.nextNode(); n !== null; n = walk.nextNode()) {
+            if ((n.textContent ?? '').trim() === '') continue;
+            // 一言（.shape-note）は省略記号で 1 行（切れてよい = 全文はカードの説明と読み上げ名）
+            if (n.parentElement?.closest('.shape-note')) continue;
+            const range = document.createRange();
+            range.selectNodeContents(n);
+            const tops = new Set();
+            for (const r of range.getClientRects()) if (r.width > 0) tops.add(Math.round(r.top));
+            lines = Math.max(lines, tops.size);
+          }
+          const cut = el.scrollWidth > el.clientWidth + 0.5;
+          // 1 つの要素の中で文字の行が 2 つ（ボタン・行の中の折り返し）
+          if (cut || lines > 1)
+            bad.push(
+              `${sel}「${(el.textContent ?? '').trim().slice(0, 16)}」${cut ? ` ${el.scrollWidth}/${el.clientWidth}` : ''}${tops.size > 1 ? ` 行 ${tops.size}` : ''}`,
+            );
+        }
+      }
+      // ダイアログ自身が窓に収まる
+      const r = root.getBoundingClientRect();
+      if (r.left < 0 || r.top < 0 || r.right > innerWidth + 0.5 || r.bottom > innerHeight + 0.5)
+        bad.push(
+          `ダイアログが窓の外 ${Math.round(r.left)},${Math.round(r.top)}-${Math.round(r.right)},${Math.round(r.bottom)}`,
+        );
+      const body = root.querySelector('.sheet-body');
+      if (body && body.scrollWidth > body.clientWidth + 0.5)
+        bad.push(`.sheet-body の横 ${body.scrollWidth}/${body.clientWidth}`);
+      return bad;
+    },
+    { dlg: SHAPES_DLG, sels: SHAPE_ONE_LINE },
+  );
+
+/** ポジションの ⋯ → 形から組む… */
+async function shapesFromMenu(page) {
+  await page.click('section.positions button[aria-label="ポジションの操作"]');
+  await page.click(`[role="menuitem"]:has-text("${SHAPES_MENU}")`);
+  return page
+    .waitForSelector(SHAPES_DLG, { timeout: 3000 })
+    .then(() => true)
+    .catch(() => false);
+}
+
+/** 一覧の形を押す（data-shape）・限月の Seg（文字）を押す */
+async function shapePick(page, id, month = null) {
+  await page.click(`${SHAPES_DLG} .shape-item[data-shape="${id}"]`);
+  await page.waitForTimeout(100);
+  if (month) {
+    await page.click(`${SHAPES_DLG} .shape-card [aria-label="限月"] button:has-text("${month}")`);
+    await page.waitForTimeout(100);
+  }
+}
+
+/** 保存された作業（作業中のタブの足・タブの数）。自動保存（500ms）を待つ */
+const shapeSaved = async (page) => {
+  await page.waitForTimeout(700);
+  return page.evaluate((k) => {
+    try {
+      const ws = JSON.parse(localStorage.getItem(k) ?? 'null');
+      return {
+        legs: ws?.tabs?.[ws.active]?.position?.legs ?? [],
+        tabs: ws?.tabs?.length ?? 0,
+        active: ws?.active ?? null,
+      };
+    } catch {
+      return { legs: [], tabs: 0, active: null };
+    }
+  }, WORKSPACE_KEY);
+};
+
+/** 合成の板のその限月・K・種別の bid */
+const sideBid = (month, k, type) =>
+  board.months.find((m) => m.contract_month === month)?.rows.find((r) => r.k === k)?.[type].bid ??
+  null;
+
+const shapesStats = { pass: 0, total: 0 };
+
+/**
+ * 既定の実行の 2 状態（#20）: 「形の一覧（ストラングル売りのカード）」と「足 0 本の空の欄（3 ボタン）」を
+ * 360×780・390×844・900×1100・1440×900 × ダーク / ライトで。縦・横 0px・折り返し（report）と、形の名前・足の行・カードの値・
+ * ボタンが切れない（scrollWidth ≤ clientWidth）・空の欄の 3 ボタンが 1 行で切れない
+ */
+async function shapesAll() {
+  for (const [w, h] of [
+    [360, 780],
+    [390, 844],
+    [900, 1100],
+    [1440, 900],
+  ]) {
+    for (const theme of ['dark', 'light']) {
+      // (1) 形の一覧（ストラングル売りのカード。2 限）
+      {
+        const ctx = await newContext(
+          { width: w, height: h },
+          { [WORKSPACE_KEY]: twoLegs, [PREFS_KEY]: prefsText(theme) },
+        );
+        const page = await ctx.newPage();
+        await page.goto(pageUrl('next'));
+        await waitReady(page, 'next');
+        const lbl = `next ${theme} 形の一覧（ストラングル売りのカード）`;
+        const why = [];
+        let ok = true;
+        if (w < 1200 && !(await setShell(page, 'positions', 'peek')))
+          why.push('ポジションを開けない');
+        const opened = await shapesFromMenu(page);
+        if (!opened) why.push('ダイアログが開かない');
+        else {
+          await shapePick(page, 'short_strangle', '12月限');
+          await settleMotion(page);
+          const legs = await page.locator(`${SHAPES_DLG} .shape-legs li`).count();
+          const vals = await page.locator(`${SHAPES_DLG} .shape-kv`).count();
+          if (legs !== 2 || vals !== 4) why.push(`足の行 ${legs}・値 ${vals}`);
+          const cuts = await shapeCuts(page);
+          if (cuts.length) why.push(...cuts);
+        }
+        if (why.length) ok = false;
+        if (!(await report(page, lbl, w, h, `next-${w}x${h}-${theme}-shapes`))) ok = false;
+        shapesStats.total++;
+        if (ok) shapesStats.pass++;
+        else {
+          failed = true;
+          console.log(`${lbl} ${w}x${h}: ${why.join('・')}  ← NG`);
+        }
+        await ctx.close();
+      }
+      // (2) 足 0 本の空の欄（3 ボタン）
+      {
+        const ctx = await newContext(
+          { width: w, height: h },
+          { [WORKSPACE_KEY]: noLegs, [PREFS_KEY]: prefsText(theme) },
+        );
+        const page = await ctx.newPage();
+        await page.goto(pageUrl('next'));
+        await waitReady(page, 'next');
+        const lbl = `next ${theme} 足 0 本の空の欄（3 ボタン）`;
+        const why = [];
+        let ok = true;
+        // 足 0 本で開いたときは板（#275）。ポジションを開く
+        if (w < 1200 && !(await setShell(page, 'positions', 'peek')))
+          why.push('ポジションを開けない');
+        const btns = await page.evaluate(() =>
+          [...document.querySelectorAll('section.positions .empty-state .acts button')].map((b) => {
+            const tops = new Set();
+            const range = document.createRange();
+            range.selectNodeContents(b);
+            for (const r of range.getClientRects()) if (r.width > 0) tops.add(Math.round(r.top));
+            const ar = b.getBoundingClientRect();
+            const pr = b.closest('.panel-body')?.getBoundingClientRect();
+            return {
+              text: b.textContent ?? '',
+              fit:
+                b.scrollWidth <= b.clientWidth &&
+                (!pr || (ar.left >= pr.left - 0.5 && ar.right <= pr.right + 0.5)),
+              // 文字の行（アイコンは数えない）: span / テキストの行の上端
+              lines: [...b.childNodes]
+                .filter((n) => n.nodeType === 3 || n.nodeName === 'SPAN')
+                .flatMap((n) => {
+                  const r = document.createRange();
+                  r.selectNodeContents(n);
+                  return [...r.getClientRects()]
+                    .filter((x) => x.width > 0)
+                    .map((x) => Math.round(x.top));
+                })
+                .filter((v, i, a) => a.indexOf(v) === i).length,
+            };
+          }),
+        );
+        const texts = btns.map((b) => b.text).join('｜');
+        if (texts !== '板から追加｜形から組む…｜手入力…') why.push(`ボタン ${texts}`);
+        for (const b of btns)
+          if (!b.fit || b.lines > 1) why.push(`「${b.text}」が切れる / 折り返す`);
+        if (why.length) ok = false;
+        if (!(await report(page, lbl, w, h, `next-${w}x${h}-${theme}-empty-3`))) ok = false;
+        shapesStats.total++;
+        if (ok) shapesStats.pass++;
+        else {
+          failed = true;
+          console.log(`${lbl} ${w}x${h}: ${why.join('・')}  ← NG`);
+        }
+        await ctx.close();
+      }
+    }
+  }
+}
+
+/** 形から組む（Issue #20 第 1 弾の AC。vp = 390×844・1440×900） */
+async function shapesFlows(vp) {
+  const tag = `#20 ${vp.width}x${vp.height}`;
+  const phoneSize = vp.width <= PHONE_MAX;
+  const shot = async (page, name) => {
+    if (shotsDir)
+      await page.screenshot({
+        path: join(shotsDir, `shapes-${vp.width}x${vp.height}-${name}.png`),
+      });
+  };
+  const toasts = (page) =>
+    page.evaluate(() =>
+      [...document.querySelectorAll('.toast:not(.note)')].map((t) => ({
+        text: t.querySelector('.txt')?.textContent ?? '',
+        undo: [...t.querySelectorAll('button')].some((b) => b.textContent === '元に戻す'),
+      })),
+    );
+  const undo = (page, text) =>
+    page.locator('.toast:not(.note)', { hasText: text }).locator('button', { hasText: '元に戻す' });
+  const openApp = async (ws) => {
+    const { ctx, page, errors } = await pickOpen(vp, ws);
+    if (phoneSize) await setShell(page, 'positions', 'full');
+    return { ctx, page, errors };
+  };
+
+  // (1) ⋯ → 形から組む… → ストラングル売り → 2 限 → [このタブに足す] → 足 +2（put 売り・call 売り、建値 = bid）・閉じる・
+  // トースト [元に戻す] → [元に戻す] で前の足と同じ
+  {
+    const { ctx, page, errors } = await openApp(twoLegs);
+    const before = await shapeSaved(page);
+    const opened = await shapesFromMenu(page);
+    await shapePick(page, 'short_strangle', '12月限');
+    await shot(page, '1-card');
+    const title = await page.textContent(`${SHAPES_DLG} .shape-title`).catch(() => null);
+    await page.click(`${SHAPES_DLG} .shape-acts button[data-act="current"]`);
+    await page.waitForTimeout(200);
+    const closed = (await page.locator(SHAPES_DLG).count()) === 0;
+    const after = await shapeSaved(page);
+    const added = after.legs.slice(before.legs.length).map((l) => l.leg);
+    const bidOk = added.every(
+      (l) => l.side === 'sell' && l.entry === sideBid(l.expiry, l.strike, l.type),
+    );
+    const ts = await toasts(page);
+    const t = ts.find((x) => x.text === 'ストラングル売り（2 本）を足した');
+    const selected = await page
+      .locator('section.positions li.leg:nth-child(3)')
+      .getAttribute('data-selected')
+      .catch(() => null);
+    check(
+      `${tag} ⋯ → 形から組む… → ストラングル売り → 2 限 → [このタブに足す] → 足 +2（put 売り・call 売り・建値 = bid・2026-12）・閉じる・トースト [元に戻す]・足した最初の足を選ぶ`,
+      opened &&
+        title === 'ストラングル売り' &&
+        after.legs.length === before.legs.length + 2 &&
+        added.map((l) => l.type).join(',') === 'put,call' &&
+        added.every((l) => l.expiry === '2026-12') &&
+        bidOk &&
+        closed &&
+        t?.undo === true &&
+        selected === '',
+      `開く ${opened}・見出し ${title}・足 ${before.legs.length} → ${after.legs.length}・${JSON.stringify(added.map((l) => [l.type, l.side, l.strike, l.entry]))}・閉じた ${closed}・トースト ${ts.map((x) => x.text).join(' / ')}・選択 ${selected}`,
+    );
+    await shot(page, '2-added');
+    await undo(page, 'ストラングル売り')
+      .click()
+      .catch(() => {});
+    const back = await shapeSaved(page);
+    check(
+      `${tag} [元に戻す] → 前の足と同じ`,
+      JSON.stringify(back.legs) === JSON.stringify(before.legs),
+      `足 ${back.legs.length}`,
+    );
+    check(`${tag} (1) ページのエラーなし`, errors.length === 0, errors.join(' / '));
+    await ctx.close();
+  }
+
+  // (2) [新しいタブに入れる] → タブ +1（足は形の 2 本）→ [元に戻す] で閉じる
+  {
+    const { ctx, page, errors } = await openApp(twoLegs);
+    const before = await shapeSaved(page);
+    await shapesFromMenu(page);
+    await shapePick(page, 'short_strangle', '12月限');
+    await page.click(`${SHAPES_DLG} .shape-acts button[data-act="new_tab"]`);
+    await page.waitForTimeout(200);
+    const after = await shapeSaved(page);
+    const ts = await toasts(page);
+    check(
+      `${tag} [新しいタブに入れる] → タブ +1・そのタブの足は 2 本・閉じる・トースト [元に戻す]`,
+      after.tabs === before.tabs + 1 &&
+        after.legs.length === 2 &&
+        (await page.locator(SHAPES_DLG).count()) === 0 &&
+        ts.some((x) => x.text === 'ストラングル売り（2 本）を新しいタブに入れた' && x.undo),
+      `タブ ${before.tabs} → ${after.tabs}・足 ${after.legs.length}・${ts.map((x) => x.text).join(' / ')}`,
+    );
+    await undo(page, '新しいタブに入れた')
+      .click()
+      .catch(() => {});
+    const back = await shapeSaved(page);
+    check(
+      `${tag} [元に戻す] → 足したタブを閉じて元のタブ（足は前のまま）`,
+      back.tabs === before.tabs && JSON.stringify(back.legs) === JSON.stringify(before.legs),
+      `タブ ${back.tabs}・足 ${back.legs.length}`,
+    );
+    check(`${tag} (2) ページのエラーなし`, errors.length === 0, errors.join(' / '));
+    await ctx.close();
+  }
+
+  // (3) タブ 6 個で [新しいタブに入れる] が disabled・title「タブは 6 個まで」
+  {
+    const { ctx, page, errors } = await openApp(busyWorkspace);
+    await shapesFromMenu(page);
+    await shapePick(page, 'short_strangle', '12月限');
+    const btn = `${SHAPES_DLG} .shape-acts button[data-act="new_tab"]`;
+    const dis = await page.isDisabled(btn).catch(() => false);
+    const title = await page.getAttribute(btn, 'title').catch(() => null);
+    const cur = await page.isDisabled(`${SHAPES_DLG} .shape-acts button[data-act="current"]`);
+    check(
+      `${tag} タブ 6 個で [新しいタブに入れる] が disabled・title「タブは 6 個まで」（[このタブに足す] は押せる）`,
+      dis && title === 'タブは 6 個まで' && !cur,
+      `${dis}・${title}・このタブ ${!cur}`,
+    );
+    check(`${tag} (3) ページのエラーなし`, errors.length === 0, errors.join(' / '));
+    await ctx.close();
+  }
+
+  // (4) 戻る 1 回・Esc でダイアログが閉じフォーカスが ⋯ に戻る（形を押してもダイアログの中に層を積まない）
+  for (const how of ['戻る', 'Esc']) {
+    const { ctx, page, errors } = await openApp(twoLegs);
+    const d0 = await backWait(page, 0);
+    await shapesFromMenu(page);
+    await shapePick(page, 'iron_condor');
+    await shapePick(page, 'calendar');
+    const d1 = await backWait(page, 1);
+    if (how === '戻る') await backGo(page);
+    else {
+      await page.keyboard.press('Escape');
+      await page.waitForTimeout(150);
+    }
+    const closed = (await page.locator(SHAPES_DLG).count()) === 0;
+    const focus = await page.evaluate(() => document.activeElement?.getAttribute('aria-label'));
+    const d2 = await backWait(page, 0);
+    check(
+      `${tag} 形を 2 つ押してから${how} 1 回 → 閉じて ⋯ にフォーカス・履歴 1 段 → 0（アプリに留まる）`,
+      d0.ok &&
+        d1.ok &&
+        closed &&
+        focus === 'ポジションの操作' &&
+        d2.ok &&
+        page.url() !== 'about:blank',
+      `back ${d0.now} → ${d1.now} → ${d2.now}・閉じた ${closed}・フォーカス ${focus}`,
+    );
+    check(`${tag} (4 ${how}) ページのエラーなし`, errors.length === 0, errors.join(' / '));
+    await ctx.close();
+  }
+
+  // (5) 足 0 本の空の欄の [形から組む…] → 一覧 → ストラングル売り → [このタブに足す] で足 2 本
+  {
+    const { ctx, page, errors } = await openApp(noLegs);
+    if (!phoneSize) {
+      // PC は足 0 本でもポジションが見えている
+    } else await setShell(page, 'positions', 'full');
+    const btn = page.locator('section.positions .empty-state button', { hasText: SHAPES_MENU });
+    const can = (await btn.count()) === 1 && (await btn.isEnabled());
+    await btn.click().catch(() => {});
+    const opened = await page
+      .waitForSelector(SHAPES_DLG, { timeout: 3000 })
+      .then(() => true)
+      .catch(() => false);
+    const empty = await page.textContent(`${SHAPES_DLG} .shape-empty`).catch(() => null);
+    await shapePick(page, 'short_strangle', '12月限');
+    await shot(page, '3-empty-card');
+    await page.click(`${SHAPES_DLG} .shape-acts button[data-act="current"]`);
+    await page.waitForTimeout(300);
+    const after = await shapeSaved(page);
+    const legs = after.legs.map((l) => l.leg);
+    // AC9 / U1 の手順 2: 2 限の put 売り・call 売り 1 枚ずつ、建値 = bid
+    const u1 =
+      legs.length === 2 &&
+      legs.map((l) => `${l.type}:${l.side}:${l.qty}:${l.expiry}`).join(',') ===
+        'put:sell:1:2026-12,call:sell:1:2026-12' &&
+      legs.every((l) => l.entry === sideBid(l.expiry, l.strike, l.type));
+    check(
+      `${tag} AC9 / U1: 足 0 本の空の欄の [形から組む…] → 一覧（形を選ぶ前はカードの代わりに案内）→ [ストラングル売り]（限月 12 月限）→ [このタブに足す] → 2 限の put 売り・call 売り 1 枚ずつ・建値 = bid`,
+      can && opened && empty === '形を選ぶと今の板で組んだ足と値が出ます' && u1,
+      `ボタン ${can}・開く ${opened}・案内 ${empty}・${JSON.stringify(legs.map((l) => [l.type, l.side, l.strike, l.entry, l.expiry]))}`,
+    );
+    // 開いたボタン（空の欄）は足で消える → フォーカスは足した最初の足の行（#20 レビュー N3。body に落とさない）
+    const focus = await backFocus(page);
+    check(
+      `${tag} 空の欄から足した後のフォーカスが足した最初の足の行（body に落ちない）`,
+      focus.startsWith('button.leg-main|') &&
+        focus.includes(' P ') &&
+        /\|section\.[^|]*\bpositions$/.test(focus),
+      focus,
+    );
+    check(`${tag} (5) ページのエラーなし`, errors.length === 0, errors.join(' / '));
+    await ctx.close();
+  }
+
+  // (7) 空の欄の [手入力…]（既定 = ミニ先物）→ [追加] → フォーカスが入れた足の行（N3 と同じ既存の挙動を直した）
+  {
+    const { ctx, page, errors } = await openApp(noLegs);
+    if (phoneSize) await setShell(page, 'positions', 'full');
+    await page
+      .locator('section.positions .empty-state button', { hasText: '手入力…' })
+      .click()
+      .catch(() => {});
+    await page
+      .waitForSelector('dialog[open] button[type="submit"]', { timeout: 3000 })
+      .catch(() => {});
+    await page.click('dialog[open] button[type="submit"]').catch(() => {});
+    await page.waitForTimeout(300);
+    const after = await shapeSaved(page);
+    const focus = await backFocus(page);
+    check(
+      `${tag} 空の欄の [手入力…] → [追加] → 足 1 本・フォーカスが入れた足の行（body に落ちない）`,
+      after.legs.length === 1 && focus.startsWith('button.leg-main|'),
+      `足 ${after.legs.length}・${focus}`,
+    );
+    check(`${tag} (7) ページのエラーなし`, errors.length === 0, errors.join(' / '));
+    await ctx.close();
+  }
+
+  // (8) U3: 足 0 本 → [形から組む…] → [カレンダー]（既定の 11 月限・ATM から 0 本）→ [このタブに足す] → 同じ K で
+  // 11 月限売り（bid）・12 月限買い（ask）。K は板の ATM の行（PC は表示中の 11 月限の板の強調行）
+  {
+    const { ctx, page, errors } = await openApp(noLegs);
+    if (phoneSize) await setShell(page, 'positions', 'full');
+    const atmK = phoneSize
+      ? null
+      : await page
+          .getAttribute(`${ACTIVE_WRAP} tr.atm`, 'data-k')
+          .then((v) => (v === null ? null : Number(v)))
+          .catch(() => null);
+    await page
+      .locator('section.positions .empty-state button', { hasText: SHAPES_MENU })
+      .click()
+      .catch(() => {});
+    await page.waitForSelector(SHAPES_DLG, { timeout: 3000 }).catch(() => {});
+    await shapePick(page, 'calendar');
+    const rows = await page.evaluate(
+      (d) => [...document.querySelectorAll(`${d} .shape-legs li`)].map((l) => l.textContent),
+      SHAPES_DLG,
+    );
+    await shot(page, '5-calendar');
+    await page.click(`${SHAPES_DLG} .shape-acts button[data-act="current"]`).catch(() => {});
+    await page.waitForTimeout(300);
+    const legs = (await shapeSaved(page)).legs.map((l) => l.leg);
+    const [a, b] = legs;
+    const ask = (month, k, type) =>
+      board.months.find((m) => m.contract_month === month)?.rows.find((r) => r.k === k)?.[type]
+        .ask ?? null;
+    const ok =
+      legs.length === 2 &&
+      a.strike === b.strike &&
+      a.type === b.type &&
+      a.side === 'sell' &&
+      a.expiry === '2026-11' &&
+      a.entry === sideBid(a.expiry, a.strike, a.type) &&
+      b.side === 'buy' &&
+      b.expiry === '2026-12' &&
+      b.entry === ask(b.expiry, b.strike, b.type) &&
+      (atmK === null || a.strike === atmK);
+    check(
+      `${tag} U3: [形から組む…] → [カレンダー] → [このタブに足す] → 同じ K（${phoneSize ? '' : '板の ATM の行・'}11 月限の ATM）で 11 月限売り（bid）・12 月限買い（ask）`,
+      ok,
+      `ATM ${atmK}・カード ${rows.join(' / ')}・${JSON.stringify(legs.map((l) => [l.type, l.side, l.strike, l.entry, l.expiry]))}`,
+    );
+    check(`${tag} (8) ページのエラーなし`, errors.length === 0, errors.join(' / '));
+    await ctx.close();
+  }
+
+  // (6) PC: パレット「ストラングル」→ ストラングル売りのカードで開く
+  if (!phoneSize) {
+    const { ctx, page, errors } = await openApp(twoLegs);
+    await openPalette(page);
+    await page.keyboard.type('ストラングル');
+    await page.waitForTimeout(100);
+    await page.keyboard.press('Enter');
+    const opened = await page
+      .waitForSelector(SHAPES_DLG, { timeout: 3000 })
+      .then(() => true)
+      .catch(() => false);
+    const title = await page.textContent(`${SHAPES_DLG} .shape-title`).catch(() => null);
+    const pressed = await page
+      .getAttribute(`${SHAPES_DLG} .shape-item[data-shape="short_strangle"]`, 'aria-pressed')
+      .catch(() => null);
+    await shot(page, '4-palette');
+    check(
+      `${tag} パレット「ストラングル」→ Enter → ストラングル売りのカードで開く`,
+      opened && title === 'ストラングル売り' && pressed === 'true',
+      `開く ${opened}・見出し ${title}・押した ${pressed}`,
+    );
+    check(`${tag} (6) ページのエラーなし`, errors.length === 0, errors.join(' / '));
+    await ctx.close();
+  }
+}
+
 // ---- #320 第 1 弾: 戻る（スマホの戻るジェスチャー・ブラウザの戻る）で開いているものを一番上から 1 つ閉じる（--back と --flows）
 // 「アプリを離れる」= about:blank を開いてからアプリへ goto した文脈で、goBack の後の page.url() が about:blank。
 // 段の数は history.state.back（ui/next/backStack.ts が積む）を待って確かめる（固定の待ち時間に頼らない）
@@ -5742,6 +6264,8 @@ async function runFlows() {
   for (const vp of [{ width: 360, height: 780 }, phone, { width: 900, height: 1100 }])
     await pickFlows(vp);
   await pickPcFlow();
+  // #20 形から組む（--shapes だけでも流せる）
+  for (const vp of [phone, pc]) await shapesFlows(vp);
 
   // (a) 開いただけでは作業の保存を書き換えない・ドックのバッジ
   {
@@ -16646,6 +17170,13 @@ try {
     ])
       await pickFlows(vp);
     await pickPcFlow();
+  } else if (shapesOnly && !parts) {
+    if (shotsDir) mkdirSync(shotsDir, { recursive: true });
+    for (const vp of [
+      { width: 390, height: 844 },
+      { width: 1440, height: 900 },
+    ])
+      await shapesFlows(vp);
   } else if (backOnly && !parts) {
     for (const vp of [
       { width: 390, height: 844 },
