@@ -236,7 +236,8 @@ describe('paletteItems（AC-B2）', () => {
 
   it('(e) 足の行: ラベルの価格は marketAddPlan の建値（売 = bid・買 = ask）、作れない組は出ない、先頭は ATM', () => {
     const month = m1;
-    const legs = ofGroup(items, 'leg');
+    // 先頭の「板から追加」（#325）を除いた bid / ask の行
+    const legs = ofGroup(items, 'leg').filter((r) => r.id !== 'leg:pick');
     const monthText = monthSegOptions(chain.months).find((o) => o.value === month.id)?.text;
     expect(monthText).toBeTruthy();
     let expected = 0;
@@ -289,9 +290,33 @@ describe('paletteItems（AC-B2）', () => {
     expect(atAtm).toEqual(['売 P', '買 P', '売 C', '買 C'].slice(0, atAtm.length));
   });
 
-  it('足の行: 板なし・無い限月は 0 行（例外を投げない）', () => {
-    expect(ofGroup(paletteItems(inputOf(twoLegs, { chain: null })), 'leg')).toEqual([]);
-    expect(ofGroup(paletteItems(inputOf(twoLegs, { monthId: '1999-01' })), 'leg')).toEqual([]);
+  it('足の行: 板なし・無い限月は「板から追加」の 1 行だけ（例外を投げない）', () => {
+    // 板なし: 板から追加だけ（押せない・理由は「板が無い」。#325）
+    expect(ofGroup(paletteItems(inputOf(twoLegs, { chain: null })), 'leg')).toEqual([
+      {
+        id: 'leg:pick',
+        group: 'leg',
+        label: '板から追加',
+        disabled: true,
+        title: '板が無い',
+        run: null,
+      },
+    ]);
+    expect(
+      ofGroup(paletteItems(inputOf(twoLegs, { monthId: '1999-01' })), 'leg').map((r) => r.id),
+    ).toEqual(['leg:pick']);
+  });
+
+  it('#325 「足」の群の先頭に「板から追加」が 1 件（板があれば押せる）', () => {
+    const legs = ofGroup(items, 'leg');
+    expect(legs.filter((r) => r.label === '板から追加')).toHaveLength(1);
+    expect(legs[0]).toEqual({
+      id: 'leg:pick',
+      group: 'leg',
+      label: '板から追加',
+      disabled: false,
+      run: { kind: 'pick' },
+    });
   });
 
   it('(f) タブが MAX_TABS のとき 空のタブを追加・このタブを複製が押せず title が TABS_FULL_TEXT', () => {

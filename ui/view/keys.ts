@@ -4,6 +4,7 @@
  * 純関数（Preact・DOM に依存しない）。document の keydown は ui/next/useGlobalKeys.ts だけが受ける。
  */
 import type { ThemePref } from '../prefs';
+import { BOARD_PICK_LAYER } from './backStack';
 import { leftView, type PanelId, type ShellAction, type ShellState, type Tier } from './shell';
 
 /** keydown の要約（KeyboardEvent から作る。editable・blocked は画面が DOM を見て決める） */
@@ -95,6 +96,22 @@ export function imeComposing(s: Pick<KeySummary, 'key' | 'isComposing' | 'keyCod
 }
 
 /**
+ * 板から追加の帯（#325）を Esc で消すか: 戻るのスタックの一番上が帯の層のときだけ（上に吹き出し・説明カード・
+ * ダイアログが重なっていればそれが先に閉じる）。IME の変換中・入力欄の Esc（編集の取りやめ。capture で受けるので
+ * 部品より先に来る）・部品が処理した Esc（preventDefault・claimEscape の印 = タブのつかみの取りやめなど）では消さない
+ */
+export function pickEscape(
+  s: Pick<KeySummary, 'key' | 'isComposing' | 'keyCode' | 'defaultPrevented' | 'editable'> & {
+    /** 上に重なったもの・先に受けた部品が claimEscape した */
+    claimed: boolean;
+  },
+  top: string | null,
+): boolean {
+  if (imeComposing(s) || s.defaultPrevented || s.claimed || s.editable) return false;
+  return s.key === 'Escape' && top === BOARD_PICK_LAYER;
+}
+
+/**
  * keydown の要約から全体のキーの動作を決める（無ければ null）。見る順は §4.6:
  * IME の変換中 → defaultPrevented → repeat → 入力欄 → ダイアログ → Ctrl / ⌘ + K → メニュー / ポップオーバー →
  * 修飾 → 1〜5・G・T。
@@ -114,7 +131,7 @@ export function globalKey(s: KeySummary): GlobalKey | null {
 }
 
 /**
- * 1〜5 で送る画面の状態の action（§4.6 の表。openBoardActions と同じ形）。
+ * 1〜5 で送る画面の状態の action（§4.6 の表）。
  * スマホは全部 open、タブレットはシナリオ（常設）以外 open、PC は板 / スマイルだけ market（左の列が AI なら市場に
  * 戻す）、AI は左の列の入れ替え（6 を押すたびに AI ⇄ 市場。#280）、ポジション・シナリオ・指標は常に見えるので何もしない。
  * どの幅でもこのあと画面がそのパネルのスクロールする枠（`.panel-body` / 板は `.board-wrap`）へフォーカスを移す。

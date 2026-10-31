@@ -32,6 +32,7 @@ import {
   proposalApply,
   proposeApplyTarget,
 } from '../view/aiPropose';
+import { BOARD_PICK_LAYER } from '../view/backStack';
 import { marketAddPlan, marketAddToast } from '../view/boardPanel';
 import { closedTabText, restoreTabError, type ShareResult, shareResultView } from '../view/boxTabs';
 import { fmtNum } from '../view/format';
@@ -40,7 +41,7 @@ import { keptBoardNote } from '../view/header';
 import { otherHeldCount } from '../view/holdings';
 import { type IndKind, toggleInd } from '../view/indicators';
 import { ivNowValue } from '../view/ivHistory';
-import { palettePanelActions } from '../view/keys';
+import { editableTarget, palettePanelActions, pickEscape } from '../view/keys';
 import { PC_QUERY, PHONE_QUERY } from '../view/layout';
 import { allowedLossOf } from '../view/margin';
 import { marketPill } from '../view/marketPill';
@@ -74,13 +75,14 @@ import {
 } from '../view/shell';
 import { overwrittenText, restoreEntryFailText } from '../view/topMenu';
 import { BookDialog } from './BookDialog';
-import { initBackHistory } from './backStack';
+import { initBackHistory, topLayerId, useBackLayer } from './backStack';
 import { HoldingsDialog } from './HoldingsDialog';
 import type { MarketAdd } from './market/BoardMonth';
 import { FutHistory } from './market/FutHistory';
 import { IvHistory } from './market/IvHistory';
 import { PanelHead } from './PanelHead';
 import { useAiAskHandler } from './parts/aiAsk';
+import { claimEscape, closeOverlay, escapeClaimed } from './parts/overlay';
 import { Palette } from './parts/Palette';
 import { TermCard } from './parts/TermCard';
 import { ToastSlot, useToastHost, useToasts } from './parts/Toast';
@@ -316,6 +318,53 @@ export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
   useGlobalKeys(keyCtx);
   // 戻る（スマホの戻るジェスチャー・ブラウザの戻る）で開いているものを 1 つ閉じる（#320。./backStack.ts）
   useEffect(() => initBackHistory(), []);
+  // 板から追加（#325）: 始めるのは見出し・空の欄の [＋ 板から追加] とパレット。フォーカスは板の枠へ（押したボタンが
+  // 隠れて body に落ちない。PC はキー 1 と同じ）
+  const onPickBoard = useCallback(() => {
+    send({ type: 'pick', tier });
+    focusPanelLater('board');
+  }, [tier]);
+  // 帯が出ている間は戻るの層 1 段（板の K の吹き出し・説明カードはこの上に積む）。戻る / Esc = 帯を消してポジションへ
+  const pickBack = useCallback(() => {
+    send({ type: 'pickBack' });
+    focusPanelLater('positions');
+  }, []);
+  const picking = shell.pick === true;
+  useBackLayer(BOARD_PICK_LAYER, picking, pickBack);
+  // Esc は capture で受ける: 吹き出し（バブルの listener）が先に閉じて一番上が帯に変わった同じ Esc で帯まで消さない
+  useEffect(() => {
+    if (!picking) return;
+    const onKey = (e: KeyboardEvent) => {
+      const t = e.target instanceof Element ? e.target : null;
+      const summary = {
+        key: e.key,
+        isComposing: e.isComposing,
+        keyCode: e.keyCode,
+        defaultPrevented: e.defaultPrevented,
+        // 入力欄（Stepper の数値・トップバーの欄など）の Esc は編集の取りやめ（useGlobalKeys と同じ判定）
+        editable: editableTarget(
+          t === null
+            ? null
+            : {
+                tagName: t.tagName,
+                isContentEditable: t instanceof HTMLElement && t.isContentEditable,
+              },
+        ),
+        // タブのつかみの取りやめ（BoxTabs は window の capture で先に受けて claimEscape する）
+        claimed: escapeClaimed(e),
+      };
+      if (!pickEscape(summary, topLayerId())) return;
+      claimEscape(e);
+      e.preventDefault();
+      pickBack();
+    };
+    document.addEventListener('keydown', onKey, true);
+    return () => document.removeEventListener('keydown', onKey, true);
+  }, [picking, pickBack]);
+  // PC は帯を出さない（幅が PC に変わったら帯だけ消す。層も閉じる）
+  useEffect(() => {
+    if (tier === 'pc' && picking) send({ type: 'pickEnd' });
+  }, [tier, picking]);
   const { pendingShare } = c;
   const toasts = useToasts();
   const [picked, setPicked] = useState<number | null>(null);
@@ -618,6 +667,8 @@ export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
     if (tabRef.current === state.activeTab) return;
     tabRef.current = state.activeTab;
     dropUndo();
+    // 板から追加の帯も消す（#325。パネルはそのまま）
+    send({ type: 'pickEnd' });
   }, [state.activeTab, dropUndo]);
   const onChangeStrike = useCallback(
     (id: number, k: number) => {
@@ -644,12 +695,13 @@ export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
   const { chain } = state;
   const latest = useRef({ chain, nextId: state.nextId });
   latest.current = { chain, nextId: state.nextId };
-  const onMarketAdd = useCallback<MarketAdd>(
-    (expiry, k, type, side) => {
+  // 足が入ったら true（#325 の板から追加が戻るかを決める。スマイル・パレットは戻り値を使わない）
+  const onMarketAdd = useCallback(
+    (...[expiry, k, type, side]: Parameters<MarketAdd>): boolean => {
       const leg = marketAddPlan(latest.current.chain, { expiry, k, type, side });
       const id = latest.current.nextId;
       dispatch({ type: 'addBoardLeg', expiry, k, optionType: type, side });
-      if (!leg) return;
+      if (!leg) return false;
       // 再描画の前にもう一度押されても次の id を指す（reducer は足を入れたら nextId を 1 進める）
       latest.current = { ...latest.current, nextId: id + 1 };
       setPicked(id);
@@ -658,8 +710,23 @@ export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
         text: marketAddToast(leg),
         undo: () => dispatch({ type: 'removeLeg', id }),
       });
+      return true;
     },
     [dispatch, push],
+  );
+  // 板の bid / ask（#325）: 帯が出ていれば、足が入ったらポジションへ戻る（入った足は onMarketAdd が選ぶ）。入らなければ
+  // 帯と板のまま。shell は ref で読む（板の 322 行に渡す関数の参照を変えない）
+  const onBoardAdd = useCallback<MarketAdd>(
+    (expiry, k, type, side) => {
+      const ok = onMarketAdd(expiry, k, type, side);
+      if (shellRef.current.pick !== true) return;
+      send({ type: 'picked', ok });
+      if (!ok) return;
+      // 板の K の吹き出しを開いたまま隠さない（戻るの層を残さない）
+      closeOverlay();
+      focusPanelLater('positions');
+    },
+    [onMarketAdd],
   );
   const monthId = c.month?.id ?? chain?.months[0]?.id ?? '';
   // 市場ピル・警告のタグ（#87）: シナリオの操作では入力が変わらない（TopBar は pure）
@@ -768,6 +835,9 @@ export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
         return;
       case 'add':
         onMarketAdd(run.add.expiry, run.add.k, run.add.type, run.add.side);
+        return;
+      case 'pick':
+        onPickBoard();
         return;
       case 'holdings':
         c.openHoldings();
@@ -887,8 +957,7 @@ export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
           <Positions
             key={state.activeTab}
             c={c}
-            tier={tier}
-            send={send}
+            onPickBoard={onPickBoard}
             selectedLeg={selectedLeg}
             onSelectLeg={setPicked}
             push={push}
@@ -916,7 +985,8 @@ export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
               filterAsk={state.filterAsk}
               legs={c.curLegs}
               dispatch={dispatch}
-              onAdd={onMarketAdd}
+              onAdd={onBoardAdd}
+              pickBand={picking && tier !== 'pc'}
               marketSeg={seg}
               atmJump={atmJump}
               atmJumpDone={atmJumpDone}

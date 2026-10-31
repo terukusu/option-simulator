@@ -19,6 +19,7 @@ import {
   boardRowTexts,
 } from '../../view/boardPanel';
 import type { HeaderMonthView } from '../../view/header';
+import { PICK_BAND_TEXT } from '../../view/positionsRegion';
 import { BoardMonth, type Flash, type MarketAdd } from '../market/BoardMonth';
 import { MonthSeg } from '../market/MonthSeg';
 import { PanelHead } from '../PanelHead';
@@ -63,6 +64,8 @@ export interface BoardRegionProps {
   legs: readonly UiLeg[];
   dispatch: (a: Action) => void;
   onAdd: MarketAdd;
+  /** 板から追加の帯を出す（#325。スマホ・タブレットで始めた間だけ。案内だけ） */
+  pickBand: boolean;
   /** PC の見出しの市場の Seg（Shell が作る。他の段階は null） */
   marketSeg: ComponentChildren;
   /**
@@ -311,6 +314,10 @@ function BoardView(p: BoardRegionProps) {
           <ManualLinks place="board" />
         </Popover>
       </PanelHead>
+      {/* 常に置き、中身を入れ替える（後から挿した live region は読み上げない端末がある）。空のときは CSS で高さ 0 */}
+      <p class="pick-band" role="status">
+        {p.pickBand ? PICK_BAND_TEXT : ''}
+      </p>
       <div class="panel-body market-body" ref={bodyRef}>
         <div class="board-tools">
           <div class="row">

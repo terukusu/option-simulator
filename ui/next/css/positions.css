@@ -471,3 +471,14 @@
   display: flex;
   justify-content: flex-end;
 }
+
+/* ===== 見出しの [＋ 板から追加]（#325）: 文字 + 小さめのアイコン。折り返さない（.btn の nowrap） ===== */
+.pick-btn {
+  gap: 4px;
+}
+
+.pick-btn svg.ic,
+.empty-state .acts .btn svg.ic {
+  width: 14px;
+  height: 14px;
+}

@@ -4,6 +4,7 @@ import {
   type BackEffect,
   type BackEvent,
   type BackState,
+  BOARD_PICK_LAYER,
   backReduce,
   backTarget,
   backTop,
@@ -278,5 +279,61 @@ describe('backReduce', () => {
       for (const ef of r.effects) if (ef.kind === 'close') closed.push(...ef.ids);
     }
     expect(closed).toEqual(['term:3', 'term:2', 'term:1', 'overlay:p']);
+  });
+
+  it('#325 板から追加の層: 開く → 足が入って閉じる → 後始末で go(−1)、その popstate では何も閉じない', () => {
+    const opened = run([open(BOARD_PICK_LAYER), settle]);
+    expect(opened.effects).toEqual([{ kind: 'push', back: 1 }]);
+    const r = run([close(BOARD_PICK_LAYER), settle], opened.state);
+    expect(r.effects).toEqual([{ kind: 'go', n: -1 }]);
+    const r2 = backReduce(r.state, pop(0));
+    expect(r2.effects).toEqual([]);
+    expect(r2.state).toEqual({ layers: [], hist: 0, awaiting: null });
+  });
+
+  it('#325 板から追加の層: 戻るで閉じる → 帯の閉じ方だけ呼び、その後の close・後始末で push も go も無い', () => {
+    const opened = run([open(BOARD_PICK_LAYER), settle]).state;
+    const back = backReduce(opened, pop(0));
+    expect(back.effects).toEqual([{ kind: 'close', ids: [BOARD_PICK_LAYER] }]);
+    // 帯が消えて effect の cleanup が close を送っても、層は既に無い（履歴を積み増さない・戻しすぎない）
+    const r = run([close(BOARD_PICK_LAYER), settle], back.state);
+    expect(r.effects).toEqual([]);
+    expect(r.state).toEqual({ layers: [], hist: 0, awaiting: null });
+  });
+
+  it('#325 板から追加の層の上の K の吹き出し → 戻る 1 回目は吹き出し、2 回目で帯', () => {
+    let s = run([open(BOARD_PICK_LAYER), settle, open('overlay:k'), settle]).state;
+    const closed: string[] = [];
+    for (const b of [1, 0]) {
+      const r = backReduce(s, pop(b));
+      s = r.state;
+      for (const ef of r.effects) if (ef.kind === 'close') closed.push(...ef.ids);
+    }
+    expect(closed).toEqual(['overlay:k', BOARD_PICK_LAYER]);
+  });
+
+  it('#325 帯の上の K の吹き出しを開いたまま bid で足が入る → 吹き出しと帯を同じ後始末で閉じて go(−2)、その popstate で何も閉じない', () => {
+    const two = run([open(BOARD_PICK_LAYER), settle, open('overlay:k'), settle]);
+    expect(two.state.hist).toBe(2);
+    // closeOverlay（同期）→ 描画後の cleanup で帯の層
+    const r = run([close('overlay:k'), close(BOARD_PICK_LAYER), settle], two.state);
+    expect(r.effects).toEqual([{ kind: 'go', n: -2 }]);
+    const r2 = backReduce(r.state, pop(0));
+    expect(r2.effects).toEqual([]);
+    expect(r2.state).toEqual({ layers: [], hist: 0, awaiting: null });
+  });
+
+  it('#325 帯の上の K の吹き出しを閉じる後始末と帯を閉じる後始末が分かれても、go(−1) を 2 回で履歴の段が 0 に戻る', () => {
+    const two = run([open(BOARD_PICK_LAYER), settle, open('overlay:k'), settle]).state;
+    const a = run([close('overlay:k'), settle], two);
+    expect(a.effects).toEqual([{ kind: 'go', n: -1 }]);
+    // go の popstate を待つ間に帯が閉じる → 後始末は保留、popstate の後に go(−1)
+    const b = run([close(BOARD_PICK_LAYER), settle], a.state);
+    expect(b.effects).toEqual([]);
+    const c = backReduce(b.state, pop(1));
+    expect(c.effects).toEqual([{ kind: 'go', n: -1 }]);
+    const d = backReduce(c.state, pop(0));
+    expect(d.effects).toEqual([]);
+    expect(d.state).toEqual({ layers: [], hist: 0, awaiting: null });
   });
 });

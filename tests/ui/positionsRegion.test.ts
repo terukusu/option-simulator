@@ -31,6 +31,7 @@ import {
   addedToast,
   clearUndo,
   dropUndoToasts,
+  EMPTY_LEGS_TEXT,
   flipToast,
   futureForm,
   futureFormDefault,
@@ -42,8 +43,8 @@ import {
   legFairValue,
   legSpreadCosts,
   OPTION_FORM_DEFAULT,
-  openBoardActions,
   optionForm,
+  PICK_LABEL,
   positionRows,
   qtySpec,
   REBASE_COPY_UNDO_TEXT,
@@ -983,10 +984,12 @@ describe('AC-6 ヘッジの節', () => {
 });
 
 describe('空の状態と選んだ足のスクロール', () => {
-  it('[板を開く]: スマホ・タブレットは板のパネル、PC は市場の列を板に', () => {
-    expect(openBoardActions('phone')).toEqual([{ type: 'open', panel: 'board', tier: 'phone' }]);
-    expect(openBoardActions('tablet')).toEqual([{ type: 'open', panel: 'board', tier: 'tablet' }]);
-    expect(openBoardActions('pc')).toEqual([{ type: 'market', market: 'board' }]);
+  // 空の状態の [板を開く] は #325 で [板から追加] に置き換えた（規則は tests/ui/shell.test.ts の「#325 板から追加」）
+  it('#325 足を入れる入口の文言', () => {
+    expect(PICK_LABEL).toBe('板から追加');
+    expect(EMPTY_LEGS_TEXT).toBe(
+      '[板から追加] で板の bid（売り）/ ask（買い）を押すか、[手入力…] で足を入れる',
+    );
   });
 
   it('revealScrollTop: 見えていれば同じ、上にはみ出せば上端、下なら下端、高い行は上端', () => {

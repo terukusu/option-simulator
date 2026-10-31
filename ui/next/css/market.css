@@ -742,3 +742,25 @@ table.board .legbadge.buy {
     display: inline;
   }
 }
+
+/*
+ * 板から追加の帯（#325。スマホ・タブレットで板から追加を始めた間だけ文字が入る）。role="status" の要素は常に置き、
+ * 空のときは高さ 0（中身の入れ替えで読み上げる）。案内だけ（ボタンを置かない）。1 行・入らなければ省略記号
+ */
+.pick-band {
+  flex: 0 0 auto;
+  min-width: 0;
+  padding: 4px var(--sp-3);
+  overflow: hidden;
+  border-bottom: 1px solid var(--line);
+  background: var(--accent-fill);
+  color: var(--ink);
+  font-size: 12px;
+  line-height: 18px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.pick-band:empty {
+  display: none;
+}

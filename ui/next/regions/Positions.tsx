@@ -7,6 +7,7 @@ import { PANEL_FOCUS_LABEL } from '../../view/keys';
 import { type PositionRow, SIDE_LABEL, toggledSide } from '../../view/position';
 import {
   type DetailItem,
+  EMPTY_LEGS_TEXT,
   flipToast,
   type GreekLine,
   type HedgeLineView,
@@ -18,7 +19,8 @@ import {
   legDetail,
   legFairValue,
   legSpreadCosts,
-  openBoardActions,
+  MANUAL_ADD_SHORT,
+  PICK_LABEL,
   positionRows,
   qtySpec,
   removeUndo,
@@ -26,9 +28,13 @@ import {
   scenarioLegsByRow,
   type UndoToast,
 } from '../../view/positionsRegion';
-import type { ShellAction, Tier } from '../../view/shell';
 import type { ToastInput } from '../../view/toast';
-import { clearBlockedText, rebaseBlockedText, rebaseLabel } from '../../view/topMenu';
+import {
+  clearBlockedText,
+  NO_CHAIN_TEXT,
+  rebaseBlockedText,
+  rebaseLabel,
+} from '../../view/topMenu';
 import { PanelHead } from '../PanelHead';
 import { Icon } from '../parts/Icon';
 import { ManualLinks } from '../parts/ManualLinks';
@@ -41,8 +47,11 @@ import { LegDialog } from './LegDialog';
 
 interface Props {
   c: AppController;
-  tier: Tier;
-  send: (a: ShellAction) => void;
+  /**
+   * 板から追加（#325。NextApp = パレットと同じ）: スマホ・タブレットは板のパネルと帯（bid / ask で 1 本入ったら
+   * ポジションへ戻る）、PC は市場の列を板に
+   */
+  onPickBoard: () => void;
   /** 舞台で選んだ足（#82。NextApp のローカル） */
   selectedLeg: number | null;
   /** 行の詳細を開いたらその足を舞台でも選ぶ */
@@ -142,14 +151,21 @@ export function Positions(p: Props) {
   const { held } = c.tabsView.active;
   const rebaseBlocked = rebaseBlockedText(hasChain, c.curLegs.length, held, c.tabsView.canAdd);
   const clearBlocked = clearBlockedText(c.curLegs.length, held);
+  // 並びは足す操作が先・消す操作が最後（#325）。「板から追加」は見出しのボタンにあるので置かない（同じ機能の入口は 1 本）
   const items: MenuItem[] = [
-    // 足の本数で決める（板が読めず行が無いときも消せる = #275 でトップの ⋯ の全クリアを外したため）
+    // #20: 「形から組む…」はここ（先頭）に足す
     {
-      key: 'clear',
-      label: '全クリア',
-      disabled: clearBlocked !== null,
-      ...(clearBlocked === null ? {} : { title: clearBlocked }),
-      onSelect: onClear,
+      key: 'add',
+      label: '手入力で足を追加…',
+      disabled: !hasChain,
+      ...(hasChain ? {} : { title: NO_CHAIN_TEXT }),
+      onSelect: () => setDialog('leg'),
+    },
+    {
+      key: 'hedge',
+      label: 'デルタヘッジ…',
+      disabled: hedgeView === null,
+      onSelect: () => setDialog('hedge'),
     },
     {
       key: 'rebase',
@@ -158,14 +174,29 @@ export function Positions(p: Props) {
       ...(rebaseBlocked === null ? {} : { title: rebaseBlocked }),
       onSelect: p.onRebase,
     },
-    { key: 'add', label: '足を追加…', disabled: !hasChain, onSelect: () => setDialog('leg') },
+    // 足の本数で決める（板が読めず行が無いときも消せる = #275 でトップの ⋯ の全クリアを外したため）
     {
-      key: 'hedge',
-      label: 'デルタヘッジ…',
-      disabled: hedgeView === null,
-      onSelect: () => setDialog('hedge'),
+      key: 'clear',
+      label: '全クリア',
+      disabled: clearBlocked !== null,
+      ...(clearBlocked === null ? {} : { title: clearBlocked }),
+      onSelect: onClear,
     },
   ];
+  // [＋ 板から追加]（見出し・空の欄で同じ。板が無ければ押せない = 手入力と同じ条件）
+  const pickButton = (cls: string) => (
+    <button
+      type="button"
+      class={cls}
+      disabled={!hasChain}
+      title={hasChain ? undefined : NO_CHAIN_TEXT}
+      onClick={p.onPickBoard}
+    >
+      <Icon name="plus" />
+      {/* 文字は span に（アイコンと文字の行の上端が丸めで 1px ずれても折り返しと数えない） */}
+      <span>{PICK_LABEL}</span>
+    </button>
+  );
 
   return (
     <>
@@ -183,6 +214,7 @@ export function Positions(p: Props) {
           <TermLinks ids={HINT_TERMS.positions} />
           <ManualLinks place="positions" />
         </Popover>
+        {pickButton('btn sm pick-btn')}
         <Menu label="ポジションの操作" button={<Icon name="more" />} items={items} />
       </PanelHead>
       {/* biome-ignore lint/a11y/useSemanticElements: 1〜5 の行き先のスクロールする枠に名前を付ける（fieldset にしない） */}
@@ -195,24 +227,18 @@ export function Positions(p: Props) {
       >
         {rows.length === 0 ? (
           <div class="empty-state">
-            <p>板の bid（売り）/ ask（買い）を押すか、⋯ の「足を追加…」で足を入れる</p>
+            <p>{EMPTY_LEGS_TEXT}</p>
             <div class="acts">
-              <button
-                type="button"
-                class="btn sm"
-                onClick={() => {
-                  for (const a of openBoardActions(p.tier)) p.send(a);
-                }}
-              >
-                板を開く
-              </button>
+              {pickButton('btn sm')}
+              {/* #20: [形から組む…] はここ（2 つの間）に足す */}
               <button
                 type="button"
                 class="btn sm"
                 disabled={!hasChain}
+                title={hasChain ? undefined : NO_CHAIN_TEXT}
                 onClick={() => setDialog('leg')}
               >
-                足を追加…
+                {MANUAL_ADD_SHORT}
               </button>
             </div>
           </div>
