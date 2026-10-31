@@ -38,3 +38,27 @@ export function revealDelta(
   if (!(over > 0) || !Number.isFinite(over) || !Number.isFinite(room)) return 0;
   return Math.max(0, Math.min(over, room));
 }
+
+/**
+ * ポップオーバーをボタンの上に開くか（#320 第 2 弾で見つけた、窓の下端で切れる吹き出し）。下に開くと窓の下端（viewBottom）を
+ * 越え、上に開けば窓の上端（viewTop）の内側に収まるときだけ true。どちらにも入らなければ下（今まで）のまま。
+ * btnTop / btnBottom はボタン（.pop-wrap）の上端・下端、gap はボタンとポップオーバーのすき間、height はポップオーバーの高さ（px）。
+ * 下に開くと btnBottom + gap 〜 + height、上に開くと btnTop − gap − height 〜 btnTop − gap
+ */
+export function hintAbove(
+  btnTop: number,
+  btnBottom: number,
+  gap: number,
+  height: number,
+  viewTop: number,
+  viewBottom: number,
+): boolean {
+  if (
+    ![btnTop, btnBottom, gap, height, viewTop, viewBottom].every(Number.isFinite) ||
+    !(height > 0)
+  )
+    return false;
+  const g = Math.max(0, gap);
+  if (btnBottom + g + height <= viewBottom) return false;
+  return btnTop - g - height >= viewTop;
+}

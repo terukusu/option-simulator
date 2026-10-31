@@ -245,4 +245,38 @@ describe('backReduce', () => {
     expect(backTop(s)).toBe('d');
     expect(backTop(BACK_INITIAL)).toBeNull();
   });
+
+  it('#320 第 2 弾 AC-2-2: 説明カードを 3 つ積み、× で全部閉じる → go(−3) が 1 回', () => {
+    const three = run([open('term:1'), settle, open('term:2'), settle, open('term:3'), settle]);
+    expect(three.state.hist).toBe(3);
+    expect(three.effects).toEqual([
+      { kind: 'push', back: 1 },
+      { kind: 'push', back: 2 },
+      { kind: 'push', back: 3 },
+    ]);
+    const r = run([close('term:3'), close('term:2'), close('term:1'), settle], three.state);
+    expect(r.effects).toEqual([{ kind: 'go', n: -3 }]);
+    // その go の popstate では何も閉じない
+    expect(backReduce(r.state, pop(0)).effects).toEqual([]);
+  });
+
+  it('#320 第 2 弾: 吹き出しの上の説明カード 3 つ → 戻る 3 回で用語を 1 つずつ、4 回目で吹き出し', () => {
+    let s = run([
+      open('overlay:p'),
+      settle,
+      open('term:1'),
+      settle,
+      open('term:2'),
+      settle,
+      open('term:3'),
+      settle,
+    ]).state;
+    const closed: string[] = [];
+    for (const back of [3, 2, 1, 0]) {
+      const r = backReduce(s, pop(back));
+      s = r.state;
+      for (const ef of r.effects) if (ef.kind === 'close') closed.push(...ef.ids);
+    }
+    expect(closed).toEqual(['term:3', 'term:2', 'term:1', 'overlay:p']);
+  });
 });

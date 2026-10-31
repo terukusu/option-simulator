@@ -18,6 +18,7 @@ export const ICON_NAMES = [
   'info',
   'moon',
   'chevron',
+  'back',
 ] as const;
 
 export type IconName = (typeof ICON_NAMES)[number];
@@ -66,6 +67,8 @@ const PATHS: Record<IconName, ComponentChildren> = {
   moon: <path d="M15 10.2A6.25 6.25 0 1 1 7.8 3a4.9 4.9 0 0 0 7.2 7.2z" />,
   // ▸ 折りたたみの印（開いたら CSS で 90°）
   chevron: <path d="M7 4.5l4.5 4.5L7 13.5" />,
+  // ← 1 つ前に戻る（説明カードの見出し。#320 第 2 弾）
+  back: <path d="M14.5 9h-11M7.5 5l-4 4 4 4" />,
 };
 
 export function Icon(p: { name: IconName }) {

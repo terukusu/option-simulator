@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'preact/hooks';
-import { closeLayer, openLayer } from '../backStack';
+import { closeLayer, openLayer, topLayerId } from '../backStack';
 
 /**
  * 開いているメニュー / ポップオーバーの id を 1 つだけ持つ小さな購読ストア（#81。docs/ui-redesign.md §5）。
@@ -35,6 +35,31 @@ function backClose(id: string): void {
 /** いま開いているメニュー / ポップオーバーの id（無ければ null）。全体のキー（#89）が「ふさがっている」を読む */
 export function openOverlayId(): string | null {
   return openId;
+}
+
+/**
+ * id のメニュー / ポップオーバーが戻るのスタックの一番上か（#320 第 2 弾）。上に説明カード・ダイアログが重なっている
+ * 間は、外側の pointerdown・Esc で閉じない（重なったものの操作で下の吹き出しを閉じない）
+ */
+export function overlayOnTop(id: string): boolean {
+  return topLayerId() === layerOf(id);
+}
+
+/** 上に重なったもの（説明カード）が処理した Esc の印（#320 第 2 弾） */
+const claimed = new WeakSet<Event>();
+
+/**
+ * 上に重なったもの（説明カード）がこの Esc を処理した印を付ける。下の吹き出し・板の K はその Esc で閉じない
+ * （document の keydown の listener の登録順に頼らない）。preventDefault では見分けない: ダイアログが中の吹き出しの
+ * Esc で cancel を止めるために preventDefault するので、それで吹き出しが閉じなくなる
+ */
+export function claimEscape(e: Event): void {
+  claimed.add(e);
+}
+
+/** claimEscape の印があるか */
+export function escapeClaimed(e: Event): boolean {
+  return claimed.has(e);
 }
 
 /** 開いているメニュー / ポップオーバーを閉じる（#136。吹き出しの中の [AI に聞く] を押した後） */

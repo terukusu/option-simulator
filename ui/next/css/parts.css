@@ -380,6 +380,12 @@
   box-shadow: var(--shadow);
 }
 
+/* 窓の下端で切れるときはボタンの上に開く（#320 第 2 弾。Popover.tsx の hintAbove） */
+.popover.above {
+  top: auto;
+  bottom: calc(100% + var(--sp-1));
+}
+
 /* 幅の広いポップオーバー（#87: 市場ピル・警告のタグ）。高さは画面まで、中だけスクロール */
 .popover.wide {
   width: min(420px, calc(100vw - 16px));
