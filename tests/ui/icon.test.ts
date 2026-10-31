@@ -6,7 +6,7 @@ import { ICON_NAMES, Icon } from '../../ui/next/parts/Icon';
  *
  * (a) 部品の形: すべての名前で svg・viewBox 0 0 18 18・aria-hidden="true"・class に ic
  * (b) 色は currentColor か none だけ（色の値を書かない）、style の prop が無い（CSP）
- * (c) 名前の一覧が 10 個を含む
+ * (c) 名前の一覧が 11 個を含む（#320 第 2 弾で back）
  * (d) ソースの検査: ボタンの記号の文字・Popover / Menu の button="記号"・CSS の content: "▸" / "▾" が残らない
  *     （許すのはボタンでない記号の 2 か所 = 板の IV 不安定の印・損益グラフの十字線の読み取りの ×）
  */
@@ -30,7 +30,7 @@ function walk(node: unknown, out: VNodeLike[] = []): VNodeLike[] {
 }
 
 describe('Icon（#292）', () => {
-  it('(c) 名前の一覧が 10 個を含み重複がない', () => {
+  it('(c) 名前の一覧が 11 個を含み重複がない', () => {
     const want = [
       'refresh',
       'reset',
@@ -42,6 +42,7 @@ describe('Icon（#292）', () => {
       'info',
       'moon',
       'chevron',
+      'back',
     ];
     for (const n of want) expect(ICON_NAMES).toContain(n);
     expect(new Set(ICON_NAMES).size).toBe(ICON_NAMES.length);

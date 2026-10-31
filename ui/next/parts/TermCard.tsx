@@ -1,9 +1,10 @@
 import { useId, useLayoutEffect, useRef } from 'preact/hooks';
-import { type TermCardView, termCardView } from '../../view/glossary';
+import { type TermCardView, termById, termCardView } from '../../view/glossary';
+import type { TermChainItem } from '../../view/termChain';
 import { hideBackground } from './background';
 import { Icon } from './Icon';
-import { useOverlay } from './overlay';
-import { closeTerm, openTerm, useTermCard } from './termCard';
+import { claimEscape } from './overlay';
+import { backTerm, closeTerm, openTerm, setTermScrollReader, useTermCard } from './termCard';
 
 /**
  * 用語の説明カード（#167。docs/ui-redesign.md §5）。<dialog class="term-card" aria-modal="true"> を show() で開き、
@@ -11,18 +12,21 @@ import { closeTerm, openTerm, useTermCard } from './termCard';
  * NextApp に 1 つだけ置き、開く用語は ./termCard.ts のストア（ⓘ の「用語:」・内訳の見出し・パレットの用語の行）。
  *
  * - 開くと見出しへフォーカス。フォーカスがカードの外へ出たら見出しへ戻す。Tab はカードの中のボタンで回る。
- *   開いている間は背景（兄弟の要素）に aria-hidden（#124。./background.ts）。開いている間は overlay として数える
- *   （開いていたメニュー / ポップオーバーは閉じる）。全体のキーは dialog[open] で止まる
- * - Esc・×・背景（箱の外）のクリックで閉じ、開く前の要素へフォーカスを戻す（その要素が閉じたポップオーバーの中なら
- *   その ⓘ のボタンへ。無ければ blur）
- * - 関連する用語のボタンで中身を替える（本文の枠を先頭へ・見出しへフォーカス）
+ *   開いている間は背景（兄弟の要素）に aria-hidden（#124。./background.ts）。overlay として数えない（#320 第 2 弾。
+ *   ⓘ の吹き出しから開いても吹き出しは閉じずに下に残る）。全体のキーは dialog[open] で止まる
+ * - 関連する用語のボタンで用語の列に積む（#320 第 2 弾。ui/view/termChain.ts）。今の本文の位置を控え、新しい用語は
+ *   本文の先頭・見出しへフォーカス
+ * - 戻る・Esc・[← 戻る]（1 つ前の用語があるときだけ）は 1 つ前の用語へ（控えた本文の位置に戻す）。最初の用語なら閉じる
+ * - ×・背景（箱の外）のクリックは全部閉じる。閉じたら開く前の要素へフォーカスを戻す（その要素が閉じたポップオーバーの
+ *   中ならその ⓘ のボタンへ。無ければ blur）
  * - 中身は表示モデル（ui/view/glossary.ts の termCardView）を JSX のテキストで描くだけ（HTML 文字列・style を使わない）
  */
 export function TermCard() {
-  const id = useTermCard();
-  const view = id === null ? null : termCardView(id);
-  if (!view) return null;
-  return <TermCardBody view={view} />;
+  const { current, prev } = useTermCard();
+  const view = current === null ? null : termCardView(current.id);
+  if (!view || current === null) return null;
+  const prevTitle = prev === null ? null : (termById(prev)?.title ?? null);
+  return <TermCardBody view={view} item={current} prevTitle={prevTitle} />;
 }
 
 /** 戻す先: 開く前の要素。閉じたポップオーバー（[hidden]）の中ならその ⓘ のボタン */
@@ -54,21 +58,28 @@ function tabRing(dlg: HTMLDialogElement, e: KeyboardEvent): void {
   }
 }
 
-function TermCardBody({ view }: { view: TermCardView }) {
+function TermCardBody({
+  view,
+  item,
+  prevTitle,
+}: {
+  view: TermCardView;
+  item: TermChainItem;
+  /** 戻り先の用語の見出し（無ければ [← 戻る] を出さない） */
+  prevTitle: string | null;
+}) {
   const ref = useRef<HTMLDialogElement>(null);
   const boxRef = useRef<HTMLDivElement>(null);
   const headRef = useRef<HTMLHeadingElement>(null);
   const bodyRef = useRef<HTMLDivElement>(null);
   const prevRef = useRef<HTMLElement | null>(null);
   const titleId = useId();
-  // 戻るで閉じるときは Esc と同じ（#320）
-  const { setOpen } = useOverlay('term-card', closeTerm);
 
   useLayoutEffect(() => {
     const dlg = ref.current;
     prevRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     if (dlg && !dlg.open) dlg.show();
-    setOpen(true);
+    setTermScrollReader(() => bodyRef.current?.scrollTop ?? 0);
     // 見出しへフォーカスしてから背景を読み上げから外す（#124。./background.ts）
     headRef.current?.focus({ preventScroll: true });
     const showBg = dlg ? hideBackground(dlg) : null;
@@ -85,7 +96,8 @@ function TermCardBody({ view }: { view: TermCardView }) {
       }
       if (e.key !== 'Escape' || e.isComposing) return;
       e.preventDefault();
-      closeTerm();
+      claimEscape(e);
+      backTerm();
     };
     document.addEventListener('focusin', onFocusIn);
     document.addEventListener('keydown', onKey);
@@ -94,18 +106,19 @@ function TermCardBody({ view }: { view: TermCardView }) {
       document.removeEventListener('keydown', onKey);
       showBg?.();
       if (dlg?.open) dlg.close();
-      setOpen(false);
+      setTermScrollReader(null);
       const back = returnTarget(prevRef.current);
       if (back) back.focus({ preventScroll: true });
       else if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
     };
-  }, [setOpen]);
+  }, []);
 
-  // 開いたとき・関連する用語へ移ったとき: 本文の枠を先頭へ、見出しへフォーカス
+  // 開いたとき・用語が替わったとき: 本文の枠を控えた位置へ（新しく積んだ用語は先頭）、見出しへフォーカス
+  const scroll = item.scroll;
   useLayoutEffect(() => {
-    if (bodyRef.current) bodyRef.current.scrollTop = 0;
+    if (bodyRef.current) bodyRef.current.scrollTop = scroll;
     headRef.current?.focus({ preventScroll: true });
-  }, [view.id]);
+  }, [item.key]);
 
   return (
     // biome-ignore lint/a11y/useKeyWithClickEvents: 背景のクリックだけ。キーの閉じ方は Esc（文書の keydown）と ×
@@ -116,7 +129,7 @@ function TermCardBody({ view }: { view: TermCardView }) {
       aria-labelledby={titleId}
       onCancel={(e) => {
         e.preventDefault();
-        closeTerm();
+        backTerm();
       }}
       onClick={(e) => {
         // 背景（dialog 自身の、箱の外）のクリックで閉じる
@@ -133,6 +146,17 @@ function TermCardBody({ view }: { view: TermCardView }) {
     >
       <div class="tc-box" ref={boxRef}>
         <div class="tc-head">
+          {prevTitle !== null && (
+            <button
+              type="button"
+              class="btn ghost icon"
+              aria-label={`「${prevTitle}」に戻る`}
+              title={`「${prevTitle}」に戻る`}
+              onClick={backTerm}
+            >
+              <Icon name="back" />
+            </button>
+          )}
           <h2 id={titleId} ref={headRef} tabIndex={-1}>
             {view.title}
           </h2>

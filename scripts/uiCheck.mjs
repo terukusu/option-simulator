@@ -167,6 +167,9 @@
 //                                          ⋯ のメニュー・説明カード・（PC）パレットを開く → 戻る 1 回でそれだけ閉じ URL・フォーカスが Esc と同じ、
 //                                          ×・Esc・外のクリック・メニューの項目で閉じた後は戻る 1 回でアプリを離れる、重なり・置き換え・
 //                                          進む・再読み込み（空振りの回数を出す）・共有 URL の #p=・履歴を積まない操作（AC-1-2〜AC-1-10）
+//                                          第 2 弾（説明カードの 1 つ前に戻る）: AI の返答の用語 → 関連の用語 2 つ → 戻る / Esc / [← 戻る] で
+//                                          1 つずつ戻り本文の位置・AI の返答の枠の位置・フォーカスが戻る（AC-0）、ⓘ の吹き出しが下に残る
+//                                          （AC-2-3〜2-5）、360×780 の本文の位置（AC-2-6）、[← 戻る] の見出しの行（AC-2-7）
 //   --url <base>                           dev サーバーを起こさず、その URL を使う（例 http://127.0.0.1:5173/?parts）
 //   --dom <file>                           body の下の要素の tag.class の並びを書き出す（DOM の変化の比較用）
 //   --shots <dir>                          スクリーンショットを書く（合成の板だけ。リポジトリに入れない）
@@ -2943,6 +2946,9 @@ async function closeTermCard(page, label) {
 /**
  * 説明カード（#167 AC-9）: 360 / 390 / 900 / 1440 × ダーク / ライト で、(1) パレットの `?追証` → Enter（#275 で ⋯ >
  * 用語集… を外したので、どの幅も Ctrl + K。カードの描き方を幅ごとに測る）で追証の線、(2) その関連する用語の先頭へ移る、(3) シナリオの ⓘ の「用語: Δs」でスキュー Δs
+ *
+ * #320 第 2 弾（仕様の変更）: (2) の後の Esc は 1 つ前の用語（追証の線）へ戻り、× で全部閉じる。(3) の Esc でカードが閉じても
+ * ⓘ の吹き出しは開いたまま残り、フォーカスは吹き出しの中の「用語: スキュー Δs」のボタン。もう一度 Esc で吹き出しが閉じて ⓘ へ
  */
 async function termCardSweep() {
   for (const [w, h] of SIZES) {
@@ -2966,7 +2972,29 @@ async function termCardSweep() {
       // (2) 関連する用語の先頭（余力（概算））へ。中身が替わり、フォーカスはカードの中
       await page.click(`${TERM_CARD} .tc-related .term-link >> nth=0`).catch(() => {});
       await termCardCheck(page, `${tag} 関連する用語`, w, h, `${name}-related`, '余力（概算）');
-      await closeTermCard(page, `${tag} ${w}x${h}`);
+      // #320 第 2 弾: Esc は 1 つ前の用語へ、× で全部閉じる
+      await page.keyboard.press('Escape');
+      const prevTitle = await page
+        .waitForFunction(
+          (sel) => document.querySelector(sel)?.textContent === '追証の線',
+          `${TERM_CARD} .tc-head h2`,
+          { timeout: 2000 },
+        )
+        .then(() => true)
+        .catch(() => false);
+      if (!prevTitle) {
+        failed = true;
+        console.log(`${tag} ${w}x${h}: Esc で 1 つ前の用語（追証の線）に戻らない  ← NG`);
+      }
+      await page.click(`${TERM_CARD} .tc-head button[aria-label="閉じる"]`).catch(() => {});
+      const allClosed = await page
+        .waitForSelector(TERM_CARD, { state: 'detached', timeout: 2000 })
+        .then(() => true)
+        .catch(() => false);
+      if (!allClosed) {
+        failed = true;
+        console.log(`${tag} ${w}x${h}: × でカードが閉じない  ← NG`);
+      }
       // (3) シナリオの ⓘ の「用語: Δs」
       if (phone) await setShell(page, 'scenario', 'full');
       await page.click('section.scenario .panel-head .hintbtn');
@@ -2975,15 +3003,30 @@ async function termCardSweep() {
         .catch(() => {});
       await termCardCheck(page, `${tag} ⓘ`, w, h, `${name}-hint`, 'スキュー Δs');
       await closeTermCard(page, `${tag} ${w}x${h}`);
-      // 閉じたらフォーカスは ⓘ（閉じたポップオーバーの中のボタンから戻す先）
+      // #320 第 2 弾: カードが閉じても吹き出しは開いたまま、フォーカスは吹き出しの中の押した「用語:」のボタン
+      const toTerm = await page.evaluate(
+        () =>
+          document.activeElement?.getAttribute('aria-label') === '用語: スキュー Δs' &&
+          document.activeElement.closest('section.scenario .popover:not([hidden])') !== null,
+      );
+      if (!toTerm) {
+        failed = true;
+        console.log(
+          `${tag} ${w}x${h}: 閉じた後のフォーカスが吹き出しの中の「用語: スキュー Δs」でない  ← NG`,
+        );
+      }
+      // もう一度 Esc で吹き出しが閉じ、フォーカスは ⓘ
+      await page.keyboard.press('Escape');
+      await page.waitForTimeout(100);
       const back = await page.evaluate(
         () =>
           document.activeElement?.classList.contains('hintbtn') === true &&
-          document.activeElement.closest('section.scenario') !== null,
+          document.activeElement.closest('section.scenario') !== null &&
+          document.querySelector('section.scenario .popover:not([hidden])') === null,
       );
       if (!back) {
         failed = true;
-        console.log(`${tag} ${w}x${h}: 閉じた後のフォーカスがシナリオの ⓘ でない  ← NG`);
+        console.log(`${tag} ${w}x${h}: 吹き出しを閉じた後のフォーカスがシナリオの ⓘ でない  ← NG`);
       }
       await ctx.close();
     }
@@ -3782,11 +3825,14 @@ async function backFlows(vp) {
       outside: true,
     },
     {
-      name: '説明カード（ⓘ の「用語:」）',
-      prep: () => (phone ? setShell(page, 'scenario', 'full') : null),
+      // #320 第 2 弾でカードを開いても ⓘ の吹き出しは閉じなくなったので、1 つの層だけを開く入口（パレットの `?`）で。
+      // 吹き出しから開く流れは backTermFlows（AC-2-3〜2-5）
+      name: '説明カード（パレットの用語）',
       open: async () => {
-        await page.click(HINT);
-        await page.click('section.scenario .term-links .term-link[aria-label="用語: スキュー Δs"]');
+        await openPalette(page);
+        await page.keyboard.type('?スキュー');
+        await page.waitForTimeout(100);
+        await page.keyboard.press('Enter');
       },
       sel: TERM_CARD,
       x: `${TERM_CARD} .tc-head button[aria-label="閉じる"]`,
@@ -3931,9 +3977,11 @@ async function backFlows(vp) {
   // AC-1-5 (a) 吹き出し A を開いたまま別の ⓘ B → 戻る 1 回で何も開いていない → もう 1 回で離れる
   {
     await backFresh(page);
-    // スマホはシートを半分（peek）にして、舞台の ⓘ とシナリオの ⓘ が同時に見える状態で
+    // スマホはシートを半分（peek）にして、舞台の ⓘ とシナリオの ⓘ が同時に見える状態で。スマホの A は損益グラフの前提の ⓘ
+    // （シナリオの吹き出しは窓の下端で切れないよう上に開き、舞台の ⓘ を覆うため。#320 第 2 弾）
     if (phone) await setShell(page, 'scenario', 'peek');
-    await page.click(HINT);
+    const A_SEL = phone ? '.pop-wrap > button.hintbtn[aria-label="損益グラフの前提"]' : HINT;
+    await page.click(A_SEL);
     await backWait(page, 1);
     // B: 見えていて押せる別の ⓘ。押したものの名前を detail に出す
     const B_SEL = '.pop-wrap > button.hintbtn';
@@ -3955,7 +4003,7 @@ async function backFlows(vp) {
           ? { index: all.indexOf(hit), name: hit.getAttribute('aria-label') ?? hit.textContent }
           : null;
       },
-      { hint: HINT, sel: B_SEL },
+      { hint: A_SEL, sel: B_SEL },
     );
     const bIndex = b ? b.index : -1;
     if (b) await page.locator(B_SEL).nth(b.index).click();
@@ -4191,6 +4239,486 @@ async function backFlows(vp) {
   await ctx.close();
 }
 
+// ---- #320 第 2 弾: 説明カードの「1 つ前に戻る」（--back と --flows）。用語の列・[← 戻る]・本文の位置・吹き出しが下に残る
+
+const TC_TITLE = `${TERM_CARD} .tc-head h2`;
+const TC_BACK = `${TERM_CARD} .tc-head button[aria-label$="に戻る"]`;
+const TC_X = `${TERM_CARD} .tc-head button[aria-label="閉じる"]`;
+const TC_BODY = `${TERM_CARD} .tc-body`;
+
+/** 今のカードの見出し（閉じていれば null） */
+const tcTitle = (page) =>
+  page.evaluate((sel) => document.querySelector(sel)?.textContent?.trim() ?? null, TC_TITLE);
+
+/** カードの見出しが want（null = 閉じた）になるまで待ち、今の見出しを返す */
+async function tcWait(page, want) {
+  await page
+    .waitForFunction(
+      ([sel, w]) => (document.querySelector(sel)?.textContent?.trim() ?? null) === w,
+      [TC_TITLE, want],
+      { timeout: 3000 },
+    )
+    .catch(() => {});
+  return tcTitle(page);
+}
+
+/** 関連する用語のうち、seen に無い見出しのものを押して移る（押した見出し。無ければ null） */
+async function tcRelated(page, seen) {
+  const titles = await page.$$eval(`${TERM_CARD} .tc-related .term-link`, (els) =>
+    els.map((e) => (e.getAttribute('aria-label') ?? '').replace(/^用語: /, '')),
+  );
+  const i = titles.findIndex((t) => !seen.includes(t));
+  if (i < 0) return null;
+  await page.click(`${TERM_CARD} .tc-related .term-link >> nth=${i}`);
+  return (await tcWait(page, titles[i])) === titles[i] ? titles[i] : null;
+}
+
+/** 1 つ前に戻る操作（goBack = ブラウザの戻る、esc = Esc、btn = [← 戻る]） */
+async function tcStep(page, how) {
+  if (how === 'goBack') await backGo(page);
+  else if (how === 'esc') await page.keyboard.press('Escape');
+  else await page.click(TC_BACK).catch(() => {});
+}
+
+const TC_HOW = { goBack: '戻る', esc: 'Esc', btn: '[← 戻る]' };
+
+/**
+ * 本文（.tc-body）を want px スクロールし、実際の位置を返す。関連する用語の先頭のボタンが本文の枠の中に見えるまでは
+ * 下へ足す（Playwright の click は押す前にボタンを枠の中へスクロールするので、押した時点の位置 = 返す値にする）
+ */
+const tcScrollBody = (page, want) =>
+  page.evaluate(
+    ([sel, y]) => {
+      const b = document.querySelector(sel);
+      if (!b) return null;
+      b.scrollTop = Math.min(y, Math.max(0, b.scrollHeight - b.clientHeight));
+      const link = b.querySelector('.tc-related .term-link');
+      if (link) {
+        const over = link.getBoundingClientRect().bottom - b.getBoundingClientRect().bottom;
+        if (over > 0) b.scrollTop += Math.ceil(over) + 1;
+      }
+      return b.scrollTop;
+    },
+    [TC_BODY, want],
+  );
+
+/** 本文（.tc-body）が 40px より多くスクロールできるか */
+const tcScrollable = (page) =>
+  page.evaluate((sel) => {
+    const b = document.querySelector(sel);
+    return !!b && b.scrollHeight > b.clientHeight + 40;
+  }, TC_BODY);
+
+const tcBodyTop = (page) =>
+  page.evaluate((sel) => document.querySelector(sel)?.scrollTop ?? null, TC_BODY);
+
+/**
+ * AC-0（一番の使いどころ）・AC-2-3〜2-5。vp = 390×844 / 1440×900
+ */
+async function backTermFlows(vp) {
+  const phone = vp.width <= PHONE_MAX;
+  const tag = `#320 第 2 弾 ${vp.width}x${vp.height}`;
+  const ctx = await newContext(vp, { [WORKSPACE_KEY]: twoLegs });
+  const page = await ctx.newPage();
+  const errors = [];
+  page.on('pageerror', (e) => errors.push(e.message));
+  const HINT = 'section.scenario .panel-head .hintbtn';
+  const POP = 'section.scenario .popover:not([hidden])';
+
+  // ---- AC-0: AI の返答の用語 → A（本文を少しスクロール）→ B → C → 1 つずつ戻って A の位置 → AI の返答の位置・用語のボタン
+  await backFresh(page);
+  const url0 = page.url();
+  const aiOpen = await openAi(page, vp.width, 'full').catch(() => false);
+  if (aiOpen) {
+    await aiDiagnoseDone(page);
+    // 枠を長くする（偽の SSE の「表で」）
+    await page.fill('section.ai .ai-input textarea', '表で比べて');
+    await page.press('section.ai .ai-input textarea', 'Enter');
+    await page
+      .waitForSelector('section.ai .ai-progress', { state: 'detached', timeout: 15000 })
+      .catch(() => {});
+    await page.waitForTimeout(150);
+  }
+  for (const how of ['goBack', 'esc', 'btn']) {
+    const label = `AC-0 ${tag} ${TC_HOW[how]}`;
+    if (!aiOpen) {
+      check(`${label}: AI の返答の用語から開いて 1 つずつ戻る`, false, 'AI のパネルを開けない');
+      continue;
+    }
+    // 用語の下線が枠の中に見え、枠の scrollTop > 0 になる位置へ（返答の中の用語を前から順に試す）
+    const pos = await page.evaluate(() => {
+      const body = document.querySelector('section.ai .ai-body');
+      const terms = [...document.querySelectorAll('section.ai .ai-term')];
+      if (!body) return null;
+      for (let i = 0; i < terms.length; i++) {
+        const t = terms[i];
+        const bt = body.getBoundingClientRect();
+        body.scrollTop += t.getBoundingClientRect().top - bt.top - body.clientHeight / 3;
+        const r = t.getBoundingClientRect();
+        const b = body.getBoundingClientRect();
+        const vis = r.height > 0 && r.top >= b.top && r.bottom <= b.bottom;
+        if (vis && body.scrollTop > 0) return { i, top: body.scrollTop, n: terms.length };
+      }
+      return { i: -1, top: body.scrollTop, n: terms.length };
+    });
+    if (!pos || pos.i < 0) {
+      check(
+        `${label}: AI の返答の用語から開いて 1 つずつ戻る`,
+        false,
+        `用語 ${pos?.n ?? 0} 個・枠の位置 ${pos?.top ?? '-'}（scrollTop > 0 で見える用語が無い）`,
+      );
+      continue;
+    }
+    const term = `section.ai .ai-term >> nth=${pos.i}`;
+    await page.click(term);
+    await page.waitForSelector(TC_TITLE, { timeout: 3000 }).catch(() => {});
+    const first = await tcTitle(page);
+    const seen = first ? [first] : [];
+    // 1440×900 では用語集の 25 語どれも本文が窓に収まりスクロールしない（実測）。そのときは「本文の位置 0 → 0」を確かめ、
+    // 出力に「スクロールしない長さ」と出す（本文の位置の戻しは 390 と AC-2-6 の 360 で確かめる）
+    const scrollable = await tcScrollable(page);
+    const a = seen.at(-1) ?? null;
+    const y = await tcScrollBody(page, 40);
+    const b = a ? await tcRelated(page, seen) : null;
+    const c = b ? await tcRelated(page, [...seen, b]) : null;
+    const depth = seen.length + 2;
+    const dTop = await backWait(page, depth);
+    const seq = [];
+    await tcStep(page, how);
+    seq.push(await tcWait(page, b));
+    await tcStep(page, how);
+    seq.push(await tcWait(page, a));
+    const yBack = await tcBodyTop(page);
+    // A より前（進めた分）を 1 つずつ戻る
+    for (let k = seen.length - 2; k >= 0; k--) {
+      await tcStep(page, how);
+      seq.push(await tcWait(page, seen[k]));
+    }
+    // [← 戻る] は最初の用語では出ない → 最後は Esc で閉じる
+    const noBtn = how !== 'btn' || (await page.$(TC_BACK)) === null;
+    await tcStep(page, how === 'btn' ? 'esc' : how);
+    seq.push(await tcWait(page, null));
+    await page.waitForTimeout(100);
+    const after = await page.evaluate((i) => {
+      const body = document.querySelector('section.ai .ai-body');
+      const t = document.querySelectorAll('section.ai .ai-term')[i];
+      return {
+        top: body?.scrollTop ?? null,
+        focus: t !== undefined && document.activeElement === t,
+      };
+    }, pos.i);
+    const b0 = await backWait(page, 0);
+    const urlSame = page.url() === url0;
+    const want = [b, ...[...seen].reverse(), null];
+    check(
+      `${label}: AI の返答の用語 → A（本文をスクロール）→ B → C → 1 つずつ戻って A の本文の位置 ±1px → 閉じて枠の位置 ±1px・フォーカスが押した用語`,
+      a !== null &&
+        b !== null &&
+        c !== null &&
+        dTop.ok &&
+        seq.length === want.length &&
+        seq.every((t, k) => t === want[k]) &&
+        y !== null &&
+        (scrollable ? y > 0 : y === 0) &&
+        yBack !== null &&
+        Math.abs(yBack - y) <= 1 &&
+        noBtn &&
+        after.top !== null &&
+        Math.abs(after.top - pos.top) <= 1 &&
+        after.focus &&
+        b0.ok &&
+        urlSame,
+      `${seen.join(' → ')} → ${b} → ${c}（back ${dTop.now}）・戻った順 ${seq.map((t) => t ?? '閉じた').join(' → ')}・A「${a}」の本文 ${y} → ${yBack}${scrollable ? '' : '（本文がスクロールしない長さ）'}・枠 ${pos.top} → ${after.top}・フォーカス ${after.focus ? '用語' : '外'}${noBtn ? '' : '・最初の用語に [← 戻る]'}・back ${b0.now}・URL ${urlSame ? '同じ' : page.url()}`,
+    );
+  }
+  if (aiOpen) check(`AC-0 ${tag}: 最後の戻る 1 回でアプリを離れる`, await backLeaves(page));
+
+  // ---- AC-2-3 / AC-2-4: シナリオの ⓘ → 「用語:」→ A → B → C → 1 つずつ戻る ×3 → 吹き出しが開いたまま → 吹き出し → 離れる
+  /** 吹き出しを開き、「用語:」の先頭 → 関連 B → 関連 C（押した「用語:」の名前・見出しの列） */
+  const openChain = async () => {
+    await backFresh(page);
+    if (phone) await setShell(page, 'scenario', 'full');
+    await page.click(HINT);
+    await backWait(page, 1);
+    const name = await page
+      .getAttribute(`${POP} .term-links .term-link >> nth=0`, 'aria-label')
+      .catch(() => null);
+    await page.click(`${POP} .term-links .term-link >> nth=0`).catch(() => {});
+    await page.waitForSelector(TC_TITLE, { timeout: 3000 }).catch(() => {});
+    const a = await tcTitle(page);
+    const b = a ? await tcRelated(page, [a]) : null;
+    const c = b ? await tcRelated(page, [a, b]) : null;
+    const d4 = await backWait(page, 4);
+    return { name, a, b, c, d4 };
+  };
+  /** 吹き出しが開いたまま・フォーカスが押した「用語:」のボタン */
+  const onHint = (name) =>
+    page.evaluate(
+      ([pop, n]) => {
+        const a = document.activeElement;
+        return (
+          document.querySelector(pop) !== null &&
+          a?.getAttribute('aria-label') === n &&
+          a.closest(pop) !== null
+        );
+      },
+      [POP, name],
+    );
+  for (const how of ['goBack', 'esc', 'btn']) {
+    const label = `${how === 'goBack' ? 'AC-2-3' : 'AC-2-4'} ${tag} ${TC_HOW[how]}`;
+    const o = await openChain();
+    const seq = [];
+    const backs = [];
+    await tcStep(page, how);
+    seq.push(await tcWait(page, o.b));
+    backs.push((await backWait(page, 3)).now);
+    await tcStep(page, how);
+    seq.push(await tcWait(page, o.a));
+    backs.push((await backWait(page, 2)).now);
+    const noBtn = how !== 'btn' || (await page.$(TC_BACK)) === null;
+    await tcStep(page, how === 'btn' ? 'esc' : how);
+    seq.push(await tcWait(page, null));
+    const b1 = await backWait(page, 1);
+    backs.push(b1.now);
+    await page.waitForTimeout(100);
+    const hintOk = o.name !== null && (await onHint(o.name));
+    // もう一度（戻る / Esc）で吹き出しが閉じ、フォーカスは ⓘ
+    if (how === 'goBack') await backGo(page);
+    else await page.keyboard.press('Escape');
+    await page
+      .waitForFunction((s) => !document.querySelector(s), POP, { timeout: 3000 })
+      .catch(() => {});
+    const popGone = (await page.$(POP)) === null;
+    const toI = await page.evaluate(
+      () => document.activeElement?.matches('section.scenario .panel-head .hintbtn') === true,
+    );
+    const b0 = await backWait(page, 0);
+    check(
+      `${label}: ⓘ → 「用語:」→ A → B → C → 1 つずつ戻って吹き出しが開いたまま（フォーカスは押した「用語:」）→ 吹き出しが閉じる → 戻る 1 回で離れる`,
+      o.c !== null &&
+        o.d4.ok &&
+        seq[0] === o.b &&
+        seq[1] === o.a &&
+        seq[2] === null &&
+        noBtn &&
+        b1.ok &&
+        hintOk &&
+        popGone &&
+        toI &&
+        b0.ok &&
+        (await backLeaves(page)),
+      `${o.name}: ${o.a} → ${o.b} → ${o.c}（back ${o.d4.now}）・戻った順 ${seq.map((t) => t ?? '閉じた').join(' → ')}・back ${backs.join(' → ')} → ${b0.now}・吹き出し ${hintOk ? '開いたまま・フォーカス「用語:」' : 'NG'}・その後 ${popGone ? '閉じた' : '開いたまま'}・フォーカス ${toI ? 'ⓘ' : '外'}${noBtn ? '' : '・最初の用語に [← 戻る]'}`,
+    );
+  }
+
+  // ---- AC-2-5: × / 箱の外のクリックで全部閉じて吹き出しは残る → 戻る 1 回で吹き出し → もう 1 回で離れる
+  for (const [what, close] of [
+    ['×', () => page.click(TC_X)],
+    ['箱の外のクリック', () => page.mouse.click(4, vp.height - 4)],
+  ]) {
+    const label = `AC-2-5 ${tag} ${what}`;
+    const o = await openChain();
+    await close();
+    const closed = (await tcWait(page, null)) === null;
+    const b1 = await backWait(page, 1);
+    await page.waitForTimeout(100);
+    const pop1 = (await page.$(POP)) !== null;
+    await backGo(page);
+    await page
+      .waitForFunction((s) => !document.querySelector(s), POP, { timeout: 3000 })
+      .catch(() => {});
+    const pop0 = (await page.$(POP)) === null;
+    const b0 = await backWait(page, 0);
+    check(
+      `${label}: A → B → C → 全部閉じて吹き出しは残る（back 1）→ 戻るで吹き出しが閉じる → 戻る 1 回で離れる`,
+      o.c !== null &&
+        o.d4.ok &&
+        closed &&
+        b1.ok &&
+        pop1 &&
+        pop0 &&
+        b0.ok &&
+        (await backLeaves(page)),
+      `${o.a} → ${o.b} → ${o.c}（back ${o.d4.now}）・カード ${closed ? '閉じた' : '残る'}・back ${b1.now}・吹き出し ${pop1 ? '残る' : '閉じた'} → ${pop0 ? '閉じた' : '残る'}・back ${b0.now}`,
+    );
+  }
+
+  check(
+    `${tag} 説明カードの戻るの手順の間に pageerror なし`,
+    errors.length === 0,
+    errors.slice(0, 3).join(' / '),
+  );
+  await ctx.close();
+}
+
+/** パレットの `?<見出し>` → Enter で説明カードを開く（開いた見出しを返す） */
+async function tcOpenByPalette(page, title) {
+  await openPalette(page);
+  await page.keyboard.type(`?${title}`);
+  await page.waitForTimeout(100);
+  await page.keyboard.press('Enter');
+  return tcWait(page, title);
+}
+
+/** 見出しの行（.tc-head）の検査: [← 戻る] と × が同じ大きさ・上端が同じ、見出しが 1 行（折り返さない） */
+const tcHeadCheck = (page) =>
+  page.evaluate((card) => {
+    const head = document.querySelector(`${card} .tc-head`);
+    const back = head?.querySelector('button[aria-label$="に戻る"]');
+    const x = head?.querySelector('button[aria-label="閉じる"]');
+    const h2 = head?.querySelector('h2');
+    if (!head || !back || !x || !h2)
+      return { ok: false, detail: `${back ? '' : '[← 戻る] が無い'}${x ? '' : '・× が無い'}` };
+    const rb = back.getBoundingClientRect();
+    const rx = x.getBoundingClientRect();
+    const s = getComputedStyle(h2);
+    const lh = Number.parseFloat(s.lineHeight);
+    const inner =
+      h2.clientHeight - Number.parseFloat(s.paddingTop) - Number.parseFloat(s.paddingBottom);
+    const lines = lh > 0 ? Math.round(inner / lh) : 0;
+    const svg = back.querySelector('svg.ic-back') !== null;
+    const text = (back.textContent ?? '').trim() === '';
+    const sameSize = Math.abs(rb.width - rx.width) <= 0.5 && Math.abs(rb.height - rx.height) <= 0.5;
+    const sameTop = Math.abs(rb.top - rx.top) <= 0.5;
+    const ok =
+      lines === 1 && sameSize && sameTop && svg && text && rb.left >= 0 && rx.right <= innerWidth;
+    return {
+      ok,
+      detail: `見出し ${lines} 行・[← 戻る] ${Math.round(rb.width)}×${Math.round(rb.height)} / × ${Math.round(rx.width)}×${Math.round(rx.height)}・上端 ${sameTop ? '同じ' : `${rb.top} ≠ ${rx.top}`}${svg ? '' : '・Icon でない'}${text ? '' : '・文字がある'}`,
+    };
+  }, TERM_CARD);
+
+/**
+ * AC-2-6（360×780 で本文の位置）・AC-2-7（360×780・390×844・1440×900 × ライト / ダークで [← 戻る] の出ている見出しの行）
+ */
+async function backTermLook() {
+  // AC-2-6
+  {
+    const vp = { width: 360, height: 780 };
+    const ctx = await newContext(vp, { [WORKSPACE_KEY]: twoLegs });
+    const page = await ctx.newPage();
+    await backFresh(page);
+    let picked = null;
+    for (const t of [
+      '追証の線',
+      '追証マップ',
+      '必要証拠金（概算）',
+      'sticky strike / sticky moneyness',
+    ]) {
+      if ((await tcOpenByPalette(page, t)) !== t) continue;
+      const can = await page.evaluate((sel) => {
+        const b = document.querySelector(sel);
+        return !!b && b.scrollHeight > b.clientHeight + 40;
+      }, TC_BODY);
+      if (can) {
+        picked = t;
+        break;
+      }
+      await page.keyboard.press('Escape');
+      await tcWait(page, null);
+    }
+    for (const how of ['goBack', 'btn']) {
+      const label = `AC-2-6 #320 360x780 ${TC_HOW[how]}`;
+      if (picked === null) {
+        check(
+          `${label}: 本文の位置を控えて 1 つ前に戻ったら戻す`,
+          false,
+          '本文がスクロールできる用語が無い',
+        );
+        break;
+      }
+      if ((await tcTitle(page)) !== picked) await tcOpenByPalette(page, picked);
+      const y = await tcScrollBody(page, 120);
+      const b = await tcRelated(page, [picked]);
+      const top0 = await tcBodyTop(page);
+      await tcStep(page, how);
+      const back = await tcWait(page, picked);
+      const yBack = await tcBodyTop(page);
+      check(
+        `${label}: 本文を Y px → 関連の用語（本文は先頭）→ 1 つ前で .tc-body の scrollTop が Y ±1px`,
+        b !== null &&
+          top0 === 0 &&
+          back === picked &&
+          y !== null &&
+          y > 0 &&
+          yBack !== null &&
+          Math.abs(yBack - y) <= 1,
+        `${picked} → ${b}（本文 ${top0}）→ ${back}・Y ${y} → ${yBack}`,
+      );
+    }
+    await ctx.close();
+  }
+
+  // AC-2-7
+  for (const [w, h] of [
+    [360, 780],
+    [390, 844],
+    [1440, 900],
+  ]) {
+    for (const theme of ['dark', 'light']) {
+      const ctx = await newContext(
+        { width: w, height: h },
+        { [WORKSPACE_KEY]: twoLegs, [PREFS_KEY]: prefsText(theme) },
+      );
+      const page = await ctx.newPage();
+      await page.goto(pageUrl('next'));
+      await waitReady(page, 'next');
+      // いちばん長い見出しの用語（パレットの `?` の一覧から文字数で選ぶ）
+      await openPalette(page);
+      await page.keyboard.type('?');
+      await page.waitForTimeout(100);
+      const longest = await page.$$eval(
+        `${PALETTE} .pal-opt .pal-lbl`,
+        (els) =>
+          els.map((e) => (e.textContent ?? '').trim()).sort((a, b) => b.length - a.length)[0] ?? '',
+      );
+      await page.keyboard.press('Escape');
+      await page.waitForSelector(PALETTE, { state: 'detached', timeout: 2000 }).catch(() => {});
+      const tag = `AC-2-7 #320 ${theme} ${w}x${h}`;
+      // T → 関連 R（[← 戻る] が出て見出しは R）→ R の関連に T があれば T（[← 戻る] が出て見出しは T）
+      const t = await tcOpenByPalette(page, longest);
+      const r = t ? await tcRelated(page, [t]) : null;
+      const states = [];
+      if (r) {
+        await page.waitForTimeout(100);
+        const ok = await report(
+          page,
+          `${tag} 説明カード「${r}」`,
+          w,
+          h,
+          `next-${w}x${h}-${theme}-term-back-related`,
+        );
+        states.push({ title: r, ok, head: await tcHeadCheck(page) });
+        const hasT = await page.$$eval(
+          `${TERM_CARD} .tc-related .term-link`,
+          (els, want) => els.findIndex((e) => e.getAttribute('aria-label') === `用語: ${want}`),
+          t,
+        );
+        if (hasT >= 0) {
+          await page.click(`${TERM_CARD} .tc-related .term-link >> nth=${hasT}`);
+          await tcWait(page, t);
+          await page.waitForTimeout(100);
+          const ok2 = await report(
+            page,
+            `${tag} 説明カード「${t}」（いちばん長い見出し）`,
+            w,
+            h,
+            `next-${w}x${h}-${theme}-term-back-longest`,
+          );
+          states.push({ title: t, ok: ok2, head: await tcHeadCheck(page) });
+        }
+      }
+      const longestSeen = states.some((s) => s.title === longest);
+      check(
+        `${tag}: [← 戻る] の出ている説明カードの見出しの行が折り返さず、[← 戻る] と × が同じ大きさ・同じ高さ、縦・横 0px`,
+        states.length > 0 && longestSeen && states.every((s) => s.ok && s.head.ok),
+        `いちばん長い見出し「${longest}」${longestSeen ? '' : 'を [← 戻る] つきで測れない'}・${states.map((s) => `「${s.title}」${s.head.detail}${s.ok ? '' : '・縦 / 横 NG'}`).join(' / ')}`,
+      );
+      await ctx.close();
+    }
+  }
+}
+
 // ---- 手順（AC-11・AC-12）
 const results = [];
 function check(name, ok, detail = '') {
@@ -4218,6 +4746,9 @@ async function runFlows() {
 
   // #320 戻るで開いているものを 1 つ閉じる（--back だけでも流せる）
   for (const vp of [phone, pc]) await backFlows(vp);
+  // #320 第 2 弾 説明カードの 1 つ前に戻る
+  for (const vp of [phone, pc]) await backTermFlows(vp);
+  await backTermLook();
 
   // (a) 開いただけでは作業の保存を書き換えない・ドックのバッジ
   {
@@ -14350,8 +14881,11 @@ try {
     for (const vp of [
       { width: 390, height: 844 },
       { width: 1440, height: 900 },
-    ])
+    ]) {
       await backFlows(vp);
+      await backTermFlows(vp);
+    }
+    await backTermLook();
   } else if (flows) await runFlows();
   else await measureAll();
 } finally {

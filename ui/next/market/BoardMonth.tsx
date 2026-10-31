@@ -15,7 +15,7 @@ import {
 } from '../../view/boardPanel';
 import { hintNext, revealDelta } from '../../view/hint';
 import { PANEL_FOCUS_LABEL } from '../../view/keys';
-import { useOverlay } from '../parts/overlay';
+import { escapeClaimed, useOverlay } from '../parts/overlay';
 
 /** 板・スマイルから足を入れる（NextApp。トースト・[元に戻す]・入れた足の選択） */
 export type MarketAdd = (expiry: string, k: number, type: OptionType, side: Side) => void;
@@ -108,7 +108,8 @@ function KPop(p: {
       if (!hintNext(true, 'outside')) onClose();
     };
     const onKey = (e: KeyboardEvent) => {
-      if (e.key !== 'Escape') return;
+      // 上に重なったもの（説明カード）が処理した Esc では閉じない（#320 第 2 弾）
+      if (e.key !== 'Escape' || escapeClaimed(e)) return;
       const inside = ref.current?.parentElement?.contains(document.activeElement) ?? false;
       if (!hintNext(true, 'escape')) onClose();
       if (inside) btn.current?.focus();
