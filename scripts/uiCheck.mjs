@@ -9346,7 +9346,8 @@ async function paletteFlows(vp) {
     const byPal = await steppers();
     check(
       `#89 AC-B5(c) ${tag} 急落 → Enter でパレットが閉じ、ΔX・Δσ・Δs がチップの [急落] と同じ`,
-      n === 1 &&
+      // #307: 急落は用語「過去の急落の再生」にも当たる（2 件。先頭 = Enter はプリセット = 値がチップと同じで確かめる）
+      n === 2 &&
         closed &&
         JSON.stringify(byPal) === JSON.stringify(byChip) &&
         JSON.stringify(byPal) !== JSON.stringify(reset),

@@ -62,7 +62,8 @@ def test_outputs_are_declared_queries():
     assert [c for c, _ in contract.output_columns("atm_cm_iv")] == ["started_at", "open", "high", "low", "close",
                                                                     "last_at"]
     assert [c for c, _ in contract.output_columns("atm_cm_daily")] == [
-        "day", "close_at", "iv30", "m1_last_trading_day", "m1_forward", "m2_last_trading_day", "m2_forward"]
+        "day", "close_at", "iv30", "m1_last_trading_day", "m1_forward", "m2_last_trading_day", "m2_forward",
+        "m1_iv", "m2_iv"]
     assert contract.RELATIONS["atm_cm_daily"].name == "atm_cm_iv"
 
 

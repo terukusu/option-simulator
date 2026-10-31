@@ -429,10 +429,11 @@ describe('paletteFilter（AC-B3）', () => {
     }
   });
 
-  it('(c) 急落 はシナリオの 1 行だけ', () => {
+  it('(c) 急落 はシナリオの 1 行（先頭 = Enter で当てる）と、用語「過去の急落の再生」（#307）', () => {
     const hit = paletteFilter(items, '急落');
-    expect(hit.length).toBe(1);
+    expect(hit.length).toBe(2);
     expect(hit[0]?.group).toBe('preset');
+    expect(hit[1]?.id).toBe('term:replay');
   });
 
   it('(d) 語の AND: テーマ ダーク はダークの 1 行', () => {
@@ -492,16 +493,16 @@ describe('用語の行（#167 AC-5）', () => {
   const terms = items.filter((r) => r.group === 'term');
   const ids = (q: string) => paletteFilter(items, q).map((r) => r.id);
 
-  it('(a) 用語の行は 24 行・グループは並びの最後・行の順は GLOSSARY と同じ', () => {
+  it('(a) 用語の行は 25 行・グループは並びの最後・行の順は GLOSSARY と同じ', () => {
     expect(PALETTE_GROUPS.at(-1)).toEqual({ group: 'term', name: '用語' });
-    expect(terms.length).toBe(24);
+    expect(terms.length).toBe(25);
     expect(terms.map((r) => r.label)).toEqual(GLOSSARY.map((t) => t.title));
-    expect(items.slice(-24)).toEqual(terms);
-    // 足 0 本・板なしでも 24 行
+    expect(items.slice(-25)).toEqual(terms);
+    // 足 0 本・板なしでも 25 行
     expect(
       paletteItems(inputOf(loaded, { chain: null, atmK: null })).filter((r) => r.group === 'term')
         .length,
-    ).toBe(24);
+    ).toBe(25);
     for (const r of terms) {
       expect(r.disabled).toBe(false);
       expect(r.keywords?.length ?? 0).toBeGreaterThan(0);
@@ -540,7 +541,7 @@ describe('用語の行（#167 AC-5）', () => {
     expect(ids('デルタσ')).not.toContain('term:skew');
   });
 
-  it('(c) ? / ？ で始まる問い合わせは用語の行だけ（? だけなら 24 行）', () => {
+  it('(c) ? / ？ で始まる問い合わせは用語の行だけ（? だけなら 25 行）', () => {
     expect(paletteFilter(items, '?')).toEqual(terms);
     expect(paletteFilter(items, '？')).toEqual(terms);
     expect(paletteFilter(items, ' ? ')).toEqual(terms);
@@ -550,8 +551,9 @@ describe('用語の行（#167 AC-5）', () => {
     expect(hit.map((r) => r.id)).toContain('term:iv');
     // AC-10: `?シグマ` の先頭（Enter で開く行）は IV
     expect(hit[0]?.id).toBe('term:iv');
-    // 用語に当たらない語は 0 件（コマンドは出さない）
-    expect(paletteFilter(items, '?急落')).toEqual([]);
+    // 用語に当たらない語は 0 件（コマンドは出さない）。急落は用語「過去の急落の再生」（#307）だけ
+    expect(paletteFilter(items, '?テーマ')).toEqual([]);
+    expect(paletteFilter(items, '?急落').map((r) => r.id)).toEqual(['term:replay']);
     // #179: 旧名でも追証マップに当たる。`?追証` の先頭（Enter で開く行）は今までどおり追証の線で、追証マップも並ぶ
     expect(paletteFilter(items, '?持ちこたえ').map((r) => r.id)).toEqual(['term:hold-map']);
     const call = paletteFilter(items, '?追証').map((r) => r.id);
@@ -562,20 +564,14 @@ describe('用語の行（#167 AC-5）', () => {
 
   it('(d) 既存のコマンドの問い合わせの結果が変わらない（用語の行を足しても）', () => {
     const cmds = items.filter((r) => r.group !== 'term');
-    for (const q of [
-      '急落',
-      'テーマ ダーク',
-      'テーマ',
-      'ATM',
-      '-10%',
-      '−10%',
-      '64',
-      '売 p 64000',
-      '.*',
-    ]) {
+    // 急落は用語「過去の急落の再生」（#307）にも当たる = コマンドの行は今までどおり先頭に 1 行
+    expect(paletteFilter(items, '急落').filter((r) => r.group !== 'term')).toEqual(
+      paletteFilter(cmds, '急落'),
+    );
+    for (const q of ['テーマ ダーク', 'テーマ', 'ATM', '-10%', '−10%', '64', '売 p 64000', '.*']) {
       expect(paletteFilter(items, q), q).toEqual(paletteFilter(cmds, q));
     }
-    expect(paletteFilter(items, '急落').length).toBe(1);
+    expect(paletteFilter(cmds, '急落').length).toBe(1);
     expect(paletteFilter(items, 'ATM').map((r) => r.label)).toEqual(['ATM へ']);
     // 足 0 本の「全クリア」は押せない 1 行だけ（ui:check の #89 AC-B5(b)。「クリア」だけだと用語の JSCC にも当たる）
     const empty = paletteFilter(paletteItems(inputOf(loaded)), '全クリア');

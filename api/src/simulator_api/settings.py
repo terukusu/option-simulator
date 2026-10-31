@@ -88,8 +88,9 @@ ATM_DAILY_CACHE_SIZE = 2  # キャッシュの件数（範囲の終わりが変�
 ATM_DAILY_MAX_AGE_SECONDS = 3600  # Cache-Control
 
 # クエリごとの maximum_bytes_billed の上限（設定の MAX_BYTES_BILLED との小さい方。#79 の判断 6: 予期しない全期間・全列の
-# 読み込みの保険。atm_cm_iv は 2 列で全期間 ≈ 20 MiB、全列 ≈ 112 MiB。atm_cm_daily は 6 列で全期間 ≈ 62 MiB
-# （2026-10-19）、1 年で約 8 MiB 増える）
+# 読み込みの保険。atm_cm_iv は 2 列で全期間 ≈ 20 MiB、全列 ≈ 112 MiB。atm_cm_daily は 8 列（m1_iv・m2_iv は #307）
+# で全期間 ≈ 94 MiB（2026-10-31）、1 年で約 11 MiB 増える = 上限 128 MiB まで約 3 年。越えそうなら範囲を絞るか
+# 上限を見直す）
 # future_bars（#190）は future_price_latest の 4 列で全期間 ≈ 155 MiB、1d 400 日 + 読み足し ≈ 21 MiB（2026-10-19）
 QUERY_MAX_BYTES_BILLED: dict[str, int] = {"atm_cm_iv": 64 * MiB, "atm_cm_daily": 128 * MiB, "future_bars": 64 * MiB}
 

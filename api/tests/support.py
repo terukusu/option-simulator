@@ -278,10 +278,10 @@ def fut_bars(rows: list[dict], step: int) -> list[dict]:
 
 
 def cm_daily_row(at: datetime, iv30=20.0, f1=30000.0, l1=date(2026, 11, 12), f2=30010.0,
-                 l2=date(2026, 12, 10)) -> dict:
-    """合成の atm_cm_iv の 1 行（#152。架空の値）"""
+                 l2=date(2026, 12, 10), m1_iv=21.0, m2_iv=19.5) -> dict:
+    """合成の atm_cm_iv の 1 行（#152。m1_iv・m2_iv は #307。架空の値）"""
     return {"created_at": at, "iv30": iv30, "m1_last_trading_day": l1, "m1_forward": f1, "m2_last_trading_day": l2,
-            "m2_forward": f2}
+            "m2_forward": f2, "m1_iv": m1_iv, "m2_iv": m2_iv}
 
 
 def cm_daily(rows: list[dict]) -> list[dict]:
@@ -298,7 +298,8 @@ def cm_daily(rows: list[dict]) -> list[dict]:
         last[local.date()] = r
     return [{"day": d, "close_at": r["created_at"], "iv30": r["iv30"],
              "m1_last_trading_day": r["m1_last_trading_day"], "m1_forward": r["m1_forward"],
-             "m2_last_trading_day": r["m2_last_trading_day"], "m2_forward": r["m2_forward"]}
+             "m2_last_trading_day": r["m2_last_trading_day"], "m2_forward": r["m2_forward"],
+             "m1_iv": r.get("m1_iv"), "m2_iv": r.get("m2_iv")}
             for d, r in sorted(last.items())]
 
 

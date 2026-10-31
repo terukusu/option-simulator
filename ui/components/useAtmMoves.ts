@@ -5,6 +5,7 @@
  * - active（指標のパネルが見えていて資金・足がある。#176 で開く前に先読み）が初めて true になったときに 1 回だけ読む
  *   （セッションで 1 回）。失敗したら [再試行]（retry）でだけ読み直す。トップバーの [最新] では読み直さない
  * - 2 営業日の組（data/atmDaily.ts の atmMoves）は読めた値と休業日（nonTradingDays）が変わったときだけ作る
+ * - 読めた値（daily）は過去の急落の再生（#307）の道筋にも使う（読み込みは 1 回のまま）
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'preact/hooks';
@@ -15,6 +16,8 @@ import type { HoldMovesStatus } from '../view/holdMap';
 export interface AtmMovesCtl {
   status: HoldMovesStatus;
   moves: readonly AtmMove[];
+  /** 読めた日次の値（#307 の再生。読めていなければ null） */
+  daily: AtmDailyData | null;
   retry: () => void;
 }
 
@@ -77,5 +80,8 @@ export function useAtmMoves(
     () => (data ? atmMoves(data.days, nonTradingDays) : NONE),
     [data, nonTradingDays],
   );
-  return useMemo(() => ({ status: load.status, moves, retry }), [load.status, moves, retry]);
+  return useMemo(
+    () => ({ status: load.status, moves, daily: data, retry }),
+    [load.status, moves, data, retry],
+  );
 }

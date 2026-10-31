@@ -3,9 +3,10 @@
  * 型と検証、2 営業日の動きの組（追証マップの過去の点）。設計 docs/design.md 7.1・13.4。読み込みは
  * data/adapter.ts の loadAtmDaily。
  *
- * - 応答: `{ schema_version: 1, start, end, days: [{ d, t, iv, f1, l1, f2, l2 }] }`（d は JST の日付、t は日中の終値の
- *   行の時刻（ISO 8601 のオフセット付き）、iv は %、f1 / f2 は 1 / 2 限月のフォワード、l1 / l2 はその最終取引日。f2・l2 は
- *   両方 null か両方値）。サーバーは api/src/simulator_api/atm_daily.py の atm_daily_json
+ * - 応答: `{ schema_version: 1, start, end, days: [{ d, t, iv, f1, l1, f2, l2, v1, v2 }] }`（d は JST の日付、t は日中の
+ *   終値の行の時刻（ISO 8601 のオフセット付き）、iv は %、f1 / f2 は 1 / 2 限月のフォワード、l1 / l2 はその最終取引日。f2・l2
+ *   は両方 null か両方値。v1 / v2 は 1 / 2 限月の ATM IV %（#307。無い・null・有限の正の数でなければ null に読む = エラーに
+ *   しない。古いサーバーの応答にはキーが無い）。サーバーは api/src/simulator_api/atm_daily.py の atm_daily_json
  * - 2 営業日の組はブラウザで作る（計算はブラウザの原則）。休業日は取引カレンダーの nonTradingDays（is_trading_day = false。
  *   祝日取引の実施日は取引日）と土日
  * - 純関数（DOM・通信に依存しない）
@@ -27,6 +28,12 @@ export interface AtmDailyDay {
   l1: string;
   f2: number | null;
   l2: string | null;
+  /**
+   * 1 / 2 限月の ATM IV（%。#307 の再生の倍率）。検証は常に値か null を入れる（省略可は合成の値・テストの literal のため。
+   * 無いのは null と同じ）
+   */
+  v1?: number | null;
+  v2?: number | null;
 }
 
 /** 検証済みの応答（start・end は日付。end は含まない = 確定した日の次の日） */
@@ -52,7 +59,7 @@ const MAX_ERRORS = 50;
 
 const positive = (n: unknown): n is number => typeof n === 'number' && Number.isFinite(n) && n > 0;
 
-/** `/api/atm_daily` の JSON の形の検査。余分なキーは見ない。 */
+/** `/api/atm_daily` の JSON の形の検査。余分なキーは見ない。v1・v2 は不正でもエラーにせず null（#307） */
 export function validateAtmDailyJson(v: unknown): ValidationResult<AtmDailyData> {
   const errors: string[] = [];
   const add = (path: string, msg: string) => {
@@ -117,6 +124,9 @@ export function validateAtmDailyJson(v: unknown): ValidationResult<AtmDailyData>
         l1: r.l1 as string,
         f2: pair ? null : (r.f2 as number),
         l2: pair ? null : (r.l2 as string),
+        // 緩い検証（#307）: 無い・不正は null（追証マップ・AI の IV の統計の読み込みを落とさない）
+        v1: positive(r.v1) ? r.v1 : null,
+        v2: !pair && positive(r.v2) ? r.v2 : null,
       });
     });
   }

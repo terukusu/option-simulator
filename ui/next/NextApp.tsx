@@ -1,5 +1,6 @@
 import type { ComponentChildren } from 'preact';
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'preact/hooks';
+import { replayEventOf, replayPath } from '../../data/replay';
 import { defaultName } from '../book';
 import { loadIvStatsData } from '../components/ivStatsData';
 import { loadTechnicalsData } from '../components/technicalsData';
@@ -13,6 +14,7 @@ import { useAtmMoves } from '../components/useAtmMoves';
 import { useHoldMap } from '../components/useHoldMap';
 import { useFutureBars, useIvHistory } from '../components/useIvHistory';
 import { useMediaQuery } from '../components/useMediaQuery';
+import { useReplay } from '../components/useReplay';
 import { API_LABEL, loaderNote } from '../load';
 import { MAX_PINS, pinAddError } from '../pins';
 import type { PrefsRead } from '../prefs';
@@ -65,6 +67,7 @@ import {
   layoutTier,
   leftView,
   metricsVisible,
+  replayActive,
   type ShellAction,
   shellReduce,
   smileView,
@@ -92,6 +95,7 @@ import { Board } from './regions/Board';
 import type { HoldBundle } from './regions/HoldMap';
 import { Metrics } from './regions/Metrics';
 import { Positions } from './regions/Positions';
+import type { ReplayBundle } from './regions/Replay';
 import { Scenario, scenarioInputOf } from './regions/Scenario';
 import { Smile } from './regions/Smile';
 import { Stage } from './regions/Stage';
@@ -249,6 +253,51 @@ export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
       holdDXRatio,
       holdDays,
       holdAllowedLoss,
+    ],
+  );
+  // 過去の急落の再生（#307）: 道筋は読めた日次の値（追証マップと同じ 1 回の読み込み）・選んだ出来事・nonTradingDays から。
+  // 日ごとの計算は折りたたみが開いていて指標のパネルが見えている間だけ（useReplay）。開閉と出来事は ShellState（保存しない）
+  const replayOpen = shell.replay ?? false;
+  const replayEv = replayEventOf(shell.replayEvent);
+  const dailyData = atmMoves.daily;
+  const replayBuild = useMemo(
+    () => (dailyData ? replayPath(dailyData.days, replayEv, nonTradingDays) : null),
+    [dailyData, replayEv, nonTradingDays],
+  );
+  const replayOkPath = replayBuild?.status === 'ok' ? replayBuild : null;
+  const replayCtl = useReplay(c.replayInput, replayOkPath, replayActive(shell, tier));
+  const onReplayToggle = useCallback(
+    () => send({ type: 'replay', open: !replayOpen }),
+    [replayOpen],
+  );
+  const onReplayEvent = useCallback((id: string) => send({ type: 'replayEvent', id }), []);
+  const replayIvNow = ivNow?.iv ?? null;
+  const replay = useMemo<ReplayBundle>(
+    () => ({
+      open: replayOpen,
+      onToggle: onReplayToggle,
+      noLegs: holdNoLegs,
+      noCapital: holdNoCapital,
+      load: atmMoves,
+      event: replayEv,
+      onEvent: onReplayEvent,
+      build: replayBuild,
+      ctl: replayCtl,
+      allowedLoss: holdAllowedLoss,
+      ivNow: replayIvNow,
+    }),
+    [
+      replayOpen,
+      onReplayToggle,
+      holdNoLegs,
+      holdNoCapital,
+      atmMoves,
+      replayEv,
+      onReplayEvent,
+      replayBuild,
+      replayCtl,
+      holdAllowedLoss,
+      replayIvNow,
     ],
   );
   // 全体のキー 1〜5・G・T・Ctrl / ⌘ + K（#89。パレットの行の実行も同じ ctx）
@@ -850,6 +899,7 @@ export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
             feePerLot={state.feePerLot}
             margin={c.marginView}
             hold={hold}
+            replay={replay}
           />
         }
         board={(seg) =>

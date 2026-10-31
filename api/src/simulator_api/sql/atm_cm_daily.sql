@@ -1,10 +1,10 @@
 -- /api/atm_daily（#152）: 表 atm_cm_iv の JST の日付ごとの日中の終値 = JST 9:00〜15:00（両端含む）の行のうち iv30・
 -- m1_forward・m1_last_trading_day が NULL でない最後の行（iv30 は %、フォワードは 1 / 2 限月の F）。範囲は [@start_at, @end_at)。
 -- 表は月パーティション（created_at）で requirePartitionFilter が無いので、created_at の半開区間の絞りを必ず書く
--- （tests/test_atm_daily.py の静的検査）。読む列は contract.py の atm_cm_daily と同じ 6 列だけ。CURRENT_TIMESTAMP を使わない。
+-- （tests/test_atm_daily.py の静的検査）。読む列は contract.py の atm_cm_daily と同じ 8 列だけ（m1_iv・m2_iv は #307）。CURRENT_TIMESTAMP を使わない。
 -- 窓の時刻は settings.ATM_DAILY_CLOSE_WINDOW と同じ（静的検査が照合する）。列は contract.py の OUTPUTS の atm_cm_daily と同じ順
 WITH points AS (
-  SELECT created_at, iv30, m1_last_trading_day, m1_forward, m2_last_trading_day, m2_forward
+  SELECT created_at, iv30, m1_last_trading_day, m1_forward, m2_last_trading_day, m2_forward, m1_iv, m2_iv
   FROM `${project}.${dataset}.atm_cm_iv`
   WHERE created_at >= @start_at AND created_at < @end_at
 ),
@@ -12,7 +12,7 @@ closes AS (
   SELECT
     DATE(created_at, 'Asia/Tokyo') AS day,
     ARRAY_AGG(
-      STRUCT(created_at, iv30, m1_last_trading_day, m1_forward, m2_last_trading_day, m2_forward)
+      STRUCT(created_at, iv30, m1_last_trading_day, m1_forward, m2_last_trading_day, m2_forward, m1_iv, m2_iv)
       ORDER BY created_at DESC LIMIT 1
     )[OFFSET(0)] AS last
   FROM points
@@ -27,6 +27,8 @@ SELECT
   last.m1_last_trading_day AS m1_last_trading_day,
   last.m1_forward AS m1_forward,
   last.m2_last_trading_day AS m2_last_trading_day,
-  last.m2_forward AS m2_forward
+  last.m2_forward AS m2_forward,
+  last.m1_iv AS m1_iv,
+  last.m2_iv AS m2_iv
 FROM closes
 ORDER BY day
