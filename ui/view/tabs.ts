@@ -6,6 +6,7 @@
 import { type ShareMake, URL_MAX, URL_WARN } from '../share';
 import { MAX_TABS, sanitizeTabName, type TabSlot } from '../state';
 import { fmtNum } from './format';
+import { imeComposing, type KeySummary } from './keys';
 
 export interface TabView {
   id: number;
@@ -122,6 +123,41 @@ export function tabKeyTarget(ids: readonly number[], current: number, key: strin
     default:
       return null;
   }
+}
+
+/** 帯の keydown の要約（#323。KeySummary と同じ名前の部分集合） */
+export type TabKeyInput = Pick<
+  KeySummary,
+  'key' | 'ctrl' | 'meta' | 'alt' | 'shift' | 'isComposing' | 'keyCode'
+>;
+
+/**
+ * 帯のキーの種類（#323）: 'move' = Ctrl / ⌘ + Shift + ← →（並べ替え。Alt なし）、'plain' = 修飾なし（tabKeyTarget の
+ * 切り替え）、'other' = それ以外（Shift だけ・Ctrl だけ・Alt 付き・IME の変換中。何もしない）
+ */
+export function tabKeyKind(k: TabKeyInput): 'move' | 'plain' | 'other' {
+  if (imeComposing(k)) return 'other';
+  if (!k.ctrl && !k.meta && !k.alt && !k.shift) return 'plain';
+  if (
+    (k.ctrl || k.meta) &&
+    k.shift &&
+    !k.alt &&
+    (k.key === 'ArrowLeft' || k.key === 'ArrowRight')
+  ) {
+    return 'move';
+  }
+  return 'other';
+}
+
+/**
+ * 並べ替えのキーで current のタブを動かした後の添字（#323）。端（回らない）・並べ替えのキーでない・無い id は null
+ */
+export function tabMoveKey(ids: readonly number[], current: number, k: TabKeyInput): number | null {
+  if (tabKeyKind(k) !== 'move') return null;
+  const i = ids.indexOf(current);
+  if (i < 0) return null;
+  const to = k.key === 'ArrowRight' ? i + 1 : i - 1;
+  return to < 0 || to >= ids.length ? null : to;
 }
 
 // ---------------------------------------------------------------- URL 共有（#72）の文言

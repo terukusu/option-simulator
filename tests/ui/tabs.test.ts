@@ -13,7 +13,10 @@ import {
   TAB_NAME_EMPTY_TEXT,
   TAB_NAME_TAKEN_TEXT,
   TABS_FULL_TEXT,
+  type TabKeyInput,
+  tabKeyKind,
   tabKeyTarget,
+  tabMoveKey,
   tabsModel,
 } from '../../ui/view/tabs';
 
@@ -113,6 +116,59 @@ describe('tabKeyTarget（←/→・Home/End）', () => {
     expect(tabKeyTarget(ids, 4, 'Enter')).toBeNull();
     expect(tabKeyTarget(ids, 9, 'ArrowRight')).toBeNull();
     expect(tabKeyTarget([], 1, 'Home')).toBeNull();
+  });
+});
+
+describe('tabKeyKind・tabMoveKey（#323 Ctrl / ⌘ + Shift + ← →）', () => {
+  const ids = [1, 4, 7];
+  const k = (key: string, m: Partial<TabKeyInput> = {}): TabKeyInput => ({
+    key,
+    ctrl: false,
+    meta: false,
+    alt: false,
+    shift: false,
+    isComposing: false,
+    keyCode: 0,
+    ...m,
+  });
+  const ctrlShift = { ctrl: true, shift: true };
+  const metaShift = { meta: true, shift: true };
+
+  it('Ctrl + Shift / ⌘ + Shift + → で右、← で左（動かした後の添字）', () => {
+    expect(tabMoveKey(ids, 4, k('ArrowRight', ctrlShift))).toBe(2);
+    expect(tabMoveKey(ids, 4, k('ArrowLeft', ctrlShift))).toBe(0);
+    expect(tabMoveKey(ids, 4, k('ArrowRight', metaShift))).toBe(2);
+    expect(tabMoveKey(ids, 4, k('ArrowLeft', metaShift))).toBe(0);
+    expect(tabMoveKey(ids, 1, k('ArrowRight', { ctrl: true, meta: true, shift: true }))).toBe(1);
+    expect(tabKeyKind(k('ArrowRight', ctrlShift))).toBe('move');
+  });
+
+  it('端では null（回らない）。無い id も null', () => {
+    expect(tabMoveKey(ids, 7, k('ArrowRight', ctrlShift))).toBeNull();
+    expect(tabMoveKey(ids, 1, k('ArrowLeft', ctrlShift))).toBeNull();
+    expect(tabMoveKey([5], 5, k('ArrowRight', metaShift))).toBeNull();
+    expect(tabMoveKey(ids, 9, k('ArrowRight', ctrlShift))).toBeNull();
+  });
+
+  it('修飾なし / Shift だけ / Ctrl だけ / ⌘ だけ / Alt 付き / IME の変換中 / 他のキーは null', () => {
+    const cases: Array<[TabKeyInput, 'plain' | 'other']> = [
+      [k('ArrowRight'), 'plain'],
+      [k('ArrowRight', { shift: true }), 'other'],
+      [k('ArrowRight', { ctrl: true }), 'other'],
+      [k('ArrowRight', { meta: true }), 'other'],
+      [k('ArrowRight', { ...ctrlShift, alt: true }), 'other'],
+      [k('ArrowRight', { alt: true }), 'other'],
+      [k('ArrowRight', { ...ctrlShift, isComposing: true }), 'other'],
+      [k('Process', ctrlShift), 'other'],
+      [k('ArrowRight', { ...ctrlShift, keyCode: 229 }), 'other'],
+      [k('ArrowRight', { isComposing: true }), 'other'],
+      [k('Home', ctrlShift), 'other'],
+      [k('ArrowUp', ctrlShift), 'other'],
+    ];
+    for (const [input, kind] of cases) {
+      expect(tabMoveKey(ids, 4, input), JSON.stringify(input)).toBeNull();
+      expect(tabKeyKind(input), JSON.stringify(input)).toBe(kind);
+    }
   });
 });
 
