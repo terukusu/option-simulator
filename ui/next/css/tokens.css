@@ -96,11 +96,149 @@
   --shadow-sm: 0 1px 2px rgba(20, 30, 50, 0.15);
 }
 
+/* ギリシャ文字（U+0370〜03FF）だけを端末の欧文フォントで描く（#324。docs/ui-redesign.md §7.3・§10.1）。
+   lang="ja" ではギリシャ文字が和文フォントの字形になる（Android の Chrome で Noto Sans CJK のギリシャ文字）ため、
+   unicode-range で範囲を絞った族を --font / --mono の前に置く。src は local() だけ（フォントのファイルを同梱しない・
+   読み込まない。CSP の font-src なしでも止まらない）。名前は端末ごとのフルネームと PostScript 名を並べ、先に当たったものを使う
+   （Android = Roboto / Noto Sans、Apple = Helvetica Neue / Menlo、Windows = Segoe UI・Arial / Consolas、
+   Linux = DejaVu・Liberation）。太い面は Bold の名前の後に通常の名前を並べる（太字が無くても和文のギリシャ文字に戻さない）。
+   どれも無い端末はこの族が飛ばされて今までと同じ。tests/ui/cssTokens.test.ts の (e) が形を確かめる */
+@font-face {
+  font-family: "sim-greek";
+  font-weight: 400;
+  src:
+    local("Roboto"),
+    local("Roboto Regular"),
+    local("Roboto-Regular"),
+    local("Noto Sans"),
+    local("Noto Sans Regular"),
+    local("NotoSans-Regular"),
+    local("Helvetica Neue"),
+    local("HelveticaNeue"),
+    local("Segoe UI"),
+    local("SegoeUI"),
+    local("Arial"),
+    local("ArialMT"),
+    local("DejaVu Sans"),
+    local("DejaVuSans"),
+    local("Liberation Sans"),
+    local("LiberationSans");
+  unicode-range: U+0370-03FF;
+}
+
+@font-face {
+  font-family: "sim-greek";
+  font-weight: 500;
+  src:
+    local("Roboto Medium"),
+    local("Roboto-Medium"),
+    local("Noto Sans Medium"),
+    local("NotoSans-Medium"),
+    local("Helvetica Neue Medium"),
+    local("HelveticaNeue-Medium"),
+    local("Roboto"),
+    local("Roboto Regular"),
+    local("Roboto-Regular"),
+    local("Noto Sans"),
+    local("Noto Sans Regular"),
+    local("NotoSans-Regular"),
+    local("Helvetica Neue"),
+    local("HelveticaNeue"),
+    local("Segoe UI"),
+    local("SegoeUI"),
+    local("Arial"),
+    local("ArialMT"),
+    local("DejaVu Sans"),
+    local("DejaVuSans"),
+    local("Liberation Sans"),
+    local("LiberationSans");
+  unicode-range: U+0370-03FF;
+}
+
+@font-face {
+  font-family: "sim-greek";
+  font-weight: 600 900;
+  src:
+    local("Roboto Bold"),
+    local("Roboto-Bold"),
+    local("Noto Sans Bold"),
+    local("NotoSans-Bold"),
+    local("Helvetica Neue Bold"),
+    local("HelveticaNeue-Bold"),
+    local("Segoe UI Bold"),
+    local("SegoeUI-Bold"),
+    local("Arial Bold"),
+    local("Arial-BoldMT"),
+    local("DejaVu Sans Bold"),
+    local("DejaVuSans-Bold"),
+    local("Liberation Sans Bold"),
+    local("LiberationSans-Bold"),
+    local("Roboto"),
+    local("Roboto Regular"),
+    local("Roboto-Regular"),
+    local("Noto Sans"),
+    local("Noto Sans Regular"),
+    local("NotoSans-Regular"),
+    local("Helvetica Neue"),
+    local("HelveticaNeue"),
+    local("Segoe UI"),
+    local("SegoeUI"),
+    local("Arial"),
+    local("ArialMT"),
+    local("DejaVu Sans"),
+    local("DejaVuSans"),
+    local("Liberation Sans"),
+    local("LiberationSans");
+  unicode-range: U+0370-03FF;
+}
+
+@font-face {
+  font-family: "sim-greek-mono";
+  font-weight: 400;
+  src:
+    local("Droid Sans Mono"), local("DroidSansMono"), local("Noto Sans Mono"),
+    local("NotoSansMono-Regular"), local("Menlo"), local("Menlo-Regular"), local("Consolas"),
+    local("DejaVu Sans Mono"), local("DejaVuSansMono"), local("Liberation Mono"),
+    local("LiberationMono");
+  unicode-range: U+0370-03FF;
+}
+
+@font-face {
+  font-family: "sim-greek-mono";
+  font-weight: 600 900;
+  src:
+    local("Menlo Bold"),
+    local("Menlo-Bold"),
+    local("Consolas Bold"),
+    local("Consolas-Bold"),
+    local("Noto Sans Mono Bold"),
+    local("NotoSansMono-Bold"),
+    local("DejaVu Sans Mono Bold"),
+    local("DejaVuSansMono-Bold"),
+    local("Liberation Mono Bold"),
+    local("LiberationMono-Bold"),
+    local("Droid Sans Mono"),
+    local("DroidSansMono"),
+    local("Noto Sans Mono"),
+    local("NotoSansMono-Regular"),
+    local("Menlo"),
+    local("Menlo-Regular"),
+    local("Consolas"),
+    local("DejaVu Sans Mono"),
+    local("DejaVuSansMono"),
+    local("Liberation Mono"),
+    local("LiberationMono");
+  unicode-range: U+0370-03FF;
+}
+
 /* 色でないトークン（テーマで変わらない） */
 :root {
   --font:
-    "Inter", "Hiragino Sans", "Noto Sans JP", system-ui, -apple-system, "Segoe UI", sans-serif;
-  --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+    "Inter", "sim-greek", "Hiragino Sans", "Noto Sans JP", system-ui, -apple-system, "Segoe UI",
+    sans-serif;
+  --mono:
+    "sim-greek-mono", "sim-greek", ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas,
+    monospace;
   /* 文字の大きさ（7.3） */
   --fs-body: 14px;
   --fs-sub: 12.5px;

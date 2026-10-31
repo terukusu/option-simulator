@@ -368,7 +368,7 @@ describe('bigReadout（AC-2 d）', () => {
     expect(items.map((i) => i.tier)).toEqual(['base', 'base', 'base', 'x1', 'x1']);
     const by = Object.fromEntries(items.map((i) => [i.key, i]));
     expect(by.delta?.value).toBe('+0.32 (+3.2)');
-    expect(by.delta?.sub).toBe('Γ −0.010 /100円');
+    expect(by.delta?.sub).toBe('Γ −0.010/100円');
     expect(by.delta?.tone).toBeNull();
     expect(by.date).toMatchObject({ value: '+1,234', tone: 'gain', hero: true, unit: r.unitLabel });
     expect(by.expiry).toMatchObject({ value: '−617', tone: 'loss', sub: '今日 0' });

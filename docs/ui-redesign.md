@@ -468,7 +468,7 @@ ATM IV の 30 日固定（optionchan の表 `atm_cm_iv` の `iv30`、%）の推�
 | 損益の色 | 正 = `--gain`、負 = `--loss`、0 = 無色。**文字色だけに頼らず符号を必ず付ける** | |
 | ΔX | 円と % を併記 | `−2,000 / −2.9%` |
 | Δ | ラージ 2 桁（詳細は 3 桁）、括弧にミニ 1 桁 | `+0.32 (+3.2)` |
-| Γ | 3 桁 /100円 | `−0.010` |
+| Γ | 3 桁 /100円（読み取りの副題は数字に続けて `Γ −0.010/100円`。#324。足の詳細・用語の説明は `/ 100 円`） | `−0.010` |
 | IV | 1 桁、% は省く（板・スマイル・詳細） | `28.0` |
 | 日付 | `MM/DD HH:mm（曜）`、年は板のポップオーバーだけ | `10/18 21:31（日）` |
 | 行使価格・原資産 | 3 桁区切り、小数なし | `67,812` |
@@ -526,8 +526,9 @@ ATM IV の 30 日固定（optionchan の表 `atm_cm_iv` の `iv30`、%）の推�
 
 ### 7.3 文字
 
-- 本文: `Inter, "Hiragino Sans", "Noto Sans JP", system-ui`（ウェブフォントは読み込まない）。数字は `font-variant-numeric: tabular-nums`
-- 数値: `ui-monospace, "SF Mono", Menlo, Consolas`（読み取り・板・足の名前・ステッパー・レールの吹き出し）
+- 本文: `Inter, "sim-greek", "Hiragino Sans", "Noto Sans JP", system-ui`（ウェブフォントは読み込まない）。数字は `font-variant-numeric: tabular-nums`
+- 数値: `"sim-greek-mono", "sim-greek", ui-monospace, "SF Mono", Menlo, Consolas`（読み取り・板・足の名前・ステッパー・レールの吹き出し）
+- ギリシャ文字（#324）: `"sim-greek"`・`"sim-greek-mono"` は **ギリシャ文字（U+0370〜03FF）だけ** を端末の欧文フォントで描く族（`tokens.css` の `@font-face`。`unicode-range: U+0370-03FF`、`src` は `local()` だけ。フォントのファイルは同梱しない）。`lang="ja"` ではギリシャ文字が和文フォントの字形になる（Android の Chrome で Noto Sans CJK のギリシャ文字がグリークらしく見えない）ため、和文のフォントより前に置く。`local()` の名前は Android = Roboto / Noto Sans（等幅 Droid Sans Mono / Noto Sans Mono）、Apple = Helvetica Neue（Menlo）、Windows = Segoe UI・Arial（Consolas）、Linux = DejaVu・Liberation の順にフルネームと PostScript 名。面は `"sim-greek"` が 400・500・600〜900、`"sim-greek-mono"` が 400・600〜900 で、太い面は Bold の名前の後に通常の名前を並べる（太字が無い端末でも和文のギリシャ文字に戻さない）。どの名前も無い端末はこの族が飛ばされて従来どおり。Inter を入れている端末は Inter のギリシャ文字のまま
 - サイズ: 本文 14 / 副 12.5 / 小 11 / 極小 10.5。読み取りの主役 26、他 18（スマホ 24 / 16）
 - 余白: 4 の倍数。パネルの左右 12、行の高さ 30（板）/ 48（足）/ 36（ステッパー）
 
@@ -625,6 +626,7 @@ ATM IV の 30 日固定（optionchan の表 `atm_cm_iv` の `iv30`、%）の推�
 - **幅の段階**: CSS は `@media (max-width: 719.98px)` / `(min-width: 720px) and (max-width: 1199.98px)` / `(min-width: 1200px)`。JS は `PHONE_QUERY`・`PC_QUERY`（`ui/view/layout.ts`）と `layoutTier`（`ui/view/shell.ts`）。パネルの中の詰め方はコンテナクエリ（`.panel-body` が `container-type: inline-size`）
 - **画面の状態の規則**（`ui/view/shell.ts`）: 既定 positions / peek / board（スマホ・タブレットの IV のパネルでは board は IV 推移 = `smileView(s, tier)`。#130）。開いたときは `initialShell(足の本数)` で、足 0 本ならパネルは board（#275）。ドックの別のボタン → そのパネル（hidden なら peek）、開いている同じボタン → hidden。`open`（#82。舞台の足マーカーのタップなど）はそのパネルを開くだけで閉じない（hidden なら peek）。つまみ（スマホ、見えているシートの先頭に 1 つ）は離したときの縦の移動量で決め、6px 未満はタップ（peek ⇄ full）、40px 以上で 1 段（下: full → peek → hidden、上: peek → full）、その間は何もしない。hidden ではつまみが無い。タブレットで scenario は選べない（positions に読み替える）。出し分けは `.layout[data-panel][data-sheet][data-market]` と CSS。#88 段 A で `chart`（`line` / `surface`。省略可能で無い = `line`、読むのは `chartMode`。保存しない。他の action で変わらない）を足した
 - **CSP**: `style` 属性・JSX の `style` prop・HTML 文字列を DOM に入れる API を使わない。位置・大きさが動くもの（シート・ハンドル・レールのつまみ・メニューの左右）は `data-*` / クラスの付け替えか SVG の属性。シートは指に追従させない。canvas（#88 の面モード）は大きさを `width` / `height` 属性とクラスの CSS で決め、描くのは 2D API（`putImageData`・`drawImage`）だけ（`toDataURL` などで画像の URL にしない）
+- **フォント**（#324）: `@font-face` はギリシャ文字の `"sim-greek"`・`"sim-greek-mono"`（§7.3）だけ。ui の CSS には `url()` を書かない（画像・フォントを CSS から読まない。P11）。`src` は `local()` だけで `url()` を書かない（フォントのファイルを同梱しない・読み込まない。CSP の `font-src` を足さない。`local()` は `font-src` なし = `default-src 'none'` でも止まらない）、`unicode-range` は `U+0370-03FF` に絞る（和文・英数字のフォントを変えない）。`tests/ui/cssTokens.test.ts` の (e) が形・面の太さ・端末ごとの名前・`--font` / `--mono` の並びを、`.github/scripts/csp-check.sh` がビルド成果物にフォントのファイル（`.woff` / `.woff2` / `.ttf` / `.otf`）と `url()` の `@font-face` が無いことを確かめる。実際に描いたフォントは `npm run ui:check -- --fonts`（既定の実行にも入る。CDP の `CSS.getPlatformFontsForNode`）
 - **折り返し**: 5.1。値・ラベル・ボタン・セグメント・チップは `white-space: nowrap`。ボタンの中でアイコンと文字を縦に積むときは文字を `span` に入れる（直下のテキストにしない）
 - **アイコン**（#292）: ボタンの記号は文字にせず `Icon`（`ui/next/parts/Icon.tsx`。SVG、色は `currentColor`、`aria-hidden`、名前は親の `aria-label` / `title`）。折りたたみの印も同じ部品（`chevron`）を CSS で回す（`content` の字にしない）。CSS のセレクタは `svg.ic`（ドックの字形の `span.ic` と分ける）。吹き出し・推移の折れ線は既存の `.ic-line`（`AiIcon`・`Shell.tsx` の `DOCK_IC`）。`tests/ui/icon.test.ts` が部品の形と、`ui/next/**/*.tsx` に記号の字・`ui/**/*.css` に `content: "▸"` が残らないことを検査する
 - **ページはスクロールしない**: `html, body { height: 100%; overflow: hidden }`、画面は `100dvh` のグリッド（トップバー → 本体。#87 で知らせの行をやめた）。スクロールは `.panel-body`（`overflow: auto; overscroll-behavior: contain`）だけ
@@ -686,6 +688,13 @@ ATM IV の 30 日固定（optionchan の表 `atm_cm_iv` の `iv30`、%）の推�
 ---
 
 ## 変更履歴
+
+### 2026-10-31 ギリシャ文字を端末の欧文フォントで（#324）
+
+- §7.3: `--font` の `"Inter"` の直後に `"sim-greek"`、`--mono` の先頭に `"sim-greek-mono", "sim-greek"`。ギリシャ文字（U+0370〜03FF）だけを `local()` の端末の欧文フォントで描く（Android の Chrome でギリシャ文字が和文フォントの字形になり、グリークらしく見えなかった）。和文・英数字のフォントは変えない。docs/ui-guidelines.md 7 章 5 の決定（同梱しない）の範囲
+- §10.1: フォントの規約（`@font-face` は `local()` と `unicode-range` だけ・`url()` を書かない）。`tests/ui/cssTokens.test.ts` の (e)・`.github/scripts/csp-check.sh` のフォントのファイル / `url()` の検査
+- §5.2: 読み取りの副題（だけ）の Γ を `Γ −0.010/100円`（数字と単位の間の空白を削る）。Γ が欧文の等幅（0.6em）になり、900px の 5 つの読み取りで円固定の足の副題が 1px 切れたため（docs/design.md の帯の例と同じ書き方）
+- `npm run ui:check -- --fonts`（既定の実行にも入る）: 360×780・1440×900 でギリシャ文字のプローブ（本文 400・太字、`.mono` 400・太字）を描いたフォントが `local()` に並べた名前か（CDP の `CSS.getPlatformFontsForNode`）。和文のプローブのフォントは記録
 
 ### 2026-10-31 説明カードの「1 つ前に戻る」（#320 第 2 弾）
 
