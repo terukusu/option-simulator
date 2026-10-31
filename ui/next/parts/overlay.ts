@@ -1,17 +1,35 @@
-import { useCallback, useEffect, useState } from 'preact/hooks';
+import { useCallback, useEffect, useRef, useState } from 'preact/hooks';
+import { closeLayer, openLayer } from '../backStack';
 
 /**
  * 開いているメニュー / ポップオーバーの id を 1 つだけ持つ小さな購読ストア（#81。docs/ui-redesign.md §5）。
  * Menu・Popover が共有する（同時に開くのは 1 つだけ。別のものを開くと前のものが閉じる）。
+ *
+ * 開いているものは戻る（スマホの戻るジェスチャー・ブラウザの戻る）でも閉じる（#320。../backStack.ts に層として積む）。
+ * 戻るで閉じるときは useOverlay の onBack（Esc と同じ閉じ方。省略時は閉じるだけ）を呼ぶ。
  */
 
 let openId: string | null = null;
 const listeners = new Set<() => void>();
+/** 戻るで閉じるときの閉じ方（id ごと。部品の最新の関数を ref で持つ） */
+const backs = new Map<string, { current: (() => void) | undefined }>();
+
+const layerOf = (id: string) => `overlay:${id}`;
 
 function setOpenId(id: string | null): void {
   if (openId === id) return;
+  const prev = openId;
   openId = id;
+  if (prev !== null) closeLayer(layerOf(prev));
+  if (id !== null) openLayer(layerOf(id), () => backClose(id));
   for (const f of listeners) f();
+}
+
+/** 戻るで閉じる: 部品の onBack（Esc と同じ）。無ければ閉じるだけ */
+function backClose(id: string): void {
+  const f = backs.get(id)?.current;
+  if (f) f();
+  else if (openId === id) setOpenId(null);
 }
 
 /** いま開いているメニュー / ポップオーバーの id（無ければ null）。全体のキー（#89）が「ふさがっている」を読む */
@@ -24,16 +42,37 @@ export function closeOverlay(): void {
   setOpenId(null);
 }
 
-export function useOverlay(id: string): { open: boolean; setOpen: (open: boolean) => void } {
+/**
+ * 開いているメニュー / ポップオーバーを戻ると同じ閉じ方（Esc と同じ = onBack）で閉じる（#320。ダイアログの中の
+ * ポップオーバーを Android の Chrome の閉じる要求で閉じる）
+ */
+export function closeOverlayAsBack(): void {
+  if (openId !== null) backClose(openId);
+}
+
+/**
+ * onBack: 戻るで閉じるときの閉じ方（#320。Esc と同じにする = フォーカスの戻し先も同じ）。省略時は setOpen(false)
+ */
+export function useOverlay(
+  id: string,
+  onBack?: () => void,
+): { open: boolean; setOpen: (open: boolean) => void } {
   const [open, setLocal] = useState(openId === id);
+  const backRef = useRef(onBack);
+  backRef.current = onBack;
   useEffect(() => {
     const update = () => setLocal(openId === id);
     listeners.add(update);
+    backs.set(id, backRef);
     update();
     return () => {
       listeners.delete(update);
-      // 開いたまま消えたら閉じた扱いにする（次に開くものを邪魔しない）
-      if (openId === id) openId = null;
+      if (backs.get(id) === backRef) backs.delete(id);
+      // 開いたまま消えたら閉じた扱いにする（次に開くものを邪魔しない。戻るの層も外す）
+      if (openId === id) {
+        openId = null;
+        closeLayer(layerOf(id));
+      }
     };
   }, [id]);
   const setOpen = useCallback(

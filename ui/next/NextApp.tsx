@@ -74,6 +74,7 @@ import {
 } from '../view/shell';
 import { overwrittenText, restoreEntryFailText } from '../view/topMenu';
 import { BookDialog } from './BookDialog';
+import { initBackHistory } from './backStack';
 import { HoldingsDialog } from './HoldingsDialog';
 import type { MarketAdd } from './market/BoardMonth';
 import { FutHistory } from './market/FutHistory';
@@ -313,6 +314,8 @@ export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
     onPalette,
   };
   useGlobalKeys(keyCtx);
+  // 戻る（スマホの戻るジェスチャー・ブラウザの戻る）で開いているものを 1 つ閉じる（#320。./backStack.ts）
+  useEffect(() => initBackHistory(), []);
   const { pendingShare } = c;
   const toasts = useToasts();
   const [picked, setPicked] = useState<number | null>(null);

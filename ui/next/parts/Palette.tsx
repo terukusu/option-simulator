@@ -50,7 +50,9 @@ function PaletteBody(p: {
   const prevRef = useRef<HTMLElement | null>(null);
   const showBgRef = useRef<(() => void) | null>(null);
   const listId = useId();
-  const { setOpen } = useOverlay('palette');
+  // 戻るで閉じるときは Esc と同じ（実行せずに閉じる。#320）。finish は描くたびに作るので ref で最新を呼ぶ
+  const finishRef = useRef<(run: PaletteRun | null) => void>(() => {});
+  const { setOpen } = useOverlay('palette', () => finishRef.current(null));
   const [query, setQuery] = useState('');
   const [sel, setSel] = useState(-1);
 
@@ -110,6 +112,8 @@ function PaletteBody(p: {
     p.onClose();
     if (run) p.onRun(run);
   };
+
+  finishRef.current = finish;
 
   const runAt = (i: number) => {
     const it = view.shown[i];
