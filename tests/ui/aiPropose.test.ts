@@ -3,6 +3,9 @@ import { AI_EVAL_CASES, caseMargin, caseState } from '../../scripts/aiEvalCases'
 import { activeHeld, reduce, type State, type UiLeg } from '../../ui/state';
 import { aiEnvFromState } from '../../ui/view/aiContext';
 import {
+  ATM_STRUCTURES,
+  CANDIDATE_DELTAS,
+  CANDIDATE_QTY_MAX,
   newTabPlan,
   newTabUndoActions,
   planProposal,
@@ -15,6 +18,7 @@ import {
 } from '../../ui/view/aiPropose';
 import { type AiToolEnv, isToolError, runTool, toolCard } from '../../ui/view/aiTools';
 import { metricsModel } from '../../ui/view/metrics';
+import { nextMonth, type ShapeId, shapeLegs } from '../../ui/view/templates';
 import { fixture } from '../support/fixtures';
 
 /**
@@ -133,6 +137,142 @@ describe('structure_candidates（組み合わせの候補）', () => {
     expect(runTool('structure_candidates', { structure: 'bull_put', wing_pct: 30 }, env)).toEqual({
       error: 'bad_input',
     });
+  });
+});
+
+/** Node の fs（@types/node を足さないため型はここで最小限に書く。tests/ui/aiPresets.test.ts と同じ） */
+const readRepo = (p: string) =>
+  (
+    globalThis as unknown as {
+      process: { getBuiltinModule(id: 'node:fs'): { readFileSync(p: URL, enc: 'utf8'): string } };
+    }
+  ).process
+    .getBuiltinModule('node:fs')
+    .readFileSync(new URL(`../../${p}`, import.meta.url), 'utf8');
+
+describe('#20 第 2 弾 structure_candidates の 6 形（戦略テンプレートの残り）', () => {
+  const env = envOf('strangle_sell');
+  const ADDED: readonly ShapeId[] = [
+    'long_strangle',
+    'long_straddle',
+    'bull_call',
+    'bear_put',
+    'call_butterfly',
+    'calendar',
+  ];
+  type CandLeg = { type: string; k: number; side: string; qty: number; expiry: string };
+  const legKey = (l: { type: string; k: number; side: string; qty: number; expiry: string }) =>
+    `${l.expiry}:${l.type}:${l.k}:${l.side}:${l.qty}`;
+
+  it('STRUCTURES は既存の 8 形の後ろに 6 形（中継の tools.py の STRUCTURES と同じ並び）', () => {
+    expect(STRUCTURES.slice(8)).toEqual(ADDED);
+    const py = readRepo('api/src/simulator_api/ai/tools.py');
+    const m = /^STRUCTURES = \(([^)]*)\)/m.exec(py);
+    expect(m, 'STRUCTURES が無い').not.toBeNull();
+    const ids = [...(m?.[1] ?? '').matchAll(/"([^"]+)"/g)].map((x) => x[1]);
+    expect(ids).toEqual([...STRUCTURES]);
+  });
+
+  it.each(ADDED)('%s: 候補の足が戦略テンプレートの shapeLegs（同じ限月・距離）と同じ K', (s) => {
+    const r = run(env, 'structure_candidates', { structure: s });
+    const m = env.chain.months.find((x) => x.id === r.expiry);
+    if (!m) throw new Error(r.expiry);
+    const atmK = m.atm[env.atmBasis].pick?.k ?? null;
+    const atm = ATM_STRUCTURES.has(s);
+    // ATM の型は ATM から 0 本の 1 候補、OTM の型は短い足の |Δ| ごと（同じ足の組は 1 つにまとめる。まとめたときは
+    // 先に採った |Δ| が残る = 採った d を控えて target_abs_delta と比べる）。basis は実装（structureLegs）と同じ 'A'
+    // （atmK を渡すので ATM の形には効かず、|Δ| の距離も basis を使わない）
+    const want: string[][] = [];
+    const wantD: number[] = [];
+    for (const d of atm ? [0.5] : CANDIDATE_DELTAS) {
+      const t = shapeLegs(env.chain, m, s, {
+        basis: 'A',
+        dist: { kind: 'delta', value: d },
+        n: 0,
+        wingPct: 3,
+        atmK,
+      });
+      if (!t.ok) continue;
+      const legs = t.legs.map((l) =>
+        legKey({
+          expiry: l.expiry,
+          type: l.type === 'put' ? 'P' : 'C',
+          k: l.k,
+          side: l.side,
+          qty: l.mul,
+        }),
+      );
+      if (!want.some((w) => w.join() === legs.join())) {
+        want.push(legs);
+        wantD.push(d);
+      }
+    }
+    expect(want.length).toBeGreaterThan(0);
+    const got = r.candidates.map((c: { legs: CandLeg[] }) => c.legs.map(legKey));
+    expect(got).toEqual(want);
+    if (atm) {
+      expect(r.candidates).toHaveLength(1);
+      expect(r.candidates[0].target_abs_delta).toBeNull();
+    } else {
+      expect(r.candidates.map((c: { target_abs_delta: number }) => c.target_abs_delta)).toEqual(
+        wantD,
+      );
+    }
+  });
+
+  it('calendar: 選んだ限月の ATM を売り、板の次の限月の同じ K を買う（new_tab の candidate も同じ足）', () => {
+    const r = run(env, 'structure_candidates', { structure: 'calendar' });
+    const m = env.chain.months.find((x) => x.id === r.expiry);
+    if (!m) throw new Error(r.expiry);
+    const next = nextMonth(env.chain, m);
+    expect(next).not.toBeNull();
+    const [sell, buy] = r.candidates[0].legs as CandLeg[];
+    expect(sell?.side).toBe('sell');
+    expect(sell?.expiry).toBe(m.id);
+    expect(sell?.k).toBe(m.atm[env.atmBasis].pick?.k);
+    expect(buy?.side).toBe('buy');
+    expect(buy?.expiry).toBe(next?.id);
+    expect(buy?.k).toBe(sell?.k);
+    expect(buy?.type).toBe(sell?.type);
+    const p = run(env, 'propose_position', {
+      target: 'new_tab',
+      candidate: { structure: 'calendar' },
+    });
+    expect(p.diff.map(legKey)).toEqual(r.candidates[0].legs.map(legKey));
+    expect(p.after).toEqual(r.candidates[0].summary);
+    // 次の限月が無い（最後の限月）なら組めない
+    const last = env.chain.months.filter((x) => x.smile && Number.isFinite(x.F)).at(-1);
+    expect(
+      runTool('structure_candidates', { structure: 'calendar', expiry: last?.id }, env),
+    ).toEqual({ error: 'not_on_board' });
+  });
+
+  it('propose_position の candidate の枚数の上限は倍率 2 を見る（structure_candidates と同じ。#20 レビュー N4）', () => {
+    const cand = (structure: string, qty: number) =>
+      runTool('propose_position', { target: 'new_tab', candidate: { structure, qty } }, env);
+    for (const s of ['call_butterfly', 'put_ratio', 'short_strangle']) {
+      expect(cand(s, CANDIDATE_QTY_MAX + 1)).toEqual({ error: 'bad_input' });
+      expect(
+        runTool('structure_candidates', { structure: s, qty: CANDIDATE_QTY_MAX + 1 }, env),
+      ).toEqual({ error: 'bad_input' });
+    }
+    const p = run(env, 'propose_position', {
+      target: 'new_tab',
+      candidate: { structure: 'call_butterfly', qty: CANDIDATE_QTY_MAX },
+    });
+    expect(p.diff.map((d: CandLeg) => d.qty)).toEqual([
+      CANDIDATE_QTY_MAX,
+      CANDIDATE_QTY_MAX * 2,
+      CANDIDATE_QTY_MAX,
+    ]);
+  });
+
+  it('call_butterfly: 中心を 2 枚売り、上下に同じ幅の call を 1 枚ずつ買う（qty は倍率 × 枚数）', () => {
+    const r = run(env, 'structure_candidates', { structure: 'call_butterfly', qty: 2 });
+    const [lo, mid, hi] = r.candidates[0].legs as CandLeg[];
+    expect([lo?.side, mid?.side, hi?.side]).toEqual(['buy', 'sell', 'buy']);
+    expect([lo?.qty, mid?.qty, hi?.qty]).toEqual([2, 4, 2]);
+    expect((mid?.k ?? 0) - (lo?.k ?? 0)).toBe((hi?.k ?? 0) - (mid?.k ?? 0));
   });
 });
 

@@ -72,11 +72,24 @@ def test_presets_has_each_preset_section():
     from simulator_api.ai import allowlist
 
     text = skills.skill_path("presets").read_text(encoding="utf-8")
-    names = ("崩れ方", "反論", "板の前提", "ヘッジ案", "出口", "IV の位置")
+    names = ("崩れ方", "反論", "板の前提", "ヘッジ案", "出口", "IV の位置", "形の相談")
     assert len(names) == len(allowlist.PRESET_TOPICS)
     for name in names:
         assert f"\n## {name}\n" in text
     assert "simulator:proposals" in text and "simulator:volatility" in text
+
+
+def test_presets_shape_section():
+    # #20 第 2 弾: 形の相談は simulator:proposals の手順で、候補は structure_candidates から（距離を自分で作らない）、
+    # propose_position の target は new_tab、3 案まで。system prompt も形の相談で simulator:proposals を読ませる
+    from simulator_api.ai import relay
+
+    text = skills.skill_path("presets").read_text(encoding="utf-8")
+    sec = text.split("\n## 形の相談\n", 1)[1].split("\n## ", 1)[0]
+    for word in ("simulator:proposals", "structure_candidates", "propose_position", "new_tab", "3 つまで"):
+        assert word in sec
+    assert "形の相談" in text.split("\n---\n", 1)[0]  # front matter の description
+    assert "「ヘッジ案」「形の相談」なら simulator:proposals" in relay.SYSTEM_PROMPT
 
 
 

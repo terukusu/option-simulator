@@ -1,6 +1,7 @@
 import { useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks';
 import type { AppController } from '../../components/useAppController';
 import type { State } from '../../state';
+import type { AiPreset } from '../../view/aiPresets';
 import { fmtNum } from '../../view/format';
 import { newTabUndoActions } from '../../view/newTab';
 import {
@@ -9,11 +10,14 @@ import {
   initialShapeForm,
   N_SPEC,
   QTY_SPEC,
+  SHAPE_AI_LABEL,
   SHAPE_NEW_TAB_UNDO_TEXT,
   SHAPE_PICK_TEXT,
   SHAPES_TITLE,
+  type ShapeAiAsk,
   type ShapeCard,
   type ShapeForm,
+  shapeAiAsk,
   shapeApplyPlan,
   shapeCard,
   shapeList,
@@ -40,11 +44,18 @@ interface Props {
   push: (t: ToastInput) => void;
   /** 足した最初の足を選ぶ（ポジションを見せる） */
   onPick: (id: number) => void;
+  /**
+   * [この形で AI に相談]（第 2 弾）が押せない理由（null = 押せる、undefined = AI のパネルの口が無い。AI のパネルが変わる
+   * たびに NextApp が渡し直す = 開いたままでも追従）と、送る口（NextApp が AI のパネルを開いて定型を送る）
+   */
+  aiReason: string | null | undefined;
+  onAiAsk: (p: AiPreset) => void;
 }
 
 /**
  * 形の一覧（#20。docs/ui-redesign.md「形の一覧」・docs/design.md M7・AC9）: 1 つのダイアログの中で一覧（売り / 買い）→
- * 形のカード（限月・距離・翼・枚数、今の板で組んだ足と値）→ [このタブに足す] / [新しいタブに入れる]。中に層を重ねない
+ * 形のカード（限月・距離・翼・枚数、今の板で組んだ足と値）→ [このタブに足す] / [新しいタブに入れる] /
+ * [この形で AI に相談]（閉じて AI のパネルで定型 shape を送る）。中に層を重ねない
  * （形を押すとカードが替わる。戻る 1 回で閉じる = Dialog の層）。表示モデルは ui/view/shapes.ts、入力はここのローカル
  * （保存しない）。適用は既存の action だけ（replaceLegs / openPositionInNewTab）。
  */
@@ -157,6 +168,14 @@ function ShapeDialogBody(p: Props & { init: ShapeId | null }) {
     });
   };
 
+  const ai = shapeAiAsk(card, p.aiReason);
+  const askAi = () => {
+    if (!ai.preset) return;
+    const preset = ai.preset;
+    p.onClose();
+    p.onAiAsk(preset);
+  };
+
   return (
     <Dialog open title={SHAPES_TITLE} class="shapes" onClose={p.onClose}>
       <div class="shape-list">
@@ -188,7 +207,15 @@ function ShapeDialogBody(p: Props & { init: ShapeId | null }) {
         ))}
       </div>
       {card ? (
-        <CardView card={card} form={form} set={set} cardRef={cardRef} apply={apply} />
+        <CardView
+          card={card}
+          form={form}
+          set={set}
+          cardRef={cardRef}
+          apply={apply}
+          ai={ai}
+          askAi={askAi}
+        />
       ) : (
         <p class="shape-empty">{SHAPE_PICK_TEXT}</p>
       )}
@@ -202,6 +229,8 @@ function CardView(p: {
   set: (patch: Partial<ShapeForm>) => void;
   cardRef: { current: HTMLElement | null };
   apply: (target: 'current' | 'new_tab') => void;
+  ai: ShapeAiAsk;
+  askAi: () => void;
 }) {
   const { card, form, set } = p;
   const { shape } = card;
@@ -319,6 +348,16 @@ function CardView(p: {
         </>
       )}
       <div class="shape-acts">
+        <button
+          type="button"
+          class="btn"
+          data-act="ai"
+          disabled={p.ai.disabled}
+          title={p.ai.title}
+          onClick={p.askAi}
+        >
+          {SHAPE_AI_LABEL}
+        </button>
         <button
           type="button"
           class="btn"

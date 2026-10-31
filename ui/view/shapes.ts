@@ -8,6 +8,8 @@
  *   シナリオは今 = 指標の「今」と同じ）。組めなければ理由の文で、適用のボタンは押せない
  * - 適用: [このタブに足す] = replaceLegs（前 + 形。expect = 前）と逆向きの [元に戻す]、[新しいタブに入れる] =
  *   openPositionInNewTab と newTabUndoActions（AI の提案と同じ）。新しい action を足さない
+ * - [この形で AI に相談]（第 2 弾）: 定型の質問（kind preset・ID shape）の文を形と限月から作る（shapeAiAsk）。送れない
+ *   ときは AI のパネルの自由な質問と同じ理由で押せない
  */
 
 import { boardOptionLeg, type Calendar, type Chain, type ChainMonth } from '../../data';
@@ -20,6 +22,7 @@ import {
   type State,
   type UiLeg,
 } from '../state';
+import { type AiPreset, shapePreset } from './aiPresets';
 import { marketAddLabel, monthSegOptions } from './boardPanel';
 import { evalLegs, settingsOf } from './bookList';
 import { type MarginView, marginNow, marginPointAt } from './margin';
@@ -194,6 +197,8 @@ export interface ShapeCard {
   values: ShapeValue[];
   /** 組めない理由（組めれば null） */
   reason: string | null;
+  /** 組めない理由のコード（組めれば null。no_chain = 板が無い）。判定は文ではなくこれで */
+  failCode: ShapeFail | 'no_chain' | null;
   canApply: boolean;
   applyTitle: string | undefined;
   canNewTab: boolean;
@@ -270,24 +275,32 @@ export function shapeCard(input: ShapeCardInput, form: ShapeForm): ShapeCard | n
   if (form.shape === null) return null;
   const shape = shapeOf(form.shape);
   const { chain } = input;
-  const blocked = (reason: string, months: ShapeCard['months'] = [], month = ''): ShapeCard => ({
-    shape,
-    months,
-    month,
-    legs: [],
-    rows: [],
-    values: [],
-    reason,
-    canApply: false,
-    applyTitle: reason,
-    canNewTab: false,
-    newTabTitle: reason,
-  });
-  if (!chain) return blocked(NO_CHAIN_TEXT);
+  const blocked = (
+    code: ShapeFail | 'no_chain',
+    months: ShapeCard['months'] = [],
+    month = '',
+  ): ShapeCard => {
+    const reason = code === 'no_chain' ? NO_CHAIN_TEXT : SHAPE_FAIL_TEXT[code];
+    return {
+      shape,
+      months,
+      month,
+      legs: [],
+      rows: [],
+      values: [],
+      reason,
+      failCode: code,
+      canApply: false,
+      applyTitle: reason,
+      canNewTab: false,
+      newTabTitle: reason,
+    };
+  };
+  if (!chain) return blocked('no_chain');
   const usable = chain.months.filter(usableMonth);
   const months = monthSegOptions(usable);
   const m = monthOf(chain, form, input.legs);
-  if (!m) return blocked(SHAPE_FAIL_TEXT.no_forward, months);
+  if (!m) return blocked('no_forward', months);
   const dist = form.dist === 'sigma' ? form.sigma : form.dist === 'delta' ? form.delta : form.yen;
   const r = shapeLegs(chain, m, shape.id, {
     basis: input.basis,
@@ -295,9 +308,9 @@ export function shapeCard(input: ShapeCardInput, form: ShapeForm): ShapeCard | n
     n: form.n,
     wingPct: form.wingPct,
   });
-  if (!r.ok) return blocked(SHAPE_FAIL_TEXT[r.reason], months, m.id);
+  if (!r.ok) return blocked(r.reason, months, m.id);
   const built = shapeUiLegs(chain, r.legs, form.qty);
-  if (!built.ok) return blocked(SHAPE_FAIL_TEXT[built.reason], months, m.id);
+  if (!built.ok) return blocked(built.reason, months, m.id);
   const legs = built.legs;
   const monthText = new Map(monthSegOptions(chain.months).map((o) => [o.value, o.text]));
   const rows = legs.map((l, i): ShapeLegRow => {
@@ -329,11 +342,56 @@ export function shapeCard(input: ShapeCardInput, form: ShapeForm): ShapeCard | n
     rows,
     values,
     reason: null,
+    failCode: null,
     canApply: true,
     applyTitle: undefined,
     canNewTab: input.canAddTab,
     newTabTitle: input.canAddTab ? undefined : TABS_FULL_TEXT,
   };
+}
+
+// ---------------------------------------------------------------- [この形で AI に相談]（第 2 弾）
+
+/** ボタンの文字 */
+export const SHAPE_AI_LABEL = 'この形で AI に相談';
+/** AI のパネルが無い（口が無い）ときの理由 */
+export const SHAPE_AI_NONE_TEXT = 'AI を使えません';
+
+export interface ShapeAiAsk {
+  /** 送る定型（押せなければ null） */
+  preset: AiPreset | null;
+  disabled: boolean;
+  title: string | undefined;
+}
+
+/**
+ * 距離・翼・本数によらず、その限月では形を組めない理由のコード（AI の structure_candidates も必ず not_on_board）。
+ * ATM の形の no_atm も（AI は ATM から 0 本で組むので ATM が無ければ組めない）
+ */
+export function aiCannotBuild(card: ShapeCard): boolean {
+  const c = card.failCode;
+  if (c === null) return false;
+  if (c === 'no_chain' || c === 'no_forward' || c === 'no_next_month') return true;
+  return c === 'no_atm' && card.shape.place === 'atm';
+}
+
+/**
+ * [この形で AI に相談] の状態。card = 形のカード、aiReason = AI のパネルの自由な質問が送れない理由（送れるなら null、
+ * AI のパネルの口が無ければ undefined）。形と限月が決まれば押せる（今の距離で組めない形でも、AI は候補の距離を
+ * 自分で選び直せるので押せる）。限月が無い（板が無い・F が無い）・その限月では組めない（カレンダーの次の限月が無い・
+ * ATM の形で ATM が決まらない = aiCannotBuild）ときはカードの理由で押せない
+ */
+export function shapeAiAsk(
+  card: ShapeCard | null,
+  aiReason: string | null | undefined,
+): ShapeAiAsk {
+  if (!card) return { preset: null, disabled: true, title: undefined };
+  if (card.month === '' || aiCannotBuild(card)) {
+    return { preset: null, disabled: true, title: card.reason ?? undefined };
+  }
+  if (aiReason === undefined) return { preset: null, disabled: true, title: SHAPE_AI_NONE_TEXT };
+  if (aiReason !== null) return { preset: null, disabled: true, title: aiReason };
+  return { preset: shapePreset(card.shape.id, card.month), disabled: false, title: undefined };
 }
 
 // ---------------------------------------------------------------- 適用と [元に戻す]

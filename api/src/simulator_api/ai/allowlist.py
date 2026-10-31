@@ -34,7 +34,8 @@ ASK_TOPICS = ("tile.maxProfit", "tile.maxLoss", "tile.bep", "tile.premium", "til
               "tile.margin", "tile.room", "readout.date", "readout.expiry", "readout.delta", "readout.premium",
               "tail.pnl", "tail.margin", "iv.history")
 # 定型の質問の ID（#140。ui/view/aiPresets.ts の AI_PRESET_IDS と同じ並び = tests/ui/aiPresets.test.ts が突き合わせる）
-PRESET_TOPICS = ("crash", "rebut", "board", "hedge", "exit", "iv")
+# shape = 形の一覧のカードの [この形で AI に相談]（#20。チップには出さない）
+PRESET_TOPICS = ("crash", "rebut", "board", "hedge", "exit", "iv", "shape")
 # topic を持つ kind と、その値の一覧
 TOPICS = {"ask": ASK_TOPICS, "preset": PRESET_TOPICS}
 

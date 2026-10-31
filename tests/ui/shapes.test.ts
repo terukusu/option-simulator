@@ -10,6 +10,7 @@ import {
   reduce,
   type State,
 } from '../../ui/state';
+import { shapePresetText } from '../../ui/view/aiPresets';
 import { newTabUndoActions } from '../../ui/view/aiPropose';
 import {
   capitalOf,
@@ -25,10 +26,13 @@ import { metricTiles } from '../../ui/view/metricsPanel';
 import { pnlDomains, scenarioFull, withScenarioFull } from '../../ui/view/pnlChart';
 import { positionModel } from '../../ui/view/position';
 import {
+  aiCannotBuild,
   initialShapeForm,
+  SHAPE_AI_NONE_TEXT,
   SHAPE_PICK_TEXT,
   type ShapeCardInput,
   type ShapeForm,
+  shapeAiAsk,
   shapeApplyPlan,
   shapeCard,
   shapeList,
@@ -303,5 +307,109 @@ describe('適用と [元に戻す]', () => {
 
   it('足が無ければ計画は null', () => {
     expect(shapeApplyPlan(one, 'short_strangle', [], 'current')).toBeNull();
+  });
+});
+
+describe('#20 第 2 弾 [この形で AI に相談]', () => {
+  it('形と限月から定型（kind preset・ID shape）の文を作る（距離・枚数の数字は入れない）', () => {
+    const c = shapeCard(inputOf(loaded), form({ month: m2.id, qty: 3, sigma: 2 }));
+    const a = shapeAiAsk(c, null);
+    expect(a.disabled).toBe(false);
+    expect(a.title).toBeUndefined();
+    expect(a.preset?.id).toBe('shape');
+    expect(a.preset?.text).toBe(shapePresetText('short_strangle', m2.id));
+  });
+
+  it('AI のパネルの自由な質問と同じ理由で押せない（title = 理由）・口が無ければ押せない', () => {
+    const c = shapeCard(inputOf(loaded), form({ month: m2.id }));
+    expect(shapeAiAsk(c, '送信中です')).toEqual({
+      preset: null,
+      disabled: true,
+      title: '送信中です',
+    });
+    expect(shapeAiAsk(c, 'AI は無効です（管理者の設定）').title).toBe(
+      'AI は無効です（管理者の設定）',
+    );
+    expect(shapeAiAsk(c, undefined)).toEqual({
+      preset: null,
+      disabled: true,
+      title: SHAPE_AI_NONE_TEXT,
+    });
+    expect(shapeAiAsk(null, null).disabled).toBe(true);
+  });
+
+  it('今の距離で組めなくても限月が決まれば押せる / その限月で組めない・板が無いなら理由で押せない', () => {
+    // 今の距離の値で組めない（ここでは範囲の外の値）→ AI は候補の距離を自分で選び直せるので押せる
+    const far = shapeCard(inputOf(loaded), form({ month: m2.id, dist: 'yen', yen: 0 }));
+    expect(far?.canApply).toBe(false);
+    expect(far?.reason).toBe(SHAPE_FAIL_TEXT.bad_input);
+    expect(shapeAiAsk(far, null).disabled).toBe(false);
+    const cal = shapeCard(inputOf(loaded), form({ shape: 'calendar', month: m2.id }));
+    expect(shapeAiAsk(cal, null)).toEqual({
+      preset: null,
+      disabled: true,
+      title: SHAPE_FAIL_TEXT.no_next_month,
+    });
+    const none = shapeCard(inputOf(loaded, { chain: null }), form({}));
+    expect(shapeAiAsk(none, null).title).toBe(NO_CHAIN_TEXT);
+    expect(shapeAiAsk(none, null).disabled).toBe(true);
+  });
+
+  it('押せなくする判定は理由のコード（failCode）で: ATM が決まらない限月の ATM の形は押せず、OTM の形は押せる（#20 レビュー N1）', () => {
+    // m2 の ATM（A / B とも）を消した板（ATM の形は AI も ATM から 0 本で組むので必ず組めない）
+    const noAtm = {
+      ...chain,
+      months: chain.months.map((m) =>
+        m.id === m2.id
+          ? {
+              ...m,
+              atm: {
+                A: { ...m.atm.A, pick: null },
+                B: { ...m.atm.B, pick: null },
+              },
+            }
+          : m,
+      ),
+    };
+    const straddle = shapeCard(
+      inputOf(loaded, { chain: noAtm }),
+      form({ shape: 'long_straddle', month: m2.id }),
+    );
+    expect(straddle?.failCode).toBe('no_atm');
+    expect(straddle && aiCannotBuild(straddle)).toBe(true);
+    expect(shapeAiAsk(straddle, null)).toEqual({
+      preset: null,
+      disabled: true,
+      title: SHAPE_FAIL_TEXT.no_atm,
+    });
+    // σ の距離は X₀ が要るが、AI は |Δ| で組める → no_atm でも OTM の形は押せる
+    const strangle = shapeCard(
+      inputOf(loaded, {
+        chain: {
+          ...noAtm,
+          months: noAtm.months.map((m) =>
+            m.id === m2.id
+              ? {
+                  ...m,
+                  atm: {
+                    A: { ...m.atm.A, reference: { ...m.atm.A.reference, price: null } },
+                    B: { ...m.atm.B, reference: { ...m.atm.B.reference, price: null } },
+                  },
+                }
+              : m,
+          ),
+        },
+      }),
+      form({ month: m2.id }),
+    );
+    expect(strangle?.failCode).toBe('no_atm');
+    expect(strangle && aiCannotBuild(strangle)).toBe(false);
+    expect(shapeAiAsk(strangle, null).disabled).toBe(false);
+    // コードの対応: 組めれば null、板が無ければ no_chain、次の限月が無いカレンダーは no_next_month
+    expect(shapeCard(inputOf(loaded), form({ month: m2.id }))?.failCode).toBeNull();
+    expect(shapeCard(inputOf(loaded, { chain: null }), form({}))?.failCode).toBe('no_chain');
+    expect(shapeCard(inputOf(loaded), form({ shape: 'calendar', month: m2.id }))?.failCode).toBe(
+      'no_next_month',
+    );
   });
 });

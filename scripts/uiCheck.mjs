@@ -200,7 +200,9 @@
 //                                          ストラングル売り → 2 限 → [このタブに足す] で足 +2（put 売り・call 売り・建値 = bid）・閉じる・
 //                                          トースト [元に戻す] → 前の足、[新しいタブに入れる] でタブ +1 → [元に戻す] で閉じる、タブ 6 個で
 //                                          [新しいタブに入れる] が disabled・title、戻る 1 回・Esc で閉じて ⋯ にフォーカス、足 0 本の
-//                                          空の欄の [形から組む…]、1440×900 のパレット「ストラングル」→ そのカード。--shots で shapes-*.png。
+//                                          空の欄の [形から組む…]、1440×900 のパレット「ストラングル」→ そのカード、第 2 弾の
+//                                          [この形で AI に相談] → 閉じて AI のパネル・要求が kind preset・topic shape（偽の AI）・
+//                                          AI が無効でボタンが disabled と title。--shots で shapes-*.png。
 //                                          既定の実行は「形の一覧（ストラングル売りのカード）」と「足 0 本の空の欄（3 ボタン）」
 //   --url <base>                           dev サーバーを起こさず、その URL を使う（例 http://127.0.0.1:5173/?parts）
 //   --dom <file>                           body の下の要素の tag.class の並びを書き出す（DOM の変化の比較用）
@@ -4688,6 +4690,176 @@ async function shapesFlows(vp) {
       `開く ${opened}・見出し ${title}・押した ${pressed}`,
     );
     check(`${tag} (6) ページのエラーなし`, errors.length === 0, errors.join(' / '));
+    await ctx.close();
+  }
+
+  // (9) 第 2 弾: 形のカード → [この形で AI に相談] → ダイアログが閉じ AI のパネル（PC は左の列）が開き、送った要求が
+  // kind preset・topic shape（dev の偽の AI。Anthropic を呼ばない）。文は「［定型］形の相談」+ 名前（ID）・限月だけ
+  {
+    const { ctx, page, errors } = await openApp(twoLegs);
+    const sent = [];
+    page.on('request', (r) => {
+      if (r.method() === 'POST' && r.url().includes('/fixtures/ai/messages')) {
+        try {
+          sent.push(JSON.parse(r.postData() ?? 'null'));
+        } catch {}
+      }
+    });
+    await shapesFromMenu(page);
+    await shapePick(page, 'short_strangle', '12月限');
+    const btn = `${SHAPES_DLG} .shape-acts button[data-act="ai"]`;
+    const label = await page.textContent(btn).catch(() => null);
+    const can = await page.isEnabled(btn).catch(() => false);
+    await shot(page, '6-ai-card');
+    await page.click(btn).catch(() => {});
+    await page
+      .waitForFunction(
+        () => document.querySelector('section.ai .ai-msg.user') !== null,
+        undefined,
+        {
+          timeout: 8000,
+        },
+      )
+      .catch(() => {});
+    await page.waitForTimeout(300);
+    const closed = (await page.locator(SHAPES_DLG).count()) === 0;
+    const lay = await page.evaluate(() => {
+      const l = document.querySelector('.layout');
+      const sec = document.querySelector('section.ai');
+      const r = sec?.getBoundingClientRect();
+      return {
+        panel: l?.getAttribute('data-panel') ?? null,
+        left: l?.getAttribute('data-left') ?? null,
+        shown: !!r && r.width > 0 && r.height > 0,
+        user: sec?.querySelector('.ai-msg.user')?.textContent ?? '',
+      };
+    });
+    const req = sent[0] ?? null;
+    const lastText = (req?.messages ?? [])
+      .at(-1)
+      ?.content?.filter((c) => c?.type === 'text')
+      .map((c) => c.text)
+      .join('');
+    const textOk =
+      typeof lastText === 'string' &&
+      lastText.startsWith('［定型］形の相談\nストラングル売り（short_strangle）・限月 2026-12\n') &&
+      !/[0-9]/.test(lastText.replace('2026-12', ''));
+    const where = phoneSize ? lay.panel === 'ai' : lay.left === 'ai';
+    check(
+      `${tag} 第 2 弾: 形のカード → [この形で AI に相談] → ダイアログが閉じ AI のパネル（${phoneSize ? 'シート' : '左の列'}）が開き、要求が kind preset・topic shape・文は名前（ID）と限月だけ`,
+      label === 'この形で AI に相談' &&
+        can &&
+        closed &&
+        where &&
+        lay.shown &&
+        req?.kind === 'preset' &&
+        req?.topic === 'shape' &&
+        textOk,
+      `ボタン「${label}」${can}・閉じた ${closed}・panel ${lay.panel}・left ${lay.left}・見える ${lay.shown}・要求 ${sent.length} 件 kind ${req?.kind} topic ${req?.topic}・文「${(lastText ?? '').replace(/\n/g, ' / ')}」`,
+    );
+    // 偽の AI が structure_candidates → propose_position（new_tab）を呼び、提案のカードが出る（dev の見本の通り道）
+    const card = await page
+      .waitForSelector(
+        'section.ai .ai-prop[data-ai-tool="propose_position"] button[data-ai="propose"]',
+        { timeout: 15000 },
+      )
+      .then(() => true)
+      .catch(() => false);
+    check(`${tag} 第 2 弾: 形の相談の返答（偽の AI）に提案のカードが出る`, card, `カード ${card}`);
+    await shot(page, '7-ai-sent');
+    check(`${tag} (9) ページのエラーなし`, errors.length === 0, errors.join(' / '));
+    await ctx.close();
+  }
+
+  // (10) 第 2 弾: AI が無効（状態を読んだ後）なら [この形で AI に相談] が disabled・title に理由（送らない）
+  {
+    // 状態の読み込みより先に差し替える（開く前に route）
+    const ctx = await newContext(vp, { [WORKSPACE_KEY]: twoLegs, [PREFS_KEY]: prefsText('dark') });
+    const page = await ctx.newPage();
+    const errors = [];
+    page.on('pageerror', (e) => errors.push(e.message));
+    await page.route('**/fixtures/ai/status', (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json; charset=utf-8',
+        body: JSON.stringify({
+          schema_version: 1,
+          enabled: false,
+          model: null,
+          credential: null,
+          counted: false,
+          limit_usd: null,
+          remaining_usd: null,
+          resets_at: null,
+        }),
+      }),
+    );
+    let posts = 0;
+    page.on('request', (r) => {
+      if (r.method() === 'POST' && r.url().includes('/fixtures/ai/messages')) posts++;
+    });
+    await page.goto(pageUrl('next'));
+    await waitReady(page, 'next');
+    // AI のパネルを一度見せて状態を読ませる（状態を読むのはパネルが見えたとき）→ ポジションに戻って形の一覧
+    await openAi(page, vp.width, 'full').catch(() => false);
+    await page
+      .waitForFunction(
+        () =>
+          (document.querySelector('section.ai [data-ai="reason"]')?.textContent ?? '').includes(
+            '無効',
+          ),
+        undefined,
+        { timeout: 5000 },
+      )
+      .catch(() => {});
+    if (phoneSize) await setShell(page, 'positions', 'full');
+    await shapesFromMenu(page);
+    await shapePick(page, 'short_strangle', '12月限');
+    const btn = `${SHAPES_DLG} .shape-acts button[data-act="ai"]`;
+    const dis = await page.isDisabled(btn).catch(() => false);
+    const title = await page.getAttribute(btn, 'title').catch(() => null);
+    await page.click(btn, { force: true, timeout: 1000 }).catch(() => {});
+    await page.waitForTimeout(300);
+    const still = (await page.locator(SHAPES_DLG).count()) === 1;
+    check(
+      `${tag} 第 2 弾: AI が無効なら [この形で AI に相談] が disabled・title に理由・押しても送らない`,
+      dis && (title ?? '').includes('AI は無効') && still && posts === 0,
+      `disabled ${dis}・title ${title}・開いたまま ${still}・送信 ${posts}`,
+    );
+    check(`${tag} (10) ページのエラーなし`, errors.length === 0, errors.join(' / '));
+    await ctx.close();
+  }
+
+  // (11) #20 レビュー N2: AI の送信中に形の一覧を開くと [この形で AI に相談] は disabled・title「送信中です」→ 返答が
+  // 終わると、カードを触らずに押せるようになる（ダイアログを開いたまま追従する）
+  {
+    const { ctx, page, errors } = await pickOpen(vp, twoLegs);
+    await openAi(page, vp.width, 'full').catch(() => false);
+    await page.fill('section.ai .ai-input textarea', '崩れ方を見て').catch(() => {});
+    await page.press('section.ai .ai-input textarea', 'Enter').catch(() => {});
+    await page.waitForSelector('section.ai .ai-progress', { timeout: 5000 }).catch(() => {});
+    if (phoneSize) await setShell(page, 'positions', 'full');
+    await shapesFromMenu(page);
+    await shapePick(page, 'short_strangle', '12月限');
+    const btn = `${SHAPES_DLG} .shape-acts button[data-act="ai"]`;
+    const dis0 = await page.isDisabled(btn).catch(() => false);
+    const title0 = await page.getAttribute(btn, 'title').catch(() => null);
+    // 触らずに待つ（返答が終わると押せる）
+    const enabled = await page
+      .waitForFunction((sel) => document.querySelector(sel)?.disabled === false, btn, {
+        timeout: 20000,
+      })
+      .then(() => true)
+      .catch(() => false);
+    const title1 = await page.getAttribute(btn, 'title').catch(() => null);
+    const open = (await page.locator(SHAPES_DLG).count()) === 1;
+    check(
+      `${tag} レビュー N2: 送信中に開くと [この形で AI に相談] が disabled・title「送信中です」→ 返答が終わるとダイアログを開いたまま押せる`,
+      // title は外れる（Preact は属性を空にする）
+      dis0 && title0 === '送信中です' && enabled && !title1 && open,
+      `始め disabled ${dis0}・title ${title0} → 押せる ${enabled}・title ${title1}・開いたまま ${open}`,
+    );
+    check(`${tag} (11) ページのエラーなし`, errors.length === 0, errors.join(' / '));
     await ctx.close();
   }
 }

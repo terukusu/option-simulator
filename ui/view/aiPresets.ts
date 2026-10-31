@@ -8,11 +8,15 @@
  * - 文の先頭は PRESET_PREFIX（system prompt がこれを見てスキル simulator:presets の手順を読ませる）。答えは既存の
  *   ツールで出す（新しいツールは無い）。文に数字を入れない（照合の出所にしない・評価を乱さない）
  * - 足が要る定型は [このポジションを診断] と同じ押せない理由、要らない定型（板の前提・IV）は自由な質問と同じ
+ * - 形の相談（#20 第 2 弾。ID `shape`）はチップに出さない（AI_PRESETS に入れない）。形の一覧のカードの
+ *   [この形で AI に相談] が shapePreset で作って送る。文は形の名前・型の ID・限月の ID だけ（距離・行使価格・金額の
+ *   数字を入れない = 候補は simulator が作る。#120 柱 5）
  */
 
 import { type AiChatState, type AiGate, diagnoseBlocked, sendBlocked } from './aiChat';
+import { type ShapeId, shapeOf } from './templates';
 
-export const AI_PRESET_IDS = ['crash', 'rebut', 'board', 'hedge', 'exit', 'iv'] as const;
+export const AI_PRESET_IDS = ['crash', 'rebut', 'board', 'hedge', 'exit', 'iv', 'shape'] as const;
 export type AiPresetId = (typeof AI_PRESET_IDS)[number];
 
 /** 文の先頭（中継の relay.PRESET_PREFIX と同じ文） */
@@ -35,7 +39,7 @@ const preset = (id: AiPresetId, label: string, ask: string, needsLegs: boolean):
   needsLegs,
 });
 
-/** チップの並び（AI_PRESET_IDS と同じ順） */
+/** チップの並び（AI_PRESET_IDS と同じ順。形の相談 `shape` はチップに出さない） */
 export const AI_PRESETS: readonly AiPreset[] = [
   preset(
     'crash',
@@ -69,3 +73,29 @@ export const AI_PRESETS: readonly AiPreset[] = [
 export function presetBlocked(s: AiChatState, g: AiGate, p: AiPreset): string | null {
   return p.needsLegs ? diagnoseBlocked(s, g) : sendBlocked(s, g);
 }
+
+// ---------------------------------------------------------------- 形の相談（#20 第 2 弾）
+
+/** 形の相談の名前（文の 1 行目。スキル simulator:presets の節の見出しと同じ） */
+export const SHAPE_PRESET_LABEL = '形の相談';
+
+/**
+ * 形の相談の文: `［定型］形の相談` + `<名前>（<型の ID>）・限月 <YYYY-MM>` + 頼みごと。名前は数字の無い短い名前
+ * （put レシオの「（1 買 2 売）」を入れない = 限月の ID のほかに照合の対象になる数字を入れない）
+ */
+export function shapePresetText(shape: ShapeId, monthId: string): string {
+  const s = shapeOf(shape);
+  return [
+    `${PRESET_PREFIX}${SHAPE_PRESET_LABEL}`,
+    `${s.short ?? s.name}（${s.id}）・限月 ${monthId}`,
+    '今の板でこの形を組む候補（距離の違い）を比べ、提案のカードで出してください。判断は自分でします。',
+  ].join('\n');
+}
+
+/** 形の相談の定型（kind preset・topic shape。足は要らない = 自由な質問と同じ押せない理由） */
+export const shapePreset = (shape: ShapeId, monthId: string): AiPreset => ({
+  id: 'shape',
+  label: SHAPE_PRESET_LABEL,
+  text: shapePresetText(shape, monthId),
+  needsLegs: false,
+});
