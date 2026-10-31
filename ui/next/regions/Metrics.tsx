@@ -21,6 +21,7 @@ import { PanelHead } from '../PanelHead';
 import { AskAi } from '../parts/AskAi';
 import { FullText } from '../parts/FullText';
 import { Icon } from '../parts/Icon';
+import { ManualLinks } from '../parts/ManualLinks';
 import { Popover } from '../parts/Popover';
 import { TermLinks } from '../parts/TermLinks';
 import { openTerm } from '../parts/termCard';
@@ -134,6 +135,7 @@ function MetricsView({ model, feePerLot, margin, hold, replay }: Props) {
           <p>{TAIL_HINT}</p>
           <p>{MARGIN_HINT}</p>
           <TermLinks ids={HINT_TERMS.metrics} />
+          <ManualLinks place="metrics" />
         </Popover>
       </PanelHead>
       {/* biome-ignore lint/a11y/useSemanticElements: 1〜5 の行き先のスクロールする枠に名前を付ける（fieldset にしない） */}

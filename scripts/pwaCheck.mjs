@@ -11,6 +11,8 @@
 //   (a) CDP の Page.getAppManifest の errors が 0 件・url のパスが /manifest.webmanifest
 //   (b) manifest の要求に cookie が付く（crossorigin="use-credentials" の効き目。検査用の cookie を 1 つ入れて開く）
 //   (c) コンソールの CSP 違反（Refused to / Content Security Policy）が 0 件・/favicon.svg が 200
+//   (d) `/` で ⋯ → マニュアル → 節（表・コードブロック）を説明カードで開く（#322。マニュアルの chunk の動的 import）。
+//       (c) の CSP 違反はこの操作の後に数える
 // 参考に Page.getInstallabilityErrors も出す（display: browser のため「インストールできない」の旨は想定どおり）。
 // 出力は件数・パス・ステータスだけ（cookie の値・ヘッダの全文は出さない）。--base はループバック（127.0.0.1 / localhost / [::1]）だけ。
 
@@ -87,6 +89,42 @@ try {
         r.status() === 200,
         `(c) /favicon.svg ${r.status()}（ページの読み込みでは要求なし。page.request で確認）`,
       );
+    }
+    if (path === '/') {
+      // (d) #322: マニュアルの節を説明カードで開く（別の chunk の動的 import・表・コードブロック）。その間も CSP 違反 0
+      const card = 'dialog.term-card[open]';
+      await page.click('button[aria-label="メニュー"]');
+      await page.click('header.top > .menu-wrap [role^="menuitem"]:has-text("マニュアル")');
+      const toc = await page
+        .waitForSelector(`${card} .tc-toc`, { timeout: 8000 })
+        .then(() => true)
+        .catch(() => false);
+      ok(toc, '(d) ⋯ → マニュアル で目次が出る（マニュアルの chunk を読んだ）');
+      for (const label of ['16.3 ', '11.5 ']) {
+        await page
+          .locator(`${card} .tc-toc .tc-link`, { hasText: label })
+          .first()
+          .click()
+          .catch(() => {});
+        const title = await page
+          .waitForFunction(
+            ([c, l]) =>
+              (document.querySelector(`${c} .tc-head h2`)?.textContent ?? '').startsWith(
+                `マニュアル ${l}`,
+              ),
+            [card, label],
+            { timeout: 5000 },
+          )
+          .then(() => true)
+          .catch(() => false);
+        const blocks = await page.$$eval(
+          `${card} .tc-table, ${card} .tc-code`,
+          (els) => els.length,
+        );
+        ok(title && blocks > 0, `(d) 節「${label.trim()}」を開く（表 / コード ${blocks}）`);
+        await page.keyboard.press('Escape');
+        await page.waitForTimeout(200);
+      }
     }
     ok(csp.length === 0, `(c) CSP 違反 ${csp.length} 件`);
 

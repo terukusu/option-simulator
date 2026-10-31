@@ -1,14 +1,25 @@
+import type { ComponentChildren } from 'preact';
 import { useId, useLayoutEffect, useRef } from 'preact/hooks';
-import { type TermCardView, termById, termCardView } from '../../view/glossary';
-import type { TermChainItem } from '../../view/termChain';
+import { type TermCardView, termCardView } from '../../view/glossary';
+import { cardTitle, type TermChainItem } from '../../view/termChain';
 import { hideBackground } from './background';
 import { Icon } from './Icon';
+import { ManualContent } from './ManualBody';
+import { useManual } from './manualDoc';
 import { claimEscape } from './overlay';
-import { backTerm, closeTerm, openTerm, setTermScrollReader, useTermCard } from './termCard';
+import {
+  backTerm,
+  closeTerm,
+  openManual,
+  openTerm,
+  setTermScrollReader,
+  useTermCard,
+} from './termCard';
 
 /**
  * 用語の説明カード（#167。docs/ui-redesign.md §5）。<dialog class="term-card" aria-modal="true"> を show() で開き、
- * dialog 自身を窓いっぱいの下敷きにする（コマンドパレットと同じ。showModal() の inert の作り直しを避ける）。
+ * dialog 自身を窓いっぱいの下敷きにする（コマンドパレットと同じ。showModal() の inert の作り直しを避ける）。ただし
+ * モーダルのダイアログ（保存一覧・保有ポジション）が開いているときは showModal() でその上に出す（#322）。
  * NextApp に 1 つだけ置き、開く用語は ./termCard.ts のストア（ⓘ の「用語:」・内訳の見出し・パレットの用語の行）。
  *
  * - 開くと見出しへフォーカス。フォーカスがカードの外へ出たら見出しへ戻す。Tab はカードの中のボタンで回る。
@@ -20,13 +31,30 @@ import { backTerm, closeTerm, openTerm, setTermScrollReader, useTermCard } from 
  * - ×・背景（箱の外）のクリックは全部閉じる。閉じたら開く前の要素へフォーカスを戻す（その要素が閉じたポップオーバーの
  *   中ならその ⓘ のボタンへ。無ければ blur）
  * - 中身は表示モデル（ui/view/glossary.ts の termCardView）を JSX のテキストで描くだけ（HTML 文字列・style を使わない）
+ * - 列には用語のほかにマニュアルの節・目次・AI の根拠の節を積む（#322。ui/view/termChain.ts の CardEntry）。マニュアルは
+ *   それをカードに出したときに初めて読み込む（./manualDoc.ts）。中身は ./ManualBody.tsx
  */
 export function TermCard() {
   const { current, prev } = useTermCard();
-  const view = current === null ? null : termCardView(current.id);
-  if (!view || current === null) return null;
-  const prevTitle = prev === null ? null : (termById(prev)?.title ?? null);
-  return <TermCardBody view={view} item={current} prevTitle={prevTitle} />;
+  const entry = current?.entry ?? null;
+  const manual = useManual(entry !== null && entry.kind !== 'term');
+  if (current === null || entry === null) return null;
+  const index = manual.status === 'ready' ? manual.index : null;
+  const prevTitle = prev === null ? null : cardTitle(prev, index);
+  if (entry.kind === 'term') {
+    const view = termCardView(entry.id);
+    if (!view) return null;
+    return (
+      <TermCardBody title={view.title} item={current} prevTitle={prevTitle}>
+        <TermBody view={view} />
+      </TermCardBody>
+    );
+  }
+  return (
+    <TermCardBody title={cardTitle(entry, index)} oneLine item={current} prevTitle={prevTitle}>
+      <ManualContent entry={entry} manual={manual} />
+    </TermCardBody>
+  );
 }
 
 /** 戻す先: 開く前の要素。閉じたポップオーバー（[hidden]）の中ならその ⓘ のボタン */
@@ -59,14 +87,19 @@ function tabRing(dlg: HTMLDialogElement, e: KeyboardEvent): void {
 }
 
 function TermCardBody({
-  view,
+  title,
+  oneLine = false,
   item,
   prevTitle,
+  children,
 }: {
-  view: TermCardView;
+  title: string;
+  /** 見出しを 1 行に収める（入らなければ省略記号。マニュアルの節。全文は本文の先頭の節の道筋と title） */
+  oneLine?: boolean;
   item: TermChainItem;
-  /** 戻り先の用語の見出し（無ければ [← 戻る] を出さない） */
+  /** 戻り先の見出し（無ければ [← 戻る] を出さない） */
   prevTitle: string | null;
+  children: ComponentChildren;
 }) {
   const ref = useRef<HTMLDialogElement>(null);
   const boxRef = useRef<HTMLDivElement>(null);
@@ -78,7 +111,13 @@ function TermCardBody({
   useLayoutEffect(() => {
     const dlg = ref.current;
     prevRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    if (dlg && !dlg.open) dlg.show();
+    // モーダルのダイアログ（保存一覧・保有ポジション。./Dialog.tsx の showModal()）の中の ⓘ から開いたときは、カードも
+    // showModal() で top layer のその上に出す（show() のままだとモーダルの下に描かれ、inert で押せない。#322）。
+    // カードを閉じればモーダルのダイアログが一番上に戻る。それ以外は今のまま show()（inert の作り直しを避ける）
+    if (dlg && !dlg.open) {
+      if (document.querySelector('dialog.sheet[open]') !== null) dlg.showModal();
+      else dlg.show();
+    }
     setTermScrollReader(() => bodyRef.current?.scrollTop ?? 0);
     // 見出しへフォーカスしてから背景を読み上げから外す（#124。./background.ts）
     headRef.current?.focus({ preventScroll: true });
@@ -157,60 +196,85 @@ function TermCardBody({
               <Icon name="back" />
             </button>
           )}
-          <h2 id={titleId} ref={headRef} tabIndex={-1}>
-            {view.title}
+          <h2
+            id={titleId}
+            ref={headRef}
+            tabIndex={-1}
+            class={oneLine ? 'tc-one' : undefined}
+            title={oneLine ? title : undefined}
+          >
+            {title}
           </h2>
           <button type="button" class="btn ghost icon" aria-label="閉じる" onClick={closeTerm}>
             <Icon name="close" />
           </button>
         </div>
         <div class="tc-body" ref={bodyRef} tabIndex={-1}>
-          <p class="tc-reading">{view.reading}</p>
-          {view.aliases !== '' && <p class="tc-aliases">別名: {view.aliases}</p>}
-          <p class="tc-summary">{view.summary}</p>
-          {view.body.map((p, i) => (
-            // 段落は毎回同じ順（並べ替えない）
-            <p key={i}>{p}</p>
-          ))}
-          {view.formula !== null && (
-            <>
-              <h3>式</h3>
-              <p class="tc-formula">{view.formula}</p>
-            </>
-          )}
-          {view.example !== null && (
-            <>
-              <h3>例</h3>
-              <p>{view.example}</p>
-            </>
-          )}
-          <h3>出る場所</h3>
-          <ul class="tc-where">
-            {view.where.map((w) => (
-              <li key={w}>{w}</li>
-            ))}
-          </ul>
-          <p class="tc-guide">マニュアル: {view.guide}</p>
-          {view.related.length > 0 && (
-            <>
-              <h3>関連する用語</h3>
-              <p class="tc-related">
-                {view.related.map((r) => (
-                  <button
-                    key={r.id}
-                    type="button"
-                    class="term-link"
-                    aria-label={`用語: ${r.title}`}
-                    onClick={() => openTerm(r.id)}
-                  >
-                    {r.short}
-                  </button>
-                ))}
-              </p>
-            </>
-          )}
+          {children}
         </div>
       </div>
     </dialog>
+  );
+}
+
+/** 用語の中身（#167） */
+function TermBody({ view }: { view: TermCardView }) {
+  return (
+    <>
+      <p class="tc-reading">{view.reading}</p>
+      {view.aliases !== '' && <p class="tc-aliases">別名: {view.aliases}</p>}
+      <p class="tc-summary">{view.summary}</p>
+      {view.body.map((p, i) => (
+        // 段落は毎回同じ順（並べ替えない）
+        <p key={i}>{p}</p>
+      ))}
+      {view.formula !== null && (
+        <>
+          <h3>式</h3>
+          <p class="tc-formula">{view.formula}</p>
+        </>
+      )}
+      {view.example !== null && (
+        <>
+          <h3>例</h3>
+          <p>{view.example}</p>
+        </>
+      )}
+      <h3>出る場所</h3>
+      <ul class="tc-where">
+        {view.where.map((w) => (
+          <li key={w}>{w}</li>
+        ))}
+      </ul>
+      <p class="tc-guide">
+        マニュアル:{' '}
+        <button
+          type="button"
+          class="tc-link"
+          aria-haspopup="dialog"
+          onClick={() => openManual(view.guideAnchor)}
+        >
+          {view.guide}
+        </button>
+      </p>
+      {view.related.length > 0 && (
+        <>
+          <h3>関連する用語</h3>
+          <p class="tc-related">
+            {view.related.map((r) => (
+              <button
+                key={r.id}
+                type="button"
+                class="term-link"
+                aria-label={`用語: ${r.title}`}
+                onClick={() => openTerm(r.id)}
+              >
+                {r.short}
+              </button>
+            ))}
+          </p>
+        </>
+      )}
+    </>
   );
 }

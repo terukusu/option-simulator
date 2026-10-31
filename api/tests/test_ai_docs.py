@@ -1,7 +1,9 @@
 """AI に渡す文書の索引・目次・read_doc（#137 AC1・AC2。ai/docs.py）。ネットワークに出ない。"""
 
+import json
 import random
 import re
+import unicodedata
 from pathlib import Path
 
 import pytest
@@ -307,3 +309,72 @@ def test_design_5_14_single_read(idx):
     assert "戻らなかった道筋" in sec.text and "入金して持ち続けた前提" in sec.text
     assert idx.get("user-guide", "8.5").title == "追証マップ"
     assert idx.get("user-guide", "8.6").title == "過去の急落の再生"
+
+
+# ---- #322: 画面（ui/view/manual.ts）の番号の規則との突き合わせ ----
+
+# fixtures/docs/user-guide-sections.json は npm run fixtures が画面の規則（TS）で書く（npm run fixtures:check が TS と
+# 一致を確かめる）。ここで Python の parse と同じことを確かめる = TS と Python の番号・見出しの規則が揃う
+SECTIONS_JSON = Path(__file__).resolve().parents[2] / "fixtures" / "docs" / "user-guide-sections.json"
+_ANY_HEADING_RE = re.compile(r"^(#{1,6})\s+(.*)$")
+_SLUG_KEEP = {"Pc"}
+
+
+def github_slug(text: str) -> str:
+    """GitHub の見出しのアンカー（画面の slug と別に書いた規則）
+
+    小文字化 → 文字・結合文字・数字・連結符（_ など）・空白・- 以外を消す → 空白を -
+    """
+    s = "".join(c for c in text.strip().lower() if c in " -" or unicodedata.category(c) in _SLUG_KEEP
+                or unicodedata.category(c)[0] in "LMN")
+    return s.replace(" ", "-")
+
+
+def heading_anchors(text: str) -> list[tuple[str, str]]:
+    """コードブロックの外の見出し 1〜6 の (行, アンカー)。同じアンカーの 2 つ目以降は -1…"""
+    out: list[tuple[str, str]] = []
+    seen: dict[str, int] = {}
+    fence = False
+    for line in text.split("\n"):
+        if docs._FENCE_RE.match(line):
+            fence = not fence
+            continue
+        m = None if fence else _ANY_HEADING_RE.match(line)
+        if not m:
+            continue
+        base = github_slug(m.group(2))
+        n = seen.get(base, 0)
+        seen[base] = n + 1
+        out.append((line, base if n == 0 else f"{base}-{n}"))
+    return out
+
+
+def test_user_guide_sections_match_ui_rules():
+    text = (docs.REPO_DOCS / UG.path).read_text(encoding="utf-8")
+    want = json.loads(SECTIONS_JSON.read_text(encoding="utf-8"))
+    secs = docs.parse(UG, text)
+    heads = heading_anchors(text)
+    got = []
+    at = 0
+    for s in secs:
+        first = s.text.split("\n", 1)[0]
+        while heads[at][0] != first:
+            at += 1
+        got.append({"id": s.id, "level": s.level, "title": s.title, "anchor": heads[at][1]})
+        at += 1
+    assert got == want
+
+
+@pytest.mark.parametrize(("title", "want"), [
+    ("追証マップ（#131・#150）", "追証マップ"),
+    ("見出し（K7 → Q2 でオーナー再確認）", "見出し"),
+    ("見出し（D3）", "見出し"),
+    ("見出し (R12)  の後", "見出し の後"),
+    # 和文・英字・数字・_ に続く K7 は経緯の印ではない（tests/ui/manual.test.ts と同じ例）
+    ("見出し（オーナーK7）", "見出し（オーナーK7）"),
+    ("見出し（AK7）", "見出し（AK7）"),
+    ("見出し（K7a）", "見出し（K7a）"),
+    ("見出し（_K7）", "見出し（_K7）"),
+])
+def test_clean_title_same_as_ui(title, want):
+    assert docs.clean_title(title) == want

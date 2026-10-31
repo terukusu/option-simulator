@@ -29,6 +29,7 @@ import { SmilePlot } from '../market/SmilePlot';
 import { PanelHead } from '../PanelHead';
 import { Chip } from '../parts/Chip';
 import { Icon } from '../parts/Icon';
+import { ManualLinks } from '../parts/ManualLinks';
 import { Popover } from '../parts/Popover';
 import { Seg } from '../parts/Seg';
 
@@ -116,6 +117,7 @@ function SmileView(p: SmileRegionProps) {
           <p>{SMILE_LEGEND_HINT}</p>
           <p>{SMILE_EFF_HINT}</p>
           <p>{SMILE_EFF_CAUTION}</p>
+          <ManualLinks place="smile" />
         </Popover>
       </PanelHead>
       {/* biome-ignore lint/a11y/useSemanticElements: 1〜5 の行き先のスクロールする枠に名前を付ける（fieldset にしない） */}

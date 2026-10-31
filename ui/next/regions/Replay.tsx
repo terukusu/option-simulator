@@ -26,6 +26,7 @@ import {
   replayTableRows,
 } from '../../view/replay';
 import { Icon } from '../parts/Icon';
+import { ManualLinks } from '../parts/ManualLinks';
 import { Popover } from '../parts/Popover';
 import { Seg } from '../parts/Seg';
 
@@ -92,6 +93,7 @@ export function Replay({ replay, unit }: { replay: ReplayBundle; unit: AmountUni
           <p>{REPLAY_METHOD_NOTE}</p>
           {path && <p>{replayLevelNote(path, replay.ivNow)}</p>}
           <p>{REPLAY_BIAS_NOTE}</p>
+          <ManualLinks place="replay" />
         </Popover>
       </div>
       {replay.open && (

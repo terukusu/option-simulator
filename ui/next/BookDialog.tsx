@@ -15,6 +15,7 @@ import { MARK_BASIS_TEXT } from '../view/mark';
 import { TABS_FULL_TEXT } from '../view/tabs';
 import { Dialog } from './parts/Dialog';
 import { Icon } from './parts/Icon';
+import { ManualLinks } from './parts/ManualLinks';
 import { Popover } from './parts/Popover';
 
 export interface BookDialogProps {
@@ -78,6 +79,7 @@ export function BookDialog(p: BookDialogProps) {
             本・保存しない）。 保存・上書きは作業中のタブ（{p.tabName}）を保存する。[上書き]
             はすぐ書き、トーストの [元に戻す] で戻せる。
           </p>
+          <ManualLinks place="book" />
         </Popover>
       }
       after={p.toasts}

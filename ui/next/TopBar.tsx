@@ -12,6 +12,7 @@ import { THEMES, type TopMenuKey, topMenuModel } from '../view/topMenu';
 import { AiIcon } from './parts/AiIcon';
 import { Icon } from './parts/Icon';
 import { Menu } from './parts/Menu';
+import { openToc } from './parts/termCard';
 import { BoxTabs, toItems } from './top/BoxTabs';
 import { MarketPill } from './top/MarketPill';
 import { useShareCopy } from './top/useShareCopy';
@@ -57,7 +58,7 @@ export interface TopBarProps {
 /**
  * トップバー（docs/ui-redesign.md §2.1。#87）: ブランド / BOX タブ / 市場ピル / 警告のタグ /（PC）[AI] / [最新] / テーマ ☾ / ⋯。
  * スマホはブランドとテーマのボタンを CSS で隠す（スマホのテーマは設定。#275 で ⋯ のテーマの行を外した）。縮むのは BOX タブの帯だけ（#87 (B)）。
- * ⋯ は 保有ポジション…（#302）/ 保存一覧（N）… / URL をコピー / ファイルを開く… /（dev）合成の板 / 設定…（#87 (C)・#275。行は ui/view/topMenu.ts）。
+ * ⋯ は 保有ポジション…（#302）/ 保存一覧（N）… / URL をコピー / ファイルを開く… /（dev）合成の板 / マニュアル（#322。目次）/ 設定…（#87 (C)・#275。行は ui/view/topMenu.ts）。
  * ファイルを開く… は隠した file input をメニューの選択と同じイベントの中で click()。
  * pure: 入力は NextApp の useMemo と参照の変わらない関数だけ（シナリオの操作で描き直さない）。
  */
@@ -103,6 +104,7 @@ function TopBarView(p: TopBarProps) {
       else if (k === 'book') p.onOpenBook();
       else if (k === 'share') share.copy();
       else if (k === 'file') fileRef.current?.click();
+      else if (k === 'manual') openToc();
       else if (k === 'settings') p.onOpenSettings();
       else if (k.startsWith('fixture:')) p.onFixture(k.slice('fixture:'.length));
     },

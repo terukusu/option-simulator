@@ -9,7 +9,14 @@ import { BOOK_FAIL_TEXT } from './bookList';
 import type { MenuRow, ShareItemState } from './boxTabs';
 import { TABS_FULL_TEXT } from './tabs';
 
-export type TopMenuKey = 'holdings' | 'book' | 'share' | 'file' | `fixture:${string}` | 'settings';
+export type TopMenuKey =
+  | 'holdings'
+  | 'book'
+  | 'share'
+  | 'file'
+  | `fixture:${string}`
+  | 'manual'
+  | 'settings';
 
 export interface TopMenuInput {
   /** 保存一覧の件数（読めない・新しい版なら null） */
@@ -70,9 +77,12 @@ export const THEMES: readonly { theme: ThemePref; label: string }[] = [
 /** 保有ポジションの一覧（#302）の項目名（⋯ とパレット。件数は出さない = ⋯ を開くたびに判定しない） */
 export const HOLDINGS_LABEL = '保有ポジション…';
 
+/** マニュアルの目次を説明カードに開く（#322）の項目名 */
+export const MANUAL_LABEL = 'マニュアル';
+
 /**
  * ⋯ の行（#275 で入口を 1 本に絞った）: 保有ポジション…（#302。ほかの入口はパレットだけ）/ 保存一覧（N）… / URL をコピー /（区切り）ファイルを開く… /（dev）合成の板 /
- * （区切り）設定…。ほかの入口は 1 か所ずつ: 書き出し / 読み込み… = 保存一覧のダイアログ、全クリア = ポジションの ⋯、
+ * （区切り）マニュアル（#322。目次を説明カードに開く。ほかに目次を開く口は節の末尾の [目次] だけ）/ 設定…。ほかの入口は 1 か所ずつ: 書き出し / 読み込み… = 保存一覧のダイアログ、全クリア = ポジションの ⋯、
  * テーマ = トップバーの ☾（とキー T）、用語集 = ⓘ の末尾・内訳・AI の用語（PC はパレットの `?`）。
  * 押せない: URL をコピー = shareItemState のまま。
  */
@@ -94,7 +104,8 @@ export function topMenuModel(i: TopMenuInput): MenuRow<TopMenuKey>[] {
         checked: i.sourceLabel === name,
       }),
     ),
-    { key: 'settings', label: '設定…', sep: true },
+    { key: 'manual', label: MANUAL_LABEL, sep: true },
+    { key: 'settings', label: '設定…' },
   ];
 }
 

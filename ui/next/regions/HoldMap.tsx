@@ -37,6 +37,7 @@ import {
 } from '../../view/holdMap';
 import type { AmountUnit } from '../../view/metrics';
 import { Icon } from '../parts/Icon';
+import { ManualLinks } from '../parts/ManualLinks';
 import { Popover } from '../parts/Popover';
 import { useSize } from '../useSize';
 
@@ -439,6 +440,7 @@ export function HoldMap({ hold, unit }: { hold: HoldBundle; unit: AmountUnit }) 
           <p>{holdMapCaption(blocked ? null : hold.allowedLoss)}</p>
           <p>{HOLD_MAP_CALL_NOTE}</p>
           {moves.length > 0 && <p>{holdMapNote(moves, hold.days)}</p>}
+          <ManualLinks place="holdMap" />
         </Popover>
       </div>
       {hold.open && (

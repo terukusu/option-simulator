@@ -16,6 +16,8 @@ COPY scripts/devFixtures.mjs ./scripts/
 COPY ui ./ui
 COPY model ./model
 COPY data ./data
+# マニュアルは画面のビルドに同梱する（#322。説明カードで節を読む。初めて開いたときだけ読む別の chunk。ADR-0008）
+COPY docs/user-guide.md ./docs/user-guide.md
 RUN npm run build
 
 # API: uv.lock のハッシュで検証して /opt/venv に入れる（開発用の依存は入れない）

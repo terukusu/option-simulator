@@ -5,11 +5,13 @@
  *
  * 数字の印（照合できない数字）は inline の文字列ごとに ui/view/aiNumbers.ts の checkNumbers で付け（markNumbers）、
  * 用語集の用語の印（#232）は ui/view/aiTerms.ts の findTerms で返答ごとに最初の 1 回だけ付ける（answerModel）。
+ * マニュアルの根拠の節の印（#322）は ui/view/manualRefs.ts の docRefs で付ける（answerModel。見出しにも付ける）。
  */
 
 import { checkNumbers } from './aiNumbers';
 import { findTerms } from './aiTerms';
 import type { TermId } from './glossary';
+import { docRefs } from './manualRefs';
 
 export interface Inline {
   text: string;
@@ -193,35 +195,54 @@ export interface MarkedText {
   unmatched: boolean;
   /** 用語集の用語（#232。押すと説明カード。用語のときだけ） */
   term?: TermId;
+  /**
+   * マニュアルの根拠の節（#322。押すと説明カードにその節。番号と「」の中の見出し。節が在るかは押したときに引く）。
+   * 設計書の節は付けない（文字のまま）
+   */
+  manual?: { id: string; title: string | null };
 }
 
+type Mark = { start: number; end: number; term?: TermId; manual?: MarkedText['manual'] };
+
 /**
- * inline の文字列を、照合できない数字・用語（seen を渡したときだけ。seen に無い用語の最初の 1 回）とそれ以外に分ける。
- * 用語は数値トークン（照合の印を含む）と重ならない
+ * inline の文字列を、照合できない数字・用語（seen を渡したときだけ。seen に無い用語の最初の 1 回）・マニュアルの根拠の節
+ * （refs のときだけ。ui/view/manualRefs.ts）とそれ以外に分ける。用語は数値トークン（照合の印を含む）・根拠の節と重ならない
  */
 export function markInline(
   text: string,
   sources: readonly unknown[],
   seen: Set<TermId> | null,
+  refs = false,
 ): MarkedText[] {
   const tokens = checkNumbers(text, sources).tokens;
+  const docs = refs ? docRefs(text).filter((r) => r.doc === 'manual') : [];
+  const inDoc = (t: { start: number; end: number }) =>
+    docs.some((r) => t.start < r.end && r.start < t.end);
+  // 根拠の節の範囲は用語の語の探索から外す（トークンと同じ扱い。ボタンの中にボタンを作らない）
+  const skip =
+    docs.length === 0
+      ? tokens
+      : [...tokens.filter((t) => !inDoc(t)), ...docs].sort((a, b) => a.start - b.start);
   const consumed: { start: number; end: number }[] = [];
-  const terms = seen ? findTerms(text, seen, tokens, consumed) : [];
+  const terms = seen ? findTerms(text, seen, skip, consumed).filter((t) => !inDoc(t)) : [];
   // 用語の語が丸ごと含んだ数値トークン（「30 日固定」の「30 日」）は照合の印にしない
   const inTerm = (t: { start: number; end: number }) =>
     consumed.some((c) => c.start <= t.start && t.end <= c.end);
-  const marks = [
+  const marks: Mark[] = [
     ...tokens
-      .filter((t) => t.status === 'unmatched' && !inTerm(t))
-      .map((t) => ({ start: t.start, end: t.end, term: undefined as TermId | undefined })),
-    ...terms.map((t) => ({ start: t.start, end: t.end, term: t.id as TermId | undefined })),
+      .filter((t) => t.status === 'unmatched' && !inTerm(t) && !inDoc(t))
+      .map((t) => ({ start: t.start, end: t.end })),
+    ...terms.map((t) => ({ start: t.start, end: t.end, term: t.id })),
+    ...docs.map((r) => ({ start: r.start, end: r.end, manual: { id: r.id, title: r.title } })),
   ].sort((a, b) => a.start - b.start);
   const out: MarkedText[] = [];
   let at = 0;
   for (const m of marks) {
     if (m.start > at) out.push({ text: text.slice(at, m.start), unmatched: false });
     const t = text.slice(m.start, m.end);
-    out.push(m.term ? { text: t, unmatched: false, term: m.term } : { text: t, unmatched: true });
+    if (m.term) out.push({ text: t, unmatched: false, term: m.term });
+    else if (m.manual) out.push({ text: t, unmatched: false, manual: m.manual });
+    else out.push({ text: t, unmatched: true });
     at = m.end;
   }
   if (at < text.length) out.push({ text: text.slice(at), unmatched: false });
@@ -241,7 +262,7 @@ export type MarkedBlock =
   | { kind: 'table'; head: MarkedInline[][]; num: boolean[]; rows: MarkedInline[][][] };
 
 /**
- * 返答の木 + 照合の印 + 用語の印（画面が描く形）。画面は返答ごとに (text, sources, live) で memo する = 流れの間に
+ * 返答の木 + 照合の印 + 用語の印 + マニュアルの根拠の節の印（画面が描く形）。画面は返答ごとに (text, sources, live) で memo する = 流れの間に
  * 作り直すのは流れている返答だけ（終わった返答は text も sources も変わらない）。用語は返答の中で読む順に最初の 1 回
  * だけ（見出しには付けない。表は見出しの行 → 本文の行）
  */
@@ -252,7 +273,7 @@ export function answerModel(
 ): MarkedBlock[] {
   const seen = new Set<TermId>();
   const mark = (xs: Inline[], link = true): MarkedInline[] =>
-    xs.map((x) => ({ bold: x.bold, parts: markInline(x.text, sources, link ? seen : null) }));
+    xs.map((x) => ({ bold: x.bold, parts: markInline(x.text, sources, link ? seen : null, true) }));
   return parseAiText(text, live).map((b): MarkedBlock => {
     if (b.kind === 'h') return { kind: 'h', level: b.level, inl: mark(b.inl, false) };
     if (b.kind === 'p') return { kind: 'p', inl: mark(b.inl) };

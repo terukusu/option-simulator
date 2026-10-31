@@ -27,6 +27,7 @@ import { type IvLoadState, ivInProgress, ivLoadView } from '../../view/ivLoad';
 import { PanelHead } from '../PanelHead';
 import { AskAi } from '../parts/AskAi';
 import { Icon } from '../parts/Icon';
+import { ManualLinks } from '../parts/ManualLinks';
 import { Popover } from '../parts/Popover';
 import { Seg } from '../parts/Seg';
 import { TermLinks } from '../parts/TermLinks';
@@ -121,6 +122,7 @@ function IvHistoryView(p: IvHistoryProps) {
           <p>{IV_HINT}</p>
           <p>{IV_NOTE}</p>
           <TermLinks ids={HINT_TERMS.ivHistory} />
+          <ManualLinks place="ivHistory" />
         </Popover>
       </PanelHead>
       {/* biome-ignore lint/a11y/useSemanticElements: 1〜5 の行き先のスクロールする枠に名前を付ける（fieldset にしない） */}
