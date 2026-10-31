@@ -1,6 +1,7 @@
 /**
- * 追証マップ（#152 段 B。設計 docs/design.md 5.11）の B1〜B5。
- * 板は合成（tests/support/market.ts。架空の値）。参照値はテストの中で marginAt + marginRoom を直接呼ぶ。
+ * 追証マップ（#152 段 B・#305。設計 docs/design.md 5.11）の B1〜B5 と #305 の縦軸（ATM の IV の倍率）。
+ * 板は合成（tests/support/market.ts。架空の値）。参照値はテストの中で足の σ_base を自前でずらし、marginAt +
+ * marginRoom・theoreticalPnl を直接呼ぶ（model/holdMap の足の関数を使わない）。
  */
 
 import { describe, expect, it } from 'vitest';
@@ -8,10 +9,13 @@ import {
   HOLD_MAP_C,
   HOLD_MAP_U,
   type HoldMapAxes,
+  type HoldMapCalc,
   holdMapAxes,
   holdMapColumn,
   holdMapContour,
   holdMapCount,
+  holdMapIvAdd,
+  holdMapLegs,
   holdMapLossRooms,
   holdMapPnlColumn,
   holdMapScenario,
@@ -21,12 +25,17 @@ import { DEFAULT_MARGIN_PARAMS, type MarginParams, marginAt, marginRoom } from '
 import {
   DEFAULT_SETTINGS,
   type Leg,
+  legSigma,
+  type MarketContext,
   type ModelSettings,
+  type OptionLeg,
+  type PreparedLeg,
   premiumSummary,
   preparePosition,
   theoreticalPnl,
 } from '../../model/position';
-import { type Scenario, ZERO_SCENARIO } from '../../model/scenario';
+import { type IvDynamics, type Scenario, underlyingAt, ZERO_SCENARIO } from '../../model/scenario';
+import type { Smile } from '../../model/smile';
 import { businessDaysAhead, DAY_MS } from '../../model/time';
 import { holdMapCalcOf, holdMapInput, holdMapResultOf } from '../../ui/view/holdMap';
 import { marginNow } from '../../ui/view/margin';
@@ -83,6 +92,49 @@ function baseOf(legs: readonly Leg[], settings: ModelSettings = SETTINGS) {
   return b;
 }
 
+/**
+ * テストの参照: マス (u, c) の足（#305）。OP の足の σ_base（アンカー + 板のスマイルの差）を自前で作り、
+ * Δ_p = c·σ_base(0) − σ_base(x′)（x′ = ln(F′/F)（sticky strike）/ 0（sticky moneyness））だけ平行にずらす
+ */
+function refLegs(
+  prepared: readonly PreparedLeg[],
+  u: number,
+  c: number,
+  dyn: IvDynamics,
+  settings: ModelSettings = SETTINGS,
+  market: MarketContext = ctx,
+): PreparedLeg[] {
+  return prepared.map((p) => {
+    if (p.leg.kind !== 'option' || !p.option || !Number.isFinite(p.F)) return p;
+    const smile = market.options[p.leg.expiry]?.smile ?? null;
+    const anchor = p.option.anchor;
+    const xk = Math.log(p.leg.strike / p.F);
+    const sb = (x: number) => (smile ? anchor + smile.sigma(x) - smile.sigma(xk) : anchor);
+    const Fp = underlyingAt(p.F, market.x0, market.x0 * (1 + u), settings.basisMode);
+    const xp = dyn === 'sticky_moneyness' || !(Fp > 0) ? 0 : Math.log(Fp / p.F);
+    const add = c * sb(0) - sb(xp);
+    return { ...p, option: { ...p.option, sigmaBase: (x: number) => sb(x) + add } };
+  });
+}
+
+/** マスのシナリオ（d・Δs・動き方は base。ΔX = uX₀・absolute・Δσ = 0・β = 0） */
+const cellScenario = (base: Scenario, u: number, market: MarketContext = ctx): Scenario => ({
+  days: base.days,
+  skew: base.skew,
+  ivDynamics: base.ivDynamics,
+  dX: u * market.x0,
+  ivShift: 'absolute',
+  dSigma: 0,
+  beta: 0,
+});
+
+/** 今まで（#305 の前）のマスのシナリオ: 足の IV を一律に c 倍（relative・Δσ = (c − 1) × 100・β = 0） */
+const timesCScenario = (base: Scenario, u: number, c: number, market: MarketContext = ctx) => ({
+  ...cellScenario(base, u, market),
+  ivShift: 'relative' as const,
+  dSigma: (c - 1) * 100,
+});
+
 /** テストの参照値: マス (u, c) の余力を marginAt + marginRoom で直接 */
 function reference(
   legs: readonly Leg[],
@@ -95,16 +147,13 @@ function reference(
 ): number {
   const p = preparePosition(legs, ctx, settings);
   const h = businessDaysAhead(ctx.evalTime + base.days * DAY_MS, 2, []);
-  const scenario: Scenario = {
-    days: base.days,
-    skew: base.skew,
-    ivDynamics: base.ivDynamics,
-    dX: u * ctx.x0,
-    ivShift: 'relative',
-    dSigma: (c - 1) * 100,
-    beta: 0,
-  };
-  const r = marginAt(p, { x: ctx.x0 * (1 + u), scenario, horizonDays: h }, ctx, settings, params);
+  const r = marginAt(
+    refLegs(p, u, c, base.ivDynamics, settings),
+    { x: ctx.x0 * (1 + u), scenario: cellScenario(base, u), horizonDays: h },
+    ctx,
+    settings,
+    params,
+  );
   return marginRoom(capital, premiumSummary(p, settings), r);
 }
 
@@ -146,11 +195,11 @@ describe('B1 マスの余力は marginAt の参照値と一致', () => {
     });
   }
 
-  it('holdMapScenario は ΔX = uX₀・relative・Δσ = (c − 1) × 100・β = 0、d・Δs・動き方はそのまま', () => {
-    const s = holdMapScenario(current, -0.1, 1.6, 50_000);
+  it('holdMapScenario は ΔX = uX₀・absolute・Δσ = 0・β = 0、d・Δs・動き方はそのまま', () => {
+    const s = holdMapScenario(current, -0.1, 50_000);
     expect(s.dX).toBeCloseTo(-5000, 9);
-    expect(s.dSigma).toBeCloseTo(60, 9);
-    expect(s.ivShift).toBe('relative');
+    expect(s.dSigma).toBe(0);
+    expect(s.ivShift).toBe('absolute');
     expect(s.beta).toBe(0);
     expect([s.days, s.skew, s.ivDynamics]).toEqual([3, 1, 'sticky_moneyness']);
   });
@@ -373,9 +422,9 @@ describe('#180 マスの損益と許容損失の境目', () => {
   /** 参照値: (u, c) の d の時点の損益を theoreticalPnl で直接 */
   const pnlRef = (legs: readonly Leg[], u: number, c: number) =>
     theoreticalPnl(
-      preparePosition(legs, ctx, SETTINGS),
+      refLegs(preparePosition(legs, ctx, SETTINGS), u, c, current.ivDynamics),
       ctx.x0 * (1 + u),
-      { ...current, dX: u * ctx.x0, ivShift: 'relative', dSigma: (c - 1) * 100, beta: 0 },
+      cellScenario(current, u),
       ctx,
       SETTINGS,
     );
@@ -436,5 +485,291 @@ describe('#180 マスの損益と許容損失の境目', () => {
       checked++;
     });
     expect(checked).toBeGreaterThan(5);
+  });
+});
+
+/** #305: 縦軸 = 各限月の ATM の IV の倍率（足の IV = 今のスマイルの上で坂を下る分を除いた平行の上乗せ） */
+describe('#305 縦軸は ATM の IV の倍率', () => {
+  const DYNS: IvDynamics[] = ['sticky_strike', 'sticky_moneyness'];
+  const GRID_U = [-0.3, -0.12, -0.04, 0, 0.06, 0.2];
+  const GRID_C = [0.5, 0.8, 1, 1.4, 2.5];
+
+  const opOn = (
+    rs: Record<string, NonNullable<(typeof rows)[string]>>,
+    month: string,
+    type: 'call' | 'put',
+    k: number,
+    side: 'buy' | 'sell',
+  ): Leg => {
+    const q = quoteOf(rs[month] ?? [], k, type);
+    return {
+      kind: 'option',
+      product: 'op_large',
+      type,
+      expiry: month,
+      strike: k,
+      side,
+      qty: 1,
+      entry: side === 'buy' ? q.ask : q.bid,
+      mid: q.mid,
+    };
+  };
+
+  function calcFor(
+    prepared: readonly PreparedLeg[],
+    market: MarketContext,
+    base: Scenario,
+    settings: ModelSettings = SETTINGS,
+  ): HoldMapCalc {
+    return {
+      legs: prepared,
+      ctx: market,
+      settings,
+      params: PARAMS,
+      base,
+      horizonDays: businessDaysAhead(market.evalTime + base.days * DAY_MS, 2, []),
+      capital: CAPITAL,
+      premium: premiumSummary(prepared, settings),
+    };
+  }
+
+  /** 今まで（足の IV を一律に c 倍）の余力・損益 */
+  function timesC(calc: HoldMapCalc, u: number, c: number) {
+    const { legs, ctx: m, settings, base, horizonDays, params, capital, premium } = calc;
+    const sc = timesCScenario(base, u, c, m);
+    const x = m.x0 * (1 + u);
+    const r = marginAt(legs, { x, scenario: sc, horizonDays }, m, settings, params);
+    return { room: marginRoom(capital, premium, r), pnl: theoreticalPnl(legs, x, sc, m, settings) };
+  }
+
+  /** 全マスで今まで（× c）と 1e−6 円以内 */
+  function expectSameAsTimesC(calc: HoldMapCalc) {
+    const axes: HoldMapAxes = { us: GRID_U, cs: GRID_C };
+    GRID_U.forEach((u, i) => {
+      const rooms = holdMapColumn(calc, axes, i);
+      const pnls = holdMapPnlColumn(calc, axes, i);
+      GRID_C.forEach((c, j) => {
+        const want = timesC(calc, u, c);
+        expect(Number.isFinite(want.room)).toBe(true);
+        expect(Math.abs((rooms[j] as number) - want.room), `u=${u} c=${c}`).toBeLessThanOrEqual(
+          1e-6,
+        );
+        expect(Math.abs((pnls[j] as number) - want.pnl), `u=${u} c=${c}`).toBeLessThanOrEqual(1e-6);
+      });
+    });
+  }
+
+  const flatSmile = (T: number, s: number): Smile => ({
+    T,
+    sigma: () => s,
+    totalVariance: () => s * s * T,
+    mark: () => 'interpolated',
+  });
+  const flatCtx: MarketContext = {
+    ...ctx,
+    options: {
+      [M1.id]: {
+        ...(ctx.options[M1.id] as MarketContext['options'][string]),
+        smile: flatSmile(M1.days / 365, 0.2),
+      },
+      [M2.id]: {
+        ...(ctx.options[M2.id] as MarketContext['options'][string]),
+        smile: flatSmile(M2.days / 365, 0.23),
+      },
+    },
+  };
+
+  it('AC1 平らなスマイル: 建値が ask / bid の足（アンカーがスマイルから外れる）でも余力・損益が今まで（× c）と 1e−6 円', () => {
+    const legs = [
+      opOn(rows, M1.id, 'put', 62000, 'sell'),
+      opOn(rows, M1.id, 'call', 72000, 'buy'),
+      opOn(rows, M2.id, 'put', 60000, 'sell'),
+      fut('buy', 2),
+    ];
+    const prepared = preparePosition(legs, flatCtx, SETTINGS);
+    // アンカーがスマイル（0.2 / 0.23）の上に無い足がある
+    expect(prepared.some((p) => p.option && Math.abs(p.option.anchor - 0.2) > 1e-3)).toBe(true);
+    for (const ivDynamics of DYNS) {
+      for (const skew of [0, 1.5]) {
+        const base: Scenario = { ...ZERO_SCENARIO, days: 2, skew, ivDynamics };
+        expectSameAsTimesC(calcFor(prepared, flatCtx, base));
+      }
+    }
+  });
+
+  it('AC5 スマイルの無い足: 今まで（× c）と 1e−6 円', () => {
+    const m = makeMarket({ withSmile: false });
+    const legs = [
+      opOn(m.rows, M1.id, 'put', 63000, 'sell'),
+      opOn(m.rows, M1.id, 'call', 72000, 'sell'),
+      opOn(m.rows, M2.id, 'put', 61000, 'buy'),
+    ];
+    const prepared = preparePosition(legs, m.ctx, SETTINGS);
+    for (const ivDynamics of DYNS) {
+      const base: Scenario = { ...ZERO_SCENARIO, days: 1, skew: -1, ivDynamics };
+      expectSameAsTimesC(calcFor(prepared, m.ctx, base));
+    }
+  });
+
+  /** アンカーがスマイルの上の足（IV を編集した足 = σ_smile(x₀)。a′ = 0） */
+  function onSmileLeg(month: string, k: number, type: 'call' | 'put' = 'put'): OptionLeg {
+    const m = ctx.options[month];
+    if (!m?.smile || !Number.isFinite(m.forward)) throw new Error('スマイルが無い');
+    return {
+      kind: 'option',
+      product: 'op_large',
+      type,
+      expiry: month,
+      strike: k,
+      side: 'sell',
+      qty: 1,
+      entry: 100,
+      iv: m.smile.sigma(Math.log(k / m.forward)),
+    };
+  }
+
+  it('AC2 動いた後の ATM（K = F′）の IV = c × 今の ATM の IV（1e−9。両方の動き方・2 限月）', () => {
+    for (const ivDynamics of DYNS) {
+      for (const month of [M1.id, M2.id]) {
+        const m = ctx.options[month] as MarketContext['options'][string];
+        const smile = m.smile as Smile;
+        for (const u of [-0.12, -0.05, 0.04]) {
+          const Fp = underlyingAt(m.forward, ctx.x0, ctx.x0 * (1 + u), SETTINGS.basisMode);
+          const prepared = preparePosition([onSmileLeg(month, Fp)], ctx, SETTINGS);
+          for (const c of [0.7, 1, 1.6, 2.4]) {
+            const base: Scenario = { ...ZERO_SCENARIO, ivDynamics };
+            const legs = holdMapLegs(prepared, u, c, ctx, SETTINGS, ivDynamics);
+            const sc = holdMapScenario(base, u, ctx.x0);
+            const got = legSigma(legs[0] as PreparedLeg, ctx.x0 * (1 + u), sc, ctx, SETTINGS);
+            expect(got).not.toBeNull();
+            expect(Math.abs((got as number) - c * smile.sigma(0))).toBeLessThan(1e-9);
+          }
+        }
+      }
+    }
+  });
+
+  it('AC3 sticky strike で c = σ(ln(F′/F)) / σ(0) なら、各行使価格の足の IV は今の同じ K の IV（上乗せ 0）', () => {
+    const m = ctx.options[M1.id] as MarketContext['options'][string];
+    const smile = m.smile as Smile;
+    const base: Scenario = { ...ZERO_SCENARIO, ivDynamics: 'sticky_strike' };
+    for (const u of [-0.1, -0.04, 0.03]) {
+      const Fp = underlyingAt(m.forward, ctx.x0, ctx.x0 * (1 + u), SETTINGS.basisMode);
+      const c = smile.sigma(Math.log(Fp / m.forward)) / smile.sigma(0);
+      const x = ctx.x0 * (1 + u);
+      const sc = holdMapScenario(base, u, ctx.x0);
+      for (const k of [56000, 60000, 64000, 67000, 70000]) {
+        const prepared = preparePosition([onSmileLeg(M1.id, k)], ctx, SETTINGS);
+        const p = prepared[0] as PreparedLeg;
+        expect(Math.abs(holdMapIvAdd(p, u, c, ctx, SETTINGS, 'sticky_strike'))).toBeLessThan(1e-12);
+        const shifted = holdMapLegs(
+          prepared,
+          u,
+          c,
+          ctx,
+          SETTINGS,
+          'sticky_strike',
+        )[0] as PreparedLeg;
+        const want = smile.sigma(Math.log(k / m.forward));
+        expect(Math.abs((legSigma(shifted, x, sc, ctx, SETTINGS) as number) - want)).toBeLessThan(
+          1e-9,
+        );
+      }
+    }
+  });
+
+  it('AC7 合成の板からの回復: 実際の IV = 今のスマイル + δ のとき、c を ATM の倍率にすれば各 K の足の IV = 実際（1e−6）', () => {
+    const m = ctx.options[M1.id] as MarketContext['options'][string];
+    const smile = m.smile as Smile;
+    const base: Scenario = { ...ZERO_SCENARIO, ivDynamics: 'sticky_strike' };
+    for (const u of [-0.15, -0.06]) {
+      const Fp = underlyingAt(m.forward, ctx.x0, ctx.x0 * (1 + u), SETTINGS.basisMode);
+      const x = ctx.x0 * (1 + u);
+      const sc = holdMapScenario(base, u, ctx.x0);
+      for (const delta of [-0.02, 0.03, 0.08]) {
+        // 実際（架空）: 動いた後の同じ K の IV = σ_smile(ln(K/F)) + δ。動いた後の ATM の IV = σ(ln(F′/F)) + δ
+        const actual = (k: number) => smile.sigma(Math.log(k / m.forward)) + delta;
+        const c = actual(Fp) / smile.sigma(0);
+        for (const k of [55000, 59000, 62000, 65000, 68000]) {
+          const prepared = preparePosition([onSmileLeg(M1.id, k)], ctx, SETTINGS);
+          const shifted = holdMapLegs(
+            prepared,
+            u,
+            c,
+            ctx,
+            SETTINGS,
+            'sticky_strike',
+          )[0] as PreparedLeg;
+          const got = legSigma(shifted, x, sc, ctx, SETTINGS) as number;
+          expect(Math.abs(got - actual(k)), `u=${u} δ=${delta} K=${k}`).toBeLessThan(1e-6);
+        }
+      }
+    }
+  });
+
+  it('AC6 軸の端（u = −30%・+20%・−90%、c = ×0.1・×5）で余力・損益は有限か NaN、IV ≥ σ_min（円 / % モード・F′ ≤ 0 の足も）', () => {
+    // 2 限月の F を X₀ より大きく下げた市場（円モードで X′ = 0.1X₀ のとき F′ ≤ 0 になる。#144）
+    const low: MarketContext = {
+      ...ctx,
+      options: {
+        ...ctx.options,
+        [M2.id]: { ...(ctx.options[M2.id] as MarketContext['options'][string]), forward: 58_000 },
+      },
+    };
+    const legs: Leg[] = [
+      { ...onSmileLeg(M1.id, 62000), iv: 0.25 },
+      { ...onSmileLeg(M2.id, 52000), iv: 0.3 },
+      { ...onSmileLeg(M2.id, 64000, 'call'), iv: 0.18, side: 'buy' },
+      fut('sell', 1),
+    ];
+    for (const basisMode of ['yen', 'pct'] as const) {
+      const settings: ModelSettings = { ...SETTINGS, basisMode };
+      const prepared = preparePosition(legs, low, settings);
+      for (const ivDynamics of DYNS) {
+        const base: Scenario = { ...ZERO_SCENARIO, days: 1, skew: 1, ivDynamics };
+        const calc = calcFor(prepared, low, base, settings);
+        const axes: HoldMapAxes = { us: [-0.9, -0.3, 0.2], cs: [0.1, 1, 5] };
+        axes.us.forEach((u, i) => {
+          for (const col of [holdMapColumn(calc, axes, i), holdMapPnlColumn(calc, axes, i)]) {
+            for (const v of col) expect(Number.isFinite(v) || Number.isNaN(v)).toBe(true);
+          }
+          const sc = holdMapScenario(base, u, low.x0);
+          for (const c of axes.cs) {
+            for (const p of prepared) {
+              expect(Number.isFinite(holdMapIvAdd(p, u, c, low, settings, ivDynamics))).toBe(true);
+            }
+            for (const p of holdMapLegs(prepared, u, c, low, settings, ivDynamics)) {
+              const sg = legSigma(p, low.x0 * (1 + u), sc, low, settings);
+              if (sg !== null) expect(sg).toBeGreaterThanOrEqual(settings.sigmaMin);
+            }
+          }
+        });
+      }
+    }
+    // 円モード・u = −90% で 2 限月の F′ ≤ 0 になっている（守りの枝を通った）
+    expect(underlyingAt(58_000, ctx.x0, ctx.x0 * 0.1, 'yen')).toBeLessThan(0);
+  });
+
+  it('先物・F が決まらない足はずらさない（同じ参照・上乗せ 0）', () => {
+    const prepared = preparePosition([fut('buy', 1), op('put', 62000, 'sell')], ctx, SETTINGS);
+    const legs = holdMapLegs(prepared, -0.1, 1.5, ctx, SETTINGS, 'sticky_strike');
+    expect(legs[0]).toBe(prepared[0]);
+    expect(legs[1]).not.toBe(prepared[1]);
+    expect(
+      holdMapIvAdd(prepared[0] as PreparedLeg, -0.1, 1.5, ctx, SETTINGS, 'sticky_strike'),
+    ).toBe(0);
+    const noF: MarketContext = {
+      ...ctx,
+      options: {
+        ...ctx.options,
+        [M1.id]: {
+          ...(ctx.options[M1.id] as MarketContext['options'][string]),
+          forward: Number.NaN,
+        },
+      },
+    };
+    const p = preparePosition([op('put', 62000, 'sell')], noF, SETTINGS)[0] as PreparedLeg;
+    expect(holdMapIvAdd(p, -0.1, 1.5, noF, SETTINGS, 'sticky_strike')).toBe(0);
+    expect(holdMapLegs([p], -0.1, 1.5, noF, SETTINGS, 'sticky_strike')[0]).toBe(p);
   });
 });
