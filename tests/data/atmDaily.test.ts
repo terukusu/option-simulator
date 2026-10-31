@@ -63,6 +63,8 @@ describe('validateAtmDailyJson', () => {
         l1: NOV,
         f2: 30010,
         l2: DEC,
+        v1: null,
+        v2: null,
       },
       {
         d: '2026-10-14',
@@ -72,7 +74,34 @@ describe('validateAtmDailyJson', () => {
         l1: NOV,
         f2: null,
         l2: null,
+        v1: null,
+        v2: null,
       },
+    ]);
+  });
+
+  it('v1・v2（#307）: 有限の正の数なら値、無い・null・不正はエラーにせず null。v2 は f2・l2 の組があるときだけ', () => {
+    const r = validateAtmDailyJson({
+      ...ok,
+      days: [
+        { ...day('2026-10-06', 20, 30000), v1: 22.5, v2: 19.75 },
+        { ...day('2026-10-07', 20, 30000), v1: null, v2: null },
+        day('2026-10-08', 20, 30000),
+        { ...day('2026-10-09', 20, 30000), v1: 0, v2: -1 },
+        { ...day('2026-10-13', 20, 30000), v1: '22', v2: Number.NaN },
+        { ...day('2026-10-14', 20, 30000, NOV, null, null), v1: 23, v2: 21 },
+      ],
+    });
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    const vs = r.value.days.map((x) => [x.v1, x.v2]);
+    expect(vs).toEqual([
+      [22.5, 19.75],
+      [null, null],
+      [null, null],
+      [null, null],
+      [null, null],
+      [23, null],
     ]);
   });
 

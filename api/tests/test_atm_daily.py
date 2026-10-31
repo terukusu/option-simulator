@@ -33,6 +33,18 @@ def test_atm_cm_daily_sql_filters_partition():
               f"AND TIME '{hi.strftime('%H:%M:%S')}'")
     assert window in body
     assert "iv30 IS NOT NULL AND m1_forward IS NOT NULL" in body
+    # #307: m1_iv・m2_iv は読むだけで、非 NULL の絞りに入れない（選ぶ行 = 追証マップの過去の点を変えない）
+    assert "AND iv30 IS NOT NULL AND m1_forward IS NOT NULL AND m1_last_trading_day IS NOT NULL GROUP BY day" in body
+    assert "m1_iv IS" not in body and "m2_iv IS" not in body
+
+
+def test_atm_cm_daily_sql_reads_atm_ivs():
+    # #307: 1・2 限月の ATM IV を points・STRUCT・最後の SELECT の末尾に足す
+    body = re.sub(r"\s+", " ", sql_body())
+    assert "m2_last_trading_day, m2_forward, m1_iv, m2_iv FROM" in body
+    cols = "created_at, iv30, m1_last_trading_day, m1_forward, m2_last_trading_day, m2_forward, m1_iv, m2_iv"
+    assert f"STRUCT({cols})" in body
+    assert "last.m2_forward AS m2_forward, last.m1_iv AS m1_iv, last.m2_iv AS m2_iv FROM closes" in body
 
 
 def test_atm_cm_daily_sql_takes_last_row_per_jst_day():
@@ -67,10 +79,11 @@ def test_read_window():
 
 # ---- 行 → JSON（A3） ----
 
-def row(d, h=15, mi=0, iv=20.0, f1=30000.0, l1=date(2026, 11, 12), f2=30010.0, l2=date(2026, 12, 10)):
+def row(d, h=15, mi=0, iv=20.0, f1=30000.0, l1=date(2026, 11, 12), f2=30010.0, l2=date(2026, 12, 10), v1=21.0,
+        v2=19.5):
     y, mo, dd = d
     return {"day": date(y, mo, dd), "close_at": jst(y, mo, dd, h, mi), "iv30": iv, "m1_last_trading_day": l1,
-            "m1_forward": f1, "m2_last_trading_day": l2, "m2_forward": f2}
+            "m1_forward": f1, "m2_last_trading_day": l2, "m2_forward": f2, "m1_iv": v1, "m2_iv": v2}
 
 
 def test_rows_to_json():
@@ -94,12 +107,14 @@ def test_rows_to_json():
     assert set(obj) == {"schema_version", "start", "end", "days"}
     ds = obj["days"]
     assert [d["d"] for d in ds] == ["2026-10-01", "2026-10-02", "2026-10-09", "2026-10-13", "2026-10-14"]
-    assert all(set(d) == {"d", "t", "iv", "f1", "l1", "f2", "l2"} for d in ds)
+    assert all(set(d) == {"d", "t", "iv", "f1", "l1", "f2", "l2", "v1", "v2"} for d in ds)
     assert ds[2] == {"d": "2026-10-09", "t": "2026-10-09T14:59:00+09:00", "iv": 19.25, "f1": 30000.0,
-                     "l1": "2026-11-12", "f2": 30010.0, "l2": "2026-12-10"}
+                     "l1": "2026-11-12", "f2": 30010.0, "l2": "2026-12-10", "v1": 21.0, "v2": 19.5}
     assert ds[4]["iv"] == 21.5 and ds[4]["f1"] == 30100.5 and ds[4]["t"] == "2026-10-14T15:00:00+09:00"
     for d in (ds[0], ds[1], ds[3], ds[4]):
         assert d["f2"] is None and d["l2"] is None
+        # 2 限月の組が無ければ v2 も null（v1 はそのまま）
+        assert d["v2"] is None and d["v1"] == 21.0
     assert all(d["t"].endswith("+09:00") for d in ds)
 
 
@@ -114,6 +129,33 @@ def test_rows_reject_non_numbers():
     days = atm_daily.days_from_rows(rows, date(2026, 10, 10))
     assert [d["d"] for d in days] == ["2026-10-07"] and days[0]["f2"] is None and days[0]["l2"] is None
     assert all(math.isfinite(d["iv"]) for d in days)
+
+
+def test_rows_atm_ivs():
+    # #307: v1・v2 は有限で正のときだけ値（丸めない）。無効でも行は捨てない
+    end = date(2026, 10, 20)
+    rows = [
+        row((2026, 10, 1), v1=23.456789012345, v2=21.0),
+        row((2026, 10, 2), v1=None, v2=None),
+        row((2026, 10, 5), v1=0.0, v2=-1.0),
+        row((2026, 10, 6), v1=float("nan"), v2=float("inf")),
+        row((2026, 10, 7), v1=True, v2="20"),
+        row((2026, 10, 8), v1=22.0, v2=20.0, f2=None),  # 2 限月の組が無い → v2 は null
+    ]
+    ds = atm_daily.days_from_rows(rows, end)
+    assert [d["d"] for d in ds] == ["2026-10-01", "2026-10-02", "2026-10-05", "2026-10-06", "2026-10-07", "2026-10-08"]
+    assert ds[0]["v1"] == 23.456789012345 and ds[0]["v2"] == 21.0
+    for d in ds[1:5]:
+        assert d["v1"] is None and d["v2"] is None
+    assert ds[5]["v1"] == 22.0 and ds[5]["v2"] is None
+    # キーが無い行（古い runner）でも null
+    old = {k: v for k, v in row((2026, 10, 9)).items() if k not in ("m1_iv", "m2_iv")}
+    got = atm_daily.days_from_rows([old], end)[0]
+    assert got["v1"] is None and got["v2"] is None
+
+
+def test_etag_shape():
+    assert atm_daily.ETAG_SHAPE == "v"
 
 
 def test_empty_rows():

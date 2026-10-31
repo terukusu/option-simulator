@@ -296,3 +296,14 @@ def test_design_5_13_single_read(idx):
     assert sec is not None
     assert len(sec.parts()) == 1
     assert "g(ΔX%)" in sec.text and "60pt" in sec.text and "測り直しの手順" in sec.text
+
+
+# ---- #307: 過去の急落の再生（設計書 5.14）も 1 回の読みに収まる。マニュアルは 8.6（8.5 の追証マップは変えない） ----
+
+def test_design_5_14_single_read(idx):
+    sec = idx.get("design", "5.14")
+    assert sec is not None
+    assert len(sec.parts()) == 1
+    assert "戻らなかった道筋" in sec.text and "入金して持ち続けた前提" in sec.text
+    assert idx.get("user-guide", "8.5").title == "追証マップ"
+    assert idx.get("user-guide", "8.6").title == "過去の急落の再生"

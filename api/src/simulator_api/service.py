@@ -271,7 +271,8 @@ class AtmDailyService:
         rows = self.runner("atm_cm_daily", {"start_at": start_at, "end_at": end_at})
         days = atm_daily.days_from_rows(rows, end_day)
         body, gz = _encode(atm_daily.atm_daily_json(end_day, days))
-        return _AtmDailyPayload(body, gz, f'"atm-daily-{end_day.isoformat()}-{len(days)}"', days=len(days))
+        etag = f'"atm-daily-{end_day.isoformat()}-{len(days)}-{atm_daily.ETAG_SHAPE}"'
+        return _AtmDailyPayload(body, gz, etag, days=len(days))
 
     def get(self) -> Payload:
         started = self.monotonic()

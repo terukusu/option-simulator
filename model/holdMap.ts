@@ -186,6 +186,25 @@ export function holdMapLegs(
   return columnLegs(legs, u, ctx, settings, dynamics)(c);
 }
 
+/**
+ * 足ごとに IV の倍率が違うときの足の配列（#307 の過去の急落の再生。設計 5.14）: 生きている OP の足 p は σ_base を
+ * Δ_p = cOf(p) · σ_base,p(0) − σ_base,p(x′) だけ平行にずらした写し（holdMapLegs と同じ作り方で、c を足ごとに
+ * 決める）。ほか（先物・F が決まらない足）は同じ参照。cOf(p) が有限でなければその足はずらさない（Δ_p = 0）。
+ * `holdMapLegsBy(legs, u, () => c, …)` は `holdMapLegs(legs, u, c, …)` と同じ足
+ */
+export function holdMapLegsBy(
+  legs: readonly PreparedLeg[],
+  u: number,
+  cOf: (p: PreparedLeg) => number,
+  ctx: MarketContext,
+  settings: ModelSettings,
+  dynamics: IvDynamics,
+): PreparedLeg[] {
+  return legs.map((p) =>
+    shiftable(p) ? shiftLeg(p, ivAddOf(cOf(p), atmPair(p, u, ctx, settings, dynamics))) : p,
+  );
+}
+
 /** 列の計算の入力（列ごとに同じ） */
 export interface HoldMapCalc {
   legs: readonly PreparedLeg[];

@@ -52,6 +52,10 @@ export interface ShellState {
   chart?: ChartMode;
   /** 指標 · テールの「追証マップ」の折りたたみが開いている（#152。無い = 閉。保存しない） */
   holdMap?: boolean;
+  /** 指標 · テールの「過去の急落の再生」の折りたたみが開いている（#307。無い = 閉。保存しない） */
+  replay?: boolean;
+  /** 再生で選んだ出来事の id（#307。無い = 既定の出来事。保存しない） */
+  replayEvent?: string;
   /** PC の左の列（#280。無い = market。保存しない） */
   left?: LeftView;
   /** スマイルに売りの効率の線を重ねる（#163。無い = 重ねない。保存しない） */
@@ -83,6 +87,9 @@ export type ShellAction =
   | { type: 'chart'; chart: ChartMode }
   /** 追証マップの開閉（#152） */
   | { type: 'holdMap'; open: boolean }
+  /** 過去の急落の再生の開閉・出来事の選択（#307） */
+  | { type: 'replay'; open: boolean }
+  | { type: 'replayEvent'; id: string }
   /** PC の左の列（#280。left が無ければ入れ替え） */
   | { type: 'left'; left?: LeftView }
   /** スマイルの売りの効率の線の表示（#163） */
@@ -177,6 +184,11 @@ export function holdMapActive(s: ShellState, tier: Tier): boolean {
   return metricsVisible(s, tier);
 }
 
+/** 過去の急落の再生を計算するか（#307）: 折りたたみが開いていて、指標のパネルが見えているときだけ */
+export function replayActive(s: ShellState, tier: Tier): boolean {
+  return (s.replay ?? false) && metricsVisible(s, tier);
+}
+
 /** 舞台のグラフの表示（既定 line） */
 export function chartMode(s: ShellState): ChartMode {
   return s.chart ?? 'line';
@@ -244,6 +256,10 @@ export function shellReduce(s: ShellState, a: ShellAction): ShellState {
       return a.chart === chartMode(s) ? s : { ...s, chart: a.chart };
     case 'holdMap':
       return a.open === (s.holdMap ?? false) ? s : { ...s, holdMap: a.open };
+    case 'replay':
+      return a.open === (s.replay ?? false) ? s : { ...s, replay: a.open };
+    case 'replayEvent':
+      return a.id === s.replayEvent ? s : { ...s, replayEvent: a.id };
     case 'smileEff':
       return a.on === (s.smileEff ?? false) ? s : { ...s, smileEff: a.on };
     case 'left': {

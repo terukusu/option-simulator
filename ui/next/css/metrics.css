@@ -568,3 +568,131 @@ table.tail.margin-tail td small.call {
   stroke: var(--ink);
   stroke-width: 1.5;
 }
+
+/* ===== 過去の急落の再生（#307。部品は ui/next/regions/Replay.tsx）。見出しの行は追証マップと同じ .hm-head・.hm-toggle ===== */
+.rp {
+  border-top: 1px solid var(--line);
+}
+
+/* 出来事の選択（行の高さは折りたたみの行と同じ 34px 以上） */
+.rp-ev {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  min-width: 0;
+  padding: 6px var(--sp-3);
+  font-size: var(--fs-sub);
+}
+
+.rp-ev .lab {
+  flex: 0 0 auto;
+  color: var(--ink-3);
+  font-size: var(--fs-xs);
+}
+
+.rp-ev select {
+  flex: 1 1 auto;
+  min-width: 0;
+  max-width: 100%;
+  height: 34px;
+  padding: 0 6px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-sm);
+  background: var(--s1);
+  font-size: var(--fs-sub);
+  text-overflow: ellipsis;
+}
+
+@media (max-width: 719.98px) {
+  .rp-ev select {
+    height: 36px;
+  }
+}
+
+.rp-ev select:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* 出来事の 1 行・半値の注記・表の下の注（折り返してよい） */
+.rp-line,
+.rp-note {
+  padding: 2px var(--sp-3);
+  font-size: var(--fs-xs);
+  overflow-wrap: anywhere;
+}
+
+.rp-line {
+  color: var(--ink);
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.rp-note {
+  color: var(--ink-3);
+}
+
+/* 計算中は前の結果を薄く残す */
+.rp-res.busy {
+  opacity: 0.5;
+}
+
+/* 要約 2 行（見出し + 中身。折り返してよい） */
+.rp-sum {
+  margin: 0;
+  padding: 4px var(--sp-3);
+}
+
+.rp-sum > div {
+  display: flex;
+  gap: var(--sp-2);
+  padding: 2px 0;
+  font-size: var(--fs-xs);
+}
+
+.rp-sum dt {
+  flex: 0 0 auto;
+  min-width: 6.5em;
+  color: var(--ink-2);
+  font-weight: 600;
+}
+
+.rp-sum dd {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0;
+  color: var(--ink);
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+.rp-seg {
+  padding: 4px var(--sp-3);
+}
+
+/* 日ごとの表: 枠の中だけ横にスクロール（AI の返答の表 #234 と同じやり方。画面は横にはみ出さない） */
+.rp-scroll {
+  max-width: 100%;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+}
+
+.rp-scroll:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+table.tail.rp-table td.loss {
+  color: var(--loss);
+}
+
+table.tail.rp-table td small.call {
+  color: var(--loss);
+  font-weight: 600;
+}
+
+/* 戻らなかった道筋の続落の部分（当時の日付が無い）の日の列 */
+table.tail.rp-table tr.cont th small {
+  font-style: italic;
+}

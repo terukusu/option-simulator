@@ -46,7 +46,7 @@ def test_once_then_cached(capsys):
         ("2026-10-12", "2026-10-12T15:00:00+09:00", 30015.0),
         ("2026-10-13", "2026-10-13T15:00:00+09:00", 29865.0),
     ]
-    assert first.etag == '"atm-daily-2026-10-14-2"'
+    assert first.etag == '"atm-daily-2026-10-14-2-v"'
     runner.reset()
     second = svc.atm_daily()
     assert runner.calls == [] and second.json_bytes == first.json_bytes and second.gzip_bytes == first.gzip_bytes

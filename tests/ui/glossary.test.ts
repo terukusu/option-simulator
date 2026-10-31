@@ -40,6 +40,7 @@ const IDS = [
   'room',
   'margin-line',
   'hold-map',
+  'replay',
   'var-span',
   'jscc',
 ] as const;
@@ -110,10 +111,10 @@ describe('用語集のデータ（#167 AC-2）', () => {
     }
   });
 
-  it('(a) 24 語の id がすべてあり一意', () => {
+  it('(a) 25 語の id がすべてあり一意', () => {
     expect(GLOSSARY.map((t) => t.id).sort()).toEqual([...IDS].sort());
     expect(new Set(GLOSSARY.map((t) => t.id)).size).toBe(GLOSSARY.length);
-    expect(GLOSSARY.length).toBe(24);
+    expect(GLOSSARY.length).toBe(25);
   });
 
   it('(b) 見出し・読み・一言・説明（1〜4 段落）・出る場所・マニュアルの節が空でない', () => {

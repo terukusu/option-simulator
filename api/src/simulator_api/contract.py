@@ -91,8 +91,9 @@ RELATIONS = {
         columns=(("created_at", "TIMESTAMP"), ("iv30", "FLOAT")),
         required=frozenset({"created_at"}),
     ),
-    # 日次の値（/api/atm_daily、#152）。同じ表 atm_cm_iv から日中の終値の iv30 と 1 / 2 限月のフォワード・最終取引日を
-    # 読む（method・*_days・*_iv は読まない）。created_at の半開区間の絞りは tests/test_atm_daily.py の静的検査で守る
+    # 日次の値（/api/atm_daily、#152）。同じ表 atm_cm_iv から日中の終値の iv30 と 1 / 2 限月のフォワード・最終取引日・
+    # ATM IV（m1_iv・m2_iv。#307 の再生の倍率）を読む（method・*_days は読まない）。created_at の半開区間の絞りは
+    # tests/test_atm_daily.py の静的検査で守る
     "atm_cm_daily": Relation(
         name="atm_cm_iv",
         schema_file="cm/atm_cm_iv.json",
@@ -103,6 +104,8 @@ RELATIONS = {
             ("m1_forward", "FLOAT"),
             ("m2_last_trading_day", "DATE"),
             ("m2_forward", "FLOAT"),
+            ("m1_iv", "FLOAT"),
+            ("m2_iv", "FLOAT"),
         ),
         required=frozenset({"created_at"}),
     ),
@@ -135,6 +138,8 @@ OUTPUTS: dict[str, tuple[tuple[str, str], ...]] = {
         ("m1_forward", "FLOAT"),
         ("m2_last_trading_day", "DATE"),
         ("m2_forward", "FLOAT"),
+        ("m1_iv", "FLOAT"),
+        ("m2_iv", "FLOAT"),
     ),
     "future_bars": (
         ("started_at", "TIMESTAMP"),

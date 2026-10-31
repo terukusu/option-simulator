@@ -14,6 +14,7 @@ export * from './normal';
 export * from './pnl';
 export * from './position';
 export * from './products';
+export * from './replay';
 export * from './scenario';
 export * from './sellEfficiency';
 export * from './smile';

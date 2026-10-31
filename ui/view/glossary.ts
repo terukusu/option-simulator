@@ -40,6 +40,7 @@ export type TermId =
   | 'room'
   | 'margin-line'
   | 'hold-map'
+  | 'replay'
   | 'var-span'
   | 'jscc';
 
@@ -76,6 +77,10 @@ const G_MARGIN = { anchor: '証拠金概算', title: '8 章 指標 · テール 
 const G_HOLD = {
   anchor: '追証マップ',
   title: '8 章 指標 · テール > 追証マップ',
+};
+const G_REPLAY = {
+  anchor: '過去の急落の再生',
+  title: '8 章 指標 · テール > 過去の急落の再生',
 };
 const G_IV_HISTORY = {
   anchor: 'iv-推移atm-iv-の-30-日固定',
@@ -538,7 +543,27 @@ export const GLOSSARY: readonly GlossaryTerm[] = [
       '例（架空の値）: 原資産 −6%・ATM IV ×1.6 のマスが追証の色なら、2 日でそれだけ動くと余力が負になる',
     where: ['指標 · テールの「追証マップ」'],
     guide: G_HOLD,
-    related: ['margin-line', 'room', 'iv30'],
+    related: ['margin-line', 'room', 'iv30', 'replay'],
+  },
+  {
+    id: 'replay',
+    title: '過去の急落の再生',
+    short: '急落の再生',
+    reading: 'かこのきゅうらくのさいせい',
+    // 英語の replay は AI の英語の返答（replayed など）に下線が付くので別名にしない
+    aliases: ['リプレイ'],
+    summary:
+      '過去の急落の道筋を今のポジションに 1 日ずつ当て、何日目に追証になるか・最悪の損益を見る表',
+    body: [
+      '指標 · テールの追証マップの下の折りたたみ。2018-10 以降の大きな下げ（コロナ・ショック、2024 年 8 月の急落など）から 1 つを選ぶと、当時の日中の引けの原資産の変化と ATM の IV の倍率を、今日から 1 営業日ずつ今のポジションに当てた余力と損益が日ごとに出る。',
+      '「実際」はその後に戻った道筋、「戻らなかった」は底からもう一度同じだけ下げた道筋（IV は底の水準のまま）。データの期間の大きな下げはすべて戻っているので、戻らなかった場合も並べる。',
+      '足の IV は追証マップと同じく今のスマイルの形のまま上げ下げし、水準だけを当時の ATM の IV の倍率（足の残存に合わせた値）で当てる。追証になった日の後も入金して持ち続けた前提。',
+    ],
+    example:
+      '例（架空の値）: 実際は 8 営業日目に追証・最も足りない額 −120 千円、戻らなかった道筋では 8 営業日目に追証のまま最悪 −900 千円',
+    where: ['指標 · テールの「過去の急落の再生」'],
+    guide: G_REPLAY,
+    related: ['hold-map', 'room', 'iv30'],
   },
   {
     id: 'var-span',

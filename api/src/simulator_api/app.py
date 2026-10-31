@@ -3,8 +3,8 @@
 - GET /api/chain: 使える最新の板（7.2）を JSON 版 1 で（data/chainTypes.ts）。?at= は後段（#33 では 400）
 - GET /api/calendar: 取引カレンダーの最新版（trading_calendar_latest）
 - GET /api/atm_iv?tf=<1m|1h|1d>[&start=&end=]: IV 推移（表 atm_cm_iv の iv30 の足。atm_iv.py。#79）
-- GET /api/atm_daily: 日次の値（表 atm_cm_iv の日中の終値の iv30・1 / 2 限月のフォワード。確定した日だけ。atm_daily.py。
-  #152）。パラメータは読まない
+- GET /api/atm_daily: 日次の値（表 atm_cm_iv の日中の終値の iv30・1 / 2 限月のフォワードと ATM IV（#307）。確定した日
+  だけ。atm_daily.py。#152）。パラメータは読まない
 - GET /api/future_bars?tf=<1m|1h|1d>[&start=&end=]: 先物推移（future_price_latest の現在値の足と限月。future_bars.py。
   要求・Cache-Control は /api/atm_iv と同じ。#190）
 - POST /api/ai/messages: AI の中継（SSE。許可リスト・費用の 1 日上限・同じオリジン。ai/relay.py。#134）

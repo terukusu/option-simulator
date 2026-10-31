@@ -7,9 +7,13 @@ docs/design.md 7.1・7.3・13.4。
 - 日次の値: JST の日付ごとに、JST 9:00〜15:00（両端含む。settings.ATM_DAILY_CLOSE_WINDOW）の行のうち iv30・m1_forward・
   m1_last_trading_day が NULL でない最後の行（sql/atm_cm_daily.sql が束ねる）
 - 2 営業日の組はブラウザ（data/atmDaily.ts の atmMoves）。サーバーは日次の値を返すだけ
-- JSON: {schema_version: 1, start, end, days: [{d, t, iv, f1, l1, f2, l2}]}。d の昇順・重複なし（重複は後を捨てる）。
-  t は close_at の +09:00、iv は %（iv30 のまま）、値は丸めない。iv・f1 が有限で正でない・l1 が NULL の行は捨てる。
-  f2・l2 は片方でも NULL / 有限でない / 正でなければ両方 null
+- JSON: {schema_version: 1, start, end, days: [{d, t, iv, f1, l1, f2, l2, v1, v2}]}。d の昇順・重複なし（重複は後を
+  捨てる）。t は close_at の +09:00、iv は %（iv30 のまま）、値は丸めない。iv・f1 が有限で正でない・l1 が NULL の行は
+  捨てる。f2・l2 は片方でも NULL / 有限でない / 正でなければ両方 null
+- v1・v2（#307）: 1・2 限月の ATM IV（%。m1_iv・m2_iv のまま）。有限で正でなければ null（行は捨てない）。v2 は
+  f2・l2 の組があるときだけ値（組が無ければ null）。過去の急落の再生（5.14）の足の残存に合わせた ATM の倍率に使う。
+  schema_version は 1 のまま（キーを足しただけ。古い画面は知らないキーを無視する）
+- ETag の形の印 ETAG_SHAPE: 同じ範囲の終わり・件数でも v1・v2 の無い古い本文を 304 で使い続けないため
 """
 
 import math
@@ -20,6 +24,8 @@ from .calendar import jst_iso
 from .usable import JST
 
 SCHEMA_VERSION = 1
+# ETag の形の印（JSON の日のキーを変えたら変える。v = v1・v2 を足した形。#307）
+ETAG_SHAPE = "v"
 DAY = timedelta(days=1)
 EPOCH = datetime.fromisoformat(st.ATM_IV_EPOCH_ISO)
 
@@ -52,8 +58,10 @@ def days_from_rows(rows: list[dict], end_day: date) -> list[dict]:
             continue
         f2, l2 = r.get("m2_forward"), r.get("m2_last_trading_day")
         pair = _positive(f2) and isinstance(l2, date)
+        v1, v2 = r.get("m1_iv"), r.get("m2_iv")
         out[d] = {"d": d.isoformat(), "t": jst_iso(close_at), "iv": iv, "f1": f1, "l1": l1.isoformat(),
-                  "f2": f2 if pair else None, "l2": l2.isoformat() if pair else None}
+                  "f2": f2 if pair else None, "l2": l2.isoformat() if pair else None,
+                  "v1": v1 if _positive(v1) else None, "v2": v2 if pair and _positive(v2) else None}
     return list(out.values())
 
 

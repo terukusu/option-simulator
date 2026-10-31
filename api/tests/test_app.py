@@ -573,7 +573,7 @@ def test_atm_daily_ok_headers():
     assert res.status_code == 200
     assert res.headers["Content-Type"] == "application/json; charset=utf-8"
     assert res.headers["Cache-Control"] == "private, max-age=3600"
-    assert res.headers["ETag"] == '"atm-daily-2026-10-13-2"'
+    assert res.headers["ETag"] == '"atm-daily-2026-10-13-2-v"'
     assert res.headers["Vary"] == "Accept-Encoding"
     assert_security_headers(res)
     body = res.get_json()
@@ -593,6 +593,8 @@ def test_atm_daily_etag_304():
     assert res.status_code == 304 and res.data == b""
     assert res.headers["ETag"] == etag and res.headers["Cache-Control"] == "private, max-age=3600"
     assert client.get("/api/atm_daily", headers={"If-None-Match": '"atm-daily-2026-10-12-1"'}).status_code == 200
+    # #307: v1・v2 の無い古い形の ETag（同じ範囲の終わり・件数）では 304 にしない
+    assert client.get("/api/atm_daily", headers={"If-None-Match": '"atm-daily-2026-10-13-2"'}).status_code == 200
 
 
 def test_atm_daily_unknown_params_ignored(capsys):

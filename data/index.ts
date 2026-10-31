@@ -9,3 +9,4 @@ export * from './futureBars';
 export * from './jpxGreeks';
 export * from './legs';
 export * from './normalize';
+export * from './replay';

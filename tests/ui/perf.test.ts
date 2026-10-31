@@ -9,6 +9,7 @@ import {
   holdMapColumn,
   holdMapPnlColumn,
   indicators,
+  replayDay,
 } from '../../model';
 import { preparePosition } from '../../model/position';
 import { ZERO_SCENARIO } from '../../model/scenario';
@@ -107,6 +108,7 @@ import {
   scenarioLegsByRow,
 } from '../../ui/view/positionsRegion';
 import { readoutModel } from '../../ui/view/readout';
+import { type ReplayPathOk, replayCalcOf, replayInput, replayResultOf } from '../../ui/view/replay';
 import { scenarioMarks } from '../../ui/view/scenarioMarks';
 import {
   advSummary,
@@ -1956,6 +1958,77 @@ describe('性能（#152 追証マップ）', () => {
         runs: RECORD_RUNS,
       },
     );
+  });
+});
+
+/**
+ * #307: 過去の急落の再生の 1 日（足 10 本・全足を評価する側）。画面は日ごとに setTimeout(0) で回すので、1 日が 1 フレーム
+ * （16 ms）に収まること。1 出来事 = 60 営業日 × 2 本（実際 + 戻らなかった）の全体は記録だけ。日次の値は架空
+ */
+describe('性能（#307 過去の急落の再生）', () => {
+  const { ctx, rows } = makeMarket();
+  const legs = preparePosition(PERF_LEGS, ctx);
+  const board = {
+    months: [
+      { F: M1.F, rows: rows[M1.id] ?? [] },
+      { F: M2.F, rows: rows[M2.id] ?? [] },
+    ],
+  };
+  const built = pnlDomains(board, legs, ctx);
+  if (!built) throw new Error('損益グラフの基礎が作れない');
+  const params = { ...DEFAULT_MARGIN_PARAMS, ignoreLongOptions: false };
+  const input = replayInput(built, 'sticky_strike', params, 15_000_000, CALENDAR.holidays);
+  if (!input) throw new Error('再生の入力が作れない');
+  const calc = replayCalcOf(input);
+  // 架空の道筋: 30 営業日で −25% まで下げて 30 営業日で戻る。期間構造は日ごとに変える
+  const day = (k: number) => {
+    const u = k <= 30 ? -0.25 * (k / 30) : -0.25 * ((60 - k) / 30);
+    const v = 20 * (1 - 2 * u);
+    return {
+      k,
+      d: `2031-01-${String((k % 28) + 1).padStart(2, '0')}`,
+      gap: 0,
+      u,
+      iv: v,
+      term: { t1: 20 - (k % 20), v1: v * 1.1, t2: 48 - (k % 20), v2: v * 0.95 },
+      cont: false,
+    };
+  };
+  const actual = Array.from({ length: 61 }, (_, k) => day(k));
+  const bottom = 30;
+  const b = actual[bottom] as (typeof actual)[number];
+  const noRecovery = [
+    ...actual.slice(0, bottom + 1),
+    ...actual.slice(1, bottom + 1).map((x) => ({
+      ...x,
+      k: b.k + x.k,
+      d: null,
+      u: (1 + b.u) * (1 + x.u) - 1,
+      iv: b.iv,
+      term: b.term,
+      cont: true,
+    })),
+  ];
+  const path: ReplayPathOk = { status: 'ok', actual, noRecovery, bottom, half: 45, iv30Days: 0 };
+  const day0 = actual[0] as (typeof actual)[number];
+  let k = 0;
+
+  it(`#307 再生の 1 日が ${BUDGET_MS} ms 以内（30 回の最小値）`, () => {
+    // SQ の前の日（最も遠い足の SQ で切れない日）を回す
+    const one = () => {
+      k = (k % 25) + 1;
+      const r = replayDay(calc, actual[k] as (typeof actual)[number], day0);
+      return r.ended ? -1 : 1;
+    };
+    expect(one()).toBe(1);
+    expectWithinBudget('#307 再生の 1 日', one, { warmup: 10, runs: 30 });
+  });
+
+  it('1 出来事（60 営業日 × 2 本）の全体（記録のみ）', () => {
+    record('#307 再生の全体（60 営業日 × 2 本）', () => replayResultOf(input, path).actual.length, {
+      warmup: 1,
+      runs: RECORD_RUNS,
+    });
   });
 });
 

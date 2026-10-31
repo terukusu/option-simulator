@@ -116,6 +116,7 @@ import {
 } from '../view/pnlChart';
 import { positionModel } from '../view/position';
 import { readoutModel } from '../view/readout';
+import { type ReplayInput, replayInput as replayInputOf } from '../view/replay';
 import { clampDXInput, evalTimeTargets } from '../view/scenario';
 import { scenarioAtmMark } from '../view/scenarioAtm';
 import type { SmileEffBase } from '../view/smileEff';
@@ -646,6 +647,12 @@ export function useAppController(boot: Boot = NO_BOOT, margin: MarginPrefs = DEF
     () => holdMapInputOf(pnlBoard, holdScenario, marginParams, capital, holidays),
     [pnlBoard, holdScenario, marginParams, capital, holidays],
   );
+  // 過去の急落の再生の入力（#307）: 板の基礎・IV の動き方・パラメータ・資金・休業日だけ（シナリオの d・ΔX・Δσ・β・Δs・
+  // パン・拡大で参照が変わらない）。日ごとの計算は useReplay が折りたたみを開いている間だけ。資金が未設定・足なしなら null
+  const replayInput = useMemo<ReplayInput | null>(
+    () => replayInputOf(pnlBoard, ivDynamics, marginParams, capital, holidays),
+    [pnlBoard, ivDynamics, marginParams, capital, holidays],
+  );
   const marginView = useMemo<MarginView | null>(
     () =>
       pnlBase
@@ -1058,6 +1065,7 @@ export function useAppController(boot: Boot = NO_BOOT, margin: MarginPrefs = DEF
     marginView,
     marginLineInput,
     holdMapInput,
+    replayInput,
     readout,
     hedgeView,
     targets,

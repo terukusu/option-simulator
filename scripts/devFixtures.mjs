@@ -346,7 +346,7 @@ function gauss(n) {
  * `/api/atm_daily` と同じ形の合成の応答（架空の値）。取引日だけ（土日・同梱のカレンダーの取引の無い日は行なし）、
  * 範囲の終わり = now の JST の日付（8:00 前は前日。含まない）。原資産は 1 日 1.1% 前後の種つきの酔歩、IV は下げで
  * 上がる架空の反応（1% の下げで約 1 pt）と平均への回帰。1 / 2 限月は毎月の取引最終日で切り替わる（2 限月 = 1 限月の
- * F の 0.02% 上の架空の値）。
+ * F の 0.02% 上の架空の値）。v1 / v2（1・2 限月の ATM IV。#307）は iv30 から近い限月ほど大きく離れる架空の値。
  */
 let dailyCache = null;
 export function synthAtmDaily(now = SYNTH_IV_NOW) {
@@ -378,6 +378,9 @@ export function synthAtmDaily(now = SYNTH_IV_NOW) {
       l1: dayIso(l1),
       f2: Math.round(s * 1.0002 * 100) / 100,
       l2: dayIso(l2),
+      // 1・2 限月の ATM IV（#307。架空: 近い限月ほど iv30 から大きく離れる）
+      v1: Math.round((iv + 0.3 * (iv - 19)) * 1e4) / 1e4,
+      v2: Math.round((iv - 0.1 * (iv - 19) - 0.3) * 1e4) / 1e4,
     });
   }
   const body = { schema_version: 1, start: '2010-01-01', end: dayIso(endDay), days };

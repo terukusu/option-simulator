@@ -15,6 +15,7 @@ import {
   leftView,
   MARKET_VIEWS,
   metricsVisible,
+  replayActive,
   SHEET_SNAP_PX,
   SHEET_TAP_PX,
   type ShellState,
@@ -410,6 +411,25 @@ describe('追証マップの開閉と見え方（#152）', () => {
     expect(shellReduce(s1, { type: 'holdMap', open: false })).toEqual({ ...s0, holdMap: false });
     // パネルの切替で開閉は保つ
     expect(shellReduce(s1, { type: 'dock', panel: 'board', tier: 'phone' }).holdMap).toBe(true);
+  });
+
+  it('#307 過去の急落の再生: 既定は閉・出来事は未選択、action で開閉と選択、同じ値なら同じ参照。計算は開いて指標が見えているときだけ', () => {
+    const s0 = at({});
+    expect(s0.replay ?? false).toBe(false);
+    expect(s0.replayEvent).toBeUndefined();
+    const s1 = shellReduce(s0, { type: 'replay', open: true });
+    expect(s1).toEqual({ ...s0, replay: true });
+    expect(shellReduce(s1, { type: 'replay', open: true })).toBe(s1);
+    expect(shellReduce(s0, { type: 'replay', open: false })).toBe(s0);
+    const s2 = shellReduce(s1, { type: 'replayEvent', id: '2024-08' });
+    expect(s2).toEqual({ ...s1, replayEvent: '2024-08' });
+    expect(shellReduce(s2, { type: 'replayEvent', id: '2024-08' })).toBe(s2);
+    // 追証マップの開閉とは別
+    expect(shellReduce(s2, { type: 'holdMap', open: true }).replay).toBe(true);
+    expect(replayActive(at({ replay: true, panel: 'metrics', sheet: 'peek' }), 'phone')).toBe(true);
+    expect(replayActive(at({ replay: true, panel: 'board' }), 'phone')).toBe(false);
+    expect(replayActive(at({ replay: false, panel: 'metrics' }), 'pc')).toBe(false);
+    expect(replayActive(at({ replay: true }), 'pc')).toBe(true);
   });
 
   it('#176・#274 指標のパネルが見えている（過去の値の先読みと追証マップの計算。#274 で閉じていても計算 = 見出しの結論）: 開閉によらない', () => {
