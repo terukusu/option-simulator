@@ -51,6 +51,7 @@ import {
   rebasePlan,
   removeUndo,
   revealScrollTop,
+  SHAPES_LABEL,
   scenarioLegsByRow,
 } from '../../ui/view/positionsRegion';
 import { isHot, stepBy } from '../../ui/view/stepper';
@@ -985,10 +986,11 @@ describe('AC-6 ヘッジの節', () => {
 
 describe('空の状態と選んだ足のスクロール', () => {
   // 空の状態の [板を開く] は #325 で [板から追加] に置き換えた（規則は tests/ui/shell.test.ts の「#325 板から追加」）
-  it('#325 足を入れる入口の文言', () => {
+  it('#325・#20 足を入れる入口の文言', () => {
     expect(PICK_LABEL).toBe('板から追加');
+    expect(SHAPES_LABEL).toBe('形から組む…');
     expect(EMPTY_LEGS_TEXT).toBe(
-      '[板から追加] で板の bid（売り）/ ask（買い）を押すか、[手入力…] で足を入れる',
+      '[板から追加] で板の bid（売り）/ ask（買い）を押すか、[形から組む…] で形を選ぶか、[手入力…] で足を入れる',
     );
   });
 

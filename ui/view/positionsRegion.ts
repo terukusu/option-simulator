@@ -823,16 +823,17 @@ export function hedgeSummary(model: HedgeModel, legCount: number): HedgeSummaryV
 /**
  * 足を入れる入口の文言（#325。見出しのボタン・空の欄・パレットで同じ文字）。ポジションの ⋯ の「手入力で足を追加…」は
  * Positions.tsx の項目にリテラルで書く（定数にしない = 文字の出所を 1 つに。ui:check の --flows も同じ文字で探す）。[板から追加] は板を開くリンク
- * （スマホ・タブレットは帯を出し、bid / ask で 1 本入ったらポジションへ戻る。ui/view/shell.ts の pick）。#20 の
- * 「形から組む…」はここに足す
+ * （スマホ・タブレットは帯を出し、bid / ask で 1 本入ったらポジションへ戻る。ui/view/shell.ts の pick）
  */
 export const PICK_LABEL = '板から追加';
+/** 形の一覧を開く入口（#20。⋯・空の欄・パレットで同じ文字。ダイアログは ui/view/shapes.ts） */
+export const SHAPES_LABEL = '形から組む…';
 /** 空の欄の手入力のボタン（短い形） */
 export const MANUAL_ADD_SHORT = '手入力…';
 /** 板から追加の帯（スマホ・タブレットの板の見出しの下。案内だけで、ボタンを置かない） */
 export const PICK_BAND_TEXT = 'bid / ask を押すとポジションに戻ります';
 /** 足 0 本の空の欄の案内 */
-export const EMPTY_LEGS_TEXT = `[${PICK_LABEL}] で板の bid（売り）/ ask（買い）を押すか、[${MANUAL_ADD_SHORT}] で足を入れる`;
+export const EMPTY_LEGS_TEXT = `[${PICK_LABEL}] で板の bid（売り）/ ask（買い）を押すか、[${SHAPES_LABEL}] で形を選ぶか、[${MANUAL_ADD_SHORT}] で足を入れる`;
 
 /**
  * 選んだ足の行を見せる .panel-body の scrollTop（座標は同じ基準の px）。見えていれば同じ値、上にはみ出せば

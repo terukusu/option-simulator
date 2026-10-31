@@ -65,6 +65,23 @@ function focusLater(sel: string): void {
   requestAnimationFrame(tick);
 }
 
+/**
+ * 次のフレームから、フォーカスが落ちていれば（body・外れた要素）行き先へ focus（#20 レビュー N3）。ダイアログを開いた
+ * ボタンが閉じる前に消えた（足 0 本の空の欄から足を入れた・タブが替わった）とき、Dialog の「開く前の要素へ戻す」が
+ * 外れた要素に当たって body に落ちるのを拾う。フォーカスが残っていれば（⋯ へ戻った）何もしない
+ */
+export function focusIfLost(sel: string): void {
+  let n = 0;
+  const tick = () => {
+    const now = document.activeElement;
+    if (now !== null && now !== document.body && now.isConnected) return;
+    const el = document.querySelector<HTMLElement>(sel);
+    if (el !== null) el.focus({ preventScroll: true });
+    else if (++n < FOCUS_FRAMES) requestAnimationFrame(tick);
+  };
+  requestAnimationFrame(tick);
+}
+
 /** そのパネルの行き先へ次のフレームから focus（#136 の [AI に聞く] の後に AI のパネルへ。キー 1〜6 と同じ行き先） */
 export function focusPanelLater(panel: PanelId): void {
   focusLater(PANEL_FOCUS[panel]);

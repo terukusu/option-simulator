@@ -100,6 +100,7 @@ import { Metrics } from './regions/Metrics';
 import { Positions } from './regions/Positions';
 import type { ReplayBundle } from './regions/Replay';
 import { Scenario, scenarioInputOf } from './regions/Scenario';
+import { ShapeDialog, type ShapeOpen } from './regions/ShapeDialog';
 import { Smile } from './regions/Smile';
 import { Stage } from './regions/Stage';
 import { SettingsDialog } from './SettingsDialog';
@@ -371,6 +372,10 @@ export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
   const [dXUnit, setDXUnit] = useState<DXUnit>('pct');
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [bookFocusName, setBookFocusName] = useState(false);
+  // 形の一覧（#20。ポジションの ⋯・空の欄・パレット）。開いている間の入力は ShapeDialog のローカル（保存しない）
+  const [shapes, setShapes] = useState<ShapeOpen | null>(null);
+  const onShapes = useCallback(() => setShapes({ shape: null }), []);
+  const closeShapes = useCallback(() => setShapes(null), []);
   // 足が消えたら選択を外す
   const selectedLeg = picked !== null && c.curLegs.some((l) => l.id === picked) ? picked : null;
   const onChart = useCallback((chart: ChartMode) => send({ type: 'chart', chart }), []);
@@ -386,6 +391,7 @@ export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
   // 閉じたタブの [元に戻す] は押した時点の state で判定する（トーストの undo は push した時点のクロージャ）
   const stateRef = useRef(state);
   stateRef.current = state;
+  const getState = useCallback(() => stateRef.current, []);
   // ---- AI（#135）。ツールの環境は送るときに今の state・証拠金の設定から作る（参照の変わらない関数）
   const marginRef = useRef(userPrefs.prefs.margin);
   marginRef.current = userPrefs.prefs.margin;
@@ -839,6 +845,9 @@ export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
       case 'pick':
         onPickBoard();
         return;
+      case 'shape':
+        setShapes({ shape: run.shape });
+        return;
       case 'holdings':
         c.openHoldings();
         return;
@@ -963,6 +972,7 @@ export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
             push={push}
             onClear={onClearLegs}
             onRebase={onRebaseLegs}
+            onShapes={onShapes}
           />
         }
         metrics={
@@ -1096,6 +1106,14 @@ export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
         onCancel={cancelShare}
       />
       <ShareUrlDialog share={shareUrl} onClose={closeShareUrl} />
+      <ShapeDialog
+        open={shapes}
+        onClose={closeShapes}
+        c={c}
+        getState={getState}
+        push={push}
+        onPick={onPickLeg}
+      />
       <SettingsDialog
         open={settingsOpen}
         onClose={closeSettings}

@@ -18,7 +18,6 @@
 
 import { boardOptionLeg, type Chain, type ChainMonth, futureLeg } from '../../data';
 import {
-  black76Greeks,
   evaluatePosition,
   type Leg,
   type OptionType,
@@ -33,6 +32,8 @@ import { fmtNum } from './format';
 import { marginLine, marginNow } from './margin';
 import { AMOUNT_UNIT_LABEL, fmtAmount } from './metrics';
 import { type PnlBase, THOUSAND_YEN_FROM } from './pnlChart';
+import { defaultMonthOf, quotedStrikes, strikeByDelta } from './strikePick';
+import { RATIO_GAP, shapeLegs } from './templates';
 
 /** 足の列を評価した結果（aiEnvFromState が useAppController と同じ組み立てで作る） */
 export interface DraftEval {
@@ -58,7 +59,7 @@ export const SCAN_DEFAULT_RANGE = 0.3;
 /** structure_candidates の短い足の |Δ| */
 export const CANDIDATE_DELTAS = [0.1, 0.15, 0.2, 0.25, 0.3] as const;
 /** レシオの買いの足の |Δ| = 売り + これ */
-export const RATIO_BUY_DELTA_GAP = 0.15;
+export const RATIO_BUY_DELTA_GAP = RATIO_GAP;
 /** 翼の距離（F に対する %。既定・範囲） */
 export const WING_PCT_DEFAULT = 3;
 export const WING_PCT_RANGE = [1, 10] as const;
@@ -510,62 +511,11 @@ export function sameLegsBefore(env: AiToolEnv, result: unknown): boolean {
 
 // ---------------------------------------------------------------- 候補の行使価格
 
-const rowIndex = (m: ChainMonth, k: number) => m.rows.findIndex((r) => r.k === k);
-
-/** 両気配の行の行使価格（種別の側。昇順） */
-function quotedStrikes(m: ChainMonth, type: OptionType): number[] {
-  return m.strikes.filter((s) => s[type].quote === 'two_sided').map((s) => s.k);
-}
-
-/** 行使価格の Δ（スマイルの IV と Black-76。画面の足の Δ と同じ式。求まらなければ NaN） */
-function deltaAt(chain: Chain, m: ChainMonth, k: number, type: OptionType): number {
-  const info = m.strikes[rowIndex(m, k)];
-  const sigma = info?.smileIv ?? null;
-  if (sigma === null || !fin(m.F) || !(m.T > 0)) return Number.NaN;
-  return black76Greeks(type, m.F, k, m.T, sigma, chain.r).delta;
-}
-
-/** OTM 側で |Δ| が目標に最も近い行（無ければ null） */
-function strikeByDelta(chain: Chain, m: ChainMonth, type: OptionType, target: number) {
-  let best: number | null = null;
-  let gap = Number.POSITIVE_INFINITY;
-  for (const k of quotedStrikes(m, type)) {
-    if (type === 'put' ? k > m.F : k < m.F) continue;
-    const d = Math.abs(deltaAt(chain, m, k, type));
-    if (!fin(d)) continue;
-    const g = Math.abs(d - target);
-    if (g < gap) {
-      gap = g;
-      best = k;
-    }
-  }
-  return best;
-}
-
-/** 目標の水準に最も近い行（far の側 = put は k より下、call は上。無ければ null） */
-function strikeNear(m: ChainMonth, type: OptionType, from: number, level: number) {
-  let best: number | null = null;
-  for (const k of quotedStrikes(m, type)) {
-    if (type === 'put' ? k >= from : k <= from) continue;
-    if (best === null || Math.abs(k - level) < Math.abs(best - level)) best = k;
-  }
-  return best;
-}
-
-/** 既定の限月: 足の最初の OP の限月、無ければ残存 2 日以上の最初の限月 */
-function defaultMonth(env: AiToolEnv): ChainMonth | null {
-  const months = env.chain.months.filter((m) => m.smile && fin(m.F) && m.F > 0);
-  const legMonth = env.draft?.legs.find((l) => l.leg.kind === 'option')?.leg;
-  if (legMonth?.kind === 'option') {
-    const m = months.find((x) => x.id === legMonth.expiry);
-    if (m) return m;
-  }
-  return months.find((m) => m.T * 365 >= 2) ?? months[0] ?? null;
-}
+// 仕組みは ui/view/strikePick.ts（#20 で戦略テンプレートと共用にした。中身は #139 のまま）
 
 /** 限月の指定 → 板の限月（省略 = 既定の限月。形の誤りは bad_input、板に無い・スマイルが無いは not_on_board） */
 export function monthFor(env: AiToolEnv, expiry: unknown): ChainMonth | Err {
-  if (expiry === undefined) return defaultMonth(env) ?? 'no_data';
+  if (expiry === undefined) return defaultMonthOf(env.chain, env.draft?.legs ?? []) ?? 'no_data';
   if (!isMonth(expiry)) return 'bad_input';
   const m = env.chain.months.find((x) => x.id === expiry);
   if (!m?.smile || !fin(m.F)) return 'not_on_board';
@@ -672,6 +622,10 @@ export function strikeScan(env: AiToolEnv, input: Record<string, unknown>) {
 
 type LegSpec = { type: OptionType; k: number; side: Side; mul: number };
 
+/**
+ * 型 × |Δ| の足（put / call の単体の売りはここ、ほかの 6 形は戦略テンプレートの shapeLegs（ui/view/templates.ts。#20 で
+ * 共通にした。|Δ| の距離・atmK を渡す = #139 と同じ行を選ぶ））
+ */
 function structureLegs(
   chain: Chain,
   atmK: number | null,
@@ -680,83 +634,24 @@ function structureLegs(
   d: number,
   wingPct: number,
 ): LegSpec[] | null {
-  const put = () => strikeByDelta(chain, m, 'put', d);
-  const call = () => strikeByDelta(chain, m, 'call', d);
-  const wing = (type: OptionType, k: number) =>
-    strikeNear(m, type, k, k * (1 + ((type === 'put' ? -1 : 1) * wingPct) / 100));
   switch (s) {
     case 'short_put': {
-      const k = put();
+      const k = strikeByDelta(chain, m, 'put', d);
       return k === null ? null : [{ type: 'put', k, side: 'sell', mul: 1 }];
     }
     case 'short_call': {
-      const k = call();
+      const k = strikeByDelta(chain, m, 'call', d);
       return k === null ? null : [{ type: 'call', k, side: 'sell', mul: 1 }];
     }
-    case 'short_strangle': {
-      const p = put();
-      const c = call();
-      return p === null || c === null
-        ? null
-        : [
-            { type: 'put', k: p, side: 'sell', mul: 1 },
-            { type: 'call', k: c, side: 'sell', mul: 1 },
-          ];
-    }
-    case 'short_straddle': {
-      const k = atmK;
-      if (k === null) return null;
-      const both = quotedStrikes(m, 'put').includes(k) && quotedStrikes(m, 'call').includes(k);
-      return both
-        ? [
-            { type: 'put', k, side: 'sell', mul: 1 },
-            { type: 'call', k, side: 'sell', mul: 1 },
-          ]
-        : null;
-    }
-    case 'bull_put': {
-      const k = put();
-      const w = k === null ? null : wing('put', k);
-      return k === null || w === null
-        ? null
-        : [
-            { type: 'put', k, side: 'sell', mul: 1 },
-            { type: 'put', k: w, side: 'buy', mul: 1 },
-          ];
-    }
-    case 'bear_call': {
-      const k = call();
-      const w = k === null ? null : wing('call', k);
-      return k === null || w === null
-        ? null
-        : [
-            { type: 'call', k, side: 'sell', mul: 1 },
-            { type: 'call', k: w, side: 'buy', mul: 1 },
-          ];
-    }
-    case 'iron_condor': {
-      const p = put();
-      const c = call();
-      const pw = p === null ? null : wing('put', p);
-      const cw = c === null ? null : wing('call', c);
-      return p === null || c === null || pw === null || cw === null
-        ? null
-        : [
-            { type: 'put', k: pw, side: 'buy', mul: 1 },
-            { type: 'put', k: p, side: 'sell', mul: 1 },
-            { type: 'call', k: c, side: 'sell', mul: 1 },
-            { type: 'call', k: cw, side: 'buy', mul: 1 },
-          ];
-    }
-    case 'put_ratio': {
-      const sell = put();
-      const buy = strikeByDelta(chain, m, 'put', d + RATIO_BUY_DELTA_GAP);
-      return sell === null || buy === null || buy <= sell
-        ? null
-        : [
-            { type: 'put', k: buy, side: 'buy', mul: 1 },
-            { type: 'put', k: sell, side: 'sell', mul: 2 },
-          ];
+    default: {
+      const r = shapeLegs(chain, m, s, {
+        basis: 'A',
+        dist: { kind: 'delta', value: d },
+        n: 0,
+        wingPct,
+        atmK,
+      });
+      return r.ok ? r.legs.map(({ type, k, side, mul }) => ({ type, k, side, mul })) : null;
     }
   }
 }
