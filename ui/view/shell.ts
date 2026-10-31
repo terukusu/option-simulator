@@ -60,6 +60,11 @@ export interface ShellState {
   left?: LeftView;
   /** スマイルに売りの効率の線を重ねる（#163。無い = 重ねない。保存しない） */
   smileEff?: boolean;
+  /**
+   * 板から追加の帯が出ている（#325。スマホ・タブレットだけ。無い = 帯なし。保存しない）。立っている間は panel = board
+   * かつ sheet が hidden でない（shellReduce が保つ）
+   */
+  pick?: boolean;
 }
 
 export const INITIAL_SHELL: ShellState = { panel: 'positions', sheet: 'peek', market: 'board' };
@@ -93,7 +98,18 @@ export type ShellAction =
   /** PC の左の列（#280。left が無ければ入れ替え） */
   | { type: 'left'; left?: LeftView }
   /** スマイルの売りの効率の線の表示（#163） */
-  | { type: 'smileEff'; on: boolean };
+  | { type: 'smileEff'; on: boolean }
+  /**
+   * 板から追加を始める（#325）。スマホ・タブレット = 板のパネルを開いて帯を出す（hidden なら peek）、PC = 市場の列を
+   * 板にする（AI の列なら市場に戻す。帯は出さない）
+   */
+  | { type: 'pick'; tier: Tier }
+  /** 板の bid / ask を押した後（#325）。足が入った（ok）なら帯を消してポジションへ。入らなければ何もしない */
+  | { type: 'picked'; ok: boolean }
+  /** 戻る / Esc で帯を消す（#325）。ポジションへ戻る（足は変えない） */
+  | { type: 'pickBack' }
+  /** タブの切り替え・PC への幅の変化で帯だけを消す（#325。パネルはそのまま） */
+  | { type: 'pickEnd' };
 
 /**
  * ドックのボタンの文字と読み上げの名前（#130。smile のパネルは IV 推移とスマイル。ラベルは「IV」）。アイコンは
@@ -225,9 +241,44 @@ function grab(sheet: SheetStage, dy: number): SheetStage {
   return 'full';
 }
 
-/** 変わらないときは同じ参照を返す（再描画しない）。 */
+/** pick を外した状態（pick のキーを残さない = 既定の形と toEqual で等しい） */
+function withoutPick(s: ShellState): ShellState {
+  const { pick: _, ...rest } = s;
+  return rest;
+}
+
+/**
+ * 変わらないときは同じ参照を返す（再描画しない）。板から追加の帯（#325）は、結果で panel が board でない・シートが
+ * hidden になったら外す（ドックの別パネル・同じ [板] でシートを隠す・open で別パネル・つまみで隠す を 1 か所で。
+ * 押した先を優先 = パネルはそのまま）。
+ */
 export function shellReduce(s: ShellState, a: ShellAction): ShellState {
+  const next = reduce(s, a);
+  if (next.pick === true && (next.panel !== 'board' || next.sheet === 'hidden')) {
+    return withoutPick(next);
+  }
+  return next;
+}
+
+function reduce(s: ShellState, a: ShellAction): ShellState {
   switch (a.type) {
+    case 'pick': {
+      if (a.tier === 'pc') {
+        // PC は板とポジションが同時に見える: 市場の列を板に（market と同じ）。帯は出さない
+        return reduce(s, { type: 'market', market: 'board' });
+      }
+      const sheet = s.sheet === 'hidden' ? 'peek' : s.sheet;
+      if (s.panel === 'board' && s.sheet === sheet && s.pick === true) return s;
+      return { ...s, panel: 'board', sheet, pick: true };
+    }
+    case 'picked':
+      if (!a.ok || s.pick !== true) return s;
+      return { ...withoutPick(s), panel: 'positions' };
+    case 'pickBack':
+      if (s.pick !== true) return s;
+      return { ...withoutPick(s), panel: 'positions' };
+    case 'pickEnd':
+      return s.pick === true ? withoutPick(s) : s;
     case 'dock': {
       const panel = forTier(a.panel, a.tier);
       const current = visiblePanel(s, a.tier);

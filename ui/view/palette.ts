@@ -25,6 +25,7 @@ import {
   THEME_KEY,
 } from './keys';
 import { type PinMenuInput, pinMenuRows } from './pins';
+import { PICK_LABEL } from './positionsRegion';
 import { evalChips, presetChips, type ScenarioRegionInput } from './scenarioRegion';
 import { CHART_MODES, DOCK_LABELS, type PanelId, type ShellAction } from './shell';
 import type { TabsView } from './tabs';
@@ -108,6 +109,8 @@ export type PaletteRun =
   | { kind: 'atm' }
   /** 板の bid / ask と同じ足の追加 */
   | { kind: 'add'; add: MarketAddInput }
+  /** 板から追加（#325。ポジションの見出しの [＋ 板から追加] と同じ） */
+  | { kind: 'pick' }
   /** 保有ポジションの一覧（#302） */
   | { kind: 'holdings' }
   | { kind: 'book' }
@@ -315,7 +318,16 @@ export function paletteItems(input: PaletteInput): PaletteItem[] {
       },
     ),
   );
-  // 足
+  // 足: 先頭に板から追加（#325。板が無ければ押せない）。#20 の「形から組む…」はこの次に足す
+  out.push(
+    item(
+      'leg',
+      'pick',
+      PICK_LABEL,
+      { kind: 'pick' },
+      { disabled: input.chain === null, title: NO_CHAIN_TEXT },
+    ),
+  );
   out.push(...legItems(input.chain, input.monthId, input.atmK));
   // タブ（＋ のメニューと同じ）
   for (const r of addMenuModel(input.tabs)) {

@@ -447,3 +447,100 @@ describe('追証マップの開閉と見え方（#152）', () => {
     }
   });
 });
+
+describe('#325 板から追加（帯。スマホ・タブレットだけ。保存しない）', () => {
+  const picking = (p: Partial<ShellState> = {}): ShellState =>
+    at({ panel: 'board', sheet: 'peek', pick: true, ...p });
+
+  it('(a) スマホ・タブレットで始める → panel = board・帯あり（hidden なら peek、peek / full はそのまま）', () => {
+    for (const tier of ['phone', 'tablet'] as const) {
+      expect(shellReduce(at({}), { type: 'pick', tier })).toEqual(
+        at({ panel: 'board', sheet: 'peek', pick: true }),
+      );
+      expect(shellReduce(at({ sheet: 'hidden' }), { type: 'pick', tier })).toEqual(
+        at({ panel: 'board', sheet: 'peek', pick: true }),
+      );
+      expect(shellReduce(at({ sheet: 'full' }), { type: 'pick', tier })).toEqual(
+        at({ panel: 'board', sheet: 'full', pick: true }),
+      );
+      // 既に帯が出ていれば同じ参照
+      const s = picking();
+      expect(shellReduce(s, { type: 'pick', tier })).toBe(s);
+    }
+  });
+
+  it('(b) PC で始める → market = board（left = ai なら market に戻す）・帯なし', () => {
+    const s = shellReduce(at({ market: 'smile' }), { type: 'pick', tier: 'pc' });
+    expect(s).toEqual(at({ market: 'board' }));
+    expect(s.pick).toBeUndefined();
+    const ai = shellReduce(at({ market: 'iv', left: 'ai' }), { type: 'pick', tier: 'pc' });
+    expect(ai).toEqual(at({ market: 'board', left: 'market' }));
+    expect(ai.pick).toBeUndefined();
+    // 既に市場の列が板なら同じ参照
+    const same = at({});
+    expect(shellReduce(same, { type: 'pick', tier: 'pc' })).toBe(same);
+  });
+
+  it('(c) 帯ありで足が入る → panel = positions・帯なし（シートはそのまま）。入らなければ board・帯ありのまま', () => {
+    expect(shellReduce(picking(), { type: 'picked', ok: true })).toEqual(
+      at({ panel: 'positions', sheet: 'peek' }),
+    );
+    expect(shellReduce(picking({ sheet: 'full' }), { type: 'picked', ok: true })).toEqual(
+      at({ panel: 'positions', sheet: 'full' }),
+    );
+    const s = picking();
+    expect(shellReduce(s, { type: 'picked', ok: false })).toBe(s);
+    // 帯なし（ふだんの板からの追加）では何もしない
+    const plain = at({ panel: 'board' });
+    expect(shellReduce(plain, { type: 'picked', ok: true })).toBe(plain);
+  });
+
+  it('(d) 帯ありで別のパネル / 同じ板でシートを隠す / タブの切り替え → 帯なし・パネルは押した先のまま', () => {
+    for (const panel of ['positions', 'smile', 'scenario', 'metrics', 'ai'] as const) {
+      expect(shellReduce(picking(), { type: 'dock', panel, tier: 'phone' })).toEqual(
+        at({ panel, sheet: 'peek' }),
+      );
+      expect(shellReduce(picking(), { type: 'open', panel, tier: 'phone' })).toEqual(
+        at({ panel, sheet: 'peek' }),
+      );
+    }
+    expect(shellReduce(picking(), { type: 'dock', panel: 'metrics', tier: 'tablet' })).toEqual(
+      at({ panel: 'metrics', sheet: 'peek' }),
+    );
+    // 同じ [板] → シートを隠す
+    expect(shellReduce(picking(), { type: 'dock', panel: 'board', tier: 'phone' })).toEqual(
+      at({ panel: 'board', sheet: 'hidden' }),
+    );
+    expect(
+      shellReduce(picking({ sheet: 'full' }), { type: 'dock', panel: 'board', tier: 'tablet' }),
+    ).toEqual(at({ panel: 'board', sheet: 'hidden' }));
+    // つまみで隠す
+    expect(shellReduce(picking(), { type: 'grab', dy: 100 })).toEqual(
+      at({ panel: 'board', sheet: 'hidden' }),
+    );
+    // タブの切り替え・PC への幅の変化
+    expect(shellReduce(picking(), { type: 'pickEnd' })).toEqual(at({ panel: 'board' }));
+    const plain = at({});
+    expect(shellReduce(plain, { type: 'pickEnd' })).toBe(plain);
+  });
+
+  it('(e) 帯ありで戻る → panel = positions・帯なし。帯なしなら同じ参照', () => {
+    expect(shellReduce(picking(), { type: 'pickBack' })).toEqual(
+      at({ panel: 'positions', sheet: 'peek' }),
+    );
+    expect(shellReduce(picking({ sheet: 'full' }), { type: 'pickBack' })).toEqual(
+      at({ panel: 'positions', sheet: 'full' }),
+    );
+    const plain = at({ panel: 'board' });
+    expect(shellReduce(plain, { type: 'pickBack' })).toBe(plain);
+  });
+
+  it('帯ありで板の中の操作（同じ板を開く・市場・グラフ・つまみのタップ）は帯を保つ', () => {
+    expect(shellReduce(picking(), { type: 'open', panel: 'board', tier: 'phone' }).pick).toBe(true);
+    expect(shellReduce(picking(), { type: 'market', market: 'smile' }).pick).toBe(true);
+    expect(shellReduce(picking(), { type: 'chart', chart: 'surface' }).pick).toBe(true);
+    expect(shellReduce(picking(), { type: 'holdMap', open: true }).pick).toBe(true);
+    // つまみのタップ（peek → full）
+    expect(shellReduce(picking(), { type: 'grab', dy: 0 })).toEqual(picking({ sheet: 'full' }));
+  });
+});

@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { BOARD_PICK_LAYER } from '../../ui/view/backStack';
 import {
   CHART_KEY,
   editableTarget,
@@ -12,6 +13,7 @@ import {
   palettePanelActions,
   panelKeyActions,
   panelKeyFocus,
+  pickEscape,
   THEME_KEY,
   toggledTheme,
 } from '../../ui/view/keys';
@@ -273,5 +275,35 @@ describe('#280 レビュー指摘 2・3: パレットの「AI に相談」・キ
     expect(panelKeyFocus('ai', 'pc', at({}))).toBe('ai');
     expect(panelKeyFocus('ai', 'tablet', at({ left: 'ai' }))).toBe('ai');
     expect(panelKeyFocus('metrics', 'pc', at({ left: 'ai' }))).toBe('metrics');
+  });
+});
+
+describe('#325 pickEscape（板から追加の帯を Esc で消す）', () => {
+  const pe = (key: string, o: Partial<KeySummary> & { claimed?: boolean } = {}) => ({
+    ...ev(key, o),
+    claimed: o.claimed ?? false,
+  });
+  it('Escape で一番上が帯の層なら真', () => {
+    expect(pickEscape(pe('Escape'), BOARD_PICK_LAYER)).toBe(true);
+  });
+
+  it('入力欄の Esc（編集の取りやめ）・先に受けた部品が claimEscape した Esc（タブのつかみの取りやめ）は偽', () => {
+    expect(pickEscape(pe('Escape', { editable: true }), BOARD_PICK_LAYER)).toBe(false);
+    expect(pickEscape(pe('Escape', { claimed: true }), BOARD_PICK_LAYER)).toBe(false);
+  });
+
+  it('一番上が他の層（吹き出し・ダイアログ）・層なしなら偽', () => {
+    expect(pickEscape(pe('Escape'), 'overlay:x')).toBe(false);
+    expect(pickEscape(pe('Escape'), 'dialog:y')).toBe(false);
+    expect(pickEscape(pe('Escape'), null)).toBe(false);
+  });
+
+  it('IME の変換中・部品が処理した Esc・他のキーは偽', () => {
+    expect(pickEscape(pe('Escape', { isComposing: true }), BOARD_PICK_LAYER)).toBe(false);
+    expect(pickEscape(pe('Process'), BOARD_PICK_LAYER)).toBe(false);
+    expect(pickEscape(pe('Escape', { keyCode: 229 }), BOARD_PICK_LAYER)).toBe(false);
+    expect(pickEscape(pe('Escape', { defaultPrevented: true }), BOARD_PICK_LAYER)).toBe(false);
+    expect(pickEscape(pe('1'), BOARD_PICK_LAYER)).toBe(false);
+    expect(pickEscape(pe('Enter'), BOARD_PICK_LAYER)).toBe(false);
   });
 });

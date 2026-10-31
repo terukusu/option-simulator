@@ -69,7 +69,7 @@ function LegDialogBody(p: {
   };
 
   return (
-    <Dialog open title="足を追加" onClose={p.onClose}>
+    <Dialog open title="手入力で足を追加" onClose={p.onClose}>
       <form class="pos-form" onSubmit={submit}>
         <Seg<Kind>
           label="足の種類"

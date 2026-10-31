@@ -190,6 +190,12 @@
 //                                          レビューの F1〜F4（blur・隠れた・capture を失ったら取りやめ、帯の外の 2 本目の指で取りやめ、
 //                                          click を捨てる印は時間で切れる、自動スクロールの後に置いたチップが帯の中）。
 //                                          --shots で tabs-look-*.png・tabs-drag-*.png
+//   --pick                                 #325 のポジションから「板から追加」の項目だけ（--flows にも入る）: 360×780・390×844・
+//                                          900×1100 で足 1 本 → [＋ 板から追加] → 板・帯 1 個 → put の bid → ポジション・足 2 本・
+//                                          入った足が data-selected・トースト [元に戻す] → 戻る 1 回で離れる、帯 → 戻る / Esc でポジション・
+//                                          足はそのまま、帯 → ドックの [指標] で帯 0 個、足 0 本の空の欄の [板から追加]、帯の上の K の
+//                                          吹き出し（Esc 1 回目は吹き出しだけ・開いたまま bid で戻り履歴のずれ無し）。1440×900 は
+//                                          市場の列が板・帯 0 個（AI の列からでも）。--shots で pick-*.png。既定の実行は「帯を出した板」
 //   --url <base>                           dev サーバーを起こさず、その URL を使う（例 http://127.0.0.1:5173/?parts）
 //   --dom <file>                           body の下の要素の tag.class の並びを書き出す（DOM の変化の比較用）
 //   --shots <dir>                          スクリーンショットを書く（合成の板だけ。リポジトリに入れない）
@@ -259,6 +265,7 @@ const known = new Set([
   '--fonts',
   '--manual',
   '--tabs',
+  '--pick',
 ]);
 for (const a of args) {
   if (a.startsWith('--') && !known.has(a)) {
@@ -286,6 +293,7 @@ const backOnly = flag('--back');
 const manualOnly = flag('--manual');
 const fontsOnly = flag('--fonts');
 const tabsOnly = flag('--tabs');
+const pickOnly = flag('--pick');
 const mode = parts ? 'parts' : 'next';
 
 // ---- 足 2 本の作業（版 2）: workspace-v2.json のタブ A だけ（fixture は変えない）
@@ -1488,6 +1496,11 @@ async function measureAll() {
     await boardKPopAll();
     console.log(
       `板の K のポップオーバーの検査（#264）: ${kpopStats.pass} / ${kpopStats.total} 状態で pass`,
+    );
+    // 板から追加の帯と見出しの [＋ 板から追加]（#325）
+    await pickBandAll();
+    console.log(
+      `板から追加の帯の検査（#325）: ${pickBandStats.pass} / ${pickBandStats.total} 状態で pass`,
     );
     // 市場の追加の状態（1200 / 1280 / 1800・322 行の板・字幅 2 通り。#85）
     await marketSweep();
@@ -3743,6 +3756,420 @@ async function futSweep() {
   }
 }
 
+// ---- #325 ポジションから「板から追加」（--pick と --flows。既定の実行は pickBandAll）
+// スマホ・タブレット = 板のパネルと帯、bid / ask で 1 本入ったらポジションへ戻る。やめるのは戻る / Esc。PC は市場の列を板に
+
+/** 帯の文字（ui/view/positionsRegion.ts の PICK_BAND_TEXT） */
+const PICK_BAND_TEXT = 'bid / ask を押すとポジションに戻ります';
+const PICK_BTN = 'section.positions .panel-head .pick-btn';
+/** 足 1 本の作業（twoLegs のタブ A の 1 本目だけ）。足 0 本は noLegs */
+const oneLeg = withLegs(tabA.position.legs.slice(0, 1));
+
+/** 画面の状態（パネル・シート・市場・左の列）と帯（文字の入った .pick-band の数）・足の行の数 */
+const pickState = (page) =>
+  page.evaluate(() => {
+    const l = document.querySelector('.layout');
+    const bands = [...document.querySelectorAll('.pick-band')];
+    return {
+      panel: l?.getAttribute('data-panel') ?? null,
+      sheet: l?.getAttribute('data-sheet') ?? null,
+      market: l?.getAttribute('data-market') ?? null,
+      left: l?.getAttribute('data-left') ?? null,
+      band: bands.filter((b) => (b.textContent ?? '') !== '' && b.getClientRects().length > 0)
+        .length,
+      bandText: bands.map((b) => b.textContent ?? '').join(''),
+      legs: document.querySelectorAll('section.positions li.leg').length,
+      selectedLast:
+        document
+          .querySelector('section.positions li.leg:last-child')
+          ?.hasAttribute('data-selected') ?? false,
+      toasts: [...document.querySelectorAll('.toast:not(.note)')].map((t) => ({
+        text: t.querySelector('.txt')?.textContent ?? '',
+        undo: [...t.querySelectorAll('button')].some((b) => b.textContent === '元に戻す'),
+      })),
+    };
+  });
+
+/**
+ * 要素の文字が 1 行で切れない（scrollWidth ≤ clientWidth・文字の行の上端が 1 つ）。無い / 見えなければ ok = false
+ */
+const oneLine = (page, sel) =>
+  page.evaluate((s) => {
+    const el = document.querySelector(s);
+    if (!el || el.getClientRects().length === 0) return { ok: false, why: '無い / 見えない' };
+    // 文字の行（アイコンの svg は数えない）: 文字のノードごとの行の上端
+    const tops = new Set();
+    const walk = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+    for (let n = walk.nextNode(); n !== null; n = walk.nextNode()) {
+      if ((n.textContent ?? '').trim() === '') continue;
+      const range = document.createRange();
+      range.selectNodeContents(n);
+      for (const r of range.getClientRects()) tops.add(Math.round(r.top));
+    }
+    const fit = el.scrollWidth <= el.clientWidth;
+    return {
+      ok: fit && tops.size === 1,
+      why: `scrollWidth ${el.scrollWidth} / clientWidth ${el.clientWidth}・行 ${tops.size}`,
+    };
+  }, sel);
+
+/** 表示中の put の bid（ATM の行。無ければ見えている最初の put の bid）を押し、押した行の K を返す */
+async function pickPutBid(page, phoneOrTablet) {
+  if (phoneOrTablet) {
+    const seg = page.locator('section.board [aria-label="対象の種別"] button:has-text("put")');
+    if ((await seg.getAttribute('aria-pressed').catch(() => null)) !== 'true')
+      await seg.click().catch(() => {});
+  }
+  const sel = await page.evaluate((wrapSel) => {
+    const wrap = document.querySelector(wrapSel);
+    if (!wrap) return null;
+    const rows = [...wrap.querySelectorAll('tbody tr')];
+    const atm = rows.find((r) => r.classList.contains('atm'));
+    for (const tr of atm ? [atm, ...rows] : rows) {
+      const b = tr.querySelector('button.bid[aria-label*=" put bid "]:not(.noquote)');
+      if (!b) continue;
+      const k = tr.getAttribute('data-k');
+      return `${wrapSel} tr[data-k="${k}"] button.bid[aria-label*=" put bid "]`;
+    }
+    return null;
+  }, ACTIVE_WRAP);
+  if (!sel) return false;
+  await page
+    .locator(sel)
+    .scrollIntoViewIfNeeded()
+    .catch(() => {});
+  await page.click(sel);
+  await page.waitForTimeout(200);
+  return true;
+}
+
+/** 新しい文脈で about:blank → アプリ（戻る 1 回で about:blank に戻る）。ws = 作業の保存 */
+async function pickOpen(vp, ws) {
+  const ctx = await newContext(vp, { [WORKSPACE_KEY]: ws, [PREFS_KEY]: prefsText('dark') });
+  const page = await ctx.newPage();
+  const errors = [];
+  page.on('pageerror', (e) => errors.push(e.message));
+  await backFresh(page);
+  return { ctx, page, errors };
+}
+
+/** スマホ・タブレットの板から追加（Issue #325 の AC。vp = 360×780・390×844・900×1100） */
+async function pickFlows(vp) {
+  const tag = `#325 ${vp.width}x${vp.height}`;
+  const shot = async (page, name) => {
+    if (shotsDir)
+      await page.screenshot({ path: join(shotsDir, `pick-${vp.width}x${vp.height}-${name}.png`) });
+  };
+
+  // (1) 足 1 本 → [＋ 板から追加] → 板・帯 1 個 → put の bid → ポジション・足 2 本・入った足が選ばれ・トースト [元に戻す]
+  {
+    const { ctx, page, errors } = await pickOpen(vp, oneLeg);
+    const s0 = await pickState(page);
+    const btn = await oneLine(page, PICK_BTN);
+    check(
+      `${tag} ポジションの見出しの [＋ 板から追加] が 1 行で切れない`,
+      btn.ok && s0.panel === 'positions',
+      `${btn.why}・パネル ${s0.panel}`,
+    );
+    await shot(page, '0-positions');
+    await page.click(PICK_BTN);
+    await page.waitForTimeout(200);
+    const s1 = await pickState(page);
+    const d1 = await backWait(page, 1);
+    const band = await oneLine(page, '.pick-band');
+    check(
+      `${tag} [＋ 板から追加] → パネルが板・帯 1 個「${PICK_BAND_TEXT}」（1 行で切れない）・履歴に 1 段`,
+      s1.panel === 'board' &&
+        s1.sheet !== 'hidden' &&
+        s1.band === 1 &&
+        s1.bandText === PICK_BAND_TEXT &&
+        band.ok &&
+        d1.ok,
+      `パネル ${s1.panel}/${s1.sheet}・帯 ${s1.band}・${band.why}・back ${d1.now}`,
+    );
+    await shot(page, '1-band');
+    const pressed = await pickPutBid(page, true);
+    const s2 = await pickState(page);
+    const d2 = await backWait(page, 0);
+    const toast = s2.toasts.find((t) => / を追加$/.test(t.text));
+    check(
+      `${tag} put の bid → パネルがポジション・足 2 本・入った足の行が data-selected・トースト「… を追加」[元に戻す]・帯 0 個`,
+      pressed &&
+        s2.panel === 'positions' &&
+        s2.legs === 2 &&
+        s2.selectedLast &&
+        toast?.undo === true &&
+        s2.band === 0 &&
+        d2.ok,
+      `押した ${pressed}・パネル ${s2.panel}・足 ${s2.legs}・選択 ${s2.selectedLast}・トースト ${s2.toasts.map((t) => t.text).join(' / ')}・帯 ${s2.band}・back ${d2.now}`,
+    );
+    await shot(page, '2-back-to-positions');
+    check(
+      `${tag} 足が入った後の戻る 1 回でアプリを離れる（履歴のずれ無し）`,
+      await backLeaves(page),
+    );
+    check(`${tag} (1) ページのエラーなし`, errors.length === 0, errors.join(' / '));
+    await ctx.close();
+  }
+
+  // (2) もう一度 [＋ 板から追加] → 戻る 1 回でポジション・足は 1 本のまま・帯 0 個 → 次の戻る 1 回でページを離れる
+  {
+    const { ctx, page, errors } = await pickOpen(vp, oneLeg);
+    await page.click(PICK_BTN);
+    await backWait(page, 1);
+    await backGo(page);
+    const s = await pickState(page);
+    const d = await backWait(page, 0);
+    check(
+      `${tag} 帯を出して戻る 1 回 → パネルがポジション・足 1 本のまま・帯 0 個・アプリに留まる`,
+      s.panel === 'positions' &&
+        s.legs === 1 &&
+        s.band === 0 &&
+        d.ok &&
+        page.url() !== 'about:blank',
+      `パネル ${s.panel}・足 ${s.legs}・帯 ${s.band}・back ${d.now}`,
+    );
+    check(`${tag} 次の戻る 1 回でアプリを離れる`, await backLeaves(page));
+    check(`${tag} (2) ページのエラーなし`, errors.length === 0, errors.join(' / '));
+    await ctx.close();
+  }
+
+  // (3) Esc → ポジション・帯 0 個・段が戻る（後の戻る 1 回で離れる）
+  {
+    const { ctx, page, errors } = await pickOpen(vp, oneLeg);
+    await page.click(PICK_BTN);
+    await backWait(page, 1);
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(150);
+    const s = await pickState(page);
+    const d = await backWait(page, 0);
+    check(
+      `${tag} 帯を出して Esc → パネルがポジション・足 1 本のまま・帯 0 個・back 0`,
+      s.panel === 'positions' && s.legs === 1 && s.band === 0 && d.ok,
+      `パネル ${s.panel}・足 ${s.legs}・帯 ${s.band}・back ${d.now}`,
+    );
+    check(`${tag} Esc の後の戻る 1 回でアプリを離れる`, await backLeaves(page));
+    check(`${tag} (3) ページのエラーなし`, errors.length === 0, errors.join(' / '));
+    await ctx.close();
+  }
+
+  // (4) 帯を出してドックの [指標] → 帯 0 個・パネルは指標・段が戻る
+  {
+    const { ctx, page, errors } = await pickOpen(vp, oneLeg);
+    await page.click(PICK_BTN);
+    await backWait(page, 1);
+    await page.click('.dock button[data-panel="metrics"]');
+    await page.waitForTimeout(150);
+    const s = await pickState(page);
+    const d = await backWait(page, 0);
+    check(
+      `${tag} 帯を出してドックの [指標] → 帯 0 個・パネルは指標（ポジションへ戻さない）・back 0`,
+      s.panel === 'metrics' && s.band === 0 && d.ok,
+      `パネル ${s.panel}・帯 ${s.band}・back ${d.now}`,
+    );
+    check(`${tag} ドックで消した後の戻る 1 回でアプリを離れる`, await backLeaves(page));
+    check(`${tag} (4) ページのエラーなし`, errors.length === 0, errors.join(' / '));
+    await ctx.close();
+  }
+
+  // (6) 帯の上に K の吹き出し（#325 レビュー指摘 2）: (a) Esc 1 回目は吹き出しだけ・帯は残る → 2 回目でポジションへ、
+  // (b) 吹き出しを開いたまま put の bid → ポジションへ戻り吹き出し 0 個・back 0 → 戻る 1 回でアプリを離れる
+  {
+    const KBTN = `${ACTIVE_WRAP} tr.atm th.k .kbtn`;
+    const KPOP = 'section.board .popover.kpop';
+    const kpops = () => page.locator(KPOP).count();
+    const { ctx, page, errors } = await pickOpen(vp, oneLeg);
+    await page.click(PICK_BTN);
+    await backWait(page, 1);
+    await page.click(KBTN);
+    await page.waitForSelector(KPOP, { timeout: 3000 }).catch(() => {});
+    const k1 = await kpops();
+    const d2 = await backWait(page, 2);
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(150);
+    const sa = await pickState(page);
+    const ka = await kpops();
+    const da = await backWait(page, 1);
+    check(
+      `${tag} 帯 + K の吹き出し → Esc 1 回目は吹き出しだけ閉じ、帯 1 個・パネルは板・back 1`,
+      k1 === 1 && d2.ok && ka === 0 && sa.band === 1 && sa.panel === 'board' && da.ok,
+      `吹き出し ${k1} → ${ka}・back ${d2.now} → ${da.now}・帯 ${sa.band}・パネル ${sa.panel}`,
+    );
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(150);
+    const sb = await pickState(page);
+    const db = await backWait(page, 0);
+    check(
+      `${tag} 続く Esc 2 回目で帯を消してポジションへ・back 0`,
+      sb.band === 0 && sb.panel === 'positions' && db.ok,
+      `帯 ${sb.band}・パネル ${sb.panel}・back ${db.now}`,
+    );
+    // (b)
+    await page.click(PICK_BTN);
+    await backWait(page, 1);
+    await page.click(KBTN);
+    await page.waitForSelector(KPOP, { timeout: 3000 }).catch(() => {});
+    const k2 = await kpops();
+    await backWait(page, 2);
+    const pressed = await pickPutBid(page, true);
+    const sc = await pickState(page);
+    const kc = await kpops();
+    const dc = await backWait(page, 0);
+    check(
+      `${tag} 帯 + K の吹き出しを開いたまま put の bid → ポジション・足 2 本・吹き出し 0 個・帯 0 個・back 0`,
+      k2 === 1 &&
+        pressed &&
+        sc.panel === 'positions' &&
+        sc.legs === 2 &&
+        kc === 0 &&
+        sc.band === 0 &&
+        dc.ok,
+      `吹き出し ${k2} → ${kc}・押した ${pressed}・パネル ${sc.panel}・足 ${sc.legs}・帯 ${sc.band}・back ${dc.now}`,
+    );
+    check(`${tag} その後の戻る 1 回でアプリを離れる（履歴のずれ無し）`, await backLeaves(page));
+    check(`${tag} (6) ページのエラーなし`, errors.length === 0, errors.join(' / '));
+    await ctx.close();
+  }
+
+  // (5) 足 0 本の空の欄の [板から追加] でも同じ
+  {
+    const { ctx, page, errors } = await pickOpen(vp, noLegs);
+    // 足 0 本で開いたときは板（#275）。ポジションを開いて空の欄から
+    await page.click('.dock button[data-panel="positions"]');
+    await page.waitForTimeout(150);
+    const empty = page.locator('section.positions .empty-state button', { hasText: '板から追加' });
+    const can = (await empty.count()) === 1 && (await empty.isEnabled());
+    await shot(page, '3-empty');
+    await empty.click().catch(() => {});
+    await page.waitForTimeout(200);
+    const s1 = await pickState(page);
+    const pressed = await pickPutBid(page, true);
+    const s2 = await pickState(page);
+    const d = await backWait(page, 0);
+    check(
+      `${tag} 足 0 本の空の欄の [板から追加] → 板・帯 1 個 → put の bid → ポジション・足 1 本・選ばれ・帯 0 個`,
+      can &&
+        s1.panel === 'board' &&
+        s1.band === 1 &&
+        pressed &&
+        s2.panel === 'positions' &&
+        s2.legs === 1 &&
+        s2.selectedLast &&
+        s2.band === 0 &&
+        d.ok,
+      `ボタン ${can}・${s1.panel}/帯 ${s1.band} → ${s2.panel}/足 ${s2.legs}/選択 ${s2.selectedLast}/帯 ${s2.band}・back ${d.now}`,
+    );
+    check(`${tag} (5) ページのエラーなし`, errors.length === 0, errors.join(' / '));
+    await ctx.close();
+  }
+}
+
+/** PC（1440×900）: 市場の列を板にするだけ（帯なし・履歴に積まない）。AI の列からでも板 */
+async function pickPcFlow() {
+  const vp = { width: 1440, height: 900 };
+  const tag = `#325 ${vp.width}x${vp.height}`;
+  const { ctx, page, errors } = await pickOpen(vp, oneLeg);
+  const btn = await oneLine(page, PICK_BTN);
+  check(`${tag} ポジションの見出しの [＋ 板から追加] が 1 行で切れない`, btn.ok, btn.why);
+  // 市場の列をスマイルにしてから
+  await page.click('section.board .panel-head .seg button:has-text("スマイル")');
+  await page.waitForTimeout(150);
+  const s0 = await pickState(page);
+  await page.click(PICK_BTN);
+  await page.waitForTimeout(200);
+  const s1 = await pickState(page);
+  const d1 = await backWait(page, 0);
+  check(
+    `${tag} 市場がスマイル → [＋ 板から追加] → 市場の列が板・帯 0 個・履歴に積まない`,
+    s0.market === 'smile' && s1.market === 'board' && s1.band === 0 && d1.ok,
+    `${s0.market} → ${s1.market}・帯 ${s1.band}・back ${d1.now}`,
+  );
+  if (shotsDir) await page.screenshot({ path: join(shotsDir, 'pick-1440x900-board.png') });
+  // AI の列を開いた状態から
+  await page.click('.top button[data-ai="top"]');
+  await page.waitForTimeout(150);
+  const s2 = await pickState(page);
+  await page.click(PICK_BTN);
+  await page.waitForTimeout(200);
+  const s3 = await pickState(page);
+  check(
+    `${tag} AI の列を開いた状態 → [＋ 板から追加] → 市場の列が板・帯 0 個`,
+    s2.left === 'ai' && s3.left === 'market' && s3.market === 'board' && s3.band === 0,
+    `左 ${s2.left} → ${s3.left}・市場 ${s3.market}・帯 ${s3.band}`,
+  );
+  // 板の bid で足を入れてもパネルはそのまま（帯が無いので戻る動きは無い）
+  const legs0 = s3.legs;
+  const pressed = await pickPutBid(page, false);
+  const s4 = await pickState(page);
+  check(
+    `${tag} 板の put の bid → 足 +1・市場の列は板のまま`,
+    pressed && s4.legs === legs0 + 1 && s4.market === 'board' && s4.left === 'market',
+    `押した ${pressed}・足 ${legs0} → ${s4.legs}・市場 ${s4.market}`,
+  );
+  check(`${tag} ページのエラーなし`, errors.length === 0, errors.join(' / '));
+  await ctx.close();
+}
+
+const pickBandStats = { pass: 0, total: 0 };
+
+/**
+ * 既定の実行の「帯を出した板」（#325）: 360×780・390×844 の peek / full、900×1100 × ダーク / ライト で縦・横 0px・
+ * 折り返し、帯とポジションの見出しの [＋ 板から追加] が 1 行で切れない。1440×900 は見出しのボタンだけ
+ */
+async function pickBandAll() {
+  const cases = [
+    [360, 780, 'peek'],
+    [360, 780, 'full'],
+    [390, 844, 'peek'],
+    [390, 844, 'full'],
+    [900, 1100, null],
+    [1440, 900, null],
+  ];
+  for (const [w, h, sheet] of cases) {
+    for (const theme of ['dark', 'light']) {
+      const ctx = await newContext(
+        { width: w, height: h },
+        { [WORKSPACE_KEY]: twoLegs, [PREFS_KEY]: prefsText(theme) },
+      );
+      const page = await ctx.newPage();
+      await page.goto(pageUrl('next'));
+      await waitReady(page, 'next');
+      const lbl = `next ${theme} 帯を出した板${sheet ? ` ${sheet}` : ''}`;
+      const shotName = `next-${w}x${h}-${theme}-pick${sheet ? `-${sheet}` : ''}`;
+      let ok = true;
+      const why = [];
+      if (sheet && !(await setShell(page, 'positions', sheet))) {
+        ok = false;
+        why.push('ポジションの画面の状態を作れない');
+      }
+      const btn = await oneLine(page, PICK_BTN);
+      if (!btn.ok) {
+        ok = false;
+        why.push(`[＋ 板から追加] ${btn.why}`);
+      }
+      if (w < 1200) {
+        await page.click(PICK_BTN);
+        await page.waitForTimeout(200);
+        await settleMotion(page);
+        const s = await pickState(page);
+        const band = await oneLine(page, '.pick-band');
+        if (!(s.panel === 'board' && s.band === 1 && band.ok && (!sheet || s.sheet === sheet))) {
+          ok = false;
+          why.push(`帯 ${s.band}・${band.why}・${s.panel}/${s.sheet}`);
+        }
+      }
+      if (!(await report(page, lbl, w, h, shotName))) ok = false;
+      pickBandStats.total++;
+      if (ok) pickBandStats.pass++;
+      else {
+        failed = true;
+        console.log(`${lbl} ${w}x${h}: ${why.join('・')}  ← NG`);
+      }
+      await ctx.close();
+    }
+  }
+}
+
 // ---- #320 第 1 弾: 戻る（スマホの戻るジェスチャー・ブラウザの戻る）で開いているものを一番上から 1 つ閉じる（--back と --flows）
 // 「アプリを離れる」= about:blank を開いてからアプリへ goto した文脈で、goBack の後の page.url() が about:blank。
 // 段の数は history.state.back（ui/next/backStack.ts が積む）を待って確かめる（固定の待ち時間に頼らない）
@@ -5311,6 +5738,10 @@ async function runFlows() {
   // #322 マニュアルの節を説明カードで読む（--manual だけでも流せる）
   for (const vp of [phone, pc]) await manualFlows(vp);
   await manualLook();
+  // #325 ポジションから「板から追加」（--pick だけでも流せる）
+  for (const vp of [{ width: 360, height: 780 }, phone, { width: 900, height: 1100 }])
+    await pickFlows(vp);
+  await pickPcFlow();
 
   // (a) 開いただけでは作業の保存を書き換えない・ドックのバッジ
   {
@@ -6680,7 +7111,7 @@ async function benchFlows(vp) {
   // 手入力 OP（板に無い限月）→ 足が増えて印「手入力」
   {
     await noToasts();
-    await menu('足を追加…');
+    await menu('手入力で足を追加…');
     const open1 = await page.locator('dialog[open]').count();
     await page.click('dialog[open] button[type="submit"]');
     await page.waitForTimeout(150);
@@ -6689,7 +7120,7 @@ async function benchFlows(vp) {
     const texts = await toastText();
     const last = s1[s1.length - 1]?.leg;
     check(
-      `#84 AC-11(f) ${tag} 足を追加…（先物の既定）→ 足 ${s1.length} 本（${last?.product}）・閉じる・トースト`,
+      `#84 AC-11(f) ${tag} 手入力で足を追加…（先物の既定）→ 足 ${s1.length} 本（${last?.product}）・閉じる・トースト`,
       open1 === 1 &&
         s1.length === 3 &&
         last?.product === 'fut_mini' &&
@@ -6697,7 +7128,7 @@ async function benchFlows(vp) {
         texts.some((t) => /^ミニ先物 \d{4}-\d{2} 買 ×1 を追加$/.test(t ?? '')),
       texts.join(' / '),
     );
-    await menu('足を追加…');
+    await menu('手入力で足を追加…');
     await page.fill('dialog[open] input[name="qty"]', '0');
     await page.click('dialog[open] button[type="submit"]');
     await page.waitForTimeout(120);
@@ -6715,7 +7146,7 @@ async function benchFlows(vp) {
       `#84 AC-11(f) ${tag} Esc → 閉じて ⋯ にフォーカス（${focus}）`,
       (await page.locator('dialog[open]').count()) === 0 && focus === 'ポジションの操作',
     );
-    await menu('足を追加…');
+    await menu('手入力で足を追加…');
     await page.click('dialog[open] .seg button:has-text("OP（手入力）")');
     await page.fill('dialog[open] input[name="expiry"]', '2027-06');
     await page.fill('dialog[open] input[name="k"]', '66000');
@@ -16206,6 +16637,15 @@ try {
   } else if (tabsOnly && !parts) {
     if (shotsDir) mkdirSync(shotsDir, { recursive: true });
     await tabsFlows();
+  } else if (pickOnly && !parts) {
+    if (shotsDir) mkdirSync(shotsDir, { recursive: true });
+    for (const vp of [
+      { width: 360, height: 780 },
+      { width: 390, height: 844 },
+      { width: 900, height: 1100 },
+    ])
+      await pickFlows(vp);
+    await pickPcFlow();
   } else if (backOnly && !parts) {
     for (const vp of [
       { width: 390, height: 844 },

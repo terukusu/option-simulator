@@ -12,6 +12,12 @@
  * 何もしない）。go の popstate を待つ間（awaiting）は push を保留する（go が新しく積んだ段から戻るのを防ぐ）。
  */
 
+/**
+ * 板から追加の帯の層（#325。ShellState.pick の間。戻る / Esc で帯を消してポジションへ。板の K のポップオーバー・
+ * 説明カードはこの上に積む）
+ */
+export const BOARD_PICK_LAYER = 'boardPick';
+
 export interface BackLayer {
   readonly id: string;
   /** 履歴に 1 段積む層か（利用者の操作の中で開いた・pushState に失敗していない） */
