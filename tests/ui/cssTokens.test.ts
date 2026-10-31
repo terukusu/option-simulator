@@ -347,6 +347,32 @@ describe('ui/next の CSS のトークン（§7）', () => {
     expect(['var(--ink)', 'var(--ink-2)']).toContain(d.get('color'));
   });
 
+  it('BOX タブの作業中の指示線（#323）: ::after は var(--accent)、--accent / --s1 は両テーマで 3:1 以上（WCAG 1.4.11）。作業中のチップは面・枠を塗らない', () => {
+    const top = stripComments(files['../../ui/next/css/top.css'] ?? '');
+    const line = blocks(top).find((b) => b.selector === '.boxtab[aria-selected="true"]::after');
+    expect(line, '.boxtab[aria-selected="true"]::after').toBeDefined();
+    const d = decls(line?.body ?? '');
+    expect(d.get('background')).toBe('var(--accent)');
+    expect(Number.parseFloat(d.get('height') ?? '0')).toBeGreaterThanOrEqual(2);
+    expect(d.get('bottom')).toBe('0');
+    for (const [theme, t] of [
+      ['dark', darkDecls],
+      ['light', lightDecls],
+    ] as const) {
+      const fg = t.get('--accent') ?? '';
+      const bg = t.get('--s1') ?? '';
+      expect(contrast(fg, bg), `${theme} --accent(${fg}) / --s1(${bg})`).toBeGreaterThanOrEqual(3);
+    }
+    const sel = blocks(top).filter((b) => b.selector === '.boxtab[aria-selected="true"]');
+    expect(sel.length).toBeGreaterThan(0);
+    for (const b of sel) {
+      const v = decls(b.body);
+      for (const k of ['background', 'background-color', 'border', 'border-color']) {
+        expect(v.get(k), `.boxtab[aria-selected="true"] の ${k}`).toBeUndefined();
+      }
+    }
+  });
+
   it('(e) @font-face は "sim-greek" / "sim-greek-mono" の local() だけで、ギリシャ文字（U+0370-03FF）に絞る（#324）', () => {
     expect(fontFaces.length, '@font-face の数').toBeGreaterThan(0);
     for (const f of fontFaces) {

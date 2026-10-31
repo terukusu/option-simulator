@@ -8,6 +8,8 @@ import {
   revealScrollLeft,
   shareItemState,
   shareResultView,
+  TAB_FIRST_TEXT,
+  TAB_LAST_TEXT,
   tabMenuModel,
 } from '../../ui/view/boxTabs';
 import {
@@ -40,7 +42,7 @@ describe('tabMenuModel', () => {
     expect(rows.find((r) => r.key === 'copy')?.disabled).toBeUndefined();
   });
 
-  it('タブ 2 個: 閉じるは区切りの後', () => {
+  it('タブ 2 個: 左へ移動・右へ移動・閉じるはそれぞれ区切りの後', () => {
     const rows = tabMenuModel(view(2), okShare);
     expect(rows.map((r) => r.label)).toEqual([
       '名前を変える…',
@@ -48,9 +50,13 @@ describe('tabMenuModel', () => {
       '保有にする',
       '保存一覧に保存…',
       'URL をコピー',
+      '左へ移動',
+      '右へ移動',
       '閉じる',
     ]);
     expect(rows[5]?.sep).toBe(true);
+    expect(rows[6]?.sep).toBeUndefined();
+    expect(rows[7]?.sep).toBe(true);
   });
 
   it(`タブ ${MAX_TABS} 個: 複製を押せない（理由は title）`, () => {
@@ -61,6 +67,53 @@ describe('tabMenuModel', () => {
   it('URL をコピーの状態をそのまま映す', () => {
     const share = tabMenuModel(view(2), { disabled: true, title: '足が無い' })[4];
     expect(share).toMatchObject({ key: 'share', disabled: true, title: '足が無い' });
+  });
+});
+
+describe('tabMenuModel の 左へ移動 / 右へ移動（#323 AC4）', () => {
+  /** n 個のうち active 番目（1 始まりの id）が作業中 */
+  const at = (n: number, active: number) => {
+    const tabs: TabSlot[] = Array.from({ length: n }, (_, i) => ({
+      id: i + 1,
+      name: String.fromCharCode(65 + i),
+      saved: i + 1 === active ? null : (pos as unknown as TabSlot['saved']),
+    }));
+    return tabMenuModel(tabsModel(tabs, active, 0), okShare);
+  };
+  const keys = (rows: ReturnType<typeof at>) => rows.map((r) => r.key);
+
+  it('タブ 3 個の真ん中: URL をコピーと閉じるの間に 2 行（左へ移動に区切り、閉じるに区切り）、どちらも押せる', () => {
+    const rows = at(3, 2);
+    expect(keys(rows).slice(-4)).toEqual(['share', 'left', 'right', 'close']);
+    expect(rows.find((r) => r.key === 'left')).toEqual({
+      key: 'left',
+      label: '左へ移動',
+      sep: true,
+    });
+    expect(rows.find((r) => r.key === 'right')).toEqual({ key: 'right', label: '右へ移動' });
+    expect(rows.find((r) => r.key === 'close')?.sep).toBe(true);
+  });
+
+  it('先頭では左へ移動、最後では右へ移動を押せない（理由は title）', () => {
+    const first = at(3, 1);
+    expect(first.find((r) => r.key === 'left')).toMatchObject({
+      disabled: true,
+      title: TAB_FIRST_TEXT,
+    });
+    expect(first.find((r) => r.key === 'right')?.disabled).toBeUndefined();
+    const last = at(3, 3);
+    expect(last.find((r) => r.key === 'right')).toMatchObject({
+      disabled: true,
+      title: TAB_LAST_TEXT,
+    });
+    expect(last.find((r) => r.key === 'left')?.disabled).toBeUndefined();
+    expect(TAB_FIRST_TEXT).toBe('先頭のタブ');
+    expect(TAB_LAST_TEXT).toBe('最後のタブ');
+  });
+
+  it('タブ 1 個では 2 行とも無い', () => {
+    expect(keys(at(1, 1))).not.toContain('left');
+    expect(keys(at(1, 1))).not.toContain('right');
   });
 });
 

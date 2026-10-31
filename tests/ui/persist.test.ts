@@ -326,6 +326,29 @@ describe('書き出しと往復', () => {
     expect(persistKey(reduce(s, { type: 'setFee', fee: 0 }))).not.toBe(k0);
   });
 
+  it('並べ替え（#323 moveTab）: 名前の並びと作業中の添字がそのまま往復し、版は 2 のまま。persistKey が変わる', () => {
+    const s = run(
+      worked(),
+      { type: 'addTab', mode: 'empty' },
+      { type: 'addTab', mode: 'copy' },
+      { type: 'switchTab', id: 2 },
+    );
+    expect(s.tabs.map((t) => t.name)).toEqual(['A', 'B', 'C']);
+    const m = reduce(s, { type: 'moveTab', id: 2, to: 0 });
+    expect(m.tabs.map((t) => t.name)).toEqual(['B', 'A', 'C']);
+    expect(persistKey(m)).not.toBe(persistKey(s));
+    const text = serializeWorkspace(m, NOW);
+    expect(savedVersion(text)).toBe(2);
+    expect(WORKSPACE_SCHEMA_VERSION).toBe(2);
+    const { saved } = okWs(readWorkspace(text));
+    expect(saved.tabs.map((t) => t.name)).toEqual(['B', 'A', 'C']);
+    expect(saved.active).toBe(0);
+    const r = restoreWorkspace(initialState, saved);
+    expect(r.tabs.map((t) => t.name)).toEqual(['B', 'A', 'C']);
+    expect(r.tabs[0]?.id).toBe(r.activeTab);
+    expect(persistKey(r)).toBe(persistKey(m));
+  });
+
   it('板が無いときは板の時刻を null で書く', () => {
     expect(toSaved(initialState, NOW).position.board_snapshot_at).toBeNull();
   });

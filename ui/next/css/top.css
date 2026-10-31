@@ -30,25 +30,33 @@
   overscroll-behavior: contain;
 }
 
-/* ===== BOX タブ（#87 (B)）: 帯 + ＋ + 作業中のタブのメニュー（帯の外 = この要素に対する絶対配置） ===== */
+/* ===== BOX タブ（#87 (B)）: 帯 + ＋ + 作業中のタブのメニュー（帯の外 = この要素に対する絶対配置） =====
+ * 形は M3 の primary tabs（#323）: 帯はトップバーの高さいっぱいで下の区切り線（.top の border-bottom）に接し、作業中の
+ * チップは下端の --accent の 3px の指示線 + 文字の濃さ・太さ（面と枠は塗らない）。＋ は今の高さのまま縦の中央 */
 .boxtabs-wrap {
   position: relative;
   display: flex;
   flex: 0 1 auto;
+  align-self: stretch;
   align-items: center;
   gap: 2px;
   min-width: 0;
+}
+
+.boxtabs-wrap > .menu-wrap {
+  align-self: center;
 }
 
 .boxtabs {
   position: relative;
   display: flex;
   flex: 0 1 auto;
-  align-items: center;
+  align-self: stretch;
+  align-items: stretch;
   gap: var(--sp-1);
   min-width: var(--tab-min);
-  /* フォーカスの輪が帯の端で切れないだけの余白 */
-  padding: 3px;
+  /* 左右だけ（フォーカスの輪はチップの内側 = outline-offset が負なので上下は要らない） */
+  padding: 0 3px;
   overflow-x: auto;
   overflow-y: hidden;
   overscroll-behavior-x: contain;
@@ -61,17 +69,27 @@
 }
 
 .boxtab {
+  position: relative;
   display: inline-flex;
   flex: 0 0 auto;
   align-items: center;
   gap: 6px;
-  height: 30px;
+  height: auto;
   padding: 0 10px;
-  border: 1px solid transparent;
-  border-radius: var(--r-sm);
+  border: 0;
+  border-radius: 0;
   background: transparent;
   color: var(--ink-2);
   white-space: nowrap;
+  /* 長押しでつかむ（#323）: 文字の選択・長押しのメニュー（iOS の callout）を出さない */
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+
+/* フォーカスの輪はチップの内側（帯の overflow で上下が切れない） */
+.boxtab:focus-visible {
+  outline-offset: -2px;
 }
 
 .boxtab:hover {
@@ -79,9 +97,61 @@
 }
 
 .boxtab[aria-selected="true"] {
-  border-color: var(--line-2);
-  background: var(--s3);
   color: var(--ink);
+  font-weight: 600;
+}
+
+/* 作業中の指示線（#323。--accent / --s1 は両テーマで 3:1 以上 = WCAG 1.4.11。tests/ui/cssTokens.test.ts） */
+.boxtab[aria-selected="true"]::after {
+  content: "";
+  position: absolute;
+  right: 4px;
+  bottom: 0;
+  left: 4px;
+  height: 3px;
+  border-radius: 3px 3px 0 0;
+  background: var(--accent);
+}
+
+/* ドラッグの並べ替え（#323）: つかんでいる間は帯の data-dragging、つかんだチップは data-grabbed。入れ替わって見える
+   並びは DOM を動かさずに data-pos（プレビューの位置）と CSS の order で出す（style を使わない = CSP。MAX_TABS 個ぶん。
+   数は tests/ui/tabDrag.test.ts が MAX_TABS と照らす） */
+.boxtabs[data-dragging] {
+  cursor: grabbing;
+}
+
+.boxtabs[data-dragging] > .boxtab {
+  cursor: grabbing;
+}
+
+.boxtab[data-grabbed] {
+  background: var(--s3);
+  outline: 1px dashed var(--line-2);
+  outline-offset: -1px;
+}
+
+.boxtabs[data-dragging] > .boxtab[data-pos="0"] {
+  order: 0;
+}
+
+.boxtabs[data-dragging] > .boxtab[data-pos="1"] {
+  order: 1;
+}
+
+.boxtabs[data-dragging] > .boxtab[data-pos="2"] {
+  order: 2;
+}
+
+.boxtabs[data-dragging] > .boxtab[data-pos="3"] {
+  order: 3;
+}
+
+.boxtabs[data-dragging] > .boxtab[data-pos="4"] {
+  order: 4;
+}
+
+.boxtabs[data-dragging] > .boxtab[data-pos="5"] {
+  order: 5;
 }
 
 .boxtab .nm {
@@ -379,7 +449,7 @@
   }
 
   .boxtabs {
-    padding: 3px 2px;
+    padding: 0 2px;
   }
 
   .boxtab {

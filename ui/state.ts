@@ -336,6 +336,12 @@ export type Action =
   /** タブの名前を変える（正規化して空・他のタブと同じ名前なら何もしない） */
   | { type: 'renameTab'; id: number; name: string }
   /**
+   * タブの並びを変える（#323。メニューの左へ / 右へ移動・Ctrl / ⌘ + Shift + ← →・ドラッグ）。並びだけを変え、id・名前・
+   * saved・held・activeTab・nextTabId・pins は変えない。to は 0..n−1 に収める。今の位置・無い id・非有限の to は
+   * state をそのまま返す（参照も同じ）
+   */
+  | { type: 'moveTab'; id: number; to: number }
+  /**
    * 閉じたタブを戻す（#87 (B) のトーストの [元に戻す]。docs/ui-redesign.md §4.5・§10.1）。restoreTabAction が閉じる前の
    * state から作る。上限・名前が空・同じ名前のタブがあれば何もしない。active なら作業中にして横軸の表示範囲を viewport に戻す
    */
@@ -533,6 +539,19 @@ function renameTab(state: State, id: number, raw: string): State {
 }
 
 const renameActive = (state: State, raw: string): State => renameTab(state, state.activeTab, raw);
+
+/** タブを to の位置へ動かす（#323。to は 0..n−1 に収める。今の位置・無い id・非有限の to は state のまま）。 */
+function moveTab(state: State, id: number, rawTo: number): State {
+  const i = state.tabs.findIndex((t) => t.id === id);
+  if (i < 0 || !Number.isFinite(rawTo)) return state;
+  const to = Math.min(Math.max(rawTo, 0), state.tabs.length - 1);
+  if (to === i) return state;
+  const tabs = state.tabs.slice();
+  const [slot] = tabs.splice(i, 1);
+  if (!slot) return state;
+  tabs.splice(to, 0, slot);
+  return { ...state, tabs };
+}
 
 /** 閉じたタブを戻す action（#87 (B)）。index は閉じる前の並びの位置、viewport は閉じる前の横軸の表示範囲 */
 export interface RestoreTabAction {
@@ -865,6 +884,8 @@ export function reduce(state: State, action: Action): State {
     }
     case 'renameTab':
       return renameTab(state, action.id, action.name);
+    case 'moveTab':
+      return moveTab(state, action.id, action.to);
     case 'restoreTab':
       return restoreTab(state, action);
     case 'addPin': {

@@ -1653,3 +1653,78 @@ describe('保有の印（#301）', () => {
     }
   });
 });
+
+describe('moveTab（#323）', () => {
+  const chain = normalizeChain(fixture('latest'));
+  const m0 = chain.months[0];
+  if (!m0) throw new Error('限月が無い');
+  const ks = m0.rows.map((r) => r.k);
+  const mid = Math.floor(ks.length / 2);
+  const k = (i: number) => ks[mid + i] ?? 0;
+  const board = (i: number, optionType: OptionType, side: 'buy' | 'sell'): Action => ({
+    type: 'addBoardLeg',
+    expiry: m0.id,
+    k: k(i),
+    optionType,
+    side,
+  });
+
+  /** タブ A（足 2 本。退避）・B（作業中）・C（足 1 本・保有） */
+  function abc(): State {
+    const s = run(
+      loaded(chain),
+      board(-2, 'put', 'sell'),
+      board(2, 'call', 'sell'),
+      { type: 'addTab', mode: 'empty' },
+      { type: 'addTab', mode: 'empty' },
+      board(0, 'put', 'buy'),
+      { type: 'setTabHeld', held: true },
+    );
+    const b = s.tabs[1]?.id ?? 0;
+    return reduce(s, { type: 'switchTab', id: b });
+  }
+  const names = (s: State) => s.tabs.map((t) => t.name);
+  const byId = (s: State) =>
+    new Map(s.tabs.map((t) => [t.id, { saved: t.saved, held: t.held, name: t.name }]));
+
+  it('B を先頭へ: 並びだけが変わり、作業中・退避した足・保有の印・nextTabId・ピンは変わらない', () => {
+    const s = abc();
+    expect(names(s)).toEqual(['A', 'B', 'C']);
+    const a = s.tabs[0];
+    const b = s.tabs[1];
+    const c = s.tabs[2];
+    if (!a || !b || !c) throw new Error('タブが 3 個ない');
+    expect(s.activeTab).toBe(b.id);
+    expect(a.saved?.legs).toHaveLength(2);
+    expect(c.held).toBe(true);
+    const m = reduce(s, { type: 'moveTab', id: b.id, to: 0 });
+    expect(names(m)).toEqual(['B', 'A', 'C']);
+    expect(m.activeTab).toBe(b.id);
+    expect(byId(m)).toEqual(byId(s));
+    expect(m.nextTabId).toBe(s.nextTabId);
+    expect(m.pins).toBe(s.pins);
+    expect(m.legs).toBe(s.legs);
+    // 作業中でないタブも動かせる
+    expect(names(reduce(s, { type: 'moveTab', id: a.id, to: 2 }))).toEqual(['B', 'C', 'A']);
+    expect(names(reduce(s, { type: 'moveTab', id: c.id, to: 0 }))).toEqual(['C', 'A', 'B']);
+  });
+
+  it('今の位置・無い id・非有限の to は state をそのまま返す', () => {
+    const s = abc();
+    const b = s.tabs[1]?.id ?? 0;
+    expect(reduce(s, { type: 'moveTab', id: b, to: 1 })).toBe(s);
+    expect(reduce(s, { type: 'moveTab', id: 999, to: 0 })).toBe(s);
+    expect(reduce(s, { type: 'moveTab', id: b, to: Number.NaN })).toBe(s);
+    expect(reduce(s, { type: 'moveTab', id: b, to: Number.POSITIVE_INFINITY })).toBe(s);
+  });
+
+  it('範囲外の to は 0..n−1 に収める（-1 → 0、99 → 2）', () => {
+    const s = abc();
+    const b = s.tabs[1]?.id ?? 0;
+    expect(names(reduce(s, { type: 'moveTab', id: b, to: -1 }))).toEqual(['B', 'A', 'C']);
+    expect(names(reduce(s, { type: 'moveTab', id: b, to: 99 }))).toEqual(['A', 'C', 'B']);
+    // 1 個のときは何もしない
+    const one = loaded(chain);
+    expect(reduce(one, { type: 'moveTab', id: one.activeTab, to: 3 })).toBe(one);
+  });
+});

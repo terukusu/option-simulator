@@ -180,6 +180,16 @@
 //                                          CDP の CSS.getPlatformFontsForNode で読み、tokens.css の "sim-greek" / "sim-greek-mono" の
 //                                          local() の名前（太字は PostScript 名に Bold）なら pass。和文（建玉）のフォントと画面の
 //                                          ギリシャ文字の要素の 1 つは記録だけ
+//   --tabs                                 #323 の作業中のタブの見た目と並べ替えの項目だけ（--flows にも入る）: 360×780・390×844・
+//                                          900×1100・1440×900 × ダーク / ライトのタブ 3 個で、作業中のチップの下端が区切り線に接し
+//                                          ::after の指示線（≥ 2px・--accent）・他のチップと ＋ に線なし・面を塗らない・太字（AC8）、
+//                                          390×844・1440×900 でメニューの左へ移動 / 右へ移動（先頭で押せない・再読み込み・1 個で無い。
+//                                          AC9）と Ctrl + Shift + → ←（端で回らない・修飾なしの ← は切り替え・390 のタブ 6 個で帯の中。
+//                                          AC10）、1440×900 のマウスのドラッグ（6px でつかむ・3px は切り替え・Esc で取りやめ。AC11）、
+//                                          390×844 のタッチ（CDP。長押しでつかむ・払いは帯の横スクロール・タップは切り替え。AC12）、
+//                                          レビューの F1〜F4（blur・隠れた・capture を失ったら取りやめ、帯の外の 2 本目の指で取りやめ、
+//                                          click を捨てる印は時間で切れる、自動スクロールの後に置いたチップが帯の中）。
+//                                          --shots で tabs-look-*.png・tabs-drag-*.png
 //   --url <base>                           dev サーバーを起こさず、その URL を使う（例 http://127.0.0.1:5173/?parts）
 //   --dom <file>                           body の下の要素の tag.class の並びを書き出す（DOM の変化の比較用）
 //   --shots <dir>                          スクリーンショットを書く（合成の板だけ。リポジトリに入れない）
@@ -248,6 +258,7 @@ const known = new Set([
   '--back',
   '--fonts',
   '--manual',
+  '--tabs',
 ]);
 for (const a of args) {
   if (a.startsWith('--') && !known.has(a)) {
@@ -274,6 +285,7 @@ const quotesOnly = flag('--quotes-only');
 const backOnly = flag('--back');
 const manualOnly = flag('--manual');
 const fontsOnly = flag('--fonts');
+const tabsOnly = flag('--tabs');
 const mode = parts ? 'parts' : 'next';
 
 // ---- 足 2 本の作業（版 2）: workspace-v2.json のタブ A だけ（fixture は変えない）
@@ -5630,6 +5642,8 @@ async function runFlows() {
   for (const vp of [phone, pc]) await topFlows(vp);
   // #87 (B) BOX タブの手順（AC-12・AC-15(e)）と URL 共有の手順（AC-13）
   for (const vp of [phone, pc]) await tabFlows(vp);
+  // #323 作業中のタブの見た目と並べ替え（--tabs だけでも流せる）
+  await tabsFlows();
   await shareFlows(pc);
   // #87 (C) 設定と保存一覧の手順（AC-14）とタッチの端末のエミュレーション（AC-19。Chromium の根拠）
   for (const vp of [phone, pc]) await bookSettingsFlows(vp);
@@ -9055,6 +9069,614 @@ async function tabFlows(vp) {
     );
     await ctx6.close();
   }
+}
+
+// ---- #323 作業中のタブの見た目と並べ替え（--tabs。--flows にも入る）
+/** タブ A・B・C（作業中 B。A・B は足 2 本、C は 0 本）。名前は架空 */
+const abcWorkspace = JSON.stringify({
+  ...fixture,
+  active: 1,
+  tabs: fixture.tabs.slice(0, 3).map((t, i) => ({ ...t, name: ['A', 'B', 'C'][i] })),
+});
+const STRIP_MENU = '.boxtabs-wrap > [role="menu"]';
+const tabNames = (ws) => ws?.tabs?.map((t) => t.name).join(',') ?? '—';
+const activeName = (ws) => ws?.tabs?.[ws.active]?.name ?? '—';
+/** 帯のチップの中心（client 座標）と名前 */
+const chipCenters = (page) =>
+  page.evaluate(() =>
+    [...document.querySelectorAll('.boxtabs [role="tab"]')].map((c) => {
+      const b = c.getBoundingClientRect();
+      return {
+        x: b.left + b.width / 2,
+        y: b.top + b.height / 2,
+        name: c.querySelector('.nm')?.textContent ?? '',
+      };
+    }),
+  );
+/** フォーカスのあるチップ（作業中か・名前） */
+const focusedChip = (page) =>
+  page.evaluate(() => {
+    const a = document.activeElement;
+    return a?.getAttribute('role') === 'tab'
+      ? {
+          selected: a.getAttribute('aria-selected') === 'true',
+          name: a.querySelector('.nm')?.textContent ?? '',
+        }
+      : null;
+  });
+
+/** AC8: 作業中のチップの指示線・区切り線に接する・面を塗らない・太字（タブ 3 個） */
+async function tabLook(vp, theme) {
+  const tag = `${vp.width}x${vp.height} ${theme}`;
+  const ctx = await newContext(
+    vp,
+    { [WORKSPACE_KEY]: abcWorkspace, [PREFS_KEY]: prefsText(theme) },
+    theme,
+  );
+  const page = await ctx.newPage();
+  await page.goto(pageUrl('next'));
+  await waitReady(page, 'next');
+  await page.mouse.move(vp.width - 2, vp.height - 2);
+  const r = await page.evaluate((sel) => {
+    const top = document.querySelector('header.top');
+    const chip = document.querySelector(sel);
+    if (!top || !chip) return null;
+    const ts = getComputedStyle(top);
+    const lineTop = top.getBoundingClientRect().bottom - Number.parseFloat(ts.borderBottomWidth);
+    const cb = chip.getBoundingClientRect();
+    const af = getComputedStyle(chip, '::after');
+    const hex = getComputedStyle(document.documentElement).getPropertyValue('--accent').trim();
+    const m = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(hex);
+    const accent = m
+      ? `rgb(${Number.parseInt(m[1], 16)}, ${Number.parseInt(m[2], 16)}, ${Number.parseInt(m[3], 16)})`
+      : hex;
+    const noLine = (el) => {
+      const a = getComputedStyle(el, '::after');
+      return a.content === 'none' || a.content === 'normal' || Number.parseFloat(a.height) === 0;
+    };
+    const others = [...document.querySelectorAll('.boxtabs [role="tab"]')].filter(
+      (c) => c !== chip,
+    );
+    const add = document.querySelector('.boxtabs-add');
+    const bg = getComputedStyle(chip).backgroundColor;
+    return {
+      gap: cb.bottom - lineTop,
+      h: Number.parseFloat(af.height),
+      afBottom: Number.parseFloat(af.bottom),
+      afColor: af.backgroundColor,
+      accent,
+      others: others.length,
+      othersNoLine: others.every(noLine),
+      addNoLine: !!add && noLine(add),
+      bg,
+      topBg: ts.backgroundColor,
+      weight: Number(getComputedStyle(chip).fontWeight),
+    };
+  }, CHIP);
+  if (shotsDir) {
+    const clip = await page.evaluate(() => {
+      const b = document.querySelector('header.top')?.getBoundingClientRect();
+      return b ? { x: 0, y: 0, width: Math.ceil(b.right), height: Math.ceil(b.bottom) + 40 } : null;
+    });
+    if (clip)
+      await page.screenshot({
+        path: join(shotsDir, `tabs-look-${vp.width}x${vp.height}-${theme}.png`),
+        clip,
+      });
+  }
+  check(
+    `#323 AC8 ${tag} 作業中のチップの下端が区切り線に接し（±0.5px）、::after の指示線（≥ 2px・--accent・下端）、他のチップと ＋ に線なし、面を塗らない、太字`,
+    !!r &&
+      Math.abs(r.gap) <= 0.5 &&
+      r.h >= 2 &&
+      Math.abs(r.afBottom) <= 0.5 &&
+      r.afColor === r.accent &&
+      r.others === 2 &&
+      r.othersNoLine &&
+      r.addNoLine &&
+      (r.bg === 'rgba(0, 0, 0, 0)' || r.bg === r.topBg) &&
+      r.weight >= 600,
+    r
+      ? `差 ${r.gap.toFixed(2)}px・線 ${r.h}px ${r.afColor}（--accent ${r.accent}）・下 ${r.afBottom}・他 ${r.othersNoLine}・＋ ${r.addNoLine}・面 ${r.bg}・太さ ${r.weight}`
+      : 'チップが無い',
+  );
+  await ctx.close();
+}
+
+/** AC9: メニューの左へ移動 / 右へ移動 */
+async function tabMoveMenuFlow(vp) {
+  const tag = `${vp.width}x${vp.height}`;
+  const ctx = await newContext(vp, { [WORKSPACE_KEY]: abcWorkspace });
+  const page = await ctx.newPage();
+  await page.goto(pageUrl('next'));
+  await waitReady(page, 'next');
+  await page.click(CHIP);
+  await page.click(menuItem('左へ移動'));
+  const w1 = await savedWorkspace(page);
+  const menus = await page.locator(STRIP_MENU).count();
+  const f1 = await focusedChip(page);
+  await page.click(CHIP);
+  const left = page.locator(menuItem('左へ移動'));
+  const dis = {
+    aria: await left.getAttribute('aria-disabled'),
+    title: await left.getAttribute('title'),
+  };
+  const right = await page.locator(menuItem('右へ移動')).getAttribute('aria-disabled');
+  await page.keyboard.press('Escape');
+  // メニューを閉じた戻る（#320 の history.back）が終わってから再読み込みする（重なると再読み込みが始まらない）
+  await page.waitForSelector(STRIP_MENU, { state: 'detached', timeout: 3000 });
+  await page.waitForTimeout(300);
+  await page.reload();
+  await waitReady(page, 'next');
+  const w2 = await savedWorkspace(page);
+  const dom = (await chipCenters(page)).map((c) => c.name).join(',');
+  const domActive = await page.textContent(`${CHIP} .nm`);
+  check(
+    `#323 AC9 ${tag} メニュー > 左へ移動で B,A,C・active 0・メニューが閉じフォーカスは B、先頭では左へ移動が押せない（先頭のタブ）、再読み込みでも同じ`,
+    tabNames(w1) === 'B,A,C' &&
+      w1.active === 0 &&
+      menus === 0 &&
+      f1?.selected === true &&
+      f1.name === 'B' &&
+      dis.aria === 'true' &&
+      dis.title === '先頭のタブ' &&
+      right === null &&
+      tabNames(w2) === 'B,A,C' &&
+      activeName(w2) === 'B' &&
+      dom === 'B,A,C' &&
+      domActive === 'B',
+    `${tabNames(w1)} active ${w1?.active}・メニュー ${menus}・フォーカス ${JSON.stringify(f1)}・左 ${JSON.stringify(dis)}・右 ${right}・再読み込み ${tabNames(w2)} ${activeName(w2)}・帯 ${dom} ${domActive}`,
+  );
+  await ctx.close();
+
+  // タブ 1 個: 行が無い
+  const one = await newContext(vp, { [WORKSPACE_KEY]: twoLegs });
+  const p1 = await one.newPage();
+  await p1.goto(pageUrl('next'));
+  await waitReady(p1, 'next');
+  await p1.click(CHIP);
+  const rows = await p1.evaluate(() =>
+    [...document.querySelectorAll('.boxtabs-wrap > [role="menu"] [role="menuitem"]')].map(
+      (b) => b.textContent ?? '',
+    ),
+  );
+  check(
+    `#323 AC9 ${tag} タブ 1 個のメニューに左へ移動・右へ移動が無い`,
+    rows.length > 0 && !rows.some((t) => t.includes('左へ移動') || t.includes('右へ移動')),
+    rows.join(' / '),
+  );
+  await one.close();
+}
+
+/** AC10: Ctrl + Shift + ← → */
+async function tabMoveKeyFlow(vp) {
+  const tag = `${vp.width}x${vp.height}`;
+  const ctx = await newContext(vp, { [WORKSPACE_KEY]: abcWorkspace });
+  const page = await ctx.newPage();
+  await page.goto(pageUrl('next'));
+  await waitReady(page, 'next');
+  await page.focus(CHIP);
+  await page.keyboard.press('Control+Shift+ArrowRight');
+  await page.keyboard.press('Control+Shift+ArrowRight');
+  const w1 = await savedWorkspace(page);
+  const f1 = await focusedChip(page);
+  await page.keyboard.press('Control+Shift+ArrowRight');
+  const w2 = await savedWorkspace(page);
+  await page.keyboard.press('ArrowLeft');
+  const w3 = await savedWorkspace(page);
+  check(
+    `#323 AC10 ${tag} Ctrl + Shift + → で最後へ（A,C,B・active 2・フォーカスは B）、端でもう 1 回押しても同じ、修飾なしの ← で隣（C）に切り替わる`,
+    tabNames(w1) === 'A,C,B' &&
+      w1.active === 2 &&
+      f1?.selected === true &&
+      f1.name === 'B' &&
+      tabNames(w2) === 'A,C,B' &&
+      w2.active === 2 &&
+      tabNames(w3) === 'A,C,B' &&
+      activeName(w3) === 'C',
+    `${tabNames(w1)} ${w1?.active}・${JSON.stringify(f1)}・${tabNames(w2)} ${w2?.active}・← ${tabNames(w3)} ${activeName(w3)}`,
+  );
+  await ctx.close();
+
+  if (vp.width !== 390) return;
+  const busy = await newContext(vp, { [WORKSPACE_KEY]: busyWorkspace });
+  const p2 = await busy.newPage();
+  await p2.goto(pageUrl('next'));
+  await waitReady(p2, 'next');
+  await p2.focus(CHIP);
+  for (let i = 0; i < 5; i++) await p2.keyboard.press('Control+Shift+ArrowRight');
+  const wb = await savedWorkspace(p2);
+  const inStrip = await p2.evaluate((sel) => {
+    const c = document.querySelector(sel)?.getBoundingClientRect();
+    const st = document.querySelector('.boxtabs')?.getBoundingClientRect();
+    return !!c && !!st && c.left >= st.left - 0.5 && c.right <= st.right + 0.5;
+  }, CHIP);
+  check(
+    `#323 AC10 ${tag} タブ 6 個（12 字）で先頭から Ctrl + Shift + → 5 回 → 最後・作業中のチップが帯の矩形の中`,
+    wb?.active === 5 && activeName(wb) === BUSY_NAMES[0] && inStrip,
+    `active ${wb?.active} ${activeName(wb)}・帯の中 ${inStrip}`,
+  );
+  await busy.close();
+}
+
+/** AC11: マウスのドラッグ（1440） */
+async function tabDragMouseFlow(vp) {
+  const tag = `${vp.width}x${vp.height}`;
+  const ctx = await newContext(vp, { [WORKSPACE_KEY]: abcWorkspace });
+  const page = await ctx.newPage();
+  await page.goto(pageUrl('next'));
+  await waitReady(page, 'next');
+  const c0 = await chipCenters(page);
+  const a = c0[0];
+  const last = c0[c0.length - 1];
+  await page.mouse.move(a.x, a.y);
+  await page.mouse.down();
+  await page.mouse.move(last.x + 10, last.y, { steps: 10 });
+  const mid = await page.evaluate(() => ({
+    dragging: document.querySelector('.boxtabs')?.hasAttribute('data-dragging') ?? false,
+    grabbed: document.querySelector('.boxtab[data-grabbed] .nm')?.textContent ?? null,
+    // 見た目の並び（CSS の order）
+    order: [...document.querySelectorAll('.boxtabs [role="tab"]')]
+      .map((c) => ({ x: c.getBoundingClientRect().left, n: c.querySelector('.nm')?.textContent }))
+      .sort((p, q) => p.x - q.x)
+      .map((p) => p.n)
+      .join(','),
+  }));
+  if (shotsDir)
+    await page.screenshot({
+      path: join(shotsDir, `tabs-drag-${vp.width}x${vp.height}.png`),
+      clip: { x: 0, y: 0, width: 700, height: 90 },
+    });
+  await page.mouse.up();
+  const w1 = await savedWorkspace(page);
+  const menus = await page.locator(STRIP_MENU).count();
+  const after = await page.evaluate(() =>
+    document.querySelector('.boxtabs')?.hasAttribute('data-dragging'),
+  );
+  check(
+    `#323 AC11 ${tag} マウスで A を最後のチップの中心の先まで動かして離す → B,C,A・作業中は B のまま・メニュー 0（動かしている間は C の後ろに A が見える）`,
+    tabNames(w1) === 'B,C,A' &&
+      activeName(w1) === 'B' &&
+      menus === 0 &&
+      mid.dragging &&
+      mid.grabbed === 'A' &&
+      mid.order === 'B,C,A' &&
+      after === false,
+    `${tabNames(w1)} ${activeName(w1)}・メニュー ${menus}・途中 ${JSON.stringify(mid)}・後 ${after}`,
+  );
+
+  // 3px で離す → 切り替え（今のまま）
+  const c1 = await chipCenters(page);
+  const c = c1.find((x) => x.name === 'C');
+  await page.mouse.move(c.x, c.y);
+  await page.mouse.down();
+  await page.mouse.move(c.x + 3, c.y, { steps: 3 });
+  await page.mouse.up();
+  const w2 = await savedWorkspace(page);
+  check(
+    `#323 AC11 ${tag} 3px 動かして離す → そのタブ（C）に切り替わる・並びは同じ`,
+    tabNames(w2) === 'B,C,A' && activeName(w2) === 'C',
+    `${tabNames(w2)} ${activeName(w2)}`,
+  );
+
+  // 掴んだまま Esc → 離しても並びは元のまま
+  const c2 = await chipCenters(page);
+  const aa = c2.find((x) => x.name === 'A');
+  const first = c2[0];
+  await page.mouse.move(aa.x, aa.y);
+  await page.mouse.down();
+  await page.mouse.move(first.x - 10, first.y, { steps: 10 });
+  const grabbing = await page.evaluate(
+    () => document.querySelector('.boxtabs')?.hasAttribute('data-dragging') ?? false,
+  );
+  await page.keyboard.press('Escape');
+  const cancelled = await page.evaluate(
+    () => !document.querySelector('.boxtabs')?.hasAttribute('data-dragging'),
+  );
+  await page.mouse.up();
+  const w3 = await savedWorkspace(page);
+  const menus3 = await page.locator(STRIP_MENU).count();
+  check(
+    `#323 AC11 ${tag} 掴んだまま Esc → 取りやめ、離しても並び・作業中は元のまま`,
+    grabbing && cancelled && tabNames(w3) === 'B,C,A' && activeName(w3) === 'C' && menus3 === 0,
+    `掴んだ ${grabbing}・取りやめ ${cancelled}・${tabNames(w3)} ${activeName(w3)}・メニュー ${menus3}`,
+  );
+  await ctx.close();
+}
+
+/** AC12: タッチ（390・hasTouch。CDP の Input.dispatchTouchEvent） */
+async function tabDragTouchFlow() {
+  const tag = '390x844 touch';
+  {
+    const ctx = await touchContext({ [WORKSPACE_KEY]: abcWorkspace });
+    const page = await ctx.newPage();
+    await page.goto(pageUrl('next'));
+    await waitReady(page, 'next');
+    const cdp = await ctx.newCDPSession(page);
+    const touch = (type, touchPoints) =>
+      cdp.send('Input.dispatchTouchEvent', { type, touchPoints });
+    const c0 = await chipCenters(page);
+    const a = c0[0];
+    const b = c0[1];
+    const y = Math.round(a.y);
+    await touch('touchStart', [{ x: Math.round(a.x), y }]);
+    await page.waitForTimeout(500);
+    const grabbed = await page.evaluate(
+      () => document.querySelector('.boxtab[data-grabbed] .nm')?.textContent ?? null,
+    );
+    const goal = Math.round(b.x + 8);
+    for (let x = Math.round(a.x) + 8; ; x += 8) {
+      const xx = Math.min(x, goal);
+      await touch('touchMove', [{ x: xx, y }]);
+      await page.waitForTimeout(16);
+      if (xx >= goal) break;
+    }
+    await touch('touchEnd', []);
+    await page.waitForTimeout(300);
+    const w1 = await savedWorkspace(page);
+    const r = await page.evaluate(() => ({
+      menus: document.querySelectorAll('.boxtabs-wrap > [role="menu"]').length,
+      sel: window.getSelection()?.toString() ?? '',
+      sx: window.scrollX,
+      sy: window.scrollY,
+    }));
+    check(
+      `#323 AC12 ${tag} 500ms 押してから隣のチップの中心の先まで動かして離す → B,A,C・作業中は B・メニュー 0・選択なし`,
+      grabbed === 'A' &&
+        tabNames(w1) === 'B,A,C' &&
+        activeName(w1) === 'B' &&
+        r.menus === 0 &&
+        r.sel === '' &&
+        r.sx === 0 &&
+        r.sy === 0,
+      `掴んだ ${grabbed}・${tabNames(w1)} ${activeName(w1)}・${JSON.stringify(r)}`,
+    );
+    // 短いタップ → 切り替え（今のまま）
+    const cs = await chipCenters(page);
+    const cc = cs.find((x) => x.name === 'C');
+    await touch('touchStart', [{ x: Math.round(cc.x), y: Math.round(cc.y) }]);
+    await page.waitForTimeout(50);
+    await touch('touchEnd', []);
+    const w2 = await savedWorkspace(page);
+    check(
+      `#323 AC12 ${tag} 短いタップ → そのタブ（C）に切り替わる・並びは同じ`,
+      tabNames(w2) === 'B,A,C' && activeName(w2) === 'C',
+      `${tabNames(w2)} ${activeName(w2)}`,
+    );
+    // レビュー F2: 長押しでつかんだまま、帯の外（損益グラフ）を 2 本目の指で押す → 取りやめ。1 本目を動かして離しても同じ並び
+    await page.waitForTimeout(400);
+    const c3 = await chipCenters(page);
+    const bb = c3.find((x) => x.name === 'B');
+    const ee = c3[c3.length - 1];
+    const y3 = Math.round(bb.y);
+    const p1 = { x: Math.round(bb.x), y: y3, id: 0 };
+    await touch('touchStart', [p1]);
+    await page.waitForTimeout(500);
+    const held = await page.evaluate(
+      () => document.querySelector('.boxtab[data-grabbed] .nm')?.textContent ?? null,
+    );
+    const p2 = { x: 195, y: 500, id: 1 };
+    await touch('touchStart', [p1, p2]);
+    await page.waitForTimeout(50);
+    const gone = await page.evaluate(
+      () => !document.querySelector('.boxtabs')?.hasAttribute('data-dragging'),
+    );
+    for (let x = p1.x + 8; x <= Math.round(ee.x) + 8; x += 8) {
+      await touch('touchMove', [{ ...p1, x }, p2]);
+      await page.waitForTimeout(16);
+    }
+    await touch('touchEnd', [p2]);
+    await touch('touchEnd', []);
+    await page.waitForTimeout(300);
+    const w3 = await savedWorkspace(page);
+    check(
+      `#323 F2 ${tag} B を長押しでつかんだまま帯の外を 2 本目の指で押す → 取りやめ、1 本目を最後の先まで動かして離しても B,A,C`,
+      held === 'B' && gone && tabNames(w3) === 'B,A,C',
+      `つかんだ ${held}・取りやめ ${gone}・${tabNames(w3)} ${activeName(w3)}`,
+    );
+    await ctx.close();
+  }
+  {
+    const ctx = await touchContext({ [WORKSPACE_KEY]: busyWorkspace });
+    const page = await ctx.newPage();
+    await page.goto(pageUrl('next'));
+    await waitReady(page, 'next');
+    const cdp = await ctx.newCDPSession(page);
+    const touch = (type, touchPoints) =>
+      cdp.send('Input.dispatchTouchEvent', { type, touchPoints });
+    const before = await page.evaluate(() => {
+      const s = document.querySelector('.boxtabs');
+      const b = s?.getBoundingClientRect();
+      return b ? { x: b.left + b.width / 2, y: b.top + b.height / 2, sl: s.scrollLeft } : null;
+    });
+    const w0 = await savedWorkspace(page);
+    const sx = Math.round(before?.x ?? 100);
+    const sy = Math.round(before?.y ?? 20);
+    await touch('touchStart', [{ x: sx, y: sy }]);
+    for (let i = 1; i <= 5; i++) await touch('touchMove', [{ x: sx - i * 12, y: sy }]);
+    await touch('touchEnd', []);
+    await page.waitForTimeout(300);
+    const w1 = await savedWorkspace(page);
+    const sl = await page.evaluate(() => document.querySelector('.boxtabs')?.scrollLeft ?? 0);
+    check(
+      `#323 AC12 ${tag} タブ 6 個で長押しせずに横へ 60px 払う → 並びは同じ・帯の scrollLeft が変わる`,
+      !!before && tabNames(w1) === tabNames(w0) && w1?.active === w0?.active && sl !== before.sl,
+      `scrollLeft ${before?.sl} → ${sl}・${tabNames(w1) === tabNames(w0) ? '並び同じ' : '並びが変わった'}`,
+    );
+    await ctx.close();
+  }
+}
+
+/**
+ * #323 レビュー F1・F3: マウスでつかんだまま、離すが届かない出来事（ウィンドウの blur・ページが隠れた・pointer capture を
+ * 失った）で取りやめ、並びは元のまま。取りやめの後に click が来なくても、後の click（ポインタの押下なし）を捨てない
+ */
+async function tabDragAbortFlow(vp) {
+  const tag = `${vp.width}x${vp.height}`;
+  const ctx = await newContext(vp, { [WORKSPACE_KEY]: abcWorkspace });
+  const page = await ctx.newPage();
+  await page.goto(pageUrl('next'));
+  await waitReady(page, 'next');
+  await page.evaluate(() => {
+    window.addEventListener(
+      'pointerdown',
+      (e) => {
+        window.__tabPid = e.pointerId;
+      },
+      true,
+    );
+  });
+  const dragging = () =>
+    page.evaluate(() => document.querySelector('.boxtabs')?.hasAttribute('data-dragging') ?? false);
+  const cases = [
+    ['blur', () => page.evaluate(() => window.dispatchEvent(new Event('blur')))],
+    [
+      'visibilitychange（hidden）',
+      () =>
+        page.evaluate(() => {
+          Object.defineProperty(document, 'visibilityState', {
+            configurable: true,
+            get: () => 'hidden',
+          });
+          document.dispatchEvent(new Event('visibilitychange'));
+          delete document.visibilityState;
+        }),
+    ],
+    [
+      'lostpointercapture',
+      async () => {
+        await page.evaluate(() =>
+          document.querySelector('.boxtabs')?.releasePointerCapture(window.__tabPid),
+        );
+        // capture の解放は次の pointer の出来事の前に届く
+        const c = await chipCenters(page);
+        await page.mouse.move(c[c.length - 1].x + 14, c[0].y);
+      },
+    ],
+  ];
+  for (const [name, abort] of cases) {
+    const c0 = await chipCenters(page);
+    const a = c0.find((x) => x.name === 'A');
+    const last = c0[c0.length - 1];
+    await page.mouse.move(a.x, a.y);
+    await page.mouse.down();
+    await page.mouse.move(last.x + 10, last.y, { steps: 10 });
+    const grabbed = await dragging();
+    await abort();
+    const gone = !(await dragging());
+    // 帯の外で離す（click は帯を通らない = click を捨てる印が残る）
+    await page.mouse.move(vp.width - 4, vp.height - 4, { steps: 2 });
+    await page.mouse.up();
+    const w = await savedWorkspace(page);
+    check(
+      `#323 F1 ${tag} マウスでつかんだまま ${name} → 取りやめ（プレビューが消える）、離しても A,B,C・作業中は B`,
+      grabbed && gone && tabNames(w) === 'A,B,C' && activeName(w) === 'B' && !(await dragging()),
+      `つかんだ ${grabbed}・消えた ${gone}・${tabNames(w)} ${activeName(w)}`,
+    );
+    if (name === 'blur') {
+      // F3: 印は時間で切れる。押下なしの click（キーの Enter / Space と同じ）で作業中のタブのメニューが開く
+      await page.waitForTimeout(600);
+      await page.evaluate((sel) => document.querySelector(sel)?.click(), CHIP);
+      const menus = await page.locator(STRIP_MENU).count();
+      check(
+        `#323 F3 ${tag} 取りやめの後に click が来ないまま 600ms 経ってからの作業中のチップの click（押下なし）→ メニューが開く`,
+        menus === 1,
+        `メニュー ${menus}`,
+      );
+      await page.keyboard.press('Escape');
+      await page.waitForSelector(STRIP_MENU, { state: 'detached', timeout: 3000 });
+      await page.waitForTimeout(300);
+    }
+  }
+  await ctx.close();
+}
+
+/**
+ * #323 レビュー F4: 390 のタブ 6 個で、作業中でないチップを右端まで運んで（自動スクロール）離す → 動かしたチップが最後・
+ * 帯の矩形の中に見える（作業中のチップへ戻らない）。作業中のタブは変わらない
+ */
+async function tabDragRevealFlow() {
+  const vp = { width: 390, height: 844 };
+  const tag = `${vp.width}x${vp.height}`;
+  const ctx = await newContext(vp, { [WORKSPACE_KEY]: busyWorkspace });
+  const page = await ctx.newPage();
+  await page.goto(pageUrl('next'));
+  await waitReady(page, 'next');
+  const g = await page.evaluate(() => {
+    const s = document.querySelector('.boxtabs');
+    const c = document.querySelectorAll('.boxtabs [role="tab"]')[1];
+    if (!s || !c) return null;
+    const sb = s.getBoundingClientRect();
+    const cb = c.getBoundingClientRect();
+    return {
+      // 見えている部分を押す（端の帯の外 = 内側）
+      x: Math.min(cb.left + cb.width / 2, sb.right - 60),
+      y: cb.top + cb.height / 2,
+      right: sb.right,
+      max: s.scrollWidth - s.clientWidth,
+    };
+  });
+  const name = BUSY_NAMES[1];
+  if (!g || g.max <= 0) {
+    check(`#323 F4 ${tag} 帯が横にスクロールする`, false, JSON.stringify(g));
+    await ctx.close();
+    return;
+  }
+  await page.mouse.move(g.x, g.y);
+  await page.mouse.down();
+  await page.mouse.move(g.x - 10, g.y, { steps: 3 });
+  await page.mouse.move(g.right - 2, g.y, { steps: 10 });
+  // 自動スクロールで帯の右端まで流れるのを待つ
+  await page
+    .waitForFunction(
+      (max) => (document.querySelector('.boxtabs')?.scrollLeft ?? 0) >= max - 1,
+      g.max,
+      { timeout: 5000 },
+    )
+    .catch(() => {});
+  const sl = await page.evaluate(() => document.querySelector('.boxtabs')?.scrollLeft ?? 0);
+  await page.mouse.up();
+  await page.waitForTimeout(100);
+  const w = await savedWorkspace(page);
+  const r = await page.evaluate((n) => {
+    const s = document.querySelector('.boxtabs')?.getBoundingClientRect();
+    const c = [...document.querySelectorAll('.boxtabs [role="tab"]')].find(
+      (x) => x.querySelector('.nm')?.textContent === n,
+    );
+    const b = c?.getBoundingClientRect();
+    return {
+      inStrip: !!s && !!b && b.left >= s.left - 0.5 && b.right <= s.right + 0.5,
+      sl: document.querySelector('.boxtabs')?.scrollLeft ?? 0,
+    };
+  }, name);
+  const names = w?.tabs?.map((t) => t.name) ?? [];
+  check(
+    `#323 F4 ${tag} タブ 6 個で 2 番目のチップを右端まで運んで（自動スクロール）離す → 最後に置かれ、帯の矩形の中に見える・作業中は 1 番目のまま`,
+    names[names.length - 1] === name && activeName(w) === BUSY_NAMES[0] && r.inStrip,
+    `流れた scrollLeft ${sl}/${g.max}・離した後 ${r.sl}・最後 ${names[names.length - 1] === name}・作業中 ${activeName(w) === BUSY_NAMES[0]}・帯の中 ${r.inStrip}`,
+  );
+  await ctx.close();
+}
+
+async function tabsFlows() {
+  for (const vp of [
+    { width: 360, height: 780 },
+    { width: 390, height: 844 },
+    { width: 900, height: 1100 },
+    { width: 1440, height: 900 },
+  ])
+    for (const theme of ['dark', 'light']) await tabLook(vp, theme);
+  for (const vp of [
+    { width: 390, height: 844 },
+    { width: 1440, height: 900 },
+  ]) {
+    await tabMoveMenuFlow(vp);
+    await tabMoveKeyFlow(vp);
+  }
+  await tabDragMouseFlow({ width: 1440, height: 900 });
+  await tabDragAbortFlow({ width: 1440, height: 900 });
+  await tabDragRevealFlow();
+  await tabDragTouchFlow();
 }
 
 async function shareFlows(vp) {
@@ -15581,6 +16203,9 @@ try {
     ])
       await manualFlows(vp);
     await manualLook();
+  } else if (tabsOnly && !parts) {
+    if (shotsDir) mkdirSync(shotsDir, { recursive: true });
+    await tabsFlows();
   } else if (backOnly && !parts) {
     for (const vp of [
       { width: 390, height: 844 },

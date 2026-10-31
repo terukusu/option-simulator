@@ -57,15 +57,19 @@ export interface ShareItemState {
   title: string;
 }
 
-export type TabMenuKey = 'rename' | 'copy' | 'held' | 'save' | 'share' | 'close';
+export type TabMenuKey = 'rename' | 'copy' | 'held' | 'save' | 'share' | 'left' | 'right' | 'close';
+
+/** 左へ移動 / 右へ移動を押せない理由（#323。端では回らない） */
+export const TAB_FIRST_TEXT = '先頭のタブ';
+export const TAB_LAST_TEXT = '最後のタブ';
 
 /** 保有にできない理由（#301。足 0 本のタブ） */
 export const HELD_NO_LEGS_TEXT = '足が無い';
 
 /**
  * 作業中のタブのメニュー: 名前を変える… / 複製 / 保有にする・保有を外す（#301。足 0 本では付けられない。外すのは
- * いつでも）/ 保存一覧に保存…（#87 (C)。常に押せる = 保存一覧を開くだけ）/ URL をコピー /（区切り）閉じる
- * （最後の 1 個では出さない）。
+ * いつでも）/ 保存一覧に保存…（#87 (C)。常に押せる = 保存一覧を開くだけ）/ URL をコピー /（区切り）左へ移動 /
+ * 右へ移動（#323。端では押せない = 回らない）/（区切り）閉じる。並べ替えと閉じるは最後の 1 個では出さない。
  */
 export function tabMenuModel(view: TabsView, share: ShareItemState): MenuRow<TabMenuKey>[] {
   const rows: MenuRow<TabMenuKey>[] = [
@@ -81,7 +85,19 @@ export function tabMenuModel(view: TabsView, share: ShareItemState): MenuRow<Tab
     { key: 'save', label: '保存一覧に保存…' },
     { key: 'share', label: 'URL をコピー', disabled: share.disabled, title: share.title },
   ];
-  if (view.canClose) rows.push({ key: 'close', label: '閉じる', sep: true });
+  if (view.canClose) {
+    const i = view.tabs.findIndex((t) => t.active);
+    const last = view.tabs.length - 1;
+    rows.push(
+      i <= 0
+        ? { key: 'left', label: '左へ移動', sep: true, disabled: true, title: TAB_FIRST_TEXT }
+        : { key: 'left', label: '左へ移動', sep: true },
+      i >= last
+        ? { key: 'right', label: '右へ移動', disabled: true, title: TAB_LAST_TEXT }
+        : { key: 'right', label: '右へ移動' },
+      { key: 'close', label: '閉じる', sep: true },
+    );
+  }
   return rows;
 }
 
