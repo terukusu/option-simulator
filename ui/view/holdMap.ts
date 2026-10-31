@@ -1,5 +1,5 @@
 /**
- * 追証マップ（#152。設計 docs/design.md 5.11）の画面側の計算の単位と表示モデル（純関数。Preact・DOM に依存しない）。
+ * 追証マップ（#152・#305。設計 docs/design.md 5.11）の画面側の計算の単位と表示モデル（純関数。Preact・DOM に依存しない）。
  *
  * - 入力（holdMapInput）は 板の基礎（pnlBoard）・今のシナリオの d・Δs・IV の動き方・パラメータ・資金・休業日だけ
  *   （ΔX・Δσ・β・ivShift・パン・拡大では変わらない = 作り直さない。B7）
@@ -49,7 +49,7 @@ export const HOLD_MAP_RETRY = '再試行';
 export const HOLD_MAP_IDLE_READOUT = '点かマスを触ると値を出す（矢印キーでマスを動かす）';
 /** 見出しの下の説明の頭（何の図か・軸） */
 const CAPTION_HEAD =
-  '原資産と IV が同時に動いたときの余力。横 = 原資産の変化（今の X₀ に対する %）、縦 = IV の倍率（足ごとの IV に掛ける）。';
+  '原資産と IV が同時に動いたときの余力。横 = 原資産の変化（今の X₀ に対する %）、縦 = ATM の IV の倍率（限月ごと）。';
 /** 見出しの下の説明の尾 */
 const CAPTION_TAIL = '、十字 = 今。β・Δσ は使わない';
 /**
@@ -427,7 +427,7 @@ export function holdMapNote(moves: readonly AtmMove[], days: number): string {
   const first = moves[0];
   const last = moves[moves.length - 1];
   const span = first && last ? `${first.d0.slice(0, 7)}〜${last.d1.slice(0, 7)} の ` : '';
-  return `点 = ${span}2 営業日（日中の終値）の原資産と ATM IV（30 日）の倍率。重なりあり・足の IV が同じ倍率で動くと見なした近似。マップの日数はシナリオの d（${daysText(days)} 日）`;
+  return `点 = ${span}2 営業日（日中の終値）の原資産と ATM IV（30 日）の倍率。重なりあり・30 日の倍率を各限月の ATM に当て、行使価格ごとの動きは今のスマイルの形で見た近似。マップの日数はシナリオの d（${daysText(days)} 日）`;
 }
 
 export type HoldMapSel = { kind: 'point'; k: number } | { kind: 'cell'; i: number; j: number };
@@ -555,7 +555,7 @@ export function holdMapReadout(
   if (u === undefined || c === undefined) return HOLD_MAP_IDLE_READOUT;
   const v = rooms[sel.i]?.[sel.j] ?? Number.NaN;
   const pnl = pnls[sel.i]?.[sel.j] ?? Number.NaN;
-  return `原資産 ${fmtSigned(u * 100, 0)}% · IV ×${fmtNum(c, 1)} · ${roomPnlText(v, pnl, unit, allowedLoss)}`;
+  return `原資産 ${fmtSigned(u * 100, 0)}% · ATM IV ×${fmtNum(c, 1)} · ${roomPnlText(v, pnl, unit, allowedLoss)}`;
 }
 
 /** 選んだもの（点 / マス）の印の画素（無ければ null） */
@@ -666,7 +666,7 @@ export interface HoldMapCrosshair {
 
 /**
  * 追証マップの十字線（#217。docs/ui-redesign.md §4.1）: 両方の軸が入力の格子なので、縦線・横線は指 / マウスの下のマスの
- * 中心に吸着する。札 = ΔX%（符号つきの整数 %）・IV の倍率（×小数 1 桁）、読み取り = そのマスの余力。描画域の外・空は null
+ * 中心に吸着する。札 = ΔX%（符号つきの整数 %）・ATM の IV の倍率（×小数 1 桁）、読み取り = そのマスの余力。描画域の外・空は null
  */
 export function holdMapCrosshair(
   plot: HoldMapPlot,

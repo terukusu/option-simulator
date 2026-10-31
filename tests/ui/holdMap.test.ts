@@ -202,14 +202,14 @@ describe('B6 表示モデル', () => {
     );
   });
 
-  it('マスを触った 1 行: 原資産 %・IV ×・余力・損益（#180）', () => {
+  it('マスを触った 1 行: 原資産 %・ATM IV ×・余力・損益（#180・#305）', () => {
     const { us, cs } = RESULT.axes;
     const i = us.findIndex((u) => Math.abs(u + 0.1) < 1e-9);
     const j = cs.findIndex((c) => Math.abs(c - 1.6) < 1e-9);
     const room = RESULT.rooms[i]?.[j] as number;
     const s = holdMapReadout({ kind: 'cell', i, j }, RESULT, MOVES, 'yen');
     expect(s).toMatch(
-      /^原資産 −10% · IV ×1\.6 · 余力 [+−]?[\d,]+ 円 · (追証|余力あり) · 損益 [+−]?[\d,]+ 円$/,
+      /^原資産 −10% · ATM IV ×1\.6 · 余力 [+−]?[\d,]+ 円 · (追証|余力あり) · 損益 [+−]?[\d,]+ 円$/,
     );
     expect(s).toContain(room < 0 ? '· 追証 ·' : '· 余力あり ·');
     expect(holdMapReadout(null, RESULT, MOVES, 'yen')).toBe(HOLD_MAP_IDLE_READOUT);
@@ -281,7 +281,7 @@ describe('B6 表示モデル', () => {
     const x = holdMapDxX(RESULT.axes, 600, -0.1);
     expect(x).not.toBeNull();
     expect(holdMapNote(MOVES, 5)).toBe(
-      '点 = 2031-03〜2032-01 の 2 営業日（日中の終値）の原資産と ATM IV（30 日）の倍率。重なりあり・足の IV が同じ倍率で動くと見なした近似。マップの日数はシナリオの d（5 日）',
+      '点 = 2031-03〜2032-01 の 2 営業日（日中の終値）の原資産と ATM IV（30 日）の倍率。重なりあり・30 日の倍率を各限月の ATM に当て、行使価格ごとの動きは今のスマイルの形で見た近似。マップの日数はシナリオの d（5 日）',
     );
   });
 });

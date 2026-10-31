@@ -1,16 +1,22 @@
 /**
- * 追証マップ（原資産の変化 u × IV の倍率 c の各マスの余力。#152）。設計 docs/design.md 5.11。
+ * 追証マップ（原資産の変化 u × ATM の IV の倍率 c の各マスの余力。#152・#305）。設計 docs/design.md 5.11。
  *
- * - マスの状態 S = (x = X₀(1 + u), シナリオ = 今の d・Δs・IV の動き方 + ΔX = uX₀・ivShift = relative・
- *   Δσ = (c − 1) × 100・β = 0)。relative の σ = σ_base(x_eff) × c + Δs の項 なので、足の IV がちょうど c 倍になる
- *   （σ_min の下限は後）。β・Δσ を使わないのは、縦軸が IV の変化そのもので、過去の点（iv30 の実際の倍率）が原資産に
- *   対する IV の反応を含むため（β を重ねると二重に数える）
+ * - 縦軸 c = 各限月の（動いた後の）ATM の IV が今の ATM の IV の c 倍（#305。過去の点の iv30 の倍率と同じ物差し）
+ * - マスの状態 S = (x = X₀(1 + u), シナリオ = 今の d・Δs・IV の動き方 + ΔX = uX₀・ivShift = absolute・Δσ = 0・
+ *   β = 0)。生きている OP の足 p は σ_base を平行に Δ_p だけずらした写しにする（holdMapLegs）:
+ *   Δ_p = c · σ_base,p(0) − σ_base,p(x′)、x′ = ln(F_p′ / F_p)（sticky strike）/ 0（sticky moneyness）。
+ *   動いた後の ATM（K = F_p′）の IV がちょうど c × 今の ATM の IV になり、ほかの行使価格は今のスマイルの形
+ *   （動き方どおり）のまま平行に動く。スマイルが平ら・無い足は今までどおり足の IV × c と同じ。
+ *   β・Δσ を使わないのは、縦軸が IV の変化そのもので、過去の点（iv30 の実際の倍率）が原資産に対する IV の反応を
+ *   含むため（β を重ねると二重に数える）
+ * - Δ_p はマス（状態 S）で 1 回決めて固定する。証拠金の格子（30 点）の中では作り直さない（5.10 の格子と同じ）
  * - マスの値 = 余力（5.10 の marginAt + marginRoom。所要額 = max(0, k × PFE − NOV)）。有限でなければ NaN
  * - 境目の線 = 格子点の余力の marching squares（辺の線形補間、鞍点は 4 隅の平均の符号）。NaN を含む区画は線にしない
  * - 点の判定 = 双線形補間の余力 < 0（線と同じ面で決める）。NaN を含む区画・範囲の外の点は数えない
  * - 計算は列（u を 1 つ固定した c の全行）ごと（holdMapColumn）。呼び出し側が 1 フレームに収まる単位で回す
- * - マスの損益（#180）= 同じシナリオの theoreticalPnl（損益グラフの指定日の損益。手数料込み）。許容損失の境目は
- *   損益 + 許容損失 = 0 の線（holdMapLossRooms を holdMapContour に渡す）。許容損失によらないので作り直さない
+ * - マスの損益（#180）= 同じシナリオ・同じずらした足の theoreticalPnl（損益グラフの指定日の損益。手数料込み）。
+ *   許容損失の境目は損益 + 許容損失 = 0 の線（holdMapLossRooms を holdMapContour に渡す）。許容損失によらないので
+ *   作り直さない
  *
  * 純関数（DOM・通信・時計に依存しない）。h（保有期間の暦日）・休業日・資金は呼び出し側が決めて渡す。
  */
@@ -23,11 +29,11 @@ import {
   type PreparedLeg,
   theoreticalPnl,
 } from './position';
-import type { Scenario } from './scenario';
+import { type IvDynamics, type Scenario, underlyingAt } from './scenario';
 
 /** 横軸の既定: 原資産の変化 u（X₀ に対する比）−30%〜+20%、2% 刻み（26 列） */
 export const HOLD_MAP_U = { min: -0.3, max: 0.2, step: 0.02 } as const;
-/** 縦軸の既定: IV の倍率 c ×0.5〜×2.5、0.1 刻み（21 行） */
+/** 縦軸の既定: ATM の IV の倍率 c ×0.5〜×2.5、0.1 刻み（21 行） */
 export const HOLD_MAP_C = { min: 0.5, max: 2.5, step: 0.1 } as const;
 /** 点で広げるときの限界（u > −1・c > 0。これより外の点は数えない） */
 export const HOLD_MAP_U_LIMIT = { min: -0.9, max: 1 } as const;
@@ -36,7 +42,7 @@ export const HOLD_MAP_C_LIMIT = { min: 0.1, max: 5 } as const;
 export interface HoldMapAxes {
   /** 原資産の変化（比。昇順・等間隔） */
   us: number[];
-  /** IV の倍率（昇順・等間隔） */
+  /** ATM の IV の倍率（昇順・等間隔） */
   cs: number[];
 }
 
@@ -89,9 +95,95 @@ export function holdMapAxes(points: readonly HoldMapPoint[]): HoldMapAxes {
   };
 }
 
-/** マス (u, c) のシナリオ（d・Δs・動き方は base のまま。ΔX = uX₀・relative・Δσ = (c − 1) × 100・β = 0） */
-export function holdMapScenario(base: Scenario, u: number, c: number, x0: number): Scenario {
-  return { ...base, dX: u * x0, ivShift: 'relative', dSigma: (c - 1) * 100, beta: 0 };
+/**
+ * マス (u, ·) のシナリオ（d・Δs・動き方は base のまま。ΔX = uX₀・absolute・Δσ = 0・β = 0）。
+ * IV の倍率 c は足の σ_base のずらし（holdMapLegs）で入れる
+ */
+export function holdMapScenario(base: Scenario, u: number, x0: number): Scenario {
+  return { ...base, dX: u * x0, ivShift: 'absolute', dSigma: 0, beta: 0 };
+}
+
+type LiveOption = PreparedLeg & { option: NonNullable<PreparedLeg['option']> };
+
+/** σ_base をずらす足（OP・F 有限）か */
+const shiftable = (p: PreparedLeg): p is LiveOption =>
+  p.leg.kind === 'option' && p.option !== undefined && Number.isFinite(p.F);
+
+/**
+ * 足 p の σ_base,p(0)（今の ATM）と σ_base,p(x′)（動いた後の ATM = K が F_p′ の足の今の σ_base）。
+ * x′ = ln(F_p′ / F_p)（sticky strike）/ 0（sticky moneyness）。F_p′ ≤ 0（円モードの basis が負の足を X′ ≈ 0 に
+ * 置いたとき。#144）は x′ を作れないので here = atm（Δ_p = (c − 1)·σ_base,p(0)。価格は本源的価値で σ に依らない）
+ */
+function atmPair(
+  p: LiveOption,
+  u: number,
+  ctx: MarketContext,
+  settings: ModelSettings,
+  dynamics: IvDynamics,
+): { atm: number; here: number } {
+  const atm = p.option.sigmaBase(0);
+  if (dynamics === 'sticky_moneyness') return { atm, here: atm };
+  const Fp = underlyingAt(p.F, ctx.x0, ctx.x0 * (1 + u), settings.basisMode);
+  return { atm, here: Fp > 0 ? p.option.sigmaBase(Math.log(Fp / p.F)) : atm };
+}
+
+/** Δ_p = c · atm − here（有限でなければ 0 = ずらさない） */
+function ivAddOf(c: number, pair: { atm: number; here: number }): number {
+  const v = c * pair.atm - pair.here;
+  return Number.isFinite(v) ? v : 0;
+}
+
+/**
+ * マス (u, c) の足 p の IV の上乗せ Δ_p（σ の小数）= c · σ_base,p(0) − σ_base,p(x′)。
+ * x′ = ln(F_p′ / F_p)（sticky strike）/ 0（sticky moneyness）。OP 以外・F が決まらない足は 0。
+ * F_p′ ≤ 0 は (c − 1)·σ_base,p(0)。有限でなければ 0
+ */
+export function holdMapIvAdd(
+  p: PreparedLeg,
+  u: number,
+  c: number,
+  ctx: MarketContext,
+  settings: ModelSettings,
+  dynamics: IvDynamics,
+): number {
+  if (!shiftable(p)) return 0;
+  return ivAddOf(c, atmPair(p, u, ctx, settings, dynamics));
+}
+
+/** 足の σ_base を Δ だけ平行にずらした写し（Δ = 0 なら同じ参照） */
+function shiftLeg(p: LiveOption, add: number): PreparedLeg {
+  if (add === 0) return p;
+  const base = p.option.sigmaBase;
+  return { ...p, option: { ...p.option, sigmaBase: (x) => base(x) + add } };
+}
+
+/**
+ * 列（u を固定）の足の配列を c ごとに作る関数。足ごとの σ_base,p(0)・σ_base,p(x′) は列で 1 回だけ求める。
+ * 生きている OP の足は σ_base を Δ_p だけ平行にずらした写し、ほか（先物・F が決まらない足）は同じ参照
+ */
+function columnLegs(
+  legs: readonly PreparedLeg[],
+  u: number,
+  ctx: MarketContext,
+  settings: ModelSettings,
+  dynamics: IvDynamics,
+): (c: number) => PreparedLeg[] {
+  const pre = legs.map((p) =>
+    shiftable(p) ? { p, pair: atmPair(p, u, ctx, settings, dynamics) } : null,
+  );
+  return (c) => legs.map((p, k) => (pre[k] ? shiftLeg(pre[k].p, ivAddOf(c, pre[k].pair)) : p));
+}
+
+/** マス (u, c) の足の配列（holdMapColumn・holdMapPnlColumn が使う足と同じ。holdMapIvAdd だけずらした写し） */
+export function holdMapLegs(
+  legs: readonly PreparedLeg[],
+  u: number,
+  c: number,
+  ctx: MarketContext,
+  settings: ModelSettings,
+  dynamics: IvDynamics,
+): PreparedLeg[] {
+  return columnLegs(legs, u, ctx, settings, dynamics)(c);
 }
 
 /** 列の計算の入力（列ごとに同じ） */
@@ -114,31 +206,28 @@ export function holdMapColumn(calc: HoldMapCalc, axes: HoldMapAxes, i: number): 
   const { legs, ctx, settings, params, base, horizonDays, capital, premium } = calc;
   const u = axes.us[i] as number;
   const x = ctx.x0 * (1 + u);
+  const scenario = holdMapScenario(base, u, ctx.x0);
+  const legsAt = columnLegs(legs, u, ctx, settings, base.ivDynamics);
   const out = new Float64Array(axes.cs.length);
   for (let j = 0; j < axes.cs.length; j++) {
     const c = axes.cs[j] as number;
-    const scenario = holdMapScenario(base, u, c, ctx.x0);
-    const r = marginAt(legs, { x, scenario, horizonDays }, ctx, settings, params);
+    const r = marginAt(legsAt(c), { x, scenario, horizonDays }, ctx, settings, params);
     const room = marginRoom(capital, premium, r);
     out[j] = Number.isFinite(room) ? room : Number.NaN;
   }
   return out;
 }
 
-/** 列 i（u = axes.us[i]）の各行の損益（円。マスと同じシナリオの theoreticalPnl。有限でなければ NaN。#180） */
+/** 列 i（u = axes.us[i]）の各行の損益（円。マスと同じシナリオ・同じずらした足の theoreticalPnl。有限でなければ NaN。#180） */
 export function holdMapPnlColumn(calc: HoldMapCalc, axes: HoldMapAxes, i: number): Float64Array {
   const { legs, ctx, settings, base } = calc;
   const u = axes.us[i] as number;
   const x = ctx.x0 * (1 + u);
+  const scenario = holdMapScenario(base, u, ctx.x0);
+  const legsAt = columnLegs(legs, u, ctx, settings, base.ivDynamics);
   const out = new Float64Array(axes.cs.length);
   for (let j = 0; j < axes.cs.length; j++) {
-    const v = theoreticalPnl(
-      legs,
-      x,
-      holdMapScenario(base, u, axes.cs[j] as number, ctx.x0),
-      ctx,
-      settings,
-    );
+    const v = theoreticalPnl(legsAt(axes.cs[j] as number), x, scenario, ctx, settings);
     out[j] = Number.isFinite(v) ? v : Number.NaN;
   }
   return out;
