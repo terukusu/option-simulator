@@ -8,6 +8,7 @@
       "!node_modules",
       "!fixtures/local",
       "!fixtures/synthetic",
+      "!fixtures/docs",
       "!data/calendar",
       "!api/.venv",
       "!.optionchan",

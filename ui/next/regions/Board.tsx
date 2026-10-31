@@ -24,6 +24,7 @@ import { MonthSeg } from '../market/MonthSeg';
 import { PanelHead } from '../PanelHead';
 import { Chip, ChipRow } from '../parts/Chip';
 import { Icon } from '../parts/Icon';
+import { ManualLinks } from '../parts/ManualLinks';
 import { Popover } from '../parts/Popover';
 import { Seg } from '../parts/Seg';
 
@@ -307,6 +308,7 @@ function BoardView(p: BoardRegionProps) {
           {BOARD_HINT.map((t) => (
             <p key={t}>{t}</p>
           ))}
+          <ManualLinks place="board" />
         </Popover>
       </PanelHead>
       <div class="panel-body market-body" ref={bodyRef}>

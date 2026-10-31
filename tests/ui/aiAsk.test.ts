@@ -18,6 +18,7 @@ import {
 } from '../../ui/view/aiAsk';
 import { MAX_USER_TEXT } from '../../ui/view/aiChat';
 import { fmtIvPt, ivReadout } from '../../ui/view/ivHistory';
+import { docSections } from '../../ui/view/manual';
 import {
   capitalOf,
   type MarginView,
@@ -92,74 +93,12 @@ const base = baseOf(strangle);
 const mm = metricsModel({ base, scenario: strangle.scenario, unit: 'auto' });
 const view = metricsPanel(mm, strangle.feePerLot, marginOf(strangle));
 
-// ---------------------------------------------------------------- 文書の索引（docs.py の parse と同じ規則）
-
-interface DocSection {
-  id: string;
-  title: string;
-}
-
-const HEADING_RE = /^(#{2,4}) +(.+?) *#* *$/;
-const FENCE_RE = /^ {0,3}(```|~~~)/;
-const NUM_RE = /^([0-9]+(?:\.[0-9]+)*)\.? +(.*)$/;
-const HISTORY_RE = /[（(][^（）()]*(?:#[0-9]+|\b[KDQR][0-9]+\b)[^（）()]*[）)]/g;
-const cleanTitle = (t: string) => t.replace(HISTORY_RE, '').replace(/ {2,}/g, ' ').trim();
-
-/** 見出しの番号か、親の番号 + 兄弟の順。番号の無い章（目次・付録）は節にしない。chapters があればその章だけ */
-function sections(text: string, chapters: readonly string[] | null): DocSection[] {
-  const heads: { level: number; raw: string }[] = [];
-  let fence = false;
-  for (const line of text.split('\n')) {
-    if (FENCE_RE.test(line)) {
-      fence = !fence;
-      continue;
-    }
-    if (fence) continue;
-    const m = HEADING_RE.exec(line);
-    if (m?.[1] && m[2]) heads.push({ level: m[1].length, raw: m[2] });
-  }
-  const out: DocSection[] = [];
-  let stack: { level: number; id: string }[] = [];
-  const count = new Map<string, number>();
-  let chapterOk = false;
-  for (const { level, raw } of heads) {
-    while (stack.length > 0 && (stack.at(-1)?.level ?? 0) >= level) stack.pop();
-    const m = NUM_RE.exec(raw);
-    let id: string;
-    let title: string;
-    if (level === 2) {
-      stack = [];
-      if (!m?.[1] || m[1].includes('.')) {
-        chapterOk = false;
-        continue;
-      }
-      id = m[1];
-      title = m[2] ?? '';
-      chapterOk = chapters === null || chapters.includes(id);
-    } else {
-      const parent = stack.at(-1)?.id;
-      if (!chapterOk || parent === undefined) continue;
-      const n = (count.get(parent) ?? 0) + 1;
-      count.set(parent, n);
-      if (m?.[1]?.startsWith(`${parent}.`)) {
-        id = m[1];
-        title = m[2] ?? '';
-      } else {
-        id = `${parent}.${n}`;
-        title = raw;
-      }
-    }
-    if (!chapterOk) continue;
-    stack.push({ level, id });
-    out.push({ id, title: cleanTitle(title) });
-  }
-  return out;
-}
+// ---------------------------------------------------------------- 文書の索引（docs.py の parse と同じ規則。ui/view/manual.ts の docSections）
 
 const read = (p: string) => fs.readFileSync(new URL(`../../${p}`, import.meta.url), 'utf8');
 const DOCS = {
-  'user-guide': sections(read('docs/user-guide.md'), null),
-  design: sections(read('docs/design.md'), ['3', '5']),
+  'user-guide': docSections(read('docs/user-guide.md'), null),
+  design: docSections(read('docs/design.md'), ['3', '5']),
 } as const;
 
 describe('#136 AC1 [AI に聞く] の説明の節', () => {

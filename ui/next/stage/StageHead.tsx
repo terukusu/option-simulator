@@ -11,6 +11,7 @@ import { KIND_PREFIX } from '../../view/scenarioMarks';
 import { CHART_MODES, type ChartMode } from '../../view/shell';
 import { FullText } from '../parts/FullText';
 import { Icon } from '../parts/Icon';
+import { ManualLinks } from '../parts/ManualLinks';
 import { Menu, type MenuItem } from '../parts/Menu';
 import { Popover } from '../parts/Popover';
 import { Seg } from '../parts/Seg';
@@ -220,6 +221,7 @@ export function StageHead(p: {
             </>
           )}
           <TermLinks ids={HINT_TERMS.stage} />
+          <ManualLinks place="stage" />
         </Popover>
       </div>
     </div>

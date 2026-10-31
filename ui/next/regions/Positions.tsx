@@ -31,6 +31,7 @@ import type { ToastInput } from '../../view/toast';
 import { clearBlockedText, rebaseBlockedText, rebaseLabel } from '../../view/topMenu';
 import { PanelHead } from '../PanelHead';
 import { Icon } from '../parts/Icon';
+import { ManualLinks } from '../parts/ManualLinks';
 import { Menu, type MenuItem } from '../parts/Menu';
 import { Popover } from '../parts/Popover';
 import { Stepper } from '../parts/Stepper';
@@ -180,6 +181,7 @@ export function Positions(p: Props) {
             mid の差 × 枚数 × 乗数（不利な側が +。mid の無い足は —）。
           </p>
           <TermLinks ids={HINT_TERMS.positions} />
+          <ManualLinks place="positions" />
         </Popover>
         <Menu label="ポジションの操作" button={<Icon name="more" />} items={items} />
       </PanelHead>

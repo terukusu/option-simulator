@@ -44,6 +44,7 @@ import type { TechLineWidths } from '../../view/techLineWidth';
 import { PanelHead } from '../PanelHead';
 import { Chip } from '../parts/Chip';
 import { Icon } from '../parts/Icon';
+import { ManualLinks } from '../parts/ManualLinks';
 import { Popover } from '../parts/Popover';
 import { Seg } from '../parts/Seg';
 import { TermLinks } from '../parts/TermLinks';
@@ -231,6 +232,7 @@ function FutHistoryView(p: FutHistoryProps) {
           <p>{FUT_PANE_HINT}</p>
           <p>{FUT_NOTE}</p>
           <TermLinks ids={HINT_TERMS.futHistory} />
+          <ManualLinks place="futHistory" />
         </Popover>
       </PanelHead>
       {/* biome-ignore lint/a11y/useSemanticElements: 1〜5 の行き先のスクロールする枠に名前を付ける（fieldset にしない） */}

@@ -28,6 +28,11 @@ dialog.term-card[open] {
   justify-content: center;
 }
 
+/* モーダルのダイアログの上に showModal() で出したとき（#322）: 下敷きは dialog 自身の --scrim なので ::backdrop は描かない */
+dialog.term-card::backdrop {
+  background: transparent;
+}
+
 .tc-box {
   display: flex;
   flex-direction: column;
@@ -59,6 +64,14 @@ dialog.term-card[open] {
   line-height: 1.4;
   overflow-wrap: anywhere;
   outline: none;
+}
+
+/* マニュアルの節の見出しは 1 行（入らなければ省略記号。全文は本文の先頭の道筋）。#322 */
+.tc-head h2.tc-one {
+  overflow: hidden;
+  overflow-wrap: normal;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .tc-head .btn {
@@ -175,4 +188,181 @@ dialog.term-card[open] {
 
 .kv-term:hover {
   color: var(--ink);
+}
+
+/*
+ * マニュアルの節・目次（#322。説明カードの中。ui/next/parts/ManualBody.tsx）。本文の中の見出しは h3〜h6（カードの見出しが
+ * h2）。表とコードブロックは枠（.tc-table / .tc-code）の中だけ横にスクロールする（画面は 360px でも横にはみ出さない）。
+ * 続きのある側は data-more で端をぼかす（AI の返答の表 #234 と同じ）。
+ */
+.tc-body ol {
+  margin: 0 0 var(--sp-2);
+  padding-left: 1.6em;
+}
+
+.tc-body li > ul,
+.tc-body li > ol {
+  margin: 2px 0 0;
+}
+
+.tc-manual h3,
+.tc-manual h4,
+.tc-manual h5,
+.tc-manual h6 {
+  margin: var(--sp-4) 0 var(--sp-1);
+  color: var(--ink);
+  font-size: var(--fs-sub);
+  font-weight: 600;
+}
+
+.tc-manual h4,
+.tc-manual h5,
+.tc-manual h6 {
+  margin-top: var(--sp-3);
+  color: var(--ink-2);
+}
+
+.tc-manual strong {
+  color: var(--ink);
+}
+
+.tc-manual code {
+  padding: 0 3px;
+  border-radius: var(--r-sm);
+  background: var(--s3);
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+}
+
+.tc-manual hr {
+  margin: var(--sp-3) 0;
+  border: 0;
+  border-top: 1px solid var(--line);
+}
+
+/* 本文の中の節へのリンク・用語の「マニュアル: …」・目次の行（文の中で折り返す押せる文字） */
+.tc-link {
+  display: inline;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--accent-ink);
+  font: inherit;
+  text-align: inherit;
+  text-decoration: underline solid;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+}
+
+.tc-link:hover {
+  background: var(--s3);
+}
+
+.tc-status {
+  color: var(--ink-3);
+}
+
+.tc-toc-link {
+  margin-top: var(--sp-3);
+  padding-top: var(--sp-2);
+  border-top: 1px solid var(--line);
+}
+
+.tc-body .tc-toc,
+.tc-body .tc-toc-sub {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.tc-body .tc-toc-sub {
+  margin-top: 2px;
+  padding-left: var(--sp-3);
+}
+
+.tc-toc-ch-row {
+  margin-bottom: var(--sp-2);
+}
+
+.tc-toc-4 {
+  padding-left: var(--sp-3);
+}
+
+.tc-toc-ch {
+  font-weight: 600;
+}
+
+.tc-table,
+.tc-code {
+  position: relative;
+  max-width: 100%;
+  margin: 0 0 var(--sp-2);
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+}
+
+.tc-table:focus-visible,
+.tc-code:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.tc-table[data-more="end"],
+.tc-code[data-more="end"] {
+  mask-image: linear-gradient(to right, var(--ink) calc(100% - 28px), transparent);
+}
+
+.tc-table[data-more="start"],
+.tc-code[data-more="start"] {
+  mask-image: linear-gradient(to left, var(--ink) calc(100% - 28px), transparent);
+}
+
+.tc-table[data-more="both"],
+.tc-code[data-more="both"] {
+  mask-image: linear-gradient(
+    to right,
+    transparent,
+    var(--ink) 28px,
+    var(--ink) calc(100% - 28px),
+    transparent
+  );
+}
+
+.tc-table table {
+  border-collapse: collapse;
+  font-size: var(--fs-sm);
+  line-height: 1.45;
+}
+
+.tc-table th,
+.tc-table td {
+  min-width: 6em;
+  max-width: 24em;
+  padding: 3px 8px;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+  vertical-align: top;
+  overflow-wrap: anywhere;
+}
+
+.tc-table th {
+  border-bottom-color: var(--line-2);
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.tc-code pre {
+  margin: 0;
+  padding: 6px var(--sp-2);
+  border-radius: var(--r-sm);
+  background: var(--s3);
+  color: var(--ink);
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+  line-height: 1.45;
+  white-space: pre;
+  overflow-wrap: normal;
 }

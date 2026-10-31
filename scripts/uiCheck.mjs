@@ -170,6 +170,11 @@
 //                                          第 2 弾（説明カードの 1 つ前に戻る）: AI の返答の用語 → 関連の用語 2 つ → 戻る / Esc / [← 戻る] で
 //                                          1 つずつ戻り本文の位置・AI の返答の枠の位置・フォーカスが戻る（AC-0）、ⓘ の吹き出しが下に残る
 //                                          （AC-2-3〜2-5）、360×780 の本文の位置（AC-2-6）、[← 戻る] の見出しの行（AC-2-7）
+//   --manual                               #322 のマニュアルの節の項目だけ（--flows にも入る）: 390×844・1440×900 で、最初の画面の読み込みに
+//                                          マニュアルが入らない・遅いと「読み込み中」・読めないと固定文（AC11）、AI の用語 →「マニュアル: …」→
+//                                          節 → リンク 2 つ → 戻る / Esc / [← 戻る] で 1 つずつ戻り各段の本文の位置・フォーカス（AC6）、ⓘ の
+//                                          「マニュアル:」（AC7）、AI の根拠の節（番号違い・無い節・章。AC8）、⋯ → マニュアル → 目次（AC9）。
+//                                          360×780・390×844・1440×900 × ダーク / ライトで表とコードの多い節の縦・横 0px（AC10）
 //   --fonts                                #324 のギリシャ文字のフォントの項目だけ（既定の検査にも入る）: 360×780・1440×900（ダーク）で
 //                                          ギリシャ文字だけのプローブ（本文 400・本文の太字・.mono 400・.mono の太字）を描いたフォントを
 //                                          CDP の CSS.getPlatformFontsForNode で読み、tokens.css の "sim-greek" / "sim-greek-mono" の
@@ -242,6 +247,7 @@ const known = new Set([
   '--icons',
   '--back',
   '--fonts',
+  '--manual',
 ]);
 for (const a of args) {
   if (a.startsWith('--') && !known.has(a)) {
@@ -266,6 +272,7 @@ const crossOnly = flag('--cross');
 const iconsOnly = flag('--icons');
 const quotesOnly = flag('--quotes-only');
 const backOnly = flag('--back');
+const manualOnly = flag('--manual');
 const fontsOnly = flag('--fonts');
 const mode = parts ? 'parts' : 'next';
 
@@ -4728,6 +4735,537 @@ async function backTermLook() {
   }
 }
 
+// ---- #322: マニュアルの節を説明カードで読む（--manual と --flows）。説明カードの列に節・目次を積み、戻る・本文の位置・
+// フォーカスは用語と同じ規則。マニュアルは初めて開いたときだけ読み込む（別の chunk）
+
+const MANUAL_ERROR = 'マニュアルを読み込めませんでした。ページを読み直してください';
+const MANUAL_REQ = /user-guide/;
+
+/** AI のパネルで「根拠」を送り、返答（偽の SSE。根拠の節の見本）を待つ */
+async function aiAskRefs(page, w) {
+  const ok = await openAi(page, w, 'full').catch(() => false);
+  if (!ok) return false;
+  await page.fill('section.ai .ai-input textarea', '根拠の節を示して');
+  await page.press('section.ai .ai-input textarea', 'Enter');
+  await page
+    .waitForSelector('section.ai .ai-progress', { state: 'detached', timeout: 15000 })
+    .catch(() => {});
+  await page.waitForTimeout(150);
+  return (await page.$('section.ai .ai-term[data-manual]')) !== null;
+}
+
+/**
+ * 説明カードの本文の中のリンク（sel の i 番目）を本文の枠の中ほどへ動かし、その位置を控えて DOM の click で押す
+ * （Playwright の click は押す前に動かすので使わない）。見出しが変わるまで待つ（{ top: 押したときの本文の位置, title }）
+ */
+async function tcClickIn(page, sel, i, before) {
+  const top = await page.evaluate(
+    ([body, s, k]) => {
+      const b = document.querySelector(body);
+      const el = b?.querySelectorAll(s)[k];
+      if (!b || !(el instanceof HTMLElement)) return null;
+      const r = el.getBoundingClientRect();
+      const br = b.getBoundingClientRect();
+      b.scrollTop += r.top - br.top - b.clientHeight / 2;
+      const y = b.scrollTop;
+      el.click();
+      return y;
+    },
+    [TC_BODY, sel, i],
+  );
+  if (top === null) return null;
+  await page
+    .waitForFunction(
+      ([s, t]) => {
+        const h = document.querySelector(s)?.textContent?.trim() ?? null;
+        return h !== null && h !== t && h !== 'マニュアル';
+      },
+      [TC_TITLE, before],
+      { timeout: 4000 },
+    )
+    .catch(() => {});
+  const title = await tcTitle(page);
+  return title !== null && title !== before ? { top, title } : null;
+}
+
+/** 節の中のリンクを前から押し、今と違う節が開いたもの（無ければ null） */
+async function tcManualLink(page, seen) {
+  const n = await page.$$eval(`${TC_BODY} .tc-manual .tc-link`, (els) => els.length);
+  const before = await tcTitle(page);
+  for (let i = 0; i < n; i++) {
+    const r = await tcClickIn(page, '.tc-manual .tc-link', i, before);
+    if (r && !seen.includes(r.title)) return r;
+    if (r) {
+      await page.keyboard.press('Escape');
+      await tcWait(page, before);
+    }
+  }
+  return null;
+}
+
+/** AC6・AC7・AC8・AC9・AC11。vp = 390×844 / 1440×900 */
+async function manualFlows(vp) {
+  const tag = `#322 ${vp.width}x${vp.height}`;
+  const ctx = await newContext(vp, { [WORKSPACE_KEY]: twoLegs });
+  const page = await ctx.newPage();
+  const errors = [];
+  page.on('pageerror', (e) => errors.push(e.message));
+  const reqs = [];
+  page.on('request', (r) => {
+    if (MANUAL_REQ.test(r.url())) reqs.push(r.url());
+  });
+
+  // ---- AC11（前半）: 最初の画面の読み込みにマニュアルは入らない
+  await backFresh(page);
+  await page.waitForTimeout(500);
+  check(
+    `AC11 ${tag}: 最初の画面の読み込みでマニュアルを要求しない`,
+    reqs.length === 0,
+    `${reqs.length} 件`,
+  );
+
+  // ---- AC6: AI の返答の用語 → カードの「マニュアル: …」→ 節 → リンク → リンク → 1 つずつ戻る（各段の本文の位置）
+  for (const how of ['goBack', 'esc', 'btn']) {
+    const label = `AC6 ${tag} ${TC_HOW[how]}`;
+    await backFresh(page);
+    const url0 = page.url();
+    if (!(await aiAskRefs(page, vp.width))) {
+      check(`${label}: 用語 → 節 → 節 → 節 → 1 つずつ戻る`, false, 'AI の返答が出ない');
+      continue;
+    }
+    const term = 'section.ai .ai-term[data-term="margin"]';
+    const hasTerm = (await page.$(term)) !== null;
+    if (hasTerm) await page.click(term);
+    const t0 = await tcWait(page, '必要証拠金（概算）');
+    const a =
+      t0 === '必要証拠金（概算）' ? await tcClickIn(page, '.tc-guide .tc-link', 0, t0) : null;
+    const b = a ? await tcManualLink(page, [t0, a.title]) : null;
+    const c = b ? await tcManualLink(page, [t0, a.title, b.title]) : null;
+    const dTop = await backWait(page, 4);
+    const seq = [];
+    const tops = [];
+    for (const want of [b?.title, a?.title]) {
+      await tcStep(page, how);
+      seq.push(await tcWait(page, want ?? null));
+      tops.push(await tcBodyTop(page));
+    }
+    await tcStep(page, how);
+    seq.push(await tcWait(page, t0));
+    tops.push(await tcBodyTop(page));
+    const noBtn = how !== 'btn' || (await page.$(TC_BACK)) === null;
+    await tcStep(page, how === 'btn' ? 'esc' : how);
+    seq.push(await tcWait(page, null));
+    await page.waitForTimeout(100);
+    const focus = await page.evaluate(
+      (s) => document.activeElement === document.querySelector(s),
+      term,
+    );
+    const b0 = await backWait(page, 0);
+    const urlSame = page.url() === url0;
+    // 押したときの位置: 用語 = a.top、節 A = b.top、節 B = c.top
+    const wantTops = [c?.top, b?.top, a?.top];
+    const topsOk = wantTops.every(
+      (y, k) => y !== undefined && tops[k] !== null && Math.abs(tops[k] - y) <= 1,
+    );
+    check(
+      `${label}: AI の用語 → 「マニュアル: …」→ 節 A → リンク B → リンク C → 1 つずつ戻って各段の本文の位置 ±1px → 用語 → 閉じてフォーカスが押した用語 → 戻る 1 回で離れる`,
+      hasTerm &&
+        c !== null &&
+        dTop.ok &&
+        seq.join('|') === [b?.title, a?.title, t0, null].join('|') &&
+        topsOk &&
+        noBtn &&
+        focus &&
+        b0.ok &&
+        urlSame &&
+        (await backLeaves(page)),
+      `${t0} → ${a?.title} → ${b?.title} → ${c?.title}（back ${dTop.now}）・戻った順 ${seq.map((t) => t ?? '閉じた').join(' → ')}・本文 ${wantTops.join('/')} → ${tops.join('/')}・フォーカス ${focus ? '用語' : '外'}${noBtn ? '' : '・最初の用語に [← 戻る]'}・back ${b0.now}`,
+    );
+  }
+
+  // ---- AC6: × と箱の外のクリックで全部閉じる → 戻る 1 回で離れる
+  for (const [what, close] of [
+    ['×', () => page.click(TC_X)],
+    ['箱の外のクリック', () => page.mouse.click(4, vp.height - 4)],
+  ]) {
+    await backFresh(page);
+    const ok = await aiAskRefs(page, vp.width);
+    if (ok) await page.click('section.ai .ai-term[data-term="margin"]').catch(() => {});
+    const t0 = await tcWait(page, '必要証拠金（概算）');
+    const a = t0 ? await tcClickIn(page, '.tc-guide .tc-link', 0, t0) : null;
+    const b = a ? await tcManualLink(page, [t0, a.title]) : null;
+    await close();
+    const closed = (await tcWait(page, null)) === null;
+    const b0 = await backWait(page, 0);
+    check(
+      `AC6 ${tag} ${what}: 用語 → 節 → 節 → 全部閉じる → 戻る 1 回で離れる`,
+      b !== null && closed && b0.ok && (await backLeaves(page)),
+      `${t0} → ${a?.title} → ${b?.title}・${closed ? '閉じた' : '残る'}・back ${b0.now}`,
+    );
+  }
+
+  // ---- AC7: シナリオの ⓘ →「マニュアル:」→ 節 → 戻る / Esc で吹き出しが開いたまま、フォーカスは押したボタン
+  const HINT = 'section.scenario .panel-head .hintbtn';
+  const POP = 'section.scenario .popover:not([hidden])';
+  for (const how of ['goBack', 'esc']) {
+    await backFresh(page);
+    if (vp.width <= PHONE_MAX) await setShell(page, 'scenario', 'full');
+    await page.click(HINT);
+    await backWait(page, 1);
+    const link = `${POP} [data-manual-link]`;
+    const has = (await page.$(link)) !== null;
+    if (has) await page.click(link);
+    const t = await tcWait(page, 'マニュアル 6 シナリオ');
+    const d2 = await backWait(page, 2);
+    await tcStep(page, how);
+    const closed = (await tcWait(page, null)) === null;
+    await page.waitForTimeout(100);
+    const kept = await page.evaluate(
+      ([pop, l]) =>
+        document.querySelector(pop) !== null &&
+        document.activeElement === document.querySelector(l),
+      [POP, link],
+    );
+    const b1 = await backWait(page, 1);
+    check(
+      `AC7 ${tag} ${TC_HOW[how]}: ⓘ →「マニュアル:」→ 節 → 戻ると吹き出しが開いたまま・フォーカスは押した「マニュアル:」のボタン`,
+      has && t === 'マニュアル 6 シナリオ' && d2.ok && closed && kept && b1.ok,
+      `「マニュアル:」${has ? 'あり' : 'なし'}・${t}（back ${d2.now}）・${closed ? '閉じた' : '残る'}・吹き出し / フォーカス ${kept ? 'OK' : 'NG'}・back ${b1.now}`,
+    );
+  }
+
+  // ---- モーダルのダイアログ（保存一覧・保有ポジション。showModal()）の ⓘ →「マニュアル:」→ カードがダイアログの上に出て
+  // 押せる・フォーカスがカードの中 → 戻る / Esc で 1 つずつ閉じる（カード → 吹き出し → ダイアログ）。レビュー指摘 1
+  for (const [what, item, sheet, title] of [
+    ['保存一覧', '保存一覧', BOOK, 'マニュアル 11.3 保存一覧（名前を付けて保存）'],
+    ['保有ポジション', '保有ポジション…', HOLDINGS, 'マニュアル 11.5 保有ポジションの一覧'],
+  ]) {
+    for (const how of ['goBack', 'esc']) {
+      await backFresh(page);
+      await openFromMore(page, item, sheet);
+      const sheetPop = `${sheet} .sheet-head .popover:not([hidden])`;
+      await page.click(`${sheet} .sheet-head .hintbtn`).catch(() => {});
+      await backWait(page, 2);
+      const link = `${sheetPop} [data-manual-link]`;
+      const has = (await page.$(link)) !== null;
+      if (has) await page.click(link).catch(() => {});
+      const t = await tcWait(page, title);
+      const d3 = await backWait(page, 3);
+      const top = await page.evaluate((card) => {
+        const c = document.querySelector(card);
+        const r = c?.querySelector('.tc-box')?.getBoundingClientRect();
+        if (!c || !r) return { hit: false, focus: false };
+        const at = document.elementFromPoint(r.x + r.width / 2, r.y + Math.min(40, r.height / 2));
+        return { hit: c.contains(at), focus: c.contains(document.activeElement) };
+      }, TERM_CARD);
+      // 本文の末尾の [目次] が押せる（Playwright の当たりの検査だけ。押さない）
+      const clickable = await page
+        .click(`${TC_BODY} .tc-toc-link .term-link`, { trial: true, timeout: 2000 })
+        .then(() => true)
+        .catch(() => false);
+      const state = () =>
+        page.evaluate(
+          ([sh, pop, l]) => ({
+            sheet: document.querySelector(sh) !== null,
+            pop: document.querySelector(pop) !== null,
+            focus: document.activeElement === document.querySelector(l),
+          }),
+          [sheet, sheetPop, link],
+        );
+      await tcStep(page, how);
+      const closed = (await tcWait(page, null)) === null;
+      await page.waitForTimeout(100);
+      const s1 = await state();
+      const b2 = await backWait(page, 2);
+      await tcStep(page, how);
+      await page.waitForTimeout(150);
+      const s2 = await state();
+      const b1 = await backWait(page, 1);
+      await tcStep(page, how);
+      await page.waitForSelector(sheet, { state: 'detached', timeout: 3000 }).catch(() => {});
+      const s3 = await state();
+      const b0 = await backWait(page, 0);
+      check(
+        `${tag} ${TC_HOW[how]}: ${what}（モーダル）の ⓘ →「マニュアル:」→ カードがダイアログの上で押せる・フォーカスがカード → 1 つずつ閉じる（カード → 吹き出し → ダイアログ）`,
+        has &&
+          t === title &&
+          d3.ok &&
+          top.hit &&
+          top.focus &&
+          clickable &&
+          closed &&
+          s1.sheet &&
+          s1.pop &&
+          s1.focus &&
+          b2.ok &&
+          s2.sheet &&
+          !s2.pop &&
+          b1.ok &&
+          !s3.sheet &&
+          b0.ok,
+        `「マニュアル:」${has ? 'あり' : 'なし'}・${t}（back ${d3.now}）・最前面 ${top.hit ? 'OK' : 'NG'}・フォーカス ${top.focus ? 'カード' : '外'}・[目次] ${clickable ? '押せる' : '押せない'} → ${closed ? 'カードを閉じた' : 'カードが残る'}（ダイアログ ${s1.sheet ? 'あり' : 'なし'}・吹き出し ${s1.pop ? 'あり' : 'なし'}・フォーカス ${s1.focus ? '押したボタン' : '外'}・back ${b2.now}）→ 吹き出し ${s2.pop ? '残る' : '閉じた'}（back ${b1.now}）→ ダイアログ ${s3.sheet ? '残る' : '閉じた'}（back ${b0.now}）`,
+      );
+    }
+  }
+
+  // ---- AC8: AI の返答の根拠の節 → 節 → 戻るで閉じ、枠の位置とフォーカス（押した印）が戻る。番号違い・無い節・章・設計書
+  await backFresh(page);
+  if (await aiAskRefs(page, vp.width)) {
+    // 最後の返答（前の手順の返答が会話に残る）の根拠の節
+    const last = await page.evaluate(() => {
+      const all = [...document.querySelectorAll('section.ai .ai-term[data-manual]')];
+      const ans = [...document.querySelectorAll('section.ai .ai-msg.answer')].at(-1);
+      const mine = all.filter((e) => ans?.contains(e));
+      return {
+        offset: all.length - mine.length,
+        refs: mine.map((e) => e.firstChild?.textContent ?? ''),
+        design: [...(ans?.querySelectorAll('button') ?? [])].some((b) =>
+          (b.textContent ?? '').includes('設計書'),
+        ),
+      };
+    });
+    const { refs, design } = last;
+    const want = [
+      ['マニュアル 8.5「追証マップ」', 'マニュアル 8.5 追証マップ', false],
+      ['8.9「テール表」', 'マニュアル 8.3 テール表', false],
+      ['マニュアルの 10 章', 'マニュアル 10 市場: スマイル・IV 推移・先物推移', false],
+      ['マニュアル 99.1「架空の節」', 'マニュアル 99.1', true],
+    ];
+    const got = [];
+    for (const [k, [, title, missing]] of want.entries()) {
+      for (const how of k === 0 ? ['goBack', 'esc', 'btn'] : ['esc']) {
+        const at = last.offset + k;
+        const sel = `section.ai .ai-term[data-manual] >> nth=${at}`;
+        const pos = await page.evaluate((i) => {
+          const body = document.querySelector('section.ai .ai-body');
+          const t = document.querySelectorAll('section.ai .ai-term[data-manual]')[i];
+          if (!body || !t) return null;
+          body.scrollTop +=
+            t.getBoundingClientRect().top -
+            body.getBoundingClientRect().top -
+            body.clientHeight / 2;
+          return body.scrollTop;
+        }, at);
+        await page.click(sel);
+        const t = await tcWait(page, title);
+        const body = await page.$eval(TC_BODY, (e) => e.textContent ?? '').catch(() => '');
+        const nf = body.includes('マニュアルに見つからない');
+        const d1 = await backWait(page, 1);
+        // [← 戻る] は最初の項目では出ない → btn は Esc で閉じる
+        await tcStep(page, how === 'btn' ? 'esc' : how);
+        const closed = (await tcWait(page, null)) === null;
+        await page.waitForTimeout(100);
+        const after = await page.evaluate((i) => {
+          const b = document.querySelector('section.ai .ai-body');
+          const x = document.querySelectorAll('section.ai .ai-term[data-manual]')[i];
+          return {
+            top: b?.scrollTop ?? null,
+            focus: x !== undefined && document.activeElement === x,
+          };
+        }, at);
+        const b0 = await backWait(page, 0);
+        const ok =
+          t === title &&
+          nf === missing &&
+          d1.ok &&
+          closed &&
+          pos !== null &&
+          after.top !== null &&
+          Math.abs(after.top - pos) <= 1 &&
+          after.focus &&
+          b0.ok;
+        got.push(ok);
+        check(
+          `AC8 ${tag} ${TC_HOW[how]}: 根拠の節「${refs[k] ?? '—'}」→ ${title}${missing ? '（マニュアルに見つからない）' : ''} → 戻るで閉じ、返答の枠の位置 ±1px・フォーカスが押した印`,
+          ok,
+          `${t}${nf ? '・見つからない' : ''}・back ${d1.now} → ${b0.now}・枠 ${pos} → ${after.top}・フォーカス ${after.focus ? '印' : '外'}`,
+        );
+      }
+    }
+    check(
+      `AC8 ${tag}: 根拠の節の印は「マニュアル」の 4 つ（並べた 2 つ目・章・無い節を含む）、「設計書 5.4」は文字のまま`,
+      refs.length === want.length && want.every(([w], k) => refs[k] === w) && !design,
+      `${refs.join(' / ')}${design ? '・設計書がボタン' : ''}`,
+    );
+  } else check(`AC8 ${tag}: 根拠の節`, false, 'AI の返答が出ない');
+
+  // ---- AC9: ⋯ → マニュアル → 目次 → 節 → 戻るで目次 → 戻るで閉じる → 戻る 1 回で離れる
+  await backFresh(page);
+  await openFromMore(page, 'マニュアル', TERM_CARD);
+  const toc = await tcWait(page, 'マニュアルの目次');
+  const n = await page.$$eval(`${TC_BODY} .tc-toc .tc-link`, (els) => els.length);
+  const s = await page.evaluate((body) => {
+    const b = document.querySelector(body);
+    const el = [...(b?.querySelectorAll('.tc-toc .tc-link') ?? [])].find(
+      (e) => e.textContent === '8.5 追証マップ',
+    );
+    if (!b || !(el instanceof HTMLElement)) return null;
+    b.scrollTop +=
+      el.getBoundingClientRect().top - b.getBoundingClientRect().top - b.clientHeight / 2;
+    const y = b.scrollTop;
+    el.click();
+    return y;
+  }, TC_BODY);
+  const sec = await tcWait(page, 'マニュアル 8.5 追証マップ');
+  const tocLink = (await page.$(`${TC_BODY} .tc-toc-link .term-link`)) !== null;
+  const d2 = await backWait(page, 2);
+  await backGo(page);
+  const back1 = await tcWait(page, 'マニュアルの目次');
+  const y1 = await tcBodyTop(page);
+  await backGo(page);
+  const back2 = await tcWait(page, null);
+  const b0 = await backWait(page, 0);
+  check(
+    `AC9 ${tag}: ⋯ → マニュアル → 目次（章 20・節の行 ${n}）→ 8.5 → 戻るで目次（本文の位置 ±1px）→ 戻るで閉じる → 戻る 1 回で離れる`,
+    toc === 'マニュアルの目次' &&
+      n > 60 &&
+      sec === 'マニュアル 8.5 追証マップ' &&
+      tocLink &&
+      d2.ok &&
+      back1 === 'マニュアルの目次' &&
+      s !== null &&
+      y1 !== null &&
+      Math.abs(y1 - s) <= 1 &&
+      back2 === null &&
+      b0.ok &&
+      (await backLeaves(page)),
+    `${toc} → ${sec}（back ${d2.now}・末尾の [目次] ${tocLink ? 'あり' : 'なし'}）→ ${back1}（本文 ${s} → ${y1}）→ ${back2 ?? '閉じた'}・back ${b0.now}`,
+  );
+  check(`AC11 ${tag}: 開いた後はマニュアルを読んだ`, reqs.length >= 1, `${reqs.length} 件`);
+  check(
+    `${tag} マニュアルの手順の間に pageerror なし`,
+    errors.length === 0,
+    errors.slice(0, 3).join(' / '),
+  );
+  await ctx.close();
+
+  // ---- AC11（後半）: 読み込み中は「読み込み中」、読めなければ固定文（例外を外へ出さない）
+  for (const mode of ['slow', 'abort']) {
+    const c2 = await newContext(vp, { [WORKSPACE_KEY]: twoLegs });
+    const p2 = await c2.newPage();
+    const errs = [];
+    p2.on('pageerror', (e) => errs.push(e.message));
+    await p2.route(MANUAL_REQ, async (route) => {
+      if (mode === 'abort') return route.abort();
+      await new Promise((r) => setTimeout(r, 1500));
+      return route.continue();
+    });
+    await p2.goto(pageUrl('next'));
+    await waitReady(p2, 'next');
+    await openFromMore(p2, 'マニュアル', TERM_CARD);
+    const want = mode === 'abort' ? MANUAL_ERROR : '読み込み中';
+    const shown = await p2
+      .waitForFunction(
+        ([sel, w]) => (document.querySelector(sel)?.textContent ?? '').includes(w),
+        [TC_BODY, want],
+        { timeout: 4000 },
+      )
+      .then(() => true)
+      .catch(() => false);
+    let later = '';
+    if (mode === 'slow') {
+      later = await p2
+        .waitForSelector(`${TC_BODY} .tc-toc`, { timeout: 8000 })
+        .then(() => '・その後に目次')
+        .catch(() => '・目次が出ない');
+    }
+    check(
+      `AC11 ${tag} ${mode === 'abort' ? '読めない' : '遅い'}: カードに「${want}」${mode === 'slow' ? '→ 読めたら目次' : ''}・pageerror なし`,
+      shown && errs.length === 0 && (mode === 'abort' || later === '・その後に目次'),
+      `${shown ? '出た' : '出ない'}${later}${errs.length ? `・${errs[0]}` : ''}`,
+    );
+    await c2.close();
+  }
+}
+
+/**
+ * AC10: 360×780・390×844・1440×900 × ダーク / ライトで、表の多い節（14.1「全体のキー」・16.3「単位」）とコードブロックのある節
+ * （11.5「保有ポジションの一覧」）を目次から開き、ページの縦・横スクロール 0px（表とコードは枠の中だけ横に送る）、
+ * 見出しの行（[← 戻る]・見出し・×）が折り返さない、カードが窓の中
+ */
+async function manualLook() {
+  for (const [w, h] of [
+    [360, 780],
+    [390, 844],
+    [1440, 900],
+  ]) {
+    for (const theme of ['dark', 'light']) {
+      const ctx = await newContext(
+        { width: w, height: h },
+        { [WORKSPACE_KEY]: twoLegs, [PREFS_KEY]: prefsText(theme) },
+      );
+      const page = await ctx.newPage();
+      await page.goto(pageUrl('next'));
+      await waitReady(page, 'next');
+      await openFromMore(page, 'マニュアル', TERM_CARD);
+      await tcWait(page, 'マニュアルの目次');
+      await page.waitForSelector(`${TC_BODY} .tc-toc`, { timeout: 5000 }).catch(() => {});
+      for (const [label, key] of [
+        ['14.1', 'keys'],
+        ['16.3', 'units'],
+        ['11.5', 'holdings'],
+      ]) {
+        const tag = `AC10 #322 ${theme} ${w}x${h} ${label}`;
+        const clicked = await page.evaluate(
+          ([body, l]) => {
+            const el = [
+              ...(document.querySelector(body)?.querySelectorAll('.tc-toc .tc-link') ?? []),
+            ].find((e) => (e.textContent ?? '').startsWith(`${l} `));
+            if (!(el instanceof HTMLElement)) return null;
+            el.click();
+            return el.textContent;
+          },
+          [TC_BODY, label],
+        );
+        const title = clicked ? await tcWait(page, `マニュアル ${clicked}`) : null;
+        await page.waitForTimeout(150);
+        const ok = await report(
+          page,
+          `${tag} 説明カード「${title}」`,
+          w,
+          h,
+          `manual-${w}x${h}-${theme}-${key}`,
+        );
+        const head = await tcHeadCheck(page);
+        const box = await page.evaluate(() => {
+          const b = document
+            .querySelector('dialog.term-card[open] .tc-box')
+            ?.getBoundingClientRect();
+          const scrollers = [
+            ...document.querySelectorAll(
+              'dialog.term-card[open] .tc-table, dialog.term-card[open] .tc-code',
+            ),
+          ];
+          const wide = scrollers.filter((e) => e.scrollWidth > e.clientWidth + 1).length;
+          const out = scrollers.filter(
+            (e) => e.getBoundingClientRect().right > innerWidth + 0.5,
+          ).length;
+          return {
+            inWin: !!b && b.left >= 0 && b.right <= innerWidth,
+            n: scrollers.length,
+            wide,
+            out,
+          };
+        });
+        check(
+          `${tag}: 「${clicked}」縦・横 0px・見出しの行が折り返さない・カードと表の枠が窓の中（広い表は枠の中で横に送る）`,
+          title === `マニュアル ${clicked}` &&
+            ok &&
+            head.ok &&
+            box.inWin &&
+            box.n > 0 &&
+            box.out === 0,
+          `${title}・${head.detail}・表 / コード ${box.n}（枠の中で横に送る ${box.wide}・窓の外 ${box.out}）`,
+        );
+        // 目次へ戻る
+        await page.keyboard.press('Escape');
+        await tcWait(page, 'マニュアルの目次');
+      }
+      await ctx.close();
+    }
+  }
+}
+
 // ---- 手順（AC-11・AC-12）
 const results = [];
 function check(name, ok, detail = '') {
@@ -4758,6 +5296,9 @@ async function runFlows() {
   // #320 第 2 弾 説明カードの 1 つ前に戻る
   for (const vp of [phone, pc]) await backTermFlows(vp);
   await backTermLook();
+  // #322 マニュアルの節を説明カードで読む（--manual だけでも流せる）
+  for (const vp of [phone, pc]) await manualFlows(vp);
+  await manualLook();
 
   // (a) 開いただけでは作業の保存を書き換えない・ドックのバッジ
   {
@@ -15033,6 +15574,13 @@ try {
       await aiAskSweep();
       await aiToolPendingFlow();
     }
+  } else if (manualOnly && !parts) {
+    for (const vp of [
+      { width: 390, height: 844 },
+      { width: 1440, height: 900 },
+    ])
+      await manualFlows(vp);
+    await manualLook();
   } else if (backOnly && !parts) {
     for (const vp of [
       { width: 390, height: 844 },

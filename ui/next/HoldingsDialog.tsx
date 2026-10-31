@@ -17,6 +17,7 @@ import {
 import { MARK_BASIS_TEXT } from '../view/mark';
 import { Dialog } from './parts/Dialog';
 import { Icon } from './parts/Icon';
+import { ManualLinks } from './parts/ManualLinks';
 import { Popover } from './parts/Popover';
 
 export interface HoldingsDialogProps {
@@ -78,6 +79,7 @@ export function HoldingsDialog(p: HoldingsDialogProps) {
             のまま原資産だけを動かして余力が 0 になる水準のうち今に最も近い下と上（β・IV
             の動き方は画面の設定）。IV の急騰と同時の危なさは追証マップ（作業中のタブ）で見る。
           </p>
+          <ManualLinks place="holdings" />
         </Popover>
       }
       after={p.toasts}

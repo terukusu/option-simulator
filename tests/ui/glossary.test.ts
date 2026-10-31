@@ -6,6 +6,7 @@ import {
   termCardView,
   termSearchText,
 } from '../../ui/view/glossary';
+import { manualIndex, slug } from '../../ui/view/manual';
 
 /** #167: 用語集のデータ（AC-2〜AC-4）と説明カードの表示モデル（AC-7） */
 
@@ -45,50 +46,8 @@ const IDS = [
   'jscc',
 ] as const;
 
-/** GitHub の見出しのアンカー: 小文字化 → 文字・結合文字・数字・連結符・空白・ハイフン以外を消す → 空白を `-`。重複は `-1`… */
-function slug(text: string): string {
-  return text
-    .trim()
-    .toLowerCase()
-    .replace(/[^\p{L}\p{M}\p{N}\p{Pc} -]/gu, '')
-    .replace(/ /g, '-');
-}
-
-interface Section {
-  anchor: string;
-  level: number;
-  body: string;
-}
-
-/** 見出し（コードブロックの外）ごとのアンカーと本文（次の同じか上の階層の見出しまで） */
-function sections(md: string): Section[] {
-  const lines = md.split('\n');
-  const heads: { at: number; level: number; anchor: string }[] = [];
-  const seen = new Map<string, number>();
-  let code = false;
-  lines.forEach((line, at) => {
-    if (line.startsWith('```')) code = !code;
-    if (code) return;
-    const m = /^(#{1,6})\s+(.*)$/.exec(line);
-    if (!m) return;
-    const base = slug(m[2] ?? '');
-    const n = seen.get(base) ?? 0;
-    seen.set(base, n + 1);
-    heads.push({ at, level: (m[1] ?? '').length, anchor: n === 0 ? base : `${base}-${n}` });
-  });
-  return heads.map((h, i) => {
-    let end = lines.length;
-    for (const next of heads.slice(i + 1)) {
-      if (next.level <= h.level) {
-        end = next.at;
-        break;
-      }
-    }
-    return { anchor: h.anchor, level: h.level, body: lines.slice(h.at, end).join('\n') };
-  });
-}
-
-const SECTIONS = sections(guide);
+/** 見出し 2〜4 の節（ui/view/manual.ts の manualIndex。本文は見出しの次の行から） */
+const SECTIONS = manualIndex(guide).sections;
 const ANCHORS = new Set(SECTIONS.map((s) => s.anchor));
 
 /** 用語の全部の文字列（説明・例・式・出る場所・別名・マニュアルの節） */
@@ -199,8 +158,9 @@ describe('マニュアルの節（#167 AC-3）', () => {
       const [, n, chapter, section] = m ?? [];
       const ch = SECTIONS.find((s) => s.level === 2 && s.anchor === slug(`${n}. ${chapter}`));
       expect(ch, `${t.id}: ## ${n}. ${chapter}`).toBeDefined();
-      expect(ch?.body.split('\n')[0], `${t.id}: ## ${n}. ${chapter}`).toBe(`## ${n}. ${chapter}`);
-      expect(ch?.body.includes(`\n### ${section}\n`), `${t.id}: ### ${section}`).toBe(true);
+      expect(ch?.id, `${t.id}: ## ${n}. ${chapter}`).toBe(n);
+      expect(ch?.title, `${t.id}: ## ${n}. ${chapter}`).toBe(chapter);
+      expect(`\n${ch?.body}`.includes(`\n### ${section}\n`), `${t.id}: ### ${section}`).toBe(true);
       expect(slug(section ?? ''), `${t.id}: ${t.guide.anchor}`).toBe(t.guide.anchor);
     }
   });

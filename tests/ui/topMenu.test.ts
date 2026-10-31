@@ -31,7 +31,7 @@ const base: TopMenuInput = {
 const row = (i: TopMenuInput, key: string) => topMenuModel(i).find((r) => r.key === key);
 
 describe('topMenuModel', () => {
-  it('#275（EPIC #281 終了条件 4）: 本番（合成の板なし）の行は 6 以下 = 保有ポジション…（#302）/ 保存一覧… / URL をコピー / ファイルを開く… / 設定…', () => {
+  it('#275（EPIC #281 終了条件 4）: 本番（合成の板なし）の行は 6 以下 = 保有ポジション…（#302）/ 保存一覧… / URL をコピー / ファイルを開く… / マニュアル（#322）/ 設定…', () => {
     const rows = topMenuModel(base);
     expect(rows.length).toBeLessThanOrEqual(6);
     expect(rows.map((r) => [r.label, r.sep === true])).toEqual([
@@ -39,7 +39,8 @@ describe('topMenuModel', () => {
       ['保存一覧（3）…', false],
       ['URL をコピー', false],
       ['ファイルを開く…', true],
-      ['設定…', true],
+      ['マニュアル', true],
+      ['設定…', false],
     ]);
   });
 
@@ -71,6 +72,7 @@ describe('topMenuModel', () => {
       'fixture:latest',
       'fixture:night_early',
       'fixture:pre_open',
+      'manual',
       'settings',
     ]);
     const fx = rows.filter((r) => r.key.startsWith('fixture:'));

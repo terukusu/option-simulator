@@ -48,7 +48,8 @@ import { PANEL_FOCUS_LABEL } from '../../view/keys';
 import { PanelHead } from '../PanelHead';
 import { Chip, ChipRow } from '../parts/Chip';
 import { Icon } from '../parts/Icon';
-import { openTerm } from '../parts/termCard';
+import { useScrollMore } from '../parts/scrollMore';
+import { openManualRef, openTerm } from '../parts/termCard';
 
 /** 免責の文（端末で最初の 1 回だけ。AI の返答には書かせない。#135） */
 export const AI_DISCLAIMER =
@@ -66,6 +67,8 @@ const PRESETS_LABEL = '定型の質問';
 const UNMATCHED_LABEL = '計算結果に無い数字';
 /** 用語のボタンの読み上げの補い（#232。押すと説明カード） */
 const TERM_LABEL = '用語の説明';
+/** マニュアルの根拠の節の読み上げ（#322） */
+const MANUAL_REF_LABEL = 'マニュアルの節';
 /** 横にスクロールする表の枠の名前（#234） */
 const TABLE_SCROLL_LABEL = '表（横にスクロール）';
 /** 提案の差分の印の読み上げ（#139） */
@@ -704,7 +707,8 @@ function ChatRow(p: {
 /**
  * 返答の文（木 + 照合の印 + 用語の印）。(text, sources, live) で memo する = 流れの間にフレームごとに作り直すのは
  * 流れている返答だけ（終わった返答の text と、会話の sources（messages が変わったときだけ作る）は変わらない）。
- * 用語（#232）は押すと説明カード（openTerm）。表（#234）は AiTable
+ * 用語（#232）は押すと説明カード（openTerm）。マニュアルの根拠の節（#322）は押すと説明カードにその節（openManualRef）。
+ * 表（#234）は AiTable
  */
 function AnswerText(p: { text: string; sources: readonly unknown[]; live: boolean }) {
   const blocks = useMemo(() => answerModel(p.text, p.sources, p.live), [p.text, p.sources, p.live]);
@@ -712,6 +716,22 @@ function AnswerText(p: { text: string; sources: readonly unknown[]; live: boolea
     xs.map((x, i) => {
       const parts = x.parts.map((m, j) => {
         const term = m.term;
+        const ref = m.manual;
+        if (ref)
+          // マニュアルの根拠の節（#322）: 押したときにマニュアルを読み込み、カードで節を引く（無ければカードに「見つからない」）
+          return (
+            <button
+              key={j}
+              type="button"
+              class="ai-term"
+              data-manual={ref.id}
+              aria-haspopup="dialog"
+              onClick={() => openManualRef(ref.id, ref.title)}
+            >
+              {m.text}
+              <span class="sr">（{MANUAL_REF_LABEL}）</span>
+            </button>
+          );
         if (term)
           return (
             <button
@@ -777,13 +797,6 @@ function AnswerChecks(p: { text: string; onCheck: AiCheckApply }) {
   );
 }
 
-/** 続きのある側（表の枠の横スクロール。#234） */
-function moreOf(el: HTMLElement): string | null {
-  const start = el.scrollLeft > 1;
-  const end = el.scrollLeft + el.clientWidth < el.scrollWidth - 1;
-  return start && end ? 'both' : start ? 'start' : end ? 'end' : null;
-}
-
 /**
  * 返答の表（#234）。数字の列（class num）は右揃え・折り返さない、文字の列はセルの中で折り返す。入らなければ枠
  * （.ai-table）の中だけ横にスクロールし、続きのある側を data-more（start / end / both）で示す（CSS が端をぼかす）。
@@ -795,33 +808,14 @@ function AiTable(p: {
   table: Extract<MarkedBlock, { kind: 'table' }>;
   inl: (xs: MarkedInline[]) => ComponentChildren;
 }) {
-  const ref = useRef<HTMLDivElement>(null);
-  const [over, setOver] = useState(false);
-  const update = () => {
-    const el = ref.current;
-    if (!el) return;
-    const m = moreOf(el);
-    if (m === null) el.removeAttribute('data-more');
-    else el.setAttribute('data-more', m);
-    setOver(el.scrollWidth > el.clientWidth + 1);
-  };
-  useLayoutEffect(() => {
-    update();
-    const el = ref.current;
-    if (!el || typeof ResizeObserver === 'undefined') return;
-    const ro = new ResizeObserver(update);
-    ro.observe(el);
-    const table = el.firstElementChild;
-    if (table) ro.observe(table);
-    return () => ro.disconnect();
-  }, []);
+  const { ref, over, onScroll } = useScrollMore();
   const { table: t } = p;
   const cls = (j: number) => (t.num[j] ? 'num' : undefined);
   return (
     <div
       class="ai-table"
       ref={ref}
-      onScroll={update}
+      onScroll={onScroll}
       {...(over && { tabIndex: 0, role: 'region', 'aria-label': TABLE_SCROLL_LABEL })}
     >
       <table>

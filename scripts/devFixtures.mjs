@@ -520,6 +520,15 @@ export function synthAiReply(body) {
     ].join('\n');
     return { thinking: '説明の節を読む', text, stop: 'end_turn' };
   }
+  if (userText.includes('根拠')) {
+    // 根拠の節（#322）の見本: 番号と見出しが合う / 番号違い（見出しで引く）/ 無い節 / 章 / 設計書（文字のまま）
+    const text = [
+      '必要証拠金は概算です。追証までの距離は、追証マップで原資産と IV を同時に動かして見ます（マニュアル 8.5「追証マップ」・8.9「テール表」）。',
+      'IV の推移はマニュアルの 10 章、計算の前提は設計書 5.4「スキュー」にあります。',
+      '古い節の例: マニュアル 99.1「架空の節」。',
+    ].join('\n');
+    return { thinking: '根拠の節を示す', text, stop: 'end_turn' };
+  }
   if (userText.includes('表で')) {
     // 返答の表（#234）と用語のリンク（#232）の見本: tail_table を呼び、その結果と文脈の足の値で表を書く（下）
     return {

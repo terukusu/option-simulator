@@ -27,6 +27,7 @@ import {
 import { PanelHead } from '../PanelHead';
 import { Chip, ChipRow } from '../parts/Chip';
 import { Icon } from '../parts/Icon';
+import { ManualLinks } from '../parts/ManualLinks';
 import { Popover } from '../parts/Popover';
 import { Seg } from '../parts/Seg';
 import { Stepper } from '../parts/Stepper';
@@ -154,6 +155,7 @@ export function Scenario(p: { c: AppController; dXUnit: DXUnit; onDXUnit: (u: DX
             へ線形。
           </p>
           <TermLinks ids={HINT_TERMS.scenario} />
+          <ManualLinks place="scenario" />
         </Popover>
       </PanelHead>
       {/* biome-ignore lint/a11y/useSemanticElements: 1〜5 の行き先のスクロールする枠に名前を付ける（fieldset にしない） */}

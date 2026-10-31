@@ -4,8 +4,9 @@
  *
  * - GLOSSARY は関数・undefined を持たず JSON にそのまま直せる形（AI アドバイザー #137 の根拠と共有できる形）
  * - 説明は docs/design.md・docs/user-guide.md の定義に合わせる（定義は変えない）。例の数値は架空の値（「架空」と書く）
- * - 外部 URL を置かない。マニュアルの節は docs/user-guide.md の見出しのアンカー（GitHub の規則）と節の名前だけで、
- *   画面には節の名前を文字で出す（マニュアルはビルド成果物に入れない）
+ * - 外部 URL を置かない。マニュアルの節は docs/user-guide.md の見出しのアンカー（GitHub の規則）と節の名前。画面は節の
+ *   名前をボタンにし、押すと説明カードにその節を開く（#322。マニュアルはビルドに同梱して初めて開いたときだけ読む =
+ *   docs/adr-0008-manual-bundled-viewer.md。索引は ui/view/manual.ts）
  * - 検索語（termSearchText）は見出し・読み・別名。パレット（ui/view/palette.ts）の行の keywords に入れる
  * - β の例の数は model の betaAddPt から作る（定数 BETA_SHAPE と文をずらさない。#306）
  */
@@ -652,8 +653,10 @@ export interface TermCardView {
   formula: string | null;
   example: string | null;
   where: readonly string[];
-  /** マニュアルの節の名前（画面に文字で出す。リンクにしない） */
+  /** マニュアルの節の名前（ボタンの文字。#322 で押すとその節を開く） */
   guide: string;
+  /** マニュアルの節のアンカー（ui/view/manual.ts の索引の byAnchor） */
+  guideAnchor: string;
   related: readonly { id: TermId; title: string; short: string }[];
 }
 
@@ -677,6 +680,7 @@ export function termCardView(id: string): TermCardView | null {
     example: t.example ?? null,
     where: t.where,
     guide: t.guide.title,
+    guideAnchor: t.guide.anchor,
     related,
   };
 }
