@@ -17,7 +17,13 @@ import {
   preparePosition,
   theoreticalPnl,
 } from '../../model/position';
-import { applyPreset, CRASH_PRESETS, type Scenario, ZERO_SCENARIO } from '../../model/scenario';
+import {
+  applyPreset,
+  betaAddPt,
+  CRASH_PRESETS,
+  type Scenario,
+  ZERO_SCENARIO,
+} from '../../model/scenario';
 import { DAY_MS } from '../../model/time';
 import { EVAL_TIME, FUT, M1, M2, makeMarket, R } from '../support/market';
 import { rng } from '../support/synthChain';
@@ -215,7 +221,7 @@ describe('テール表（AC22）', () => {
         if (p.leg.kind !== 'option' || !p.option) continue;
         const K = p.leg.strike;
         const x = Math.log(K / M1.F); // sticky strike → x_eff = x₀
-        const shiftPt = sc.dSigma + -sc.beta * r.shock * 100 - (sc.skew * x) / 0.1;
+        const shiftPt = sc.dSigma + betaAddPt(r.shock * 100, sc.beta) - (sc.skew * x) / 0.1;
         const sigma = Math.max(0.01, p.option.anchor + shiftPt / 100);
         const T = (M1.days - sc.days) / 365;
         const value = black76Price(p.leg.type, r.x, K, T, sigma, R);
@@ -435,7 +441,7 @@ describe('複数限月の横軸（AC24）', () => {
 });
 
 describe('急落プリセットをポジションに（AC23 の通し）', () => {
-  it('ATM の足の IV は +30pt', () => {
+  it('ATM の足の IV は +39.45pt（+20 と β の g(−10%) = +19.45）', () => {
     const legs = [op(M1.id, 'call', 67750, 'buy', 1990)];
     const prepared = preparePosition(legs, ctx);
     const preset = CRASH_PRESETS[0] as (typeof CRASH_PRESETS)[number];
@@ -443,7 +449,7 @@ describe('急落プリセットをポジションに（AC23 の通し）', () =>
     const ev = evaluatePosition(prepared, sc, ctx);
     const x = Math.log(67750 / M1.F);
     const anchor = prepared[0]?.option?.anchor ?? 0;
-    expect((ev.legs[0]?.sigma ?? 0) - anchor).toBeCloseTo(0.3 - (3 * x) / 0.1 / 100, 12);
+    expect((ev.legs[0]?.sigma ?? 0) - anchor).toBeCloseTo(0.3945 - (3 * x) / 0.1 / 100, 9);
   });
 });
 
@@ -470,15 +476,15 @@ describe('設計 6.1 のワイヤーの数値（架空の例）と一致', () =>
     expect(Math.abs(t.vegaPerPt / -129500 - 1)).toBeLessThan(0.002);
   });
 
-  it('テール表の指定日（d = 0、sticky strike、β = 1）: −1,010,000 / −2,999,000 / −8,522,000 / −14,895,000 / −21,546,000', () => {
+  it('テール表の指定日（d = 0、sticky strike、β = 1 = 実測の形 g）: −719,000 / −3,966,000 / −11,416,000 / −15,918,000 / −21,768,000', () => {
     const t = tailTable(prepared, ZERO_SCENARIO, c);
-    const want = [-1_010_000, -2_999_000, -8_522_000, -14_895_000, -21_546_000];
+    const want = [-719_000, -3_966_000, -11_416_000, -15_918_000, -21_768_000];
     t.rows.forEach((r, i) => {
-      // 設計の表は千円単位の丸め（−30% は −14,895,678 を −14,895,000 と表記）なので ±1,000 円で照合
+      // 設計の表は千円未満を切り捨て（−30% は −15,918,577 を −15,918,000 と表記）なので ±1,000 円で照合
       expect(Math.abs(r.scenario.pnl - (want[i] as number))).toBeLessThanOrEqual(1000);
     });
     expect(t.rows.map((r) => Math.round(Math.abs(r.scenario.ratio ?? 0) * 10) / 10)).toEqual([
-      0.6, 1.7, 4.7, 8.3, 11.9,
+      0.4, 2.2, 6.3, 8.8, 12.1,
     ]);
   });
 });

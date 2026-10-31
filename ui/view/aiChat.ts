@@ -22,6 +22,7 @@ import type {
   AiStatus,
   AiUserBlock,
 } from '../../data/aiStream';
+import { betaAddPt } from '../../model/scenario';
 import { displayedValues } from './aiNumbers';
 
 export const AI_SESSION_KEY = 'optsim.ai.v1';
@@ -675,13 +676,23 @@ export function chatGroups(items: readonly ChatItem[]): ChatGroup[] {
   return out;
 }
 
+/** β の上乗せの代表の点（ΔX%） */
+const BETA_SOURCE_DX = [-3, -6, -10] as const;
+
 /**
- * β の定義から導ける値（#136 の評価。「β = 1 なので下落 1% ごとに IV +1.0pt」= 1% あたり β pt。docs/design.md 5.4）。
- * 文脈のシナリオの β だけを pt の値として足す（ほかの値は足さない = 取り違えを広く見逃さない）
+ * β の定義から導ける値（#136 の評価。#306: β は実測の形 g(ΔX%) の倍率 = Δσ_β = β × g。docs/design.md 5.4・5.13）。
+ * 文脈のシナリオの β から、代表の点（−3%・−6%・−10%）の上乗せ（pt）だけを足す（ほかの値は足さない = 取り違えを
+ * 広く見逃さない）。照合の元だけで、context には載せない（system の量は増えない）
  */
 function betaSource(c: AiContext): unknown[] {
   const b = c.scenario?.beta;
-  return typeof b === 'number' && Number.isFinite(b) ? [{ beta_iv_per_1pct_pt: b }] : [];
+  if (typeof b !== 'number' || !Number.isFinite(b)) return [];
+  return [
+    {
+      beta_dx_pct: [...BETA_SOURCE_DX],
+      beta_add_pt: BETA_SOURCE_DX.map((x) => betaAddPt(x, b)),
+    },
+  ];
 }
 
 /**
@@ -699,7 +710,7 @@ function contextSources(c: AiContext): unknown[] {
 
 /**
  * 照合の値（最初の文脈・文脈の更新・ツールの結果）。#136: その会話の [AI に聞く] の質問の文（ASK_PREFIX で始まる
- * 利用者の発言）に入れた画面の表示の値と、シナリオの β の 1% あたりの pt も足す。#140: その会話の利用者の発言の文の数
+ * 利用者の発言）に入れた画面の表示の値と、シナリオの β の代表の点の上乗せ（pt）も足す。#140: その会話の利用者の発言の文の数
  * （「最大損失を −1,000 千円に抑える」など。表示の値と同じ読み方）と、AI がツールに渡した入力の値（propose_position の
  * max_loss_floor_yen など。キーの名前で単位）も足す（ほかの会話の値は足さない）。#156: 文脈の自分の前提の文の数も
  * 利用者の発言と同じく足す

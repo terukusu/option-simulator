@@ -41,7 +41,7 @@ export const DX_ABS_MAX = 1e6;
 export const DX_YEN_STEP = 100;
 /** Shift・PageUp/PageDown の刻みの倍数 */
 export const BIG_STEP = 10;
-/** β の範囲（pt / 1%） */
+/** β の範囲（倍率。Δσ_β = β × g(ΔX%)） */
 export const BETA_MAX = 10;
 
 export interface SliderSpec {
@@ -284,12 +284,12 @@ export function parseSliderInput(text: string, spec: SliderSpec): Parsed<number>
   return { ok: false, message: `${spec.label}は ${rangeText(spec, lo, hi)}` };
 }
 
-/** β（pt / 1%）: 0〜10。 */
+/** β（倍率）: 0〜10。 */
 export function parseBeta(text: string): Parsed<number> {
   const v = parseNum(text);
   return Number.isFinite(v) && v >= 0 && v <= BETA_MAX
     ? { ok: true, value: v }
-    : { ok: false, message: `β は 0〜${BETA_MAX}（pt / 1%）` };
+    : { ok: false, message: `β は 0〜${BETA_MAX}（倍）` };
 }
 
 /** 状態の値（ΔX は円）→ 表示の単位。 */

@@ -287,3 +287,12 @@ def test_design_5_12_single_read(idx):
     assert sec is not None
     assert len(sec.parts()) == 1
     assert "sticky strike" in sec.text and "二重" in sec.text
+
+
+# ---- #306: シナリオの β の形（設計書 5.13）も 1 回の読みに収まる ----
+
+def test_design_5_13_single_read(idx):
+    sec = idx.get("design", "5.13")
+    assert sec is not None
+    assert len(sec.parts()) == 1
+    assert "g(ΔX%)" in sec.text and "60pt" in sec.text and "測り直しの手順" in sec.text
