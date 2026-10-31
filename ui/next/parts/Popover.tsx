@@ -24,10 +24,16 @@ export function Popover(p: {
   popClass?: string;
 }) {
   const id = useId();
-  const { open, setOpen } = useOverlay(id);
-  const [align, setAlign] = useState<'start' | 'end'>('start');
   const wrapRef = useRef<HTMLSpanElement>(null);
   const btnRef = useRef<HTMLButtonElement>(null);
+  // Esc で閉じる: 中にフォーカスがあればボタンへ戻す（戻るで閉じるときも同じ。#320）
+  const closeByEscape = () => {
+    const inside = wrapRef.current?.contains(document.activeElement) ?? false;
+    setOpen(hintNext(true, 'escape'));
+    if (inside) btnRef.current?.focus();
+  };
+  const { open, setOpen } = useOverlay(id, closeByEscape);
+  const [align, setAlign] = useState<'start' | 'end'>('start');
   const send = (ev: HintEvent) => setOpen(hintNext(open, ev));
 
   const within = p.within;
@@ -64,9 +70,7 @@ export function Popover(p: {
     };
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return;
-      const inside = wrapRef.current?.contains(document.activeElement) ?? false;
-      setOpen(hintNext(true, 'escape'));
-      if (inside) btnRef.current?.focus();
+      closeByEscape();
     };
     document.addEventListener('pointerdown', onDown, true);
     document.addEventListener('keydown', onKey);

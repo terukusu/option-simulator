@@ -60,7 +60,8 @@ export function useMenu(o: {
   onOpenChange?: ((open: boolean) => void) | undefined;
 }): UseMenu {
   const id = useId();
-  const { open, setOpen } = useOverlay(id);
+  // 戻るで閉じるときは Esc と同じ（閉じてボタンへ戻す。#320）
+  const { open, setOpen } = useOverlay(id, () => closeToButton());
   const [align, setAlign] = useState<'start' | 'end'>('start');
   const wrapRef = useRef<HTMLElement>(null);
   const btnRef = useRef<HTMLButtonElement>(null);

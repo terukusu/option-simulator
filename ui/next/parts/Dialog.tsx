@@ -1,6 +1,8 @@
 import type { ComponentChildren } from 'preact';
 import { useId, useLayoutEffect, useRef } from 'preact/hooks';
+import { useBackLayer } from '../backStack';
 import { Icon } from './Icon';
+import { closeOverlayAsBack } from './overlay';
 
 /**
  * ダイアログ（docs/ui-redesign.md §5）。<dialog class="sheet"> + showModal()。
@@ -11,6 +13,8 @@ import { Icon } from './Icon';
  * - head: 見出しと × の間に置くもの（ⓘ のポップオーバー）
  * - after: .sheet-body の後（ダイアログの直下）に置くもの（保存一覧を開いている間のトースト。モーダルの外は押せないため）
  * Esc はダイアログの中に開いたポップオーバーがあればそれだけを閉じる（cancel を止める。旧 Book の Hint と同じ規則）。
+ * 戻る（スマホの戻るジェスチャー・ブラウザの戻る）でも onClose（#320。../backStack.ts。中のポップオーバーが開いて
+ * いればそれが上の層なので先に閉じる）。利用者の操作なしで開いたもの（共有 URL を開く確認）は履歴に積まない。
  */
 export function Dialog(p: {
   open: boolean;
@@ -40,6 +44,8 @@ function DialogBody(p: {
 }) {
   const ref = useRef<HTMLDialogElement>(null);
   const titleId = useId();
+  // 戻るで閉じる（× / Esc と同じ onClose）。開いている間だけ層を積む
+  useBackLayer(`dialog:${titleId}`, true, p.onClose);
   // 開いたら showModal、閉じる（アンマウント）ときは開く前の要素へフォーカスを戻す
   useLayoutEffect(() => {
     const dlg = ref.current;
@@ -65,6 +71,12 @@ function DialogBody(p: {
       onCancel={(e) => {
         // Esc: 閉じるのは呼び出し側の状態で（アンマウントで close する）
         e.preventDefault();
+        // 中のポップオーバーが開いていればそれだけ閉じる（Android の Chrome の戻るは閉じる要求 = keydown を通らずに
+        // cancel が来る。#320。デスクトップの Esc は上の keydown で cancel を止めるのでここには来ない）
+        if (ref.current?.querySelector('.popover:not([hidden])')) {
+          closeOverlayAsBack();
+          return;
+        }
         p.onClose();
       }}
     >

@@ -61,7 +61,8 @@ function TermCardBody({ view }: { view: TermCardView }) {
   const bodyRef = useRef<HTMLDivElement>(null);
   const prevRef = useRef<HTMLElement | null>(null);
   const titleId = useId();
-  const { setOpen } = useOverlay('term-card');
+  // 戻るで閉じるときは Esc と同じ（#320）
+  const { setOpen } = useOverlay('term-card', closeTerm);
 
   useLayoutEffect(() => {
     const dlg = ref.current;

@@ -163,6 +163,10 @@
 //                                          #242 のツールの結果を待つ間のカードは --ai（--flows なし）でだけ
 //   --icons                                #292 のボタンのアイコンの項目だけ（既定の検査。手元の確かめ用）
 //   --cross                                #217 の十字線の項目だけ（既定の検査・--flows とも。--flows は #201・#130・#207 のタッチの流れも。手元の確かめ用）
+//   --back                                 #320 の戻るの項目だけ（--flows にも入る）: 390×844・1440×900 で、設定・保存一覧・ⓘ の吹き出し・
+//                                          ⋯ のメニュー・説明カード・（PC）パレットを開く → 戻る 1 回でそれだけ閉じ URL・フォーカスが Esc と同じ、
+//                                          ×・Esc・外のクリック・メニューの項目で閉じた後は戻る 1 回でアプリを離れる、重なり・置き換え・
+//                                          進む・再読み込み（空振りの回数を出す）・共有 URL の #p=・履歴を積まない操作（AC-1-2〜AC-1-10）
 //   --url <base>                           dev サーバーを起こさず、その URL を使う（例 http://127.0.0.1:5173/?parts）
 //   --dom <file>                           body の下の要素の tag.class の並びを書き出す（DOM の変化の比較用）
 //   --shots <dir>                          スクリーンショットを書く（合成の板だけ。リポジトリに入れない）
@@ -228,6 +232,7 @@ const known = new Set([
   '--cross',
   '--quotes-only',
   '--icons',
+  '--back',
 ]);
 for (const a of args) {
   if (a.startsWith('--') && !known.has(a)) {
@@ -251,6 +256,7 @@ const aiOnly = flag('--ai');
 const crossOnly = flag('--cross');
 const iconsOnly = flag('--icons');
 const quotesOnly = flag('--quotes-only');
+const backOnly = flag('--back');
 const mode = parts ? 'parts' : 'next';
 
 // ---- 足 2 本の作業（版 2）: workspace-v2.json のタブ A だけ（fixture は変えない）
@@ -3666,6 +3672,525 @@ async function futSweep() {
   }
 }
 
+// ---- #320 第 1 弾: 戻る（スマホの戻るジェスチャー・ブラウザの戻る）で開いているものを一番上から 1 つ閉じる（--back と --flows）
+// 「アプリを離れる」= about:blank を開いてからアプリへ goto した文脈で、goBack の後の page.url() が about:blank。
+// 段の数は history.state.back（ui/next/backStack.ts が積む）を待って確かめる（固定の待ち時間に頼らない）
+
+/** about:blank → アプリ（戻る 1 回で about:blank に戻る文脈）。hash は共有 URL など */
+async function backFresh(page, hash = '') {
+  await page.goto('about:blank');
+  await page.goto(`${pageUrl('next')}${hash}`);
+  await waitReady(page, 'next');
+}
+
+/** history.state.back が n になるまで待つ（なれば true。ならなければ今の値を detail に） */
+async function backWait(page, n) {
+  const ok = await page
+    .waitForFunction((want) => (history.state?.back ?? 0) === want, n, { timeout: 3000 })
+    .then(() => true)
+    .catch(() => false);
+  const now = await page.evaluate(() => history.state?.back ?? null).catch(() => null);
+  return { ok, now };
+}
+
+/** 開いているもの（モーダル / 非モーダルの dialog・吹き出し・メニュー） */
+const backOpen = (page) =>
+  page.evaluate(() => {
+    const out = [];
+    for (const d of document.querySelectorAll('dialog[open]')) out.push(`dialog.${d.className}`);
+    for (const _ of document.querySelectorAll('.popover:not([hidden])')) out.push('popover');
+    for (const _ of document.querySelectorAll('[role="menu"]')) out.push('menu');
+    return out;
+  });
+
+/** フォーカスの印（要素・名前・属する所） */
+const backFocus = (page) =>
+  page.evaluate(() => {
+    const a = document.activeElement;
+    if (!a || a === document.body) return 'body';
+    const host = a.closest('dialog, section, header');
+    return `${a.tagName.toLowerCase()}.${a.className}|${a.getAttribute('aria-label') ?? ''}|${host ? `${host.tagName.toLowerCase()}.${host.className}` : ''}`;
+  });
+
+/** 戻る 1 回（同じ文書の移動も、about:blank への移動も） */
+async function backGo(page) {
+  await page.goBack({ timeout: 5000 }).catch(() => null);
+  await page.waitForTimeout(150);
+}
+
+/** 戻る 1 回でアプリを離れるか */
+async function backLeaves(page) {
+  await backGo(page);
+  return page.url() === 'about:blank';
+}
+
+/** 外側のクリック: 押しても何も起きない所（パネル / トップバーの見出し）の中心 */
+async function backOutside(page) {
+  const pt = await page.evaluate(() => {
+    for (const el of document.querySelectorAll('.panel-head h2, header.top .brand')) {
+      const r = el.getBoundingClientRect();
+      if (r.width === 0 || r.height === 0) continue;
+      const x = r.left + Math.min(r.width / 2, 20);
+      const y = r.top + r.height / 2;
+      if (x < 0 || y < 0 || x > innerWidth || y > innerHeight) continue;
+      const hit = document.elementFromPoint(x, y);
+      if (!hit || !(hit === el || el.contains(hit))) continue;
+      return { x, y };
+    }
+    return null;
+  });
+  if (pt) await page.mouse.click(pt.x, pt.y);
+  return pt !== null;
+}
+
+/**
+ * 戻るの項目（AC-1-2〜AC-1-10）。vp = 390×844 / 1440×900（パレット・テーマのメニュー・市場の切替は PC だけ）
+ */
+async function backFlows(vp) {
+  const phone = vp.width <= PHONE_MAX;
+  const tag = `#320 ${vp.width}x${vp.height}`;
+  const ctx = await newContext(vp, { [WORKSPACE_KEY]: twoLegs });
+  const page = await ctx.newPage();
+  const errors = [];
+  page.on('pageerror', (e) => errors.push(e.message));
+
+  const HINT = 'section.scenario .panel-head .hintbtn';
+  const items = [
+    {
+      name: '設定（ダイアログ）',
+      open: () => openFromMore(page, '設定…', SET),
+      sel: SET,
+      x: `${SET} .sheet-head button[aria-label="閉じる"]`,
+    },
+    {
+      name: '保存一覧（ダイアログ）',
+      open: () => openFromMore(page, '保存一覧', BOOK),
+      sel: BOOK,
+      x: `${BOOK} .sheet-head button[aria-label="閉じる"]`,
+    },
+    {
+      name: 'シナリオの ⓘ の吹き出し',
+      prep: () => (phone ? setShell(page, 'scenario', 'full') : null),
+      open: () => page.click(HINT),
+      sel: 'section.scenario .panel-head .popover:not([hidden])',
+      outside: true,
+    },
+    {
+      name: 'トップバーの ⋯ のメニュー',
+      open: () => page.click(MORE),
+      sel: 'header.top > .menu-wrap [role="menu"]',
+      outside: true,
+    },
+    {
+      name: '説明カード（ⓘ の「用語:」）',
+      prep: () => (phone ? setShell(page, 'scenario', 'full') : null),
+      open: async () => {
+        await page.click(HINT);
+        await page.click('section.scenario .term-links .term-link[aria-label="用語: スキュー Δs"]');
+      },
+      sel: TERM_CARD,
+      x: `${TERM_CARD} .tc-head button[aria-label="閉じる"]`,
+      outside: 'card',
+    },
+  ];
+  if (!phone) items.push({ name: 'コマンドパレット', open: () => openPalette(page), sel: PALETTE });
+
+  for (const it of items) {
+    const label = `${tag} ${it.name}`;
+    // (1) Esc で閉じたときのフォーカス・Esc の後の戻る 1 回で離れる（AC-1-4）
+    await backFresh(page);
+    await it.prep?.();
+    const url0 = page.url();
+    await it.open();
+    await page.waitForSelector(it.sel, { timeout: 3000 }).catch(() => {});
+    const d1 = await backWait(page, 1);
+    await page.keyboard.press('Escape');
+    await page.waitForSelector(it.sel, { state: 'detached', timeout: 3000 }).catch(() => {});
+    await page
+      .waitForFunction((s) => !document.querySelector(s), it.sel, { timeout: 3000 })
+      .catch(() => {});
+    const escFocus = await backFocus(page);
+    const e0 = await backWait(page, 0);
+    check(
+      `AC-1-4 ${label}: 開いて back 1 → Esc で閉じて back 0 → 戻る 1 回でアプリを離れる`,
+      d1.ok && e0.ok && (await backLeaves(page)),
+      `back ${d1.now} → ${e0.now}`,
+    );
+
+    // (2) 開く → 戻る 1 回でそれだけ閉じ、離れず URL 同じ・フォーカスは Esc と同じ → もう 1 回で離れる（AC-1-2）
+    await backFresh(page);
+    await it.prep?.();
+    await it.open();
+    await page.waitForSelector(it.sel, { timeout: 3000 }).catch(() => {});
+    const o1 = await backWait(page, 1);
+    const opened = (await backOpen(page)).length;
+    await backGo(page);
+    await page
+      .waitForFunction((s) => !document.querySelector(s), it.sel, { timeout: 3000 })
+      .catch(() => {});
+    const left = await backOpen(page);
+    const url1 = page.url();
+    const focus = await backFocus(page);
+    const b0 = await backWait(page, 0);
+    check(
+      `AC-1-2 ${label}: 戻る 1 回でそれだけ閉じ、アプリに留まり URL が同じ・フォーカスが Esc と同じ`,
+      o1.ok && opened > 0 && left.length === 0 && url1 === url0 && focus === escFocus && b0.ok,
+      `開いて back ${o1.now}・閉じた後 ${left.join(',') || 'なし'}・URL ${url1 === url0 ? '同じ' : url1}・フォーカス ${focus === escFocus ? '同じ' : `${focus} ≠ Esc ${escFocus}`}`,
+    );
+    check(`AC-1-2 ${label}: もう 1 回の戻るでアプリを離れる`, await backLeaves(page));
+
+    // (3) × で閉じた後の戻る 1 回で離れる（AC-1-4）
+    if (it.x) {
+      await backFresh(page);
+      await it.prep?.();
+      await it.open();
+      await page.waitForSelector(it.sel, { timeout: 3000 }).catch(() => {});
+      await backWait(page, 1);
+      await page.click(it.x);
+      const z = await backWait(page, 0);
+      check(
+        `AC-1-4 ${label}: × で閉じて back 0 → 戻る 1 回でアプリを離れる`,
+        z.ok && (await backLeaves(page)),
+        `back ${z.now}`,
+      );
+    }
+    // (4) 外のクリックで閉じた後（AC-1-4）
+    if (it.outside) {
+      await backFresh(page);
+      await it.prep?.();
+      await it.open();
+      await page.waitForSelector(it.sel, { timeout: 3000 }).catch(() => {});
+      await backWait(page, 1);
+      let clicked = true;
+      if (it.outside === 'card') await page.mouse.click(4, vp.height - 4);
+      else clicked = await backOutside(page);
+      await page
+        .waitForFunction((s) => !document.querySelector(s), it.sel, { timeout: 3000 })
+        .catch(() => {});
+      const closed = (await page.$(it.sel)) === null;
+      const z = await backWait(page, 0);
+      check(
+        `AC-1-4 ${label}: 外のクリックで閉じて back 0 → 戻る 1 回でアプリを離れる`,
+        clicked && closed && z.ok && (await backLeaves(page)),
+        `${clicked ? '' : '外の点が無い・'}${closed ? '' : '閉じない・'}back ${z.now}`,
+      );
+    }
+  }
+
+  // AC-1-4 メニューの項目を選ぶ: PC はテーマのメニューの「ダーク」、スマホは ⋯ > 設定… → ×
+  await backFresh(page);
+  if (!phone) {
+    await page.click('button[aria-label="テーマ"]');
+    await backWait(page, 1);
+    await page.click('[role="menuitemradio"]:has-text("ダーク")');
+    const z = await backWait(page, 0);
+    check(
+      `AC-1-4 ${tag} テーマのメニューの「ダーク」を選ぶ → back 0 → 戻る 1 回でアプリを離れる`,
+      z.ok && (await backLeaves(page)),
+      `back ${z.now}`,
+    );
+  } else {
+    await openFromMore(page, '設定…', SET);
+    const s1 = await backWait(page, 1);
+    await page.click(`${SET} .sheet-head button[aria-label="閉じる"]`);
+    const z = await backWait(page, 0);
+    check(
+      `AC-1-4 ${tag} ⋯ の「設定…」を選ぶ（メニュー → ダイアログで back 1）→ × → 戻る 1 回でアプリを離れる`,
+      s1.ok && z.ok && (await backLeaves(page)),
+      `back ${s1.now} → ${z.now}`,
+    );
+  }
+
+  // AC-1-3 重なり: 保存一覧 → 見出しの ⓘ → 戻る（吹き出しだけ）→ 戻る（ダイアログ）→ 戻る（離れる）
+  {
+    await backFresh(page);
+    await openFromMore(page, '保存一覧', BOOK);
+    await page.click(`${BOOK} .sheet-head .hintbtn`);
+    const two = await backWait(page, 2);
+    await backGo(page);
+    const pop1 = await page.$(`${BOOK} .sheet-head .popover:not([hidden])`);
+    const dlg1 = await page.$(BOOK);
+    const one = await backWait(page, 1);
+    await backGo(page);
+    await page.waitForSelector(BOOK, { state: 'detached', timeout: 3000 }).catch(() => {});
+    const dlg0 = await page.$(BOOK);
+    const zero = await backWait(page, 0);
+    check(
+      `AC-1-3 ${tag} 保存一覧 → ⓘ（back 2）→ 戻るで吹き出しだけ閉じる → 戻るでダイアログ → 戻るでアプリを離れる`,
+      two.ok &&
+        pop1 === null &&
+        dlg1 !== null &&
+        one.ok &&
+        dlg0 === null &&
+        zero.ok &&
+        (await backLeaves(page)),
+      `back ${two.now} → ${one.now} → ${zero.now}`,
+    );
+  }
+
+  // AC-1-5 (a) 吹き出し A を開いたまま別の ⓘ B → 戻る 1 回で何も開いていない → もう 1 回で離れる
+  {
+    await backFresh(page);
+    // スマホはシートを半分（peek）にして、舞台の ⓘ とシナリオの ⓘ が同時に見える状態で
+    if (phone) await setShell(page, 'scenario', 'peek');
+    await page.click(HINT);
+    await backWait(page, 1);
+    // B: 見えていて押せる別の ⓘ。押したものの名前を detail に出す
+    const B_SEL = '.pop-wrap > button.hintbtn';
+    const b = await page.evaluate(
+      ({ hint, sel }) => {
+        const a = document.querySelector(hint);
+        const all = [...document.querySelectorAll(sel)];
+        const hit = all.find((b) => {
+          if (b === a || b.closest('dialog')) return false;
+          const r = b.getBoundingClientRect();
+          if (r.width === 0 || r.height === 0) return false;
+          const x = r.left + r.width / 2;
+          const y = r.top + r.height / 2;
+          if (x < 0 || y < 0 || x > innerWidth || y > innerHeight) return false;
+          const hit = document.elementFromPoint(x, y);
+          return hit !== null && (hit === b || b.contains(hit));
+        });
+        return hit
+          ? { index: all.indexOf(hit), name: hit.getAttribute('aria-label') ?? hit.textContent }
+          : null;
+      },
+      { hint: HINT, sel: B_SEL },
+    );
+    const bIndex = b ? b.index : -1;
+    if (b) await page.locator(B_SEL).nth(b.index).click();
+    const bOpen = (await backOpen(page)).filter((s) => s === 'popover').length;
+    const one = await backWait(page, 1);
+    await backGo(page);
+    const left = await backOpen(page);
+    const zero = await backWait(page, 0);
+    check(
+      `AC-1-5(a) ${tag} 吹き出し A → 別の ⓘ B（back 1 のまま）→ 戻る 1 回で何も開いていない → もう 1 回で離れる`,
+      bIndex >= 0 &&
+        bOpen === 1 &&
+        one.ok &&
+        left.length === 0 &&
+        zero.ok &&
+        (await backLeaves(page)),
+      `${b ? `B「${b.name}」・` : '別の ⓘ が見えない・'}吹き出し ${bOpen}・back ${one.now} → ${zero.now}・残り ${left.join(',') || 'なし'}`,
+    );
+  }
+
+  // AC-1-5 (b) PC: パレットから「設定…」→ 戻る 1 回で設定が閉じる → もう 1 回で離れる
+  if (!phone) {
+    await backFresh(page);
+    await openPalette(page);
+    await page.keyboard.type('設定');
+    await page.waitForTimeout(100);
+    await page.keyboard.press('Enter');
+    const shown = await page
+      .waitForSelector(SET, { timeout: 3000 })
+      .then(() => true)
+      .catch(() => false);
+    const one = await backWait(page, 1);
+    await backGo(page);
+    await page.waitForSelector(SET, { state: 'detached', timeout: 3000 }).catch(() => {});
+    const closed = (await page.$(SET)) === null && (await page.$(PALETTE)) === null;
+    const zero = await backWait(page, 0);
+    check(
+      `AC-1-5(b) ${tag} パレット → 「設定…」（back 1）→ 戻る 1 回で設定が閉じる → もう 1 回で離れる`,
+      shown && one.ok && closed && zero.ok && (await backLeaves(page)),
+      `${shown ? '' : '設定が開かない・'}back ${one.now} → ${zero.now}`,
+    );
+  }
+
+  // AC-1-6 進む: 設定 → 戻る → 進む → 何も開かない・URL 同じ → 戻る 1 回で離れる
+  {
+    await backFresh(page);
+    const url0 = page.url();
+    await openFromMore(page, '設定…', SET);
+    await backWait(page, 1);
+    await backGo(page);
+    await page.waitForSelector(SET, { state: 'detached', timeout: 3000 }).catch(() => {});
+    await page.goForward({ timeout: 5000 }).catch(() => null);
+    await page.waitForTimeout(300);
+    const zero = await backWait(page, 0);
+    const left = await backOpen(page);
+    check(
+      `AC-1-6 ${tag} 設定 → 戻る → 進む: 何も開かず URL 同じ（back 0 に戻す）→ 戻る 1 回で離れる`,
+      left.length === 0 && page.url() === url0 && zero.ok && (await backLeaves(page)),
+      `back ${zero.now}・開いている ${left.join(',') || 'なし'}`,
+    );
+  }
+
+  // AC-1-7 再読み込み: 設定を開いたまま再読み込み → 何も開いていない → 戻るを最大 3 回（空振りの回数を出す）
+  {
+    await backFresh(page);
+    await openFromMore(page, '設定…', SET);
+    await backWait(page, 1);
+    await page.reload();
+    await waitReady(page, 'next');
+    const after = await backOpen(page);
+    const err0 = errors.length;
+    let leftAt = 0;
+    const stray = [];
+    for (let i = 1; i <= 3; i++) {
+      await backGo(page);
+      if (page.url() === 'about:blank') {
+        leftAt = i;
+        break;
+      }
+      await waitReady(page, 'next').catch(() => {});
+      const o = await backOpen(page);
+      if (o.length) stray.push(`${i} 回目: ${o.join(',')}`);
+    }
+    console.log(
+      `参考  AC-1-7 ${tag} 再読み込みの後、${leftAt ? `${leftAt} 回目の戻るで離れた（空振り ${leftAt - 1} 回）` : '3 回の戻るで離れない'}`,
+    );
+    check(
+      `AC-1-7 ${tag} 設定を開いたまま再読み込み → 何も開いていない → 戻る 3 回以内で離れる（開いた層・pageerror なし）`,
+      after.length === 0 && leftAt > 0 && stray.length === 0 && errors.length === err0,
+      `再読み込みの後 ${after.join(',') || 'なし'}・${leftAt ? `${leftAt} 回目で離れる` : '離れない'}${stray.length ? `・${stray.join(' / ')}` : ''}${errors.length > err0 ? `・pageerror ${errors.slice(err0).join(' / ')}` : ''}`,
+    );
+  }
+
+  // AC-1-8 共有 URL（#p=）: 消し込みが効く → 設定 → 戻る → URL に #p= が無い → 戻る 1 回で離れる
+  {
+    await backFresh(page, share.hash);
+    const erased = await page
+      .waitForFunction(() => location.hash === '', undefined, { timeout: 5000 })
+      .then(() => true)
+      .catch(() => false);
+    await openFromMore(page, '設定…', SET);
+    const one = await backWait(page, 1);
+    await backGo(page);
+    await page.waitForSelector(SET, { state: 'detached', timeout: 3000 }).catch(() => {});
+    const closed = (await page.$(SET)) === null;
+    const hash = new URL(page.url()).hash;
+    const zero = await backWait(page, 0);
+    check(
+      `AC-1-8 ${tag} 共有 URL の #p= が消える → 設定 → 戻るで閉じて URL に #p= が無い → 戻る 1 回で離れる`,
+      erased && one.ok && closed && hash === '' && zero.ok && (await backLeaves(page)),
+      `${erased ? '' : '#p= が残る・'}back ${one.now} → ${zero.now}・hash ${hash || 'なし'}`,
+    );
+  }
+
+  // AC-1-9 起動直後（何も操作しない）の history.length が goto 直後から増えない
+  {
+    await page.goto('about:blank');
+    await page.goto(pageUrl('next'));
+    const len0 = await page.evaluate(() => history.length);
+    await waitReady(page, 'next', { keepNotes: true });
+    await page.waitForTimeout(2000);
+    const len1 = await page.evaluate(() => history.length);
+    check(
+      `AC-1-9 ${tag} 起動して 2 秒（操作なし）: history.length が増えない`,
+      len1 === len0,
+      `${len0} → ${len1}`,
+    );
+  }
+
+  // AC-1-10 戻るで取り消さないもの: ステッパー・パネル（スマホはドック、PC は市場の切替）・足の詳細・トースト・作業の
+  // タブの切り替え → 履歴を積まない。作業のタブは 2 つ要るので workspace-v2.json のタブ 3 つ（作業の保存を入れ直して開く）
+  {
+    await page.evaluate(
+      ([k, v]) => localStorage.setItem(k, v),
+      [WORKSPACE_KEY, JSON.stringify({ ...fixture, active: 0 })],
+    );
+    await backFresh(page);
+    const len0 = await page.evaluate(() => history.length);
+    const done = [];
+    if (phone) await setShell(page, 'scenario', 'full');
+    await page
+      .click('section.scenario .stepper[data-name="dSigma"] > button:last-child')
+      .then(() => done.push('ステッパー'))
+      .catch(() => {});
+    if (phone) {
+      await setShell(page, 'positions', 'full').then((ok) => ok && done.push('ドックのタブ'));
+    } else {
+      await page
+        .click('[aria-label="市場"] button[aria-pressed="false"] >> nth=0')
+        .then(() => done.push('市場の切替'))
+        .catch(() => {});
+    }
+    await page
+      .click('section.positions li.leg:nth-child(1) .leg-main')
+      .then(() => done.push('足の詳細'))
+      .catch(() => {});
+    await page
+      .click('section.positions li.leg:nth-child(2) button[aria-label$="の足を削除"]')
+      .catch(() => {});
+    if (
+      await page
+        .waitForSelector('.toast:not(.note)', { timeout: 2000 })
+        .then(() => true)
+        .catch(() => false)
+    )
+      done.push('トースト');
+    await page
+      .click('.boxtabs [role="tab"]:nth-child(2)')
+      .then(() => done.push('作業のタブの切り替え'))
+      .catch(() => {});
+    await page.waitForTimeout(300);
+    const len1 = await page.evaluate(() => history.length);
+    const b = await page.evaluate(() => history.state?.back ?? null);
+    check(
+      `AC-1-10 ${tag} ${done.join('・')} の後も history.length が同じ → 戻る 1 回で離れる`,
+      done.length === 5 && len1 === len0 && b === 0 && (await backLeaves(page)),
+      `${len0} → ${len1}・back ${b}・行った操作 ${done.length} / 5`,
+    );
+  }
+
+  // 遅れて届く popstate（UI で閉じた後始末の go(−1)）がフォーカスを奪わない: go を 300ms 遅らせ、⋯ を Esc で閉じた直後
+  // （popstate の前）にシナリオの ΔX の数値入力へ入る → popstate の後も入力欄が開いたままでフォーカスがそこにある
+  {
+    const late = await newContext(vp, { [WORKSPACE_KEY]: twoLegs });
+    await late.addInitScript(() => {
+      window.__pops = 0;
+      const go = history.go.bind(history);
+      history.go = (n) => setTimeout(() => go(n), 300);
+      addEventListener('popstate', () => {
+        window.__pops++;
+      });
+    });
+    const lp = await late.newPage();
+    await lp.goto(pageUrl('next'));
+    await waitReady(lp, 'next');
+    if (phone) await setShell(lp, 'scenario', 'peek');
+    const val = 'section.scenario .stepper[data-name="dX"] > .val';
+    await lp.click(MORE);
+    await lp
+      .waitForSelector('header.top > .menu-wrap [role="menu"]', { timeout: 3000 })
+      .catch(() => {});
+    await lp.keyboard.press('Escape');
+    const before = await lp.evaluate(() => window.__pops);
+    await lp.focus(val);
+    await lp.keyboard.press('Enter');
+    const opened = await lp
+      .waitForSelector(`${val} input`, { timeout: 2000 })
+      .then(() => true)
+      .catch(() => false);
+    const popped = await lp
+      .waitForFunction(() => window.__pops > 0, undefined, { timeout: 3000 })
+      .then(() => true)
+      .catch(() => false);
+    await lp.waitForTimeout(150);
+    const inInput = await lp.evaluate(
+      (q) => document.activeElement?.matches(q) === true,
+      `${val} input`,
+    );
+    const back = await lp.evaluate(() => history.state?.back ?? null);
+    check(
+      `${tag} ⋯ を Esc で閉じた直後に数値入力へ入る → 遅れて届く popstate の後も入力欄にフォーカス`,
+      before === 0 && opened && popped && inInput && back === 0,
+      `popstate ${before === 0 ? '入力の後' : '入力の前'}・入力欄 ${opened ? 'あり' : 'なし'}・フォーカス ${inInput ? '入力欄' : '外'}・back ${back}`,
+    );
+    await late.close();
+  }
+
+  check(
+    `${tag} 戻るの手順の間に pageerror なし`,
+    errors.length === 0,
+    errors.slice(0, 3).join(' / '),
+  );
+  await ctx.close();
+}
+
 // ---- 手順（AC-11・AC-12）
 const results = [];
 function check(name, ok, detail = '') {
@@ -3690,6 +4215,9 @@ async function runFlows() {
 
   // #301 保有の印（チップ・タブのメニュー・ポジションの ⋯・保存一覧の行。360px と PC）
   for (const vp of [{ width: 360, height: 780 }, pc]) await heldFlows(vp);
+
+  // #320 戻るで開いているものを 1 つ閉じる（--back だけでも流せる）
+  for (const vp of [phone, pc]) await backFlows(vp);
 
   // (a) 開いただけでは作業の保存を書き換えない・ドックのバッジ
   {
@@ -9148,13 +9676,16 @@ async function keyFlows(vp) {
       .then(() => true)
       .catch(() => false);
     const inInput = hasInput && (await activeIs(input));
+    const activeNow = await page.evaluate(
+      () => `${document.activeElement?.tagName.toLowerCase()}.${document.activeElement?.className}`,
+    );
     const r3 = await pressAll();
     await page.keyboard.press('Escape');
     await page.waitForTimeout(120);
     check(
       `#89 AC-A4(d) ${ref}${tag} ステッパーの数値入力の欄で 1・G・T が効かない`,
       inInput && r3.ok,
-      r3.detail,
+      `入力欄 ${hasInput ? 'あり' : 'なし'}・フォーカス ${inInput ? '入力欄' : activeNow}・${r3.detail}`,
     );
   }
 
@@ -13815,6 +14346,12 @@ try {
       await aiAskSweep();
       await aiToolPendingFlow();
     }
+  } else if (backOnly && !parts) {
+    for (const vp of [
+      { width: 390, height: 844 },
+      { width: 1440, height: 900 },
+    ])
+      await backFlows(vp);
   } else if (flows) await runFlows();
   else await measureAll();
 } finally {
