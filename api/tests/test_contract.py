@@ -54,6 +54,7 @@ def test_schema_files_are_relative_to_schema_dir():
         assert re.fullmatch(r"(tokyo|cm)/\w+\.json", rel.schema_file), rel.name
     assert contract.RELATIONS["atm_cm_iv"].schema_file == "cm/atm_cm_iv.json"
     assert contract.RELATIONS["atm_cm_daily"].schema_file == "cm/atm_cm_iv.json"
+    assert contract.RELATIONS["option_bars"].schema_file == "tokyo/option_price_hourly.json"
 
 
 def test_outputs_are_declared_queries():
@@ -65,6 +66,10 @@ def test_outputs_are_declared_queries():
         "day", "close_at", "iv30", "m1_last_trading_day", "m1_forward", "m2_last_trading_day", "m2_forward",
         "m1_iv", "m2_iv"]
     assert contract.RELATIONS["atm_cm_daily"].name == "atm_cm_iv"
+    # option_bars（#319）は表の列をそのまま返す（OUTPUTS に無い）
+    assert "option_bars" not in contract.OUTPUTS
+    assert contract.output_columns("option_bars") == contract.RELATIONS["option_bars"].columns
+    assert contract.RELATIONS["option_bars"].name == "option_price_hourly"
 
 
 def test_pinned_commit_format():

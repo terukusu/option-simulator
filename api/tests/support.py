@@ -120,6 +120,8 @@ class World:
         self.cm_daily: list[dict] = []
         # future_price_latest を範囲で読む行（created_at・price・price_time・contract_month。#190）
         self.fut: list[dict] = []
+        # option_price_hourly の行（last_trading_day・target_price・type と 12 列。#319）
+        self.opt: list[dict] = []
 
     def add(self, at, options, future_price, spot_price=None, rows_option=800, finished_after=40):
         """rows_option は latest_runs の行数（判定用の小さな板でも既定は 800 行として扱う）"""
@@ -208,6 +210,11 @@ class FakeRunner:
         if name == "trading_calendar":
             return [dict(r) for r in w.calendar]
         start, end = params["start_at"], params["end_at"]
+        if name == "option_bars":
+            return [{k: v for k, v in r.items() if k not in ("last_trading_day", "target_price", "type")}
+                    for r in sorted(w.opt, key=lambda r: r["started_at"])
+                    if r["last_trading_day"] == params["ltd"] and r["target_price"] == params["k"]
+                    and r["type"] == params["type"] and start <= r["started_at"] < end]
         if name == "atm_cm_iv":
             return cm_bars([p for p in w.cm if start <= p[0] < end], params["step"])
         if name == "atm_cm_daily":
@@ -275,6 +282,17 @@ def fut_bars(rows: list[dict], step: int) -> list[dict]:
                     "low": min(prices), "close": prices[-1], "last_at": max(p[1] for p in ps),
                     "contract_month": max(p[2]["contract_month"] for p in ps)})
     return out
+
+
+def opt_row(started_at: datetime, ltd=date(2026, 11, 12), k=30000, typ=2, mid=(100.0, 110.0, 95.0, 105.0),
+            bid=100, ask=110, bid_iv=20.0, ask_iv=21.0, trade=None, trade_iv=None,
+            last_at: datetime | None = None) -> dict:
+    """合成の option_price_hourly の 1 行（#319。架空の値）。mid = (始, 高, 安, 終)。None の mid は 4 つとも NULL"""
+    o, h, lo, c = mid if mid is not None else (None,) * 4
+    return {"last_trading_day": ltd, "target_price": k, "type": typ, "started_at": started_at, "mid_open": o,
+            "mid_high": h, "mid_low": lo, "mid_close": c, "bid_close": bid, "ask_close": ask,
+            "bid_iv_close": bid_iv, "ask_iv_close": ask_iv, "trade_close": trade, "iv_close": trade_iv,
+            "last_at": started_at + timedelta(minutes=59) if last_at is None else last_at}
 
 
 def cm_daily_row(at: datetime, iv30=20.0, f1=30000.0, l1=date(2026, 11, 12), f2=30010.0,

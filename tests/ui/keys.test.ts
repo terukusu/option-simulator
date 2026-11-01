@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { BOARD_PICK_LAYER } from '../../ui/view/backStack';
+import { BOARD_PICK_LAYER, OPT_CHART_LAYER } from '../../ui/view/backStack';
 import {
   CHART_KEY,
   editableTarget,
@@ -296,6 +296,15 @@ describe('#325 pickEscape（板から追加の帯を Esc で消す）', () => {
     expect(pickEscape(pe('Escape'), 'overlay:x')).toBe(false);
     expect(pickEscape(pe('Escape'), 'dialog:y')).toBe(false);
     expect(pickEscape(pe('Escape'), null)).toBe(false);
+  });
+
+  it('#319 銘柄の推移も同じ規則（層を渡す）: 一番上が推移の層のときだけ', () => {
+    expect(pickEscape(pe('Escape'), OPT_CHART_LAYER, OPT_CHART_LAYER)).toBe(true);
+    expect(pickEscape(pe('Escape'), BOARD_PICK_LAYER, OPT_CHART_LAYER)).toBe(false);
+    expect(pickEscape(pe('Escape'), OPT_CHART_LAYER)).toBe(false);
+    expect(pickEscape(pe('Escape', { editable: true }), OPT_CHART_LAYER, OPT_CHART_LAYER)).toBe(
+      false,
+    );
   });
 
   it('IME の変換中・部品が処理した Esc・他のキーは偽', () => {

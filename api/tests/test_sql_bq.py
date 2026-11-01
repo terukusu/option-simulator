@@ -8,6 +8,7 @@ CI では動かさない（BigQuery の認証が要る）。手元で（ADC。gc
 - 見積もり（total_bytes_processed）が 512 MiB 以下（atm_cm_iv・future_bars は 64 MiB 以下、atm_cm_daily は
   128 MiB 以下。値は -s で表示。PR に記録する）
 - 結果の列名・型が contract.py の宣言（集計するクエリは OUTPUTS）と一致（dry run の job.schema）
+- option_bars（#319 AC 3）は前月の取引最終日の銘柄の一生（101 日。パーティション 1 個）。上限は 64 MiB
 - atm_cm_iv（#79 AC6）・future_bars（#190 AC-3）は足ごとの最大の範囲（1m 3 日・1h 100 日・1d 400 日 + 読み足しの
   11 日）でも見る
 """
@@ -17,7 +18,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from simulator_api import atm_daily, atm_iv, bq, contract, future_bars
+from simulator_api import atm_daily, atm_iv, bq, contract, future_bars, option_bars
 from simulator_api import settings as st
 
 PROJECT = os.environ.get("OPTIONCHAN_BQ_PROJECT", "")
@@ -45,6 +46,8 @@ def params(name, now):
         return atm_iv_params("1h", now)
     if name == "future_bars":  # 1d の最大（400 日 + 読み足し。#190 AC-3）
         return future_bars_params("1d", now)
+    if name == "option_bars":
+        return option_bars_params(now)
     if name == "atm_cm_daily":  # 全期間（#152。確定した範囲の終わりまで）
         start_at, end_at = atm_daily.read_window(atm_daily.settled_end(now))
         return {"start_at": start_at, "end_at": end_at}
@@ -71,6 +74,16 @@ def future_bars_params(tf, now):
     req = atm_iv.AtmIvRequest(tf, end - timedelta(days=max_days), end)
     start_at, end_at, step, _ = future_bars.read_window(req, now)
     return {"start_at": start_at, "end_at": end_at, "step": step}
+
+
+def option_bars_params(now):
+    """前月（書き終わった最新のパーティション）の 1 日を取引最終日とする架空の銘柄（K・put）の一生。パーティションは
+    last_trading_day の月なので、日付・K は見積もりに効かない（月の 1 日でよい）"""
+    first = now.astimezone(option_bars.JST).date().replace(day=1)
+    ltd = (first - timedelta(days=1)).replace(day=1)
+    req = option_bars.OptionBarsRequest(ltd, 30000, 2, "1h")
+    start_at, end_at = option_bars.read_window(req)
+    return {"ltd": ltd, "k": req.k, "type": req.type, "start_at": start_at, "end_at": end_at}
 
 
 def dry_run(runner, name, query_params, label, record_property):
@@ -116,3 +129,7 @@ def test_future_bars_max_range_dry_run(runner, tf, record_property):
     days = (p["end_at"] - p["start_at"]).days
     dry_run(runner, "future_bars", p, f"future_bars {tf} {days} 日", record_property)
     assert runner.maximum_bytes_billed("future_bars") == 64 * MiB
+
+
+def test_option_bars_cap_is_64mib(runner):
+    assert runner.maximum_bytes_billed("option_bars") == 64 * MiB

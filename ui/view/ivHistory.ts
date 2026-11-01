@@ -600,6 +600,33 @@ export interface IvChartInput {
    * 描画域の clip で切る = 線の出し入れで軸を動かさない）
    */
   overlays?: readonly IvOverlay[];
+  /**
+   * 描かない足（#319 銘柄の推移の気配の無い足。足の index ごと、true の足はローソク・線を描かず縦軸の範囲に入れない。
+   * 線の区間は呼び出し側が segments で切る）。無ければ全部描く
+   */
+  skip?: readonly boolean[];
+  /**
+   * 足ごとの下 / 上の帯（#319 bid / ask の帯。null の足・segments の区間の境で切る塗りの path）。縦軸の範囲に入れる（見えて
+   * いる足だけ）
+   */
+  bands?: readonly IvBand[];
+  /** 足ごとの点（#319 約定の点。null の足は描かない）。縦軸の範囲に入れる（見えている足だけ） */
+  marks?: readonly IvMarks[];
+  /** 横線（#319 建値の線。シナリオの水準と同じ描き方で別のクラス）。縦軸の範囲に入れる。無ければ null */
+  level?: { cls: string; value: number } | null;
+}
+
+/** 帯の入力（cls = CSS のクラス。lo・hi は足の index ごとの値、無い足は null） */
+export interface IvBand {
+  cls: string;
+  lo: readonly (number | null)[];
+  hi: readonly (number | null)[];
+}
+
+/** 点の入力（cls = CSS のクラス。values は足の index ごとの値、無い足は null） */
+export interface IvMarks {
+  cls: string;
+  values: readonly (number | null)[];
 }
 
 /** 重ねる線の入力（cls = CSS のクラス。色は CSS だけ。width = 線の太さ px = SVG の stroke-width 属性。#214） */
@@ -631,16 +658,56 @@ export interface IvChartModel {
   scenarioY: number | null;
   /** 重ねる線の path（入力の overlays の順。見えている足 + 端の 1 本外だけ。値の無い足で切る。無ければ空文字） */
   overlays: { cls: string; d: string; width?: number }[];
+  /** 帯の塗りの path（入力の bands の順。無ければ空文字） */
+  bands: { cls: string; d: string }[];
+  /** 点の path（入力の marks の順。無ければ空文字） */
+  marks: { cls: string; d: string }[];
+  /** 横線（入力の level。無ければ null） */
+  level: { cls: string; y: number } | null;
 }
 
-/** [i0, i1] の足の安値〜高値（無ければ null） */
-function lowHigh(bars: readonly IvBar[], i0: number, i1: number): Domain | null {
+/** [i0, i1] の足の安値〜高値（skip の足は除く。無ければ null） */
+function lowHigh(
+  bars: readonly IvBar[],
+  i0: number,
+  i1: number,
+  skip?: readonly boolean[],
+): Domain | null {
   let lo = Number.POSITIVE_INFINITY;
   let hi = Number.NEGATIVE_INFINITY;
   for (let i = i0; i <= i1; i++) {
+    if (skip?.[i]) continue;
     const b = bars[i] as IvBar;
     if (b.l < lo) lo = b.l;
     if (b.h > hi) hi = b.h;
+  }
+  return lo <= hi ? [lo, hi] : null;
+}
+
+const finiteNum = (v: number | null | undefined): v is number =>
+  v !== null && v !== undefined && Number.isFinite(v);
+
+/** [i0, i1] の帯・点・横線の値を縦軸の範囲 base に足す（#319） */
+function widenBy(
+  base: Domain | null,
+  i0: number,
+  i1: number,
+  bands: readonly IvBand[],
+  marks: readonly IvMarks[],
+): Domain | null {
+  let lo = base ? base[0] : Number.POSITIVE_INFINITY;
+  let hi = base ? base[1] : Number.NEGATIVE_INFINITY;
+  const take = (v: number | null | undefined) => {
+    if (!finiteNum(v)) return;
+    if (v < lo) lo = v;
+    if (v > hi) hi = v;
+  };
+  for (let i = i0; i <= i1; i++) {
+    for (const b of bands) {
+      take(b.lo[i]);
+      take(b.hi[i]);
+    }
+    for (const m of marks) take(m.values[i]);
   }
   return lo <= hi ? [lo, hi] : null;
 }
@@ -657,12 +724,22 @@ export function ivChartModel(p: IvChartInput): IvChartModel {
   // 中心が表示範囲に入る足（線は端の 1 本外まで描いて切る）
   const i0 = Math.max(0, Math.ceil(viewport[0]));
   const i1 = Math.min(n - 1, Math.floor(viewport[1]));
-  const seen = lowHigh(bars, i0, i1) ?? lowHigh(bars, 0, n - 1);
-  // 縦軸: 見えている足の安値〜高値と、見えている「今」・シナリオの水準
+  const skip = p.skip;
+  const bandsIn = p.bands ?? [];
+  const marksIn = p.marks ?? [];
+  const extra = bandsIn.length > 0 || marksIn.length > 0;
+  // 見えている足（skip の足を除く）と帯・点。見えている所に何も無ければ全体
+  const seenAt = (a: number, b: number) => {
+    const d = lowHigh(bars, a, b, skip);
+    return extra ? widenBy(d, a, b, bandsIn, marksIn) : d;
+  };
+  const seen = seenAt(i0, i1) ?? seenAt(0, n - 1);
+  // 縦軸: 見えている足の安値〜高値と、見えている「今」・シナリオの水準・横線
   const now = p.now && p.now.index >= viewport[0] && p.now.index <= viewport[1] ? p.now : null;
   const scenario = p.scenario ?? null;
+  const levelIn = p.level ?? null;
   let base: Domain | null = seen;
-  for (const v of [now?.iv ?? null, scenario]) {
+  for (const v of [now?.iv ?? null, scenario, levelIn?.value ?? null]) {
     if (v === null || !Number.isFinite(v)) continue;
     base = base ? [Math.min(base[0], v), Math.max(base[1], v)] : [v, v];
   }
@@ -676,6 +753,7 @@ export function ivChartModel(p: IvChartInput): IvChartModel {
     const perBar = (range[1] - range[0]) / Math.max(viewport[1] - viewport[0], 1e-9);
     const bw = Math.min(Math.max(perBar * 0.7, 1), 14);
     for (let i = i0; i <= i1; i++) {
+      if (skip?.[i]) continue;
       const b = bars[i] as IvBar;
       const x = sx(i);
       const yo = sy(b.o);
@@ -749,6 +827,58 @@ export function ivChartModel(p: IvChartInput): IvChartModel {
     return o.width === undefined ? { cls: o.cls, d } : { cls: o.cls, d, width: o.width };
   });
 
+  // 帯（#319）: segments の区間ごとに、値のある足の連なりを上の線 → 下の線の逆順で閉じた塗りにする（見えている足 + 端の
+  // 1 本外だけ）。1 本だけの連なりは足の幅の矩形
+  const perBarPx = (range[1] - range[0]) / Math.max(viewport[1] - viewport[0], 1e-9);
+  const halfW = Math.min(Math.max(perBarPx * 0.35, 1), 7);
+  const bands = bandsIn.map((band) => {
+    let d = '';
+    const flush = (run: number[]) => {
+      if (run.length === 0) return;
+      if (run.length === 1) {
+        const i = run[0] as number;
+        const x = sx(i);
+        const top = sy(band.hi[i] as number);
+        const bottom = sy(band.lo[i] as number);
+        d += `M${r1(x - halfW)} ${r1(top)}H${r1(x + halfW)}V${r1(bottom)}H${r1(x - halfW)}Z`;
+        return;
+      }
+      d += run
+        .map((i, k) => `${k === 0 ? 'M' : 'L'}${r1(sx(i))} ${r1(sy(band.hi[i] as number))}`)
+        .join('');
+      for (let k = run.length - 1; k >= 0; k--) {
+        const i = run[k] as number;
+        d += `L${r1(sx(i))} ${r1(sy(band.lo[i] as number))}`;
+      }
+      d += 'Z';
+    };
+    for (const [a, b] of p.segments) {
+      if (b < i0 - 1 || a > i1 + 1) continue;
+      let run: number[] = [];
+      for (let i = Math.max(a, i0 - 1); i <= Math.min(b, i1 + 1); i++) {
+        if (finiteNum(band.lo[i]) && finiteNum(band.hi[i])) run.push(i);
+        else {
+          flush(run);
+          run = [];
+        }
+      }
+      flush(run);
+    }
+    return { cls: band.cls, d };
+  });
+  // 点（#319）: 見えている足の値のある所に半径 2.5 の円
+  const marks = marksIn.map((m) => {
+    let d = '';
+    for (let i = i0; i <= i1; i++) {
+      const v = m.values[i];
+      if (!finiteNum(v)) continue;
+      const x = r1(sx(i) - 2.5);
+      const y = r1(sy(v));
+      d += `M${x} ${y}a2.5 2.5 0 1 0 5 0a2.5 2.5 0 1 0 -5 0`;
+    }
+    return { cls: m.cls, d };
+  });
+
   const yVals = niceTicks(
     yDomain[0],
     yDomain[1],
@@ -777,6 +907,12 @@ export function ivChartModel(p: IvChartInput): IvChartModel {
     nowPt: now && n > 0 ? { x: r1(sx(now.index)), y: r1(sy(now.iv)) } : null,
     scenarioY: scenario !== null && Number.isFinite(scenario) && n > 0 ? r1(sy(scenario)) : null,
     overlays,
+    bands,
+    marks,
+    level:
+      levelIn !== null && Number.isFinite(levelIn.value) && n > 0
+        ? { cls: levelIn.cls, y: r1(sy(levelIn.value)) }
+        : null,
   };
 }
 
@@ -839,8 +975,10 @@ export function ivCrosshair(p: IvCrosshairInput): IvCrosshair | null {
   const x = r1(linear(p.viewport, range)(c));
   const clamp = (v: number, lo: number, hi: number) => Math.min(Math.max(v, lo), Math.max(hi, lo));
   const yPx: Domain = [height - IV_MARGIN.bottom, IV_MARGIN.top];
+  // 足の値が無い（#319 銘柄の推移の IV の段の気配も約定 IV も無い足）ときは縦軸の中央
+  const yAt = Number.isFinite(b.c) ? b.c : (model.yDomain[0] + model.yDomain[1]) / 2;
   const y = r1(
-    clamp(p.y ?? linear(model.yDomain, yPx)(b.c), IV_MARGIN.top, height - IV_MARGIN.bottom),
+    clamp(p.y ?? linear(model.yDomain, yPx)(yAt), IV_MARGIN.top, height - IV_MARGIN.bottom),
   );
   const xText = ivTimeText(b.t, p.tf);
   const xw = r1(Math.min(labelPx(xText) + IV_TAG_PAD_X, width));

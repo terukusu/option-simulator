@@ -4,6 +4,8 @@
  * 純関数（Preact に依存しない）。部品は ui/next/Shell.tsx。
  */
 
+import type { OptTarget } from './optHistory';
+
 /** 幅の段階（ui/view/layout.ts の PHONE_QUERY・PC_QUERY） */
 export type Tier = 'phone' | 'tablet' | 'pc';
 /** ai = AI のチャット（#135。スマホ・タブレットはドックの 1 枚、PC は左の列（市場）を入れ替える = ShellState.left。#280） */
@@ -36,7 +38,8 @@ export const SMILE_VIEWS = [
   { value: 'smile', text: 'スマイル' },
   { value: 'fut', text: '先物' },
 ] as const;
-export type SmileView = (typeof SMILE_VIEWS)[number]['value'];
+/** opt = 銘柄の推移（#319。Seg の項目には無い。板の K・足の詳細から開く） */
+export type SmileView = (typeof SMILE_VIEWS)[number]['value'] | 'opt';
 /** 舞台のグラフの表示（凡例行の [線 | 面]。#88） */
 export const CHART_MODES = [
   { value: 'line', text: '線' },
@@ -65,6 +68,13 @@ export interface ShellState {
    * かつ sheet が hidden でない（shellReduce が保つ）
    */
   pick?: boolean;
+  /**
+   * 開いている銘柄の推移（#319。無い = 閉じている。保存しない）。開いている間は市場の列（PC）・スマイルのパネル（スマホ・
+   * タブレット）に銘柄のチャートを描き、市場の Seg はどれも選ばない
+   */
+  opt?: OptTarget;
+  /** 銘柄の推移を開く前の見え方（閉じたら戻す。#319） */
+  optPrev?: { panel: PanelId; sheet: SheetStage; left: LeftView };
 }
 
 export const INITIAL_SHELL: ShellState = { panel: 'positions', sheet: 'peek', market: 'board' };
@@ -109,7 +119,14 @@ export type ShellAction =
   /** 戻る / Esc で帯を消す（#325）。ポジションへ戻る（足は変えない） */
   | { type: 'pickBack' }
   /** タブの切り替え・PC への幅の変化で帯だけを消す（#325。パネルはそのまま） */
-  | { type: 'pickEnd' };
+  | { type: 'pickEnd' }
+  /**
+   * 銘柄の推移を開く（#319。板の K のポップオーバー・足の詳細）。PC = 左の列を市場に、スマホ・タブレット = スマイルの
+   * パネル（hidden なら peek）。開く前の見え方を控える（開いたまま別の銘柄を開いたら最初の控えのまま）
+   */
+  | { type: 'opt'; target: OptTarget; tier: Tier }
+  /** 銘柄の推移を閉じる（× / Esc / 戻る。#319）。開く前の見え方に戻す */
+  | { type: 'optClose' };
 
 /**
  * ドックのボタンの文字と読み上げの名前（#130。smile のパネルは IV 推移とスマイル。ラベルは「IV」）。アイコンは
@@ -152,6 +169,7 @@ const leftFor = (panel: PanelId, cur: LeftView): LeftView =>
  * smile / fut のときだけそれ（既定の board は IV 推移。#130・#190）
  */
 export function smileView(s: ShellState, tier: Tier): SmileView {
+  if (s.opt) return 'opt';
   if (s.market === 'fut') return 'fut';
   if (tier === 'pc') return s.market === 'iv' ? 'iv' : 'smile';
   return s.market === 'smile' ? 'smile' : 'iv';
@@ -179,6 +197,16 @@ export function ivVisible(s: ShellState, tier: Tier): boolean {
 /** 先物推移が見えているか（#190。条件は ivVisible と同じで smileView が fut） */
 export function futVisible(s: ShellState, tier: Tier): boolean {
   return smileShown(s, tier, 'fut');
+}
+
+/** 銘柄の推移が見えているか（#319。条件は ivVisible と同じで smileView が opt） */
+export function optVisible(s: ShellState, tier: Tier): boolean {
+  return smileShown(s, tier, 'opt');
+}
+
+/** 本体の data-market（#319: 銘柄の推移を開いている間は opt = PC は市場の列に section.smile を描く） */
+export function marketAttr(s: ShellState): string {
+  return s.opt ? 'opt' : s.market;
 }
 
 /**
@@ -247,12 +275,41 @@ function withoutPick(s: ShellState): ShellState {
   return rest;
 }
 
+/** 銘柄の推移を外した状態（#319。戻さない = 押した先を優先） */
+function withoutOpt(s: ShellState): ShellState {
+  if (!s.opt && !s.optPrev) return s;
+  const { opt: _, optPrev: __, ...rest } = s;
+  return rest;
+}
+
+/**
+ * 銘柄の推移（#319）を外す操作か: 市場の Seg・PC の左の列（AI）・板から追加・ドック。open は別のパネルを開くとき
+ * （PC は AI を開くとき）だけ。つまみ・グラフの表示などは外さない
+ */
+function dropsOpt(a: ShellAction): boolean {
+  switch (a.type) {
+    case 'market':
+    case 'left':
+    case 'pick':
+    case 'dock':
+      return true;
+    case 'open':
+      return a.tier === 'pc' ? a.panel === 'ai' : forTier(a.panel, a.tier) !== 'smile';
+    default:
+      return false;
+  }
+}
+
 /**
  * 変わらないときは同じ参照を返す（再描画しない）。板から追加の帯（#325）は、結果で panel が board でない・シートが
  * hidden になったら外す（ドックの別パネル・同じ [板] でシートを隠す・open で別パネル・つまみで隠す を 1 か所で。
  * 押した先を優先 = パネルはそのまま）。
  */
 export function shellReduce(s: ShellState, a: ShellAction): ShellState {
+  if (s.opt && dropsOpt(a)) {
+    // 銘柄の推移を外してから操作する（市場の Seg で同じ見え方を押しても推移を閉じる）
+    return shellReduce(withoutOpt(s), a);
+  }
   const next = reduce(s, a);
   if (next.pick === true && (next.panel !== 'board' || next.sheet === 'hidden')) {
     return withoutPick(next);
@@ -313,6 +370,23 @@ function reduce(s: ShellState, a: ShellAction): ShellState {
       return a.id === s.replayEvent ? s : { ...s, replayEvent: a.id };
     case 'smileEff':
       return a.on === (s.smileEff ?? false) ? s : { ...s, smileEff: a.on };
+    case 'opt': {
+      const optPrev = s.optPrev ?? { panel: s.panel, sheet: s.sheet, left: leftView(s) };
+      if (a.tier === 'pc') {
+        const base = { ...withoutPick(s), opt: a.target, optPrev };
+        return leftView(s) === 'ai' ? { ...base, left: 'market' } : base;
+      }
+      const sheet = s.sheet === 'hidden' ? 'peek' : s.sheet;
+      return { ...withoutPick(s), opt: a.target, optPrev, panel: 'smile', sheet };
+    }
+    case 'optClose': {
+      if (!s.opt) return s;
+      const prev = s.optPrev;
+      const rest = withoutOpt(s);
+      if (!prev) return rest;
+      const back: ShellState = { ...rest, panel: prev.panel, sheet: prev.sheet };
+      return prev.left === leftView(back) ? back : { ...back, left: prev.left };
+    }
     case 'left': {
       const cur = leftView(s);
       const left = a.left ?? (cur === 'ai' ? 'market' : 'ai');

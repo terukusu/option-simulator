@@ -6,6 +6,8 @@
 // 決まった関数なので、同じ要求には同じ応答）。Docker の context の許可リストの 1 本なので別ファイルにしない。
 // 先物推移（#190）の合成の応答も `/fixtures/future_bars?tf=&start=&end=` で配る（`/api/future_bars` と同じ形。架空の値。
 // 合成の板 latest の先物の値で終わる決まった関数。既定の 1 時間足の範囲に限月交代（取引最終日の 17:00）を 1 回含む）。
+// 銘柄の推移（#319）の合成の応答も `/fixtures/option_bars?ltd=&k=&type=&tf=` で配る（`/api/option_bars` と同じ形・同じ
+// 検査。架空の値 = 合成の先物と IV から Black-76 で作る。気配の無い約定だけの足の塊・まばらな約定・bid_iv だけ欠けた足を含む）。
 // 日次の値（#152）の合成の応答も `/fixtures/atm_daily` で配る（`/api/atm_daily` と同じ形。架空の値。種つき）。
 // AI の中継（#135）の偽の応答も `/fixtures/ai/status`・`/fixtures/ai/messages`（偽の SSE。Anthropic を呼ばない）で配る。
 // 画像の読み取り（#318）は `/fixtures/ai/read_positions`（合成の結果 SYNTH_READ_RESULT を返す。画像は読まずに捨てる）。
@@ -301,6 +303,199 @@ function buildSynthFutureBars(tf, range, now) {
     end: jstIso(Math.min(end, Math.floor(now))),
     last_at: lastAt === null ? null : jstIso(lastAt),
     bars: out.map((b) => ({ t: jstIso(b.key), o: b.o, h: b.h, l: b.l, c: b.c, m: b.m })),
+  };
+}
+
+// ---- 銘柄の推移の合成の応答（#319。架空の値）
+const OPTION_BARS_PATH = '/fixtures/option_bars';
+/** 1 銘柄が載る期間（取引最終日の何日前から。サーバーは 100 日前から読む） */
+const OPT_LIFE_DAYS = 60;
+/** 気配の無い約定だけの足の塊（急落の日の欠けの見本。この日の日中） */
+export const SYNTH_OPT_NOQUOTE_DAY = '2026-10-09';
+
+/** 標準正規の分布関数（Abramowitz–Stegun 7.1.26。表示用の合成の値なので精度は足りる） */
+function normCdf(x) {
+  const t = 1 / (1 + (0.3275911 * Math.abs(x)) / Math.SQRT2);
+  const y =
+    1 -
+    ((((1.061405429 * t - 1.453152027) * t + 1.421413741) * t - 0.284496736) * t + 0.254829592) *
+      t *
+      Math.exp(-(x * x) / 2);
+  return x >= 0 ? (1 + y) / 2 : (1 - y) / 2;
+}
+
+/** Black-76（金利 0）の値段 */
+function black76(f, k, years, sigma, call) {
+  const sd = sigma * Math.sqrt(Math.max(years, 1e-6));
+  const d1 = Math.log(f / k) / sd + sd / 2;
+  const d2 = d1 - sd;
+  return call ? f * normCdf(d1) - k * normCdf(d2) : k * normCdf(-d2) - f * normCdf(-d1);
+}
+
+/** 呼値（100 円以下 1 円、それより上 5 円。表示用の近似） */
+const tick = (v) => (v <= 100 ? 1 : 5);
+
+/**
+ * その分の気配（mid・bid・ask・bid_iv・ask_iv）と約定の候補。値段は合成の先物（futAt）と iv30 にスキューを足した IV から
+ * Black-76。0.5 円未満は気配なし
+ */
+function optQuoteAt(t, ltdClose, k, call, nowM) {
+  const f = futAt(t, nowM, nowM);
+  const years = (ltdClose - t) / (365 * DAY);
+  const atm = (ivAt(t) ?? 19) / 100;
+  const sigma = Math.max(0.05, atm * (1 - 0.9 * Math.log(k / f)));
+  const mid = black76(f, k, years, sigma, call);
+  if (!(mid >= 0.5)) return null;
+  const tk = tick(mid);
+  const half = Math.max(tk, mid * 0.03);
+  const bid = Math.max(tk, Math.floor((mid - half) / tk) * tk);
+  const ask = Math.ceil((mid + half) / tk) * tk;
+  const ivPt = sigma * 100;
+  return { mid: (bid + ask) / 2, bid, ask, bidIv: ivPt - 0.4, askIv: ivPt + 0.4, ivPt };
+}
+
+/** `?ltd=&k=&type=&tf=` を読む（サーバーの option_bars.parse_request と同じ検査。形が違えば null = 400） */
+export function optionBarsQuery(url) {
+  const q = new URLSearchParams(url.split('?')[1] ?? '');
+  const one = (name) => {
+    const v = q.getAll(name);
+    return v.length === 1 ? v[0] : null;
+  };
+  const ltd = one('ltd');
+  const k = one('k');
+  const type = one('type');
+  const tf = one('tf');
+  if (ltd === null || !/^\d{4}-\d{2}-\d{2}$/.test(ltd)) return null;
+  if (new Date(`${ltd}T00:00:00Z`).toISOString().slice(0, 10) !== ltd) return null;
+  if (k === null || !/^[1-9]\d{0,6}$/.test(k)) return null;
+  if (type !== 'call' && type !== 'put') return null;
+  if (tf !== '1h' && tf !== '1d') return null;
+  return { ltd, k: Number(k), type, tf };
+}
+
+/**
+ * `/api/option_bars` と同じ形の合成の応答（架空の値）。1 時間足は表の行と同じ作り（気配のある分の mid の始高安終、
+ * 足の終わりの bid / ask / IV、足の中の最後の約定）、日足は取引日に束ねる（サーバーの daily_bars と同じ規則）。
+ * 今（SYNTH_IV_LAST_AT）より後の足は無い
+ */
+const optCache = new Map();
+export function synthOptionBars(ltd, k, type, tf, now = SYNTH_IV_NOW) {
+  const key = `${ltd} ${k} ${type} ${tf} ${now}`;
+  if (!optCache.has(key)) {
+    if (optCache.size > 32) optCache.clear();
+    optCache.set(key, buildSynthOptionBars(ltd, k, type, tf, now));
+  }
+  return optCache.get(key);
+}
+
+function buildSynthOptionBars(ltd, k, type, tf, now) {
+  const ltdDay = Date.parse(`${ltd}T00:00:00Z`) / 1000 / DAY;
+  const ltdClose = ltdDay * DAY - JST + (15 * 60 + 45) * 60;
+  const start = Math.max((ltdDay - OPT_LIFE_DAYS) * DAY - JST, SYNTH_IV_FIRST);
+  const end = Math.min((ltdDay + 1) * DAY - JST, Math.floor(now / 60) * 60 - 50 * 60);
+  const call = type === 'call';
+  const nowM = futContractOf(SYNTH_IV_NOW);
+  const noQuoteFrom = Date.parse(`${SYNTH_OPT_NOQUOTE_DAY}T08:45:00+09:00`) / 1000;
+  const noQuoteTo = Date.parse(`${SYNTH_OPT_NOQUOTE_DAY}T15:45:00+09:00`) / 1000;
+  const hours = [];
+  let cur = null;
+  // 5 分ごとに見る（表示用。表は毎分の行から作る）
+  for (let t = start; t < end; t += 300) {
+    if (!inSession(t)) continue;
+    const h = Math.floor(t / 3600) * 3600;
+    if (!cur || cur.t !== h) {
+      cur = {
+        t: h,
+        o: null,
+        h: null,
+        l: null,
+        c: null,
+        q: null,
+        trade: null,
+        tradeIv: null,
+        last: t,
+      };
+      hours.push(cur);
+    }
+    cur.last = t;
+    const q = optQuoteAt(t, ltdClose, k, call, nowM);
+    if (!q) continue;
+    const noQuote = t >= noQuoteFrom && t < noQuoteTo;
+    // 約定はまばら（足の 3 割ほど。気配の無い塊の中は毎足）
+    const hn = Math.floor(t / 3600);
+    const traded = noQuote
+      ? Math.floor(t / 300) % 12 === 6
+      : Math.floor(t / 300) % 12 === 9 && hash01(hn + 11) < 0.3;
+    if (traded) {
+      const px = Math.max(1, Math.round(q.mid / tick(q.mid)) * tick(q.mid));
+      cur.trade = px;
+      cur.tradeIv = Math.round((q.ivPt + 0.6 * (hash01(hn + 29) - 0.5)) * 100) / 100;
+    }
+    if (noQuote) continue;
+    cur.o ??= q.mid;
+    cur.h = Math.max(cur.h ?? q.mid, q.mid);
+    cur.l = Math.min(cur.l ?? q.mid, q.mid);
+    cur.c = q.mid;
+    cur.q = q;
+  }
+  let lastAt = null;
+  const hourly = [];
+  for (const b of hours) {
+    const quoted = b.q !== null;
+    if (!quoted && b.trade === null) continue;
+    lastAt = b.last;
+    const hn = Math.floor(b.t / 3600);
+    // bid_iv だけ欠けた足（足の 5% ほど）
+    const bidIvGone = hash01(hn + 47) < 0.05;
+    hourly.push({
+      t: b.t,
+      o: quoted ? b.o : null,
+      h: quoted ? b.h : null,
+      l: quoted ? b.l : null,
+      c: quoted ? b.c : null,
+      bid: quoted ? b.q.bid : null,
+      ask: quoted ? b.q.ask : null,
+      bid_iv: quoted && !bidIvGone ? Math.round(b.q.bidIv * 100) / 100 : null,
+      ask_iv: quoted ? Math.round(b.q.askIv * 100) / 100 : null,
+      trade: b.trade,
+      trade_iv: b.trade === null ? null : b.tradeIv,
+    });
+  }
+  let bars = hourly;
+  if (tf === '1d') {
+    const days = new Map();
+    for (const b of hourly) {
+      const d = tradingDayStart(b.t);
+      if (!days.has(d)) days.set(d, []);
+      days.get(d).push(b);
+    }
+    bars = [...days.entries()].map(([d, bs]) => {
+      const q = bs.filter((b) => b.o !== null);
+      const tr = bs.filter((b) => b.trade !== null);
+      const last = q.at(-1);
+      return {
+        t: d,
+        o: q.length ? q[0].o : null,
+        h: q.length ? Math.max(...q.map((b) => b.h)) : null,
+        l: q.length ? Math.min(...q.map((b) => b.l)) : null,
+        c: last ? last.c : null,
+        bid: last ? last.bid : null,
+        ask: last ? last.ask : null,
+        bid_iv: last ? last.bid_iv : null,
+        ask_iv: last ? last.ask_iv : null,
+        trade: tr.length ? tr.at(-1).trade : null,
+        trade_iv: tr.length ? tr.at(-1).trade_iv : null,
+      };
+    });
+  }
+  return {
+    schema_version: 1,
+    tf,
+    ltd,
+    k,
+    type,
+    last_at: lastAt === null ? null : jstIso(lastAt),
+    bars: bars.map((b) => ({ ...b, t: jstIso(b.t) })),
   };
 }
 
@@ -838,6 +1033,18 @@ export function serveSyntheticFixtures() {
           res.setHeader('Content-Type', 'application/json; charset=utf-8');
           res.setHeader('Cache-Control', 'no-store');
           res.end(JSON.stringify(synthAtmDaily()));
+          return;
+        }
+        if (path === OPTION_BARS_PATH) {
+          const q = optionBarsQuery(req.url ?? '');
+          res.setHeader('Content-Type', 'application/json; charset=utf-8');
+          res.setHeader('Cache-Control', 'no-store');
+          if (!q) {
+            res.statusCode = 400;
+            res.end('{"error":"bad_request"}');
+            return;
+          }
+          res.end(JSON.stringify(synthOptionBars(q.ltd, q.k, q.type, q.tf)));
           return;
         }
         if (path === ATM_IV_PATH || path === FUTURE_BARS_PATH) {

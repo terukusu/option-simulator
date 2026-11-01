@@ -108,3 +108,40 @@ export const SYNTH_READ_RESULT: {
 };
 /** 読み取りの合成の応答の待ち（ms） */
 export const SYNTH_READ_DELAY_MS: number;
+
+/** 銘柄の推移の合成の気配の無い日（#319。この日の日中は約定だけの足） */
+export const SYNTH_OPT_NOQUOTE_DAY: string;
+
+/** `/fixtures/option_bars?ltd=&k=&type=&tf=` の検査（サーバーの parse_request と同じ。形が違えば null = 400） */
+export function optionBarsQuery(
+  url: string,
+): { ltd: string; k: number; type: 'call' | 'put'; tf: '1h' | '1d' } | null;
+
+/** `/api/option_bars` と同じ形の合成の応答（#319。架空の値） */
+export function synthOptionBars(
+  ltd: string,
+  k: number,
+  type: 'call' | 'put',
+  tf: '1h' | '1d',
+  now?: number,
+): {
+  schema_version: 1;
+  tf: string;
+  ltd: string;
+  k: number;
+  type: string;
+  last_at: string | null;
+  bars: {
+    t: string;
+    o: number | null;
+    h: number | null;
+    l: number | null;
+    c: number | null;
+    bid: number | null;
+    ask: number | null;
+    bid_iv: number | null;
+    ask_iv: number | null;
+    trade: number | null;
+    trade_iv: number | null;
+  }[];
+};

@@ -60,13 +60,13 @@ AI（ツール・文脈。docs/design.md 14 章）は上の欠けうる項目を
 - `api/tests/test_service.py` の `test_roundtrip_quotes_only_board`: `bigquery` の経路で option_price の欠けうる列が全部 NULL の行 → `/api/chain` が `latest` の板（全キーあり、欠けは null）。`DATA_SOURCE=quotes` の経路は `api/tests/test_quotes.py`
 - 画面の縦・横スクロールと折り返し: `npm run ui:check -- --quotes-only`（手元の検査。dev の `/fixtures/latest.json` を気配だけの板に差し替える）
 
-取引カレンダー（`/api/calendar`）は板とは別のエンドポイント。供給元が返せなければ 503 で、画面は同梱の版（`data/calendar/calendar.json`）を使う。`source` が `bigquery` 以外の API の版は、ヘッダの前提に「API の版」と出す。IV 推移（`/api/atm_iv`）・日次の値（`/api/atm_daily`）・先物推移（`/api/future_bars`。#190）は optionchan の表だけから作っており、他の供給元では 503（IV 推移・追証マップの過去の点・先物推移は「読めない」）。
+取引カレンダー（`/api/calendar`）は板とは別のエンドポイント。供給元が返せなければ 503 で、画面は同梱の版（`data/calendar/calendar.json`）を使う。`source` が `bigquery` 以外の API の版は、ヘッダの前提に「API の版」と出す。IV 推移（`/api/atm_iv`）・日次の値（`/api/atm_daily`）・先物推移（`/api/future_bars`。#190）・銘柄の推移（`/api/option_bars`。#319）は optionchan の表だけから作っており、他の供給元では 503（IV 推移・追証マップの過去の点・先物推移・銘柄の推移は「読めない」）。
 
 ## 3. API の供給元のアダプタ
 
 `api/src/simulator_api/sources.py`:
 
-- `DataSource`（Protocol）: `chain()`（`/api/chain`）・`calendar()`（`/api/calendar`）・`atm_iv(req)`・`atm_daily()`・`future_bars(req)`（#190）。失敗は `service.Unavailable`（503 `{"error":"unavailable"}`。理由の符号だけをログに）か任意の例外（503・ログは型だけ）
+- `DataSource`（Protocol）: `chain()`（`/api/chain`）・`calendar()`（`/api/calendar`）・`atm_iv(req)`・`atm_daily()`・`future_bars(req)`（#190）・`option_bars(req)`（#319）。失敗は `service.Unavailable`（503 `{"error":"unavailable"}`。理由の符号だけをログに）か任意の例外（503・ログは型だけ）
 - `BUILDERS`: 環境変数 `DATA_SOURCE` の値 → 実装（`bigquery` = `ChainService`、`file` = `FileChainService`、`quotes` = `QuotesFileService`）。キーは `settings.DATA_SOURCES` と同じ（`api/tests/test_sources.py`）。未知の値は起動時にエラー
 - `bigquery` の読み方・クエリ・キャッシュ・single-flight・`MAX_BYTES_BILLED` は #154 で変えていない（`docs/design.md` 7.2・7.3）
 

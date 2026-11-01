@@ -7,6 +7,8 @@ import { CROSS_TOUCH_GRAB_PX, crossTapAction } from '../../view/crosshair';
 import {
   IV_MIN_BARS,
   IV_PLOT_LABEL,
+  type IvBand,
+  type IvMarks,
   type IvMode,
   type IvOverlay,
   type IvSeries,
@@ -64,6 +66,16 @@ export interface IvPlotProps {
   height?: number;
   /** 十字線の横線と縦軸の札を描くか（#207。段の上の十字線のときは false = 縦線と横軸の札だけ。無ければ描く） */
   crossH?: boolean;
+  /** 描かない足（#319 銘柄の推移の気配の無い足。ivChartModel の skip） */
+  skip?: readonly boolean[];
+  /** 帯（#319 bid / ask。ローソク・線の下に塗る） */
+  bands?: readonly IvBand[];
+  /** 点（#319 約定。ローソク・線の上に描く） */
+  marks?: readonly IvMarks[];
+  /** 横線（#319 建値。無ければ描かない） */
+  level?: { cls: string; value: number } | null;
+  /** 足 0 本のときの文言（無ければ「データがありません」） */
+  emptyText?: string;
 }
 
 /**
@@ -91,6 +103,10 @@ function IvPlotView(p: IvPlotProps) {
         scenario: p.scenario,
         ...(p.series ? { series: p.series } : {}),
         ...(p.overlays ? { overlays: p.overlays } : {}),
+        ...(p.skip ? { skip: p.skip } : {}),
+        ...(p.bands ? { bands: p.bands } : {}),
+        ...(p.marks ? { marks: p.marks } : {}),
+        ...(p.level ? { level: p.level } : {}),
       }),
     [
       bars,
@@ -105,6 +121,10 @@ function IvPlotView(p: IvPlotProps) {
       p.scenario,
       p.series,
       p.overlays,
+      p.skip,
+      p.bands,
+      p.marks,
+      p.level,
     ],
   );
   const { range } = model;
@@ -257,6 +277,7 @@ function IvPlotView(p: IvPlotProps) {
             <rect x={range[0]} y={0} width={Math.max(range[1] - range[0], 0)} height={h} />
           </clipPath>
           <g clip-path={`url(#${clipId})`}>
+            {model.bands.map((b) => b.d && <path key={b.cls} class={b.cls} d={b.d} />)}
             {p.mode === 'candle' ? (
               <>
                 <path class="iv-bar up wick" d={paths.upWick || 'M0 0'} />
@@ -286,6 +307,7 @@ function IvPlotView(p: IvPlotProps) {
             {model.overlays.map(
               (o) => o.d && <path key={o.cls} class={o.cls} d={o.d} stroke-width={o.width} />,
             )}
+            {model.marks.map((m) => m.d && <path key={m.cls} class={m.cls} d={m.d} />)}
           </g>
           {rollMarks.map((r) => (
             <g key={`roll${r.x}`} class="fut-roll-mark">
@@ -304,6 +326,15 @@ function IvPlotView(p: IvPlotProps) {
               x2={range[1]}
               y1={model.scenarioY}
               y2={model.scenarioY}
+            />
+          )}
+          {model.level && (
+            <line
+              class={model.level.cls}
+              x1={range[0]}
+              x2={range[1]}
+              y1={model.level.y}
+              y2={model.level.y}
             />
           )}
           {model.nowPt && (
@@ -373,7 +404,9 @@ function IvPlotView(p: IvPlotProps) {
           </button>
         </div>
       )}
-      {p.status === 'empty' && <p class="iv-state iv-empty">データがありません</p>}
+      {p.status === 'empty' && (
+        <p class="iv-state iv-empty">{p.emptyText ?? 'データがありません'}</p>
+      )}
       {p.busy && (
         <span
           class={p.busy === 'left' ? 'iv-badge left iv-loading' : 'iv-badge iv-loading'}

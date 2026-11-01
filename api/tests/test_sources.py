@@ -10,7 +10,7 @@ from simulator_api import settings as st
 from simulator_api import sources
 from simulator_api.service import ChainService, FileChainService, QuotesFileService
 
-METHODS = ("chain", "calendar", "atm_iv", "atm_daily", "future_bars")
+METHODS = ("chain", "calendar", "atm_iv", "atm_daily", "future_bars", "option_bars")
 
 
 def test_builders_match_settings():

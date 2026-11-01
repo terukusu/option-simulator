@@ -764,3 +764,15 @@ table.board .legbadge.buy {
 .pick-band:empty {
   display: none;
 }
+
+/* K のポップオーバーの [call の推移] [put の推移]（#319） */
+table.board .popover.kpop > .kpop-opt {
+  display: flex;
+  gap: var(--sp-2);
+  margin-top: var(--sp-2);
+}
+
+table.board .popover.kpop > .kpop-opt .btn {
+  gap: 4px;
+  white-space: nowrap;
+}
