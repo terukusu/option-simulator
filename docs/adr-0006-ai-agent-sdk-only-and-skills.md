@@ -2,7 +2,7 @@
 
 - 状態: 採択（2026-10-21）
 - 日付: 2026-10-21
-- 関連: #221・EPIC #141・#186・#184・#135・#200、[ADR-0005](adr-0005-ai-oauth-via-agent-sdk.md)（一部改訂）、[ADR-0001](adr-0001-ai-credentials-secret-manager.md)（追補 #184・#186）、[ADR-0004](adr-0004-ai-spend-counter-firestore.md)、`docs/design.md` 13.4「AI の中継」・14 章、`docs/ai-advisor.md` 論点 7
+- 関連: #221・EPIC #141・#186・#184・#135・#200、[ADR-0005](adr-0005-ai-oauth-via-agent-sdk.md)（一部改訂）、[ADR-0001](adr-0001-ai-credentials-secret-manager.md)（追補 #184・#186）、[ADR-0004](adr-0004-ai-spend-counter-firestore.md)、`docs/design.md` 13.4「AI の中継」・14 章、`docs/ai-advisor.md` 論点 7。画像の読み取り（#318）も同じ送り口で送る: [ADR-0009](adr-0009-ai-image-read-positions.md)
 - 版: `claude-agent-sdk==0.2.160`、同梱の Claude Code CLI **2.1.283**（ADR-0005 と同じ。`uv.lock` で固定）
 
 ## 背景

@@ -15,6 +15,7 @@ import {
   TOTAL_LABEL,
 } from '../view/holdings';
 import { MARK_BASIS_TEXT } from '../view/mark';
+import { IMPORT_LABEL } from '../view/positionImport';
 import { Dialog } from './parts/Dialog';
 import { Icon } from './parts/Icon';
 import { ManualLinks } from './parts/ManualLinks';
@@ -40,6 +41,9 @@ export interface HoldingsDialogProps {
   onClose: () => void;
   onSwitchTab: (id: number) => void;
   onOpenNewTab: (id: string) => boolean;
+  /** 画像から建玉を読み取る…（#318。この一覧を閉じて読み取りのダイアログを開く）と押せない理由（null = 押せる） */
+  onImport: () => void;
+  importBlocked: string | null;
   /** 開いている間のトースト（モーダルの外は押せないので、ダイアログの中に描く） */
   toasts: ComponentChildren;
 }
@@ -151,6 +155,18 @@ function HoldingsBody(p: HoldingsDialogProps) {
           ? `今の板（${view.boardText}）・シナリオ 0 で計算。金額の単位: ${view.unitLabel}`
           : '板が無い（評価損益・必要証拠金・Δ は板を読むと出る）'}
       </p>
+      <div class="bk-ops hl-import">
+        <button
+          type="button"
+          class="btn sm"
+          data-act="import"
+          disabled={p.importBlocked !== null}
+          title={p.importBlocked ?? undefined}
+          onClick={p.onImport}
+        >
+          {IMPORT_LABEL}
+        </button>
+      </div>
       {view.empty ? (
         <p class="bk-note">{HOLDINGS_EMPTY_TEXT}</p>
       ) : (

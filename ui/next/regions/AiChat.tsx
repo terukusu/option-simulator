@@ -2,7 +2,7 @@ import type { ComponentChildren } from 'preact';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks';
 import type { AiStatus } from '../../../data/aiStream';
 import { pure } from '../../components/pure';
-import { type AiChatController, useAiChat } from '../../components/useAiChat';
+import { type AiChatController, type AiStatusView, useAiChat } from '../../components/useAiChat';
 import { downloadText } from '../../download';
 import type { AiAsk } from '../../view/aiAsk';
 import {
@@ -152,6 +152,8 @@ function AiPanelView(p: {
    * 終わりなどで、カードのボタンの押せる / 押せないを追従させる。値が変わったときだけ呼ぶ）
    */
   onPresetReason?: (reason: string | null) => void;
+  /** 読んだ AI の状態が変わったら知らせる（画像から建玉を読み取る #318 の入口の押せる / 押せない。null = まだ読んでいない） */
+  onStatus?: (status: AiStatusView) => void;
 }) {
   const chat = useAiChat(p.visible, p.base, p.env, p.tech, p.ivStats, p.evalSource);
   const gate = { hasChain: p.hasChain, legCount: p.legCount };
@@ -227,6 +229,9 @@ function AiPanelView(p: {
   useEffect(() => {
     p.onPresetReason?.(presetReason);
   }, [presetReason]);
+  useEffect(() => {
+    p.onStatus?.(chat.status);
+  }, [chat.status]);
   p.apiRef.current = {
     diagnose: chat.diagnose,
     ask: (a) => decide(a, askPlan(chat.state, { ...gate, status: chat.status })),

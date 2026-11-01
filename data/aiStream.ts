@@ -251,8 +251,15 @@ export const AI_STATUS_PATH = '/api/ai/status';
 
 const isAbort = (e: unknown) => e instanceof Error && e.name === 'AbortError';
 
-/** fetch の包み: リダイレクトは追わない（IAP のセッション切れ = session_expired）、失敗は network */
-async function fetchAi(fetchFn: typeof fetch, url: string, init: RequestInit): Promise<Response> {
+/**
+ * fetch の包み: リダイレクトは追わない（IAP のセッション切れ = session_expired）、失敗は network。画像の読み取り
+ * （data/aiReadPositions.ts。#318）も使う
+ */
+export async function fetchAi(
+  fetchFn: typeof fetch,
+  url: string,
+  init: RequestInit,
+): Promise<Response> {
   let res: Response;
   try {
     res = await fetchFn(url, { ...init, redirect: 'manual', credentials: 'same-origin' });
@@ -269,7 +276,8 @@ async function fetchAi(fetchFn: typeof fetch, url: string, init: RequestInit): P
 
 const contentType = (res: Response) => (res.headers.get('Content-Type') ?? '').toLowerCase();
 
-async function failure(res: Response): Promise<AiRequestError> {
+/** 中継の事前の失敗の応答（JSON の error・remaining_usd）→ AiRequestError（画像の読み取りも使う） */
+export async function aiFailure(res: Response): Promise<AiRequestError> {
   let code = 'unavailable';
   let remaining: number | null = null;
   try {
@@ -300,7 +308,7 @@ export async function postAiMessages(
     body: JSON.stringify(body),
     signal: signal ?? null,
   });
-  if (!res.ok) throw await failure(res);
+  if (!res.ok) throw await aiFailure(res);
   if (!contentType(res).startsWith('text/event-stream') || !res.body) {
     // 200 でも SSE でない = IAP のログインの画面など
     throw new AiRequestError(res.status, 'session_expired');
@@ -367,7 +375,7 @@ export async function getAiStatus(
   signal?: AbortSignal,
 ): Promise<AiStatus> {
   const res = await fetchAi(fetchFn, endpoint, { method: 'GET', signal: signal ?? null });
-  if (!res.ok) throw await failure(res);
+  if (!res.ok) throw await aiFailure(res);
   if (!contentType(res).startsWith('application/json')) {
     throw new AiRequestError(res.status, 'session_expired');
   }

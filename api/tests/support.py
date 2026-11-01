@@ -501,3 +501,50 @@ def log_records(out: str) -> list[dict]:
         except ValueError:
             continue
     return recs
+
+
+# ---- 画像の読み取り（#318）: テストの画像はここで組む（画像ファイルをリポジトリに置かない。値は架空）
+
+def _png_chunk(kind: bytes, data: bytes) -> bytes:
+    import struct
+    import zlib
+
+    return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data) & 0xFFFFFFFF)
+
+
+def png_bytes(w: int, h: int, rgb=(200, 30, 30), noise_seed: int | None = None, text: str | None = None) -> bytes:
+    """合成の PNG（8 bit RGB）。noise_seed で画素を種つき乱数に（圧縮が効かない = 大きい画像）。
+    text は tEXt のチャンクに入れる架空の文字列（ログ・応答に出ないことの確かめ用）"""
+    import random
+    import struct
+    import zlib
+
+    rnd = random.Random(noise_seed) if noise_seed is not None else None
+    row = bytes(rgb) * w
+    raw = b"".join(b"\x00" + (rnd.randbytes(3 * w) if rnd else row) for _ in range(h))
+    out = b"\x89PNG\r\n\x1a\n" + _png_chunk(b"IHDR", struct.pack(">IIBBBBB", w, h, 8, 2, 0, 0, 0))
+    if text is not None:
+        out += _png_chunk(b"tEXt", b"Comment\x00" + text.encode("latin-1"))
+    return out + _png_chunk(b"IDAT", zlib.compress(raw)) + _png_chunk(b"IEND", b"")
+
+
+def jpeg_bytes(w: int, h: int) -> bytes:
+    """寸法だけを持つ最小の JPEG の枠（SOI・APP0・SOF0・EOI。中継はマジックバイトと寸法しか見ない）"""
+    import struct
+
+    app0 = b"\xff\xe0" + struct.pack(">H", 16) + b"JFIF\x00\x01\x01\x00\x00\x01\x00\x01\x00\x00"
+    sof0 = b"\xff\xc0" + struct.pack(">HBHHB", 17, 8, h, w, 3) + b"\x01\x22\x00\x02\x11\x01\x03\x11\x01"
+    return b"\xff\xd8" + app0 + sof0 + b"\xff\xd9"
+
+
+def read_body(raw: bytes, media_type="image/png", **extra) -> dict:
+    import base64
+
+    return {"schema_version": 1, "image": {"media_type": media_type, "data": base64.b64encode(raw).decode("ascii")},
+            **extra}
+
+
+def read_post(client, body, headers=None, raw: bytes | None = None, content_type="application/json", **kw):
+    data = raw if raw is not None else json.dumps(body, ensure_ascii=False).encode("utf-8")
+    return client.post("/api/ai/read_positions", data=data, headers=SAME_ORIGIN if headers is None else headers,
+                       content_type=content_type, **kw)
