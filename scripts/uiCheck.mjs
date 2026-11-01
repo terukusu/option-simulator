@@ -163,9 +163,16 @@
 //                                          .btn.icon.sm が 32px 以上・中の svg.ic 18px・窓の中、IV 推移・先物推移のツールの行が切れず ⟳ が
 //                                          内容の箱の中（既定 / 実機相当の字幅）、指標の内訳・追証マップ・モデルの前提の行 ≥ 36px、
 //                                          1440×900 で 26px・svg 14px のまま。390 と 1440 で開閉の印が 90° 回り transition 0s
+//                                          ポップオーバー（#344 AC-2〜AC-4）: 360×780・390×844・360×520 のダークで Popover の吹き出し
+//                                          （市場ピル・警告のタグ・損益グラフの前提・グラフの設定・ピンの中身・パネルの見出しの ⓘ 11 個・
+//                                          指標のタイル 6 枚・保存一覧 / 保有ポジションの見出しの ⓘ）を 1 つずつ開き、左 ≥ 0・
+//                                          右 ≤ 窓の幅・幅 > 0・横スクロール 0（開けなければ理由つきで fail）。ポジションの ⓘ は .fit で
+//                                          ボタンの下（.above なら上）4 ± 1px、ボタンを含む祖先の scroll で閉じる（fit でない板の ⓘ は閉じない）
+//                                          900×1100・1440×900 は見えている吹き出しを全部開き、窓の中・窓に入る揃えがあるのに fit でない
 //   --ai                                   #135・#136 の項目だけ（既定の検査・--flows とも。手元の確かめ用）。
 //                                          #242 のツールの結果を待つ間のカードは --ai（--flows なし）でだけ
 //   --icons                                #292 のボタンのアイコンの項目だけ（既定の検査。手元の確かめ用）
+//   --popovers                             #344 のポップオーバーが窓の中の項目だけ（既定の検査にも入る。手元の確かめ用）
 //   --cross                                #217 の十字線の項目だけ（既定の検査・--flows とも。--flows は #201・#130・#207 のタッチの流れも。手元の確かめ用）
 //   --back                                 #320 の戻るの項目だけ（--flows にも入る）: 390×844・1440×900 で、設定・保存一覧・ⓘ の吹き出し・
 //                                          ⋯ のメニュー・説明カード・（PC）パレットを開く → 戻る 1 回でそれだけ閉じ URL・フォーカスが Esc と同じ、
@@ -288,6 +295,7 @@ const known = new Set([
   '--pick',
   '--shapes',
   '--import',
+  '--popovers',
 ]);
 for (const a of args) {
   if (a.startsWith('--') && !known.has(a)) {
@@ -318,6 +326,7 @@ const tabsOnly = flag('--tabs');
 const pickOnly = flag('--pick');
 const shapesOnly = flag('--shapes');
 const importOnly = flag('--import');
+const popoversOnly = flag('--popovers');
 const mode = parts ? 'parts' : 'next';
 
 // ---- 足 2 本の作業（版 2）: workspace-v2.json のタブ A だけ（fixture は変えない）
@@ -1618,6 +1627,8 @@ async function measureAll() {
     await iconSweep();
     // ギリシャ文字のフォント（#324 AC-4）
     await fontSweep();
+    // ポップオーバーが窓の中（#344 AC-2〜AC-4）
+    await popoverSweep();
   }
   // 旧のクラス名（#91・EPIC #92 の終了条件 8）: report を通ったすべての状態の合計
   console.log(
@@ -18115,6 +18126,450 @@ async function optFlows(vp) {
   await ctx.close();
 }
 
+// ---- ポップオーバーが窓の中（#344 AC-2〜AC-4）。360×780・390×844（と上に開く 360×520）のダークで、Popover を使う吹き出しを 1 つずつ開き、
+// .popover の左 ≥ 0・右 ≤ 窓の幅（0.5px の許し）・幅 > 0・ページの横スクロール 0。開けないものも fail で理由を出す
+// （黙って飛ばさない）。900×1100・1440×900 は見えている全部を開き、窓に入る揃えがあるのに fit（窓の中央に跳ぶ）なら NG。
+// ポジションの ⓘ は .fit（左右どちらに揃えても入らない）でボタンの下 4 ± 1px（.above なら上）、
+// fit の吹き出しはボタンを含む祖先（section.positions）の scroll で閉じ（ボタンを含まない .panel-body では閉じない）、
+// fit でないもの（板の ⓘ）は閉じない
+const popStats = { pass: 0, total: 0 };
+const POP_SIZES = [
+  [360, 780],
+  [390, 844],
+  // 背の低い窓: ポジションの peek の ⓘ が上に開く（.fit.above）
+  [360, 520],
+];
+
+/** 開いている Popover（aria-expanded のボタンの aria-controls）の矩形・クラスとボタンの .pop-wrap の矩形 */
+function popOpenState(page, btnSel) {
+  return page.evaluate((sel) => {
+    const btn = [...document.querySelectorAll(sel)].find((b) => b.getClientRects().length > 0);
+    if (!btn) return { err: 'ボタンが無い' };
+    const pop = document.getElementById(btn.getAttribute('aria-controls') ?? '');
+    if (!pop) return { err: '吹き出しが無い' };
+    const r = pop.getBoundingClientRect();
+    const w = btn.closest('.pop-wrap')?.getBoundingClientRect();
+    return {
+      expanded: btn.getAttribute('aria-expanded') === 'true',
+      hidden: pop.hidden,
+      left: r.left,
+      right: r.right,
+      top: r.top,
+      bottom: r.bottom,
+      width: r.width,
+      wrapTop: w?.top ?? Number.NaN,
+      wrapBottom: w?.bottom ?? Number.NaN,
+      cls: pop.className,
+      vw: innerWidth,
+      hScroll: Math.max(
+        document.documentElement.scrollWidth - innerWidth,
+        document.body.scrollWidth - document.body.clientWidth,
+      ),
+    };
+  }, btnSel);
+}
+
+/** btnSel（見えているもの）を押して開き、窓の中かを判定して返す（閉じない）。開けなければ fail で理由 */
+async function popOpenCheck(page, tag, name, btnSel) {
+  popStats.total++;
+  const loc = page.locator(btnSel).locator('visible=true').first();
+  if ((await loc.count()) === 0) {
+    check(`${tag} ${name}: 窓の中`, false, `開けない（${btnSel} が見えない）`);
+    return null;
+  }
+  await loc.scrollIntoViewIfNeeded().catch(() => {});
+  await loc.click();
+  await page.waitForTimeout(120);
+  const st = await popOpenState(page, btnSel);
+  if (st.err || !st.expanded || st.hidden) {
+    check(`${tag} ${name}: 窓の中`, false, `開けない（${st.err ?? '開いていない'}）`);
+    return null;
+  }
+  const ok = st.width > 0 && st.left >= 0 && st.right <= st.vw + 0.5 && st.hScroll === 0;
+  if (ok) popStats.pass++;
+  check(
+    `${tag} ${name}: 窓の中`,
+    ok,
+    `[${Math.round(st.left)}, ${Math.round(st.right)}] / ${st.vw}・幅 ${Math.round(st.width)}・横 ${st.hScroll}px・${st.cls}`,
+  );
+  return st;
+}
+
+/** 開いている吹き出しを Esc で閉じる（閉じたのを待つ） */
+async function popClose(page) {
+  await page.keyboard.press('Escape');
+  await page
+    .waitForFunction(
+      () => ![...document.querySelectorAll('.pop-wrap > button[aria-expanded="true"]')].length,
+      undefined,
+      { timeout: 2000 },
+    )
+    .catch(() => {});
+}
+
+/** 開いて判定して閉じる */
+async function popOne(page, tag, name, btnSel) {
+  const st = await popOpenCheck(page, tag, name, btnSel);
+  if (st) await popClose(page);
+  return st;
+}
+
+/**
+ * 見えている Popover のボタンを全部 1 つずつ開き（PC・タブレットの幅）、吹き出しが窓の中かと揃えのクラスを出す。
+ * fit は窓の中央に跳ぶので、窓に入る揃えがあるのに fit になっていないか（within の祖先が狭いだけのとき）も見る
+ */
+async function popAllVisible(page, tag) {
+  const n = await page.locator('.pop-wrap > button:visible').count();
+  for (let i = 0; i < n; i++) {
+    const btn = page.locator('.pop-wrap > button:visible').nth(i);
+    const name =
+      (await btn.getAttribute('aria-label').catch(() => null)) ??
+      ((await btn.textContent().catch(() => '')) || '?').trim().slice(0, 16);
+    popStats.total++;
+    await btn.scrollIntoViewIfNeeded().catch(() => {});
+    await btn.click().catch(() => {});
+    await page.waitForTimeout(120);
+    const st = await btn.evaluate((b) => {
+      const pop = document.getElementById(b.getAttribute('aria-controls') ?? '');
+      if (!pop || pop.hidden) return null;
+      const r = pop.getBoundingClientRect();
+      const w = b.getBoundingClientRect();
+      return {
+        left: r.left,
+        right: r.right,
+        width: r.width,
+        bl: w.left,
+        br: w.right,
+        cls: pop.className,
+        vw: innerWidth,
+        hScroll: document.documentElement.scrollWidth - innerWidth,
+        // 横を切る祖先（overflow-x が visible 以外）と窓の重なり = start / end に置いて見える範囲
+        ...(() => {
+          let L = 0;
+          let R = innerWidth;
+          for (let el = b.parentElement; el && el !== document.body; el = el.parentElement) {
+            if (getComputedStyle(el).overflowX === 'visible') continue;
+            const c = el.getBoundingClientRect();
+            L = Math.max(L, c.left);
+            R = Math.min(R, c.right);
+          }
+          return { clipL: L, clipR: R };
+        })(),
+      };
+    });
+    if (!st) {
+      check(`${tag} ${name}: 窓の中`, false, '開けない');
+      continue;
+    }
+    // start / end のどちらかが見える範囲（窓と横を切る祖先の重なり）に入るのに fit なら NG（窓の中央に跳ばない）
+    const winFits = st.bl + st.width <= st.clipR + 0.5 || st.br - st.width >= st.clipL - 0.5;
+    const fitJump = st.cls.split(' ').includes('fit') && winFits;
+    const ok =
+      st.width > 0 && st.left >= 0 && st.right <= st.vw + 0.5 && st.hScroll === 0 && !fitJump;
+    if (ok) popStats.pass++;
+    check(
+      `${tag} ${name}: 窓の中`,
+      ok,
+      `[${Math.round(st.left)}, ${Math.round(st.right)}] / ${st.vw}・${st.cls}${fitJump ? '・窓に入る揃えがあるのに fit' : ''}`,
+    );
+    await popClose(page);
+  }
+}
+
+/**
+ * レビュー N-3・N-4: スクロールする .panel-body（container-type: inline-size）の中の吹き出しが fit のとき、
+ * (a) 固定の位置が窓基準（.panel-body が包含ブロックにならない = 窓の中央・ボタンの下 4 ± 1px）、
+ * (b) .panel-body を実際にスクロールして（ボタンが動く）閉じる。今の画面ではタイルは fit にならないので、
+ * 検査の中だけ .panel-body の左右の margin を非対称に広げて（CSSOM。画面のコードではない）基準を狭くする
+ */
+async function tileFitScroll(page, tag) {
+  const sel = 'section.metrics .tile:nth-child(1) .tile-btn';
+  await page.evaluate(() => {
+    const pb = document.querySelector('section.metrics .panel-body');
+    if (!(pb instanceof HTMLElement)) return;
+    pb.style.marginLeft = '140px';
+    pb.style.marginRight = '40px';
+    pb.style.paddingBottom = '600px';
+    pb.scrollTop = 0;
+  });
+  await page.waitForTimeout(150);
+  await page.locator(sel).click();
+  await page.waitForTimeout(150);
+  const st = await page.evaluate((s) => {
+    const btn = document.querySelector(s);
+    const pop = document.getElementById(btn?.getAttribute('aria-controls') ?? '');
+    const pb = document.querySelector('section.metrics .panel-body');
+    if (!btn || !pop || pop.hidden || !pb) return null;
+    const r = pop.getBoundingClientRect();
+    const w = btn.closest('.pop-wrap').getBoundingClientRect();
+    const p = pb.getBoundingClientRect();
+    return {
+      cls: pop.className,
+      left: r.left,
+      right: r.right,
+      width: r.width,
+      gap: r.top - w.bottom,
+      wrapTop: w.top,
+      vw: innerWidth,
+      host: [p.left, p.right],
+      room: pb.scrollHeight - pb.clientHeight,
+    };
+  }, sel);
+  if (!st) {
+    check(`${tag} タイル（.panel-body を狭めた fit）: 窓基準`, false, '開けない');
+    return;
+  }
+  const center = (st.vw - st.width) / 2;
+  check(
+    `${tag} タイル（.panel-body を狭めた fit）: 固定の位置が窓基準（窓の中央・下 4 ± 1px。レビュー N-4）`,
+    st.cls.split(' ').includes('fit') &&
+      Math.abs(st.left - center) <= 1 &&
+      st.left >= 0 &&
+      st.right <= st.vw + 0.5 &&
+      Math.abs(st.gap - 4) <= 1,
+    `${st.cls}・[${Math.round(st.left)}, ${Math.round(st.right)}]・窓の中央 ${Math.round(center)}・すき間 ${st.gap.toFixed(1)}px・基準 [${Math.round(st.host[0])}, ${Math.round(st.host[1])}]`,
+  );
+  // 実際にスクロールする（合成のイベントではない）: ボタンが動き、吹き出しは閉じる
+  await page.evaluate(() => {
+    const pb = document.querySelector('section.metrics .panel-body');
+    if (pb) pb.scrollTop += 40;
+  });
+  await page.waitForTimeout(150);
+  const after = await page.evaluate((s) => {
+    const btn = document.querySelector(s);
+    const pop = document.getElementById(btn?.getAttribute('aria-controls') ?? '');
+    return {
+      expanded: btn?.getAttribute('aria-expanded') === 'true',
+      hidden: pop?.hidden ?? null,
+      wrapTop: btn?.closest('.pop-wrap')?.getBoundingClientRect().top ?? Number.NaN,
+    };
+  }, sel);
+  const moved = st.wrapTop - after.wrapTop;
+  check(
+    `${tag} タイル（fit）: .panel-body を実際にスクロールするとボタンが動き吹き出しは閉じる（レビュー N-3）`,
+    moved > 1 && !after.expanded && after.hidden === true,
+    `ボタン ${moved.toFixed(1)}px 上へ・expanded ${after.expanded}・hidden ${after.hidden}・余白 ${st.room}px`,
+  );
+  if (after.expanded) await popClose(page);
+  await page.evaluate(() => {
+    const pb = document.querySelector('section.metrics .panel-body');
+    if (!(pb instanceof HTMLElement)) return;
+    pb.style.marginLeft = '';
+    pb.style.marginRight = '';
+    pb.style.paddingBottom = '';
+    pb.scrollTop = 0;
+  });
+}
+
+async function popoverSweep() {
+  for (const [w, h] of POP_SIZES) {
+    const tag = `next dark ポップオーバー（#344）${w}x${h}`;
+    const ctx = await newContext(
+      { width: w, height: h },
+      { [WORKSPACE_KEY]: twoLegs, [PREFS_KEY]: prefsText('dark') },
+    );
+    const page = await ctx.newPage();
+    await page.goto(pageUrl('next'));
+    await waitReady(page, 'next');
+    // トップバーの市場ピル
+    await popOne(page, tag, '市場ピル', 'header.top .market-pill');
+    // 舞台の見出し（シートは peek = 舞台が見える）
+    await setShell(page, 'positions', 'peek');
+    await popOne(page, tag, '損益グラフの前提', 'button[aria-label="損益グラフの前提"]');
+    await popOne(page, tag, 'グラフの設定', 'button[aria-label="グラフの設定"]');
+    await page.click('button[aria-label="ピン"]');
+    await page.click('[role="menuitem"]:has-text("今の線を残す")');
+    await page.waitForTimeout(150);
+    await popOne(page, tag, 'ピンの中身', '.pin-chip .pin-open');
+    // シートの peek（見出しが窓の下の方）: 下に開くと窓の下端を越えるなら .above。左右・上下とも窓の中、すき間 4 ± 1px
+    {
+      const sel = 'section.positions button[aria-label="ポジションのグリークと建値ずれ"]';
+      const pk = await popOpenCheck(page, tag, 'ポジション（peek）', sel);
+      if (pk) {
+        const above = pk.cls.split(' ').includes('above');
+        const gap = above ? pk.wrapTop - pk.bottom : pk.top - pk.wrapBottom;
+        const vh = await page.evaluate(() => innerHeight);
+        check(
+          `${tag} ポジション（peek）: fit でボタンの${above ? '上' : '下'} 4 ± 1px・上下も窓の中（AC-3）`,
+          pk.cls.split(' ').includes('fit') &&
+            Math.abs(gap - 4) <= 1 &&
+            pk.top >= 0 &&
+            pk.bottom <= vh + 0.5,
+          `${pk.cls}・すき間 ${gap.toFixed(1)}px・[${Math.round(pk.top)}, ${Math.round(pk.bottom)}] / ${vh}`,
+        );
+        await popClose(page);
+      }
+    }
+    // ポジションの ⓘ（#344 の再現）: fit・ボタンの下 4 ± 1px・.panel-body の scroll で閉じる
+    await setShell(page, 'positions', 'full');
+    const posSel = 'section.positions button[aria-label="ポジションのグリークと建値ずれ"]';
+    const st = await popOpenCheck(page, tag, 'ポジション', posSel);
+    if (st) {
+      const fit = st.cls.split(' ').includes('fit');
+      const above = st.cls.split(' ').includes('above');
+      const gap = above ? st.wrapTop - st.bottom : st.top - st.wrapBottom;
+      check(
+        `${tag} ポジション: fit でボタンの${above ? '上' : '下'} 4 ± 1px（AC-3）`,
+        fit && Math.abs(gap - 4) <= 1,
+        `${st.cls}・すき間 ${gap.toFixed(1)}px`,
+      );
+      // 見出し（ボタン）は .panel-body の外にある = 本文のスクロールではボタンが動かない → 開いたまま
+      await page.evaluate(() =>
+        document.querySelector('section.positions .panel-body')?.dispatchEvent(new Event('scroll')),
+      );
+      await page.waitForTimeout(100);
+      const mid = await popOpenState(page, posSel);
+      check(
+        `${tag} ポジション: ボタンを含まない .panel-body の scroll では閉じない（AC-4）`,
+        !mid.err && mid.expanded && !mid.hidden,
+        `expanded ${mid.expanded}・hidden ${mid.hidden}`,
+      );
+      // ボタンを含む祖先（section.positions）の scroll = ボタンが動く → 閉じる
+      await page.evaluate(() =>
+        document.querySelector('section.positions')?.dispatchEvent(new Event('scroll')),
+      );
+      await page.waitForTimeout(100);
+      const after = await popOpenState(page, posSel);
+      check(
+        `${tag} ポジション: fit の吹き出しはボタンを含む祖先の scroll で閉じる（AC-4）`,
+        !after.err && !after.expanded && after.hidden,
+        `expanded ${after.expanded}・hidden ${after.hidden}`,
+      );
+      if (after.expanded) await popClose(page);
+      // レビュー N-2: 中にフォーカスがあるときにスクロールで閉じたら、Esc と同じくボタンへ戻す
+      await page.locator(posSel).click();
+      await page.waitForTimeout(120);
+      const focused = await page.evaluate((sel) => {
+        const btn = document.querySelector(sel);
+        const pop = document.getElementById(btn?.getAttribute('aria-controls') ?? '');
+        const inner = pop?.querySelector('button:not([disabled])');
+        if (!(inner instanceof HTMLElement)) return false;
+        inner.focus();
+        return pop.contains(document.activeElement);
+      }, posSel);
+      await page.evaluate(() =>
+        document.querySelector('section.positions')?.dispatchEvent(new Event('scroll')),
+      );
+      await page.waitForTimeout(100);
+      const back = await page.evaluate(
+        (sel) => document.activeElement === document.querySelector(sel),
+        posSel,
+      );
+      check(
+        `${tag} ポジション: 中にフォーカスがあるときスクロールで閉じたらフォーカスはボタンへ（レビュー N-2）`,
+        focused && back,
+        `中へ ${focused}・戻り ${back}`,
+      );
+      await popClose(page);
+    }
+    // 板（fit でない吹き出しは scroll で閉じない）
+    await setShell(page, 'board', 'full');
+    const boardSel = 'section.board button[aria-label="板の使い方"]';
+    const bst = await popOpenCheck(page, tag, '板', boardSel);
+    if (bst) {
+      const fit = bst.cls.split(' ').includes('fit');
+      await page.evaluate(() =>
+        document.querySelector('section.board')?.dispatchEvent(new Event('scroll')),
+      );
+      await page.waitForTimeout(100);
+      const after = await popOpenState(page, boardSel);
+      check(
+        `${tag} 板: fit でない吹き出しはボタンを含む祖先の scroll で閉じない（AC-4）`,
+        !fit && after.expanded && !after.hidden,
+        `${bst.cls}・expanded ${after.expanded}`,
+      );
+      await popClose(page);
+    }
+    // IV のパネル: IV 推移・スマイル・先物推移
+    await openIv(page, w, 'full');
+    await popOne(page, tag, 'IV 推移', 'section.smile button[aria-label="IV 推移の操作"]');
+    await smileTab(page);
+    await popOne(page, tag, 'スマイル', 'section.smile button[aria-label="スマイルの操作"]');
+    await openFut(page, w, 'full');
+    await popOne(page, tag, '先物推移', 'section.smile button[aria-label="先物推移の操作"]');
+    // 銘柄の推移（板の K →「put の推移」）
+    if (await openOptFromBoard(page, w)) {
+      await setShell(page, 'smile', 'full');
+      await popOne(page, tag, '銘柄の推移', 'section.smile button[aria-label="銘柄の推移の操作"]');
+    } else check(`${tag} 銘柄の推移: 窓の中`, false, '開けない（銘柄の推移が出ない）');
+    // シナリオ
+    await setShell(page, 'scenario', 'full');
+    await popOne(page, tag, 'シナリオ', 'section.scenario button[aria-label="シナリオの操作"]');
+    // 指標: 見出し・追証マップ・過去の急落の再生・タイル 6 枚
+    await setShell(page, 'metrics', 'full');
+    await popOne(
+      page,
+      tag,
+      '指標',
+      'section.metrics button[aria-label="金額の単位・テール表・証拠金"]',
+    );
+    await popOne(
+      page,
+      tag,
+      '追証マップ',
+      'section.metrics button[aria-label="追証マップの読み方"]',
+    );
+    await popOne(
+      page,
+      tag,
+      '過去の急落の再生',
+      'section.metrics button[aria-label="過去の急落の再生の読み方"]',
+    );
+    const tiles = await page.locator('section.metrics .tile .tile-btn').count();
+    check(`${tag} 指標のタイルが 6 枚`, tiles === 6, `${tiles} 枚`);
+    for (let i = 0; i < tiles; i++) {
+      await popOne(
+        page,
+        tag,
+        `タイル ${i + 1}`,
+        `section.metrics .tile:nth-child(${i + 1}) .tile-btn`,
+      );
+    }
+    if (w === 360 && h === 780) await tileFitScroll(page, tag);
+    // ダイアログの見出し: 保存したポジション・保有ポジション
+    await openFromMore(page, '保存一覧', BOOK);
+    await popOne(
+      page,
+      tag,
+      '保存したポジション',
+      `${BOOK} button[aria-label="保存したポジション"]`,
+    );
+    await closeDialog(page);
+    await openFromMore(page, '保有ポジション…', HOLDINGS);
+    await popOne(page, tag, '保有ポジション', `${HOLDINGS} button[aria-label="保有ポジション"]`);
+    await closeDialog(page);
+    await ctx.close();
+    // 警告のタグ（読み込みの失敗の板 + 別のタブ）と、その状態の市場ピル
+    const busy = await busyPage({ width: w, height: h }, 'dark');
+    await closeNotes(busy.page);
+    await popOne(busy.page, tag, '警告のタグ', 'header.top .warn-btn');
+    await popOne(busy.page, tag, '市場ピル（読み込みの失敗）', 'header.top .market-pill');
+    await busy.ctx.close();
+  }
+  // タブレット・PC: 見えている全部（パネルは開いているもの）と、タブレットはドックで指標
+  for (const [w, h] of [
+    [900, 1100],
+    [1440, 900],
+  ]) {
+    const tag = `next dark ポップオーバー（#344）${w}x${h}`;
+    const ctx = await newContext(
+      { width: w, height: h },
+      { [WORKSPACE_KEY]: twoLegs, [PREFS_KEY]: prefsText('dark') },
+    );
+    const page = await ctx.newPage();
+    await page.goto(pageUrl('next'));
+    await waitReady(page, 'next');
+    await popAllVisible(page, tag);
+    if (w < 1200) {
+      await page.click('.dock button[data-panel="metrics"]');
+      await page.waitForTimeout(150);
+      await popAllVisible(page, `${tag} 指標`);
+    }
+    await ctx.close();
+  }
+  console.log(`ポップオーバーが窓の中の検査（#344）: ${popStats.pass} / ${popStats.total} で pass`);
+}
+
 // 開く URL（#91: 既定はクエリなし。--parts は ?parts）
 console.log(`URL: ${pageUrl(mode)}`);
 try {
@@ -18143,6 +18598,8 @@ try {
     await iconSweep();
   } else if (fontsOnly && !parts && !flows) {
     await fontSweep();
+  } else if (popoversOnly && !parts && !flows) {
+    await popoverSweep();
   } else if (aiOnly && !parts) {
     if (flows)
       for (const vp of [

@@ -1,12 +1,25 @@
 import type { ComponentChildren } from 'preact';
 import { useId, useLayoutEffect, useRef, useState } from 'preact/hooks';
-import { type HintEvent, hintAbove, hintAlign, hintNext, revealDelta } from '../../view/hint';
+import {
+  type HintEvent,
+  hintAbove,
+  hintAlign,
+  hintNext,
+  popAlign,
+  revealDelta,
+} from '../../view/hint';
 import { escapeClaimed, overlayOnTop, useOverlay } from './overlay';
 
 /**
  * ポップオーバー（docs/ui-redesign.md §5）。開閉の規則は旧 Hint と同じ ui/view/hint.ts の hintNext
  * （押すたびに反転・外側の pointerdown で閉じる・Esc で閉じてボタンへ戻す・同時に 1 つだけ = ./overlay.ts をメニューと共有）。
- * 位置は .pop-wrap に対する絶対配置 + .end（hintAlign。style 属性を使わない）。
+ * 位置は .pop-wrap に対する絶対配置 + 左右の揃え（style 属性を使わない）。揃えは開いた後に吹き出しの幅を測って
+ * popAlign で決める（#344）: start（左端をボタンに）/ end（.end。右端をボタンに）/ fit（.fit。どちらに揃えても基準に
+ * 入らないとき、窓の左右 8px の内側で中央 = 固定の位置。縦は .pop-wrap の flex の静的な位置 + translate でボタンの下（上））。
+ * fit の間は窓が基準（上に開くかは窓で見る・祖先の scrollTop は動かさない）で、祖先がスクロールしたら閉じる
+ * （固定の位置はスクロールについていかない。中にフォーカスがあればボタンへ戻す）。within の祖先に入らず fit でも、
+ * その祖先が横を切らなければ窓に入る揃え（start / end）を使う。.pop-wrap が位置を持たない（position: static。スマホのピンの中身）ときは
+ * 呼び出し側の CSS が位置を決めるので、今までの 2 択（hintAlign）のまま。
  *
  * 省略可能な props（#107。省略時の DOM・動きは #81 のまま）:
  * - label: 省略すると aria-label を出さない（名前はボタンの中身。指標のタイルの全文）
@@ -36,18 +49,33 @@ export function Popover(p: {
     if (inside) btnRef.current?.focus();
   };
   const { open, setOpen } = useOverlay(id, closeByEscape);
-  const [align, setAlign] = useState<'start' | 'end'>('start');
+  const [align, setAlign] = useState<'start' | 'end' | 'fit'>('start');
   const [above, setAbove] = useState(false);
   const send = (ev: HintEvent) => setOpen(hintNext(open, ev));
 
   const within = p.within;
   useLayoutEffect(() => {
     if (!open) return;
+    const wrap = wrapRef.current;
     const b = btnRef.current?.getBoundingClientRect();
-    if (!b) return;
-    const host = within ? (wrapRef.current?.closest(within) ?? null) : null;
+    if (!wrap || !b) return;
+    const host = within ? wrap.closest(within) : null;
     const h = host?.getBoundingClientRect();
-    setAlign(hintAlign((b.left + b.right) / 2, h ? h.left : 0, h ? h.right : window.innerWidth));
+    const hl = h ? h.left : 0;
+    const hr = h ? h.right : window.innerWidth;
+    // .pop-wrap が位置を持たない = 呼び出し側の CSS が位置を決める（スマホのピンの中身）。2 択のまま
+    if (getComputedStyle(wrap).position === 'static') {
+      setAlign(hintAlign((b.left + b.right) / 2, hl, hr));
+      return;
+    }
+    // 幅は揃え（start / end / fit）に依らない（max-content + max-width・.wide は固定の幅）ので 1 回の測定で決まる
+    const pop = wrap.querySelector('.popover');
+    const pw = pop instanceof HTMLElement ? pop.getBoundingClientRect().width : 0;
+    const a = popAlign(b.left, b.right, pw, hl, hr);
+    // 祖先（within）に入らなくても、その祖先が横を切らない（overflow-x: visible）なら窓に入る揃えを使う（窓の中央に
+    // 跳ぶのは窓に入らないときだけ）。横を切る祖先（スクロールする .panel-body）では外へ出た部分が切れるので fit のまま
+    const widen = a === 'fit' && host && getComputedStyle(host).overflowX === 'visible';
+    setAlign(widen ? popAlign(b.left, b.right, pw, 0, window.innerWidth) : a);
   }, [open, within]);
 
   // 開いた後（揃えが決まった後）、窓の下端で切れるなら上に開く（スクロールする祖先があればその祖先の中で見せる = 下）
@@ -59,9 +87,12 @@ export function Popover(p: {
     const wrap = wrapRef.current;
     const pop = wrap?.querySelector('.popover');
     if (!wrap || !(pop instanceof HTMLElement)) return;
-    for (let el = wrap.parentElement; el && el !== document.body; el = el.parentElement) {
-      const oy = getComputedStyle(el).overflowY;
-      if (oy === 'auto' || oy === 'scroll') return;
+    // fit（固定の位置）は窓が基準。スクロールする祖先の中で見せる（revealDelta）ことはしない
+    if (align !== 'fit') {
+      for (let el = wrap.parentElement; el && el !== document.body; el = el.parentElement) {
+        const oy = getComputedStyle(el).overflowY;
+        if (oy === 'auto' || oy === 'scroll') return;
+      }
     }
     const w = wrap.getBoundingClientRect();
     const r = pop.getBoundingClientRect();
@@ -71,7 +102,7 @@ export function Popover(p: {
 
   // 開いた後（揃えが決まった後）、スクロールする祖先の中で下端が見えるようにする
   useLayoutEffect(() => {
-    if (!open || !within) return;
+    if (!open || !within || align === 'fit') return;
     const host = wrapRef.current?.closest(within);
     const pop = wrapRef.current?.querySelector('.popover');
     if (!(host instanceof HTMLElement) || !pop) return;
@@ -82,6 +113,25 @@ export function Popover(p: {
     const d = revealDelta(r.top, r.bottom, h.top, h.bottom);
     if (d > 0) host.scrollTop += d;
   }, [open, within, align]);
+
+  // fit（固定の位置）で開いている間に祖先（または文書）がスクロールしたら閉じる（#344。固定の位置はスクロールに
+  // ついていかず、ボタンから離れる）。吹き出しの中（.wide の中身）のスクロールは閉じない。中にフォーカスがあれば
+  // Esc と同じくボタンへ戻す（preventScroll: 戻す操作で祖先をまた動かさない）
+  useLayoutEffect(() => {
+    if (!open || align !== 'fit') return;
+    const onScroll = (e: Event) => {
+      const w = wrapRef.current;
+      const t = e.target;
+      if (!w) return;
+      if (t === document || (t instanceof Node && t !== w && !w.contains(t) && t.contains(w))) {
+        const inside = w.contains(document.activeElement);
+        setOpen(hintNext(true, 'other'));
+        if (inside) btnRef.current?.focus({ preventScroll: true });
+      }
+    };
+    document.addEventListener('scroll', onScroll, true);
+    return () => document.removeEventListener('scroll', onScroll, true);
+  }, [open, align, setOpen]);
 
   // 外側の pointerdown・Esc は開いた描画の直後から購読する。上に説明カードなどが重なっている間は閉じない
   // （#320 第 2 弾。カードの操作・Esc はカードのもの。カードを閉じると吹き出しが開いたまま残る）
@@ -120,7 +170,7 @@ export function Popover(p: {
         {p.button}
       </button>
       <div
-        class={`popover${p.popClass ? ` ${p.popClass}` : ''}${align === 'end' ? ' end' : ''}${above ? ' above' : ''}`}
+        class={`popover${p.popClass ? ` ${p.popClass}` : ''}${align === 'end' ? ' end' : align === 'fit' ? ' fit' : ''}${above ? ' above' : ''}`}
         id={`${id}-pop`}
         hidden={!open}
       >

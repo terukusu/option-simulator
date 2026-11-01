@@ -487,4 +487,12 @@
     left: 8px;
     width: auto;
   }
+
+  /* fit（#344）が付いても今の固定の位置のまま（トップバーの下・左右 8px） */
+  .popover.wide.fit,
+  .popover.wide.fit.above {
+    top: calc(var(--top-h) + 4px);
+    margin-inline: 0;
+    translate: none;
+  }
 }

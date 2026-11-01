@@ -24,6 +24,35 @@ export function hintAlign(
 }
 
 /**
+ * ポップオーバー（Popover）の左右の揃え（#344）。hintAlign の 2 択に、吹き出しの幅を見た第 3 の答え fit を足す。
+ * 好み（ボタンの中心が基準の右半分なら end）の側に揃えて基準（host = within の祖先、無ければ窓）の中に入ればそれ、
+ * 入らなければ反対側、どちらにも入らなければ fit（窓の左右 8px の内側で中央。.popover.fit）。
+ * start = 左端をボタンの左端に揃える（btnLeft + popWidth ≤ hostRight）、end = 右端をボタンの右端に揃える
+ * （btnRight − popWidth ≥ hostLeft）。どちらも 0.5px まで許す。測れない値（非有限・popWidth ≤ 0・基準の幅 0）は start。
+ * Menu は 2 択の hintAlign のまま（#344 のスコープ外）
+ */
+export function popAlign(
+  btnLeft: number,
+  btnRight: number,
+  popWidth: number,
+  hostLeft: number,
+  hostRight: number,
+): 'start' | 'end' | 'fit' {
+  if (
+    ![btnLeft, btnRight, popWidth, hostLeft, hostRight].every(Number.isFinite) ||
+    !(popWidth > 0) ||
+    !(hostRight > hostLeft)
+  )
+    return 'start';
+  const startFits = btnLeft + popWidth <= hostRight + 0.5;
+  const endFits = btnRight - popWidth >= hostLeft - 0.5;
+  const pref = hintAlign((btnLeft + btnRight) / 2, hostLeft, hostRight);
+  if (pref === 'end' ? endFits : startFits) return pref;
+  if (pref === 'end' ? startFits : endFits) return pref === 'end' ? 'start' : 'end';
+  return 'fit';
+}
+
+/**
  * 開いたポップオーバーをスクロールする祖先（host）の中で見せるための scrollTop の増分（px。正 = 下へ。#107）。
  * 下端がはみ出す量だけ動かすが、上端（popTop − hostTop）を越えて動かさない（上を隠さない）。負にならない。
  */
