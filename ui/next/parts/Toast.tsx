@@ -9,7 +9,9 @@ import {
   type Toast,
   type ToastInput,
   takeUndo,
+  toastButtons,
 } from '../../view/toast';
+import { reloadPage } from './ReloadButton';
 
 /**
  * トースト（docs/ui-redesign.md §5・§11-8。規則は ui/view/toast.ts）。下中央（ドックの上）・折り返さない。
@@ -18,6 +20,7 @@ import {
  * note の無いトーストの DOM は #81 のまま。#87 (C): .toasts は位置の箱だけにし、中に常設の読み上げの領域を 2 つ置く
  * （.toast-alerts = role="alert" に警告の知らせ、.toast-log = role="status" にほか全部。各領域の中は古い順）。
  * #124: 箱は useToastHost で 1 つだけ作り、置き場（ToastSlot）の間を移す（保存一覧の開閉で作り直さない）。
+ * #341: ボタンの並びは toastButtons（ui/view/toast.ts）で決め、ここは戻り値を描くだけ（[ページを読み直す] が増えた）。
  */
 export function useToasts(): {
   toasts: readonly Toast[];
@@ -73,6 +76,8 @@ interface ToastsProps {
   onUndo: (id: number) => void;
   /** 知らせのトーストの [閉じる]（#87） */
   onDismiss?: (id: number) => void;
+  /** 知らせのトーストの [ページを読み直す]（#341。既定は location.reload()） */
+  onReload?: () => void;
 }
 
 /**
@@ -86,13 +91,18 @@ export function useToastHost(p: ToastsProps): HTMLElement {
     el.className = 'toasts';
     return el;
   });
-  const { toasts, onUndo, onDismiss } = p;
+  const { toasts, onUndo, onDismiss, onReload } = p;
   useLayoutEffect(() => {
     render(
-      <ToastRegions toasts={toasts} onUndo={onUndo} {...(onDismiss && { onDismiss })} />,
+      <ToastRegions
+        toasts={toasts}
+        onUndo={onUndo}
+        {...(onDismiss && { onDismiss })}
+        {...(onReload && { onReload })}
+      />,
       host,
     );
-  }, [host, toasts, onUndo, onDismiss]);
+  }, [host, toasts, onUndo, onDismiss, onReload]);
   useLayoutEffect(() => () => render(null, host), [host]);
   return host;
 }
@@ -107,7 +117,22 @@ export function ToastSlot({ host }: { host: HTMLElement }) {
 }
 
 function ToastRegions(p: ToastsProps) {
-  const { onDismiss } = p;
+  const handlers = {
+    undo: p.onUndo,
+    reload: p.onReload ?? reloadPage,
+    ...(p.onDismiss && { dismiss: p.onDismiss }),
+  };
+  const buttons = (t: Toast) =>
+    toastButtons(t, handlers).map((b) => (
+      <button
+        type="button"
+        key={b.label}
+        {...(b.ariaLabel && { 'aria-label': b.ariaLabel })}
+        onClick={b.run}
+      >
+        {b.label}
+      </button>
+    ));
   const item = (t: Toast) =>
     t.note ? (
       <div
@@ -116,20 +141,12 @@ function ToastRegions(p: ToastsProps) {
         data-kind={t.kind}
       >
         <p class="txt">{t.text}</p>
-        {onDismiss && (
-          <button type="button" aria-label="知らせを閉じる" onClick={() => onDismiss(t.id)}>
-            閉じる
-          </button>
-        )}
+        {buttons(t)}
       </div>
     ) : (
       <div class="toast" key={t.id}>
         <span class="txt">{t.text}</span>
-        {t.undo && (
-          <button type="button" onClick={() => p.onUndo(t.id)}>
-            元に戻す
-          </button>
-        )}
+        {buttons(t)}
       </div>
     );
   // 読み上げの領域は常設の 2 つ（入れ子にしない。#87 (C)）: 警告の知らせ = alert、ほか = status（polite）。

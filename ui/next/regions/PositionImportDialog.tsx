@@ -29,12 +29,15 @@ import {
   PRODUCT_ORDER,
   READING_TEXT,
   readBlocked,
+  readBlockedReload,
   readErrorText,
+  readReload,
   rowView,
   TOO_LARGE_TEXT,
 } from '../../view/positionImport';
 import type { ToastInput } from '../../view/toast';
 import { Dialog } from '../parts/Dialog';
+import { ReloadButton } from '../parts/ReloadButton';
 import { focusIfLost } from '../useGlobalKeys';
 
 interface Props {
@@ -49,6 +52,11 @@ interface Props {
 }
 
 type StatusView = AiStatus | null | { error: string };
+/** 読み取りの知らせ（reload = [ページを読み直す] を出す。#341） */
+interface ImportMsg {
+  text: string;
+  reload: boolean;
+}
 
 /** 確認表の欄の読み上げ名 */
 const FIELD_LABEL: Readonly<Record<ImportField, string>> = {
@@ -87,7 +95,8 @@ function ImportBody(p: Props) {
   const [image, setImage] = useState<EncodedImage | null>(null);
   const [encoding, setEncoding] = useState(false);
   const [reading, setReading] = useState(false);
-  const [msg, setMsg] = useState<string | null>(null);
+  // 知らせ（reload = [ページを読み直す] を出す。#341）
+  const [msg, setMsg] = useState<ImportMsg | null>(null);
   const [rows, setRows] = useState<ImportRow[] | null>(null);
   const [held, setHeld] = useState(true);
   const abort = useRef<AbortController | null>(null);
@@ -130,13 +139,15 @@ function ImportBody(p: Props) {
       disposeImage(imageRef.current);
       if (out.kind === 'error') {
         setImage(null);
-        setMsg(
-          out.error === 'too_large'
-            ? TOO_LARGE_TEXT
-            : out.error === 'huge'
-              ? HUGE_TEXT
-              : NOT_IMAGE_TEXT,
-        );
+        setMsg({
+          text:
+            out.error === 'too_large'
+              ? TOO_LARGE_TEXT
+              : out.error === 'huge'
+                ? HUGE_TEXT
+                : NOT_IMAGE_TEXT,
+          reload: false,
+        });
         return;
       }
       setImage(out.image);
@@ -183,15 +194,16 @@ function ImportBody(p: Props) {
       );
       if (!alive.current) return;
       if (res.kind === 'not_positions') {
-        setMsg(NOT_POSITIONS_TEXT);
+        setMsg({ text: NOT_POSITIONS_TEXT, reload: false });
         return;
       }
       setRows(initialRows(res, chain, holidays));
     } catch (e) {
       if (!alive.current) return;
-      if (ctl.signal.aborted) setMsg(readErrorText('aborted'));
-      else if (e instanceof AiRequestError) setMsg(readErrorText(e.code, e.remainingUsd));
-      else setMsg(readErrorText('unavailable'));
+      if (ctl.signal.aborted) setMsg({ text: readErrorText('aborted'), reload: false });
+      else if (e instanceof AiRequestError) {
+        setMsg({ text: readErrorText(e.code, e.remainingUsd), reload: readReload(e.code) });
+      } else setMsg({ text: readErrorText('unavailable'), reload: false });
     } finally {
       if (alive.current) setReading(false);
       abort.current = null;
@@ -206,6 +218,7 @@ function ImportBody(p: Props) {
           encoding={encoding}
           reading={reading}
           blocked={blocked}
+          blockedReload={readBlockedReload({ hasChain: chain !== null, status })}
           msg={msg}
           onPick={pick}
           onRead={read}
@@ -230,7 +243,8 @@ function PickStep(p: {
   encoding: boolean;
   reading: boolean;
   blocked: string | null;
-  msg: string | null;
+  blockedReload: boolean;
+  msg: ImportMsg | null;
   onPick: (f: Blob | null | undefined) => void;
   onRead: () => void;
   onAbort: () => void;
@@ -312,10 +326,16 @@ function PickStep(p: {
           読み取る
         </button>
       </div>
-      {p.blocked !== null && !p.reading && image && <p class="imp-why">{p.blocked}</p>}
+      {p.blocked !== null && !p.reading && image && (
+        <p class="imp-why">
+          {p.blocked}
+          {p.blockedReload && <ReloadButton class="imp-reload" />}
+        </p>
+      )}
       {p.msg && (
         <p class="imp-msg" role="status">
-          {p.msg}
+          {p.msg.text}
+          {p.msg.reload && <ReloadButton class="imp-reload" />}
         </p>
       )}
     </section>

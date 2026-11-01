@@ -104,7 +104,8 @@ export interface PillFull {
   /** 旧 Header の ⓘ「計算の前提」の文（板があるときだけ） */
   hint: string | null;
   loaderNote: string | null;
-  error: { message: string; kept: string | null; errors: string[] } | null;
+  /** 失敗の詳細。reload = ログイン切れ（[ページを読み直す] を出す。#341。auth のときだけキーがある） */
+  error: { message: string; kept: string | null; errors: string[]; reload?: true } | null;
 }
 
 export interface MarketPillModel {
@@ -197,7 +198,12 @@ function refView(r: ReferenceView, active: boolean): PillRef {
 function fullModel(header: HeaderModel | null, curId: string | null, load: PillLoad): PillFull {
   const loaderNote = load.loaderNote === '' ? null : load.loaderNote;
   const error = load.error
-    ? { message: load.error.message, kept: load.kept, errors: [...load.error.errors] }
+    ? {
+        message: load.error.message,
+        kept: load.kept,
+        errors: [...load.error.errors],
+        ...(load.error.reload && { reload: true as const }),
+      }
     : null;
   if (!header) {
     return {

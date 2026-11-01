@@ -106,6 +106,8 @@ function withHeld(slot: TabSlot, held: boolean): TabSlot {
 export interface LoadErrorView {
   message: string;
   errors: string[];
+  /** ログイン切れ（auth）だけ true: 知らせに [ページを読み直す] を出す（#341。他の種類はこのキーを持たない） */
+  reload?: true;
 }
 
 export interface State {

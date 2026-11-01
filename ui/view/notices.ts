@@ -95,12 +95,20 @@ export function boardNoticeText(
 
 export const LOAD_FAILED_KIND = 'load-failed';
 
-/** 読み込みに失敗した瞬間の警告のトースト（文は知らせの行の失敗の文 1 行）。 */
+/**
+ * 読み込みに失敗した瞬間の警告のトースト（文は知らせの行の失敗の文 1 行）。
+ * #341: ログイン切れ（error.reload）は板の有無によらずその文（+ kept）にして [ページを読み直す] を出す
+ * （板が無いときの一般の文は [最新] を指すため）。
+ */
 export function loadFailedToast(
   hasChain: boolean,
-  error: { message: string },
+  error: { message: string; reload?: true },
   kept: string | null,
 ): NoteToast {
+  if (error.reload) {
+    const text = kept ? `${error.message}。${kept}` : error.message;
+    return { kind: LOAD_FAILED_KIND, text, note: 'warn', reload: true };
+  }
   const n = boardNoticeText(hasChain, false, error, kept);
   return { kind: LOAD_FAILED_KIND, text: n?.text ?? error.message, note: 'warn' };
 }

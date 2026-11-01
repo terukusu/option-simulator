@@ -237,10 +237,10 @@ describe('postAiMessages', () => {
     }) as unknown as typeof fetch;
     const c = await run(offline);
     expect([c.err?.code, c.err?.status]).toEqual(['network', 0]);
-    // 3 つとも画面の文言が違う（session_expired は再読み込み、network / incomplete は途中で切れた）
+    // 3 つとも画面の文言が違う（session_expired は [ページを読み直す]、network / incomplete は途中で切れた）
     const texts = new Set(['session_expired', 'network', 'incomplete'].map((k) => aiErrorText(k)));
     expect(texts.size).toBe(3);
-    expect(aiErrorText('session_expired')).toContain('再読み込み');
+    expect(aiErrorText('session_expired')).toContain('[ページを読み直す]');
     expect(aiErrorText('incomplete')).toContain('途中で切れ');
     expect(aiErrorText('budget_exceeded', 0.05)).toContain('$0.05');
   });

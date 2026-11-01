@@ -8,7 +8,11 @@
  * - 知らせのトースト（#87。note 付き。§5 の例外）: 説明文として折り返し、[閉じる] を出す。情報は 6 秒、
  *   警告は [閉じる] まで消えない（until = Infinity。nextDeadline は有限の期限だけを見る）
  * - keep 付き（#87）: タブの切り替えで閉じない [元に戻す]（dropUndoToasts の対象外。タブを閉じたトースト）
+ * - reload 付き（#341）: 知らせのトーストに [ページを読み直す]（ログイン切れ。ホーム画面のアプリには再読み込みの
+ *   ボタンが無いため）。ボタンの並びは toastButtons で決め、部品はその戻り値を描くだけ
  */
+
+import { RELOAD_PAGE_LABEL } from './reloadPage';
 
 export const TOAST_MS = 2200;
 export const UNDO_TOAST_MS = 5000;
@@ -26,6 +30,8 @@ export interface ToastInput {
   note?: 'info' | 'warn';
   /** タブの切り替えで閉じない（dropUndoToasts の対象外。#87） */
   keep?: boolean;
+  /** 知らせのトーストに [ページを読み直す] を出す（#341。note の無いトーストでは無視） */
+  reload?: true;
 }
 
 export interface Toast extends ToastInput {
@@ -74,4 +80,34 @@ export function takeUndo(
   const t = list.find((x) => x.id === id);
   if (!t) return { list: list as Toast[], undo: null };
   return { list: list.filter((x) => x.id !== id), undo: t.undo ?? null };
+}
+
+/** トーストのボタン 1 つ（#341）。label は見える文字、ariaLabel は読み上げの名前（見える文字と違うときだけ） */
+export interface ToastButton {
+  label: string;
+  ariaLabel?: string;
+  run: () => void;
+}
+
+/** トーストのボタンの操作（部品が注入する） */
+export interface ToastHandlers {
+  undo(id: number): void;
+  /** ページを読み直す（トーストは消さない = 画面ごと読み直すため） */
+  reload(): void;
+  /** 知らせのトーストの [閉じる]（無ければ出さない） */
+  dismiss?(id: number): void;
+}
+
+/**
+ * トーストのボタンの並び（#341）。
+ * - note なし: undo があれば [元に戻す] だけ（#81 のまま）
+ * - note あり: reload なら [ページを読み直す]、次に dismiss があれば [閉じる]（aria-label「知らせを閉じる」。#87 のまま）
+ */
+export function toastButtons(t: Toast, h: ToastHandlers): ToastButton[] {
+  if (!t.note) return t.undo ? [{ label: '元に戻す', run: () => h.undo(t.id) }] : [];
+  const out: ToastButton[] = [];
+  if (t.reload) out.push({ label: RELOAD_PAGE_LABEL, run: () => h.reload() });
+  const { dismiss } = h;
+  if (dismiss) out.push({ label: '閉じる', ariaLabel: '知らせを閉じる', run: () => dismiss(t.id) });
+  return out;
 }

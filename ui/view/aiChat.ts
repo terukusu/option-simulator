@@ -24,6 +24,7 @@ import type {
 } from '../../data/aiStream';
 import { betaAddPt } from '../../model/scenario';
 import { displayedValues } from './aiNumbers';
+import { RELOAD_PAGE_REF } from './reloadPage';
 
 export const AI_SESSION_KEY = 'optsim.ai.v1';
 /** [このポジションを診断] の最初の発言（中継の relay.DIAGNOSE_TEXT と同じ文。system prompt の診断の節が参照する） */
@@ -368,7 +369,7 @@ function commonBlocked(s: AiChatState, g: AiGate): string | null {
   if (g.legCount > MAX_AI_LEGS) return `足が ${MAX_AI_LEGS} 本を超えると AI に送れません`;
   const st = g.status;
   if (st === null) return 'AI の状態を読んでいます…';
-  if ('error' in st) return `AI の状態を読めません（${aiErrorText(st.error)}）`;
+  if ('error' in st) return statusErrorText(st.error);
   if (!st.enabled) return 'AI は無効です（管理者の設定）';
   if (st.counted && st.remaining_usd !== null && st.remaining_usd <= 0) {
     return '今日の上限に達しました（日付が変わると戻ります）';
@@ -428,6 +429,43 @@ export function footReason(s: AiChatState, g: AiGate): string | null {
   return sendBlocked(s, g) ?? diagnoseBlocked(s, g);
 }
 
+/** AI の状態（/api/ai/status）を読めないときの理由の文 */
+export function statusErrorText(code: string): string {
+  return `AI の状態を読めません（${aiErrorText(code)}）`;
+}
+
+/**
+ * ページを読み直せば直る失敗か（#341: IAP のログイン切れ = session_expired だけ）。この code の文は
+ * [ページを読み直す] を指すので、文を出す所にはボタンも出す（返答の失敗・足元の理由の行・画像の読み取り）
+ */
+export function aiNeedsReload(code: string): boolean {
+  return code === 'session_expired';
+}
+
+/** ログイン切れの理由を AI のパネルの外（ボタンの無い所）で出す文（#341。[ページを読み直す] を指さない） */
+export const SESSION_EXPIRED_ELSEWHERE_TEXT =
+  'AI の状態を読めません（ログインの期限が切れた可能性があります。ページを読み直してログインし直してください）';
+
+/**
+ * AI のパネルの外（コマンドパレットの行・形の一覧の AI のボタンの title）に出す押せない理由（#341）。
+ * そこには [ページを読み直す] が無いので、ログイン切れの理由だけボタンを指さない文に替える（ほかはそのまま）
+ */
+export function blockedElsewhere(reason: string | null): string | null {
+  return reason === statusErrorText('session_expired') ? SESSION_EXPIRED_ELSEWHERE_TEXT : reason;
+}
+
+/** 返答の失敗の行の操作（#341）: session_expired は [ページを読み直す]、ほかは [もう一度] */
+export function aiErrorAction(code: string): 'reload' | 'retry' {
+  return aiNeedsReload(code) ? 'reload' : 'retry';
+}
+
+/** 足元の理由の行に [ページを読み直す] を出すか（#341: 理由が状態の失敗で、その code が session_expired のときだけ） */
+export function footReload(s: AiChatState, g: AiGate): boolean {
+  const st = g.status;
+  if (st === null || !('error' in st) || !aiNeedsReload(st.error)) return false;
+  return footReason(s, g) === statusErrorText(st.error);
+}
+
 /** 今日の残りの表示（費用を数えない資格情報・上限が無いときは `残り $—`） */
 export function remainingText(st: AiStatus | null, latest: number | null): string | null {
   if (!st?.enabled) return null;
@@ -441,7 +479,7 @@ export function remainingText(st: AiStatus | null, latest: number | null): strin
 export function aiErrorText(code: string, remainingUsd: number | null = null): string {
   switch (code) {
     case 'session_expired':
-      return 'ログインの期限が切れた可能性があります。再読み込みしてください';
+      return `ログインの期限が切れた可能性があります。${RELOAD_PAGE_REF} でログインし直してください`;
     case 'network':
       return '接続できませんでした（ネットワーク）。もう一度送ってください';
     case 'incomplete':

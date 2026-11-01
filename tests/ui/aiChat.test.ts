@@ -10,10 +10,13 @@ import {
   type AiChatState,
   type AiGate,
   aiChatReduce,
+  aiErrorAction,
   aiErrorText,
+  aiNeedsReload,
   applyDraft,
   askPlan,
   atLimit,
+  blockedElsewhere,
   chatGroups,
   chatItems,
   DIAGNOSE_TEXT,
@@ -22,6 +25,7 @@ import {
   diagnoseProminent,
   encodeAiChat,
   footReason,
+  footReload,
   HOLD_END_RATIO,
   holdAfterDone,
   INITIAL_AI_CHAT,
@@ -31,8 +35,10 @@ import {
   numberSources,
   remainingText,
   requestOf,
+  SESSION_EXPIRED_ELSEWHERE_TEXT,
   sendBlocked,
   sentShown,
+  statusErrorText,
   TOOL_LIMIT_NOTE,
   toolResultBlocks,
   turnSent,
@@ -494,6 +500,60 @@ describe('#136 AC2 [AI に聞く]（kind ask と場所の topic）', () => {
       '板がありません（板を読んでから送ってください）',
     );
     expect(footReason(INITIAL_AI_CHAT, { ...GATE, legCount: 0 })).toContain('足がありません');
+  });
+});
+
+describe('#341 ログイン切れ（session_expired）の [ページを読み直す]', () => {
+  const OTHERS = ['network', 'incomplete', 'timeout', 'budget_exceeded', 'unavailable', 'busy'];
+
+  it('文が [ページを読み直す] を指すのは session_expired だけ', () => {
+    expect(aiErrorText('session_expired')).toBe(
+      'ログインの期限が切れた可能性があります。[ページを読み直す] でログインし直してください',
+    );
+    for (const c of OTHERS) expect(aiErrorText(c)).not.toContain('[ページを読み直す]');
+  });
+
+  it('aiNeedsReload・aiErrorAction: session_expired → reload、ほか → retry（今の [もう一度]）', () => {
+    expect(aiNeedsReload('session_expired')).toBe(true);
+    expect(aiErrorAction('session_expired')).toBe('reload');
+    for (const c of OTHERS) {
+      expect(aiNeedsReload(c)).toBe(false);
+      expect(aiErrorAction(c)).toBe('retry');
+    }
+  });
+
+  it('footReload: 足元の理由が状態の失敗（session_expired）のときだけ true', () => {
+    const expired: AiGate = { ...GATE, status: { error: 'session_expired' } };
+    expect(footReason(INITIAL_AI_CHAT, expired)).toBe(statusErrorText('session_expired'));
+    expect(footReason(INITIAL_AI_CHAT, expired)).toContain('[ページを読み直す]');
+    expect(footReload(INITIAL_AI_CHAT, expired)).toBe(true);
+    // 足が無くても送れない理由は状態の失敗（診断だけの理由より先）
+    expect(footReload(INITIAL_AI_CHAT, { ...expired, legCount: 0 })).toBe(true);
+    // ほかの理由が先 = ボタンなし
+    expect(footReload(INITIAL_AI_CHAT, { ...expired, hasChain: false })).toBe(false);
+    expect(footReload(INITIAL_AI_CHAT, { ...expired, legCount: 999 })).toBe(false);
+    // ほかの code の失敗・読めた・読んでいる = ボタンなし
+    expect(footReload(INITIAL_AI_CHAT, { ...GATE, status: { error: 'network' } })).toBe(false);
+    expect(footReload(INITIAL_AI_CHAT, GATE)).toBe(false);
+    expect(footReload(INITIAL_AI_CHAT, { ...GATE, status: null })).toBe(false);
+  });
+
+  it('blockedElsewhere: パネルの外（パレット・形の一覧の title）ではログイン切れの理由が [ページを読み直す] を指さない', () => {
+    const expired: AiGate = { ...GATE, status: { error: 'session_expired' } };
+    for (const reason of [
+      diagnoseBlocked(INITIAL_AI_CHAT, expired),
+      sendBlocked(INITIAL_AI_CHAT, expired),
+    ]) {
+      const out = blockedElsewhere(reason);
+      expect(out).toBe(SESSION_EXPIRED_ELSEWHERE_TEXT);
+      expect(out).not.toContain('[ページを読み直す]');
+      expect(out).toContain('ログインの期限が切れた');
+    }
+    // ほかの理由・押せる はそのまま
+    const net = sendBlocked(INITIAL_AI_CHAT, { ...GATE, status: { error: 'network' } });
+    expect(blockedElsewhere(net)).toBe(net);
+    expect(blockedElsewhere('送信中です')).toBe('送信中です');
+    expect(blockedElsewhere(null)).toBeNull();
   });
 });
 

@@ -2,6 +2,7 @@ import type { MarketPillModel, PillFull, PillTag } from '../../view/marketPill';
 import { visibleTags } from '../../view/marketPill';
 import type { Tier } from '../../view/shell';
 import { Popover } from '../parts/Popover';
+import { ReloadButton } from '../parts/ReloadButton';
 
 /**
  * ピルに見せるタグの数（幅の段階で固定。残りは +N。docs/ui-redesign.md §2.1）。タブレットは BOX タブの帯を入れるため 1
@@ -123,6 +124,7 @@ function Full({ f }: { f: PillFull }) {
             {f.error.message}
             {f.error.kept && `。${f.error.kept}`}
           </p>
+          {f.error.reload && <ReloadButton class="pf-reload" />}
           {f.error.errors.length > 0 && (
             <ul>
               {f.error.errors.map((e, i) => (

@@ -493,6 +493,11 @@ details.ai-thinking[open] > summary > svg.ic {
   overflow-wrap: anywhere;
 }
 
+/* ログイン切れの [ページを読み直す]（#341）。文の後ろに置く */
+.ai-reason .ai-reload {
+  margin-left: var(--sp-2);
+}
+
 .ai-actions {
   display: flex;
   gap: var(--sp-2);

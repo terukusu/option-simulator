@@ -138,6 +138,37 @@ describe('noticeRoute', () => {
     );
   });
 
+  it('#341: ログイン切れ（reload）の失敗は板の有無によらずその文で [ページを読み直す] を出す', () => {
+    const auth = {
+      message: 'ログインが切れた（[ページを読み直す] でログインし直す）',
+      reload: true as const,
+    };
+    expect(loadFailedToast(true, auth, '前の板のまま（取得 21:47）')).toEqual({
+      kind: 'load-failed',
+      text: 'ログインが切れた（[ページを読み直す] でログインし直す）。前の板のまま（取得 21:47）',
+      note: 'warn',
+      reload: true,
+    });
+    for (const hasChain of [true, false]) {
+      expect(loadFailedToast(hasChain, auth, null)).toEqual({
+        kind: 'load-failed',
+        text: 'ログインが切れた（[ページを読み直す] でログインし直す）',
+        note: 'warn',
+        reload: true,
+      });
+    }
+    // http・network・invalid は reload のキーが無い（[ページを読み直す] を出さない）
+    for (const message of [
+      '板を読めない（HTTP 500）',
+      '板を読めない（通信エラー）',
+      '板の JSON が不正',
+    ]) {
+      for (const hasChain of [true, false]) {
+        expect(loadFailedToast(hasChain, { message }, null)).not.toHaveProperty('reload');
+      }
+    }
+  });
+
   it('boardNoticeText: #81 の知らせの行と同じ 5 通り', () => {
     const e = { message: 'm' };
     expect(boardNoticeText(true, true, e, 'k')).toEqual({ text: '読み込み中…', warn: false });
