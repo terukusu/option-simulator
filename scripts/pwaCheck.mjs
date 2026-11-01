@@ -13,9 +13,15 @@
 //   (c) コンソールの CSP 違反（Refused to / Content Security Policy）が 0 件・/favicon.svg が 200
 //   (d) `/` で ⋯ → マニュアル → 節（表・コードブロック）を説明カードで開く（#322。マニュアルの chunk の動的 import）。
 //       (c) の CSP 違反はこの操作の後に数える
-// 参考に Page.getInstallabilityErrors も出す（display: browser のため「インストールできない」の旨は想定どおり）。
+//   (e) #341: `/` を本物の Chromium（`channel: 'chromium'` の新しい headless。headless shell は installability を
+//       持たない）の永続の context（一時ディレクトリ。終わったら消す）で開き、CDP の Page.getInstallabilityErrors が 0 件
+//       （display: standalone・アイコン・start_url など Chrome のインストールの条件）。一過性の pipeline-restarted だけなら
+//       1 回だけ取り直す。in-incognito が出たらそれだけを除き、その旨を行に出す。CDP が取れなければ NG
 // 出力は件数・パス・ステータスだけ（cookie の値・ヘッダの全文は出さない）。--base はループバック（127.0.0.1 / localhost / [::1]）だけ。
 
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { chromium } from 'playwright';
 
 const args = process.argv.slice(2);
@@ -127,20 +133,46 @@ try {
       }
     }
     ok(csp.length === 0, `(c) CSP 違反 ${csp.length} 件`);
-
-    try {
-      const inst = await cdp.send('Page.getInstallabilityErrors');
-      const ids = inst.installabilityErrors.map((e) => e.errorId);
-      console.log(
-        `参考: installabilityErrors ${ids.length} 件${ids.length ? `（${ids.join(', ')}）` : ''}`,
-      );
-    } catch (e) {
-      console.log(`参考: installabilityErrors は取れない（${e.message.split('\n')[0]}）`);
-    }
     await context.close();
   }
 } finally {
   await browser.close();
+}
+
+// (e) #341: インストールできるアプリか（永続の context・本物の Chromium）
+console.log('--- / (e) installability');
+const dir = mkdtempSync(join(tmpdir(), 'pwa-check-'));
+try {
+  const context = await chromium.launchPersistentContext(dir, { channel: 'chromium' });
+  try {
+    await context.addCookies([COOKIE]);
+    const page = context.pages()[0] ?? (await context.newPage());
+    const res = await page.goto(new URL('/', base).href, { waitUntil: 'load' });
+    ok(res?.status() === 200, `(e) / ${res?.status()}`);
+    await page.waitForTimeout(500);
+    const cdp = await context.newCDPSession(page);
+    const errorIds = async () =>
+      (await cdp.send('Page.getInstallabilityErrors')).installabilityErrors.map((e) => e.errorId);
+    let ids = await errorIds();
+    if (ids.length > 0 && ids.every((id) => id === 'pipeline-restarted')) {
+      await page.waitForTimeout(1000);
+      ids = await errorIds();
+    }
+    const incognito = ids.includes('in-incognito');
+    const rest = ids.filter((id) => id !== 'in-incognito');
+    ok(
+      rest.length === 0,
+      `(e) installabilityErrors ${rest.length} 件${rest.length ? `（${rest.join(', ')}）` : ''}${incognito ? '（in-incognito を除いた）' : ''}`,
+    );
+  } catch (e) {
+    ok(false, `(e) installabilityErrors を取れない（${String(e.message ?? e).split('\n')[0]}）`);
+  } finally {
+    await context.close();
+  }
+} catch (e) {
+  ok(false, `(e) Chromium を開けない（${String(e.message ?? e).split('\n')[0]}）`);
+} finally {
+  rmSync(dir, { recursive: true, force: true });
 }
 
 console.log(failed === 0 ? 'pwa:check OK' : `pwa:check NG（${failed} 件）`);

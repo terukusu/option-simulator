@@ -61,6 +61,28 @@ describe('describeLoadError', () => {
     for (const m of messages) expect(m).not.toMatch(SECRET);
   });
 
+  it('#341: ログイン切れ（auth）だけ reload: true で、文が [ページを読み直す] を指す。ほかの種類は reload のキーが無い', () => {
+    const auth = describeLoadError(
+      new ChainLoadError('ログインが切れた（api）', [], { kind: 'auth', status: 401 }),
+    );
+    expect(auth).toEqual({
+      message: 'ログインが切れた（[ページを読み直す] でログインし直す）',
+      errors: [],
+      reload: true,
+    });
+    const others = [
+      new ChainLoadError('x', [], { kind: 'http', status: 503 }),
+      new ChainLoadError('x', [], { kind: 'http', status: 500 }),
+      new ChainLoadError('x', [], { kind: 'network' }),
+      new ChainLoadError('x', ['$.x: 必須']),
+      new Error('x'),
+    ].map(describeLoadError);
+    for (const v of others) {
+      expect(v).not.toHaveProperty('reload');
+      expect(v.message).not.toContain('[ページを読み直す]');
+    }
+  });
+
   it('検証エラーの明細は最大 MAX_ERROR_LINES 件', () => {
     const errs = Array.from({ length: MAX_ERROR_LINES + 5 }, (_, i) => `$.months[${i}]: 不正`);
     const v = describeLoadError(new ChainLoadError('板の JSON が不正（api）', errs));

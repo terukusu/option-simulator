@@ -5,6 +5,7 @@
  */
 
 import { useState } from 'preact/hooks';
+import { AUTH_EXPIRED_TEXT, RELOAD_PAGE_LABEL } from '../../view/reloadPage';
 import { Chip, ChipRow } from '../parts/Chip';
 import { Dialog } from '../parts/Dialog';
 import { Icon } from '../parts/Icon';
@@ -250,6 +251,16 @@ export function PartsGallery() {
         </div>
         <div class="toast note warn gal-static">
           <p class="txt">URL が長すぎて読まない。作業は変えていない</p>
+          <button type="button" tabIndex={-1}>
+            閉じる
+          </button>
+        </div>
+        {/* ログイン切れ（#341。[ページを読み直す] と [閉じる] の 2 つ。360px でボタンが折り返さない） */}
+        <div class="toast note warn gal-static">
+          <p class="txt">{`${AUTH_EXPIRED_TEXT}。前の板のまま（取得 21:47）`}</p>
+          <button type="button" tabIndex={-1}>
+            {RELOAD_PAGE_LABEL}
+          </button>
           <button type="button" tabIndex={-1}>
             閉じる
           </button>

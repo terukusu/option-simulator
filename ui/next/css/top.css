@@ -368,6 +368,11 @@
   padding-left: 1.2em;
 }
 
+/* ログイン切れの [ページを読み直す]（#341） */
+.pf-error .pf-reload {
+  margin-top: var(--sp-1);
+}
+
 /* ===== テーマのボタン（PC・タブレット） ===== */
 .top-theme {
   display: inline-flex;

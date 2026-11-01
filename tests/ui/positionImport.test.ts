@@ -16,6 +16,9 @@ import {
   initialRows,
   openedAtOfDay,
   readBlocked,
+  readBlockedReload,
+  readErrorText,
+  readReload,
   rowView,
 } from '../../ui/view/positionImport';
 import { TABS_FULL_TEXT } from '../../ui/view/tabs';
@@ -316,6 +319,24 @@ describe('押せる / 押せない', () => {
     expect(readBlocked({ ...base, status: { ...st, remaining_usd: 0 } })).toMatch(/上限/);
     expect(readBlocked({ ...base, reading: true })).toMatch(/読み取り中/);
     expect(readBlocked({ ...base, hasImage: false })).toMatch(/画像を選んで/);
+  });
+
+  it('#341: session_expired の知らせ・押せない理由だけ [ページを読み直す]', () => {
+    expect(readErrorText('session_expired')).toContain('[ページを読み直す]');
+    expect(readReload('session_expired')).toBe(true);
+    for (const c of ['network', 'timeout', 'too_large', 'bad_result', 'aborted', 'unavailable']) {
+      expect(readReload(c)).toBe(false);
+      expect(readErrorText(c)).not.toContain('[ページを読み直す]');
+    }
+    const expired = { error: 'session_expired' };
+    expect(
+      readBlocked({ hasChain: true, status: expired, hasImage: true, reading: false }),
+    ).toContain('[ページを読み直す]');
+    expect(readBlockedReload({ hasChain: true, status: expired })).toBe(true);
+    expect(readBlockedReload({ hasChain: false, status: expired })).toBe(false);
+    expect(readBlockedReload({ hasChain: true, status: { error: 'network' } })).toBe(false);
+    expect(readBlockedReload({ hasChain: true, status: null })).toBe(false);
+    expect(readBlockedReload({ hasChain: true, status: st })).toBe(false);
   });
 });
 

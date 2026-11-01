@@ -473,10 +473,14 @@ async function waitReady(page, m, opts = {}) {
   if (m === 'next' && !opts.keepNotes) await closeNotes(page);
 }
 
-/** 知らせのトーストを全部閉じる（#87） */
+/** 知らせのトーストを全部閉じる（#87）。押すのは [閉じる] だけ（#341: [ページを読み直す] は押さない） */
 async function closeNotes(page) {
   await page.evaluate(() => {
-    for (const b of document.querySelectorAll('.toast.note > button')) b.click();
+    for (const b of document.querySelectorAll(
+      '.toast.note > button[aria-label="知らせを閉じる"]',
+    )) {
+      b.click();
+    }
   });
   await page
     .waitForFunction(() => document.querySelectorAll('.toast.note').length === 0, undefined, {

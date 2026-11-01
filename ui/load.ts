@@ -19,6 +19,7 @@ import {
   normalizeChain,
 } from '../data';
 import type { LoadErrorView } from './state';
+import { AUTH_EXPIRED_TEXT } from './view/reloadPage';
 
 /** 読み込みエラーで出す明細の最大件数 */
 export const MAX_ERROR_LINES = 20;
@@ -109,7 +110,12 @@ export function describeLoadError(e: unknown): LoadErrorView {
           errors: [],
         };
       case 'auth':
-        return { message: 'ログインが切れた（ページを読み直してから [最新]）', errors: [] };
+        // #341: ホーム画面のアプリには再読み込みのボタンが無いので、知らせに [ページを読み直す] を出す
+        return {
+          message: AUTH_EXPIRED_TEXT,
+          errors: [],
+          reload: true,
+        };
       case 'network':
         return { message: '板を読めない（通信エラー）', errors: [] };
       case 'invalid': {

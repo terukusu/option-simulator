@@ -1,11 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
 /**
- * #90: PWA（ホーム画面に追加とアイコン。docs/ui-redesign.md §10.1「PWA」・§11 決定 10）。
+ * #90・#341: PWA（アプリとしてインストールとアイコン。docs/ui-redesign.md §10.1「PWA」・§11 決定 10）。
  *
- * (a) manifest の項目 (b) theme_color / background_color = tokens.css のダークの --bg
+ * (a) manifest の項目（display は standalone。#341） (b) theme_color / background_color = tokens.css のダークの --bg
  * (c) icons と禁止の語 (d) PNG の署名・大きさ・不透明 (e) favicon.svg に script・style・外部参照なし
- * (f) index.html の head のリンク・meta
+ * (f) index.html の head のリンク・meta (g) service worker を置かない（#341）
  *
  * 色の値はテストに写さず tokens.css を読む（色を変えたら manifest・index.html の直し漏れがここで落ちる）。
  * ファイルは Node の fs で読む（@types/node を足さないため型はここで最小限に書く。cssTokens.test.ts と同じ）。
@@ -16,6 +16,8 @@ const fs = (
       getBuiltinModule(id: 'node:fs'): {
         readFileSync(p: URL, enc: 'utf8'): string;
         readFileSync(p: URL): Uint8Array;
+        readdirSync(p: URL, opts: { recursive: true }): string[];
+        readdirSync(p: URL): string[];
       };
     };
   }
@@ -64,7 +66,7 @@ describe('PWA の manifest（#90）', () => {
     expect(manifest.id).toBe('./');
     expect(manifest.start_url).toBe('./');
     expect(manifest.scope).toBe('./');
-    expect(manifest.display).toBe('browser');
+    expect(manifest.display).toBe('standalone');
   });
 
   it('(b) theme_color と background_color は tokens.css のダークの --bg', () => {
@@ -73,7 +75,7 @@ describe('PWA の manifest（#90）', () => {
     expect(String(manifest.background_color).toLowerCase()).toBe(DARK_BG);
   });
 
-  it('(c) icons は 192 と 512 の PNG の 2 件。外部 URL・全画面・Service Worker の語が無い', () => {
+  it('(c) icons は 192 と 512 の PNG の 2 件。外部 URL・fullscreen・minimal-ui・display_override・Service Worker の語が無い', () => {
     expect(manifest.icons).toEqual([
       expect.objectContaining({ src: 'icon-192.png', sizes: '192x192', type: 'image/png' }),
       expect.objectContaining({ src: 'icon-512.png', sizes: '512x512', type: 'image/png' }),
@@ -81,9 +83,9 @@ describe('PWA の manifest（#90）', () => {
     expect(manifest.icons).toHaveLength(2);
     for (const word of [
       /https?:\/\//i,
-      /standalone/i,
       /fullscreen/i,
       /minimal-ui/i,
+      /display_override/i,
       /serviceworker/i,
     ]) {
       expect(manifestText).not.toMatch(word);
@@ -168,5 +170,23 @@ describe('index.html の head（#90）', () => {
     ]);
     expect(html).not.toMatch(/apple-mobile-web-app-capable/i);
     expect(html).not.toMatch(/mobile-web-app-capable/i);
+    expect(html).not.toMatch(/apple-mobile-web-app-status-bar-style/i);
+  });
+});
+
+describe('service worker を置かない（#341）', () => {
+  it('(g) ui/ の下に serviceWorker の語が無く、ui/public/ はちょうど 5 つの名前', () => {
+    const files = fs
+      .readdirSync(url('../../ui/'), { recursive: true })
+      .filter((f) => /\.(ts|tsx|js|mjs|html|css|json|webmanifest|svg)$/i.test(f));
+    expect(files.length).toBeGreaterThan(0);
+    for (const f of files) expect(text(`../../ui/${f}`), f).not.toMatch(/serviceWorker/i);
+    expect([...fs.readdirSync(url(PUBLIC))].sort()).toEqual([
+      'apple-touch-icon.png',
+      'favicon.svg',
+      'icon-192.png',
+      'icon-512.png',
+      'manifest.webmanifest',
+    ]);
   });
 });

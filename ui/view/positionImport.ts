@@ -25,7 +25,7 @@ import {
 } from '../../data';
 import { type AtmBasis, type Holidays, monthlyExpiry, type Side } from '../../model';
 import { type Action, QTY_MAX, type State, type UiLeg } from '../state';
-import { aiErrorText } from './aiChat';
+import { aiErrorText, aiNeedsReload, statusErrorText } from './aiChat';
 import { type NewTabUndo, newTabPlan } from './newTab';
 import { TABS_FULL_TEXT } from './tabs';
 import { NO_CHAIN_TEXT } from './topMenu';
@@ -118,6 +118,11 @@ export function readErrorText(code: string, remainingUsd: number | null = null):
   }
 }
 
+/** 読み取りの失敗の知らせに [ページを読み直す] を出すか（#341: session_expired だけ。文が readErrorText で指す） */
+export function readReload(code: string): boolean {
+  return aiNeedsReload(code);
+}
+
 // ---------------------------------------------------------------- 押せる / 押せない
 
 /**
@@ -150,12 +155,21 @@ export function readBlocked(o: {
   if (!o.hasChain) return '板がありません（板を読んでから）';
   const st = o.status;
   if (st === null) return 'AI の状態を読んでいます…';
-  if ('error' in st) return `AI の状態を読めません（${aiErrorText(st.error)}）`;
+  if ('error' in st) return statusErrorText(st.error);
   const blocked = statusBlocked(st);
   if (blocked) return blocked;
   if (o.reading) return '読み取り中です';
   if (!o.hasImage) return '画像を選んでください';
   return null;
+}
+
+/**
+ * [読み取る] が押せない理由（readBlocked）に [ページを読み直す] を出すか（#341）: 理由が AI の状態の失敗で、
+ * その code が session_expired のときだけ（板が無いときは板の理由が先）
+ */
+export function readBlockedReload(o: { hasChain: boolean; status: AiStatusLike }): boolean {
+  const st = o.status;
+  return o.hasChain && st !== null && 'error' in st && readReload(st.error);
 }
 
 // ---------------------------------------------------------------- 行

@@ -282,6 +282,15 @@ describe('marketPill の要約', () => {
     expect(none.full.notice?.text).toBe('板の JSON を選んでください。');
   });
 
+  it('#341: ログイン切れ（reload）の失敗は全文の error に reload: true（ほかは無い）', () => {
+    const auth = { message: 'ログインが切れた', errors: [], reload: true as const };
+    for (const h of [latestHeader(), null]) {
+      expect(marketPill(h, null, { ...IDLE, error: auth }).full.error?.reload).toBe(true);
+      const http = marketPill(h, null, { ...IDLE, error: { message: 'x', errors: [] } });
+      expect(http.full.error).not.toHaveProperty('reload');
+    }
+  });
+
   it('visibleTags: 幅の段階の数だけ、残りは +N', () => {
     const p = marketPill(latestHeader('B', { stale: true }), null, {
       ...IDLE,

@@ -7,9 +7,11 @@ import { downloadText } from '../../download';
 import type { AiAsk } from '../../view/aiAsk';
 import {
   type AiGate,
+  aiErrorAction,
   aiErrorText,
   applyDraft,
   askPlan,
+  blockedElsewhere,
   type ChatItem,
   chatGroups,
   chatItems,
@@ -17,6 +19,7 @@ import {
   diagnoseBlocked,
   diagnoseProminent,
   footReason,
+  footReload,
   holdAfterDone,
   MAX_USER_TEXT,
   nearLimit,
@@ -48,6 +51,7 @@ import { PANEL_FOCUS_LABEL } from '../../view/keys';
 import { PanelHead } from '../PanelHead';
 import { Chip, ChipRow } from '../parts/Chip';
 import { Icon } from '../parts/Icon';
+import { ReloadButton } from '../parts/ReloadButton';
 import { useScrollMore } from '../parts/scrollMore';
 import { openManualRef, openTerm } from '../parts/termCard';
 
@@ -225,7 +229,8 @@ function AiPanelView(p: {
       setKeepNote(keepFailText('ファイルを作れませんでした'));
     }
   };
-  const presetReason = sendBlocked(chat.state, known);
+  // パネルの外（形の一覧の title・パレット）に出す理由は [ページを読み直す] を指さない文に（#341）
+  const presetReason = blockedElsewhere(sendBlocked(chat.state, known));
   useEffect(() => {
     p.onPresetReason?.(presetReason);
   }, [presetReason]);
@@ -235,7 +240,7 @@ function AiPanelView(p: {
   p.apiRef.current = {
     diagnose: chat.diagnose,
     ask: (a) => decide(a, askPlan(chat.state, { ...gate, status: chat.status })),
-    paletteReason: diagnoseBlocked(chat.state, known),
+    paletteReason: blockedElsewhere(diagnoseBlocked(chat.state, known)),
     preset: (pr) => decidePreset(pr, askPlan(chat.state, { ...gate, status: chat.status })),
     presetReason,
   };
@@ -290,6 +295,7 @@ export function AiChat(p: {
   const diagnoseReason = diagnoseBlocked(state, gate);
   const sendReason = sendBlocked(state, gate);
   const reason = footReason(state, gate);
+  const reasonReload = footReload(state, gate);
   const items = useMemo(() => chatItems(state), [state]);
   const sources = useMemo(() => numberSources(state), [state.context, state.messages]);
   const keepable = useMemo(() => keepKeys(state), [state.messages, state.turn === null]);
@@ -495,6 +501,7 @@ export function AiChat(p: {
         {reason !== null && (
           <p class="ai-reason" data-ai="reason">
             {reason}
+            {reasonReload && <ReloadButton class="ai-reload" />}
           </p>
         )}
         {p.keepNote && (
@@ -662,7 +669,9 @@ function ChatRow(p: {
           {it.failed !== null && (
             <p class="ai-error" data-ai="error" data-code={it.failed}>
               {aiErrorText(it.failed, it.remainingUsd ?? null)}
-              {it.failed !== 'session_expired' && (
+              {aiErrorAction(it.failed) === 'reload' ? (
+                <ReloadButton />
+              ) : (
                 <button type="button" class="btn sm" disabled={!p.canRetry} onClick={p.onRetry}>
                   もう一度
                 </button>

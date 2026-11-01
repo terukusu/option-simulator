@@ -137,6 +137,12 @@ dialog.sheet.import {
   line-height: 1.45;
 }
 
+/* ログイン切れの [ページを読み直す]（#341）。文の後ろに置く */
+.imp-why .imp-reload,
+.imp-msg .imp-reload {
+  margin-left: var(--sp-2);
+}
+
 ul.imp-why {
   display: flex;
   flex-direction: column;
