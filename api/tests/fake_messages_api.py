@@ -10,6 +10,7 @@ redacted_thinking）/ "err429" / "err401" /
 文書（#137）: "doc"（1 回目は thinking → read_doc の tool_use、往復の後は text）/ "skill_doc"（1 回目に Skill と
 read_doc を並べて、その後は text）/ "doc_outside"（1 回目は許可リストの外の節 design 13 の read_doc、その後は text）/
 "doc_many"（1 回目に read_doc を DOC_MANY 本並べる = 1 要求の回数の上限を超える）。
+画像の読み取り（#318）: "report"（thinking → report_positions の tool_use 1 本。入力は REPORT_INPUT）。
 usage は要求ごとに変える（n 回目 = 0 始まり: input_tokens 1234 + 1000n、output_tokens 321 + 10n、cache は 100・50。
 n = 1 だけ cache_creation の内訳を付ける）。値はすべて架空。
 """
@@ -30,6 +31,10 @@ DOC_INPUT = {"file": "user-guide", "section": "8.5"}
 DOC_OUTSIDE = {"file": "design", "section": "13"}
 DOC_MANY = 7
 UNKNOWN_SKILL = "simulator:unknown"
+# 読み取りの結果（#318。値は架空）
+REPORT_INPUT = {"kind": "positions", "rows": [
+    {"product": "op_large", "expiry_year": 2026, "expiry_month": 12, "type": "C", "strike": 70000, "side": "buy",
+     "qty": 3, "price": 210, "opened_on": "2026-10-05"}]}
 
 
 def turn_usage(n: int) -> tuple[dict, dict]:
@@ -199,6 +204,20 @@ class FakeMessagesApi:
                 self.ev({"type": "content_block_delta", "index": i,
                          "delta": {"type": "signature_delta", "signature": SIG}})
                 self.ev({"type": "content_block_stop", "index": i})
+                rname = next((t["name"] for t in body.get("tools") or [] if t["name"].endswith("report_positions")),
+                             None)
+                if api.script == "report" and rname:
+                    i += 1
+                    self.ev({"type": "content_block_start", "index": i, "content_block": {
+                        "type": "tool_use", "id": f"toolu_report_{n}", "name": rname, "input": {}}})
+                    self.ev({"type": "content_block_delta", "index": i, "delta": {
+                        "type": "input_json_delta", "partial_json": json.dumps(REPORT_INPUT)}})
+                    self.ev({"type": "content_block_stop", "index": i})
+                    self.ev({"type": "message_delta", "delta": {"stop_reason": "tool_use", "stop_sequence": None},
+                             "usage": delta_usage})
+                    self.ev({"type": "message_stop"})
+                    self.close_connection = True
+                    return
                 if skill is not None or doc is not None:
                     if skill is not None:
                         i += 1

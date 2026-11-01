@@ -416,6 +416,23 @@ describe('paletteItems（AC-B2）', () => {
     }
   });
 
+  it('#318: 作業の「画像から建玉を読み取る…」は保有ポジション… の直後。押せない理由は title（省略なら行を出さない）', () => {
+    const ok = ofGroup(paletteItems(inputOf(loaded, { importBlocked: null })), 'work');
+    expect(ok.map((r) => r.id).slice(0, 3)).toEqual(['work:holdings', 'work:import', 'work:book']);
+    expect(ok[1]).toMatchObject({
+      label: '画像から建玉を読み取る…',
+      disabled: false,
+      run: { kind: 'importImage' },
+    });
+    const blocked = ofGroup(
+      paletteItems(inputOf(twoLegs, { chain: null, importBlocked: '板が無い' })),
+      'work',
+    ).find((r) => r.id === 'work:import');
+    expect(blocked).toMatchObject({ disabled: true, title: '板が無い', run: null });
+    const none = ofGroup(paletteItems(inputOf(loaded)), 'work');
+    expect(none.some((r) => r.id === 'work:import')).toBe(false);
+  });
+
   it('#298 AC9: 作業の「建値を今の板に合わせる」は板なし・足 0 本で押せない（理由つき）、それ以外は押せる', () => {
     const find = (list: PaletteItem[]) => list.find((i) => i.id === 'work:rebase');
     const ok = find(items);

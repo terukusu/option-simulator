@@ -9,6 +9,7 @@
   要求・Cache-Control は /api/atm_iv と同じ。#190）
 - POST /api/ai/messages: AI の中継（SSE。許可リスト・費用の 1 日上限・同じオリジン。ai/relay.py。#134）
 - GET /api/ai/status: AI が使えるか・1 日の上限と残り（ai/relay.py。#134）
+- POST /api/ai/read_positions: 建玉の一覧の画像 1 枚を読み取る（JSON。ai/relay.py・ai/read_positions.py。#318）
 - GET /healthz: 設定の読み込みだけ（BigQuery・Anthropic・Firestore に触れない）
 - 静的ファイル: 環境変数 STATIC_DIR があるときだけ / と /assets/<path>（Vite のビルド成果物 = dist/）と、
   dist/ 直下の決まった名前（ROOT_FILES。manifest とアイコン。#90）
@@ -189,6 +190,10 @@ def create_app(runner=None, clock=None, monotonic=None, cfg: st.Settings | None 
     @app.post("/api/ai/messages")
     def api_ai_messages():
         return relay.messages(request)
+
+    @app.post("/api/ai/read_positions")
+    def api_ai_read_positions():
+        return relay.read_positions(request)
 
     if cfg.static_dir is not None:
         static_dir = cfg.static_dir.resolve()

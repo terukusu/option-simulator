@@ -4,6 +4,7 @@ import { replayEventOf, replayPath } from '../../data/replay';
 import { defaultName } from '../book';
 import { loadIvStatsData } from '../components/ivStatsData';
 import { loadTechnicalsData } from '../components/technicalsData';
+import type { AiStatusView } from '../components/useAiChat';
 import {
   type Boot,
   DEV_FIXTURES,
@@ -55,6 +56,7 @@ import {
 } from '../view/notices';
 import { type PaletteRun, paletteAtmK, paletteItems } from '../view/palette';
 import { shareReplaceConfirmText } from '../view/persistNote';
+import { importEntryBlocked } from '../view/positionImport';
 import { clearUndo, REBASE_COPY_UNDO_TEXT, rebasePlan } from '../view/positionsRegion';
 import type { DXUnit } from '../view/scenario';
 import { presetRevealAction } from '../view/scenarioRegion';
@@ -98,6 +100,7 @@ import {
 import { Board } from './regions/Board';
 import type { HoldBundle } from './regions/HoldMap';
 import { Metrics } from './regions/Metrics';
+import { PositionImportDialog } from './regions/PositionImportDialog';
 import { Positions } from './regions/Positions';
 import type { ReplayBundle } from './regions/Replay';
 import { Scenario, scenarioInputOf } from './regions/Scenario';
@@ -377,6 +380,16 @@ export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
   const [shapes, setShapes] = useState<ShapeOpen | null>(null);
   const onShapes = useCallback(() => setShapes({ shape: null }), []);
   const closeShapes = useCallback(() => setShapes(null), []);
+  // 画像から建玉を読み取る（#318。パレット・保有ポジションの一覧（⋯ の保有ポジション…））。画像・結果はダイアログの
+  // メモリだけ（閉じたら捨てる）
+  const [importOpen, setImportOpen] = useState(false);
+  const closeImport = useCallback(() => setImportOpen(false), []);
+  // 保有ポジションの一覧から: 一覧を閉じて開く（ダイアログを重ねない）
+  const { closeHoldings } = c;
+  const onHoldingsImport = useCallback(() => {
+    closeHoldings();
+    setImportOpen(true);
+  }, [closeHoldings]);
   // 足が消えたら選択を外す
   const selectedLeg = picked !== null && c.curLegs.some((l) => l.id === picked) ? picked : null;
   const onChart = useCallback((chart: ChartMode) => send({ type: 'chart', chart }), []);
@@ -549,6 +562,8 @@ export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
   // 押せない理由は AI のパネルが変わるたびに上げてもらう（ダイアログを開いたままでも追従する。#20 レビュー N2）。
   // undefined = AI のパネルがまだ描かれていない
   const [shapeAiReason, setShapeAiReason] = useState<string | null | undefined>(undefined);
+  // AI のパネルが読んだ状態（#318 の入口の押せる / 押せない。state にして変わったら描き直す = レビュー N5）
+  const [aiStatus, setAiStatus] = useState<AiStatusView>(null);
   const onCloseTab = useCallback(
     (id: number) => {
       const action = restoreTabAction(stateRef.current, id);
@@ -666,6 +681,9 @@ export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
   // 読み込みの失敗: 失敗した瞬間に警告のトースト、次に成功したら（loadError が null に戻ったら）消す
   const { loadError, legError } = state;
   const hasChain = state.chain !== null;
+  // 画像から建玉を読み取る…（#318。パレット・保有ポジションの一覧）が押せない理由: 板なし・（AI のパネルが読んだ状態で）AI が無効・今日の上限。
+  // 状態をまだ読んでいなければ押せる（ダイアログが読んで [読み取る] を判定する）
+  const importBlocked = importEntryBlocked(hasChain, aiStatus);
   const keptNote = hasChain ? keptBoardNote(state.fetchedAt, state.boardStale) : null;
   const failRef = useRef(loadError);
   useEffect(() => {
@@ -801,6 +819,7 @@ export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
             legCount: c.curLegs.length,
             bookCount: c.bookCount,
             aiDiagnoseBlocked: aiApi.current?.paletteReason ?? null,
+            importBlocked,
           })
         : [],
     [
@@ -821,6 +840,7 @@ export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
       c.tabsView,
       c.curLegs.length,
       c.bookCount,
+      importBlocked,
     ],
   );
   const runPalette = (run: PaletteRun) => {
@@ -863,6 +883,9 @@ export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
         return;
       case 'holdings':
         c.openHoldings();
+        return;
+      case 'importImage':
+        setImportOpen(true);
         return;
       case 'book':
         onOpenBook();
@@ -1102,6 +1125,7 @@ export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
             held={c.tabsView.active.held}
             apiRef={aiApi}
             onPresetReason={setShapeAiReason}
+            onStatus={setAiStatus}
           />
         }
       />
@@ -1129,6 +1153,14 @@ export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
         onPick={onPickLeg}
         aiReason={shapeAiReason}
         onAiAsk={onShapeAi}
+      />
+      <PositionImportDialog
+        open={importOpen}
+        onClose={closeImport}
+        c={c}
+        getState={getState}
+        push={push}
+        base={aiBase}
       />
       <SettingsDialog
         open={settingsOpen}
@@ -1191,6 +1223,8 @@ export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
         params={c.marginParams}
         capital={c.capital}
         message={c.holdingsMsg}
+        onImport={onHoldingsImport}
+        importBlocked={importBlocked}
         onClose={c.closeHoldings}
         onSwitchTab={c.onHoldingSwitchTab}
         onOpenNewTab={c.onHoldingOpenNewTab}

@@ -159,6 +159,20 @@ AI_INPUT_OVERHEAD_TOKENS = 2000
 # CLI 2.1.283 の実測で、送った本文（system・tools・messages の UTF-8）− 中継の本文 = 2,843〜2,884 B
 # （tests/test_ai_agent_sdk_cli.py がこの値以下であることを固定する）。見積もり E に足す
 AI_CLI_OVERHEAD_TOKENS = 4000
+# 建玉の一覧の画像の読み取り（POST /api/ai/read_positions。#318 = docs/adr-0009-ai-image-read-positions.md）。
+# 画像 1 枚（image/png・image/jpeg の base64）を同梱の CLI で上流へ送り、読み取り専用のツール report_positions の
+# 入力だけを返す。上限は CLI が画像を作り直さずにバイトのまま上流へ渡す範囲（CLI 2.1.283 の観測: 長辺 2,000 px 以下・
+# 生のバイト数 約 512,000 B 以下。tests/test_ai_agent_sdk_cli.py で固定）の内側。
+AI_READ_MAX_BODY_BYTES = 768 * 1024  # 要求の本文の上限（413。base64 の 500,000 B ≈ 666,668 字 + 枠）
+AI_IMAGE_MAX_BYTES = 500_000  # 画像の生のバイト数の上限（400）
+AI_IMAGE_MAX_EDGE = 2000  # 画像の長辺（px）の上限（400）
+# 画像 1 枚の入力トークンの上界（公式の文書の高解像度の段の 1 枚の上限 4,784。2026-11-01 確認）。予約額の E に足す
+# （base64 のバイト数はトークンに数えない）。⌈w/28⌉×⌈h/28⌉ の素の計算は 2,000×2,000 で 5,184 だが、4,784 を超える寸法は
+# 上流が縮めて 4,784 に収める前提（崩れても過少は最大 約 400 トークン = 約 $0.003 で精算で戻る。
+# モデル・SDK の更新時に見直す）
+AI_IMAGE_MAX_TOKENS = 4784
+AI_READ_MAX_TOKENS = 6000  # 読み取りの出力の上限（thinking を含む。Opus 5.5 は thinking を切れない）
+AI_READ_EFFORT = "low"  # 読み取りの output_config.effort
 AI_FIRESTORE_DATABASE = "simulator-ai"  # 日の計上の置き場所（Firestore の名前つき DB。infra/bootstrap/ai_budget.tf）
 AI_FIRESTORE_COLLECTION = "ai_spend"
 AI_FIRESTORE_TIMEOUT_SECONDS = 5.0

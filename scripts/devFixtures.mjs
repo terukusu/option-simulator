@@ -8,6 +8,7 @@
 // 合成の板 latest の先物の値で終わる決まった関数。既定の 1 時間足の範囲に限月交代（取引最終日の 17:00）を 1 回含む）。
 // 日次の値（#152）の合成の応答も `/fixtures/atm_daily` で配る（`/api/atm_daily` と同じ形。架空の値。種つき）。
 // AI の中継（#135）の偽の応答も `/fixtures/ai/status`・`/fixtures/ai/messages`（偽の SSE。Anthropic を呼ばない）で配る。
+// 画像の読み取り（#318）は `/fixtures/ai/read_positions`（合成の結果 SYNTH_READ_RESULT を返す。画像は読まずに捨てる）。
 // 診断 = 考え中 → 文（事前計算の値を書き写す）、追加の質問 = tool_use（evaluate_scenario）→ ツールの結果を受けて文。
 // 「ヘッジ」を含む質問はツール propose_position（#139）→ 提案のカード。
 // 質問に「切断」を含むと done の無いまま終える（画面の incomplete の確認用）。遅れつき（進み具合の表示の確認用）。
@@ -401,6 +402,76 @@ export const SYNTH_AI_STATUS = {
   remaining_usd: 2.4,
   resets_at: '2026-10-14T00:00:00+09:00',
 };
+const AI_READ_PATH = '/fixtures/ai/read_positions';
+/**
+ * 画像の読み取りの合成の結果（#318。値は架空。合成の板 latest の限月 2026-11 / 2026-12・先物 2026-12 に合わせる）: 5 行・
+ * 読めない欄 1 つ（3 行目の建てた日）・年の無い限月 1 つ（5 行目 = 年を補う・板に無い限月で IV 仮）
+ */
+export const SYNTH_READ_RESULT = {
+  schema_version: 1,
+  kind: 'positions',
+  rows: [
+    {
+      product: 'op_large',
+      expiry_year: 2026,
+      expiry_month: 12,
+      type: 'P',
+      strike: 64000,
+      side: 'sell',
+      qty: 2,
+      price: 1480,
+      opened_on: '2026-10-01',
+    },
+    {
+      product: 'op_large',
+      expiry_year: 2026,
+      expiry_month: 12,
+      type: 'C',
+      strike: 70000,
+      side: 'sell',
+      qty: 2,
+      price: 610,
+      opened_on: '2026-10-01',
+    },
+    {
+      product: 'op_large',
+      expiry_year: 2026,
+      expiry_month: 11,
+      type: 'P',
+      strike: 62000,
+      side: 'buy',
+      qty: 1,
+      price: 310,
+      opened_on: null,
+    },
+    {
+      product: 'fut_mini',
+      expiry_year: 2026,
+      expiry_month: 12,
+      type: null,
+      strike: null,
+      side: 'buy',
+      qty: 1,
+      price: 66500,
+      opened_on: '2026-10-02',
+    },
+    {
+      product: 'op_large',
+      expiry_year: null,
+      expiry_month: 3,
+      type: 'P',
+      strike: 60000,
+      side: 'sell',
+      qty: 1,
+      price: 900,
+      opened_on: '2026-09-15',
+    },
+  ],
+  remaining_usd: 2.3,
+};
+/** 読み取りの合成の応答の待ち（ms。読み取り中の表示を見せる） */
+export const SYNTH_READ_DELAY_MS = 600;
+
 /** 偽の SSE の事象の間隔（ms） */
 export const SYNTH_AI_STEP_MS = { thinking: 150, writing: 900, chunk: 120 };
 
@@ -705,6 +776,41 @@ function serveAiMessages(req, res) {
   });
 }
 
+/** 画像の読み取りの合成の応答（形だけ見て画像は読まずに捨てる。中継と同じく JSON の 1 往復） */
+function serveReadPositions(req, res) {
+  let size = 0;
+  let raw = '';
+  req.setEncoding('utf8');
+  req.on('data', (c) => {
+    size += c.length;
+    if (size <= 1024 * 1024) raw += c;
+  });
+  req.on('end', () => {
+    let ok = false;
+    try {
+      const body = JSON.parse(raw);
+      const img = body?.image;
+      ok =
+        body?.schema_version === 1 &&
+        (img?.media_type === 'image/png' || img?.media_type === 'image/jpeg') &&
+        typeof img?.data === 'string' &&
+        img.data.length > 0;
+    } catch {
+      ok = false;
+    }
+    raw = '';
+    res.setHeader('Content-Type', 'application/json; charset=utf-8');
+    res.setHeader('Cache-Control', 'no-store');
+    if (!ok) {
+      res.statusCode = 400;
+      res.end('{"error":"bad_request"}');
+      return;
+    }
+    const t = setTimeout(() => res.end(JSON.stringify(SYNTH_READ_RESULT)), SYNTH_READ_DELAY_MS);
+    res.on('close', () => clearTimeout(t));
+  });
+}
+
 /** @returns {import('vite').Plugin} */
 export function serveSyntheticFixtures() {
   return {
@@ -721,6 +827,10 @@ export function serveSyntheticFixtures() {
         }
         if (path === AI_MESSAGES_PATH && req.method === 'POST') {
           serveAiMessages(req, res);
+          return;
+        }
+        if (path === AI_READ_PATH && req.method === 'POST') {
+          serveReadPositions(req, res);
           return;
         }
         if (path === ATM_DAILY_PATH) {

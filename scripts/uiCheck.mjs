@@ -204,6 +204,14 @@
 //                                          [この形で AI に相談] → 閉じて AI のパネル・要求が kind preset・topic shape（偽の AI）・
 //                                          AI が無効でボタンが disabled と title。--shots で shapes-*.png。
 //                                          既定の実行は「形の一覧（ストラングル売りのカード）」と「足 0 本の空の欄（3 ボタン）」
+//   --import                               #318 画像から建玉を読み取るの項目だけ（--flows にも入る）: 360×780・768×1024・
+//                                          1280×800（と 360 のライト）で ⋯ → 保有ポジション… → [画像から建玉を読み取る…] →
+//                                          合成の画像（ページの canvas で描いた架空の画面の JPEG + 架空の EXIF。ファイルは置かない）
+//                                          を選ぶ → プレビューが canvas・送る寸法 900×2000・選んだだけでは送らない・注意が [読み取る]
+//                                          の直上に見える → [読み取る]（dev の /fixtures/ai/read_positions: 5 行・読めない欄 1 つ）→
+//                                          送った本文が画像 1 枚・500,000 B 以下・EXIF の印なし → 確認表の縦・横 0px（表は枠の中で
+//                                          横に送る）→ 建てた日を埋めて [新しいタブに入れる]（保有の印・5 本）→ 端末の保存に画像なし →
+//                                          [元に戻す]。AI が無効なら [読み取る] が押せない・戻る 1 回で閉じる。--shots で import-*.png
 //   --url <base>                           dev サーバーを起こさず、その URL を使う（例 http://127.0.0.1:5173/?parts）
 //   --dom <file>                           body の下の要素の tag.class の並びを書き出す（DOM の変化の比較用）
 //   --shots <dir>                          スクリーンショットを書く（合成の板だけ。リポジトリに入れない）
@@ -275,6 +283,7 @@ const known = new Set([
   '--tabs',
   '--pick',
   '--shapes',
+  '--import',
 ]);
 for (const a of args) {
   if (a.startsWith('--') && !known.has(a)) {
@@ -304,6 +313,7 @@ const fontsOnly = flag('--fonts');
 const tabsOnly = flag('--tabs');
 const pickOnly = flag('--pick');
 const shapesOnly = flag('--shapes');
+const importOnly = flag('--import');
 const mode = parts ? 'parts' : 'next';
 
 // ---- 足 2 本の作業（版 2）: workspace-v2.json のタブ A だけ（fixture は変えない）
@@ -6399,6 +6409,386 @@ async function manualLook() {
   }
 }
 
+// ---- #318 画像から建玉を読み取る（--import と --flows）
+// 保有ポジション…（⋯）→ [画像から建玉を読み取る…] → 合成の画像（ページの canvas で描いた架空の画面の JPEG に、架空の
+// EXIF の段を足したもの。ファイルはリポジトリに置かない）を選ぶ → プレビュー・送る前の注意 → [読み取る]（dev の合成の
+// 結果 /fixtures/ai/read_positions: 5 行・読めない欄 1 つ）→ 確認表 → 建てた日を埋めて [新しいタブに入れる]
+
+const IMPORT_DLG = 'dialog.sheet.import[open]';
+const IMPORT_EXIF_SECRET = 'SYNTH-DEVICE-q8Zr';
+
+/** 合成の画像（架空の建玉の一覧の画面 1080×2400 の JPEG）に、架空の EXIF（APP1）の段を足したバイト列 */
+async function importImageBytes(page) {
+  const arr = await page.evaluate(async (secret) => {
+    const c = new OffscreenCanvas(1080, 2400);
+    const g = c.getContext('2d');
+    g.fillStyle = '#ffffff';
+    g.fillRect(0, 0, 1080, 2400);
+    g.fillStyle = '#1b3a6b';
+    g.fillRect(0, 0, 1080, 160);
+    g.font = '48px sans-serif';
+    for (let i = 0; i < 12; i++) {
+      g.fillStyle = i % 2 ? '#f2f4f7' : '#ffffff';
+      g.fillRect(0, 200 + i * 170, 1080, 170);
+      g.fillStyle = '#222222';
+      g.fillText(`架空 ${i + 1}  26/12  P 64,000  売建 2  1,480`, 40, 300 + i * 170);
+    }
+    const jpg = new Uint8Array(
+      await (await c.convertToBlob({ type: 'image/jpeg', quality: 0.9 })).arrayBuffer(),
+    );
+    const enc = new TextEncoder();
+    const payload = new Uint8Array([...enc.encode('Exif\0\0'), ...enc.encode(secret)]);
+    const len = payload.length + 2;
+    const app1 = new Uint8Array([0xff, 0xe1, len >> 8, len & 0xff, ...payload]);
+    return [...jpg.slice(0, 2), ...app1, ...jpg.slice(2)];
+  }, IMPORT_EXIF_SECRET);
+  return Buffer.from(arr);
+}
+
+/** ⋯ → 保有ポジション… → [画像から建玉を読み取る…] */
+async function importOpen(page) {
+  await page.click('button[aria-label="メニュー"]');
+  await page.click('header.top > .menu-wrap [role^="menuitem"]:has-text("保有ポジション…")');
+  await page.waitForSelector(`${HOLDINGS} button[data-act="import"]`, { timeout: 3000 });
+  await page.click(`${HOLDINGS} button[data-act="import"]`);
+  return page
+    .waitForSelector(IMPORT_DLG, { timeout: 3000 })
+    .then(() => true)
+    .catch(() => false);
+}
+
+/** 送る前の注意が [読み取る] の直上にあり、ダイアログの見える範囲（.sheet-body の中・窓の中）に全部見えている */
+const importNoticeVisible = (page) =>
+  page.evaluate((dlg) => {
+    const n = document.querySelector(`${dlg} .imp-notice`);
+    const b = document.querySelector(`${dlg} button[data-act="read"]`);
+    const body = document.querySelector(`${dlg} .sheet-body`);
+    if (!n || !b || !body) return '注意・ボタンが無い';
+    const r = n.getBoundingClientRect();
+    const rb = b.getBoundingClientRect();
+    const vb = body.getBoundingClientRect();
+    const out = [];
+    if (r.top < vb.top - 0.5 || r.bottom > vb.bottom + 0.5)
+      out.push('注意が .sheet-body の見える範囲の外');
+    if (r.top < 0 || r.bottom > innerHeight) out.push('注意が窓の外');
+    if (rb.top < r.bottom - 0.5) out.push('[読み取る] が注意より上');
+    if (rb.top - r.bottom > 80)
+      out.push(`注意と [読み取る] の間 ${Math.round(rb.top - r.bottom)}px`);
+    return out.join('・');
+  }, IMPORT_DLG);
+
+/** ダイアログの中の 1 行の要素が切れない（ボタン・欄・印・見出し） */
+const importCuts = (page) =>
+  page.evaluate((dlg) => {
+    const root = document.querySelector(dlg);
+    if (!root) return ['ダイアログが無い'];
+    const bad = [];
+    for (const el of root.querySelectorAll(
+      '.btn, .tag, .imp-meta > span, .imp-held, .imp-table th, .imp-hint',
+    )) {
+      if (el.getClientRects().length === 0) continue;
+      if (el.scrollWidth > el.clientWidth + 0.5)
+        bad.push(`${el.className}「${(el.textContent ?? '').trim().slice(0, 12)}」が切れる`);
+    }
+    const r = root.getBoundingClientRect();
+    if (r.left < -0.5 || r.top < -0.5 || r.right > innerWidth + 0.5 || r.bottom > innerHeight + 0.5)
+      bad.push('ダイアログが窓の外');
+    const body = root.querySelector('.sheet-body');
+    if (body && body.scrollWidth > body.clientWidth + 0.5)
+      bad.push(`.sheet-body の横 ${body.scrollWidth}/${body.clientWidth}`);
+    return bad;
+  }, IMPORT_DLG);
+
+/** 端末の保存（localStorage・sessionStorage）の値に s が入っているか */
+const storageHas = (page, s) =>
+  page.evaluate((needle) => {
+    for (const st of [localStorage, sessionStorage]) {
+      for (let i = 0; i < st.length; i++) {
+        const k = st.key(i);
+        if (k !== null && (st.getItem(k) ?? '').includes(needle)) return k;
+      }
+    }
+    return null;
+  }, s);
+
+/** 画像から建玉を読み取る（#318 AC10。vp = 360×780・768×1024・1280×800） */
+async function importFlows(vp, theme = 'dark') {
+  const tag = `#318 ${vp.width}x${vp.height} ${theme}`;
+  const shot = async (page, name) => {
+    if (shotsDir)
+      await page.screenshot({
+        path: join(shotsDir, `import-${vp.width}x${vp.height}-${theme}-${name}.png`),
+      });
+  };
+  const ctx = await newContext(
+    vp,
+    { [WORKSPACE_KEY]: twoLegs, [PREFS_KEY]: prefsText(theme) },
+    theme,
+  );
+  const page = await ctx.newPage();
+  const errors = [];
+  page.on('pageerror', (e) => errors.push(e.message));
+  const sent = [];
+  page.on('request', (r) => {
+    if (r.url().includes('/read_positions') && r.method() === 'POST') sent.push(r.postData() ?? '');
+  });
+  await page.goto(pageUrl('next'));
+  await waitReady(page, 'next');
+  const opened = await importOpen(page);
+  check(
+    `${tag}: 保有ポジションの一覧から読み取りのダイアログが開く（一覧は閉じる）`,
+    opened && (await page.locator(HOLDINGS).count()) === 0,
+  );
+  if (!opened) {
+    await ctx.close();
+    return;
+  }
+  // (1) 画像を選ぶ前: [読み取る] は押せない（理由 = 画像を選んでください）・注意は常に見える
+  await page
+    .waitForFunction(
+      (dlg) =>
+        document
+          .querySelector(`${dlg} button[data-act="read"]`)
+          ?.getAttribute('title')
+          ?.includes('画像を選んで'),
+      IMPORT_DLG,
+      { timeout: 5000 },
+    )
+    .catch(() => {});
+  const before = await page.getAttribute(`${IMPORT_DLG} button[data-act="read"]`, 'title');
+  const noticeText = await page.textContent(`${IMPORT_DLG} .imp-notice`);
+  check(
+    `${tag}: 選ぶ前は [読み取る] が押せない（理由）、注意の文に Anthropic・保存しません・切り取って`,
+    (await page.isDisabled(`${IMPORT_DLG} button[data-act="read"]`)) &&
+      (before ?? '').includes('画像を選んで') &&
+      ['Anthropic', '保存しません', '切り取って'].every((w) => (noticeText ?? '').includes(w)),
+    before ?? '',
+  );
+  // (2) 合成の画像を選ぶ → プレビュー（canvas）・送る寸法 900×2000・注意が [読み取る] の直上に見える。まだ送らない
+  const img = await importImageBytes(page);
+  await page.setInputFiles(`${IMPORT_DLG} input[type="file"]`, {
+    name: 'synthetic.jpg',
+    mimeType: 'image/jpeg',
+    buffer: img,
+  });
+  await page.waitForSelector(`${IMPORT_DLG} .imp-canvas`, { timeout: 5000 }).catch(() => {});
+  await page.waitForTimeout(200);
+  await settleMotion(page);
+  const meta = (await page.textContent(`${IMPORT_DLG} .imp-meta`).catch(() => '')) ?? '';
+  const imgTags = await page.locator(`${IMPORT_DLG} img`).count();
+  check(
+    `${tag}: 選ぶとプレビューは canvas（img なし）・送る画像 900×2000、選んだだけでは送らない`,
+    meta.includes('900×2000') && imgTags === 0 && sent.length === 0,
+    meta,
+  );
+  const vis1 = await importNoticeVisible(page);
+  const cut1 = await importCuts(page);
+  await shot(page, '1-pick');
+  const ok1 = await report(
+    page,
+    `next ${theme} 画像から建玉を読み取る（選んだ後）`,
+    vp.width,
+    vp.height,
+    `import-${vp.width}x${vp.height}-${theme}-pick`,
+    false,
+  );
+  check(
+    `${tag}: 選んだ後 縦・横 0px・注意が [読み取る] の直上に見える・切れない`,
+    ok1 && vis1 === '' && cut1.length === 0,
+    [vis1, ...cut1].filter(Boolean).join('・'),
+  );
+  // (3) [読み取る] → 読み取り中（[中止]）→ 確認表 5 行・読めない欄 1 つ・[新しいタブに入れる] は押せない（理由）
+  await page.click(`${IMPORT_DLG} button[data-act="read"]`);
+  const busy = await page
+    .waitForSelector(`${IMPORT_DLG} button[data-act="abort"]`, { timeout: 2000 })
+    .then(() => true)
+    .catch(() => false);
+  await page
+    .waitForSelector(`${IMPORT_DLG} .imp-table tbody tr`, { timeout: 8000 })
+    .catch(() => {});
+  await page.waitForTimeout(150);
+  // 送った本文: 画像 1 枚（JPEG / PNG）・生 ≤ 500,000 B・EXIF の印と架空の端末名が無い
+  let body = null;
+  try {
+    body = JSON.parse(sent[0] ?? 'null');
+  } catch {
+    body = null;
+  }
+  const raw = body?.image?.data ? Buffer.from(body.image.data, 'base64') : Buffer.alloc(0);
+  const keys = body ? Object.keys(body).sort().join(',') : '';
+  check(
+    `${tag}: 送った本文は画像 1 枚だけ・500,000 B 以下・EXIF の印と架空の端末名が無い`,
+    sent.length === 1 &&
+      keys === 'image,schema_version' &&
+      Object.keys(body.image).sort().join(',') === 'data,media_type' &&
+      ['image/png', 'image/jpeg'].includes(body.image.media_type) &&
+      raw.length > 0 &&
+      raw.length <= 500_000 &&
+      raw.indexOf(Buffer.from('Exif\0\0')) < 0 &&
+      raw.indexOf(Buffer.from(IMPORT_EXIF_SECRET)) < 0 &&
+      img.indexOf(Buffer.from(IMPORT_EXIF_SECRET)) >= 0,
+    `${body?.image?.media_type ?? '-'} ${raw.length} B`,
+  );
+  const table = await page.evaluate(
+    (dlg) => ({
+      rows: document.querySelectorAll(`${dlg} .imp-table tbody tr`).length,
+      unread: document.querySelectorAll(`${dlg} .imp-in[data-unread]`).length,
+      chips: [...document.querySelectorAll(`${dlg} .imp-no .tag`)].map((t) => t.textContent),
+      why: [...document.querySelectorAll(`${dlg} .imp-why li`)].map((t) => t.textContent),
+    }),
+    IMPORT_DLG,
+  );
+  check(
+    `${tag}: 確認表 5 行・読めない欄 1 つ・印（読めない・年を補った・IV 仮）・押せない理由「3 行目: 建てた日が空」`,
+    busy &&
+      table.rows === 5 &&
+      table.unread === 1 &&
+      ['読めない', '年を補った', 'IV 仮'].every((c) => table.chips.includes(c)) &&
+      table.why.some((t) => t.startsWith('3 行目') && t.includes('建てた日が空')) &&
+      (await page.isDisabled(`${IMPORT_DLG} button[data-act="apply"]`)),
+    `行 ${table.rows}・読めない ${table.unread}・印 ${table.chips.join(' ')}・理由 ${table.why.join(' / ')}`,
+  );
+  const cut2 = await importCuts(page);
+  await settleMotion(page);
+  await shot(page, '2-table');
+  const ok2 = await report(
+    page,
+    `next ${theme} 画像から建玉を読み取る（確認表 5 行）`,
+    vp.width,
+    vp.height,
+    `import-${vp.width}x${vp.height}-${theme}-table`,
+    false,
+  );
+  check(
+    `${tag}: 確認表 縦・横 0px（表は枠の中で横に送る）・切れない・窓の中`,
+    ok2 && cut2.length === 0,
+    cut2.join('・'),
+  );
+  // (4) 建てた日を埋める → [新しいタブに入れる] → 閉じる・タブ +1（保有の印・5 本・建てた日の 0:00 JST）・トースト
+  const tabsBefore = await shapeSaved(page);
+  await page.fill(`${IMPORT_DLG} input[aria-label="3 行目の建てた日"]`, '2026-10-05');
+  await page.waitForTimeout(100);
+  const can = !(await page.isDisabled(`${IMPORT_DLG} button[data-act="apply"]`));
+  await page.click(`${IMPORT_DLG} button[data-act="apply"]`).catch(() => {});
+  await page.waitForTimeout(200);
+  const closed = (await page.locator(IMPORT_DLG).count()) === 0;
+  const after = await shapeSaved(page);
+  const ws = await page.evaluate(
+    (k) => JSON.parse(localStorage.getItem(k) ?? 'null'),
+    WORKSPACE_KEY,
+  );
+  const tabNow = ws?.tabs?.[ws.active];
+  const legs = tabNow?.position?.legs ?? [];
+  const toast = await page.locator('.toast:not(.note)', { hasText: '新しいタブに入れた' }).count();
+  check(
+    `${tag}: 埋めると押せる → 新しいタブ（保有の印・5 本・建てた日 = その日の 0:00 JST）・閉じる・トースト`,
+    can &&
+      closed &&
+      after.tabs === tabsBefore.tabs + 1 &&
+      tabNow?.position?.held === true &&
+      legs.length === 5 &&
+      legs[0]?.leg?.opened_at === '2026-09-30T15:00:00.000Z' &&
+      toast === 1,
+    `押せる ${can}・閉じた ${closed}・タブ ${tabsBefore.tabs}→${after.tabs}・held ${tabNow?.position?.held}・足 ${legs.length}・opened_at ${legs[0]?.leg?.opened_at}・トースト ${toast}`,
+  );
+  // (4b) IV 仮の行（5 行目 = 板に無い限月）の知らせ（[閉じる] まで出る。#318 レビュー S1）
+  const ivNote = await page
+    .locator('.toast.note', { hasText: 'IV 仮の行があります' })
+    .textContent({ timeout: 2000 })
+    .catch(() => null);
+  check(
+    `${tag}: IV 仮の行の知らせ（5 行目・足の詳細で IV を確かめる）`,
+    (ivNote ?? '').includes('5 行目') && (ivNote ?? '').includes('足の詳細で IV を確かめて'),
+    ivNote ?? '',
+  );
+  // (5) 端末の保存に画像（base64 の先頭 32 字）・data URL が無い
+  const head = body?.image?.data?.slice(0, 32) ?? 'x'.repeat(32);
+  const k1 = await storageHas(page, head);
+  const k2 = await storageHas(page, 'data:image');
+  check(
+    `${tag}: localStorage・sessionStorage に画像（base64・data URL）が無い`,
+    k1 === null && k2 === null,
+    `${k1 ?? ''} ${k2 ?? ''}`,
+  );
+  // (6) [元に戻す] → 足したタブを閉じる
+  await page
+    .locator('.toast:not(.note)', { hasText: '新しいタブに入れた' })
+    .locator('button', { hasText: '元に戻す' })
+    .click()
+    .catch(() => {});
+  const undone = await shapeSaved(page);
+  check(
+    `${tag}: [元に戻す] で足したタブを閉じる`,
+    undone.tabs === tabsBefore.tabs,
+    `タブ ${undone.tabs}`,
+  );
+  check(`${tag}: ページのエラー 0`, errors.length === 0, errors.join(' / '));
+  await ctx.close();
+}
+
+/** AI が無効のとき（状態を差し替え）: [読み取る] が押せない・理由（#318） */
+async function importDisabledFlow(vp) {
+  const tag = `#318 ${vp.width}x${vp.height}`;
+  const ctx = await newContext(vp, { [WORKSPACE_KEY]: twoLegs, [PREFS_KEY]: prefsText('dark') });
+  const page = await ctx.newPage();
+  await page.route('**/fixtures/ai/status', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json; charset=utf-8',
+      body: JSON.stringify({
+        schema_version: 1,
+        enabled: false,
+        model: null,
+        credential: null,
+        counted: false,
+        limit_usd: null,
+        remaining_usd: null,
+        resets_at: null,
+      }),
+    }),
+  );
+  await page.goto(pageUrl('next'));
+  await waitReady(page, 'next');
+  await importOpen(page);
+  await page.setInputFiles(`${IMPORT_DLG} input[type="file"]`, {
+    name: 'synthetic.jpg',
+    mimeType: 'image/jpeg',
+    buffer: await importImageBytes(page),
+  });
+  await page.waitForSelector(`${IMPORT_DLG} .imp-canvas`, { timeout: 5000 }).catch(() => {});
+  await page.waitForTimeout(200);
+  const title = await page.getAttribute(`${IMPORT_DLG} button[data-act="read"]`, 'title');
+  const why = await page.textContent(`${IMPORT_DLG} .imp-why`).catch(() => null);
+  check(
+    `${tag}: AI が無効なら [読み取る] が押せない（理由を title と本文に）`,
+    (await page.isDisabled(`${IMPORT_DLG} button[data-act="read"]`)) &&
+      (title ?? '').includes('無効') &&
+      (why ?? '').includes('無効'),
+    `${title} / ${why}`,
+  );
+  // 戻る 1 回で閉じる（Dialog の層）
+  await page.goBack().catch(() => {});
+  await page.waitForTimeout(300);
+  check(`${tag}: 戻る 1 回で閉じる`, (await page.locator(IMPORT_DLG).count()) === 0);
+  await ctx.close();
+}
+
+async function importAll() {
+  const start = results.length;
+  for (const vp of [
+    { width: 360, height: 780 },
+    { width: 768, height: 1024 },
+    { width: 1280, height: 800 },
+  ])
+    await importFlows(vp);
+  await importFlows({ width: 360, height: 780 }, 'light');
+  await importDisabledFlow({ width: 1280, height: 800 });
+  const mine = results.slice(start);
+  console.log(
+    `画像から建玉を読み取るの検査（#318）: ${mine.filter(Boolean).length} / ${mine.length} で pass`,
+  );
+}
+
 // ---- 手順（AC-11・AC-12）
 const results = [];
 function check(name, ok, detail = '') {
@@ -6438,6 +6828,8 @@ async function runFlows() {
   await pickPcFlow();
   // #20 形から組む（--shapes だけでも流せる）
   for (const vp of [phone, pc]) await shapesFlows(vp);
+  // #318 画像から建玉を読み取る（--import だけでも流せる）
+  await importAll();
 
   // (a) 開いただけでは作業の保存を書き換えない・ドックのバッジ
   {
@@ -17349,6 +17741,9 @@ try {
       { width: 1440, height: 900 },
     ])
       await shapesFlows(vp);
+  } else if (importOnly && !parts) {
+    if (shotsDir) mkdirSync(shotsDir, { recursive: true });
+    await importAll();
   } else if (backOnly && !parts) {
     for (const vp of [
       { width: 390, height: 844 },

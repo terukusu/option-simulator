@@ -90,6 +90,8 @@ def metadata_identity_token(opener=None) -> str:
 
 class FakeGateway:
     """偽の送信先（Anthropic を呼ばない）。script: 返す事象の列（最後に final を自分で足す）。
+    read_script: 読み取りの要求（params["mode"] == "read"）の事象の列（省略時は script、どちらも省略なら
+    既定の読み取り）。
     gate: セットされるまで最初の事象を返さない（止まった送信先）。error: 途中で投げる UpstreamError（after 件の後）。
     calls: 受けた params の記録"""
 
@@ -99,10 +101,25 @@ class FakeGateway:
     )
     DEFAULT_USAGE = {"input_tokens": 1200, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0,
                      "output_tokens": 300}
+    # 画像の読み取り（params["mode"] == "read"。#318）の既定の台本: report_positions の tool_use 1 本（値は架空）
+    DEFAULT_READ_SCRIPT = (
+        {"type": "thinking", "text": "（偽の送信先の読み取りの要約）"},
+        {"type": "tool_use", "id": "toolu_fake_read", "name": "report_positions", "input": {
+            "kind": "positions",
+            "rows": [
+                {"product": "op_large", "expiry_year": 2026, "expiry_month": 12, "type": "P", "strike": 60000,
+                 "side": "sell", "qty": 2, "price": 150, "opened_on": "2026-10-01"},
+                {"product": "fut_mini", "expiry_year": 2026, "expiry_month": 12, "type": None, "strike": None,
+                 "side": "buy", "qty": 1, "price": 66000, "opened_on": "2026-10-02"},
+            ]}},
+    )
 
     def __init__(self, script=None, usage=None, stop_reason="end_turn", gate: threading.Event | None = None,
-                 error: UpstreamError | None = None, error_after: int = 0, final: bool = True):
+                 error: UpstreamError | None = None, error_after: int = 0, final: bool = True, read_script=None):
         self.script = list(self.DEFAULT_SCRIPT if script is None else script)
+        # 読み取りの要求の台本（script を渡したときはそれを使う = テストが読み取りの応答を決める）
+        self.read_script = list(self.DEFAULT_READ_SCRIPT if read_script is None and script is None
+                                else (read_script if read_script is not None else script))
         self.usage = dict(self.DEFAULT_USAGE if usage is None else usage)
         self.stop_reason = stop_reason
         self.gate = gate
@@ -125,7 +142,8 @@ class FakeGateway:
         if self.gate is not None:
             self.gate.wait(10)
         content: list[dict] = []
-        for i, ev in enumerate(self.script):
+        script = self.read_script if params.get("mode") == "read" else self.script
+        for i, ev in enumerate(script):
             if self.error is not None and i == self.error_after:
                 raise self.error
             if cancel.is_set():
@@ -143,7 +161,7 @@ class FakeGateway:
                     content.append({"type": "thinking", "thinking": ev["text"], "signature": "ZmFrZQ=="})
             elif ev["type"] == "tool_use":
                 content.append({"type": "tool_use", "id": ev["id"], "name": ev["name"], "input": ev["input"]})
-        if self.error is not None and self.error_after >= len(self.script):
+        if self.error is not None and self.error_after >= len(script):
             raise self.error
         if self.final:
             yield {"type": "final", "content": content, "usage": dict(self.usage), "stop_reason": self.stop_reason}

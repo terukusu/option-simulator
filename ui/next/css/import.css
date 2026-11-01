@@ -1,0 +1,267 @@
+/*
+ * 画像から建玉を読み取る（#318。ui/next/regions/PositionImportDialog.tsx・docs/ui-redesign.md「画像から建玉を読み取る」）。
+ * dialog.sheet.import の中身だけ。スマホ（< 720px）は全画面のシート。確認表は枠（.imp-table-wrap）の中で横に送る
+ * （画面は横にスクロールしない）。説明文は <li> / <p>（折り返す）、ボタン・表の欄は折り返さない。色は var(--…) だけ。
+ */
+
+dialog.sheet.import {
+  width: min(960px, calc(100vw - 32px));
+}
+
+@media (max-width: 719.98px) {
+  dialog.sheet.import {
+    width: 100vw;
+    max-width: 100vw;
+    height: 100dvh;
+    max-height: 100dvh;
+    margin: 0;
+    border-radius: 0;
+  }
+}
+
+.imp-pick,
+.imp-confirm {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+
+.imp-file-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+.imp-file {
+  position: relative;
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.imp-file.disabled {
+  opacity: 0.5;
+  pointer-events: none;
+}
+
+/* 見えないが押せる（label が開く）。キーボードのフォーカスは label の枠で見せる */
+.imp-input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.imp-file:focus-within {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.imp-hint {
+  color: var(--ink-3);
+  font-size: var(--fs-sm);
+  white-space: nowrap;
+}
+
+.imp-preview {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  margin: 0;
+}
+
+.imp-canvas {
+  display: block;
+  max-width: min(100%, 320px);
+  max-height: 220px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-sm);
+  background: var(--s1);
+}
+
+.imp-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px var(--sp-2);
+  color: var(--ink-2);
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+  font-variant-numeric: tabular-nums;
+}
+
+.imp-meta > span {
+  white-space: nowrap;
+}
+
+.imp-notice {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: var(--sp-2) var(--sp-2) var(--sp-2) calc(var(--sp-2) + 1em);
+  border: 1px solid var(--warn);
+  border-radius: var(--r-sm);
+  background: var(--warn-fill);
+  color: var(--ink);
+  font-size: var(--fs-sub);
+  line-height: 1.45;
+}
+
+.imp-acts {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--sp-2);
+}
+
+.imp-acts .btn {
+  white-space: nowrap;
+}
+
+.imp-status {
+  margin-right: auto;
+  color: var(--ink-2);
+  font-size: var(--fs-sub);
+}
+
+.imp-why,
+.imp-msg {
+  margin: 0;
+  color: var(--warn);
+  font-size: var(--fs-sub);
+  line-height: 1.45;
+}
+
+ul.imp-why {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-left: 1.2em;
+}
+
+.imp-lead {
+  color: var(--ink-2);
+  font-size: var(--fs-sub);
+  line-height: 1.45;
+}
+
+/* ===== 確認表 ===== */
+.imp-table-wrap {
+  max-width: 100%;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+}
+
+.imp-table {
+  border-collapse: collapse;
+  font-size: var(--fs-sub);
+  white-space: nowrap;
+}
+
+.imp-table th,
+.imp-table td {
+  padding: 4px 6px;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+  vertical-align: middle;
+}
+
+.imp-table thead th {
+  position: sticky;
+  top: 0;
+  background: var(--s3);
+  color: var(--ink-3);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+}
+
+.imp-table tbody tr:last-child > * {
+  border-bottom: 0;
+}
+
+.imp-no {
+  font-weight: 400;
+}
+
+.imp-no .n {
+  margin-right: 4px;
+  font-family: var(--mono);
+}
+
+.imp-no .tag {
+  margin-right: 2px;
+}
+
+.imp-table tr.off td,
+.imp-table tr.off .n {
+  opacity: 0.55;
+}
+
+.imp-in {
+  height: 28px;
+  padding: 0 4px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-sm);
+  background: var(--s1);
+  color: var(--ink);
+  font: inherit;
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.imp-in.k,
+.imp-in.entry {
+  width: 6.5em;
+  text-align: right;
+}
+
+.imp-in.qty {
+  width: 4.5em;
+  text-align: right;
+}
+
+.imp-in.month {
+  width: 9em;
+}
+
+.imp-in.date {
+  width: 10.5em;
+}
+
+.imp-in:disabled {
+  opacity: 0.4;
+}
+
+/* 読み取りで null だった欄（「読めない」）は破線の枠、エラーの欄は赤の枠 */
+.imp-in[data-unread] {
+  border-style: dashed;
+  border-color: var(--warn);
+}
+
+.imp-in[aria-invalid="true"] {
+  border-style: solid;
+  border-color: var(--loss);
+}
+
+.imp-held {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--fs-sub);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.imp-held input {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: var(--accent);
+}

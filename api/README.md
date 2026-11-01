@@ -11,6 +11,7 @@ optionchan の BigQuery（データセット `optionchan_tokyo` のテーブル�
 | `GET /api/atm_daily` | 日次の値（#152）: 表 `atm_cm_iv` の JST の日付ごとの日中の終値（JST 9:00〜15:00 の最後の行）の `iv30` と 1 / 2 限月のフォワード・最終取引日 `{schema_version, start, end, days: [{d, t, iv, f1, l1, f2, l2}]}`。パラメータなし（知らないパラメータは無視）。確定した日だけ（`end` = JST の今日（8:00 以降）/ 前日、含まない）。`Cache-Control: private, max-age=3600`・ETag で 304。BigQuery の失敗・`DATA_SOURCE=file` は 503。2 営業日の組はブラウザ（`data/atmDaily.ts`）。仕様は `docs/design.md` 7.1・13.4 |
 | `POST /api/ai/messages` | AI の中継（#134）。本文 JSON `{schema_version: 1, kind: "chat" | "diagnose" | "ask" | "preset", context, messages, topic?}`（`topic` は ask・preset のときだけ） を許可リストで検査し、サーバーが固定する引数を付けて Anthropic に送り、SSE（`accepted` → `progress` / `thinking` / `text` / `tool_use` → `done` / `error`）で流す。1 日の上限（予約と精算）・同じオリジン・`Content-Type: application/json`・512 KiB・同時 2 本・1 分 10 回。下の「AI の中継」 |
 | `GET /api/ai/status` | AI が使えるか・モデル・資格情報の種類・数えるか・1 日の上限と残り・戻る時刻（`no-store`） |
+| `POST /api/ai/read_positions` | 建玉の一覧の画像の読み取り（#318）。本文 JSON `{schema_version: 1, image: {media_type: "image/png" \| "image/jpeg", data: <base64>}}`（768 KiB・画像は生 500,000 B・長辺 2,000 px まで）を検査し、読み取り専用のツール `report_positions` 1 本で 1 turn だけ送り、検査を通った行だけを JSON で返す（`{schema_version, kind, rows, remaining_usd}`。`no-store`）。守り・1 日の上限・同時の本数・1 分の回数は会話と共用。下の「画像の読み取り」 |
 | `GET /healthz` | 設定の読み込みだけ（BigQuery・Anthropic・Firestore に触れない） |
 | `/`・`/assets/<path>` | `STATIC_DIR` があるときだけ、Vite のビルド成果物（`dist/`）を配る |
 | `/manifest.webmanifest`・`/favicon.svg`・`/apple-touch-icon.png`・`/icon-192.png`・`/icon-512.png` | `STATIC_DIR` があるときだけ、`dist/` 直下のこの 5 つの名前だけを配る（`no-cache`。名前の集合は `app.py` の `ROOT_FILES`。他の名前は 404。#90） |
@@ -178,11 +179,23 @@ gcloud logging read 'resource.type="cloud_run_revision" AND resource.labels.serv
 - **会話の途中の文脈の更新**（#135）: 2 件目以降の user の発言に `{"type": "context_update", "context": {…}}` を 1 つ（`tool_result` の後ろ）。`context` と同じ形式で検査し、`<context_update>…</context_update>` の text block にして同じ位置に置く。最初の `context` と前の messages は変えない（Opus 5.5 の preserved thinking・prompt caching の前置きを保つ）。`kind: "diagnose"` は [このポジションを診断]（system prompt は 1 つ。`relay.DIAGNOSE_TEXT` が最初の発言）。`kind: "preset"` は定型の質問のチップ（#140）で、`topic` は定型の ID（`allowlist.PRESET_TOPICS`: `crash`・`rebut`・`board`・`hedge`・`exit`・`iv`。必須。外れ・自由文・ほかの kind に付けたら 400）。発言は `relay.PRESET_PREFIX`（「［定型］」）で始まり、system prompt の案内でスキル `simulator:presets` を読む
 - テストは偽の送信先（`ai/gateway.py` の `FakeGateway`）、偽の Firestore の session、送信経路の偽の `query`・偽の CLI（環境を記録する。`tests/test_ai_agent_sdk.py`）と、同梱の本物の CLI を pytest の中の 127.0.0.1 の偽の Messages API（`tests/fake_messages_api.py`。ダミーの資格情報。スキルの往復・`read_doc` の往復（#137）・turn の上限・turn ごとの usage・WIF の交換のエンドポイント `POST /v1/oauth/token` の脚本がある）に向けた結合（`tests/test_ai_agent_sdk_cli.py`・`tests/test_ai_secrets.py`。同梱の CLI が無いプラットフォームでは skip）。Anthropic・GCP には触れない
 
+### 画像の読み取り（#318）
+
+設計は `docs/design.md` 13.4「AI の中継」の「画像の読み取り」・14 章「画像から建玉を読み取る」、`docs/adr-0009-ai-image-read-positions.md`。
+
+- `ai/read_positions.py`（純関数）: 要求の検査（`parse_read_request`。キーは `schema_version`・`image` だけ、`media_type` は PNG / JPEG、base64 の形・生のバイト数 1〜`AI_IMAGE_MAX_BYTES`・マジックバイトが `media_type` と一致・長辺 ≤ `AI_IMAGE_MAX_EDGE` を PNG の IHDR・JPEG の SOF から読む）、送る引数（`build_read_params`。`mode: "read"`・読み取りの指示 `READ_SYSTEM`・画像・決まった文 `READ_TEXT`・ツール `TOOL_DEFINITION`）、予約額（`read_estimate`・`read_reserve`。T = 1・K = 0・M = `AI_READ_MAX_TOKENS`、E に画像 1 枚の上界 `AI_IMAGE_MAX_TOKENS` を足し base64 は数えない）、結果の検査（`check_result`。知らないキー・自由な文字列・型の不正・行 > 20 は全体を捨てる = 502 `bad_result`、欄の範囲外はその欄だけ null）
+- 送信先: `AgentSdkGateway` は `params["mode"] == "read"` のとき組み込みのツール・スキル・プラグインなし・`max_turns` 1。`FakeGateway` は読み取りの既定の台本（`report_positions` の tool_use。架空の値）を返す
+- 上限は同梱の CLI が画像を作り直さずにバイトのまま上流へ渡す範囲（CLI 2.1.283 の観測: 長辺 ≤ 2,000 px・生 ≤ 約 512,000 B）の内側。`tests/test_ai_agent_sdk_cli.py` が境の内側のバイト一致・外側の作り直し・CLI が足す `[Image: source: …]` の文が 1 つだけ・要求の後に一時ファイルが残らないことを固定する（SDK の版を上げたら必ず通す）
+- 子の環境の `CLAUDE_CODE_TMPDIR` は要求ごとの一時ディレクトリの中（全要求）。CLI は受けた画像をここに書くので、要求の後に一時ディレクトリごと消える
+- 応答: 200 `{schema_version: 1, kind: "positions" | "not_positions", rows, remaining_usd}`、失敗は会話の事前の失敗と同じ JSON に 502 `bad_result` / `no_result` / `upstream_*`・504 `timeout`。text・thinking は返さない
+- 手元: `AI_CREDENTIAL=fake` で `curl -s -X POST http://127.0.0.1:8080/api/ai/read_positions -H 'Content-Type: application/json' -H 'Origin: http://127.0.0.1:8080' -d "{\"schema_version\":1,\"image\":{\"media_type\":\"image/png\",\"data\":\"$(base64 -w0 <合成の PNG>)\"}}"`（実際の口座の画像は使わない）。テストは `tests/test_ai_read_positions.py`（画像はテストの中で `support.png_bytes`・`jpeg_bytes` で組む）
+
 ### ログ
 
 | イベント | いつ | 項目 |
 |---|---|---|
 | `ai_request` | 1 要求 1 行（失敗も。失敗は WARNING） | `kind`・`topic`（[AI に聞く] の場所・定型の ID。列挙の値だけ。#136・#140）・`profile_chars`（自分の前提の字数。本文は出さない。#156）・`model`・`credential`（種類だけ）・`n_messages`・`request_bytes`・`est_input_tokens`・`reserved_usd`・`accepted_ms`・`first_delta_ms`（最初の thinking / text）・`first_text_ms`（最初の text。K15 の「最初の文字」）・`total_ms`・`stop_reason`・`tools`（会話に出たツールの名前）・`input_tokens`・`cache_creation_input_tokens`・`cache_read_input_tokens`・`output_tokens`・`cost_usd_est`（料金表の概算。`oauth_token` も）・`charged_usd`（計上額。`oauth_token` は 0）・`price_checked`・`remaining_usd`・`error`・`error_type`（例外の型名）・`upstream_status`・`spawn_ms`（送信の開始 → CLI の最初の事象。子の起動・CLI の初期化・上流の応答の始まりを含む）・`skills`（読んだスキルの名前。本文は出さない）・`turns`（上流の message の数。Skill を読むと 2 以上）・`docs`（`read_doc` が返した節 `<file>:<番号>`、part 2 以上は `#<part>`。本文は出さない。#137） |
+| `ai_request`（`kind=read_positions`。#318） | 画像の読み取り 1 要求 1 行 | `model`・`credential`・`request_bytes`・`media_type`・`image_bytes`・`width`・`height`・`est_input_tokens`・`reserved_usd`・usage 4 種・`cost_usd_est`・`charged_usd`・`result_kind`・`rows`（行の数）・`stop_reason`・`error`・`result_path` / `result_reason`（結果の検査で捨てたときのキーの道筋と理由。値は出さない）・`total_ms`・`spawn_ms`・`turns`。画像・base64・結果の値・text・thinking は出さない |
 | `ai_rejected` | ストリームの前の拒否（400 / 403 / 413 / 415 / 429 / 503 `ai_disabled`） | `status`・`error`・`reason`・`path`（キーのパス。知らないキーは `<unknown>`。値は出さない） |
 | `ai_disabled` | 起動時に設定が不正（WARNING） | `reason`（`ai_credential_conflict`・`ai_credential_missing`・`ai_wif_invalid` など） |
 | `ai_sdk_warning` | SDK（logger `claude_agent_sdk`）の WARNING 以上（WARNING） | `logger`・`level`・`error_type`・`upstream_status`（SDK の文言は上流のメッセージ・CLI の出力を含みうるので出さない。SDK のログは stderr にも流さない） |

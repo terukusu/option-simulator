@@ -34,6 +34,10 @@ stream(params, cancel) は事象（thinking / text / tool_use / final）を返�
   交換したトークンのキャッシュ（ANTHROPIC_CONFIG_DIR・CLAUDE_CODE_FEDERATION_CACHE_DIR）は要求ごとの一時ディレクトリ
 - 設定・CLAUDE.md・自動のメモリを読まない（setting_sources=[]・CLAUDE_CODE_DISABLE_AUTO_MEMORY）。設定ディレクトリと
   cwd は要求ごとの一時ディレクトリ（終わったら消す）。CLI の標準エラーは捨てる（本文をログに出さない）
+- CLI の一時ファイルの置き場所（CLAUDE_CODE_TMPDIR）も要求ごとの一時ディレクトリの中（#318。CLI は受けた画像を
+  <TMPDIR>/claude-<uid>/…/images/ に書いて残すので、要求の後に一時ディレクトリごと消す = 画像をディスクに残さない）
+- 読み取りの要求（params["mode"] == "read"。#318 = ADR-0009）: 組み込みのツール・スキル・プラグインなし、turn 1。
+  ツールは params["tools"] の report_positions 1 本（mcp__sim__report_positions。フックが deny + continue_=False）
 - 再試行しない（CLAUDE_CODE_MAX_RETRIES=0。既定では 429 を 100 秒以上再試行する）。出力の上限は max_tokens を
   CLAUDE_CODE_MAX_OUTPUT_TOKENS で
 
@@ -223,9 +227,10 @@ def credential_env(credential: str, secret: str | None, wif: st.WifIds | None = 
 
 def child_env(credential: str, secret: str | None, config_dir: str, max_tokens: int, resume_turn: bool,
               wif: st.WifIds | None = None, identity_token: str | None = None,
-              extra: dict[str, str] | None = None) -> dict[str, str]:
+              extra: dict[str, str] | None = None, tmp_dir: str | None = None) -> dict[str, str]:
     """子の環境（親の環境に重なる）。資格情報は選んだ種類のものだけ（他は空で上書き = CLI は未設定として扱う。
-    spike S5）。送信先・転送の変数（ROUTING_ENV）も空。extra はテスト用（ANTHROPIC_BASE_URL を偽の送信先に）"""
+    spike S5）。送信先・転送の変数（ROUTING_ENV）も空。tmp_dir: CLI の一時ファイルの置き場所（CLAUDE_CODE_TMPDIR。
+    要求ごとの一時ディレクトリの中。#318）。extra はテスト用（ANTHROPIC_BASE_URL を偽の送信先に）"""
     env = {
         **dict.fromkeys(ROUTING_ENV, ""),
         **credential_env(credential, secret, wif, identity_token),
@@ -243,6 +248,8 @@ def child_env(credential: str, secret: str | None, config_dir: str, max_tokens: 
         "CLAUDE_CODE_RESUME_INTERRUPTED_TURN": "1" if resume_turn else "",
         "CLAUDE_CODE_RESUME_PROMPT": RESUME_PROMPT,
     }
+    if tmp_dir is not None:
+        env["CLAUDE_CODE_TMPDIR"] = tmp_dir
     if extra:
         env.update(extra)
     return env
@@ -515,10 +522,11 @@ class AgentSdkGateway:
         servers = {SERVER: self._server(tools)} if tools else {}
         if reader is not None:
             servers[docs.SERVER] = self.docs_server(reader)
+        read = params.get("mode") == "read"  # 画像の読み取り（#318）: 組み込みのツール・スキルなし、turn 1
         return ClaudeAgentOptions(
-            tools=[SKILL_TOOL],  # 組み込みのツールは Skill だけ（Read・Bash などは無い）
-            skills=list(skills.ENABLED),
-            plugins=[{"type": "local", "path": str(skills.PLUGIN_DIR)}],
+            tools=[] if read else [SKILL_TOOL],  # 組み込みのツールは Skill だけ（Read・Bash などは無い）
+            skills=[] if read else list(skills.ENABLED),
+            plugins=[] if read else [{"type": "local", "path": str(skills.PLUGIN_DIR)}],
             system_prompt=params["system"],
             mcp_servers=servers,
             strict_mcp_config=True,
@@ -528,12 +536,12 @@ class AgentSdkGateway:
             effort=(params.get("output_config") or {}).get("effort"),
             include_partial_messages=True,
             verbatim_prompts=True,
-            max_turns=st.AI_MAX_TURNS,
+            max_turns=1 if read else st.AI_MAX_TURNS,
             hooks={"PreToolUse": [HookMatcher(matcher=None, hooks=[_hook(reader)])]},
             cli_path=self._cli_path,
             cwd=cwd,
             env=child_env(self._credential, self._secret, cfg_dir, params["max_tokens"], resume_turn, self._wif,
-                          identity_token, self._extra_env),
+                          identity_token, self._extra_env, tmp_dir=f"{base_dir}/tmp"),
             stderr=lambda line: None,  # CLI の標準エラーは本文を含みうるので捨てる
             **kw,
         )
@@ -571,6 +579,7 @@ class AgentSdkGateway:
                     return
             os.mkdir(f"{base}/cfg", 0o700)
             os.mkdir(f"{base}/cwd", 0o700)
+            os.mkdir(f"{base}/tmp", 0o700)
             asyncio.run(self._run(params, cancel, stop, q, base, started, identity_token))
         except BaseException as e:  # noqa: BLE001 - 型だけを中継に渡す
             q.put(UpstreamError("upstream_unavailable", None, type(e).__name__))

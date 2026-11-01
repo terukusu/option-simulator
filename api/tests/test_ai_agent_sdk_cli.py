@@ -6,6 +6,7 @@ CLAUDE_CODE_RESUME_*・ツールの名前の付け方）に依存する作りを
 同梱の CLI が無い環境（wheel の無いプラットフォーム）では skip。
 """
 
+import base64
 import copy
 import json
 import os
@@ -20,13 +21,26 @@ from fake_messages_api import (
     DOC_MANY,
     DOC_TOOL,
     EXCHANGED,
+    REPORT_INPUT,
     SIG,
     SKILL_NAME,
     THINKING_PARTS,
     FakeMessagesApi,
     turn_usage,
 )
-from support import FAKE_ID_TOKEN, FAKE_KEY, ai_app, ai_body, ai_context, ai_settings, log_records, sse_events
+from support import (
+    FAKE_ID_TOKEN,
+    FAKE_KEY,
+    ai_app,
+    ai_body,
+    ai_context,
+    ai_settings,
+    log_records,
+    png_bytes,
+    read_body,
+    read_post,
+    sse_events,
+)
 from support import ai_post as post
 from test_ai_agent_sdk import _full_history, built, tool_result_text
 from test_ai_skills import frontmatter
@@ -595,3 +609,94 @@ def test_doc_calls_over_limit_stop_request(parent_creds, capsys):
 
 def test_doc_input_matches_fake_api():
     assert DOC_INPUT == {"file": "user-guide", "section": "8.5"} and DOC_TOOL == docs.CLI_TOOL_NAME
+
+
+# ---- 画像の読み取り（#318 AC6。docs/adr-0009-ai-image-read-positions.md）----
+
+@pytest.fixture
+def read_tmp(parent_creds, monkeypatch, tmp_path):
+    """CLI の既定の一時ディレクトリ（os.tmpdir() = $TMPDIR）も tmp_path に寄せる。要求の後に CLI の画像の置き場所
+    （claude-<uid>/…/images）も中継の要求ごとの一時ディレクトリ（ai-sdk-*）も残らないことを確かめる"""
+    monkeypatch.setenv("TMPDIR", str(tmp_path))
+    yield tmp_path
+    assert sorted(p.name for p in tmp_path.iterdir() if p.name.startswith(("claude", "ai-sdk-"))) == []
+    assert list(tmp_path.rglob("*.png")) == [] and list(tmp_path.rglob("*.jpg")) == []
+
+
+def _images(body: dict) -> list[dict]:
+    return [b for m in body["messages"] if m["role"] == "user" and isinstance(m["content"], list)
+            for b in m["content"] if b.get("type") == "image"]
+
+
+def _texts(body: dict) -> list[str]:
+    last = [m for m in body["messages"] if m["role"] == "user"][-1]
+    c = last["content"]
+    return [c] if isinstance(c, str) else [b.get("text", "") for b in c if b.get("type") == "text"]
+
+
+@pytest.mark.parametrize("w,h,seed", [(470, 350, 11), (900, 2000, None)], ids=["noise_470x350", "flat_900x2000"])
+def test_read_image_reaches_upstream_byte_identical(read_tmp, capsys, w, h, seed):
+    """AC6: 長辺 ≤ 2,000 px・生 ≤ 500,000 B の PNG は、最後の user の image block が media_type・data ともバイト一致で
+    上流に届く（CLI 2.1.283。境の外では CLI が作り直す = 下のテスト）。読み取りの形: 上流のツールは
+    mcp__sim__report_positions の 1 本だけ（Skill・組み込みのツールなし）、上流は 1 回、結果は検査を通った行"""
+    raw = png_bytes(w, h, noise_seed=seed)
+    assert len(raw) <= st.AI_IMAGE_MAX_BYTES and max(w, h) <= st.AI_IMAGE_MAX_EDGE
+    body = read_body(raw)
+    with FakeMessagesApi("report") as api:
+        client, store = relay_app(gateway(api))
+        res = read_post(client, body)
+        posts = api.posts()
+    assert res.status_code == 200, res.get_data(as_text=True)
+    out = res.get_json()
+    assert out["kind"] == "positions" and out["rows"] == REPORT_INPUT["rows"]
+    assert len(posts) == 1
+    up = posts[0]["body"]
+    imgs = _images(up)
+    assert len(imgs) == 1
+    assert imgs[0]["source"]["type"] == "base64"
+    assert imgs[0]["source"]["media_type"] == "image/png"
+    assert imgs[0]["source"]["data"] == body["image"]["data"]
+    assert [t["name"] for t in up.get("tools") or []] == ["mcp__sim__report_positions"]
+    assert up["max_tokens"] == st.AI_READ_MAX_TOKENS and up["output_config"]["effort"] == st.AI_READ_EFFORT
+    # system: CLI の前置き + 我々の読み取りの指示（会話の system・文書の目次・スキルの一覧は無い）
+    assert up["system"][-1]["text"] == relay.rp.READ_SYSTEM
+    assert "simulator:" not in json.dumps(up, ensure_ascii=False)
+    rec = ai_request(capsys)
+    assert rec["kind"] == "read_positions" and rec["rows"] == 1 and rec["turns"] == 1
+
+
+def test_read_cli_adds_one_image_source_text_inside_request_tmp(read_tmp):
+    """ADR-0009 に書いた事実: CLI は最後の user の末尾に `[Image: source: <パス>]` の text を 1 つ足す。パスは中継の
+    要求ごとの一時ディレクトリ（CLAUDE_CODE_TMPDIR = ai-sdk-*/tmp）の中で、利用者の値を含まない。送るのは画像・
+    決まった文・この 1 つだけ"""
+    raw = png_bytes(64, 64)
+    with FakeMessagesApi("report") as api:
+        client, _ = relay_app(gateway(api))
+        assert read_post(client, read_body(raw)).status_code == 200
+        up = api.posts()[0]["body"]
+    texts = _texts(up)
+    added = [t for t in texts if t.startswith("[Image: source: ")]
+    assert len(added) == 1
+    path = added[0][len("[Image: source: "):].rstrip("]")
+    assert path.startswith(f"{read_tmp}/ai-sdk-") and "/tmp/" in path[len(str(read_tmp)):]
+    # 決まった文は CLI が末尾に改行を 1 つ足すことがある（CLI 2.1.283。中身は変えない）
+    assert [t.rstrip("\n") for t in texts if t not in added] == [relay.rp.READ_TEXT]
+
+
+def test_read_image_over_edge_is_rebuilt_by_cli(read_tmp):
+    """境の外（長辺 2,001 px）は CLI が作り直す（縮める）= 中継の上限（2,000 px）がこれを入れない理由。CLI の版を
+    上げて境が変わったらここで分かる。中継の検査を通さずに送信先へ直接渡す"""
+    raw = png_bytes(1080, 2001)
+    data = base64.b64encode(raw).decode("ascii")
+    params = {"mode": "read", "model": "claude-opus-5-5", "max_tokens": 4000, "system": "read (test)",
+              "thinking": {"type": "adaptive"}, "output_config": {"effort": "low"},
+              "tools": [relay.rp.TOOL_DEFINITION],
+              "messages": [{"role": "user", "content": [
+                  {"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": data}},
+                  {"type": "text", "text": relay.rp.READ_TEXT}]}]}
+    with FakeMessagesApi("report") as api:
+        evs = list(gateway(api).stream(params, threading.Event()))
+        up = api.posts()[0]["body"]
+    assert evs[-1]["type"] == "final"
+    imgs = _images(up)
+    assert len(imgs) == 1 and imgs[0]["source"]["data"] != data

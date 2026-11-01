@@ -88,3 +88,23 @@ export function synthAiReply(body: unknown): {
   cut?: boolean;
   tool?: { id: string; name: string; input: Record<string, unknown> };
 };
+
+/** 画像の読み取りの合成の結果（#318。/fixtures/ai/read_positions） */
+export const SYNTH_READ_RESULT: {
+  schema_version: 1;
+  kind: 'positions';
+  rows: {
+    product: string;
+    expiry_year: number | null;
+    expiry_month: number | null;
+    type: string | null;
+    strike: number | null;
+    side: string | null;
+    qty: number | null;
+    price: number | null;
+    opened_on: string | null;
+  }[];
+  remaining_usd: number;
+};
+/** 読み取りの合成の応答の待ち（ms） */
+export const SYNTH_READ_DELAY_MS: number;

@@ -1,4 +1,4 @@
-"""AI の中継の本体（POST /api/ai/messages・GET /api/ai/status）。
+"""AI の中継の本体（POST /api/ai/messages・GET /api/ai/status・POST /api/ai/read_positions）。
 
 docs/design.md 7.1・13.4、docs/ai-advisor.md 論点 3・4・8。
 
@@ -7,6 +7,11 @@ POST の順: 有効か（503 ai_disabled）→ 同じオリジン（403）→ Co
 ここまでの失敗は Anthropic を呼ばない。SSE は accepted を Anthropic を呼ぶ前に書き、送信先の事象を別のスレッドで受けて
 締め切り（AI_DEADLINE_SECONDS）までに流す。終わりは done か error。精算・セマフォの解放・ログ ai_request は finally で
 必ず（切断でも）。
+
+POST /api/ai/read_positions（#318。建玉の一覧の画像 1 枚 → 読み取り専用のツール report_positions の入力。
+ai/read_positions.py・docs/adr-0009-ai-image-read-positions.md）は SSE にせず JSON の 1 往復。守りの順と
+同時の本数・1 分の回数・予約・精算は会話と共用。上流の text・thinking は返さない。画像・base64・結果の値を
+ログに出さない（種類・バイト数・寸法・行数・usage だけ）。
 
 ログに出さないもの: 会話の本文・context の値（自分の前提は字数 profile_chars だけ）・ツールの入出力・鍵・例外の本文・
 IAP の見出し。拒否は ai_rejected に理由とキーの道筋だけ。
@@ -25,6 +30,7 @@ from flask import Response
 from .. import settings as st
 from ..log import log
 from . import allowlist, budget, docs, guard
+from . import read_positions as rp
 from .budget import StoreUnavailable
 from .gateway import UpstreamError
 from .shape import Bad
@@ -454,3 +460,161 @@ class AiRelay:
                 "upstream_status": upstream.status if upstream else None,
             })
             log("WARNING" if error else "INFO", "ai_request", **rec)
+
+    # ---- POST /api/ai/read_positions（#318）----
+    def read_positions(self, request) -> Response:
+        """建玉の一覧の画像を読み取る。守りの順は messages と同じ（本文の上限だけ AI_READ_MAX_BODY_BYTES）"""
+        cfg = self.cfg
+        if not cfg.enabled:
+            return self._reject(503, "ai_disabled", cfg.disabled or "not_configured")
+        if not guard.origin_ok(request.headers, request.host):
+            return self._reject(403, "forbidden", "origin")
+        if not guard.json_content_type(request.mimetype):
+            return self._reject(415, "unsupported_media_type", "content_type")
+        if request.content_length is not None and request.content_length > st.AI_READ_MAX_BODY_BYTES:
+            return self._reject(413, "too_large", "body_size")
+        raw = request.stream.read(st.AI_READ_MAX_BODY_BYTES + 1)
+        if len(raw) > st.AI_READ_MAX_BODY_BYTES:
+            return self._reject(413, "too_large", "body_size")
+        try:
+            req = rp.parse_read_request(raw)
+        except Bad as e:
+            return self._reject(400, "bad_request", e.reason, e.path)
+        if not self.rate.allow():
+            return self._reject(429, "rate_limited", "rate")
+        if not self.concurrency.acquire():
+            return self._reject(429, "busy", "concurrency")
+        try:
+            return self._read(req, len(raw))
+        finally:
+            self.concurrency.release()
+
+    def _read(self, req: rp.ReadRequest, request_bytes: int) -> Response:
+        cfg = self.cfg
+        started = time.monotonic()
+        params = rp.build_read_params(req, cfg)
+        est = rp.read_estimate(params)
+        reserved = rp.read_reserve(cfg.model, est)
+        day = budget.jst_day(self.clock())
+        charged = None
+        rec = {"kind": "read_positions", "model": cfg.model, "credential": cfg.credential,
+               "request_bytes": request_bytes, "media_type": req.media_type, "image_bytes": req.n_bytes,
+               "width": req.width, "height": req.height, "est_input_tokens": est,
+               "price_checked": st.AI_PRICE_CHECKED}
+        if cfg.counted:
+            try:
+                ok, charged = self.store.reserve(day, reserved, cfg.daily_limit_micro_usd)
+            except StoreUnavailable as e:
+                log("WARNING", "ai_request", **rec, error="unavailable",
+                    error_type=type(e.__cause__ or e).__name__, reserved_usd=budget.usd(reserved))
+                return _error(503, "unavailable")
+            if not ok:
+                remaining = budget.usd(max(cfg.daily_limit_micro_usd - charged, 0))
+                return self._reject(429, "budget_exceeded", "budget", remaining_usd=remaining)
+        rec["reserved_usd"] = budget.usd(reserved if cfg.counted else 0)
+
+        cancel = threading.Event()
+        events: queue.Queue = queue.Queue()
+        deadline = started + cfg.deadline_seconds
+        settled = False
+        usage = None
+        error = None
+        upstream: UpstreamError | None = None
+        stop_reason = None
+        result = None
+
+        def produce():
+            try:
+                for ev in self.gateway.stream(params, cancel):
+                    if cancel.is_set():
+                        return
+                    events.put(ev)
+                events.put(_END)
+            except UpstreamError as e:
+                events.put(e)
+            except Exception as e:  # 送信先の想定外の失敗（型だけ）
+                events.put(UpstreamError("upstream_unavailable", None, type(e).__name__))
+
+        def ms() -> int:
+            return round((time.monotonic() - started) * 1000)
+
+        try:
+            threading.Thread(target=produce, name="ai-read", daemon=True).start()
+            while True:
+                left = deadline - time.monotonic()
+                if left <= 0:
+                    error = "timeout"
+                    break
+                try:
+                    ev = events.get(timeout=left)
+                except queue.Empty:
+                    error = "timeout"
+                    break
+                if ev is _END:
+                    error = "upstream_incomplete"
+                    break
+                if isinstance(ev, UpstreamError):
+                    upstream = ev
+                    error = ev.code
+                    break
+                if ev["type"] == "meta":
+                    if isinstance(ev.get("spawn_ms"), int):
+                        rec["spawn_ms"] = ev["spawn_ms"]
+                    if isinstance(ev.get("turns"), int):
+                        rec["turns"] = ev["turns"]
+                    continue
+                if ev["type"] != "final":
+                    continue  # thinking・text・tool_use は final の content で見る（ブラウザにもログにも出さない）
+                usage = ev.get("usage") or {}
+                stop_reason = ev.get("stop_reason")
+                actual = budget.cost_micro_usd(cfg.model, usage)
+                rec["cost_usd_est"] = budget.usd(actual)
+                if cfg.counted:
+                    try:
+                        charged = self.store.adjust(day, actual - reserved)
+                        rec["charged_usd"] = budget.usd(actual)
+                    except StoreUnavailable as e:
+                        charged = None
+                        rec["charged_usd"] = budget.usd(reserved)
+                        log("WARNING", "ai_settle_failed", error_type=type(e.__cause__ or e).__name__)
+                else:
+                    rec["charged_usd"] = 0.0
+                settled = True
+                uses = [b for b in ev.get("content") or []
+                        if isinstance(b, dict) and b.get("type") == "tool_use"]
+                if not uses:
+                    error = "no_result"
+                elif len(uses) > 1 or uses[0].get("name") != rp.TOOL_NAME:
+                    error = "bad_result"
+                else:
+                    try:
+                        result = rp.check_result(uses[0].get("input"))
+                    except Bad as e:
+                        error = "bad_result"
+                        rec["result_path"] = e.path
+                        rec["result_reason"] = e.reason
+                break
+        finally:
+            cancel.set()
+            if not settled:
+                # 途中で切れた: 予約額のまま（多めに数える）。数えない（oauth_token）ときは 0
+                rec["charged_usd"] = budget.usd(reserved) if cfg.counted else 0.0
+            if usage is not None:
+                for k in ("input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens", "output_tokens"):
+                    rec[k] = usage.get(k)
+            if result is not None:
+                rec["result_kind"] = result["kind"]
+                rec["rows"] = len(result["rows"])
+            rec.update({
+                "total_ms": ms(), "stop_reason": stop_reason, "error": error,
+                "error_type": upstream.error_type if upstream else None,
+                "upstream_status": upstream.status if upstream else None,
+            })
+            log("WARNING" if error else "INFO", "ai_request", **rec)
+        remaining = self._remaining(charged) if settled else None
+        if error == "timeout":
+            return _error(504, "timeout")
+        if error is not None:
+            return _error(502, error, remaining_usd=remaining)
+        return _json(200, {"schema_version": rp.SCHEMA_VERSION, "kind": result["kind"], "rows": result["rows"],
+                           "remaining_usd": remaining})

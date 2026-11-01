@@ -25,6 +25,7 @@ import {
   THEME_KEY,
 } from './keys';
 import { type PinMenuInput, pinMenuRows } from './pins';
+import { IMPORT_LABEL } from './positionImport';
 import { PICK_LABEL, SHAPES_LABEL } from './positionsRegion';
 import { evalChips, presetChips, type ScenarioRegionInput } from './scenarioRegion';
 import { CHART_MODES, DOCK_LABELS, type PanelId, type ShellAction } from './shell';
@@ -116,6 +117,8 @@ export type PaletteRun =
   | { kind: 'shape'; shape: ShapeId | null }
   /** 保有ポジションの一覧（#302） */
   | { kind: 'holdings' }
+  /** 画像から建玉を読み取る（#318。⋯ と保有ポジションの一覧と同じダイアログ） */
+  | { kind: 'importImage' }
   | { kind: 'book' }
   | { kind: 'saveToBook' }
   | { kind: 'clear' }
@@ -168,6 +171,11 @@ export interface PaletteInput {
    * [このポジションを診断] が押せない理由（#135。ui/view/aiChat.ts の diagnoseBlocked。null = 押せる。省略 = 行を出さない）
    */
   aiDiagnoseBlocked?: string | null;
+  /**
+   * 画像から建玉を読み取る…（#318）が押せない理由（ui/view/positionImport.ts の importEntryBlocked。null = 押せる。
+   * 省略 = 行を出さない）
+   */
+  importBlocked?: string | null;
 }
 
 export const CHART_NO_LEGS_TEXT = '足が無い';
@@ -387,6 +395,17 @@ export function paletteItems(input: PaletteInput): PaletteItem[] {
   const clearBlocked = clearBlockedText(input.legCount, held);
   out.push(
     item('work', 'holdings', HOLDINGS_LABEL, { kind: 'holdings' }),
+    ...(input.importBlocked === undefined
+      ? []
+      : [
+          item(
+            'work',
+            'import',
+            IMPORT_LABEL,
+            input.importBlocked === null ? { kind: 'importImage' } : null,
+            { disabled: input.importBlocked !== null, title: input.importBlocked ?? undefined },
+          ),
+        ]),
     item(
       'work',
       'book',
