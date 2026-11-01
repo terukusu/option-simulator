@@ -15,11 +15,25 @@ import {
 } from '../../view/boardPanel';
 import { hintNext, revealDelta } from '../../view/hint';
 import { PANEL_FOCUS_LABEL } from '../../view/keys';
+import { optOpenLabel } from '../../view/optHistory';
+import { Icon } from '../parts/Icon';
 import { escapeClaimed, useOverlay } from '../parts/overlay';
 
 /** 板・スマイルから足を入れる（NextApp。トースト・[元に戻す]・入れた足の選択） */
 export type MarketAdd = (expiry: string, k: number, type: OptionType, side: Side) => void;
 type RowAdd = (k: number, type: OptionType, side: Side) => void;
+/**
+ * 銘柄の推移を開く（#319。NextApp）: 限月（YYYY-MM）・取引最終日（YYYY-MM-DD）・K・種別と、閉じたときにフォーカスを
+ * 戻す要素（K のボタン）
+ */
+export type OpenOptChart = (
+  month: string,
+  ltd: string,
+  k: number,
+  type: OptionType,
+  from: HTMLElement | null,
+) => void;
+type RowOpt = (k: number, type: OptionType, from: HTMLElement | null) => void;
 
 /** ジャンプの強調（0 = なし。1 / 2 は同じ行を続けて強調するときにアニメーションを掛け直すための交互の印） */
 export type Flash = 0 | 1 | 2;
@@ -89,6 +103,8 @@ function KPop(p: {
   text: BoardRowText;
   btn: RefObject<HTMLButtonElement>;
   onClose: () => void;
+  /** 銘柄の推移を開く（#319。押したらポップオーバーを閉じて開く。無ければ出さない） */
+  opt: { month: string; k: number; open: RowOpt } | null;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const { onClose, btn } = p;
@@ -140,6 +156,29 @@ function KPop(p: {
           ))}
         </p>
       )}
+      {p.opt && (
+        <p class="kpop-opt">
+          {(['call', 'put'] as const).map((type) => (
+            <button
+              type="button"
+              key={type}
+              class="btn sm"
+              data-opt={type}
+              aria-label={optOpenLabel(p.opt?.month ?? '', p.opt?.k ?? 0, type)}
+              onClick={() => {
+                const o = p.opt;
+                if (!o) return;
+                const from = btn.current;
+                onClose();
+                o.open(o.k, type, from);
+              }}
+            >
+              <Icon name="chart" />
+              {type} の推移
+            </button>
+          ))}
+        </p>
+      )}
     </div>
   );
 }
@@ -165,6 +204,10 @@ interface RowProps {
   /** K を押した（開閉の反転） */
   onK: (k: number) => void;
   onPopClose: () => void;
+  /** 銘柄の推移を開く（#319。無ければ K のポップオーバーに出さない） */
+  onOpt: RowOpt | null;
+  /** 限月（YYYY-MM。推移のボタンの名前） */
+  month: string;
 }
 
 /** 1 行（K を key にし、props が変わった行だけ描き直す）。 */
@@ -184,7 +227,8 @@ class BoardRowView extends Component<RowProps> {
       p.pb !== n.pb ||
       p.onAdd !== n.onAdd ||
       p.pop !== n.pop ||
-      p.onK !== n.onK
+      p.onK !== n.onK ||
+      p.onOpt !== n.onOpt
     );
   }
 
@@ -230,7 +274,19 @@ class BoardRowView extends Component<RowProps> {
             </span>
           )}
         </span>
-        {pop && <KPop id={popId} text={text} btn={this.kBtn} onClose={onPopClose} />}
+        {pop && (
+          <KPop
+            id={popId}
+            text={text}
+            btn={this.kBtn}
+            onClose={onPopClose}
+            opt={
+              this.props.onOpt
+                ? { month: this.props.month, k: row.k, open: this.props.onOpt }
+                : null
+            }
+          />
+        )}
       </th>
     );
     const side = (type: OptionType) => {
@@ -307,6 +363,8 @@ interface TableProps {
   flash: Flash;
   badges: BoardBadges | undefined;
   onAdd: RowAdd;
+  onOpt: RowOpt | null;
+  month: string;
 }
 
 const NO_BADGE = { call: undefined, put: undefined };
@@ -380,6 +438,8 @@ const BoardTable = pure(function BoardTable(p: TableProps) {
                 popId={`${id}-kpop`}
                 onK={onK}
                 onPopClose={onPopClose}
+                onOpt={p.onOpt}
+                month={p.month}
               />
             );
           })}
@@ -405,6 +465,8 @@ export interface BoardMonthProps {
   flash: Flash;
   badges: BoardBadges | undefined;
   onAdd: MarketAdd;
+  /** 銘柄の推移を開く（#319。無ければ K のポップオーバーに出さない） */
+  onOptChart?: OpenOptChart;
 }
 
 /**
@@ -427,6 +489,12 @@ function BoardMonthView(p: BoardMonthProps) {
   const rowAdd = useCallback<RowAdd>(
     (k, type, side) => onAdd(monthId, k, type, side),
     [onAdd, monthId],
+  );
+  const { onOptChart } = p;
+  const ltd = p.month.lastTradingDay;
+  const rowOpt = useCallback<RowOpt>(
+    (k, type, from) => onOptChart?.(monthId, ltd, k, type, from),
+    [onOptChart, monthId, ltd],
   );
   const sides: Array<OptionType | null> = p.cols === 5 ? ['put', 'call'] : [null];
   return (
@@ -457,6 +525,8 @@ function BoardMonthView(p: BoardMonthProps) {
           flash={p.flash}
           badges={p.badges}
           onAdd={rowAdd}
+          onOpt={onOptChart ? rowOpt : null}
+          month={monthId}
         />
       ))}
     </div>

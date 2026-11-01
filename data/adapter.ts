@@ -11,6 +11,7 @@
  * 取引カレンダーは板と別に同一オリジンの `/api/calendar` を読む（loadCalendarJson。7.5）。
  * IV 推移は IV 推移を開いたときだけ同一オリジンの `/api/atm_iv` を読む（loadAtmIv。7.1。#79）。先物推移も同じく
  * 開いたときだけ `/api/future_bars`（loadFutureBars。#190）。
+ * 銘柄の推移は銘柄のチャートを開いたときだけ `/api/option_bars`（loadOptionBars。#319）。
  * 日次の値は追証マップを開いたときだけ同一オリジンの `/api/atm_daily` を読む（loadAtmDaily。7.1。#152）。
  */
 
@@ -20,6 +21,13 @@ import { type CalendarJson, validateCalendarJson } from './calendar';
 import { type ChainJson, parseChainJson } from './chainJson';
 import { type FutureBarsData, futureBarsUrl, validateFutureBarsJson } from './futureBars';
 import { type Chain, type NormalizeOptions, normalizeChain } from './normalize';
+import {
+  type OptionBarsData,
+  type OptionBarsKey,
+  type OptionBarsTf,
+  optionBarsUrl,
+  validateOptionBarsJson,
+} from './optionBars';
 
 export type AdapterKind = 'file' | 'bigquery';
 
@@ -93,7 +101,7 @@ async function fetchText(
   label: string,
   base: Omit<FetchInit, 'signal'>,
   /** 何を読むか（エラーの文言の名詞） */
-  what: '板' | 'カレンダー' | 'IV 推移' | '先物推移' | '過去の値動き' = '板',
+  what: '板' | 'カレンダー' | 'IV 推移' | '先物推移' | '銘柄の推移' | '過去の値動き' = '板',
 ): Promise<string> {
   const init: FetchInit = { ...base };
   if (opts.signal) init.signal = opts.signal;
@@ -262,6 +270,41 @@ export async function loadFutureBars(
   }
   const r = validateFutureBarsJson(parsed, tf);
   if (!r.ok) throw new ChainLoadError('先物推移の JSON が不正（api）', r.errors);
+  return r.value;
+}
+
+export interface OptionBarsLoadOptions {
+  /** API の URL（既定は同一オリジンの /api/option_bars。dev の合成の応答は /fixtures/option_bars） */
+  endpoint?: string;
+  fetch?: FetchLike;
+  signal?: AbortSignal;
+}
+
+/**
+ * 銘柄の推移（`/api/option_bars`。#319）を読んで検証する。作法は loadAtmIv と同じ（範囲は無い = 銘柄の一生を 1 回で）。
+ */
+export async function loadOptionBars(
+  tf: OptionBarsTf,
+  key: OptionBarsKey,
+  opts: OptionBarsLoadOptions = {},
+): Promise<OptionBarsData> {
+  const load: LoadOptions = opts.signal ? { signal: opts.signal } : {};
+  const text = await fetchText(
+    opts.fetch ?? defaultFetch,
+    optionBarsUrl(opts.endpoint ?? '/api/option_bars', tf, key),
+    load,
+    'api',
+    { cache: 'no-cache', redirect: 'manual' },
+    '銘柄の推移',
+  );
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    throw new ChainLoadError('銘柄の推移の JSON が不正（api）', ['$: JSON として解析できない']);
+  }
+  const r = validateOptionBarsJson(parsed, tf, key);
+  if (!r.ok) throw new ChainLoadError('銘柄の推移の JSON が不正（api）', r.errors);
   return r.value;
 }
 

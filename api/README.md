@@ -8,6 +8,7 @@ optionchan の BigQuery（データセット `optionchan_tokyo` のテーブル�
 | `GET /api/calendar` | 取引カレンダーの最新版 `{schema_version, source, version_at, covered_until, listed_until, days: [{date, is_trading_day, status, name}]}`（日付の昇順）。画面は本番で開いたときと [最新] で読む（取れなければ同梱の版。#39） |
 | `GET /api/atm_iv?tf=<1m\|1h\|1d>[&start=<ISO>&end=<ISO>]` | IV 推移（#79）: 表 `atm_cm_iv` の `iv30`（30 日固定の ATM IV、%）の足 `{schema_version, tf, start, end, last_at, bars: [{t, o, h, l, c}]}`。`start`・`end` は両方か無し（無ければ右端（最新）までの既定の範囲。1m 3 日・1h 60 日・1d 365 日）、オフセット付きの ISO 8601 で UTC の 0 時ちょうど。1 回の最大は 1m 3 日・1h 100 日・1d 400 日。不正は 400、BigQuery の失敗・`DATA_SOURCE=file` は 503。仕様は `docs/design.md` 7.1・13.4 |
 | `GET /api/future_bars?tf=<1m\|1h\|1d>[&start=<ISO>&end=<ISO>]` | 先物推移（#190）: テーブル関数 `future_price_latest` の現在値（ラージ・期近。15 分遅れ）の足 `{schema_version, tf, start, end, last_at, bars: [{t, o, h, l, c, m}]}`（値は円、`m` は限月 `YYYY-MM` = 取引カレンダーから求めた期近）。パラメータ・最大日数・400 / 503・`Cache-Control` は `/api/atm_iv` と同じ。足は `price_time`（約定の分）で切り、`created_at` は範囲の終わりより 10 分先まで読む。`DATA_SOURCE=file` / `quotes` は 503。仕様は `docs/design.md` 7.1・13.4 |
+| `GET /api/option_bars?ltd=<YYYY-MM-DD>&k=<整数>&type=<call\|put>&tf=<1h\|1d>` | 銘柄の推移（#319）: 表 `option_price_hourly` の 1 銘柄（取引最終日 × 行使価格 × 種別）の足 `{schema_version, tf, ltd, k, type, last_at, bars: [{t, o, h, l, c, bid, ask, bid_iv, ask_iv, trade, trade_iv}]}`（値は円、IV は %。気配の無い足は `o`〜`ask_iv` が null、約定の無い足は `trade`・`trade_iv` が null）。4 つとも必須、外れた値・重複は 400（値は応答・ログに出さない）、銘柄の一生（`ltd` の 100 日前〜翌日）を 1 回で読む。範囲の外の限月は読まずに `bars: []`。`file` / `quotes` は 503。`Cache-Control` は確定した銘柄（取引最終日の翌日 0 時 + 48 時間）で `max-age=3600`、それ以外 60 |
 | `GET /api/atm_daily` | 日次の値（#152）: 表 `atm_cm_iv` の JST の日付ごとの日中の終値（JST 9:00〜15:00 の最後の行）の `iv30` と 1 / 2 限月のフォワード・最終取引日 `{schema_version, start, end, days: [{d, t, iv, f1, l1, f2, l2}]}`。パラメータなし（知らないパラメータは無視）。確定した日だけ（`end` = JST の今日（8:00 以降）/ 前日、含まない）。`Cache-Control: private, max-age=3600`・ETag で 304。BigQuery の失敗・`DATA_SOURCE=file` は 503。2 営業日の組はブラウザ（`data/atmDaily.ts`）。仕様は `docs/design.md` 7.1・13.4 |
 | `POST /api/ai/messages` | AI の中継（#134）。本文 JSON `{schema_version: 1, kind: "chat" | "diagnose" | "ask" | "preset", context, messages, topic?}`（`topic` は ask・preset のときだけ） を許可リストで検査し、サーバーが固定する引数を付けて Anthropic に送り、SSE（`accepted` → `progress` / `thinking` / `text` / `tool_use` → `done` / `error`）で流す。1 日の上限（予約と精算）・同じオリジン・`Content-Type: application/json`・512 KiB・同時 2 本・1 分 10 回。下の「AI の中継」 |
 | `GET /api/ai/status` | AI が使えるか・モデル・資格情報の種類・数えるか・1 日の上限と残り・戻る時刻（`no-store`） |
@@ -26,7 +27,7 @@ optionchan の BigQuery（データセット `optionchan_tokyo` のテーブル�
 | `GCP_PROJECT` | なし（`bigquery` のとき必須） | BigQuery のプロジェクト ID |
 | `BQ_DATASET` | `optionchan_tokyo` | データセット |
 | `BQ_LOCATION` | `asia-northeast1` | ロケーション |
-| `MAX_BYTES_BILLED` | `536870912` | 1 ジョブのクエリ量の上限（バイト。1〜512 MiB。超える値は起動時にエラー）。`atm_cm_iv` のジョブはこれと 64 MiB、`atm_cm_daily` のジョブはこれと 128 MiB の小さい方（`settings.QUERY_MAX_BYTES_BILLED`） |
+| `MAX_BYTES_BILLED` | `536870912` | 1 ジョブのクエリ量の上限（バイト。1〜512 MiB。超える値は起動時にエラー）。`atm_cm_iv`・`future_bars`・`option_bars` のジョブはこれと 64 MiB、`atm_cm_daily` のジョブはこれと 128 MiB の小さい方（`settings.QUERY_MAX_BYTES_BILLED`） |
 | `CHAIN_FILE` | なし | `DATA_SOURCE=file` の板の JSON |
 | `QUOTES_FILE` | なし | `DATA_SOURCE=quotes` の気配の一覧（要求ごとに読む。書き換えれば [最新] で新しい板） |
 | `CALENDAR_FILE` | なし | `DATA_SOURCE=quotes` の取引カレンダー（`/api/calendar` と同じデータ形式。同梱の `../data/calendar/calendar.json` を指せる） |
@@ -124,6 +125,8 @@ gcloud logging read "protoPayload.serviceName=\"bigquery.googleapis.com\" AND pr
 IV 推移（`/api/atm_iv`。#79）のジョブだけを見るときは、`jq` の最初の `map(...)` の前に `map(select(.protoPayload.metadata.jobChange.job.jobConfig.queryConfig.query // "" | test("atm_cm_iv")))` を挟む（エラーの内訳は `.protoPayload.metadata.jobChange.job.jobStatus.errorResult.reason`。`bytesBilledLimitExceeded` が 64 MiB の上限）。目安は 1 ジョブの最大が 64 MiB 以下（通常は最小課金の 10 MiB。表が変わるまでの同じ要求は結果キャッシュで 0）。
 
 先物推移（`/api/future_bars`。#190）のジョブは `test("traded_at")` で絞る（板の `/api/chain` も `future_price_latest` を読むが、`price_time` を `traded_at` にして集約するのは先物推移だけ）。目安は 1 ジョブ最小課金の 20 MiB（テーブル関数の中で表 2 本）・最大 64 MiB の上限の下（1d 400 日と前後の追加の読み込みで約 22 MiB）。アプリのログでは `jsonPayload.event = "future_bars_served"`（`tf`・`days`・`bars`・`cache`・`contract_mismatch` = 生の `contract_month` と求めた限月が違う足の数）と `bq_job` の `name = "future_bars"`。
+
+銘柄の推移（`/api/option_bars`。#319）のジョブは `test("option_price_hourly")` で絞る。目安は 1 ジョブ 約 29〜42 MiB（パーティション = 取引最終日の月 1 個。月の大きさで変わる）で 64 MiB の上限（`bytesBilledLimitExceeded`）の下。上限が dry run の見積もりより小さいとジョブは課金 0 で失敗する（その限月の銘柄が 503）ので、最大の月が 64 MiB に近づいたら上限を見直す。アプリのログでは `jsonPayload.event = "option_bars_served"`（`tf`・`bars`・`cache`・`elapsed_ms`。銘柄は出さない）と `bq_job` の `name = "option_bars"`。
 
 `atm_cm_iv` の文字列は IV 推移と日次の値（`/api/atm_daily`。#152）の 2 つのクエリに当たるので、分けるときは `m1_forward` を含むか否かで絞る: IV 推移は `test("atm_cm_iv") and (test("m1_forward") | not)`、日次の値は `test("m1_forward")`。日次の値の目安は 1 ジョブ 約 62 MiB（全期間。1 年で約 8 MiB 増える）で 128 MiB の上限（`bytesBilledLimitExceeded`）の下、回数はインスタンスごと 1 日 1 回 + コールドスタートの回数（範囲の終わりごとのキャッシュ）。アプリのログでは `jsonPayload.event = "atm_daily_served"`（`end`・`days`・`cache`）と `bq_job` の `name = "atm_cm_daily"`（`total_bytes_processed`）。
 

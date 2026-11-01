@@ -5,6 +5,7 @@ import {
   dockPanels,
   leftView,
   MARKET_VIEWS,
+  marketAttr,
   type PanelId,
   type ShellAction,
   type ShellState,
@@ -86,17 +87,19 @@ export function Shell(p: {
     ) : null;
   // 市場の Seg は同じ要素を使い回す（板・スマイルの領域の pure を効かせる）
   const { market } = state;
+  // 銘柄の推移（#319）を開いている間はどれも選ばない（押すと推移を閉じてその見え方へ）
+  const optOpen = state.opt !== undefined;
   const marketSeg = useMemo(
     () =>
       tier === 'pc' ? (
         <Seg
           label="市場"
-          value={market}
+          value={optOpen ? null : market}
           options={MARKET_VIEWS}
           onChange={(m) => send({ type: 'market', market: m })}
         />
       ) : null,
-    [tier, market, send],
+    [tier, market, optOpen, send],
   );
   const smileValue = smileView(state, tier);
   const smileSeg = useMemo(
@@ -106,7 +109,7 @@ export function Shell(p: {
       ) : (
         <Seg
           label="IV 推移 / スマイル / 先物"
-          value={smileValue}
+          value={smileValue === 'opt' ? null : smileValue}
           options={SMILE_VIEWS}
           onChange={(m) => send({ type: 'market', market: m })}
         />
@@ -119,7 +122,7 @@ export function Shell(p: {
       class="layout"
       data-panel={panel}
       data-sheet={state.sheet}
-      data-market={state.market}
+      data-market={marketAttr(state)}
       data-left={leftView(state)}
     >
       <section class="stage panel" aria-label="損益グラフ">
@@ -144,7 +147,13 @@ export function Shell(p: {
       <section
         class="market panel side smile"
         aria-label={
-          smileValue === 'iv' ? 'IV 推移' : smileValue === 'fut' ? '先物推移' : 'スマイル'
+          smileValue === 'iv'
+            ? 'IV 推移'
+            : smileValue === 'fut'
+              ? '先物推移'
+              : smileValue === 'opt'
+                ? '銘柄の推移'
+                : 'スマイル'
         }
       >
         {grabber('smile')}

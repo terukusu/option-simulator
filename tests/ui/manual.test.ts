@@ -146,9 +146,9 @@ describe('リンクの先（#322 AC2）', () => {
     for (const t of GLOSSARY) expect(INDEX.byAnchor.has(t.guide.anchor), t.id).toBe(true);
   });
 
-  it('ⓘ の場所 → 節の表（12 か所）の全部が当たり、見出しも同じ', () => {
+  it('ⓘ の場所 → 節の表（13 か所。#319 で銘柄の推移）の全部が当たり、見出しも同じ', () => {
     const places = Object.entries(HINT_GUIDE);
-    expect(places).toHaveLength(12);
+    expect(places).toHaveLength(13);
     for (const [place, g] of places) {
       const s = INDEX.byAnchor.get(g.anchor);
       expect(s, place).toBeDefined();

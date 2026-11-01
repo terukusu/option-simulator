@@ -14,7 +14,8 @@ export interface SegOption<T extends string> {
 
 export function Seg<T extends string>(p: {
   label: string;
-  value: T;
+  /** 選んでいる値（null = どれも選ばない。#319 銘柄の推移を開いている間の市場の Seg） */
+  value: T | null;
   onChange: (v: T) => void;
   options: readonly SegOption<T>[];
 }) {

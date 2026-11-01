@@ -482,3 +482,12 @@
   width: 14px;
   height: 14px;
 }
+
+/* 足の詳細の [推移]（#319。ラージの OP の足だけ） */
+.leg-detail > .leg-opt {
+  margin: var(--sp-2) 0 0;
+}
+
+.leg-detail > .leg-opt .btn {
+  gap: 4px;
+}

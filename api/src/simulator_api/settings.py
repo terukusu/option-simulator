@@ -77,6 +77,20 @@ ATM_IV_SETTLED_MAX_AGE_SECONDS = 3600  # Cache-Control（確定した範囲）
 # created_at は足の上限よりこの分だけ先まで読む（UTC 0 時 = JST 9:00 の境で created_at が 1〜2 分遅れた行を落とさない）
 FUTURE_BARS_READ_AFTER_MINUTES = 10
 
+# ---- 銘柄の推移（/api/option_bars。表 option_price_hourly、#319。docs/design.md 7.1・7.3・13.4） ----
+# 1 銘柄（限月 × 行使価格 × put / call）の一生を 1 回で読む: started_at を [JST 0 時の (ltd − LOOKBACK), JST 0 時の
+# (ltd + 1 日)) で読む（月限の銘柄が 1・2 限月のページに載るのは最長 約 2 か月 = 100 日で覆う。今で打ち切らない =
+# キーが今に依らない）
+OPTION_BARS_LOOKBACK_DAYS = 100
+OPTION_BARS_TIMEFRAMES = ("1h", "1d")  # 1h は表の行そのまま、1d は 1 時間足を取引日に束ねる
+OPTION_BARS_MIN_LTD_ISO = "2018-10-01"  # これより前の限月は表に無い（表の始まり 2018-10）。クエリを出さず bars: []
+OPTION_BARS_SETTLED_HOURS = 48  # JST 0 時の (ltd + 1 日) からこれだけ経てば確定（表の作り直しの外）
+OPTION_BARS_TTL_SECONDS = 300  # 確定していない銘柄のサーバーのキャッシュ
+OPTION_BARS_SETTLED_TTL_SECONDS = 86400  # 確定した銘柄のサーバーのキャッシュ
+OPTION_BARS_CACHE_SIZE = 64  # キャッシュの件数（行 = (ltd, k, type)・応答 = (ltd, k, type, tf) のそれぞれ）
+OPTION_BARS_MAX_AGE_SECONDS = 60  # Cache-Control（確定していない銘柄）
+OPTION_BARS_SETTLED_MAX_AGE_SECONDS = 3600  # Cache-Control（確定した銘柄）
+
 # ---- 日次の値（/api/atm_daily。表 atm_cm_iv の日中の終値の iv30・1 / 2 限月のフォワード、#152。docs/design.md 7.1・
 # 7.3・13.4） ----
 ATM_DAILY_CLOSE_WINDOW = (time(9, 0), time(15, 0))  # 日中の終値を取る窓（JST。両端含む。この中の最後の行）
@@ -92,7 +106,12 @@ ATM_DAILY_MAX_AGE_SECONDS = 3600  # Cache-Control
 # で全期間 ≈ 94 MiB（2026-10-31）、1 年で約 11 MiB 増える = 上限 128 MiB まで約 3 年。越えそうなら範囲を絞るか
 # 上限を見直す）
 # future_bars（#190）は future_price_latest の 4 列で全期間 ≈ 155 MiB、1d 400 日 + 読み足し ≈ 21 MiB（2026-10-19）
-QUERY_MAX_BYTES_BILLED: dict[str, int] = {"atm_cm_iv": 64 * MiB, "atm_cm_daily": 128 * MiB, "future_bars": 64 * MiB}
+# option_bars（#319）は option_price_hourly の 12 列。パーティション（last_trading_day の月）1 個だけを読み、1 銘柄の
+# 一生の dry run は 28.8 MiB、最も大きい月のパーティション（2026-09）で 41.2 MiB（2026-11-01）。上限が dry run の
+# 見積もりより小さいとジョブは課金 0 で失敗する（その限月の銘柄が 503）ので、最大の 1.5 倍余りの 64 MiB。
+# パーティションが大きくなって越えそうなら上限を見直す（tests/test_sql_bq.py が前月のパーティションで見る）
+QUERY_MAX_BYTES_BILLED: dict[str, int] = {"atm_cm_iv": 64 * MiB, "atm_cm_daily": 128 * MiB, "future_bars": 64 * MiB,
+                                          "option_bars": 64 * MiB}
 
 # ---- 中立の気配の一覧（DATA_SOURCE=quotes。quotes.py・service.QuotesFileService。#154） ----
 QUOTES_MAX_FILE_BYTES = 16 * MiB  # QUOTES_FILE・CALENDAR_FILE の大きさの上限（超えたら読まずに 503）

@@ -819,3 +819,37 @@ describe('#227: , . の始点（ivKeyStep）は価格・段とも表示範囲の
     expect(ivKeyStep(null, 0, v, 1)).toBeNull();
   });
 });
+
+describe('ivChartModel の任意の入力（#319 skip・bands・marks・level）', () => {
+  const bars = barsAt(everyStep(jst('2026-11-02T09:00'), H, 60), 7);
+  const base = {
+    bars,
+    tf: '1h' as const,
+    mode: 'candle' as const,
+    viewport: resolveIvViewport(bars, '1h', null, null),
+    segments: lineSegments(bars, '1h', NTD),
+    width: 600,
+    height: 300,
+    rightLoaded: true,
+  };
+
+  it('無指定なら追加の出力は空で、ほかは skip が全部 false・帯 / 点が空のときと同じ', () => {
+    const m = ivChartModel(base);
+    expect(m.bands).toEqual([]);
+    expect(m.marks).toEqual([]);
+    expect(m.level).toBeNull();
+    const same = ivChartModel({ ...base, skip: bars.map(() => false), bands: [], marks: [] });
+    expect(same).toEqual(m);
+    for (const mode of ['candle', 'line'] as const) {
+      expect(ivChartModel({ ...base, mode, level: null })).toEqual(ivChartModel({ ...base, mode }));
+    }
+  });
+
+  it('skip の足はローソクを描かず縦軸に入れない', () => {
+    const spike = bars.map((b, i) => (i === 30 ? { ...b, h: b.h + 1000 } : b));
+    const skip = bars.map((_, i) => i === 30);
+    const m = ivChartModel({ ...base, bars: spike, skip, viewport: [-0.5, 59.5] });
+    expect(m.candles.some((c) => c.t === (bars[30] as IvBar).t)).toBe(false);
+    expect(m.yDomain[1]).toBeLessThan((bars[30] as IvBar).h + 100);
+  });
+});

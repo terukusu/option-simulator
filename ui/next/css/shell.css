@@ -222,11 +222,12 @@ section.panel .board-wrap:focus-visible {
     border-right: 1px solid var(--line);
   }
 
-  /* IV 推移（#79）・先物推移（#190）は section.smile の領域に描く */
+  /* IV 推移（#79）・先物推移（#190）・銘柄の推移（#319）は section.smile の領域に描く */
   .layout[data-market="board"] section.board,
   .layout[data-market="smile"] section.smile,
   .layout[data-market="iv"] section.smile,
-  .layout[data-market="fut"] section.smile {
+  .layout[data-market="fut"] section.smile,
+  .layout[data-market="opt"] section.smile {
     display: flex;
   }
 

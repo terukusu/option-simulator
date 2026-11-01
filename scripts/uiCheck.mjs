@@ -138,6 +138,10 @@
 //                                          --flows: future_bars への要求 = 起動 0 → IV 推移を開いて 0（atm_iv 1）→ 先物 1（atm_iv
 //                                          増えない）→ 閉じて開き直し 1 → ⟳ 2 → [最新] で増えない、日足で限月交代の印 ≥ 1・線は交代でもつながる（つなぎ足）・読み取りに
 //                                          限月、先物で日足 → IV 推移も日足（足を保つ）。390×844 と 1440×900
+//                                          銘柄の推移（#319 AC 5〜7）: 360×780・1440×900 × ダーク / ライトで板の K →「put の推移」で
+//                                          開いた状態（1 時間足のローソク・線・日足、スマホは peek も）の縦・横・折り返しと 2 段・帯・
+//                                          約定の点・Seg の選択なし・切れ。--cross: 2 段の十字線（PC のホバー・タッチのタップ / つかむ /
+//                                          外のタップ）。--flows: option_bars の要求の回数・Esc / 戻るで閉じてフォーカスが開いたボタンへ
 //                                          AI のチャット（#135 AC7）: 360 / 390（AI のシート peek / full）・900（ドックの AI）・1440
 //                                          （トップバーの [AI] で左の列（市場）を入れ替え。#280）× ダーク / ライトで縦・横・折り返し・舞台の読み取り、
 //                                          ドック 6 つ（タブレット 5 つ）の文字が切れない、押す前に残り（$）が見出しに見えて切れない、
@@ -1590,6 +1594,8 @@ async function measureAll() {
     console.log(
       `先物推移の段の操作の検査（#207）: ${paneStats.pass} / ${paneStats.total} 状態で pass`,
     );
+    // 銘柄の推移（#319 AC 5）
+    await optSweep();
     // 損益グラフの十字線（#201 AC-5）
     await pnlCrossAll();
     console.log(
@@ -7194,6 +7200,8 @@ async function runFlows() {
   for (const vp of [phone, { width: 900, height: 1100 }]) await ivDockFlows(vp);
   // #190 先物推移の遅延ロード・IV 推移と要求が混ざらない・限月交代の印・切替で足を保つ（AC-9）
   for (const vp of [phone, pc]) await futFlows(vp);
+  // #319 銘柄の推移を開く・閉じる・フォーカスが戻る・要求は開いたときだけ（AC 7）
+  for (const vp of [phone, pc]) await optFlows(vp);
   // #201 損益グラフの十字線（PC のホバー・タッチのタップ / 交点のドラッグ / ほかの所のタップ・× で消す（#217。移さない）・長押しとパンは今のまま）
   await pnlCrossFlows(pc);
   await pnlCrossTouchFlow();
@@ -9493,7 +9501,10 @@ async function marketWideFlows(vp) {
   await run('bid / ask での追加 5 回', async () => {
     await page.click('section.board .board-tools button[aria-label="ATM へ"]');
     await twoFrames(page);
-    const btns = page.locator(`${ACTIVE_WRAP} tr.atm button`);
+    // K のボタンと気配のボタン（K のポップオーバーの中のボタン = #319 の推移は数えない）
+    const btns = page.locator(
+      `${ACTIVE_WRAP} tr.atm > th .kbtn, ${ACTIVE_WRAP} tr.atm > td button`,
+    );
     const n = await btns.count();
     for (let i = 0; i < 5; i++) {
       await btns.nth(i % n).click();
@@ -17677,6 +17688,429 @@ async function fontSweep() {
   );
 }
 
+// ---- 銘柄の推移（#319 AC 5〜7）。板の K のポップオーバー・足の詳細から開く。dev の合成の足（/fixtures/option_bars）
+const OPT_KBTN =
+  'section.board .board-month:not(.inactive) .board-wrap:not(.side-hidden) tr.atm th.k .kbtn';
+const OPT_SEC = 'section.smile';
+const optStats = { pass: 0, total: 0 };
+
+/** 読み終わり（描画域・読み中なし・⟳ が押せる）まで待つ */
+const optReady = (page) =>
+  page
+    .waitForFunction(
+      () => {
+        const s = document.querySelector('section.smile');
+        return (
+          !!s?.querySelector('.opt-stack .iv-wrap svg') &&
+          !s.querySelector('.iv-loading') &&
+          s.querySelector('.iv-refresh')?.disabled === false
+        );
+      },
+      undefined,
+      { timeout: 10000 },
+    )
+    .then(() => true)
+    .catch(() => false);
+
+/** 板の ATM の行の K → ポップオーバーの [type の推移]（スマホは板のパネルを全開に。PC は市場の列を板に） */
+async function openOptFromBoard(page, w, type = 'put') {
+  if (w <= PHONE_MAX) await setShell(page, 'board', 'full');
+  else {
+    const b = page.locator('section.market:visible .panel-head .seg button:text-is("板")');
+    if ((await b.count()) > 0 && (await b.getAttribute('aria-pressed')) !== 'true') await b.click();
+  }
+  await page.waitForSelector(OPT_KBTN, { timeout: 10000 });
+  await page.click(OPT_KBTN);
+  await page.click(`.kpop-opt button[data-opt="${type}"]`);
+  const ok = await optReady(page);
+  await page.waitForTimeout(150);
+  return ok;
+}
+
+/** 銘柄の推移の状態（2 段・帯・約定の点・建値の線・Seg の選択・切れ） */
+const optState = (page) =>
+  page.evaluate(() => {
+    const s = document.querySelector('section.smile');
+    const plots = [...(s?.querySelectorAll('.opt-stack > .iv-wrap') ?? [])];
+    const cut = (el) => (el ? el.scrollWidth > el.clientWidth + 1 : true);
+    const dCount = (sel, re) =>
+      [...(s?.querySelectorAll(sel) ?? [])].reduce(
+        (n, p) => n + ((p.getAttribute('d') ?? '').match(re)?.length ?? 0),
+        0,
+      );
+    return {
+      label: s?.getAttribute('aria-label') ?? null,
+      market: document.querySelector('.layout')?.getAttribute('data-market') ?? null,
+      plots: plots.length,
+      svgs: plots.filter((p) => p.querySelector('svg')).length,
+      heights: plots.map((p) => Math.round(p.getBoundingClientRect().height)),
+      band: dCount('.opt-band', /Z/g),
+      trades: dCount('.opt-trade', /M/g),
+      entry: s?.querySelectorAll('line.opt-entry').length ?? 0,
+      pressed: s?.querySelectorAll('.panel-head .seg button[aria-pressed="true"]').length ?? -1,
+      name: (s?.querySelector('.panel-head .sub')?.textContent ?? '').trim(),
+      nameCut: cut(s?.querySelector('.panel-head .sub')),
+      toolsCut: cut(s?.querySelector('.iv-tools')),
+      legendCut: cut(s?.querySelector('.iv-legend')),
+      readoutCut: [...(s?.querySelectorAll('.opt-readout') ?? [])].some(cut),
+      empty: (s?.querySelector('.iv-empty')?.textContent ?? '').trim(),
+    };
+  });
+
+function optCheck(st, label, opts = {}) {
+  optStats.total++;
+  const bad = [];
+  if (!st) bad.push('状態が取れない');
+  else {
+    if (st.label !== '銘柄の推移') bad.push(`領域の名前 ${st.label}`);
+    if (st.market !== 'opt') bad.push(`data-market ${st.market}`);
+    if (st.plots !== 2 || st.svgs !== 2) bad.push(`段 ${st.plots}・svg ${st.svgs}`);
+    if (st.heights.some((h) => h < (opts.minH ?? 50))) bad.push(`段の高さ ${st.heights.join('/')}`);
+    if (st.band < 1) bad.push('帯が無い');
+    if (st.trades < 1) bad.push('約定の点が無い');
+    if ((opts.entry ?? false) !== st.entry > 0) bad.push(`建値の線 ${st.entry}`);
+    if (st.pressed !== 0) bad.push(`見出しの Seg の選択 ${st.pressed}`);
+    if (st.nameCut || st.name === '') bad.push(`銘柄の名前「${st.name}」が無い / 切れる`);
+    if (st.toolsCut) bad.push('ツールの行が切れる');
+    if (st.legendCut) bad.push('凡例が切れる');
+    if (st.readoutCut) bad.push('読み取りが切れる');
+  }
+  const ok = bad.length === 0;
+  if (ok) optStats.pass++;
+  else failed = true;
+  console.log(
+    `${label}: 段 ${st?.heights.join('/')}px・帯 ${st?.band}・約定 ${st?.trades}・建値 ${st?.entry}・${st?.name} ${ok ? 'pass' : `${bad.join('・')}  ← NG`}`,
+  );
+}
+
+/** 既定の実行（AC 5）: 360×780・1440×900 × ダーク / ライトで銘柄のチャート（1 時間足のローソク・線・日足）の縦・横・折り返し */
+async function optSweep() {
+  for (const [w, h] of [
+    [360, 780],
+    [1440, 900],
+  ]) {
+    for (const theme of ['dark', 'light']) {
+      const ctx = await newContext(
+        { width: w, height: h },
+        { [WORKSPACE_KEY]: twoLegs, [PREFS_KEY]: prefsText(theme) },
+      );
+      const page = await ctx.newPage();
+      await page.goto(pageUrl('next'));
+      await waitReady(page, 'next');
+      const tag = `next ${theme} 銘柄の推移`;
+      const name = `next-${w}x${h}-${theme}-opt`;
+      const opened = await openOptFromBoard(page, w);
+      if (!opened) {
+        optStats.total++;
+        failed = true;
+        console.log(`${tag} ${w}x${h}: 開けない  ← NG`);
+        await ctx.close();
+        continue;
+      }
+      await report(page, `${tag} 1 時間足`, w, h, `${name}-1h`);
+      optCheck(await optState(page), `${tag} 1 時間足 ${w}x${h}`);
+      await page.click(`${OPT_SEC} .iv-tools button:has-text("線")`);
+      await page.waitForTimeout(150);
+      await report(page, `${tag} 線`, w, h, `${name}-line`);
+      optCheck(await optState(page), `${tag} 線 ${w}x${h}`);
+      await page.click(`${OPT_SEC} .iv-tools button[aria-label="日足"]`);
+      await optReady(page);
+      await page.waitForTimeout(150);
+      await report(page, `${tag} 日足`, w, h, `${name}-1d`);
+      optCheck(await optState(page), `${tag} 日足 ${w}x${h}`);
+      if (w <= PHONE_MAX) {
+        // シートを覗く（最も狭い）
+        await page.click('.grabber');
+        await settleMotion(page);
+        await report(page, `${tag} 日足 peek`, w, h, `${name}-1d-peek`);
+        optCheck(await optState(page), `${tag} 日足 peek ${w}x${h}`, { minH: 20 });
+      }
+      await ctx.close();
+    }
+  }
+  console.log(`銘柄の推移の検査（#319）: ${optStats.pass} / ${optStats.total} 状態で pass`);
+}
+
+/** 十字線の状態（2 段それぞれ: 縦線・横線・札の数と横の札の文字） */
+const optCrossState = (page) =>
+  page.evaluate(() => {
+    const plots = [...document.querySelectorAll('section.smile .opt-stack > .iv-wrap')];
+    return plots.map((p) => {
+      const svg = p.querySelector('svg');
+      const b = svg?.getBoundingClientRect();
+      return {
+        v: p.querySelectorAll('.iv-cursor.v').length,
+        h: p.querySelectorAll('.iv-cursor.h').length,
+        yTag: p.querySelectorAll('.iv-tag.y').length,
+        xTag: (p.querySelector('.iv-tag.x text')?.textContent ?? '').trim(),
+        vx: Number(p.querySelector('.iv-cursor.v')?.getAttribute('x1') ?? Number.NaN),
+        hy: Number(p.querySelector('.iv-cursor.h')?.getAttribute('y1') ?? Number.NaN),
+        left: b?.left ?? 0,
+        top: b?.top ?? 0,
+      };
+    });
+  });
+
+/** --cross（AC 6）: PC のホバーで 2 段の縦線がそろい、横線と縦軸の札は触っている段だけ。外れて消える */
+async function optCrossAll() {
+  for (const theme of ['dark', 'light']) {
+    const ctx = await newContext(
+      { width: 1440, height: 900 },
+      { [WORKSPACE_KEY]: twoLegs, [PREFS_KEY]: prefsText(theme) },
+    );
+    const page = await ctx.newPage();
+    await page.goto(pageUrl('next'));
+    await waitReady(page, 'next');
+    await openOptFromBoard(page, 1440);
+    const boxes = await page.locator(`${OPT_SEC} .opt-stack > .iv-wrap`).evaluateAll((els) =>
+      els.map((e) => {
+        const r = e.getBoundingClientRect();
+        return { x: r.x, y: r.y, w: r.width, h: r.height };
+      }),
+    );
+    const lbl = `#319 AC 6 ${theme} 1440x900 銘柄の推移`;
+    for (const [i, name] of [
+      [0, '値段の段'],
+      [1, 'IV の段'],
+    ]) {
+      const b = boxes[i];
+      await page.mouse.move(b.x + b.w * 0.7, b.y + b.h * 0.45);
+      await page.waitForTimeout(150);
+      const st = await optCrossState(page);
+      const other = st[1 - i];
+      const me = st[i];
+      check(
+        `${lbl} ${name}にホバー: 2 段に縦線（同じ x・同じ時刻の札）、横線と縦軸の札はその段だけ・横線はマウスの高さ`,
+        me?.v === 1 &&
+          other?.v === 1 &&
+          Math.abs(me.vx - other.vx) <= 0.5 &&
+          me.xTag !== '' &&
+          me.xTag === other.xTag &&
+          me.h === 1 &&
+          me.yTag === 1 &&
+          other.h === 0 &&
+          other.yTag === 0 &&
+          Math.abs(me.hy - (b.y + b.h * 0.45 - me.top)) <= 0.6,
+        `${JSON.stringify(st.map(({ v, h, yTag, xTag, vx, hy }) => ({ v, h, yTag, xTag, vx, hy })))}・マウスの高さ ${(b.y + b.h * 0.45 - (me?.top ?? 0)).toFixed(1)}`,
+      );
+    }
+    await page.mouse.move(2, 2);
+    await page.waitForTimeout(150);
+    const gone = await optCrossState(page);
+    check(
+      `${lbl} 描画域の外へ出すと十字線が消える`,
+      gone.every((g) => g.v === 0 && g.h === 0),
+      JSON.stringify(gone.map((g) => g.v)),
+    );
+    await ctx.close();
+  }
+  await optCrossTouchFlow();
+}
+
+/** --cross（AC 6）: タッチ（360×780）でタップで置く・交点をつかんで動かす・ほかの所のタップで消える（共通の規則） */
+async function optCrossTouchFlow() {
+  const tag = '#319 AC 6 360x780 touch 銘柄の推移';
+  const ctx = await touchContext({ [WORKSPACE_KEY]: twoLegs }, { width: 360, height: 780 });
+  const page = await ctx.newPage();
+  await page.goto(pageUrl('next'));
+  await waitReady(page, 'next');
+  await page.tap('.dock button[data-panel="board"]');
+  await page.waitForTimeout(200);
+  await page.waitForSelector(OPT_KBTN, { timeout: 10000 });
+  await page.tap(OPT_KBTN);
+  await page.tap('.kpop-opt button[data-opt="put"]');
+  await optReady(page);
+  await page.waitForTimeout(300);
+  const box = await page.locator(`${OPT_SEC} .opt-stack > .iv-wrap`).first().boundingBox();
+  if (!box) {
+    check(`${tag} 描画域`, false, '無い');
+    await ctx.close();
+    return;
+  }
+  const cdp = await ctx.newCDPSession(page);
+  const touch = (type, touchPoints) => cdp.send('Input.dispatchTouchEvent', { type, touchPoints });
+  const tapAt = async (pt) => {
+    await touch('touchStart', [{ ...pt, id: 0 }]);
+    await page.waitForTimeout(40);
+    await touch('touchEnd', []);
+    await page.waitForTimeout(400);
+  };
+  const a = { x: Math.round(box.x + box.width * 0.6), y: Math.round(box.y + box.height * 0.45) };
+  await tapAt(a);
+  const st1 = await optCrossState(page);
+  check(
+    `${tag} タップで置く: 値段の段に縦線・横線（指の高さ）、IV の段に縦線だけ`,
+    st1[0]?.v === 1 &&
+      st1[0].h === 1 &&
+      st1[1]?.v === 1 &&
+      st1[1].h === 0 &&
+      Math.abs(st1[0].hy - (a.y - st1[0].top)) <= 0.6,
+    JSON.stringify(st1.map(({ v, h, xTag }) => ({ v, h, xTag }))),
+  );
+  const cx = Math.round((st1[0]?.left ?? 0) + (st1[0]?.vx ?? 0));
+  const cy = Math.round((st1[0]?.top ?? 0) + (st1[0]?.hy ?? 0));
+  await touch('touchStart', [{ x: cx + 2, y: cy + 2, id: 0 }]);
+  for (let i = 1; i <= 6; i++) {
+    await touch('touchMove', [{ x: cx + 2 - i * 10, y: cy + 2 + i * 3, id: 0 }]);
+    await page.waitForTimeout(20);
+  }
+  await page.waitForTimeout(120);
+  await touch('touchEnd', []);
+  await page.waitForTimeout(150);
+  const st2 = await optCrossState(page);
+  check(
+    `${tag} 交点をつかんで左へ 60px 動かすと足が替わり（2 段とも同じ時刻）、離しても残る`,
+    st2[0]?.v === 1 &&
+      st2[0].xTag !== st1[0]?.xTag &&
+      st2[0].xTag === st2[1]?.xTag &&
+      Math.abs(st2[0].vx - (st1[0]?.vx ?? 0) + 60) <= 12,
+    `${st1[0]?.xTag} → ${st2[0]?.xTag}・x ${st1[0]?.vx} → ${st2[0]?.vx}`,
+  );
+  await tapAt({ x: a.x - 120, y: a.y - 20 });
+  const st3 = await optCrossState(page);
+  check(
+    `${tag} ほかの所のタップで消える（移らない）`,
+    st3.every((g) => g.v === 0 && g.h === 0),
+    JSON.stringify(st3.map((g) => g.v)),
+  );
+  if (shotsDir) await page.screenshot({ path: join(shotsDir, 'cross-opt-360x780-touch.png') });
+  await ctx.close();
+}
+
+/**
+ * --flows（AC 7）: 板の K のポップオーバー →「put の推移」→ 銘柄のチャート、Esc で閉じてフォーカスが K へ・見え方が戻る、
+ * 足の詳細 →「推移」（建値の線あり）→ 戻る（history.back）で閉じてフォーカスが [推移] へ。要求は開いたときだけ
+ * （起動 0、開いて 1、同じ銘柄をもう一度開いて +0、日足で +1、1 時間足に戻して +0、⟳ で +1、[最新] で +0）
+ */
+async function optFlows(vp) {
+  const tag = `#319 AC 7 ${vp.width}x${vp.height}`;
+  const isPc = vp.width >= 1200;
+  const ctx = await newContext(vp, { [WORKSPACE_KEY]: twoLegs });
+  const page = await ctx.newPage();
+  const reqs = [];
+  page.on('request', (r) => {
+    const u = new URL(r.url());
+    if (u.pathname.endsWith('/option_bars')) reqs.push(u.search);
+  });
+  await page.goto(pageUrl('next'));
+  await waitReady(page, 'next');
+  await page.waitForTimeout(1200);
+  check(`${tag} 起動して 1.2 秒: option_bars への要求 0 回`, reqs.length === 0, `${reqs.length}`);
+  const shell0 = await pickState(page);
+  // スマホは板を開いてから（隠れた板は描かない = 行が無い）
+  if (!isPc) await setShell(page, 'board', 'full');
+  const k = await page
+    .getAttribute(
+      'section.board .board-month:not(.inactive) .board-wrap:not(.side-hidden) tr.atm',
+      'data-k',
+    )
+    .catch(() => null);
+  const opened = await openOptFromBoard(page, vp.width);
+  const shellBoard = isPc ? shell0 : { ...shell0, panel: 'board', sheet: 'full' };
+  const st1 = await optState(page);
+  check(
+    `${tag} K のポップオーバー →「put の推移」で銘柄のチャート（1 回・put・1h・その K）・ポップオーバーは閉じる`,
+    opened &&
+      st1.market === 'opt' &&
+      reqs.length === 1 &&
+      reqs[0].includes('type=put') &&
+      reqs[0].includes('tf=1h') &&
+      reqs[0].includes(`k=${k}`) &&
+      (await page.locator('.kpop').count()) === 0 &&
+      st1.entry === 0,
+    `要求 ${reqs.join(' ')}・${st1.name}・建値 ${st1.entry}`,
+  );
+  if (shotsDir) await page.screenshot({ path: join(shotsDir, `flows-opt-${vp.width}.png`) });
+  await page.click(`${OPT_SEC} .opt-stack > .iv-wrap`, { position: { x: 60, y: 30 } });
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(400);
+  const back1 = await pickState(page);
+  const focus1 = await page.evaluate(() => ({
+    k: document.activeElement?.closest('tr')?.getAttribute('data-k') ?? null,
+    kbtn: document.activeElement?.classList.contains('kbtn') ?? false,
+  }));
+  check(
+    `${tag} Esc で閉じて開く前の見え方に戻り、フォーカスは K のボタン`,
+    back1.market === shellBoard.market &&
+      back1.panel === shellBoard.panel &&
+      back1.sheet === shellBoard.sheet &&
+      focus1.kbtn &&
+      focus1.k === k,
+    `${JSON.stringify({ m: back1.market, p: back1.panel, s: back1.sheet })}・フォーカス ${JSON.stringify(focus1)}`,
+  );
+  await openOptFromBoard(page, vp.width);
+  check(
+    `${tag} 同じ銘柄をもう一度開いても読まない（1 回のまま）`,
+    reqs.length === 1,
+    `${reqs.length}`,
+  );
+  await page.click(`${OPT_SEC} .iv-tools button[aria-label="日足"]`);
+  await optReady(page);
+  await page.click(`${OPT_SEC} .iv-tools button[aria-label="1 時間足"]`);
+  await optReady(page);
+  await page.waitForTimeout(200);
+  check(
+    `${tag} 日足で +1（tf=1d）、1 時間足に戻して +0`,
+    reqs.length === 2 && reqs[1].includes('tf=1d'),
+    reqs.join(' '),
+  );
+  await page.click(`${OPT_SEC} .iv-refresh`);
+  await optReady(page);
+  check(`${tag} ⟳ で +1`, reqs.length === 3, `${reqs.length}`);
+  // 市場の Seg（どれも選ばれていない）を押すと推移を閉じてその見え方へ
+  const segSel = isPc
+    ? 'section.market:visible .panel-head .seg button:text-is("スマイル")'
+    : `${OPT_SEC} .panel-head .seg button:text-is("スマイル")`;
+  await page.click(segSel);
+  await page.waitForTimeout(300);
+  const toSmile = await pickState(page);
+  check(
+    `${tag} 見出しの Seg の [スマイル] で推移を閉じてスマイル`,
+    toSmile.market === 'smile' || !isPc,
+    `${toSmile.market}`,
+  );
+
+  // 足の詳細 → [推移]（建値の線あり）→ 戻るで閉じてフォーカスが [推移] へ
+  if (!isPc) await setShell(page, 'positions', 'full');
+  await page.click('section.positions li.leg:first-child .leg-main');
+  await page.waitForTimeout(200);
+  const optBtn = 'section.positions li.leg:first-child .leg-detail [data-op="opt-chart"]';
+  const hasBtn = (await page.locator(optBtn).count()) === 1;
+  const before = reqs.length;
+  if (hasBtn) await page.click(optBtn);
+  await optReady(page);
+  await page.waitForTimeout(200);
+  const st2 = await optState(page);
+  check(
+    `${tag} 足の詳細の [推移] で銘柄のチャート・建値の線 1 本（足の建値）`,
+    hasBtn && st2.market === 'opt' && st2.entry === 1 && reqs.length === before + 1,
+    `ボタン ${hasBtn}・建値 ${st2.entry}・要求 ${reqs.slice(before).join(' ')}`,
+  );
+  await page.evaluate(() => history.back());
+  await page.waitForTimeout(500);
+  const back2 = await pickState(page);
+  const focus2 = await page.evaluate(
+    () => document.activeElement?.getAttribute('data-op') ?? document.activeElement?.tagName,
+  );
+  check(
+    `${tag} 戻る（history.back）で閉じてフォーカスは [推移]`,
+    back2.market !== 'opt' && focus2 === 'opt-chart',
+    `market ${back2.market}・フォーカス ${focus2}`,
+  );
+  // トップバーの [最新] では読まない（推移を開いたまま）
+  if (hasBtn) await page.click(optBtn);
+  await optReady(page);
+  const n0 = reqs.length;
+  await page.click(LATEST_BTN).catch(() => {});
+  await page.waitForTimeout(1200);
+  check(
+    `${tag} トップバーの [最新] では読み直さない`,
+    reqs.length === n0,
+    `${n0} → ${reqs.length}`,
+  );
+  await ctx.close();
+}
+
 // 開く URL（#91: 既定はクエリなし。--parts は ?parts）
 console.log(`URL: ${pageUrl(mode)}`);
 try {
@@ -17698,6 +18132,8 @@ try {
       console.log(
         `十字線（スマイル・追証マップ・面）の検査（#217）: ${cross217Stats.pass} / ${cross217Stats.total} 状態で pass`,
       );
+      // 銘柄の推移の 2 段の十字線（#319 AC 6）
+      await optCrossAll();
     }
   } else if (iconsOnly && !parts && !flows) {
     await iconSweep();

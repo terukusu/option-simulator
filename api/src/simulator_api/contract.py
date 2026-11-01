@@ -118,6 +118,30 @@ RELATIONS = {
                  ("contract_month", "DATE")),
         required=frozenset({"created_at", "contract_month"}),
     ),
+    # 銘柄の推移（/api/option_bars、#319）。optionchan が全銘柄を 1 時間足に束ねた表（optionchan のリポジトリの #161）。
+    # 表（テーブル関数は無い）。パーティション = last_trading_day の月（requirePartitionFilter: true）、クラスタ =
+    # target_price, type, started_at。sql/option_bars.sql の last_trading_day・target_price・type の等号と started_at の
+    # 半開区間の絞りは tests/test_option_bars.py の静的検査で守る（4.1）。trade_open/high/low・volume・positions・
+    # snapshots は第 1 弾では読まない
+    "option_bars": Relation(
+        name="option_price_hourly",
+        schema_file="tokyo/option_price_hourly.json",
+        columns=(
+            ("started_at", "TIMESTAMP"),
+            ("mid_open", "FLOAT"),
+            ("mid_high", "FLOAT"),
+            ("mid_low", "FLOAT"),
+            ("mid_close", "FLOAT"),
+            ("bid_close", "INTEGER"),
+            ("ask_close", "INTEGER"),
+            ("bid_iv_close", "FLOAT"),
+            ("ask_iv_close", "FLOAT"),
+            ("trade_close", "INTEGER"),
+            ("iv_close", "FLOAT"),
+            ("last_at", "TIMESTAMP"),
+        ),
+        required=frozenset({"started_at"}),
+    ),
 }
 
 # 集計して返すクエリの結果の列（名前 → (列, 型)。dry run の job.schema と比べる）。無いクエリは RELATIONS の columns

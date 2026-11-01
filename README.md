@@ -185,7 +185,7 @@ IV 推移は ATM IV（30 日固定）、先物推移は日経225 先物（ラー
 毎分取り込んだ板（BigQuery）
         │  読むだけ（書き込まない）
         ▼
-api/（Python 3.13・Flask）  /api/chain・/api/calendar・/api/atm_iv・/api/atm_daily・/api/future_bars
+api/（Python 3.13・Flask）  /api/chain・/api/calendar・/api/atm_iv・/api/atm_daily・/api/future_bars・/api/option_bars
         │  JSON              /api/ai/status・/api/ai/messages（SSE）──中継──▶ Anthropic Claude（AI を有効にしたときだけ）
         ▼
 ブラウザ（TypeScript + Preact）  model/ の純関数で Black-76・IV・F・スマイル・満期損益・シナリオ・グリーク・証拠金

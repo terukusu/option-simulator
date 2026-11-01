@@ -98,7 +98,8 @@ export function imeComposing(s: Pick<KeySummary, 'key' | 'isComposing' | 'keyCod
 /**
  * 板から追加の帯（#325）を Esc で消すか: 戻るのスタックの一番上が帯の層のときだけ（上に吹き出し・説明カード・
  * ダイアログが重なっていればそれが先に閉じる）。IME の変換中・入力欄の Esc（編集の取りやめ。capture で受けるので
- * 部品より先に来る）・部品が処理した Esc（preventDefault・claimEscape の印 = タブのつかみの取りやめなど）では消さない
+ * 部品より先に来る）・部品が処理した Esc（preventDefault・claimEscape の印 = タブのつかみの取りやめなど）では消さない。
+ * 銘柄の推移（#319）も同じ規則（layer = OPT_CHART_LAYER）
  */
 export function pickEscape(
   s: Pick<KeySummary, 'key' | 'isComposing' | 'keyCode' | 'defaultPrevented' | 'editable'> & {
@@ -106,9 +107,10 @@ export function pickEscape(
     claimed: boolean;
   },
   top: string | null,
+  layer: string = BOARD_PICK_LAYER,
 ): boolean {
   if (imeComposing(s) || s.defaultPrevented || s.claimed || s.editable) return false;
-  return s.key === 'Escape' && top === BOARD_PICK_LAYER;
+  return s.key === 'Escape' && top === layer;
 }
 
 /**

@@ -7,6 +7,8 @@
   だけ。atm_daily.py。#152）。パラメータは読まない
 - GET /api/future_bars?tf=<1m|1h|1d>[&start=&end=]: 先物推移（future_price_latest の現在値の足と限月。future_bars.py。
   要求・Cache-Control は /api/atm_iv と同じ。#190）
+- GET /api/option_bars?ltd=<YYYY-MM-DD>&k=<整数>&type=<call|put>&tf=<1h|1d>: 銘柄の推移（表 option_price_hourly の
+  1 時間足と日足。option_bars.py。#319）。4 つとも必須
 - POST /api/ai/messages: AI の中継（SSE。許可リスト・費用の 1 日上限・同じオリジン。ai/relay.py。#134）
 - GET /api/ai/status: AI が使えるか・1 日の上限と残り（ai/relay.py。#134）
 - POST /api/ai/read_positions: 建玉の一覧の画像 1 枚を読み取る（JSON。ai/relay.py・ai/read_positions.py。#318）
@@ -22,7 +24,7 @@ from datetime import UTC, datetime
 
 from flask import Flask, Response, request, send_from_directory
 
-from . import atm_iv, sources
+from . import atm_iv, option_bars, sources
 from . import settings as st
 from .ai import budget as ai_budget
 from .ai import gateway as ai_gw
@@ -177,6 +179,19 @@ def create_app(runner=None, clock=None, monotonic=None, cfg: st.Settings | None 
             return _error(400, "bad_request")
         max_age = st.ATM_IV_SETTLED_MAX_AGE_SECONDS if atm_iv.is_settled(req, now) else st.ATM_IV_MAX_AGE_SECONDS
         return serve("future_bars", lambda: service.future_bars(req), f"private, max-age={max_age}")
+
+    @app.get("/api/option_bars")
+    def api_option_bars():
+        now = clock()
+        try:
+            req = option_bars.parse_request(request.args)
+        except atm_iv.BadRequest as e:
+            # 入力値は応答・ログに出さない（反射しない）。どのパラメータかだけ
+            log("INFO", "bad_request", endpoint="option_bars", param=e.param)
+            return _error(400, "bad_request")
+        max_age = (st.OPTION_BARS_SETTLED_MAX_AGE_SECONDS if option_bars.is_settled(req, now)
+                   else st.OPTION_BARS_MAX_AGE_SECONDS)
+        return serve("option_bars", lambda: service.option_bars(req), f"private, max-age={max_age}")
 
     @app.get("/api/atm_daily")
     def api_atm_daily():

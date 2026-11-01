@@ -4,6 +4,7 @@ import { type LegPatch, type Parsed, parseEntry, parseIvPct, parseQty } from '..
 import { fmtNum } from '../../view/format';
 import { HINT_TERMS } from '../../view/glossary';
 import { PANEL_FOCUS_LABEL } from '../../view/keys';
+import { type OptTarget, optLtdOf, optOpenLabel, optTargetOfLeg } from '../../view/optHistory';
 import { type PositionRow, SIDE_LABEL, toggledSide } from '../../view/position';
 import {
   type DetailItem,
@@ -64,6 +65,8 @@ interface Props {
   onRebase: () => void;
   /** 形から組む（#20。形の一覧のダイアログは NextApp = パレットの「形: …」と同じ） */
   onShapes: () => void;
+  /** 銘柄の推移を開く（#319。足の詳細の [推移]。from = 閉じたときにフォーカスを戻すボタン） */
+  onOptChart?: (target: OptTarget, from: HTMLElement | null) => void;
 }
 
 const fmtQty = (v: number) => fmtNum(v);
@@ -265,6 +268,13 @@ export function Positions(p: Props) {
               const row = model?.rows[i];
               if (!row) return null;
               const isOpen = open.has(r.id);
+              // 推移（#319）はラージの OP の足で、取引最終日が求められるときだけ
+              const opt =
+                isOpen && p.onOptChart
+                  ? optTargetOfLeg(row, (m) =>
+                      optLtdOf(m, state.chain?.months ?? [], state.calendar.holidays),
+                    )
+                  : null;
               return (
                 <LegItem
                   key={r.id}
@@ -283,6 +293,8 @@ export function Positions(p: Props) {
                         )
                       : null
                   }
+                  opt={opt}
+                  onOpt={p.onOptChart ?? null}
                   onToggle={() => onToggle(r.id)}
                   onQty={(qty) => dispatch({ type: 'editLeg', id: r.id, patch: { qty } })}
                   onEdit={(patch) => dispatch({ type: 'editLeg', id: r.id, patch })}
@@ -322,6 +334,9 @@ function LegItem(p: {
   open: boolean;
   selected: boolean;
   detail: LegDetailView | null;
+  /** 推移で開く銘柄（#319。出さない足は null） */
+  opt: OptTarget | null;
+  onOpt: ((target: OptTarget, from: HTMLElement | null) => void) | null;
   onToggle: () => void;
   onQty: (qty: number) => void;
   onEdit: (patch: LegPatch) => void;
@@ -395,7 +410,15 @@ function LegItem(p: {
           </button>
         </span>
       </div>
-      {p.detail && <LegDetail id={detailId} name={v.name} detail={p.detail} onEdit={p.onEdit} />}
+      {p.detail && (
+        <LegDetail
+          id={detailId}
+          name={v.name}
+          detail={p.detail}
+          onEdit={p.onEdit}
+          opt={p.opt && p.onOpt ? { target: p.opt, open: p.onOpt } : null}
+        />
+      )}
     </li>
   );
 }
@@ -414,6 +437,8 @@ function LegDetail(p: {
   name: string;
   detail: LegDetailView;
   onEdit: (patch: LegPatch) => void;
+  /** 銘柄の推移（#319。ラージの OP の足だけ） */
+  opt: { target: OptTarget; open: (target: OptTarget, from: HTMLElement | null) => void } | null;
 }) {
   const { detail: d, name } = p;
   const field = (it: DetailItem) => {
@@ -470,6 +495,20 @@ function LegDetail(p: {
       <GreekRow line={d.greeks} />
       <GreekRow line={d.scenario} />
       <div class="kvs">{d.items.map(kv)}</div>
+      {p.opt && (
+        <p class="leg-opt">
+          <button
+            type="button"
+            class="btn sm"
+            data-op="opt-chart"
+            aria-label={optOpenLabel(p.opt.target.month, p.opt.target.k, p.opt.target.type)}
+            onClick={(e) => p.opt?.open(p.opt.target, e.currentTarget)}
+          >
+            <Icon name="chart" />
+            推移
+          </button>
+        </p>
+      )}
       {d.marks.length > 0 && (
         <div class="flags">
           {d.marks.map((m) => (

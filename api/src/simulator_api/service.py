@@ -22,6 +22,9 @@ runner: (name, params) -> 行（dict）のリスト。name は sql/<name>.sql、
   期限付きの LRU（24 時間、ATM_DAILY_CACHE_SIZE 件）+ single-flight。範囲の終わりが変わる（JST 8:00）と読み直す
 - /api/future_bars（#190）: FutureBarsService。AtmIvService と同じ形（キー = (tf, start, end)、確定した範囲 24 時間・
   それ以外 300 秒、ATM_IV_CACHE_SIZE 件 + single-flight）。限月を求めるのでどの足もカレンダーを使う
+- /api/option_bars（#319）: OptionBarsService。行のキャッシュ（キー = (ltd, k, type)。1h と 1d は同じ行から作る =
+  1 銘柄 1 クエリ）と応答のキャッシュ（キー = (ltd, k, type, tf)）。どちらも期限付きの LRU（確定した銘柄 24 時間・
+  それ以外 300 秒、OPTION_BARS_CACHE_SIZE 件）+ single-flight。範囲の外の限月はクエリを出さない。日足だけカレンダー
 """
 
 import concurrent.futures
@@ -33,7 +36,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from . import atm_daily, atm_iv, chain, future_bars, quotes, usable
+from . import atm_daily, atm_iv, chain, future_bars, option_bars, quotes, usable
 from . import calendar as cal_mod
 from . import settings as st
 from .atm_iv import AtmIvRequest
@@ -120,6 +123,7 @@ class ChainService:
         self._atm_iv = AtmIvService(runner, clock, monotonic, calendar=self._calendar_value)
         self._atm_daily = AtmDailyService(runner, clock, monotonic)
         self._future_bars = FutureBarsService(runner, clock, monotonic, calendar=self._calendar_value)
+        self._option_bars = OptionBarsService(runner, clock, monotonic, calendar=self._calendar_value)
 
     def _query(self, budget: _Budget, name: str, params: dict) -> list[dict]:
         budget.check()
@@ -209,6 +213,9 @@ class ChainService:
 
     def future_bars(self, req: AtmIvRequest) -> Payload:
         return self._future_bars.get(req)
+
+    def option_bars(self, req: option_bars.OptionBarsRequest) -> Payload:
+        return self._option_bars.get(req)
 
 
 class AtmIvService:
@@ -348,6 +355,64 @@ class _FutureBarsPayload(Payload):
     mismatch: int = 0
 
 
+class OptionBarsService:
+    """/api/option_bars の中身。calendar: (budget) -> Calendar（日足の取引日。ChainService._calendar_value）"""
+
+    def __init__(self, runner, clock, monotonic=time.monotonic, calendar=None):
+        self.runner = runner
+        self.clock = clock
+        self.monotonic = monotonic
+        self._calendar = calendar
+        self._rows = ExpiringLRUCache(st.OPTION_BARS_CACHE_SIZE, monotonic)
+        self._payloads = ExpiringLRUCache(st.OPTION_BARS_CACHE_SIZE, monotonic)
+
+    def _hourly(self, req: option_bars.OptionBarsRequest, budget: _Budget, ttl: float, loaded: list):
+        """(1 時間足, last_at)。範囲の外の限月はクエリを出さない"""
+
+        def load():
+            loaded.append(1)
+            start_at, end_at = option_bars.read_window(req)
+            budget.check()
+            rows = self.runner("option_bars", {"ltd": req.ltd, "k": req.k, "type": req.type,
+                                               "start_at": start_at, "end_at": end_at})
+            bars, last_at, duplicates = option_bars.rows_to_hourly(rows)
+            if duplicates:
+                log("WARNING", "option_bars_duplicate", count=duplicates)
+            return bars, last_at
+
+        return self._rows.get(req.key, load, ttl)
+
+    def _load(self, req: option_bars.OptionBarsRequest, now: datetime, budget: _Budget, ttl: float,
+              loaded: list) -> Payload:
+        if option_bars.in_range(req, now):
+            bars, last_at = self._hourly(req, budget, ttl, loaded)
+        else:
+            bars, last_at = [], None
+        if req.tf == "1d" and bars:
+            if self._calendar is None:
+                raise Unavailable("calendar")
+            bars = option_bars.daily_bars(bars, atm_iv.non_trading_days(self._calendar(budget)))
+        body, gz = _encode(option_bars.option_bars_json(req, bars, last_at))
+        return _OptionBarsPayload(body, gz, None, bars=len(bars))
+
+    def get(self, req: option_bars.OptionBarsRequest) -> Payload:
+        started = self.monotonic()
+        budget = _Budget(self.monotonic)
+        now = self.clock()
+        loaded: list = []
+        ttl = st.OPTION_BARS_SETTLED_TTL_SECONDS if option_bars.is_settled(req, now) else st.OPTION_BARS_TTL_SECONDS
+        payload = self._payloads.get((*req.key, req.tf), lambda: self._load(req, now, budget, ttl, loaded), ttl)
+        # 銘柄（ltd・k・type）は利用者の検討内容なのでログに出さない
+        log("INFO", "option_bars_served", tf=req.tf, bars=payload.bars, cache="miss" if loaded else "hit",
+            elapsed_ms=round((self.monotonic() - started) * 1000))
+        return payload
+
+
+@dataclass(frozen=True)
+class _OptionBarsPayload(Payload):
+    bars: int = 0
+
+
 class FileChainService:
     """DATA_SOURCE=file: GCP なしで動かす（clone した人・コンテナの起動確認）。CHAIN_FILE の JSON をそのまま返す。
     検査は schema_version == 1 だけ（中身の検証はブラウザの parseChainJson）。カレンダーは無い（503）"""
@@ -377,11 +442,14 @@ class FileChainService:
     def future_bars(self, req) -> Payload:
         raise Unavailable("file_source")
 
+    def option_bars(self, req) -> Payload:
+        raise Unavailable("file_source")
+
 
 class QuotesFileService:
     """DATA_SOURCE=quotes: 利用者が自分の API から書き出した中立の気配の一覧（QUOTES_FILE）と取引カレンダー
     （CALENDAR_FILE。/api/calendar と同じ形）から板を組み立てる（quotes.py。#154）。要求ごとに読む（file と同じ）。
-    検証の失敗は 503（ログは JSON の位置だけ。値は出さない）。IV 推移・日次の値・先物推移は無い（503）"""
+    検証の失敗は 503（ログは JSON の位置だけ。値は出さない）。IV 推移・日次の値・先物推移・銘柄の推移は無い（503）"""
 
     def __init__(self, quotes_file: Path, calendar_file: Path, clock):
         self.quotes_file = quotes_file
@@ -436,4 +504,7 @@ class QuotesFileService:
         raise Unavailable("quotes_source")
 
     def future_bars(self, req) -> Payload:
+        raise Unavailable("quotes_source")
+
+    def option_bars(self, req) -> Payload:
         raise Unavailable("quotes_source")

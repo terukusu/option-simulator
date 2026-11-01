@@ -82,6 +82,20 @@ export function focusIfLost(sel: string): void {
   requestAnimationFrame(tick);
 }
 
+/**
+ * 次のフレームから、その要素が描かれていれば focus（#319 銘柄の推移を閉じたら開いたボタンへ。閉じて見え方を戻した
+ * 描き直しの後）。要素が無い・外れた・見えないまま FOCUS_FRAMES を過ぎたら何もしない
+ */
+export function focusElementLater(el: HTMLElement | null): void {
+  if (el === null) return;
+  let n = 0;
+  const tick = () => {
+    if (el.isConnected && el.getClientRects().length > 0) el.focus({ preventScroll: false });
+    else if (el.isConnected && ++n < FOCUS_FRAMES) requestAnimationFrame(tick);
+  };
+  requestAnimationFrame(tick);
+}
+
 /** そのパネルの行き先へ次のフレームから focus（#136 の [AI に聞く] の後に AI のパネルへ。キー 1〜6 と同じ行き先） */
 export function focusPanelLater(panel: PanelId): void {
   focusLater(PANEL_FOCUS[panel]);

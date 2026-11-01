@@ -15,6 +15,7 @@ import { useAtmMoves } from '../components/useAtmMoves';
 import { useHoldMap } from '../components/useHoldMap';
 import { useFutureBars, useIvHistory } from '../components/useIvHistory';
 import { useMediaQuery } from '../components/useMediaQuery';
+import { useOptionBars } from '../components/useOptionBars';
 import { useReplay } from '../components/useReplay';
 import { API_LABEL, loaderNote } from '../load';
 import { MAX_PINS, pinAddError } from '../pins';
@@ -34,7 +35,7 @@ import {
   proposalApply,
   proposeApplyTarget,
 } from '../view/aiPropose';
-import { BOARD_PICK_LAYER } from '../view/backStack';
+import { BOARD_PICK_LAYER, OPT_CHART_LAYER } from '../view/backStack';
 import { marketAddPlan, marketAddToast } from '../view/boardPanel';
 import { closedTabText, restoreTabError, type ShareResult, shareResultView } from '../view/boxTabs';
 import { fmtNum } from '../view/format';
@@ -54,6 +55,7 @@ import {
   noticeRoute,
   warnTagsModel,
 } from '../view/notices';
+import { type OptTarget, optKey } from '../view/optHistory';
 import { type PaletteRun, paletteAtmK, paletteItems } from '../view/palette';
 import { shareReplaceConfirmText } from '../view/persistNote';
 import { importEntryBlocked } from '../view/positionImport';
@@ -71,6 +73,7 @@ import {
   layoutTier,
   leftView,
   metricsVisible,
+  optVisible,
   replayActive,
   type ShellAction,
   shellReduce,
@@ -80,9 +83,10 @@ import { overwrittenText, restoreEntryFailText } from '../view/topMenu';
 import { BookDialog } from './BookDialog';
 import { initBackHistory, topLayerId, useBackLayer } from './backStack';
 import { HoldingsDialog } from './HoldingsDialog';
-import type { MarketAdd } from './market/BoardMonth';
+import type { MarketAdd, OpenOptChart } from './market/BoardMonth';
 import { FutHistory } from './market/FutHistory';
 import { IvHistory } from './market/IvHistory';
+import { OptHistory } from './market/OptHistory';
 import { PanelHead } from './PanelHead';
 import { useAiAskHandler } from './parts/aiAsk';
 import { claimEscape, closeOverlay, escapeClaimed } from './parts/overlay';
@@ -112,7 +116,13 @@ import { Shell } from './Shell';
 import { TopBar } from './TopBar';
 import { ShareConfirm } from './top/ShareConfirm';
 import { ShareUrlDialog } from './top/ShareUrlDialog';
-import { focusPanelLater, type GlobalKeysCtx, runGlobalKey, useGlobalKeys } from './useGlobalKeys';
+import {
+  focusElementLater,
+  focusPanelLater,
+  type GlobalKeysCtx,
+  runGlobalKey,
+  useGlobalKeys,
+} from './useGlobalKeys';
 import { usePrefs } from './usePrefs';
 import { useTheme } from './useTheme';
 
@@ -171,6 +181,12 @@ export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
       ? '/fixtures/future_bars'
       : '/api/future_bars';
   const fut = useFutureBars(futVisible(shell, tier), futEndpoint);
+  // 銘柄の推移（#319）: 開いた銘柄 × 足ごとに見えたら 1 回だけ読む（dev の合成の板・ファイルは dev だけ /fixtures/option_bars）
+  const optEndpoint =
+    import.meta.env.DEV && state.sourceLabel !== API_LABEL
+      ? '/fixtures/option_bars'
+      : '/api/option_bars';
+  const optCtl = useOptionBars(shell.opt ?? null, optVisible(shell, tier), optEndpoint);
   // 先物推移の指標の段（#200。既定はすべて隠す。保存しない = ローソク / 線と同じ）
   const [indKinds, setIndKinds] = useState<readonly IndKind[]>(NO_IND_KINDS);
   const onIndToggle = useCallback((k: IndKind) => setIndKinds((s) => toggleInd(s, k)), []);
@@ -366,6 +382,60 @@ export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
     document.addEventListener('keydown', onKey, true);
     return () => document.removeEventListener('keydown', onKey, true);
   }, [picking, pickBack]);
+  // 銘柄の推移（#319）: 開く = 板の K のポップオーバー・足の詳細の [推移]。閉じる（× / Esc / 戻る）と開く前の見え方に
+  // 戻し、フォーカスを開いたボタンへ戻す（ボタンが無くなっていればそのパネルの枠）
+  const optFrom = useRef<HTMLElement | null>(null);
+  const onOptOpen = useCallback(
+    (target: OptTarget, from: HTMLElement | null) => {
+      optFrom.current = from;
+      send({ type: 'opt', target, tier });
+      focusPanelLater('smile');
+    },
+    [tier],
+  );
+  const onBoardOpt = useCallback<OpenOptChart>(
+    (month, ltd, k, type, from) => onOptOpen({ month, ltd, k, type }, from),
+    [onOptOpen],
+  );
+  const optClose = useCallback(() => {
+    send({ type: 'optClose' });
+    const from = optFrom.current;
+    optFrom.current = null;
+    focusElementLater(from);
+  }, []);
+  const optOpen = shell.opt !== undefined;
+  // Seg・ドック・AI の列などで外れた（optClose を通らない = 押した先を優先してフォーカスは動かさない）ときも控えを捨てる
+  useEffect(() => {
+    if (!optOpen) optFrom.current = null;
+  }, [optOpen]);
+  useBackLayer(OPT_CHART_LAYER, optOpen, optClose);
+  useEffect(() => {
+    if (!optOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      const t = e.target instanceof Element ? e.target : null;
+      const summary = {
+        key: e.key,
+        isComposing: e.isComposing,
+        keyCode: e.keyCode,
+        defaultPrevented: e.defaultPrevented,
+        editable: editableTarget(
+          t === null
+            ? null
+            : {
+                tagName: t.tagName,
+                isContentEditable: t instanceof HTMLElement && t.isContentEditable,
+              },
+        ),
+        claimed: escapeClaimed(e),
+      };
+      if (!pickEscape(summary, topLayerId(), OPT_CHART_LAYER)) return;
+      claimEscape(e);
+      e.preventDefault();
+      optClose();
+    };
+    document.addEventListener('keydown', onKey, true);
+    return () => document.removeEventListener('keydown', onKey, true);
+  }, [optOpen, optClose]);
   // PC は帯を出さない（幅が PC に変わったら帯だけ消す。層も閉じる）
   useEffect(() => {
     if (tier === 'pc' && picking) send({ type: 'pickEnd' });
@@ -1009,6 +1079,7 @@ export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
             onClear={onClearLegs}
             onRebase={onRebaseLegs}
             onShapes={onShapes}
+            onOptChart={onOptOpen}
           />
         }
         metrics={
@@ -1033,6 +1104,7 @@ export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
               dispatch={dispatch}
               onAdd={onBoardAdd}
               pickBand={picking && tier !== 'pc'}
+              onOptChart={onBoardOpt}
               marketSeg={seg}
               atmJump={atmJump}
               atmJumpDone={atmJumpDone}
@@ -1042,7 +1114,16 @@ export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
           )
         }
         smile={(seg) =>
-          smileView(shell, tier) === 'fut' ? (
+          smileView(shell, tier) === 'opt' && shell.opt ? (
+            <OptHistory
+              key={optKey(shell.opt, '1h')}
+              target={shell.opt}
+              ctl={optCtl}
+              nonTradingDays={nonTradingDays}
+              seg={seg}
+              onClose={optClose}
+            />
+          ) : smileView(shell, tier) === 'fut' ? (
             <FutHistory
               load={fut.load}
               view={fut.view}

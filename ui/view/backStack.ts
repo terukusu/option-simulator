@@ -18,6 +18,11 @@
  */
 export const BOARD_PICK_LAYER = 'boardPick';
 
+/**
+ * 銘柄の推移の層（#319。ShellState.opt の間。戻る / Esc で閉じて開く前の見え方に戻し、フォーカスは開いたボタンへ）
+ */
+export const OPT_CHART_LAYER = 'optChart';
+
 export interface BackLayer {
   readonly id: string;
   /** 履歴に 1 段積む層か（利用者の操作の中で開いた・pushState に失敗していない） */

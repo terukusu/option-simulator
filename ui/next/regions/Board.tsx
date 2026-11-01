@@ -20,7 +20,7 @@ import {
 } from '../../view/boardPanel';
 import type { HeaderMonthView } from '../../view/header';
 import { PICK_BAND_TEXT } from '../../view/positionsRegion';
-import { BoardMonth, type Flash, type MarketAdd } from '../market/BoardMonth';
+import { BoardMonth, type Flash, type MarketAdd, type OpenOptChart } from '../market/BoardMonth';
 import { MonthSeg } from '../market/MonthSeg';
 import { PanelHead } from '../PanelHead';
 import { Chip, ChipRow } from '../parts/Chip';
@@ -64,6 +64,8 @@ export interface BoardRegionProps {
   legs: readonly UiLeg[];
   dispatch: (a: Action) => void;
   onAdd: MarketAdd;
+  /** 銘柄の推移を開く（#319。K のポップオーバーの [call の推移] [put の推移]。無ければ出さない） */
+  onOptChart?: OpenOptChart;
   /** 板から追加の帯を出す（#325。スマホ・タブレットで始めた間だけ。案内だけ） */
   pickBand: boolean;
   /** PC の見出しの市場の Seg（Shell が作る。他の段階は null） */
@@ -377,6 +379,7 @@ function BoardView(p: BoardRegionProps) {
                   flash={active ? flash.n : 0}
                   badges={badgesByMonth.get(m.id)}
                   onAdd={onAdd}
+                  {...(p.onOptChart ? { onOptChart: p.onOptChart } : {})}
                 />
               );
             })}

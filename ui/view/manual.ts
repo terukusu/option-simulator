@@ -542,11 +542,12 @@ export type HintPlace =
   | 'smile'
   | 'ivHistory'
   | 'futHistory'
+  | 'optHistory'
   | 'book'
   | 'holdings';
 
 /**
- * ⓘ の吹き出しの末尾の「マニュアル:」の節（12 か所。場所 → 節の表はここ 1 か所）。title は番号を含まない見出し
+ * ⓘ の吹き出しの末尾の「マニュアル:」の節（13 か所。場所 → 節の表はここ 1 か所）。title は番号を含まない見出し
  * （節を足すと番号がずれるので持たない。ボタンの文字）。アンカーと見出しは tests/ui/manual.test.ts が索引と突き合わせる
  */
 export const HINT_GUIDE: Readonly<Record<HintPlace, { anchor: string; title: string }>> = {
@@ -560,6 +561,7 @@ export const HINT_GUIDE: Readonly<Record<HintPlace, { anchor: string; title: str
   smile: { anchor: '点と線', title: '点と線' },
   ivHistory: { anchor: 'iv-推移atm-iv-の-30-日固定', title: 'IV 推移（ATM IV の 30 日固定）' },
   futHistory: { anchor: '先物推移日経225-先物', title: '先物推移（日経225 先物）' },
+  optHistory: { anchor: '銘柄の推移op-の-1-銘柄', title: '銘柄の推移（OP の 1 銘柄）' },
   book: { anchor: '保存一覧名前を付けて保存', title: '保存一覧（名前を付けて保存）' },
   holdings: { anchor: '保有ポジションの一覧', title: '保有ポジションの一覧' },
 };

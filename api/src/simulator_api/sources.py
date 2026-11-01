@@ -1,6 +1,6 @@
 """供給元のアダプタ（docs/data-sources.md「API の供給元のアダプタ」・docs/adr-0003-data-source-abstraction.md。#154）。
 
-画面が読む /api/chain・/api/calendar・/api/atm_iv・/api/atm_daily・/api/future_bars の中身を返すものを
+画面が読む /api/chain・/api/calendar・/api/atm_iv・/api/atm_daily・/api/future_bars・/api/option_bars の中身を返すものを
 「供給元」（DataSource）とし、環境変数 DATA_SOURCE の値 → 実装の対応をこのファイルの BUILDERS 1 か所に置く。
 app.py はここで作った供給元を呼ぶだけ。
 
@@ -17,7 +17,7 @@ import time
 from collections.abc import Callable
 from typing import Protocol
 
-from . import atm_iv, bq
+from . import atm_iv, bq, option_bars
 from . import settings as st
 from .atm_iv import AtmIvRequest
 from .service import ChainResult, ChainService, FileChainService, Payload, QuotesFileService
@@ -44,6 +44,10 @@ class DataSource(Protocol):
 
     def future_bars(self, req: AtmIvRequest) -> Payload:
         """/api/future_bars（先物推移。#190）"""
+        ...
+
+    def option_bars(self, req: option_bars.OptionBarsRequest) -> Payload:
+        """/api/option_bars（銘柄の推移。#319）"""
         ...
 
 
