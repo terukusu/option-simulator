@@ -292,7 +292,7 @@
   line-height: 16px;
 }
 
-/* ===== メニュー / ポップオーバー（ボタンの親に対する絶対配置。左右は .start / .end） ===== */
+/* ===== メニュー / ポップオーバー（ボタンの親に対する絶対配置。左右は .start / .end、ポップオーバーは窓の中央の .fit も。#344） ===== */
 .menu-wrap,
 .pop-wrap {
   position: relative;
@@ -384,6 +384,27 @@
 .popover.above {
   top: auto;
   bottom: calc(100% + var(--sp-1));
+}
+
+/*
+ * 左右どちらに揃えても窓に入らないとき（#344。Popover.tsx の popAlign = fit）: 窓の左右 8px の内側で中央（固定の位置）。
+ * 縦は .pop-wrap（flex）の中の静的な位置（align-self で下端 / 上端をボタンに揃える）から自分の高さ + すき間だけずらす。
+ * .above の後に置いて top / bottom を戻す（固定だと bottom が窓の下端基準になる）
+ */
+.popover.fit {
+  position: fixed;
+  top: auto;
+  right: var(--sp-2);
+  bottom: auto;
+  left: var(--sp-2);
+  align-self: flex-end;
+  margin-inline: auto;
+  translate: 0 calc(100% + var(--sp-1));
+}
+
+.popover.fit.above {
+  align-self: flex-start;
+  translate: 0 calc(-100% - var(--sp-1));
 }
 
 /* 幅の広いポップオーバー（#87: 市場ピル・警告のタグ）。高さは画面まで、中だけスクロール */

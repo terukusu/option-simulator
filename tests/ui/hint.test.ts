@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { hintAbove, hintAlign, hintNext, revealDelta } from '../../ui/view/hint';
+import { hintAbove, hintAlign, hintNext, popAlign, revealDelta } from '../../ui/view/hint';
 
 /** #63: 説明の吹き出し（ⓘ）の開閉と寄せ。 */
 describe('hintNext（開閉）', () => {
@@ -36,6 +36,74 @@ describe('hintAlign（左右の寄せ）', () => {
 
   it('幅 0 の行（測れない）は start', () => {
     expect(hintAlign(10, 0, 0)).toBe('start');
+  });
+});
+
+/** #344: ポップオーバーの左右の揃え（start / end / どちらも入らなければ fit = 窓の左右 8px の内側で中央）。 */
+describe('popAlign（吹き出しの幅を見た揃え）', () => {
+  it('好みの側が入れば hintAlign と同じ答え（既存の例・幅は小さい値）', () => {
+    const w = 10;
+    for (const [c, l, r] of [
+      [20, 0, 360],
+      [179, 0, 360],
+      [181, 0, 360],
+      [350, 0, 360],
+      [900, 800, 1200],
+      [1100, 800, 1200],
+    ] as const) {
+      expect(popAlign(c - 9, c + 9, w, l, r)).toBe(hintAlign(c, l, r));
+    }
+  });
+
+  it('好みの側が入らなければ反対側を見て、入る側を返す（返した側は必ず基準の中に入る）', () => {
+    // 好み（中心が基準の中央より右なら end）は、ボタンの外側の余白が広い側なので、好みが入らずに反対側だけが入ることは
+    // 幾何的に起きない（反対側の余白は好みの側以下）。性質として「返した start / end は入る」「好みが入れば好み」を格子で確かめる
+    const L = 0;
+    const R = 360;
+    for (let left = 0; left <= 342; left += 3) {
+      const right = left + 18;
+      for (let w = 10; w <= 400; w += 7) {
+        const a = popAlign(left, right, w, L, R);
+        const startFits = left + w <= R + 0.5;
+        const endFits = right - w >= L - 0.5;
+        const pref = hintAlign((left + right) / 2, L, R);
+        if (a === 'start') expect(startFits).toBe(true);
+        if (a === 'end') expect(endFits).toBe(true);
+        if (a === 'fit') expect(startFits || endFits).toBe(false);
+        if (pref === 'start' && startFits) expect(a).toBe('start');
+        if (pref === 'end' && endFits) expect(a).toBe('end');
+      }
+    }
+    // 中ほどのボタン: 小さい幅は好み（start / end）、どちらにも入らない幅で fit
+    expect(popAlign(190, 208, 170, 0, 360)).toBe('end');
+    expect(popAlign(190, 208, 209, 0, 360)).toBe('fit');
+    expect(popAlign(140, 158, 220, 0, 360)).toBe('start');
+    expect(popAlign(140, 158, 221, 0, 360)).toBe('fit');
+  });
+
+  it('どちらにも入らなければ fit（#344 のポジションの ⓘ: 360・390 の窓・幅 320）', () => {
+    expect(popAlign(185, 203, 320, 0, 360)).toBe('fit');
+    expect(popAlign(215, 233, 320, 0, 390)).toBe('fit');
+  });
+
+  it('測れない値（NaN・幅 0・基準の幅 0）は start', () => {
+    expect(popAlign(Number.NaN, 203, 320, 0, 360)).toBe('start');
+    expect(popAlign(185, 203, Number.NaN, 0, 360)).toBe('start');
+    expect(popAlign(185, 203, 0, 0, 360)).toBe('start');
+    expect(popAlign(185, 203, -5, 0, 360)).toBe('start');
+    expect(popAlign(185, 203, 320, 0, 0)).toBe('start');
+    expect(popAlign(185, 203, 320, 0, Number.POSITIVE_INFINITY)).toBe('start');
+  });
+
+  it('ちょうど入る（境界・0.5px の許し）は入る扱い', () => {
+    // start: 40 + 320 = 360 ちょうど、好み start（中心 49 < 180）
+    expect(popAlign(40, 58, 320, 0, 360)).toBe('start');
+    expect(popAlign(40.5, 58, 320, 0, 360)).toBe('start');
+    expect(popAlign(41, 58, 320, 0, 360)).toBe('fit');
+    // end: 320 − 320 = 0 ちょうど、好み end（中心 311 > 180）
+    expect(popAlign(302, 320, 320, 0, 360)).toBe('end');
+    expect(popAlign(302, 319.5, 320, 0, 360)).toBe('end');
+    expect(popAlign(302, 319, 320, 0, 360)).toBe('fit');
   });
 });
 
