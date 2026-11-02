@@ -362,7 +362,7 @@ describe('節の道筋（#322）', () => {
     const s = INDEX.byId.get('10.3.1');
     if (!s) throw new Error('10.3.1 が無い');
     expect(sectionPath(s, INDEX)).toBe(
-      '10 市場: スマイル・IV 推移・先物推移 > 10.3 スマイルから足を入れる > 10.3.1 理論価格（気配が広い行の妥当な価格）',
+      '10 市場: スマイル・IV 推移・先物推移・銘柄の推移 > 10.3 スマイルから足を入れる > 10.3.1 理論価格（気配が広い行の妥当な価格）',
     );
     const toc = INDEX.byAnchor.get('目次');
     if (!toc) throw new Error('目次が無い');
