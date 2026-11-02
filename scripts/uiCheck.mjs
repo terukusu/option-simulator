@@ -5824,6 +5824,14 @@ async function backTermLook() {
       }
       await page.keyboard.press('Escape');
       await tcWait(page, null);
+      // 閉じた後始末の go が着いてから次の用語を開く（#334）
+      const closed = await backWait(page, 0);
+      if (!closed.ok) {
+        failed = true;
+        console.log(
+          `AC-2-6 #320 360x780: ${t} を Esc で閉じた後に段が 0 にならない（今 ${closed.now}）  ← NG`,
+        );
+      }
     }
     for (const how of ['goBack', 'btn']) {
       const label = `AC-2-6 #320 360x780 ${TC_HOW[how]}`;
@@ -5838,6 +5846,12 @@ async function backTermLook() {
       if ((await tcTitle(page)) !== picked) await tcOpenByPalette(page, picked);
       const y = await tcScrollBody(page, 120);
       const b = await tcRelated(page, [picked]);
+      // 段が 2（用語 → 関連の用語）に揃ってから戻る。画面の後始末の go と戻るが重ならない（#334）
+      const stacked = await backWait(page, 2);
+      if (!stacked.ok) {
+        failed = true;
+        console.log(`${label}: 関連の用語を開いた後に段が 2 にならない（今 ${stacked.now}）  ← NG`);
+      }
       const top0 = await tcBodyTop(page);
       await tcStep(page, how);
       const back = await tcWait(page, picked);
@@ -9933,6 +9947,15 @@ async function topSweep() {
         await page.click('.warn-btn');
         await openCheck(page, `${tag} 警告のタグ`, w, h, `${name}-warn`, '.warn-tags .popover');
         await page.keyboard.press('Escape');
+        // 閉じた後始末の history.go(-1) が着いてから断片を入れる（着く前に入れると、遅れて着いた go が
+        // 断片の項目を履歴から外し、確認が開かない。#334）
+        const settled = await backWait(page, 0);
+        if (!settled.ok) {
+          failed = true;
+          console.log(
+            `${tag} ${w}x${h}: 警告のタグを Esc で閉じた後に history.state.back が 0 にならない（今 ${settled.now}）  ← NG`,
+          );
+        }
         await page.evaluate((hash) => {
           location.hash = hash;
         }, share.hash);
