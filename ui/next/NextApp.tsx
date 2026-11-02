@@ -45,7 +45,7 @@ import { otherHeldCount } from '../view/holdings';
 import { type IndKind, toggleInd } from '../view/indicators';
 import { ivNowValue } from '../view/ivHistory';
 import { editableTarget, palettePanelActions, pickEscape } from '../view/keys';
-import { PC_QUERY, PHONE_QUERY } from '../view/layout';
+import { LAND_QUERY, PC_QUERY, PHONE_QUERY } from '../view/layout';
 import { allowedLossOf } from '../view/margin';
 import { marketPill } from '../view/marketPill';
 import {
@@ -171,6 +171,8 @@ export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
   const { state, dispatch } = c;
   const theme = useTheme(userPrefs.prefs.theme, userPrefs.setTheme);
   const tier = layoutTier(useMediaQuery(PHONE_QUERY), useMediaQuery(PC_QUERY));
+  // スマホの横向き（#348）: 段は phone のまま。つまみの向きだけ（配置は CSS の @media）
+  const land = useMediaQuery(LAND_QUERY);
   // 足 0 本で開いたらドックの既定は板（#275）
   const [shell, send] = useReducer(shellReduce, c.curLegs.length, initialShell);
   const ivEndpoint =
@@ -1050,6 +1052,7 @@ export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
       />
       <Shell
         tier={tier}
+        land={land}
         state={shell}
         send={shellSend}
         legCount={c.curLegs.length}

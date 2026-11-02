@@ -260,6 +260,11 @@
   /* 高さ */
   --top-h: 48px;
   --dock-h: 56px;
+  /* スマホの横向き（#348。§2.5）: 右端の縦のドックの幅・全開のときの舞台（読み取りの列）の幅 */
+  --dock-w: 56px;
+  --land-mini-w: 160px;
+  /* 横向きの読み取りの縦の列の幅（固定。線 1 + 余白 24 + 中身 128 = 最長の副題「X 99,999 (+9,999/+99.9%)」が入る） */
+  --land-ro-w: 153px;
   /* 動き（§6） */
   --dur-fast: 120ms;
   --dur: 180ms;
@@ -270,11 +275,19 @@
   --marker-rise: 14px;
 }
 
-@media (max-width: 719.98px) {
+@media (max-width: 719.98px),
+  (pointer: coarse) and (min-width: 560px) and (max-width: 1199.98px) and (max-height: 500px) {
   :root {
     --fs-hero: 24px;
     --fs-ro: 16px;
     --top-h: 44px;
+  }
+}
+
+/* スマホの横向き（#348。§2.5）: トップバーを細く（縦を描画域に回す）。上のスマホの規則の後に置いて上書きする */
+@media (pointer: coarse) and (min-width: 560px) and (max-width: 1199.98px) and (max-height: 500px) {
+  :root {
+    --top-h: 36px;
   }
 }
 

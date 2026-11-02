@@ -96,7 +96,8 @@ details.adv[open] > summary > svg.ic {
 }
 
 /* スマホ（#292）: 行の高さ 36px 以上・印 16px（PC・タブレットは 33px・12px のまま） */
-@media (max-width: 719.98px) {
+@media (max-width: 719.98px),
+  (pointer: coarse) and (min-width: 560px) and (max-width: 1199.98px) and (max-height: 500px) {
   details.adv summary {
     min-height: 36px;
   }
@@ -150,7 +151,9 @@ section.scenario .popover p + p {
  * PC・タブレット: 舞台の下に常設（グリッドの行は auto）。画面の高さの 40% を超えれば中だけスクロール（舞台の読み取りを
  * 縮めすぎない）。行が auto なので % ではなく dvh で決める
  */
-@media (min-width: 720px) {
+@media (min-width: 1200px), (min-width: 720px) and (max-width: 1199.98px) and (pointer: fine),
+  (min-width: 720px) and (max-width: 1199.98px) and (pointer: none),
+  (min-width: 720px) and (max-width: 1199.98px) and (min-height: 500.02px) {
   section.scenario {
     max-height: 40dvh;
   }

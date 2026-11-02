@@ -70,6 +70,13 @@
 //                                          （損益・IV 推移・スマイル・追証マップ・面・先物の段・銘柄の推移の札の検査に足した）。損益は
 //                                          十字線なしで文字の数 = 格子の線の数、横線を縦の目盛り +6px・縦線を横の目盛り +5px・横線を
 //                                          上端に置くと、その目盛り（単位）の文字だけ隠れて 2 個以上残り、外れると戻る
+//                                          スマホの横向き（#348）: 844×390・915×412・740×360・667×375 × ダーク / ライト（タッチ = hasTouch・
+//                                          isMobile）でシート hidden / パネル 6 × peek / full: 縦・横・折り返し、トップバー 36px、ドックが
+//                                          右端に縦（6 ボタン ≥ 32×32 が窓の中）、読み取り（舞台の幅で 3 / 5）、描画域の大きさ（hidden で
+//                                          ≥ 480×230 / 400×200、peek で ≥ 200×160）・パネルの列の幅（peek ≥ 360・full ≥ 窓 − ドック − 160）・
+//                                          板 5 列が切れない。844×390・667×375（ダーク）で ⋯・市場ピル・設定・保存一覧・保有ポジション・
+//                                          足の追加・形の一覧・説明カード・ⓘ が窓の中。1280×500・900×450（マウス）は横向きにならない。
+//                                          568×320 は記録だけ
 //   npm run ui:check -- --parts            部品の見本（?parts。dev だけ）
 //   npm run ui:check -- --flows            保有の印の手順（#301: 360×780 と 1440×900 で保有のチップの「保」・タブのメニュー・
 //                                          ポジションの ⋯ の写しの建て直しと押せない全クリア・保存一覧の「保有」のタグ。折り返し・切れ・
@@ -177,6 +184,9 @@
 //                                          #242 のツールの結果を待つ間のカードは --ai（--flows なし）でだけ
 //   --icons                                #292 のボタンのアイコンの項目だけ（既定の検査。手元の確かめ用）
 //   --popovers                             #344 のポップオーバーが窓の中の項目だけ（既定の検査にも入る。手元の確かめ用）
+//   --land                                 #348 のスマホの横向きの項目だけ（既定の検査にも入る）。--flows と一緒なら回転（390×844 ⇄
+//                                          844×390 でパネル・シート・拡大・シナリオ・銘柄の推移・板から追加の帯を保ち十字線は消える）と
+//                                          横向きのつまみ（タップ・左右 40px・Enter / Space・ドック）の手順だけ（--flows にも入る）
 //   --cross                                #217 の十字線の項目だけ（既定の検査・--flows とも。--flows は #201・#130・#207 のタッチの流れも。手元の確かめ用）
 //   --back                                 #320 の戻るの項目だけ（--flows にも入る）: 390×844・1440×900 で、設定・保存一覧・ⓘ の吹き出し・
 //                                          ⋯ のメニュー・説明カード・（PC）パレットを開く → 戻る 1 回でそれだけ閉じ URL・フォーカスが Esc と同じ、
@@ -300,6 +310,7 @@ const known = new Set([
   '--shapes',
   '--import',
   '--popovers',
+  '--land',
 ]);
 for (const a of args) {
   if (a.startsWith('--') && !known.has(a)) {
@@ -331,6 +342,7 @@ const pickOnly = flag('--pick');
 const shapesOnly = flag('--shapes');
 const importOnly = flag('--import');
 const popoversOnly = flag('--popovers');
+const landOnly = flag('--land');
 const mode = parts ? 'parts' : 'next';
 
 // ---- 足 2 本の作業（版 2）: workspace-v2.json のタブ A だけ（fixture は変えない）
@@ -1633,6 +1645,8 @@ async function measureAll() {
     await fontSweep();
     // ポップオーバーが窓の中（#344 AC-2〜AC-4）
     await popoverSweep();
+    // スマホの横向き（#348 AC-3〜AC-6）
+    await landAll();
   }
   // 旧のクラス名（#91・EPIC #92 の終了条件 8）: report を通ったすべての状態の合計
   console.log(
@@ -7244,6 +7258,8 @@ async function runFlows() {
   for (const vp of [pc, phone]) await holdToggleFlow(vp);
   // #135 AI のチャットの進み具合・中止・終端なし・ツールのカード・会話の保存（AC6）
   for (const vp of [phone, pc]) await aiFlows(vp);
+  // #348 スマホの横向き: 回転で保つもの・横向きのつまみ（AC-7・AC-8）
+  await landFlows();
 }
 
 /**
@@ -9726,7 +9742,12 @@ async function topBarCheck(page, label) {
     const tb = top.getBoundingClientRect();
     const bad = [];
     if (Math.abs(tb.height - want) > 0.5) bad.push(`高さ ${tb.height}px（--top-h ${want}px）`);
-    const phone = window.innerWidth < 720;
+    // スマホの段（幅 < 720 か横向き。#348 = ui/view/layout.ts の PHONE_QUERY）
+    const phone =
+      window.innerWidth < 720 ||
+      matchMedia(
+        '(pointer: coarse) and (min-width: 560px) and (max-width: 1199.98px) and (max-height: 500px)',
+      ).matches;
     const sels = ['.market-pill', '.market-pill .when', latestSel, 'button[aria-label="メニュー"]'];
     if (!phone) sels.push('.market-pill .vals', 'button[aria-label="テーマ"]');
     if (top.querySelector('.warn-btn')) sels.push('.warn-btn');
@@ -18764,6 +18785,770 @@ async function popoverSweep() {
   console.log(`ポップオーバーが窓の中の検査（#344）: ${popStats.pass} / ${popStats.total} で pass`);
 }
 
+// ---- スマホの横向き（#348。docs/ui-redesign.md §2.5）: AC-3〜AC-6（既定の実行と --land）・AC-7・AC-8（--flows と --land --flows）
+/** 横向きの判定（ui/view/layout.ts の LAND_QUERY と同じ文字列） */
+const LAND_QUERY =
+  '(pointer: coarse) and (min-width: 560px) and (max-width: 1199.98px) and (max-height: 500px)';
+/** 横向きの窓（AC-3）。[w, h, hidden の描画域の高さ・幅の下限] */
+const LAND_SIZES = [
+  [844, 390, 230, 480],
+  [915, 412, 230, 480],
+  [740, 360, 200, 400],
+  [667, 375, 200, 400],
+];
+/** 参考の窓（崩れないことだけを記録。合否に入れない） */
+const LAND_REF = [568, 320];
+const LAND_PANELS = ['positions', 'board', 'scenario', 'metrics', 'smile', 'ai'];
+/** タッチの端末（pointer: coarse）のエミュレーション */
+const LAND_TOUCH = { hasTouch: true, isMobile: true };
+const landStats = { pass: 0, total: 0 };
+
+function landRecord(label, ok, detail) {
+  landStats.total++;
+  if (ok) landStats.pass++;
+  else failed = true;
+  console.log(`${label}: ${detail}${ok ? '' : '  ← NG'}`);
+}
+
+/** 横向きの配置の矩形（トップバー・ドック・描画域・読み取り・見えているパネルの列・舞台） */
+const landGeom = (page) =>
+  page.evaluate((q) => {
+    const rect = (el) => {
+      if (!el || el.getClientRects().length === 0) return null;
+      const b = el.getBoundingClientRect();
+      return { l: b.left, t: b.top, r: b.right, b: b.bottom, w: b.width, h: b.height };
+    };
+    const l = document.querySelector('.layout');
+    const side = [...document.querySelectorAll('section.panel.side, section.scenario')].find(
+      (s) => s.getClientRects().length > 0,
+    );
+    const dock = document.querySelector('.dock');
+    return {
+      land: matchMedia(q).matches,
+      vw: innerWidth,
+      vh: innerHeight,
+      sheet: l?.getAttribute('data-sheet') ?? null,
+      panel: l?.getAttribute('data-panel') ?? null,
+      top: rect(document.querySelector('header.top')),
+      dock: rect(dock),
+      dockBtns: [...(dock?.querySelectorAll(':scope > button') ?? [])].map(rect),
+      chart: rect(document.querySelector('section.stage .chart')),
+      readout: rect(document.querySelector('section.stage .readout')),
+      stage: rect(document.querySelector('section.stage')),
+      side: rect(side),
+      grabber: rect(side?.querySelector('.grabber')),
+    };
+  }, LAND_QUERY);
+
+/** 1 つの状態の判定（AC-3・AC-4）。min = [hidden の高さ, 幅] */
+async function landState(page, label, w, h, shotName, min) {
+  const okPage = await report(page, label, w, h, shotName);
+  const g = await landGeom(page);
+  const bad = [];
+  if (!g.land) bad.push('横向きの条件に当たらない');
+  if (!g.top || Math.abs(g.top.h - 36) > 0.5) bad.push(`トップバー ${g.top?.h}px（36px のはず）`);
+  // ドック: 窓の右端に縦（上 = トップバーの下・下 = 窓の下）、6 ボタンが窓の中・各 32×32px 以上
+  const d = g.dock;
+  if (
+    !d ||
+    Math.abs(d.r - g.vw) > 0.5 ||
+    Math.abs(d.b - g.vh) > 0.5 ||
+    Math.abs(d.t - (g.top?.b ?? 0)) > 0.5 ||
+    d.h <= d.w
+  )
+    bad.push(
+      `ドックが右端に縦でない（${d ? `${Math.round(d.l)},${Math.round(d.t)} ${Math.round(d.w)}x${Math.round(d.h)}` : '無い'}）`,
+    );
+  const btns = g.dockBtns.filter(Boolean);
+  if (
+    btns.length !== 6 ||
+    btns.some(
+      (b) =>
+        b.w < 32 || b.h < 32 || b.l < -0.5 || b.r > g.vw + 0.5 || b.t < -0.5 || b.b > g.vh + 0.5,
+    )
+  )
+    bad.push(
+      `ドックのボタン ${btns.map((b) => `${Math.round(b.w)}x${Math.round(b.h)}`).join(' ')}`,
+    );
+  // 読み取りの個数（舞台の幅 < 480 で 3・≥ 480 で 5）。窓の中・隠れない・切れない（readoutCheck）
+  const want = (g.stage?.w ?? 0) >= 480 ? 5 : 3;
+  const okRo = await readoutCheck(page, `${label} ${w}x${h}`, want);
+  // 描画域の大きさ・パネルの列の幅（AC-4）
+  const c = g.chart;
+  const side = g.side;
+  if (g.sheet === 'hidden') {
+    if (!c || c.h < min[0] || c.w < min[1])
+      bad.push(
+        `描画域 ${c ? `${Math.round(c.w)}x${Math.round(c.h)}` : '無い'}（${min[1]}x${min[0]} 以上）`,
+      );
+    if (side) bad.push('hidden なのにパネルの列が見える');
+  } else if (g.sheet === 'peek') {
+    // 844×390 以上の覗くは舞台 ≥ 400px = 読み取りが描画域の右の縦の列（レビュー N-3）
+    if (w >= 844) {
+      const ro = g.readout;
+      if ((g.stage?.w ?? 0) < 400 || !ro || !c || ro.l < c.r - 0.5)
+        bad.push(`読み取りが縦の列でない（舞台 ${g.stage?.w}px）`);
+    }
+    if (!c || c.h < 160 || c.w < 200)
+      bad.push(`描画域 ${c ? `${Math.round(c.w)}x${Math.round(c.h)}` : '無い'}（200x160 以上）`);
+    if (!side || side.w < 360) bad.push(`パネルの列の幅 ${side?.w}（360px 以上）`);
+  } else {
+    const minSide = g.vw - (d?.w ?? 0) - 160;
+    if (!side || side.w < minSide - 0.5) bad.push(`パネルの列の幅 ${side?.w}（${minSide}px 以上）`);
+  }
+  if (g.sheet !== 'hidden') {
+    // パネルの列: トップバーの下から窓の下まで・ドックの左隣・左端に縦のつまみ
+    if (
+      side &&
+      (Math.abs(side.t - (g.top?.b ?? 0)) > 0.5 ||
+        Math.abs(side.b - g.vh) > 0.5 ||
+        Math.abs(side.r - (d?.l ?? 0)) > 0.5)
+    )
+      bad.push(
+        `パネルの列の位置 ${Math.round(side.l)},${Math.round(side.t)}–${Math.round(side.r)},${Math.round(side.b)}`,
+      );
+    const gr = g.grabber;
+    // 当たり判定は列の外へ 6px 広げた 24px（レビュー N-5）
+    if (!gr || !side || Math.abs(gr.l - (side.l - 6)) > 1.5 || gr.h < side.h - 2 || gr.w < 24)
+      bad.push(
+        `つまみ ${gr ? `${Math.round(gr.l)},${Math.round(gr.t)} ${Math.round(gr.w)}x${Math.round(gr.h)}` : '無い'}`,
+      );
+  }
+  // 板のセルが切れない（市場の検査と同じ判定）。列の数は板の枠の幅で 9 / 7 / 5（設計 §2.4。覗くは 5、全開は 7 か 9）
+  if (g.panel === 'board' && g.sheet !== 'hidden') {
+    const bw = (side?.w ?? 0) - 18; // 左のつまみの余白を除いた幅（ui/next/regions/Board.tsx）
+    await marketCheck(page, `${label} ${w}x${h}`, {
+      cols: bw >= 540 ? 9 : bw >= 410 ? 7 : 5,
+      smileMin: null,
+    });
+  }
+  const ok = okPage && okRo && bad.length === 0;
+  landRecord(
+    `#348 ${label} ${w}x${h}`,
+    ok,
+    `描画域 ${c ? `${Math.round(c.w)}x${Math.round(c.h)}` : '—'}・列 ${side ? Math.round(side.w) : '—'}・読み取り ${want}${bad.length ? `・${bad.join('・')}` : ''}`,
+  );
+}
+
+/** 横向きの開いた状態（AC-5）: ⋯・市場ピル・設定・保存一覧・保有ポジション・足の追加・形の一覧・説明カード・ⓘ */
+async function landOpenAll(page, tag, w, h, name) {
+  const open = async (label, shot, sel) => {
+    await page.waitForTimeout(150);
+    const ok = await report(page, `${tag} ${label}`, w, h, `${name}-${shot}`);
+    const out = await inWindow(page, sel);
+    landRecord(
+      `#348 ${tag} ${label} ${w}x${h}`,
+      ok && out === '',
+      out || '窓の中・ページのスクロール 0px',
+    );
+  };
+  const closeDlg = async () => {
+    await page.keyboard.press('Escape');
+    await page
+      .waitForSelector('dialog[open]', { state: 'detached', timeout: 3000 })
+      .catch(() => {});
+  };
+  await page.click('button[aria-label="メニュー"]');
+  await open('⋯ メニュー', 'menu', 'header.top [role="menu"]');
+  await page.keyboard.press('Escape');
+  await page.click('.market-pill');
+  await open('市場ピル', 'pill', '.pill .popover');
+  await page.keyboard.press('Escape');
+  await page.click('button[aria-label="メニュー"]');
+  await page.click('header.top > .menu-wrap [role^="menuitem"]:has-text("設定…")');
+  await page.waitForSelector('dialog.sheet.settings[open]', { timeout: 3000 }).catch(() => {});
+  await open('設定', 'settings', 'dialog.sheet[open]');
+  await closeDlg();
+  await page.click('button[aria-label="メニュー"]');
+  await page.click('header.top > .menu-wrap [role^="menuitem"]:has-text("保存一覧")');
+  await page.waitForSelector('dialog.sheet.book[open]', { timeout: 3000 }).catch(() => {});
+  await open('保存一覧', 'book', 'dialog.sheet[open]');
+  await closeDlg();
+  await page.click('button[aria-label="メニュー"]');
+  await page.click('header.top > .menu-wrap [role^="menuitem"]:has-text("保有ポジション…")');
+  await page.waitForSelector(HOLDINGS, { timeout: 3000 }).catch(() => {});
+  await open('保有ポジション', 'holdings', HOLDINGS);
+  await closeDlg();
+  // ポジションのパネル（覗く）の ⋯ から: 手入力で足を追加・形から組む
+  await setShell(page, 'positions', 'peek');
+  await page.click('section.positions button[aria-label="ポジションの操作"]');
+  await page.click('[role="menuitem"]:has-text("手入力で足を追加…")');
+  await page.waitForSelector('dialog[open]', { timeout: 3000 }).catch(() => {});
+  await open('足の追加', 'leg', 'dialog[open]');
+  await closeDlg();
+  const shapes = await shapesFromMenu(page);
+  if (!shapes) landRecord(`#348 ${tag} 形の一覧 ${w}x${h}`, false, '開けない');
+  else await open('形の一覧', 'shapes', SHAPES_DLG);
+  await closeDlg();
+  // 説明カード（パレットの ?追証）
+  await openPalette(page);
+  await page.keyboard.type('?追証');
+  await page.waitForTimeout(100);
+  await page.keyboard.press('Enter');
+  await page.waitForSelector(`${TERM_CARD} .tc-head h2`, { timeout: 2000 }).catch(() => {});
+  await open('説明カード', 'term', `${TERM_CARD} .tc-box`);
+  await closeDlg();
+  // ⓘ の吹き出し: 舞台の見出し・ポジションの見出し（左右・上下とも窓の中）
+  for (const [label, sel] of [
+    ['ⓘ 損益グラフの前提', 'button[aria-label="損益グラフの前提"]'],
+    ['ⓘ ポジション', 'section.positions button[aria-label="ポジションのグリークと建値ずれ"]'],
+  ]) {
+    const st = await popOpenCheck(page, `#348 ${tag} ${w}x${h}`, label, sel);
+    const ok = !!st && st.top >= -0.5 && st.bottom <= h + 0.5 && (await measure(page)).v === 0;
+    landRecord(
+      `#348 ${tag} ${label} ${w}x${h}`,
+      ok,
+      st
+        ? `[${Math.round(st.left)}, ${Math.round(st.right)}]×[${Math.round(st.top)}, ${Math.round(st.bottom)}]・${st.cls}`
+        : '開けない',
+    );
+    if (shotsDir)
+      await page.screenshot({ path: join(shotsDir, `${name}-${label.replace(/\s+/g, '')}.png`) });
+    if (st) await popClose(page);
+  }
+  // トースト（レビュー N-4）: 板の bid で足を足す → 「… を追加」のトーストが窓の中・ドックの列に重ならない
+  await setShell(page, 'board', 'peek');
+  await pickPutBid(page, true);
+  await page.waitForSelector('.toast:not(.note)', { timeout: 3000 }).catch(() => {});
+  const t = await page.evaluate(() => {
+    const el = document.querySelector('.toast:not(.note)');
+    const dk = document.querySelector('.dock')?.getBoundingClientRect();
+    if (!el || !dk) return null;
+    const b = el.getBoundingClientRect();
+    return {
+      l: b.left,
+      r: b.right,
+      t: b.top,
+      b: b.bottom,
+      dockL: dk.left,
+      vw: innerWidth,
+      vh: innerHeight,
+      text: (el.textContent ?? '').trim().slice(0, 30),
+    };
+  });
+  const tOk = !!t && t.l >= 0 && t.r <= t.dockL + 0.5 && t.t >= 0 && t.b <= t.vh + 0.5;
+  landRecord(
+    `#348 ${tag} トースト ${w}x${h}`,
+    tOk,
+    t
+      ? `「${t.text}」[${Math.round(t.l)}, ${Math.round(t.r)}]×[${Math.round(t.t)}, ${Math.round(t.b)}]・ドックの左端 ${Math.round(t.dockL)}`
+      : 'トーストが出ない',
+  );
+  if (shotsDir) await page.screenshot({ path: join(shotsDir, `${name}-toast.png`) });
+}
+
+/** AC-6: 横向きにならない窓（マウス = hasTouch なし）。トップバー 48px・横向きの条件に当たらない・今の段の配置 */
+async function landNotAll() {
+  for (const [w, h, tier] of [
+    [1280, 500, 'pc'],
+    [900, 450, 'tablet'],
+  ]) {
+    const ctx = await newContext(
+      { width: w, height: h },
+      { [WORKSPACE_KEY]: twoLegs, [PREFS_KEY]: prefsText('dark') },
+    );
+    const page = await ctx.newPage();
+    await page.goto(pageUrl('next'));
+    await waitReady(page, 'next');
+    const okPage = await report(
+      page,
+      `next dark 横向きにしない（${tier}）`,
+      w,
+      h,
+      `land-not-${w}x${h}`,
+    );
+    const g = await landGeom(page);
+    const bad = [];
+    if (g.land) bad.push('横向きの条件に当たる');
+    if (!g.top || Math.abs(g.top.h - 48) > 0.5) bad.push(`トップバー ${g.top?.h}px`);
+    if (tier === 'pc' && g.dock) bad.push('PC にドックがある');
+    if (tier === 'tablet' && (!g.dock || g.dock.w <= g.dock.h))
+      bad.push('タブレットのドックが横でない');
+    landRecord(
+      `#348 横向きにしない ${w}x${h}（マウス・${tier}）`,
+      okPage && bad.length === 0,
+      bad.join('・') || `トップバー 48px・${tier === 'pc' ? 'ドックなし' : '横のドック'}`,
+    );
+    await ctx.close();
+  }
+}
+
+async function landAll() {
+  if (shotsDir) mkdirSync(shotsDir, { recursive: true });
+  for (const [w, h, minH, minW] of LAND_SIZES) {
+    for (const theme of ['dark', 'light']) {
+      const ctx = await newContext(
+        { width: w, height: h },
+        { [WORKSPACE_KEY]: twoLegs, [PREFS_KEY]: prefsText(theme) },
+        theme,
+        LAND_TOUCH,
+      );
+      const page = await ctx.newPage();
+      await page.goto(pageUrl('next'));
+      await waitReady(page, 'next');
+      const tag = `next ${theme} 横向き`;
+      const name = `land-${w}x${h}-${theme}`;
+      await topBarCheck(page, `${tag} ${w}x${h}`);
+      // hidden（舞台が最大。どのパネルでも同じ）→ パネル 6 × peek / full
+      await setShell(page, 'positions', 'hidden');
+      await landState(page, `${tag} hidden`, w, h, `${name}-hidden`, [minH, minW]);
+      for (const panel of LAND_PANELS) {
+        for (const sheet of ['peek', 'full']) {
+          const ok = await setShell(page, panel, sheet);
+          const lbl = `${tag} ${panel}/${sheet}`;
+          if (!ok) {
+            landRecord(`#348 ${lbl} ${w}x${h}`, false, '画面の状態を作れない');
+            continue;
+          }
+          await settleMotion(page);
+          await landState(page, lbl, w, h, `${name}-${panel}-${sheet}`, [minH, minW]);
+        }
+      }
+      if (theme === 'dark' && (w === 844 || w === 667)) {
+        await setShell(page, 'positions', 'peek');
+        await landOpenAll(page, `next ${theme} 横向き 開いた状態`, w, h, `${name}-open`);
+      }
+      await ctx.close();
+    }
+  }
+  // 足 0 本の舞台（空の格子）も崩れない
+  {
+    const [w, h] = [844, 390];
+    const ctx = await newContext(
+      { width: w, height: h },
+      { [WORKSPACE_KEY]: noLegs, [PREFS_KEY]: prefsText('dark') },
+      'dark',
+      LAND_TOUCH,
+    );
+    const page = await ctx.newPage();
+    await page.goto(pageUrl('next'));
+    await waitReady(page, 'next');
+    const ok = await report(page, 'next dark 横向き 空の舞台', w, h, `land-${w}x${h}-empty`);
+    const g = await landGeom(page);
+    landRecord(
+      `#348 横向き 空の舞台 ${w}x${h}`,
+      ok && g.land && !!g.chart && g.chart.h >= 160,
+      `描画域 ${g.chart ? `${Math.round(g.chart.w)}x${Math.round(g.chart.h)}` : '無い'}・パネル ${g.panel}/${g.sheet}`,
+    );
+    await ctx.close();
+  }
+  // 参考の窓（568×320）: ページのスクロールと描画域を記録だけ（合否に入れない）
+  {
+    const [w, h] = LAND_REF;
+    const ctx = await newContext(
+      { width: w, height: h },
+      { [WORKSPACE_KEY]: twoLegs, [PREFS_KEY]: prefsText('dark') },
+      'dark',
+      LAND_TOUCH,
+    );
+    const page = await ctx.newPage();
+    await page.goto(pageUrl('next'));
+    await waitReady(page, 'next');
+    for (const sheet of ['hidden', 'peek', 'full']) {
+      await setShell(page, 'positions', sheet);
+      await settleMotion(page);
+      const r = await measure(page);
+      const g = await landGeom(page);
+      console.log(
+        `#348 参考 横向き ${w}x${h} positions/${sheet}: 縦 ${r.v}px 横 ${r.h}px 折り返し ${r.wraps.length} 件・描画域 ${g.chart ? `${Math.round(g.chart.w)}x${Math.round(g.chart.h)}` : '—'}（記録だけ）`,
+      );
+      if (shotsDir)
+        await page.screenshot({ path: join(shotsDir, `land-${w}x${h}-ref-${sheet}.png`) });
+    }
+    await ctx.close();
+  }
+  await landNotAll();
+  console.log(`スマホの横向きの検査（#348）: ${landStats.pass} / ${landStats.total} で pass`);
+}
+
+/** 窓の大きさを変えて（回転）落ち着くのを待つ */
+async function landRotate(page, w, h) {
+  await page.setViewportSize({ width: w, height: h });
+  await page.waitForTimeout(400);
+  await settleMotion(page);
+}
+
+/** 回転で保つものの状態: パネル・シート・拡大の範囲（目盛りから逆に読んだ描画域の両端の X）・シナリオの d・十字線・帯 */
+async function landKeep(page) {
+  const st = await pnlCrossState(page);
+  const l = await page.evaluate(() => {
+    const el = document.querySelector('.layout');
+    return {
+      panel: el?.getAttribute('data-panel'),
+      sheet: el?.getAttribute('data-sheet'),
+      market: el?.getAttribute('data-market'),
+      xh: document.querySelectorAll('section.stage .chart .xh-line').length,
+      band: [...document.querySelectorAll('.pick-band')].filter(
+        (b) => (b.textContent ?? '') !== '' && b.getClientRects().length > 0,
+      ).length,
+    };
+  });
+  const dom =
+    st && st.plot.w > 0
+      ? [fromTicks(st.ticksX, st.plot.x), fromTicks(st.ticksX, st.plot.x + st.plot.w)]
+      : null;
+  const scn = await savedScenario(page);
+  return { ...l, dom, days: scn?.days ?? null };
+}
+
+const sameDom = (a, b) =>
+  !!a &&
+  !!b &&
+  a.every(
+    (v, i) =>
+      v !== null &&
+      b[i] !== null &&
+      Math.abs(v - b[i]) <= Math.max(10, Math.abs(a[1] - a[0]) * 0.01),
+  );
+const domText = (d) => (d ? d.map((v) => Math.round(v ?? Number.NaN)).join('–') : '—');
+
+/** AC-7: 回転（390×844 ⇄ 844×390。タッチ） */
+async function landRotateFlow() {
+  const tag = '#348 回転';
+  const ctx = await touchContext({ [WORKSPACE_KEY]: twoLegs, [PREFS_KEY]: prefsText('dark') });
+  const page = await ctx.newPage();
+  await page.goto(pageUrl('next'));
+  await waitReady(page, 'next');
+  await setShell(page, 'positions', 'peek');
+  // 拡大 1 段（スマホは ⋯ の中）
+  await page.click('button[aria-label="グラフの設定"]');
+  await page
+    .locator('.stage-pop button[aria-label="拡大"]')
+    .locator('visible=true')
+    .first()
+    .click();
+  await page.keyboard.press('Escape');
+  // シナリオの d を変える（描画域にフォーカスして ] = d を進める）
+  await page.focus('section.stage .chart');
+  await page.keyboard.press(']');
+  await page.keyboard.press(']');
+  await page.waitForTimeout(150);
+  // 十字線を置く（タップ）
+  const st0 = await pnlCrossState(page);
+  const cdp = await ctx.newCDPSession(page);
+  const touch = (type, touchPoints) => cdp.send('Input.dispatchTouchEvent', { type, touchPoints });
+  if (st0) {
+    const x = Math.round(st0.left + st0.plot.x + st0.plot.w * 0.35);
+    const y = Math.round(st0.top + st0.plot.y + st0.plot.h * 0.4);
+    await touch('touchStart', [{ x, y, id: 0 }]);
+    await page.waitForTimeout(40);
+    await touch('touchEnd', []);
+    await page.waitForTimeout(400);
+  }
+  const a = await landKeep(page);
+  check(
+    `${tag} 390x844: ポジ peek・拡大 1 段・d を変えた・十字線あり`,
+    a.panel === 'positions' &&
+      a.sheet === 'peek' &&
+      a.xh === 2 &&
+      a.dom !== null &&
+      a.days !== null,
+    `${a.panel}/${a.sheet}・範囲 ${domText(a.dom)}・d ${a.days}・十字線 ${a.xh}`,
+  );
+  await landRotate(page, 844, 390);
+  const b = await landKeep(page);
+  const land = await page.evaluate((q) => matchMedia(q).matches, LAND_QUERY);
+  check(
+    `${tag} → 844x390: 横向き・パネル / シート・拡大の範囲・d が同じ、十字線は消える`,
+    land &&
+      b.panel === a.panel &&
+      b.sheet === a.sheet &&
+      sameDom(a.dom, b.dom) &&
+      b.days === a.days &&
+      b.xh === 0,
+    `横向き ${land}・${b.panel}/${b.sheet}・範囲 ${domText(b.dom)}・d ${b.days}・十字線 ${b.xh}`,
+  );
+  if (shotsDir) await page.screenshot({ path: join(shotsDir, 'flows-land-rotate-844x390.png') });
+  await landRotate(page, 390, 844);
+  const c = await landKeep(page);
+  check(
+    `${tag} → 390x844 に戻す: パネル / シート・拡大の範囲・d が同じ`,
+    c.panel === a.panel &&
+      c.sheet === a.sheet &&
+      sameDom(a.dom, c.dom) &&
+      c.days === a.days &&
+      c.xh === 0,
+    `${c.panel}/${c.sheet}・範囲 ${domText(c.dom)}・d ${c.days}・十字線 ${c.xh}`,
+  );
+  // 銘柄の推移を開いたまま回す → 開いたまま、× で開く前の見え方
+  const before = await landKeep(page);
+  const opened = await openOptFromBoard(page, 390);
+  const o1 = await landKeep(page);
+  await landRotate(page, 844, 390);
+  const o2 = await landKeep(page);
+  const optLabel = await page.getAttribute('section.smile', 'aria-label').catch(() => null);
+  check(
+    `${tag} 銘柄の推移を開いたまま 844x390 へ: 開いたまま（パネル・シート・市場が同じ）`,
+    opened &&
+      o2.market === 'opt' &&
+      o2.panel === o1.panel &&
+      o2.sheet === o1.sheet &&
+      optLabel === '銘柄の推移',
+    `${o1.panel}/${o1.sheet}/${o1.market} → ${o2.panel}/${o2.sheet}/${o2.market}・${optLabel}`,
+  );
+  await page.click('section.smile .opt-close').catch(() => {});
+  await page.waitForTimeout(200);
+  const o3 = await landKeep(page);
+  check(
+    `${tag} 横向きで × → 開く前の見え方（板 full）`,
+    o3.market !== 'opt' && o3.panel === 'board' && o3.sheet === 'full',
+    `${before.panel}/${before.sheet} → 開く → × → ${o3.panel}/${o3.sheet}/${o3.market}`,
+  );
+  await landRotate(page, 390, 844);
+  // 板から追加の帯を出したまま回す
+  await setShell(page, 'positions', 'peek');
+  await page.click(PICK_BTN);
+  await page.waitForTimeout(200);
+  const p1 = await landKeep(page);
+  await landRotate(page, 844, 390);
+  const p2 = await landKeep(page);
+  await landRotate(page, 390, 844);
+  const p3 = await landKeep(page);
+  check(
+    `${tag} 板から追加の帯を出したまま 844x390 → 390x844: 帯・パネルが残る`,
+    p1.band === 1 && p2.band === 1 && p3.band === 1 && p2.panel === 'board' && p3.panel === 'board',
+    `帯 ${p1.band} → ${p2.band} → ${p3.band}・${p1.panel}/${p1.sheet} → ${p2.panel}/${p2.sheet} → ${p3.panel}/${p3.sheet}`,
+  );
+  await ctx.close();
+}
+
+/** AC-8: 横向きのつまみ（844×390。タップ・左右 40px のドラッグ・Enter / Space・ドックの同じボタン） */
+async function landGrabFlow() {
+  const tag = '#348 横向きのつまみ 844x390';
+  const ctx = await touchContext(
+    { [WORKSPACE_KEY]: twoLegs, [PREFS_KEY]: prefsText('dark') },
+    { width: 844, height: 390 },
+  );
+  const page = await ctx.newPage();
+  await page.goto(pageUrl('next'));
+  await waitReady(page, 'next');
+  await setShell(page, 'positions', 'peek');
+  const cdp = await ctx.newCDPSession(page);
+  const touch = (type, touchPoints) => cdp.send('Input.dispatchTouchEvent', { type, touchPoints });
+  const sheet = () => page.getAttribute('.layout', 'data-sheet');
+  const grab = async (dx, dy = 0) => {
+    const b = await page.locator('.grabber').boundingBox();
+    if (!b) return null;
+    const x = Math.round(b.x + b.width / 2);
+    const y = Math.round(b.y + b.height / 2);
+    await touch('touchStart', [{ x, y, id: 0 }]);
+    for (let i = 1; i <= 5; i++) {
+      await touch('touchMove', [
+        { x: Math.round(x + (dx * i) / 5), y: Math.round(y + (dy * i) / 5), id: 0 },
+      ]);
+      await page.waitForTimeout(16);
+    }
+    await touch('touchEnd', []);
+    await page.waitForTimeout(250);
+    await settleMotion(page);
+    return sheet();
+  };
+  const name = await page.getAttribute('.grabber', 'aria-label');
+  check(`${tag} つまみの名前「パネルの幅」`, name === 'パネルの幅', `${name}`);
+  const t1 = await grab(0);
+  const t2 = await grab(0);
+  check(`${tag} タップで peek → full → peek`, t1 === 'full' && t2 === 'peek', `${t1} → ${t2}`);
+  const l1 = await grab(-60);
+  check(`${tag} 左へ 60px で 1 段広く（peek → full）`, l1 === 'full', `${l1}`);
+  const r1 = await grab(60);
+  const r2 = await grab(60);
+  check(
+    `${tag} 右へ 60px で 1 段ずつ狭く（full → peek → hidden）`,
+    r1 === 'peek' && r2 === 'hidden',
+    `${r1} → ${r2}`,
+  );
+  await setShell(page, 'positions', 'peek');
+  const s1 = await grab(30, 80);
+  check(`${tag} 横 30px（縦 80px）は動かない（横の移動量だけを見る）`, s1 === 'peek', `${s1}`);
+  await page.focus('.grabber');
+  await page.keyboard.press('Enter');
+  await page.waitForTimeout(150);
+  const k1 = await sheet();
+  await page.focus('.grabber');
+  await page.keyboard.press(' ');
+  await page.waitForTimeout(150);
+  const k2 = await sheet();
+  check(
+    `${tag} Enter / Space でタップと同じ（peek → full → peek）`,
+    k1 === 'full' && k2 === 'peek',
+    `${k1} → ${k2}`,
+  );
+  await page.click('.dock button[data-panel="positions"]');
+  await page.waitForTimeout(150);
+  const h1 = await sheet();
+  check(`${tag} ドックの同じボタンで hidden`, h1 === 'hidden', `${h1}`);
+  await ctx.close();
+}
+
+/**
+ * レビュー B-1・N-1（844×390・タッチ）: (a) シナリオ点の X を動かして読み取りの値の桁が変わっても描画域の幅が変わらず、
+ * 置いた十字線が残る (b) 覗く ⇄ 全開のパネルの列の幅の補間の間、舞台の svg の width の書き換えは終わりの 1 回だけ（#123）
+ */
+/** 置いた十字線の位置: 横の札（X の値）と、縦線の位置（描画域の左からの割合・小数 3 桁） */
+async function crossPos(page) {
+  const st = await pnlCrossState(page);
+  return {
+    xTag: st?.xTag ?? null,
+    vx: st?.vx ?? null,
+    ratio:
+      st && st.vx !== null && st.plot.w > 0
+        ? Math.round(((st.vx - st.plot.x) / st.plot.w) * 1000) / 1000
+        : null,
+  };
+}
+
+/**
+ * 十字線を置いた hidden からドックで覗くにし（描画域の大きさが変わる）、十字線が 2 本のまま・横の札（X の値）が同じ・
+ * 縦線の位置の割合が ±0.01 で同じ（値の座標どおりに描き直された。古い大きさの px で持つ退行を拾う）
+ */
+async function crossKeepCheck(page, tag) {
+  const before = await crossPos(page);
+  const w0 = await page.evaluate(
+    () => document.querySelector('section.stage .chart')?.clientWidth ?? 0,
+  );
+  const h0 = await page.evaluate(
+    () => document.querySelector('section.stage .chart')?.clientHeight ?? 0,
+  );
+  await page.click('.dock button[data-panel="positions"]');
+  await page.waitForTimeout(300);
+  await settleMotion(page);
+  const after = await crossPos(page);
+  const n = await page.evaluate(
+    () => document.querySelectorAll('section.stage .chart .xh-line').length,
+  );
+  const sheet = await page.getAttribute('.layout', 'data-sheet');
+  const size = await page.evaluate(() => {
+    const c = document.querySelector('section.stage .chart');
+    return `${c?.clientWidth ?? 0}x${c?.clientHeight ?? 0}`;
+  });
+  check(
+    `${tag} 十字線を置いて hidden → 覗く（描画域 ${w0}x${h0} → ${size}）: 十字線が残り、横の札・縦線の位置の割合が同じ（レビュー R-2）`,
+    sheet === 'peek' &&
+      n === 2 &&
+      before.xTag !== null &&
+      after.xTag === before.xTag &&
+      before.ratio !== null &&
+      after.ratio !== null &&
+      Math.abs(after.ratio - before.ratio) <= 0.01,
+    `${sheet}・本数 ${n}・札 ${before.xTag} → ${after.xTag}・割合 ${before.ratio} → ${after.ratio}`,
+  );
+}
+
+/** 縦向き 390×844（タッチ）: 十字線を置いて hidden → 覗くでも残る（main と同じ挙動。レビュー R-2） */
+async function portraitCrossKeepFlow() {
+  const ctx = await touchContext({ [WORKSPACE_KEY]: twoLegs, [PREFS_KEY]: prefsText('dark') });
+  const page = await ctx.newPage();
+  await page.goto(pageUrl('next'));
+  await waitReady(page, 'next');
+  await setShell(page, 'positions', 'hidden');
+  const st0 = await pnlCrossState(page);
+  const cdp = await ctx.newCDPSession(page);
+  const touch = (type, touchPoints) => cdp.send('Input.dispatchTouchEvent', { type, touchPoints });
+  if (st0) {
+    const x = Math.round(st0.left + st0.plot.x + st0.plot.w * 0.3);
+    const y = Math.round(st0.top + st0.plot.y + st0.plot.h * 0.4);
+    await touch('touchStart', [{ x, y, id: 0 }]);
+    await page.waitForTimeout(40);
+    await touch('touchEnd', []);
+    await page.waitForTimeout(400);
+  }
+  await crossKeepCheck(page, '#348 縦向き 390x844');
+  await ctx.close();
+}
+
+async function landStableFlow() {
+  const tag = '#348 横向き 844x390';
+  const ctx = await touchContext(
+    { [WORKSPACE_KEY]: twoLegs, [PREFS_KEY]: prefsText('dark') },
+    { width: 844, height: 390 },
+  );
+  const page = await ctx.newPage();
+  await page.goto(pageUrl('next'));
+  await waitReady(page, 'next');
+  await setShell(page, 'positions', 'hidden');
+  const st0 = await pnlCrossState(page);
+  const cdp = await ctx.newCDPSession(page);
+  const touch = (type, touchPoints) => cdp.send('Input.dispatchTouchEvent', { type, touchPoints });
+  if (st0) {
+    const x = Math.round(st0.left + st0.plot.x + st0.plot.w * 0.3);
+    const y = Math.round(st0.top + st0.plot.y + st0.plot.h * 0.4);
+    await touch('touchStart', [{ x, y, id: 0 }]);
+    await page.waitForTimeout(40);
+    await touch('touchEnd', []);
+    await page.waitForTimeout(400);
+  }
+  const read = () =>
+    page.evaluate(() => ({
+      w: document.querySelector('section.stage .chart')?.clientWidth ?? 0,
+      ro: Math.round(
+        document.querySelector('section.stage .readout')?.getBoundingClientRect().width ?? 0,
+      ),
+      xh: document.querySelectorAll('section.stage .chart .xh-line').length,
+      sub: document.querySelector('.readout .ro[data-ro="date"] .s')?.textContent ?? '',
+    }));
+  const seen = [{ ...(await read()), ...(await crossPos(page)) }];
+  await page.focus('section.stage .chart');
+  for (let i = 0; i < 3; i++) {
+    await page.keyboard.press('Shift+ArrowRight');
+    await page.waitForTimeout(250);
+    seen.push({ ...(await read()), ...(await crossPos(page)) });
+  }
+  check(
+    `${tag} X を Shift+→ で 3 回動かしても描画域の幅・読み取りの列の幅が変わらず、十字線が同じ位置に残る（横の札・縦線の位置。レビュー B-1・R-2）`,
+    seen.every(
+      (r) =>
+        r.w === seen[0].w &&
+        r.ro === seen[0].ro &&
+        r.xh === 2 &&
+        r.xTag === seen[0].xTag &&
+        r.vx === seen[0].vx,
+    ) && new Set(seen.map((r) => r.sub)).size > 1,
+    seen
+      .map((r) => `${r.w}/${r.ro}/十字線 ${r.xh}・札 ${r.xTag}・縦線 ${r.vx}「${r.sub}」`)
+      .join(' → '),
+  );
+  // 大きさだけの変化（hidden → peek。描画域が狭くなる）では十字線が残り、値の座標どおりに描き直される（レビュー R-2）
+  await crossKeepCheck(page, tag);
+  // (b) 補間の間の描き直し
+  await setShell(page, 'positions', 'peek');
+  await settleMotion(page);
+  const count = async (key) => {
+    await page.evaluate(() => {
+      const svg = document.querySelector('section.stage .chart > svg');
+      window.__wn = 0;
+      window.__wo?.disconnect();
+      if (!svg) return;
+      window.__wo = new MutationObserver((ms) => {
+        window.__wn += ms.filter((m) => m.attributeName === 'width').length;
+      });
+      window.__wo.observe(svg, { attributes: true, attributeFilter: ['width'] });
+    });
+    await page.focus('.grabber');
+    await page.keyboard.press(key);
+    await page.waitForTimeout(80);
+    await settleMotion(page);
+    await page.waitForTimeout(200);
+    return page.evaluate(() => window.__wn);
+  };
+  const n1 = await count('Enter');
+  const s1 = await page.getAttribute('.layout', 'data-sheet');
+  const n2 = await count('Enter');
+  const s2 = await page.getAttribute('.layout', 'data-sheet');
+  check(
+    `${tag} 覗く ⇄ 全開の列の幅の補間の間、舞台の svg の width の書き換えは 1 回以下（#123・レビュー N-1）`,
+    s1 === 'full' && s2 === 'peek' && n1 <= 1 && n2 <= 1,
+    `peek → ${s1}: ${n1} 回・→ ${s2}: ${n2} 回`,
+  );
+  await ctx.close();
+}
+
+async function landFlows() {
+  await landRotateFlow();
+  await landGrabFlow();
+  await landStableFlow();
+  await portraitCrossKeepFlow();
+}
+
 // 開く URL（#91: 既定はクエリなし。--parts は ?parts）
 console.log(`URL: ${pageUrl(mode)}`);
 try {
@@ -18794,6 +19579,9 @@ try {
     await fontSweep();
   } else if (popoversOnly && !parts && !flows) {
     await popoverSweep();
+  } else if (landOnly && !parts) {
+    if (flows) await landFlows();
+    else await landAll();
   } else if (aiOnly && !parts) {
     if (flows)
       for (const vp of [

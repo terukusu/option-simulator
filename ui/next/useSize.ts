@@ -1,13 +1,14 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
 
-/** スマホのシート（shell.css の `transition: height` が付くのはこの 2 つだけ。#91 段 C） */
+/** スマホのシート（shell.css の `transition: height`（横向きは `width`。#348）が付くのはこの 2 つだけ。#91 段 C） */
 const SHEET_SEL = 'section.panel.side, section.scenario';
 
-/** 走っているシートの高さの補間（peek ⇄ full） */
+/** 走っているシートの高さ（横向きはパネルの列の幅）の補間（peek ⇄ full） */
 export function sheetTransition(anims: readonly Animation[]): Animation | undefined {
   return anims.find((a) => {
     if (!(a instanceof CSSTransition)) return false;
-    if (a.transitionProperty !== 'height' || a.playState !== 'running') return false;
+    const prop = a.transitionProperty;
+    if ((prop !== 'height' && prop !== 'width') || a.playState !== 'running') return false;
     const t = a.effect instanceof KeyframeEffect ? a.effect.target : null;
     return t instanceof Element && t.matches(SHEET_SEL);
   });
@@ -15,7 +16,7 @@ export function sheetTransition(anims: readonly Animation[]): Animation | undefi
 
 /**
  * el の幅と高さ（CSS px、整数に切り捨て）を ResizeObserver で追い、変わったら onSize に渡す（最初に 1 回すぐ渡す）。
- * 反映は次のフレーム（ResizeObserver loop completed with undelivered notifications を出さない）。シートの高さの補間が
+ * 反映は次のフレーム（ResizeObserver loop completed with undelivered notifications を出さない）。シートの高さ（スマホの横向きはパネルの列の幅。#348）の補間が
  * 走っている間は反映を止め、終わり（finished。取り消しでも）で 1 回だけ反映する（補間の間に舞台・パネルをフレームごとに
  * 描き直さない。#123）。返り値で止める（止めた後は onSize を呼ばない）
  */

@@ -151,7 +151,25 @@ describe('watchSize（#123）', () => {
     expect(seen).toEqual(['300x200', '300x120']);
   });
 
-  it('シート以外の height の補間・height 以外の補間・止まった補間では待たない', async () => {
+  it('スマホの横向き（#348）: パネルの列の幅の補間（width）の間も反映せず、finished で 1 回だけ反映する', async () => {
+    const m = await load();
+    const el = new FakeElement('div');
+    const { seen } = watch(m, el);
+    const t = new FakeTransition(new FakeElement('section.panel.side'), 'width');
+    anims = [t];
+    for (const w of [280, 220, 160]) {
+      el.clientWidth = w;
+      resize();
+    }
+    expect(seen).toEqual(['300x200']);
+    anims = [];
+    t.resolve();
+    await flush();
+    step();
+    expect(seen).toEqual(['300x200', '160x200']);
+  });
+
+  it('シート以外の height の補間・height / width 以外の補間・止まった補間では待たない', async () => {
     const m = await load();
     const el = new FakeElement('div');
     const { seen } = watch(m, el);

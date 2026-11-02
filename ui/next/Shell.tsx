@@ -3,6 +3,7 @@ import { useMemo, useRef } from 'preact/hooks';
 import {
   DOCK_LABELS,
   dockPanels,
+  grabDelta,
   leftView,
   MARKET_VIEWS,
   marketAttr,
@@ -58,6 +59,11 @@ const DOCK_IC: Record<PanelId, ComponentChildren> = {
  */
 export function Shell(p: {
   tier: Tier;
+  /**
+   * スマホの横向き（#348。ui/view/layout.ts の LAND_QUERY。段は phone のまま）。つまみの向き（パネルの列の左端に縦・
+   * 横の移動量）だけを変える。配置は CSS の @media
+   */
+  land: boolean;
   state: ShellState;
   send: (a: ShellAction) => void;
   legCount: number;
@@ -80,10 +86,14 @@ export function Shell(p: {
 }) {
   const { tier, state, send } = p;
   const panel = visiblePanel(state, tier);
-  // つまみはスマホで、見えているシートの先頭に 1 つだけ
+  // つまみはスマホで、見えているシートの先頭に 1 つだけ（横向きはパネルの列の左端に縦。#348）
+  const { land } = p;
   const grabber = (id: PanelId) =>
     tier === 'phone' && panel === id && state.sheet !== 'hidden' ? (
-      <Grabber onGrab={(dy) => send({ type: 'grab', dy })} />
+      <Grabber
+        land={land}
+        onGrab={(dx, dy) => send({ type: 'grab', dy: grabDelta(land, dx, dy) })}
+      />
     ) : null;
   // 市場の Seg は同じ要素を使い回す（板・スマイルの領域の pure を効かせる）
   const { market } = state;
@@ -196,32 +206,37 @@ export function Shell(p: {
 }
 
 /**
- * シートのつまみ。指に追従させず、離したときの縦の移動量で段階を決める（ui/view/shell.ts の grab）。
- * キーボードの Enter / Space はタップ（peek ⇄ full）。
+ * シートのつまみ。指に追従させず、離したときの移動量で段階を決める（ui/view/shell.ts の grab）。縦向きは縦の移動量
+ * （シートの高さ）、横向き（#348）は横の移動量（パネルの列の幅。左 = 広く・右 = 狭く）。キーボードの Enter / Space は
+ * タップ（peek ⇄ full）。
  */
-function Grabber({ onGrab }: { onGrab: (dy: number) => void }) {
-  const start = useRef<number | null>(null);
+function Grabber({ land, onGrab }: { land: boolean; onGrab: (dx: number, dy: number) => void }) {
+  const start = useRef<{ x: number; y: number } | null>(null);
   return (
     <button
       type="button"
       class="grabber"
-      aria-label="シートの高さ"
-      title="シートの高さ（タップで切替・上下にドラッグ）"
+      aria-label={land ? 'パネルの幅' : 'シートの高さ'}
+      title={
+        land
+          ? 'パネルの幅（タップで切替・左右にドラッグ）'
+          : 'シートの高さ（タップで切替・上下にドラッグ）'
+      }
       onPointerDown={(e) => {
-        start.current = e.clientY;
+        start.current = { x: e.clientX, y: e.clientY };
         e.currentTarget.setPointerCapture(e.pointerId);
       }}
       onPointerUp={(e) => {
-        const y0 = start.current;
+        const s0 = start.current;
         start.current = null;
-        if (y0 !== null) onGrab(e.clientY - y0);
+        if (s0 !== null) onGrab(e.clientX - s0.x, e.clientY - s0.y);
       }}
       onPointerCancel={() => {
         start.current = null;
       }}
       onClick={(e) => {
         // ポインタの操作は pointerup で済んでいる。キーボード（detail = 0）だけここで
-        if (e.detail === 0) onGrab(0);
+        if (e.detail === 0) onGrab(0, 0);
       }}
     />
   );
