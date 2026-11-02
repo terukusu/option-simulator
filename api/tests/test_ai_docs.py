@@ -297,7 +297,16 @@ def test_design_5_13_single_read(idx):
     sec = idx.get("design", "5.13")
     assert sec is not None
     assert len(sec.parts()) == 1
-    assert "g(ΔX%)" in sec.text and "60pt" in sec.text and "測り直しの手順" in sec.text
+    assert "g(ΔX%)" in sec.text and "40pt" in sec.text and "測り直しの手順" in sec.text
+
+
+# ---- #354: β の形の角の丸めと上限（設計書 5.15）も 1 回の読みに収まる ----
+
+def test_design_5_15_single_read(idx):
+    sec = idx.get("design", "5.15")
+    assert sec is not None
+    assert len(sec.parts()) == 1
+    assert "40pt" in sec.text and "roundKnotPct" in sec.text and "−20.275%" in sec.text
 
 
 # ---- #307: 過去の急落の再生（設計書 5.14）も 1 回の読みに収まる。マニュアルは 8.6（8.5 の追証マップは変えない） ----

@@ -122,9 +122,9 @@ describe('#83 AC-3 (a) ステッパー 4 つ + β', () => {
     const note = betaNote();
     expect(note).toContain(`β 1.0 = ${BETA_SHAPE.period} の実測の中央値の形`);
     expect(note).toContain(`測った日 ${BETA_SHAPE.measuredOn}`);
-    expect(note).toContain('−3% +0.75・−6% +3.45・−10% +19.45pt');
+    expect(note).toContain('−3% +0.99・−6% +4.61・−10% +19.45pt');
     expect(note).toContain('上げでは 0');
-    expect(note).toContain('最大 60pt');
+    expect(note).toContain('最大 40pt');
     expect(note).not.toContain('pt / 1%');
   });
 
