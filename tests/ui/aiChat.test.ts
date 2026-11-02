@@ -607,10 +607,10 @@ describe('#136 照合の出所: [AI に聞く] の質問の表示の値・β の
       scenario: { days: 0, iv_shift_pt: 0, x_range: [60000, 70000], beta: 1 },
     };
     const src = numberSources(conv('chat', 'x', ctx));
-    // g(−3%) = 0.75・g(−6%) = 3.45・g(−10%) = 19.45（BETA_SHAPE）
-    const r = checkNumbers('β 1.0 なので −10% で IV が +19.45pt、−6% で +3.45pt 上がります', src);
+    // g(−3%) = 0.99375・g(−6%) = 4.6125・g(−10%) = 19.45（BETA_SHAPE）
+    const r = checkNumbers('β 1.0 なので −10% で IV が +19.45pt、−6% で +4.61pt 上がります', src);
     expect(r.tokens.find((t) => t.raw === '+19.45pt')?.status).toBe('matched');
-    expect(r.tokens.find((t) => t.raw === '+3.45pt')?.status).toBe('matched');
+    expect(r.tokens.find((t) => t.raw === '+4.61pt')?.status).toBe('matched');
     expect(
       checkNumbers('−10% で +19.5pt', src).tokens.find((t) => t.raw === '+19.5pt')?.status,
     ).toBe('matched');

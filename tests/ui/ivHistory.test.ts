@@ -711,7 +711,7 @@ describe('AC11: シナリオの水準', () => {
         { ...ZERO_SCENARIO, dX: -0.05 * x0, dSigma: 10, beta: 2, ivShift: 'relative' },
         x0,
       ),
-    ).toBeCloseTo(22 + 2 * (0.75 + 1.8), 9);
+    ).toBeCloseTo(22 + 2 * (2.55 + 3.1 / 24), 9); // g(−5%): −5% は −6% の角の丸め（4.5〜7.5%）の中
     expect(ivScenarioLevel(20, { ...ZERO_SCENARIO, dSigma: -40 }, x0)).toBeCloseTo(1, 9);
   });
 
