@@ -759,3 +759,34 @@ section.smile[aria-label="銘柄の推移"] .panel-head .sub {
   color: var(--ink);
   font-family: var(--mono);
 }
+
+/*
+ * スマホの横向き（#348 第 2 弾。docs/ui-redesign.md §2.5。ui/view/layout.ts の LAND_QUERY）: 窓が低い（360〜412px）ので、
+ * 全開の右の列で描画域の高さを残すよう、決まった高さの行（見出し・ツールの行・読み取り・凡例）の上下の余白を詰める。
+ * 当たり判定（記号ボタン 32px・Seg の高さ）は変えない。読み取りの行の高さは固定のまま（#130 = カーソルで行の高さが変わらない）
+ */
+@media (pointer: coarse) and (min-width: 560px) and (max-width: 1199.98px) and (max-height: 500px) {
+  /* 見出しは全開のときだけ 32px（覗くでドックのパネルを切り替えても見出しの高さが跳ばない。#348 第 2 弾のレビュー N-7） */
+  .layout[data-sheet="full"] section.smile > .panel-head {
+    height: 32px;
+  }
+
+  .iv-tools {
+    padding-block: 4px;
+  }
+
+  .iv-readout {
+    height: 22px;
+    padding-block: 3px;
+  }
+
+  .iv-readout.ema,
+  .iv-readout.opt-readout.sub {
+    height: 18px;
+    padding-top: 0;
+  }
+
+  .iv-legend {
+    padding-block: 3px;
+  }
+}
