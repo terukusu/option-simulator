@@ -6,7 +6,7 @@ import { pure } from '../../components/pure';
 import { useChartGestures } from '../../components/useChartGestures';
 import { type SmileEffLineInput, useSmileEffLine } from '../../components/useSmileEffLine';
 import type { Action } from '../../state';
-import { CROSS_TOUCH_GRAB_PX } from '../../view/crosshair';
+import { CROSS_TOUCH_GRAB_PX, ticksClearX, ticksClearY } from '../../view/crosshair';
 import { fmtNum } from '../../view/format';
 import type { AmountUnit } from '../../view/metrics';
 import {
@@ -318,16 +318,19 @@ function SmilePlotView(p: SmilePlotProps) {
               ))}
             </g>
             <g class="ax">
-              {yTicks.map((t) => (
+              {/* 十字線の札と重なる目盛りの文字は描かない（#349。格子の線は残す） */}
+              {ticksClearY(yTicks, xh ? xh.yTag : null, sy).map((t) => (
                 <text key={`y${t}`} x={M.left - 5} y={sy(t)} class="ty">
                   {fmtNum(t, 0)}
                 </text>
               ))}
-              {xTicks.map((t) => (
-                <text key={`x${t}`} x={sx(t)} y={h - M.bottom + 15} class="tx">
-                  {axisTickLabel(axis, t)}
-                </text>
-              ))}
+              {ticksClearX(xTicks, xh ? xh.xTag : null, sx, (t) => axisTickLabel(axis, t)).map(
+                (t) => (
+                  <text key={`x${t}`} x={sx(t)} y={h - M.bottom + 15} class="tx">
+                    {axisTickLabel(axis, t)}
+                  </text>
+                ),
+              )}
             </g>
             {model.atmX !== null && vline(SMILE_LINE_CLASS.atm, sx(model.atmX))}
             {scnAtmX !== null && vline(SMILE_LINE_CLASS.scenario, sx(scnAtmX))}

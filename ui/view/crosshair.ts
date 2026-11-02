@@ -74,3 +74,48 @@ export const CROSS_TOUCH_GRAB_PX = 14;
 export function crossTapAction(shown: boolean): 'place' | 'hide' {
   return shown ? 'hide' : 'place';
 }
+
+/**
+ * 目盛りの文字の高さの半分（px。10.5px の文字の半分 5.25 + 余裕。#349）。縦軸の目盛りは文字の中心 = 目盛りの位置
+ */
+export const TICK_TEXT_HALF_H = 6;
+/** 札と目盛りの文字の間に空ける隙間（px。#349） */
+export const TICK_TAG_GAP = 2;
+/** 浮動小数の誤差（ちょうど隙間のときに残す） */
+const TICK_EPS = 1e-6;
+
+/**
+ * 縦軸の札と重ならない目盛り（#349。十字線の出ている間、札と重なる目盛りの文字は描かない。格子の線は残す）。
+ * 目盛りの列は札の真下なので横は必ず重なる → 高さだけで見る: 中心の差 >= 札の高さの半分 + TICK_TEXT_HALF_H + TICK_TAG_GAP
+ * なら残す。札が無ければ同じ配列を返す。元の順を保つ
+ */
+export function ticksClearY<T>(
+  ticks: readonly T[],
+  tag: Pick<CrossTagBox, 'y' | 'h'> | null,
+  at: (t: T) => number,
+): readonly T[] {
+  if (!tag) return ticks;
+  const mid = tag.y + tag.h / 2;
+  const min = tag.h / 2 + TICK_TEXT_HALF_H + TICK_TAG_GAP;
+  return ticks.filter((t) => Math.abs(at(t) - mid) >= min - TICK_EPS);
+}
+
+/**
+ * 横軸の札と重ならない目盛り（#349。規則は ticksClearY と同じ）。目盛りの行は札と同じ行なので幅だけで見る:
+ * 文字の区間 [at − labelPx/2, at + labelPx/2] と [札の左 − GAP, 札の右 + GAP] が交わらなければ残す（ちょうど接するなら残す）
+ */
+export function ticksClearX<T>(
+  ticks: readonly T[],
+  tag: Pick<CrossTagBox, 'x' | 'w'> | null,
+  at: (t: T) => number,
+  label: (t: T) => string,
+): readonly T[] {
+  if (!tag) return ticks;
+  const lo = tag.x - TICK_TAG_GAP;
+  const hi = tag.x + tag.w + TICK_TAG_GAP;
+  return ticks.filter((t) => {
+    const c = at(t);
+    const half = labelPx(label(t)) / 2;
+    return c + half <= lo + TICK_EPS || c - half >= hi - TICK_EPS;
+  });
+}

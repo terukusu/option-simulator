@@ -14,7 +14,7 @@ import {
 } from '../../chart/split';
 import { pure } from '../../components/pure';
 import { useChartGestures } from '../../components/useChartGestures';
-import { CROSS_TOUCH_GRAB_PX, crossTapAction } from '../../view/crosshair';
+import { CROSS_TOUCH_GRAB_PX, crossTapAction, ticksClearY } from '../../view/crosshair';
 import {
   type FutPaneLayout,
   futPaneAt,
@@ -72,6 +72,9 @@ export interface IndicatorPanesProps {
   lineWidth: number;
 }
 
+/** ガイドの位置（#349 の札との重なりの判定に渡す） */
+const guideY = (g: { y: number }) => g.y;
+
 function Pane({
   m,
   ro,
@@ -86,6 +89,8 @@ function Pane({
   lineWidth: number;
 }) {
   const { width: w, height: h, range } = m;
+  // 十字線の札と重なるガイドの文字は描かない（#349。ガイドの線は残す）
+  const guideTexts = cross ? new Set(ticksClearY(m.guides, cross.tag, guideY)) : null;
   return (
     <svg
       class={`ind-pane ${m.kind}`}
@@ -105,9 +110,11 @@ function Pane({
             y1={g.y}
             y2={g.y}
           />
-          <text class="ind-ty" x={range[0] - 5} y={g.y}>
-            {g.label}
-          </text>
+          {(!guideTexts || guideTexts.has(g)) && (
+            <text class="ind-ty" x={range[0] - 5} y={g.y}>
+              {g.label}
+            </text>
+          )}
         </g>
       ))}
       {m.histUp && <path class="ind-hist up" d={m.histUp} />}
