@@ -2,16 +2,22 @@
 
 - 予約 = 送る前にその要求の最大額を先に計上する。1 要求で上流を最大 T = AI_MAX_TURNS 回呼ぶ（Skill の turn。#221）。
   E = 入力の見積もり（トークン数の上界。CLI が足す分を含む）、M = max_tokens、
-  K = 1 要求で読むスキルと文書の上界（loaded_tokens。#137 で文書の read_doc の 1 要求の上限を足した）、
-  g = M + K（turn ごとに増える入力の上界 = 前の turn の出力 + Skill・read_doc の結果。K を turn ごとに足すので
-  保守側）、w = 書き込みの単価（5 分と 1 時間の
-  大きい方。CLI は資格情報によって 1 時間の TTL を付ける）、r = 読み出しの単価、o = 出力の単価:
-    turn 0: E × w + M × o
-    turn i（1 ≤ i < T）: (E + (i−1)·g) × r（前の turn の要求全体 = キャッシュの読み出し）+ g × w + M × o
+  S = 1 turn で読むスキルの上界（skill_tokens。SKILL.md の合計 + Skill の枠。turn ごとに足す = 保守側。各スキルは
+  1 要求に 1 回・呼び出しは AI_SKILL_MAX_CALLS 回までをフックが守る。#338）、
+  D = 1 要求で読む文書の上界（doc_tokens。read_doc の 1 要求の合計の上限 + 枠。docs.Reader が要求全体で数えるので
+  1 要求に 1 回だけ足す。#137・#338 = ADR-0007 の追補）、
+  w = 書き込みの単価（5 分と 1 時間の大きい方。CLI は資格情報によって 1 時間の TTL を付ける）、r = 読み出しの単価、
+  o = 出力の単価。turn i ≥ 1 の要求 = 前の turn の要求（キャッシュの読み出し）+ 増えた分（前の出力 M + S + 文書）を
+  書き込み。文書は最悪の並び（turn 0 の結果で全部読む）で数える（t = max(T, 1)）:
+    書き込み = E + (t−1)(M + S) + D·[t > 1]
+    読み出し = (t−1)E + (M + S)(t−1)(t−2)/2 + D·max(t−2, 0)
+    出力 = t·M
+  T = 1 では E × w + M × o（画像の読み取り read_positions は S = D = 0）。
   前提: CLI は各要求の最後の message に cache_control を付け、次の turn の要求は前の turn の要求をそのまま前置きに
   持つ（tests/test_ai_agent_sdk_cli.py で固定）ので、前の turn の要求はキャッシュから読まれる。キャッシュから
   読めなかったとき（追い出し）だけ、その差（前の要求 × (w − r)）の分、精算で予約を越えうる（次の要求は 429）。
-  計上額 + 予約額 ≤ 上限 のときだけ送る
+  CLI がフックより前にエラーで返すツール呼び出し（知らないツール名・一覧に無いスキル名・入力の型の誤り）の結果も
+  同じく式の外（ADR-0007 の追補の「残る例外」）。計上額 + 予約額 ≤ 上限 のときだけ送る
 - 精算: 終わったら usage × 料金表の実額との差を足し引きする。途中で切れたら精算しない（予約額のまま = 多めに数える）
 - 日は JST の日付（0:00 JST に戻る）
 """
@@ -39,25 +45,31 @@ def estimate_input_tokens(text: str) -> int:
     return len(text.encode("utf-8")) + st.AI_INPUT_OVERHEAD_TOKENS + st.AI_CLI_OVERHEAD_TOKENS
 
 
-def loaded_tokens() -> int:
-    """1 要求で読むものの上界 K（トークン。トークン数 ≤ バイト数）: SKILL.md の合計 + 枠の余裕 + 文書の read_doc の
-    1 要求の上限 + 枠の余裕（#137。文書の索引が無いときも足す = 保守側）"""
+def skill_tokens() -> int:
+    """1 turn で読むスキルの上界 S（トークン。トークン数 ≤ バイト数）: SKILL.md の合計 + Skill の枠の余裕
+    （tool_use・tool_result・deny の文・CLI が足す前置き。AI_SKILL_MAX_CALLS 回ぶん）。turn ごとに足す"""
     from . import skills
 
-    return (skills.total_bytes() + st.AI_SKILL_OVERHEAD_TOKENS
-            + st.AI_DOC_REQUEST_MAX_BYTES + st.AI_DOC_OVERHEAD_TOKENS)
+    return skills.total_bytes() + st.AI_SKILL_OVERHEAD_TOKENS
+
+
+def doc_tokens() -> int:
+    """1 要求で読む文書の上界 D: read_doc の 1 要求の合計の上限 + 枠の余裕（#137。docs.Reader が要求全体で数える
+    ので 1 要求に 1 回。#338）。文書の索引が無いときも足す = 保守側"""
+    return st.AI_DOC_REQUEST_MAX_BYTES + st.AI_DOC_OVERHEAD_TOKENS
 
 
 def reserve_micro_usd(model: str, est_input_tokens: int, max_tokens: int, turns: int = 1,
-                      loaded_tokens: int = 0) -> int:
-    """予約額（µUSD）。turn 0 は E を書き込み、turn i ≥ 1 は前の turn の要求全体を読み出し + 増えた分 g を書き込み
-    （モジュールの説明の式）"""
+                      per_turn_tokens: int = 0, per_request_tokens: int = 0) -> int:
+    """予約額（µUSD）。per_turn_tokens = S（turn ごとに増えうる分）、per_request_tokens = D（1 要求の合計で上限が
+    ある分）。モジュールの説明の式"""
     p = st.AI_PRICES[model]
     write = max(p["cache_write_5m"], p["cache_write_1h"])
-    g = max_tokens + loaded_tokens
+    g = max_tokens + per_turn_tokens
+    d = per_request_tokens
     t = max(turns, 1)
-    written = est_input_tokens + (t - 1) * g
-    read = (t - 1) * est_input_tokens + g * (t - 1) * (t - 2) // 2
+    written = est_input_tokens + (t - 1) * g + (d if t > 1 else 0)
+    read = (t - 1) * est_input_tokens + g * (t - 1) * (t - 2) // 2 + d * max(t - 2, 0)
     return _ceil_div(written * write + read * p["cache_read"] + t * max_tokens * p["output"], MTOK)
 
 

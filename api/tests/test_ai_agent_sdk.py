@@ -113,10 +113,10 @@ def turn_events(tools=2, redacted=True) -> list:
 
 class FakeQuery:
     """claude_agent_sdk.query の代わり。受けた options・prompt を記録し、決まった事象の列を流す
-    （raise_after 件の後に raise）"""
+    （raise_after 件の後に raise）。call_hooks: Skill の tool_use でフックを呼ぶ（本物の CLI と同じ）"""
 
     def __init__(self, events, raise_after: int | None = None, error: BaseException | None = None,
-                 tail=(), gate: threading.Event | None = None):
+                 tail=(), gate: threading.Event | None = None, call_hooks: bool = True):
         self.events = list(events)
         self.raise_after = raise_after
         self.error = error
@@ -125,6 +125,22 @@ class FakeQuery:
         self.options = None
         self.prompts: list[dict] = []
         self.closed = False
+        self.call_hooks = call_hooks
+        self.hook_outputs: list[dict] = []
+
+    async def _skill_hook(self, ev: dict, skill_json: dict[int, list[str]]) -> None:
+        """本物の CLI と同じく、Skill の tool_use の入力が揃ったら PreToolUse のフックを呼ぶ（#338: フックが許可した
+        スキルを meta に出す）"""
+        t = ev.get("type")
+        if t == "content_block_start" and (ev.get("content_block") or {}).get("name") == "Skill":
+            skill_json[ev["index"]] = []
+        elif t == "content_block_delta" and ev.get("index") in skill_json:
+            skill_json[ev["index"]].append((ev.get("delta") or {}).get("partial_json", ""))
+        elif t == "content_block_stop" and ev.get("index") in skill_json:
+            raw = "".join(skill_json.pop(ev["index"]))
+            hook = self.options.hooks["PreToolUse"][0].hooks[0]
+            self.hook_outputs.append(await hook({"tool_name": "Skill", "tool_input": json.loads(raw) if raw else {}},
+                                                "toolu_sk", {}))
 
     def __call__(self, prompt, options):
         self.options = options
@@ -142,9 +158,12 @@ class FakeQuery:
                 if self.gate is not None:
                     while not self.gate.is_set():
                         await asyncio.sleep(0.01)
+                skill_json: dict[int, list[str]] = {}
                 for n, m in enumerate(self.events + self.tail):
                     if self.raise_after is not None and n == self.raise_after:
                         raise self.error
+                    if self.call_hooks and isinstance(m, StreamEvent):
+                        await self._skill_hook(m.event, skill_json)
                     yield m
                 if self.raise_after is not None and self.raise_after >= len(self.events + self.tail):
                     raise self.error
@@ -355,9 +374,143 @@ def test_hook_allows_listed_skill_only():
     for name in skills.ENABLED:
         assert asyncio.run(_hook(fq)({"tool_name": "Skill", "tool_input": {"skill": name}}, "t", {})) == {}
     for bad in ({"skill": "simulator:unknown"}, {"skill": "other:technicals"}, {}, None, {"skill": 1}):
-        out = asyncio.run(_hook(fq)({"tool_name": "Skill", "tool_input": bad}, "t", {}))
+        out = asyncio.run(agent_sdk._hook()({"tool_name": "Skill", "tool_input": bad}, "t", {}))  # 回数は別に数える
         assert out["hookSpecificOutput"]["permissionDecision"] == "deny"
+        assert out["hookSpecificOutput"]["permissionDecisionReason"] == agent_sdk.SKILL_DENY_REASON
         assert "continue_" not in out  # turn は続く（モデルが別の手で答える）
+
+
+# ---- スキルの守り（#338: 同じスキルの 2 回目・args は deny、AI_SKILL_MAX_CALLS を超えたら打ち切る） ----
+
+def _skill(name, **extra) -> dict:
+    return {"tool_name": "Skill", "tool_input": {"skill": name, **extra}}
+
+
+def _decision(out: dict) -> str:
+    """フックの返り → allow / deny / stop（deny + continue_=False）"""
+    if out == {}:
+        return "allow"
+    assert out["hookSpecificOutput"]["permissionDecision"] == "deny"
+    if "continue_" in out:
+        assert out["continue_"] is False
+        return "stop"
+    return "deny"
+
+
+def _call(hook, data) -> str:
+    return _decision(asyncio.run(hook(data, "t", {})))
+
+
+def test_skill_calls_limit_covers_all_skills():
+    # 全部のスキルを 1 回ずつは読める（予備 1。値の根拠は settings の説明と tests/test_ai_agent_sdk_cli.py）
+    assert st.AI_SKILL_MAX_CALLS >= len(skills.NAMES)
+    assert st.AI_SKILL_MAX_CALLS == 5
+
+
+def test_hook_denies_same_skill_twice_in_request():
+    hook = agent_sdk._hook()
+    assert _call(hook, _skill("simulator:technicals")) == "allow"
+    out = asyncio.run(hook(_skill("simulator:technicals"), "t", {}))
+    assert _decision(out) == "deny" and "continue_" not in out  # turn は続く
+    assert out["hookSpecificOutput"]["permissionDecisionReason"] == agent_sdk.SKILL_DUP_REASON
+    # 素の名前と <プラグイン>:<スキル> は同じスキル（CLI は素の名前でも読む）
+    assert _call(hook, _skill("technicals")) == "deny"
+    assert _call(hook, _skill("proposals")) == "allow"
+    assert _call(hook, _skill("simulator:proposals")) == "deny"
+
+
+def test_hook_stops_after_skill_call_limit():
+    hook = agent_sdk._hook()
+    names = list(skills.ENABLED) + ["simulator:technicals"] * (st.AI_SKILL_MAX_CALLS - len(skills.ENABLED))
+    got = [_call(hook, _skill(n)) for n in names]
+    assert got[:len(skills.ENABLED)] == ["allow"] * len(skills.ENABLED)
+    assert got[len(skills.ENABLED):] == ["deny"] * (st.AI_SKILL_MAX_CALLS - len(skills.ENABLED))
+    # 上限を超えた 1 回は deny + continue_=False（要求を終える）。その後も止め続ける
+    out = asyncio.run(hook(_skill("simulator:volatility"), "t", {}))
+    assert _decision(out) == "stop"
+    assert out["hookSpecificOutput"]["permissionDecisionReason"] == agent_sdk.SKILL_LIMIT_REASON
+    assert _call(hook, _skill("simulator:presets")) == "stop"
+
+
+def test_hook_counts_unlisted_and_malformed_skill_calls():
+    # 一覧に無い名前・dict でない入力・名前の型の誤りも回数に数える（CLI は前で落とすが、守りを重ねる）
+    hook = agent_sdk._hook()
+    bad = [_skill("simulator:unknown"), _skill("other:technicals"), {"tool_name": "Skill", "tool_input": None},
+           _skill(1)]
+    assert [_call(hook, b) for b in bad] == ["deny"] * 4
+    assert st.AI_SKILL_MAX_CALLS == len(bad) + 1
+    assert _call(hook, _skill("simulator:technicals")) == "allow"  # 5 回目
+    assert _call(hook, _skill("simulator:proposals")) == "stop"  # 6 回目
+
+
+def test_hook_denies_skill_args():
+    # args は SKILL.md の後ろに足される（モデルの出力が次の turn の入力に増える = 予約の S の外）ので deny。
+    # 空の args は CLI が渡しうるので通す。余分なキーも deny
+    hook = agent_sdk._hook()
+    out = asyncio.run(hook(_skill("simulator:technicals", args="x" * 100), "t", {}))
+    assert _decision(out) == "deny"
+    assert out["hookSpecificOutput"]["permissionDecisionReason"] == agent_sdk.SKILL_ARGS_REASON
+    assert "x" not in json.dumps(out)  # 理由に入力を入れない
+    assert _call(hook, _skill("simulator:technicals", other=1)) == "deny"
+    assert _call(hook, _skill("simulator:technicals", args=["a"])) == "deny"
+    assert _call(hook, _skill("simulator:technicals", args="")) == "allow"
+    assert _call(hook, _skill("simulator:proposals", args=None)) == "allow"
+
+
+def test_hook_skill_count_resets_per_request():
+    # フックの状態は要求ごと（_hook を作るたび = options() を呼ぶたびに数え直す）
+    h1, h2 = agent_sdk._hook(), agent_sdk._hook()
+    assert _call(h1, _skill("simulator:technicals")) == "allow"
+    assert _call(h1, _skill("simulator:technicals")) == "deny"
+    assert _call(h2, _skill("simulator:technicals")) == "allow"
+    fq1 = FakeQuery(turn_events(), tail=[result()])
+    run(AgentSdkGateway(FAKE_TOKEN, query_fn=fq1))
+    fq2 = FakeQuery(turn_events(), tail=[result()])
+    run(AgentSdkGateway(FAKE_TOKEN, query_fn=fq2))
+    for fq in (fq1, fq2):
+        assert _call(_hook(fq), _skill("simulator:technicals")) == "allow"
+    assert _call(_hook(fq1), _skill("simulator:technicals")) == "deny"
+
+
+def test_skill_guard_counts_concurrent_calls():
+    guard = skills.SkillGuard()
+    n = 200
+    out: list[str] = []
+    lock = threading.Lock()
+
+    def call():
+        d = guard.decide({"skill": "simulator:technicals"})
+        with lock:
+            out.append(d)
+
+    threads = [threading.Thread(target=call) for _ in range(n)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert guard.calls == n
+    assert out.count("allow") == 1 and out.count("deny") == st.AI_SKILL_MAX_CALLS - 1
+    assert out.count("stop") == n - st.AI_SKILL_MAX_CALLS
+    assert guard.loaded == ["simulator:technicals"]
+
+
+def test_skill_guard_decide_order():
+    guard = skills.SkillGuard()
+    assert guard.decide("simulator:technicals") == "deny"  # dict でない
+    assert guard.decide({"skill": "technicals"}) == "allow"
+    assert guard.decide({"skill": "simulator:technicals"}) == "deny"
+    assert guard.decide({"skill": "presets", "args": "a"}) == "deny"
+    assert guard.decide({"skill": "presets"}) == "allow"
+    assert guard.loaded == ["simulator:technicals", "simulator:presets"]  # 正規化した名前・許可した順
+    assert guard.decide({"skill": "volatility"}) == "stop"  # 6 回目
+    assert guard.loaded == ["simulator:technicals", "simulator:presets"]
+
+
+def test_meta_skills_are_what_the_guard_allowed():
+    # ログの skills はフックが許可したもの（重複・deny を含まない）
+    fq = FakeQuery(skill_turn() + skill_turn("technicals") + turn_events(tools=0), tail=[result()])
+    evs = run(AgentSdkGateway(FAKE_TOKEN, query_fn=fq))
+    assert evs[-2] == {"type": "meta", "skills": ["simulator:technicals"], "turns": 3, "docs": []}
 
 
 def test_sdk_tool_handler_does_not_compute():

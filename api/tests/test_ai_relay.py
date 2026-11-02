@@ -34,7 +34,8 @@ def reserved_for(body, cfg=None) -> int:
     cfg = cfg or ai_settings()
     params = relay.build_params(allowlist.parse_request(json.dumps(body, ensure_ascii=False).encode(), REG), cfg, REG)
     return budget.reserve_micro_usd(cfg.model, budget.estimate_input_tokens(relay.params_text(params)),
-                                    st.AI_MAX_TOKENS, st.AI_MAX_TURNS, budget.loaded_tokens())
+                                    st.AI_MAX_TOKENS, st.AI_MAX_TURNS, budget.skill_tokens(),
+                                    budget.doc_tokens())
 
 
 def logs(capsys, event=None):

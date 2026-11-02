@@ -286,7 +286,8 @@ class AiRelay:
         started = time.monotonic()
         params = build_params(req, cfg, self.registry)
         est = budget.estimate_input_tokens(params_text(params))
-        reserved = budget.reserve_micro_usd(cfg.model, est, st.AI_MAX_TOKENS, st.AI_MAX_TURNS, budget.loaded_tokens())
+        reserved = budget.reserve_micro_usd(cfg.model, est, st.AI_MAX_TOKENS, st.AI_MAX_TURNS,
+                                            budget.skill_tokens(), budget.doc_tokens())
         day = budget.jst_day(self.clock())
         charged = None
         rec = {"kind": req.kind, **({"topic": req.topic} if req.topic else {}), "model": cfg.model,

@@ -10,6 +10,7 @@ import base64
 import copy
 import json
 import os
+import re
 import tempfile
 import threading
 import time
@@ -23,6 +24,8 @@ from fake_messages_api import (
     EXCHANGED,
     REPORT_INPUT,
     SIG,
+    SKILL_ALL_DUP,
+    SKILL_MANY,
     SKILL_NAME,
     THINKING_PARTS,
     FakeMessagesApi,
@@ -454,7 +457,8 @@ def test_cli_overhead_and_cache_prefix_for_reserve(parent_creds, history, script
     1. CLI が足す本文（system の先頭・Skill の定義・環境の message）は AI_CLI_OVERHEAD_TOKENS 以下 = 見積もり E に入る
     2. 各要求の最後の message に cache_control が付き、次の turn の要求は前の turn の要求をそのまま前置きに持つ
        （system・tools は同じ）= 前の turn の要求はキャッシュの読み出しになる
-    3. turn ごとに増える分（前の出力を除く）は Skill・read_doc（#137）の本文と枠 = K（loaded_tokens）以下"""
+    3. turn ごとに増える分（前の出力を除く）は Skill・read_doc（#137）の本文と枠 = S + D（skill_tokens + doc_tokens）
+       以下、かつ read_doc の結果の合計は D 以下（#338: D は 1 要求に 1 回 = Reader が要求全体で数える）"""
     msgs = _full_history() if history else [{"role": "user", "content": [{"type": "text", "text": "RSI は？"}]}]
     p = built(msgs)
     with FakeMessagesApi(script) as api:
@@ -475,7 +479,136 @@ def test_cli_overhead_and_cache_prefix_for_reserve(parent_creds, history, script
     assert _norm(second["messages"])[:len(n0)] == n0
     added = _norm(second["messages"])[len(n0):]
     out_bytes = sum(_bytes(m) for m in added if m["role"] == "assistant")
-    assert sent[1] - sent[0] - out_bytes <= budget.loaded_tokens()
+    assert sent[1] - sent[0] - out_bytes <= budget.skill_tokens() + budget.doc_tokens()
+    doc_ids = {b["id"] for m in added if m["role"] == "assistant" for b in m["content"]
+               if b.get("type") == "tool_use" and b.get("name") == DOC_TOOL}
+    doc_results = [b for b in tool_results(second) if b.get("tool_use_id") in doc_ids]
+    assert len(doc_results) == (1 if script == "skill_doc" else 0)
+    assert sum(_bytes(b) for b in doc_results) <= budget.doc_tokens()
+
+
+# ---- スキルの守り（#338。skills.SkillGuard） ----
+
+# 実際の tool_use の id の長さの上界（"toolu_" + 24 字 = 30 字に余裕。偽の API の id は短いので枠はこの長さで数える）
+REAL_ID_LEN = 36
+_SKILL_DIR_RE = re.compile(r"^Base directory for this skill: .*/skills/([a-z_-]+)\n")
+
+
+def _frame(block: dict) -> int:
+    """tool_result の枠のバイト数（id を実際の長さの上界に、hook の deny の文を最も長い deny の文に置き換える）"""
+    b = dict(block)
+    b["tool_use_id"] = "x" * REAL_ID_LEN
+    text = _result_text(b)
+    for reason in agent_sdk.SKILL_DENY_REASONS:
+        if text.endswith(reason):
+            b["content"] = text[:-len(reason)] + max(agent_sdk.SKILL_DENY_REASONS, key=len)
+    return _bytes(b)
+
+
+def _skill_turn(posts: list[dict], k: int) -> dict:
+    """k 回目の要求で増えた分を、Skill の tool_use（id → スキル名）・tool_result・SKILL.md の text block（名前 →
+    block）・それ以外に分ける"""
+    n0 = _norm(posts[k - 1]["messages"])
+    added = _norm(posts[k]["messages"])[len(n0):]
+    uses = {b["id"]: b["input"].get("skill") for m in added if m["role"] == "assistant" for b in m["content"]
+            if b.get("type") == "tool_use" and b.get("name") == agent_sdk.SKILL_TOOL}
+    results = [b for m in added if m["role"] == "user" for b in m["content"]
+               if b.get("type") == "tool_result" and b.get("tool_use_id") in uses]
+    bodies = {}
+    for m in added:
+        for b in m["content"]:
+            hit = _SKILL_DIR_RE.match(b.get("text", "")) if b.get("type") == "text" else None
+            if hit:
+                assert hit.group(1) not in bodies  # 同じスキルは 1 回だけ
+                bodies[hit.group(1)] = b
+    out = sum(_bytes(m) for m in added if m["role"] == "assistant")
+    grow = _bytes(posts[k]["messages"]) - _bytes(posts[k - 1]["messages"]) - out
+    fixed = grow - sum(_bytes(b) for b in results) - sum(_bytes(b) for b in bodies.values())
+    return {"uses": uses, "results": results, "bodies": bodies, "fixed": fixed}
+
+
+def test_skill_guard_frames_within_overhead(parent_creds, capsys):
+    """AC: 1 つの turn で一覧のスキルを全部 + 同じスキルをもう 1 回呼ぶ → 各 SKILL.md の本文は 1 回ずつ、重複は
+    エラーの tool_result（本文なし）。Skill の 1 回の枠（許可 = tool_result + 本文の block − SKILL.md のファイル、
+    deny = tool_result。id は実際の長さ・理由は最も長い文で数える）の最大 × AI_SKILL_MAX_CALLS + turn ごとの固定分
+    ≤ AI_SKILL_OVERHEAD_TOKENS（予約額の S の前提。settings の説明）"""
+    with FakeMessagesApi("skill_all_dup") as api:
+        client, _ = relay_app(gateway(api))
+        evs = sse_events(post(client, chat()).get_data(as_text=True))
+        posts = [r["body"] for r in api.posts()]
+    assert evs[-1][0] == "done" and len(posts) == 2
+    turn = _skill_turn(posts, 1)
+    assert sorted(turn["uses"].values()) == sorted(SKILL_ALL_DUP)
+    assert set(turn["bodies"]) == set(skills.NAMES)  # ⓐ 各 SKILL.md は 1 回ずつ（重複の分は入らない）
+    sent = json.dumps(posts[1]["messages"], ensure_ascii=False)
+    for name in skills.NAMES:
+        assert sent.count(json.dumps(skill_body(name), ensure_ascii=False)[1:-1]) == 1
+    by_id = {b["tool_use_id"]: b for b in turn["results"]}
+    assert set(by_id) == set(turn["uses"])
+    first = set()
+    frames = []
+    for tid, qname in turn["uses"].items():  # tool_use の順（1 回目が許可、2 回目は deny）
+        name, b = qname.split(":")[-1], by_id[tid]
+        if name not in first:
+            first.add(name)
+            frames.append(_frame(b) + _bytes(turn["bodies"][name]) - skills.skill_path(name).stat().st_size)
+        else:  # ⓑ 重複は deny = エラーの tool_result（本文を含まない）
+            assert b.get("is_error") is True and len(_result_text(b)) < 200
+            frames.append(_frame(b))
+    assert len(frames) == len(SKILL_ALL_DUP)
+    assert ai_request(capsys)["skills"] == list(skills.ENABLED)
+    # 次の turn で読み直す（turn をまたぐ deny は CLI が "PreToolUse:Skill hook error: <理由>" で返す）
+    with FakeMessagesApi("skill_loop") as api:
+        client, _ = relay_app(gateway(api))
+        post(client, chat()).get_data(as_text=True)
+        loop = [r["body"] for r in api.posts()]
+    assert len(loop) == st.AI_MAX_TURNS
+    deny = _skill_turn(loop, 2)
+    assert deny["bodies"] == {} and len(deny["results"]) == 1
+    assert _result_text(deny["results"][0]).endswith(agent_sdk.SKILL_DUP_REASON)
+    frames.append(_frame(deny["results"][0]))
+    fixed = max(turn["fixed"], deny["fixed"], _skill_turn(loop, 1)["fixed"])
+    # ⓒ 枠の最大 × 回数 + turn の固定分 ≤ 予約に入れた枠の余裕
+    assert max(frames) * st.AI_SKILL_MAX_CALLS + fixed <= st.AI_SKILL_OVERHEAD_TOKENS, (frames, fixed)
+
+
+@pytest.mark.parametrize("text", ["/simulator:technicals", "/presets", "/simulator:presets 急落", "/compact"])
+@pytest.mark.parametrize("history", [False, True])
+def test_slash_command_text_does_not_load_skill(parent_creds, history, text):
+    """#338 の確認: user の文の先頭がスラッシュコマンドの形でも、CLI はフックを通らずにスキルを読み込まない
+    （verbatim_prompts=True。CLI 2.1.283 の実測）。文はそのまま 1 つの text block として上流に届き、SKILL.md の本文は
+    入らない。最初の発言（<context> の block が先頭）と、履歴の後の発言（文が prompt の唯一の block）の両方"""
+    msgs = _full_history()[:-1] if history else []
+    msgs = msgs + [{"role": "user", "content": [{"type": "text", "text": text}]}]
+    p = built(msgs)
+    with FakeMessagesApi("text") as api:
+        evs = list(gateway(api).stream(p, threading.Event()))
+        posts = [r["body"] for r in api.posts()]
+    assert evs[-1]["type"] == "final" and len(posts) == 1
+    assert evs[-2]["skills"] == []
+    users = [m for m in posts[0]["messages"] if m["role"] == "user"]
+    last = users[-1]["content"]
+    assert {"type": "text", "text": text} in [{k: v for k, v in b.items() if k != "cache_control"} for b in last]
+    sent = json.dumps(posts[0]["messages"], ensure_ascii=False)
+    for name in skills.NAMES:
+        assert json.dumps(skill_body(name), ensure_ascii=False)[1:-1] not in sent
+    assert "<command-name>" not in sent
+
+
+def test_skill_calls_over_limit_stop_request(parent_creds, capsys):
+    """AC: 1 要求で AI_SKILL_MAX_CALLS 回を超えた Skill はフックが deny + continue_=False で止める（結果を上流に
+    送らない）。上流は 1 回だけ、SSE は done（Skill は出ない）。ログの skills はフックが許可したもの（重複なし。
+    打ち切りで本文は上流に届いていない）"""
+    assert len(SKILL_MANY) > st.AI_SKILL_MAX_CALLS
+    with FakeMessagesApi("skill_many") as api:
+        client, _ = relay_app(gateway(api))
+        evs = sse_events(post(client, chat("全部のスキルを読んで")).get_data(as_text=True))
+        posts = api.posts()
+    assert len(posts) == 1
+    assert evs[-1][0] == "done" and "tool_use" not in [e for e, _ in evs]
+    assert all(b.get("type") != "tool_use" for b in evs[-1][1]["content"])
+    rec = ai_request(capsys)
+    assert rec["skills"] == list(skills.ENABLED) and rec["turns"] == 1
 
 
 def test_parent_base_url_does_not_redirect(parent_creds, monkeypatch):
@@ -619,7 +752,16 @@ def read_tmp(parent_creds, monkeypatch, tmp_path):
     （claude-<uid>/…/images）も中継の要求ごとの一時ディレクトリ（ai-sdk-*）も残らないことを確かめる"""
     monkeypatch.setenv("TMPDIR", str(tmp_path))
     yield tmp_path
-    assert sorted(p.name for p in tmp_path.iterdir() if p.name.startswith(("claude", "ai-sdk-"))) == []
+
+    def left() -> list[str]:
+        return sorted(p.name for p in tmp_path.iterdir() if p.name.startswith(("claude", "ai-sdk-")))
+
+    # 応答（JSON）を返した後も、中継のスレッドが子を止めて一時ディレクトリを消すまで少しかかる（parent_creds と同じく
+    # 待ってから確かめる。#338 R-6: 待たずに確かめると負荷の高いときに ai-sdk-* が残って見えた）
+    deadline = time.monotonic() + 10
+    while left() and time.monotonic() < deadline:
+        time.sleep(0.05)
+    assert left() == []
     assert list(tmp_path.rglob("*.png")) == [] and list(tmp_path.rglob("*.jpg")) == []
 
 
