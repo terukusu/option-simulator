@@ -1145,7 +1145,8 @@ section.stage > .panel-body.stage-main {
     grid-template-columns: minmax(0, 1fr);
     grid-auto-columns: auto;
     align-content: start;
-    gap: var(--sp-2);
+    /* 行の間は 4px（568×320 の hidden で 5 つが窓の高さ 284px に入る。#348 第 2 弾） */
+    gap: var(--sp-1);
     padding: var(--sp-2) var(--sp-3);
     border-top: 0;
     border-left: 1px solid var(--line);
@@ -1200,13 +1201,43 @@ section.stage > .panel-body.stage-main {
     .layout:not([data-sheet="full"]) .stage-main > .readout .ro .s {
       display: none;
     }
-    /* 舞台が狭い（パネルの列の中身 360px を残すと 230px 前後）ので、数字は全開のミニと同じ大きさ */
+
     .layout:not([data-sheet="full"]) .stage-main > .readout .ro .v {
       font-size: 15px;
     }
 
     .layout:not([data-sheet="full"]) .stage-main > .readout .ro.hero .v {
       font-size: 20px;
+    }
+  }
+
+  /*
+   * 舞台が 200px 未満（568×320 の覗く = 舞台 ≈ 133px。667×375 の覗く = 232px は横の 1 行のまま。#348 第 2 弾）: 描画域は線 1 本分にしかならず、横の 1 行の読み取りも
+   * 入らないので、全開と同じく読み取りの縦の列だけにする（凡例行・描画域・時間レールを出さない。描画域と時間レールは
+   * display: none にせず 0 の行で隠す = 全開と同じ理由）
+   */
+  @container stage (max-width: 199.98px) {
+    .layout:not([data-sheet="full"]) section.stage > .stage-head {
+      display: none;
+    }
+
+    .layout:not([data-sheet="full"]) section.stage > .panel-body.stage-main {
+      grid-template-rows: 0 0 minmax(0, 1fr);
+    }
+
+    .layout:not([data-sheet="full"]) .stage-main > .stage-body,
+    .layout:not([data-sheet="full"]) .stage-main > .timerail {
+      visibility: hidden;
+      overflow: hidden;
+    }
+
+    .layout:not([data-sheet="full"]) .stage-main > .readout {
+      grid-auto-flow: row;
+      grid-template-columns: minmax(0, 1fr);
+      grid-auto-columns: auto;
+      align-content: start;
+      padding: var(--sp-2) var(--sp-3);
+      border-top: 0;
     }
   }
 }

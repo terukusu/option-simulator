@@ -3186,17 +3186,17 @@ const ivStats = { pass: 0, total: 0 };
  * IV 推移を開く（PC は市場の Seg、それ以外はドックの IV のパネルの [IV 推移 | スマイル]。#130 で既定は IV 推移 = 押されて
  * いればクリックしない。スマホはシートも作る）
  */
-async function openIv(page, w, sheet = 'peek') {
+async function openIv(page, w, sheet = 'peek', phone = w <= PHONE_MAX) {
   if (w >= 1200) {
     await closeAiPc(page);
     await page.click('section.board .panel-head .seg button:has-text("IV 推移")');
   } else {
-    if (w <= PHONE_MAX) await setShell(page, 'smile', sheet === 'hidden' ? 'peek' : sheet);
+    if (phone) await setShell(page, 'smile', sheet === 'hidden' ? 'peek' : sheet);
     else await page.click('.dock button[data-panel="smile"]');
     await page.waitForTimeout(120);
     const seg = page.locator('section.smile .panel-head .seg button:has-text("IV 推移")');
     if ((await seg.getAttribute('aria-pressed')) !== 'true') await seg.click();
-    if (w <= PHONE_MAX && sheet === 'hidden') await setShell(page, 'smile', 'hidden');
+    if (phone && sheet === 'hidden') await setShell(page, 'smile', 'hidden');
   }
   await page.waitForSelector('section.smile .iv-wrap svg', { timeout: 10000 }).catch(() => null);
   await page.waitForTimeout(150);
@@ -3338,16 +3338,16 @@ async function ivSweep() {
 
 // ---- 先物推移（#190 AC-9）
 /** 先物推移を開く（PC は市場の Seg、それ以外は IV のパネルの [IV 推移 | スマイル | 先物]。スマホはシートも作る） */
-async function openFut(page, w, sheet = 'peek') {
+async function openFut(page, w, sheet = 'peek', phone = w <= PHONE_MAX) {
   if (w >= 1200) {
     await page.click('section.market:visible .panel-head .seg button:text-is("先物")');
   } else {
-    if (w <= PHONE_MAX) await setShell(page, 'smile', sheet === 'hidden' ? 'peek' : sheet);
+    if (phone) await setShell(page, 'smile', sheet === 'hidden' ? 'peek' : sheet);
     else await page.click('.dock button[data-panel="smile"]');
     await page.waitForTimeout(120);
     const seg = page.locator('section.smile .panel-head .seg button:text-is("先物")');
     if ((await seg.getAttribute('aria-pressed')) !== 'true') await seg.click();
-    if (w <= PHONE_MAX && sheet === 'hidden') await setShell(page, 'smile', 'hidden');
+    if (phone && sheet === 'hidden') await setShell(page, 'smile', 'hidden');
   }
   await page.waitForSelector('section.smile .iv-wrap svg', { timeout: 10000 }).catch(() => null);
   await page.waitForTimeout(150);
@@ -15006,13 +15006,24 @@ async function futPanePeekTouchFlow(vp) {
  * 390×844 のタッチ（CDP。#217 の共通の規則）: タップで十字線・札 → 交点のドラッグで時刻が変わる → ほかの所のタップで消える →
  * 長押しでは出ない → ダブルタップの後に残らない。ページ・シートは動かない
  */
-async function ivCrossTouchFlow() {
-  const tag = '390x844 touch';
-  const ctx = await touchContext({ [WORKSPACE_KEY]: twoLegs });
+async function ivCrossTouchFlow(vp = { width: 390, height: 844 }, opts = {}) {
+  // opts.full = シートを全開に（スマホの横向き #348 第 2 弾）、opts.fut = 先物推移（指標の段 RSI を 1 つ出す）
+  const tag = `${vp.width}x${vp.height} touch${opts.full ? ' 全開' : ''}${opts.fut ? ' 先物推移' : ''}`;
+  const ctx = await touchContext({ [WORKSPACE_KEY]: twoLegs }, vp);
   const page = await ctx.newPage();
   await page.goto(pageUrl('next'));
   await waitReady(page, 'next');
   await page.tap('.dock button[data-panel="smile"]');
+  await page.waitForTimeout(200);
+  if (opts.fut) {
+    await page.tap('section.smile .panel-head .seg button:text-is("先物")');
+    await page.waitForSelector('section.smile .iv-wrap svg', { timeout: 10000 }).catch(() => null);
+    await page.tap('section.smile .iv-legend .ind-toggles button:text-is("RSI")');
+  }
+  if (opts.full && (await page.getAttribute('.layout', 'data-sheet')) !== 'full') {
+    await page.tap('.grabber');
+    await settleMotion(page);
+  }
   await page.waitForSelector('section.smile .iv-wrap svg', { timeout: 10000 }).catch(() => null);
   await page.waitForTimeout(300);
   const box = await page.locator('section.smile .iv-wrap').boundingBox();
@@ -15081,7 +15092,7 @@ async function ivCrossTouchFlow() {
       st1.tags.every((t) => t.inside) &&
       st1.xTag === st1.time &&
       yAt(st1, a.y) &&
-      ivYTagOk(st1, base),
+      (opts.fut ? futYTagOk(st1, base) : ivYTagOk(st1, base)),
     st1
       ? `線 ${st1.lines}・札 ${st1.xTag} / ${st1.yTag}・読み取り ${st1.time}・横線 y ${st1.hy}`
       : '',
@@ -15109,7 +15120,7 @@ async function ivCrossTouchFlow() {
     `離した後 ${st3?.lines} 本・タップ後 ${st4?.lines} 本・シート ${s0.sheet}→${s1.sheet}→${s2.sheet}・scrollTop ${s0.body}→${s1.body}・scrollY ${s1.sy}`,
   );
   check(
-    `#217 ${tag} IV 推移: 長押しでは十字線を出さない、ダブルタップ（初期表示）の後に 1 回目のタップの十字線が残らない`,
+    `#217 ${tag} ${opts.fut ? '先物推移' : 'IV 推移'}: 長押しでは十字線を出さない、ダブルタップ（初期表示）の後に 1 回目のタップの十字線が残らない`,
     st5?.lines === 0 && st6?.lines === 0,
     `長押し ${st5?.lines} 本・ダブルタップ ${st6?.lines} 本`,
   );
@@ -17938,8 +17949,8 @@ const optReady = (page) =>
     .catch(() => false);
 
 /** 板の ATM の行の K → ポップオーバーの [type の推移]（スマホは板のパネルを全開に。PC は市場の列を板に） */
-async function openOptFromBoard(page, w, type = 'put') {
-  if (w <= PHONE_MAX) await setShell(page, 'board', 'full');
+async function openOptFromBoard(page, w, type = 'put', phone = w <= PHONE_MAX) {
+  if (phone) await setShell(page, 'board', 'full');
   else {
     const b = page.locator('section.market:visible .panel-head .seg button:text-is("板")');
     if ((await b.count()) > 0 && (await b.getAttribute('aria-pressed')) !== 'true') await b.click();
@@ -18138,9 +18149,9 @@ async function optCrossAll() {
 }
 
 /** --cross（AC 6）: タッチ（360×780）でタップで置く・交点をつかんで動かす・ほかの所のタップで消える（共通の規則） */
-async function optCrossTouchFlow() {
-  const tag = '#319 AC 6 360x780 touch 銘柄の推移';
-  const ctx = await touchContext({ [WORKSPACE_KEY]: twoLegs }, { width: 360, height: 780 });
+async function optCrossTouchFlow(vp = { width: 360, height: 780 }, full = false) {
+  const tag = `#319 AC 6 ${vp.width}x${vp.height} touch${full ? ' 全開' : ''} 銘柄の推移`;
+  const ctx = await touchContext({ [WORKSPACE_KEY]: twoLegs }, vp);
   const page = await ctx.newPage();
   await page.goto(pageUrl('next'));
   await waitReady(page, 'next');
@@ -18150,6 +18161,10 @@ async function optCrossTouchFlow() {
   await page.tap(OPT_KBTN);
   await page.tap('.kpop-opt button[data-opt="put"]');
   await optReady(page);
+  if (full && (await page.getAttribute('.layout', 'data-sheet')) !== 'full') {
+    await page.tap('.grabber');
+    await settleMotion(page);
+  }
   await page.waitForTimeout(300);
   const box = await page.locator(`${OPT_SEC} .opt-stack > .iv-wrap`).first().boundingBox();
   if (!box) {
@@ -18203,7 +18218,10 @@ async function optCrossTouchFlow() {
     st3.every((g) => g.v === 0 && g.h === 0),
     JSON.stringify(st3.map((g) => g.v)),
   );
-  if (shotsDir) await page.screenshot({ path: join(shotsDir, 'cross-opt-360x780-touch.png') });
+  if (shotsDir)
+    await page.screenshot({
+      path: join(shotsDir, `cross-opt-${vp.width}x${vp.height}${full ? '-full' : ''}-touch.png`),
+    });
   await ctx.close();
 }
 
@@ -19006,35 +19024,95 @@ async function landOpenAll(page, tag, w, h, name) {
       await page.screenshot({ path: join(shotsDir, `${name}-${label.replace(/\s+/g, '')}.png`) });
     if (st) await popClose(page);
   }
-  // トースト（レビュー N-4）: 板の bid で足を足す → 「… を追加」のトーストが窓の中・ドックの列に重ならない
-  await setShell(page, 'board', 'peek');
-  await pickPutBid(page, true);
-  await page.waitForSelector('.toast:not(.note)', { timeout: 3000 }).catch(() => {});
-  const t = await page.evaluate(() => {
-    const el = document.querySelector('.toast:not(.note)');
+  // トースト（レビュー N-4・#348 第 2 弾）: 板の bid で足を足す → 「… を追加」のトースト、と知らせのトースト（.note。
+  // 共有の URL を読めない = 警告で閉じるまで残る）が、覗く・全開で窓の中・ドックの列に重ならず、パネルの列の押せる要素
+  // （板の行使価格・bid / ask・ポジションの行のボタン）にも重ならない。文は省略記号で縮めない（.txt が切れない）
+  for (const sheet of ['peek', 'full']) {
+    // 前のトーストが消えるのを待つ（[元に戻す] 付きは 5 秒）・知らせは閉じる
+    await closeNotes(page);
+    await page
+      .waitForFunction(() => document.querySelectorAll('.toast').length === 0, undefined, {
+        timeout: 7000,
+      })
+      .catch(() => {});
+    await setShell(page, 'board', sheet);
+    await settleMotion(page);
+    await pickPutBid(page, true);
+    await setShell(page, 'board', sheet);
+    await page.waitForSelector('.toast:not(.note)', { timeout: 3000 }).catch(() => {});
+    await landToastCheck(page, `${tag} トースト ${sheet}`, w, h, 1);
+    if (shotsDir) await page.screenshot({ path: join(shotsDir, `${name}-toast-${sheet}.png`) });
+    // 知らせのトースト（B-1）: 読めない共有の URL を開く
+    await page.evaluate(() => {
+      location.hash = '#p=zz';
+    });
+    await page.waitForSelector('.toast.note', { timeout: 3000 }).catch(() => {});
+    await page.waitForTimeout(200);
+    await landToastCheck(page, `${tag} 知らせのトースト ${sheet}`, w, h, 1, true);
+    if (shotsDir) await page.screenshot({ path: join(shotsDir, `${name}-note-${sheet}.png`) });
+    await page.evaluate(() => history.replaceState(null, '', location.pathname + location.search));
+  }
+}
+
+/**
+ * 見えているトースト（知らせ .note を含む全部）が窓の中・ドックの左・パネルの列の押せる要素に重ならない・文（.txt）が切れない
+ * （#348 第 2 弾）。want = 少なくとも出ているはずの数、note = 知らせのトーストが含まれるはず
+ */
+async function landToastCheck(page, label, w, h, want, note = false) {
+  const r = await page.evaluate(() => {
     const dk = document.querySelector('.dock')?.getBoundingClientRect();
-    if (!el || !dk) return null;
-    const b = el.getBoundingClientRect();
-    return {
-      l: b.left,
-      r: b.right,
-      t: b.top,
-      b: b.bottom,
-      dockL: dk.left,
-      vw: innerWidth,
-      vh: innerHeight,
-      text: (el.textContent ?? '').trim().slice(0, 30),
-    };
+    const side = [...document.querySelectorAll('section.panel.side, section.scenario')].find(
+      (x) => x.getClientRects().length > 0,
+    );
+    const pushables = side
+      ? [...side.querySelectorAll('button, a, input, [tabindex="0"]')].filter(
+          (x) => !x.classList.contains('grabber') && x.getClientRects().length > 0,
+        )
+      : [];
+    return [...document.querySelectorAll('.toast')]
+      .filter((el) => el.getClientRects().length > 0)
+      .map((el) => {
+        const b = el.getBoundingClientRect();
+        const hits = pushables
+          .filter((x) => {
+            const q = x.getBoundingClientRect();
+            if (!(q.left < b.right && q.right > b.left && q.top < b.bottom && q.bottom > b.top))
+              return false;
+            // 重なりの中心が実際にその要素を押せる所か（スクロールの枠で切れて見えない行は数えない）
+            const cx = (Math.max(q.left, b.left) + Math.min(q.right, b.right)) / 2;
+            const cy = (Math.max(q.top, b.top) + Math.min(q.bottom, b.bottom)) / 2;
+            return document.elementsFromPoint(cx, cy).some((e) => x === e || x.contains(e));
+          })
+          .map((x) => (x.getAttribute('aria-label') ?? x.textContent ?? '').trim().slice(0, 16));
+        const txt = el.querySelector('.txt');
+        return {
+          note: el.classList.contains('note'),
+          l: b.left,
+          r: b.right,
+          t: b.top,
+          b: b.bottom,
+          dockL: dk?.left ?? innerWidth,
+          vh: innerHeight,
+          hits,
+          cut: !!txt && txt.scrollWidth > txt.clientWidth + 0.5,
+          text: (txt?.textContent ?? el.textContent ?? '').trim().slice(0, 24),
+        };
+      });
   });
-  const tOk = !!t && t.l >= 0 && t.r <= t.dockL + 0.5 && t.t >= 0 && t.b <= t.vh + 0.5;
+  const bad = [];
+  if (r.length < want) bad.push(`トースト ${r.length} 個（${want} 個以上のはず）`);
+  if (note && !r.some((t) => t.note)) bad.push('知らせのトーストが出ない');
+  for (const t of r) {
+    if (t.l < -0.5 || t.t < -0.5 || t.b > t.vh + 0.5) bad.push(`「${t.text}」窓の外`);
+    if (t.r > t.dockL + 0.5) bad.push(`「${t.text}」ドックに重なる`);
+    if (t.hits.length) bad.push(`「${t.text}」がパネルの ${t.hits.join(' / ')} に重なる`);
+    if (t.cut) bad.push(`「${t.text}」の文が切れる`);
+  }
   landRecord(
-    `#348 ${tag} トースト ${w}x${h}`,
-    tOk,
-    t
-      ? `「${t.text}」[${Math.round(t.l)}, ${Math.round(t.r)}]×[${Math.round(t.t)}, ${Math.round(t.b)}]・ドックの左端 ${Math.round(t.dockL)}`
-      : 'トーストが出ない',
+    `#348 ${label} ${w}x${h}`,
+    bad.length === 0,
+    `${r.map((t) => `${t.note ? '知らせ' : ''}「${t.text}」[${Math.round(t.l)}, ${Math.round(t.r)}]×[${Math.round(t.t)}, ${Math.round(t.b)}]`).join('・')}${bad.length ? `・${bad.join('・')}` : ''}`,
   );
-  if (shotsDir) await page.screenshot({ path: join(shotsDir, `${name}-toast.png`) });
 }
 
 /** AC-6: 横向きにならない窓（マウス = hasTouch なし）。トップバー 48px・横向きの条件に当たらない・今の段の配置 */
@@ -19070,6 +19148,116 @@ async function landNotAll() {
       bad.join('・') || `トップバー 48px・${tier === 'pc' ? 'ドックなし' : '横のドック'}`,
     );
     await ctx.close();
+  }
+}
+
+/** 横向きの全開の右の列の市場のチャート（#348 第 2 弾 AC-9）の窓 */
+const LAND_MARKET_SIZES = [
+  [844, 390],
+  [740, 360],
+];
+/**
+ * AC-9 の描画域の下限（px。IV 推移の描画域・先物推移の価格 + 段・銘柄の推移の 2 段の合計）。Issue の AC は 200px だが、
+ * 740×360 の先物推移・銘柄の推移（kind = fut / opt。IV 推移は 200px のまま）は見出し・ツール・読み取り・凡例の決まった行で 186px 前後までしか取れない（CSS だけで詰めた後の実測。
+ * phase-3b.md の逸脱）ので 180px。844×390 は 200px
+ */
+const landMarketMinH = (h, kind) => (h >= 390 || kind === 'iv' ? 200 : 180);
+
+/**
+ * AC-9（#348 第 2 弾）: 844×390・740×360 × ダーク / ライトで、全開の右の列に IV 推移・先物推移（指標の段 RSI 1 つ）・
+ * 銘柄の推移を開き、ページの縦・横 0px・折り返し、ツールの行・読み取りの行・凡例が切れない、描画域の高さ ≥ 200px、
+ * キーの十字線（札が svg の内側）。タッチの十字線の手順は --cross（landCrossTouchAll）
+ */
+async function landMarketAll() {
+  for (const [w, h] of LAND_MARKET_SIZES) {
+    for (const theme of ['dark', 'light']) {
+      const ctx = await newContext(
+        { width: w, height: h },
+        { [WORKSPACE_KEY]: twoLegs, [PREFS_KEY]: prefsText(theme) },
+        theme,
+        LAND_TOUCH,
+      );
+      const page = await ctx.newPage();
+      await page.goto(pageUrl('next'));
+      await waitReady(page, 'next');
+      const tag = `next ${theme} 横向き 全開`;
+      const name = `land-${w}x${h}-${theme}-full`;
+      // IV 推移（ローソク・線）
+      await openIv(page, w, 'full', true);
+      await settleMotion(page);
+      const ok1 = await report(page, `${tag} IV 推移`, w, h, `${name}-iv`);
+      const ok2 = await ivCheck(page, `${tag} IV 推移 ${w}x${h}`, {
+        minHeight: landMarketMinH(h, 'iv'),
+      });
+      await ivCrossCheck(page, `${tag} IV 推移 ${w}x${h}`);
+      landRecord(`#348 AC-9 ${tag} IV 推移 ${w}x${h}`, ok1 && ok2, 'ページ 0px・切れ 0・描画域');
+      await page.click('section.smile .iv-tools button:has-text("線")');
+      await page.waitForTimeout(150);
+      await report(page, `${tag} IV 推移 線`, w, h, `${name}-iv-line`);
+      await ivCheck(page, `${tag} IV 推移 線 ${w}x${h}`, { minHeight: landMarketMinH(h, 'iv') });
+      // 先物推移（指標の段 RSI を 1 つ）
+      await openFut(page, w, 'full', true);
+      await settleMotion(page);
+      await ivCheck(page, `${tag} 先物推移 ${w}x${h}`, {
+        fut: true,
+        minHeight: landMarketMinH(h, 'fut'),
+      });
+      await ivCrossCheck(page, `${tag} 先物推移 ${w}x${h}`, true);
+      await page.click('section.smile .iv-legend .ind-toggles button:text-is("RSI")');
+      await page.waitForTimeout(250);
+      const okF = await report(page, `${tag} 先物推移 段 1 つ`, w, h, `${name}-fut-ind`);
+      const ind = await page.evaluate(() => {
+        const s = document.querySelector('section.smile');
+        const cut = (el) => (el ? el.scrollWidth > el.clientWidth + 1 : false);
+        const body = s?.querySelector('.panel-body')?.getBoundingClientRect();
+        const panes = [...(s?.querySelectorAll('.ind-pane') ?? [])];
+        return {
+          plotH: s?.querySelector('.iv-wrap')?.clientHeight ?? 0,
+          panes: panes.length,
+          paneH: panes.map((p) => Math.round(p.getBoundingClientRect().height)),
+          inside: panes.every((p) => p.getBoundingClientRect().bottom <= (body?.bottom ?? 0) + 1),
+          toolsCut: cut(s?.querySelector('.iv-tools')),
+          legendCut: cut(s?.querySelector('.iv-legend')),
+          readoutCut: cut(s?.querySelector('.iv-readout')),
+        };
+      });
+      const total = ind.plotH + ind.paneH.reduce((a, b) => a + b, 0);
+      landRecord(
+        `#348 AC-9 ${tag} 先物推移 段 1 つ ${w}x${h}`,
+        okF &&
+          ind.panes === 1 &&
+          ind.inside &&
+          total >= landMarketMinH(h, 'fut') &&
+          !ind.toolsCut &&
+          !ind.legendCut &&
+          !ind.readoutCut,
+        `価格 ${ind.plotH}px + 段 ${ind.paneH.join('/')}px = ${total}px（${landMarketMinH(h, 'fut')} 以上）・ツール ${ind.toolsCut ? '切れ' : 'ok'}・凡例 ${ind.legendCut ? '切れ' : 'ok'}・読み取り ${ind.readoutCut ? '切れ' : 'ok'}`,
+      );
+      await page.click('section.smile .iv-legend .ind-toggles button:text-is("RSI")');
+      // 銘柄の推移（板の K → put の推移。全開）
+      const opened = await openOptFromBoard(page, w, 'put', true);
+      await settleMotion(page);
+      const okO = await report(page, `${tag} 銘柄の推移`, w, h, `${name}-opt`);
+      const st = await optState(page);
+      optCheck(st, `${tag} 銘柄の推移 ${w}x${h}`);
+      const sum = (st?.heights ?? []).reduce((a, b) => a + b, 0);
+      landRecord(
+        `#348 AC-9 ${tag} 銘柄の推移 ${w}x${h}`,
+        opened && okO && sum >= landMarketMinH(h, 'opt'),
+        `段 ${st?.heights.join('/')}px = ${sum}px（${landMarketMinH(h, 'opt')} 以上）`,
+      );
+      await ctx.close();
+    }
+  }
+}
+
+/** --cross（#348 第 2 弾 AC-9）: 横向きの全開で IV 推移・先物推移・銘柄の推移のタッチの十字線（置く・交点のドラッグ・外のタップで消す） */
+async function landCrossTouchAll() {
+  for (const [w, h] of LAND_MARKET_SIZES) {
+    const vp = { width: w, height: h };
+    await ivCrossTouchFlow(vp, { full: true });
+    await ivCrossTouchFlow(vp, { full: true, fut: true });
+    await optCrossTouchFlow(vp, true);
   }
 }
 
@@ -19132,7 +19320,7 @@ async function landAll() {
     );
     await ctx.close();
   }
-  // 参考の窓（568×320）: ページのスクロールと描画域を記録だけ（合否に入れない）
+  // 参考の窓（568×320）: 描画域は記録だけ。ページのスクロールと読み取り（#348 第 2 弾）は合否に入れる
   {
     const [w, h] = LAND_REF;
     const ctx = await newContext(
@@ -19152,11 +19340,20 @@ async function landAll() {
       console.log(
         `#348 参考 横向き ${w}x${h} positions/${sheet}: 縦 ${r.v}px 横 ${r.h}px 折り返し ${r.wraps.length} 件・描画域 ${g.chart ? `${Math.round(g.chart.w)}x${Math.round(g.chart.h)}` : '—'}（記録だけ）`,
       );
+      // #348 第 2 弾: 読み取りは窓の中・隠れない・切れない（覗くは舞台 < 200px = 読み取りの縦の列だけ）。合否に入れる
+      const want = sheet === 'hidden' && (g.stage?.w ?? 0) >= 480 ? 5 : 3;
+      const okRo = await readoutCheck(page, `#348 参考 横向き ${w}x${h} positions/${sheet}`, want);
+      landRecord(
+        `#348 横向き ${w}x${h} positions/${sheet} の読み取り ${want} つ（第 2 弾）`,
+        okRo && r.v === 0 && r.h === 0,
+        `縦 ${r.v}px・横 ${r.h}px`,
+      );
       if (shotsDir)
         await page.screenshot({ path: join(shotsDir, `land-${w}x${h}-ref-${sheet}.png`) });
     }
     await ctx.close();
   }
+  await landMarketAll();
   await landNotAll();
   console.log(`スマホの横向きの検査（#348）: ${landStats.pass} / ${landStats.total} で pass`);
 }
@@ -19565,6 +19762,8 @@ try {
         await cross217TouchFlows(vp);
       // #223: つかんで動かす間はホバーの十字線を出さない（スマイルの選択のスクラブ。損益グラフは --flows の pnlCrossFlows）
       await smileGrabFlow();
+      // #348 第 2 弾: スマホの横向きの全開の右の列（IV 推移・先物推移・銘柄の推移）
+      await landCrossTouchAll();
     } else {
       await cross217All();
       console.log(
@@ -19572,6 +19771,8 @@ try {
       );
       // 銘柄の推移の 2 段の十字線（#319 AC 6）
       await optCrossAll();
+      // #348 第 2 弾: スマホの横向きの全開の右の列（IV 推移・先物推移・銘柄の推移）のタッチの十字線
+      await landCrossTouchAll();
     }
   } else if (iconsOnly && !parts && !flows) {
     await iconSweep();
