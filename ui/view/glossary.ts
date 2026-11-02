@@ -85,7 +85,7 @@ const G_REPLAY = {
 };
 const G_IV_HISTORY = {
   anchor: 'iv-推移atm-iv-の-30-日固定',
-  title: '10 章 市場: スマイル・IV 推移・先物推移 > IV 推移（ATM IV の 30 日固定）',
+  title: '10 章 市場: スマイル・IV 推移・先物推移・銘柄の推移 > IV 推移（ATM IV の 30 日固定）',
 };
 const G_PRICE_MODEL = { anchor: '価格モデル', title: '16 章 計算の前提と単位 > 価格モデル' };
 const G_AXIS = {

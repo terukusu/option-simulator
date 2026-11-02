@@ -1,6 +1,6 @@
 // README のスクリーンショット（`npm run readme:shots`。#160）。Chromium（Playwright）で画面を開き、docs/images/ に
 // WebP で書く。板は dev サーバーの合成の板（fixtures/synthetic/ の latest。Black-76 から作った架空の値）、IV 推移・
-// 先物推移・追証マップの過去の点・AI の返答（診断・シナリオの評価・提案・テクニカル・表。偽の SSE）は dev サーバーの合成の
+// 先物推移・銘柄の推移・追証マップの過去の点・AI の返答（診断・シナリオの評価・提案・テクニカル・表。偽の SSE）は dev サーバーの合成の
 // 応答（scripts/devFixtures.mjs）だけを使う。本番・API・BigQuery・Anthropic には触れない。資金（capital_yen）などの
 // 設定値も架空の値。
 //
@@ -73,6 +73,21 @@ const putOnly = () => {
   const ws = JSON.parse(workspace(SCENARIO));
   ws.tabs[0].name = 'put 売り';
   ws.tabs[0].position.legs = ws.tabs[0].position.legs.filter((l) => l.leg.type === 'put');
+  return JSON.stringify(ws);
+};
+/** 建てた日時（架空。合成の板の 5 日前 = 前の板で建てた足として今の板で時価評価する。#299） */
+const OPENED_AT = '2026-10-08T21:00:00+09:00';
+/** 保有ポジションの一覧の作業（#302）: 2 タブとも保有の印・建てた日時つき（架空の値） */
+const heldWs = () => {
+  const ws = JSON.parse(workspace({ days: 0, dX: 0, dSigma: 0 }));
+  ws.tabs[1].name = 'ヘッジ';
+  for (const t of ws.tabs) {
+    t.position.held = true;
+    t.position.legs = t.position.legs.map((l) => ({
+      ...l,
+      leg: { ...l.leg, opened_at: OPENED_AT },
+    }));
+  }
   return JSON.stringify(ws);
 };
 const prefs = (theme, capital = CAPITAL, allowedLoss = 0) =>
@@ -381,7 +396,9 @@ const shots = {
     await page.click('section.metrics .hm-toggle');
     await page.waitForSelector('section.metrics .hm-svg', { timeout: 20000 });
     await page.waitForTimeout(2500);
-    await page.locator('section.metrics .hm-toggle').scrollIntoViewIfNeeded();
+    // 見出しの折りたたみは追証マップと過去の急落の再生（#307）の 2 つ。先頭 = 追証マップ
+    const toggle = page.locator('section.metrics .hm-toggle').first();
+    await toggle.scrollIntoViewIfNeeded();
     await page.evaluate(() => {
       const t = document.querySelector('section.metrics .hm-toggle');
       const body = t?.closest('.panel-body');
@@ -390,7 +407,7 @@ const shots = {
     });
     await page.waitForTimeout(300);
     // 折りたたみの見出しから指標の枠の下端まで
-    const t = await page.locator('section.metrics .hm-toggle').boundingBox();
+    const t = await toggle.boundingBox();
     const m = await page.locator('section.metrics').boundingBox();
     const bottom = Math.min(m.y + m.height, page.viewportSize().height);
     await save(
@@ -413,6 +430,21 @@ const shots = {
     await page.keyboard.press('.');
     await page.waitForTimeout(300);
     await save('smile', await shotEl(page, 'section.smile'));
+    await ctx.close();
+  },
+  // 形から組む…（#20）: ポジションの ⋯ → 形の一覧 → [ストラングル売り] のカード（今の板で組んだ足と、その形だけの値）
+  async templates() {
+    const { ctx, page } = await open({ ...PC, theme: 'light' });
+    const dlg = 'dialog.sheet.shapes[open]';
+    await page.click('section.positions button[aria-label="ポジションの操作"]');
+    await page.click('[role="menuitem"]:has-text("形から組む…")');
+    await page.waitForSelector(dlg, { timeout: 5000 });
+    await page.click(`${dlg} .shape-item[data-shape="short_strangle"]`);
+    await page.waitForSelector(`${dlg} .shape-card .shape-title`, { timeout: 5000 });
+    // マウスを一覧の外へ（ホバーの色を写さない）
+    await page.mouse.move(0, 0);
+    await page.waitForTimeout(300);
+    await save('templates', await shotEl(page, dlg));
     await ctx.close();
   },
   // IV 推移（ローソク足と十字線）
@@ -448,6 +480,52 @@ const shots = {
     await page.mouse.move(b.x + b.width * 0.75, b.y + b.height * 0.2);
     await page.waitForTimeout(300);
     await save('fut-history', await shotEl(page, 'section.smile'));
+    await ctx.close();
+  },
+  // 銘柄の推移（#319）: 板の ATM の行の K →「put の推移」→ 中値のローソク・bid〜ask の帯・約定の点と、下の段の IV。
+  // 足は dev サーバーの合成の応答（/fixtures/option_bars）
+  async 'opt-history'() {
+    const { ctx, page } = await open({ ...PC_CROP, theme: 'dark' });
+    await page.click(
+      'section.board .board-month:not(.inactive) .board-wrap:not(.side-hidden) tr.atm th.k .kbtn',
+    );
+    await page.click('.kpop-opt button[data-opt="put"]');
+    await page.waitForFunction(
+      () => {
+        const s = document.querySelector('section.smile');
+        return (
+          !!s?.querySelector('.opt-stack .iv-wrap svg') &&
+          !s.querySelector('.iv-loading') &&
+          s.querySelector('.iv-refresh')?.disabled === false
+        );
+      },
+      undefined,
+      { timeout: 15000 },
+    );
+    await page.waitForTimeout(500);
+    const b = await page.locator('section.smile .opt-stack > .iv-wrap').first().boundingBox();
+    await page.mouse.move(b.x + b.width * 0.7, b.y + b.height * 0.45);
+    await page.waitForTimeout(300);
+    await save('opt-history', await shotEl(page, 'section.smile'));
+    await ctx.close();
+  },
+  // 保有ポジションの一覧（#302）: 保有の印の付いた 2 タブ（建てた日時つき）を ⋯ → 保有ポジション… で並べる
+  async holdings() {
+    const { ctx, page } = await open({ ...PC, theme: 'light', ws: heldWs() });
+    const dlg = 'dialog.sheet.holdings[open]';
+    await page.click('button[aria-label="メニュー"]');
+    await page.click('header.top > .menu-wrap [role^="menuitem"]:has-text("保有ポジション…")');
+    await page.waitForSelector(dlg, { timeout: 5000 });
+    await page.waitForFunction(
+      (sel) => {
+        const t = document.querySelector(`${sel} .hl-total`)?.textContent ?? '';
+        return t !== '' && !t.includes('計算中');
+      },
+      dlg,
+      { timeout: 15000 },
+    );
+    await page.waitForTimeout(300);
+    await save('holdings', await shotEl(page, dlg));
     await ctx.close();
   },
   // コマンドパレット
