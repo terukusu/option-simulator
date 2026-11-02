@@ -139,19 +139,32 @@ AI_EFFORT = "medium"  # output_config.effort。#135 が測って決める
 # 1 要求で上流を呼ぶ回数の上限（#221。Skill を 2 回 + 答え）。超えたら CLI は error_max_turns で終わる
 # （SSE は error: upstream_unavailable）。予約額の上界も turn の数で数える（budget.reserve_micro_usd）
 AI_MAX_TURNS = 3
-# スキル（ai/plugin/skills/*/SKILL.md）の合計の大きさの上限（tests/test_ai_skills.py）。予約額の上界には実際の合計 +
-# AI_SKILL_OVERHEAD_TOKENS（Skill の tool_use・tool_result の枠と CLI が足す前置き）を turn ごとに足す
-AI_SKILL_MAX_BYTES = 16 * 1024
+# スキル（ai/plugin/skills/*/SKILL.md）の合計の大きさの上限（tests/test_ai_skills.py。#338 で 16 → 24 KiB）。予約額の
+# 上界には実際の合計 + AI_SKILL_OVERHEAD_TOKENS（Skill の tool_use・tool_result・deny の文の枠と CLI が足す前置き）=
+# S（budget.skill_tokens）を turn ごとに足す。24 KiB ちょうどでも本文 90k の予約が $2 未満（tests/test_ai_budget.py）
+AI_SKILL_MAX_BYTES = 24 * 1024
 AI_SKILL_OVERHEAD_TOKENS = 1000
+# 1 要求の Skill の呼び出し（許可・deny の合計）の上限（#338。ai/skills.SkillGuard・agent_sdk のフック）。数えるのは
+# フックまで届いた呼び出しだけ（CLI がフックより前にエラーで返すもの = 一覧に無い名前・入力の型の誤りは数えられない。
+# docs/adr-0007-ai-docs-read-tool.md の追補の「残る例外」、#355）。
+# - 同じスキルの 2 回目（素の名前と <プラグイン>:<スキル> は同じスキル）・args が空でない呼び出しは deny（turn は
+#   続く）。なので各スキルは 1 要求に 1 回まで読み、モデルの出力（args）が SKILL.md の後ろに足されることも無い
+# - 上限を超えた呼び出しは deny + continue_=False（要求を終える = その結果は上流に送られない。read_doc と同じ）
+# - 値の根拠（CLI 2.1.283 の実測。JSON のバイト = トークン数の上界。tool_use の id は実際の長さの上界・deny の理由は
+#   最も長い文で数える）: 1 回の枠は許可 ≤ 113 B（SKILL.md のファイルを除く）・deny ≤ 161 B、turn ごとの固定 ≤ 118 B
+#   → 5 × 161 + 118 = 923 ≤ AI_SKILL_OVERHEAD_TOKENS（tests/test_ai_agent_sdk_cli.py で固定）。スキル 4 本 + 予備 1。
+#   ≥ スキルの数（tests/test_ai_agent_sdk.py）
+AI_SKILL_MAX_CALLS = 5
 # 文書（マニュアル・設計書の節。#137 = docs/adr-0007-ai-docs-read-tool.md）。中継の中で実行するツール read_doc が返す
 # 大きさの上限: 1 回の読み（超える節は part に分ける）・1 要求の合計・1 要求の呼び出しの回数。予約額の上界には
-# 1 要求の合計 + AI_DOC_OVERHEAD_TOKENS を足す。
+# 1 要求の合計 + AI_DOC_OVERHEAD_TOKENS を 1 要求に 1 回足す。
 # - 1 回の読みの返り（見出しの行・「続きは」の行を含む）≤ AI_DOC_READ_MAX_BYTES（本文は AI_DOC_FRAME_BYTES を引いた
 #   大きさで part に分ける）。2 回 ≤ 1 要求の合計なので、part を 2 つは必ず読める
 # - 呼び出しは 1 要求で AI_DOC_MAX_READS 回まで。超えた呼び出しはフックが deny + continue_=False で止める（上流を
 #   もう呼ばない = その結果は送られない）。なので read_doc の結果の合計 ≤ 1 要求の合計（本文）+ 回数 ×（エラーの文の
 #   上限 AI_DOC_ERROR_MAX_BYTES + tool_result の枠 AI_DOC_RESULT_FRAME_BYTES）≤ 1 要求の合計 + AI_DOC_OVERHEAD_TOKENS
-#   （トークン数 ≤ バイト数。tests/test_ai_docs.py で固定）
+#   （トークン数 ≤ バイト数。tests/test_ai_docs.py で固定）= D（budget.doc_tokens）。Reader が要求全体で数えるので
+#   予約額には 1 要求に 1 回だけ足す（#338。スキルの S は turn ごと）
 AI_DOC_READ_MAX_BYTES = 8 * 1024
 AI_DOC_REQUEST_MAX_BYTES = 16 * 1024
 AI_DOC_FRAME_BYTES = 512

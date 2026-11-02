@@ -11,7 +11,7 @@
   13 章の決定の経緯・14 章は渡さない）
 - 大きさ: 1 回の読みは AI_DOC_READ_MAX_BYTES まで（超える節は part に分ける。全 part をつなぐと節の本文）、
   1 要求の合計は AI_DOC_REQUEST_MAX_BYTES、呼び出しは AI_DOC_MAX_READS 回まで（Reader が要求ごとに数える）。
-  予約額の上界は budget.loaded_tokens
+  予約額の上界は budget.doc_tokens（1 要求に 1 回。#338）
 - 文書の置き場所は環境変数 AI_DOCS_DIR（イメージは /app/docs）、未設定ならリポジトリの docs/。読めなければ None
   （目次も read_doc も出さない）
 """
