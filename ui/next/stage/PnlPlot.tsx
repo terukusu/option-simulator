@@ -5,6 +5,7 @@ import type { Scenario } from '../../../model';
 import { type Domain, pixelToValue } from '../../chart/scale';
 import { useChartGestures } from '../../components/useChartGestures';
 import type { Action, UiLeg } from '../../state';
+import { ticksClearX, ticksClearY } from '../../view/crosshair';
 import { fmtNum } from '../../view/format';
 import type { AmountUnit } from '../../view/metrics';
 import type { PinLabel } from '../../view/pins';
@@ -51,6 +52,10 @@ import { SurfaceCanvas } from './SurfaceCanvas';
 
 /** ハンドルをつかむ幅（左右 px。§4.1。旧画面は 12 のまま） */
 const STAGE_GRAB_PX = 14;
+
+/** 目盛りの位置と文字（#349 の札との重なりの判定に渡す） */
+const tickPx = (t: { px: number }) => t.px;
+const tickLabel = (t: { label: string }) => t.label;
 
 const KIND_CLASS = { expiry: 'expiry', date: 'date', today: 'today' } as const;
 
@@ -434,6 +439,12 @@ export function PnlPlot(p: {
   const yTicks: ReadonlyArray<{ v: number; px: number; label: string }> = surfaceOn
     ? dayTicks.map((t) => ({ v: t.v, px: t.py, label: t.label }))
     : model.yTicks;
+  // 十字線の札と重なる目盛りの文字・単位は描かない（#349。格子の線は残す。十字線が無いときは同じ配列）
+  const tagY = cross ? cross.yTag : (surfCross?.yTag ?? null);
+  const tagX = cross ? cross.xTag : (surfCross?.xTag ?? null);
+  const yTickTexts = ticksClearY(yTicks, tagY, tickPx);
+  const xTickTexts = ticksClearX(model.xTicks, tagX, tickPx, tickLabel);
+  const unitShown = ticksClearY([plot.top + 2], tagY, (v) => v).length > 0;
   /** ● の縦の画素（面モードは d の画素） */
   const dotPy = surfaceOn ? (point?.py ?? null) : (handle?.dotPy ?? null);
 
@@ -541,19 +552,21 @@ export function PnlPlot(p: {
           )}
           {!mini && (
             <g class="ax">
-              {yTicks.map((t) => (
+              {yTickTexts.map((t) => (
                 <text key={`y${t.v}`} class="tick-y" x={plot.left - 6} y={t.px}>
                   {t.label}
                 </text>
               ))}
-              {model.xTicks.map((t) => (
+              {xTickTexts.map((t) => (
                 <text key={`x${t.v}`} class="tick-x" x={t.px} y={bottom + 17}>
                   {t.label}
                 </text>
               ))}
-              <text class="unit" x={plot.left - 6} y={plot.top + 2}>
-                {unit}
-              </text>
+              {unitShown && (
+                <text class="unit" x={plot.left - 6} y={plot.top + 2}>
+                  {unit}
+                </text>
+              )}
             </g>
           )}
           {/* 描画域の切り抜き（入れ子の svg。clip-path の ID を使わない） */}

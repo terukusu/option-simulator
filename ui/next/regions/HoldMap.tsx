@@ -9,7 +9,12 @@ import {
 } from '../../chart/press';
 import type { AtmMovesCtl } from '../../components/useAtmMoves';
 import type { HoldMapCtl } from '../../components/useHoldMap';
-import { CROSS_TOUCH_GRAB_PX, crossTapAction } from '../../view/crosshair';
+import {
+  CROSS_TOUCH_GRAB_PX,
+  crossTapAction,
+  ticksClearX,
+  ticksClearY,
+} from '../../view/crosshair';
 import {
   HOLD_MAP_CALL_NOTE,
   HOLD_MAP_PLOT_LABEL,
@@ -47,6 +52,10 @@ import { useSize } from '../useSize';
  * 157ms・最大 296ms。その 3 倍余りの余裕
  */
 const HOLD_REVEAL_MS = 1000;
+
+/** 目盛りの位置と文字（#349 の札との重なりの判定に渡す） */
+const tickAt = (t: { at: number }) => t.at;
+const tickLabel = (t: { label: string }) => t.label;
 
 /** 指標パネルに渡す追証マップの束（NextApp の useMemo。参照が同じなら描き直さない） */
 export interface HoldBundle {
@@ -259,7 +268,8 @@ function HoldMapPlotView({
               ))}
               {plot.contour && <path class="hm-line" d={plot.contour} />}
               {plot.lossContour && <path class="hm-loss-line" d={plot.lossContour} />}
-              {plot.xTicks.map((t) => (
+              {/* 十字線の札と重なる目盛りの文字は描かない（#349） */}
+              {ticksClearX(plot.xTicks, xh ? xh.xTag : null, tickAt, tickLabel).map((t) => (
                 <text
                   key={t.label}
                   class="hm-tick"
@@ -270,7 +280,7 @@ function HoldMapPlotView({
                   {t.label}
                 </text>
               ))}
-              {plot.yTicks.map((t) => (
+              {ticksClearY(plot.yTicks, xh ? xh.yTag : null, tickAt).map((t) => (
                 <text
                   key={t.label}
                   class="hm-tick"

@@ -66,6 +66,10 @@
 //                                          縦・横・折り返し。--flows: 1440 のホバー（縦線 = マウスの X・横線 = マウスの高さ・外れて 0・
 //                                          ドラッグのパン・長押しのシナリオ点）、390 のタッチ（タップで置く・交点のドラッグ・読み取りの
 //                                          タップで消す・長押しのシナリオ点・パン・描画域の外のタップで消す）
+//                                          #349: 十字線の札と目盛りの文字（.ax・.hm-tick・.ind-ty）が 0.5px を超えて重ならない
+//                                          （損益・IV 推移・スマイル・追証マップ・面・先物の段・銘柄の推移の札の検査に足した）。損益は
+//                                          十字線なしで文字の数 = 格子の線の数、横線を縦の目盛り +6px・縦線を横の目盛り +5px・横線を
+//                                          上端に置くと、その目盛り（単位）の文字だけ隠れて 2 個以上残り、外れると戻る
 //   npm run ui:check -- --parts            部品の見本（?parts。dev だけ）
 //   npm run ui:check -- --flows            保有の印の手順（#301: 360×780 と 1440×900 で保有のチップの「保」・タブのメニュー・
 //                                          ポジションの ⋯ の写しの建て直しと押せない全クリア・保存一覧の「保有」のタグ。折り返し・切れ・
@@ -3259,6 +3263,8 @@ const futStats = { pass: 0, total: 0 };
  * svg の内側・横の札 = 読み取りの時刻・縦の札 = 横線の高さの IV（キーだけのときは足の終値の高さ。小数 2 桁）
  */
 async function ivCrossCheck(page, label, fut = false) {
+  // 十字線を出す前の目盛り（#349: 札と重なる目盛りの文字は隠れる）
+  const base = await ivCrossState(page);
   await page.focus('section.smile .iv-wrap');
   await page.keyboard.press(',');
   await page.waitForTimeout(80);
@@ -3269,11 +3275,12 @@ async function ivCrossCheck(page, label, fut = false) {
     st.tags.length === 2 &&
     st.tags.every((t) => t.inside) &&
     st.xTag === st.time &&
-    (fut ? futYTagOk(st) : ivYTagOk(st));
+    (fut ? futYTagOk(st, base) : ivYTagOk(st, base)) &&
+    st.tickHits.length === 0;
   if (ok) ivCrossStats.pass++;
   else failed = true;
   console.log(
-    `${label}: 十字線 ${st?.lines ?? 0} 本・札 ${st ? st.tags.map((t) => `${t.axis}「${t.text}」${t.inside ? '' : '（外）'}`).join(' ') : '-'}・読み取り ${st?.time ?? '-'} ${ok ? 'pass' : '← NG'}`,
+    `${label}: 十字線 ${st?.lines ?? 0} 本・札 ${st ? st.tags.map((t) => `${t.axis}「${t.text}」${t.inside ? '' : '（外）'}`).join(' ') : '-'}・読み取り ${st?.time ?? '-'}・縦の目盛り ${st?.ticks.length ?? '-'}/${base?.ticks.length ?? '-'}${st?.tickHits.length ? `・札と目盛りの文字の重なり（#349）${st.tickHits.join(' ')}` : ''} ${ok ? 'pass' : '← NG'}`,
   );
 }
 
@@ -3333,11 +3340,13 @@ async function openFut(page, w, sheet = 'peek') {
 }
 
 /** 縦軸の札の文字が横線の高さの値（円の整数・桁区切り。目盛りの 2 点から逆に読んだ値と 1 円以内） */
-function futYTagOk(st) {
-  if (!st || st.hy === null || st.yTag === null || st.ticks.length < 2) return false;
+function futYTagOk(st, base = null) {
+  if (!st || st.hy === null || st.yTag === null) return false;
+  const ticks = ivReadTicks(st, base);
+  if (ticks.length < 2) return false;
   const num = (t) => Number(t.replace('−', '-').replace(/,/g, ''));
-  const [y0, l0] = st.ticks[0];
-  const [y1, l1] = st.ticks[st.ticks.length - 1];
+  const [y0, l0] = ticks[0];
+  const [y1, l1] = ticks[ticks.length - 1];
   if (!(Math.abs(y1 - y0) > 0)) return false;
   const perPx = Math.abs((num(l1) - num(l0)) / (y1 - y0));
   const v = num(l0) + ((st.hy - y0) * (num(l1) - num(l0))) / (y1 - y0);
@@ -3441,8 +3450,8 @@ async function indCheck(page, label) {
 // ---- #207 先物推移の段の高さ・最大化・段の十字線
 const paneStats = { pass: 0, total: 0 };
 /** 段の状態（段の高さ・価格の描画域・境目の位置・十字線・札・浮いた読み取り・保存の段の高さのキー） */
-const paneState = (page) =>
-  page.evaluate(() => {
+const paneState = async (page) => {
+  const st = await page.evaluate(() => {
     const s = document.querySelector('section.smile');
     const r = (e) => (e ? e.getBoundingClientRect() : null);
     const panes = [...(s?.querySelectorAll('.ind-pane') ?? [])];
@@ -3484,6 +3493,10 @@ const paneState = (page) =>
       prefs,
     };
   });
+  // #349: 段・価格の札と目盛りの文字が重ならない
+  st.tickHits = await tagTickHits(page, 'section.smile .fut-stack');
+  return st;
+};
 
 /** RSI の段の横線の高さ（段の座標）→ 値（0〜100。段の描画域 = 上 14px・下 4px）。札の文字（小数 1 桁）と比べる */
 function rsiTagOk(st) {
@@ -3570,10 +3583,11 @@ async function futPaneCheck(page, label) {
     st4.priceV === 1 &&
     st4.priceH === 0 &&
     st4.xTag === st4.time &&
-    st4.float === null;
+    st4.float === null &&
+    st4.tickHits.length === 0;
   if (!crossOk)
     bad.push(
-      `十字線 ${st4.cross}（${st4.crossKind}・y ${st4.hy}・札 ${st4.tag}）・価格 縦 ${st4.priceV} 横 ${st4.priceH}・時刻 ${st4.xTag} / ${st4.time}・浮き ${st4.float}`,
+      `十字線 ${st4.cross}（${st4.crossKind}・y ${st4.hy}・札 ${st4.tag}）・価格 縦 ${st4.priceV} 横 ${st4.priceH}・時刻 ${st4.xTag} / ${st4.time}・浮き ${st4.float}・札と目盛りの文字の重なり（#349）${st4.tickHits.join(' ') || 'なし'}`,
     );
   // MACD の段のダブルクリック → 最大化
   await page.mouse.dblclick(midX, st4.paneTop[1] + st4.paneH[1] / 2);
@@ -12283,6 +12297,17 @@ async function savedScenario(page) {
 }
 
 /** 横軸の目盛りの文字（表示範囲の判定。表示範囲は保存されないので目盛りで見る） */
+/**
+ * マウスを損益グラフの外（描画域の svg の上、上に余白が無ければ下）へ出す。#349: 十字線（面のホバーを含む）の札と重なる目盛りの
+ * 文字は隠れるので、目盛りの文字の並びで表示範囲を比べる前に十字線を消す
+ */
+async function mouseOffChart(page) {
+  const b = await page.locator('section.stage .chart').boundingBox();
+  if (!b) return;
+  await page.mouse.move(b.x + b.width / 2, b.y > 30 ? b.y - 20 : b.y + b.height + 20);
+  await page.waitForTimeout(120);
+}
+
 const xTickTexts = (page) =>
   page.evaluate(() =>
     [...document.querySelectorAll('section.stage .chart .ax .tick-x')].map((t) => t.textContent),
@@ -12323,6 +12348,7 @@ async function surfaceDragFlows(vp) {
   await page.keyboard.press('0');
   await toSurface(page);
   await page.waitForTimeout(150);
+  await mouseOffChart(page);
   const ticks0 = await xTickTexts(page);
   const maxDays = await aria('.timerail', 'aria-valuemax');
 
@@ -12396,6 +12422,7 @@ async function surfaceDragFlows(vp) {
 
   // (c) ドラッグ・クリックの前後で表示範囲（横軸の目盛り）が同じ
   {
+    await mouseOffChart(page);
     const ticks1 = await xTickTexts(page);
     check(
       `#88 AC-13(c) ${tag} 面の 1 本のドラッグ・クリックで表示範囲（横軸の目盛り）が変わらない`,
@@ -14479,8 +14506,8 @@ async function futFlows(vp) {
 
 // ---- IV 推移の十字線と軸の札（#130 AC-7）。縦線は足に吸着、横線は指 / マウスの高さ（オーナーの決定 2026-10-18）
 /** 十字線・札の状態（svg の座標）。縦軸の目盛り（y → 値）も返す */
-const ivCrossState = (page) =>
-  page.evaluate(() => {
+const ivCrossState = async (page) => {
+  const st = await page.evaluate(() => {
     const sec = document.querySelector('section.smile');
     const svg = sec?.querySelector('.iv-wrap svg');
     if (!sec || !svg) return null;
@@ -14519,13 +14546,30 @@ const ivCrossState = (page) =>
       top: box.top,
     };
   });
+  // #349: 札と目盛りの文字が重ならない
+  if (st) st.tickHits = await tagTickHits(page, 'section.smile .iv-wrap');
+  return st;
+};
+
+/**
+ * 逆に読む目盛り（#349）: 十字線の札と重なる目盛りの文字は隠れるので、描いている目盛りが 2 個以上ならそれを、1 個以下（低い描画域で
+ * 目盛り 2 個のうち 1 個が札に隠れた）なら十字線を出す前に読んだ目盛り（base。軸は十字線で変わらない）を使う
+ */
+const ivReadTicks = (st, base) => {
+  if (st.ticks.length >= 2) return st.ticks;
+  if (!base || base.ticks.length < 2) return st.ticks;
+  // 隠れるのは札の裏の高々 2 個（#349 AC3）。それより多く消えていたら逆読みしない（NG）
+  return base.ticks.length - st.ticks.length <= 2 ? base.ticks : [];
+};
 
 /** 縦軸の札の文字が横線の高さの IV（目盛りの 2 点から逆に読んだ値と 0.02 以内・読み取りと同じ小数 2 桁）か */
-function ivYTagOk(st) {
-  if (!st || st.hy === null || st.yTag === null || st.ticks.length < 2) return false;
+function ivYTagOk(st, base = null) {
+  if (!st || st.hy === null || st.yTag === null) return false;
+  const ticks = ivReadTicks(st, base);
+  if (ticks.length < 2) return false;
   const num = (t) => Number(t.replace('−', '-').replace(/,/g, ''));
-  const [y0, l0] = st.ticks[0];
-  const [y1, l1] = st.ticks[st.ticks.length - 1];
+  const [y0, l0] = ticks[0];
+  const [y1, l1] = ticks[ticks.length - 1];
   if (!(Math.abs(y1 - y0) > 0)) return false;
   const v = num(l0) + ((st.hy - y0) * (num(l1) - num(l0))) / (y1 - y0);
   return /^\d+\.\d{2}$/.test(st.yTag) && Math.abs(num(st.yTag) - v) <= 0.02;
@@ -14546,6 +14590,7 @@ async function ivCrossFlows(vp) {
     return;
   }
   // (a) ホバー: 2 か所（高さを変える）で十字線 2 本・札 2 個、横の札 = 読み取りの時刻、横線 = マウスの高さ、縦の札 = その高さの IV
+  const base = await ivCrossState(page);
   const seen = [];
   for (const [fx, fy] of [
     [0.5, 0.35],
@@ -14559,15 +14604,16 @@ async function ivCrossFlows(vp) {
     seen.push(st);
     const yOk = st && st.hy !== null && Math.abs(st.hy - (my - st.top)) <= 0.6;
     check(
-      `#130 AC-7(a) ${tag} ホバー（${fx}, ${fy}）: 十字線 2 本・札 2 個（svg の内側）、横の札 = 読み取りの時刻、横線 = マウスの高さ、縦の札 = その高さの IV（小数 2 桁）`,
+      `#130 AC-7(a) #349 ${tag} ホバー（${fx}, ${fy}）: 十字線 2 本・札 2 個（svg の内側）、横の札 = 読み取りの時刻、横線 = マウスの高さ、縦の札 = その高さの IV（小数 2 桁）、札と目盛りの文字が重ならない`,
       st?.lines === 2 &&
         st.tags.length === 2 &&
         st.tags.every((t) => t.inside) &&
         st.xTag === st.time &&
         yOk &&
-        ivYTagOk(st),
+        ivYTagOk(st, base) &&
+        st.tickHits.length === 0,
       st
-        ? `線 ${st.lines}・札 ${st.tags.map((t) => `${t.axis}「${t.text}」${t.inside ? '' : '（外）'}`).join(' ')}・読み取り ${st.time}・横線 y ${st.hy}（マウス ${Math.round((my - st.top) * 10) / 10}）`
+        ? `線 ${st.lines}・札 ${st.tags.map((t) => `${t.axis}「${t.text}」${t.inside ? '' : '（外）'}`).join(' ')}・読み取り ${st.time}・横線 y ${st.hy}（マウス ${Math.round((my - st.top) * 10) / 10}）${st.tickHits.length ? `・札と目盛りの文字の重なり（#349）${st.tickHits.join(' ')}` : ''}`
         : '描画域が無い',
     );
   }
@@ -14971,6 +15017,7 @@ async function ivCrossTouchFlow() {
     await page.waitForTimeout(400);
   };
   // (a) タップで置く（#217 で長押しからタップに）
+  const base = await ivCrossState(page);
   await tapAt(a);
   const st1 = await ivCrossState(page);
   // (b) 交点を押してドラッグで動く（パンしない）
@@ -15013,7 +15060,7 @@ async function ivCrossTouchFlow() {
       st1.tags.every((t) => t.inside) &&
       st1.xTag === st1.time &&
       yAt(st1, a.y) &&
-      ivYTagOk(st1),
+      ivYTagOk(st1, base),
     st1
       ? `線 ${st1.lines}・札 ${st1.xTag} / ${st1.yTag}・読み取り ${st1.time}・横線 y ${st1.hy}`
       : '',
@@ -16340,6 +16387,39 @@ async function aiFlows(vp) {
   await ctx.close();
 }
 
+// ---- 十字線の札と目盛りの文字の重なり（#349）
+/**
+ * root の中の各 svg（入れ子の svg は外側に含める）で、十字線の札の矩形（.xh-tag / .xc-tag / .iv-tag / .ind-tag）と
+ * 目盛りの文字（.ax の文字・追証マップの .hm-tick・段の .ind-ty）の画面の矩形が 0.5px を超えて重なる組を返す（空 = 重ならない）
+ */
+async function tagTickHits(page, root) {
+  return page.evaluate((q) => {
+    const hits = [];
+    for (const el of document.querySelectorAll(q)) {
+      const svgs = [el.matches('svg') ? el : null, ...el.querySelectorAll('svg')].filter(
+        (v) => v && !v.ownerSVGElement,
+      );
+      for (const svg of svgs) {
+        const tags = [
+          ...svg.querySelectorAll('.xh-tag rect, .xc-tag rect, .iv-tag rect, .ind-tag rect'),
+        ].map((r) => r.getBoundingClientRect());
+        if (tags.length === 0) continue;
+        for (const t of svg.querySelectorAll('.ax text, .hm-tick, .ind-ty')) {
+          const b = t.getBoundingClientRect();
+          if (b.width === 0) continue;
+          for (const r of tags) {
+            const ix = Math.min(b.right, r.right) - Math.max(b.left, r.left);
+            const iy = Math.min(b.bottom, r.bottom) - Math.max(b.top, r.top);
+            if (ix > 0.5 && iy > 0.5)
+              hits.push(`「${(t.textContent ?? '').trim()}」${ix.toFixed(1)}×${iy.toFixed(1)}`);
+          }
+        }
+      }
+    }
+    return hits;
+  }, root);
+}
+
 // ---- 損益グラフの十字線（#201）
 const pnlCrossStats = { pass: 0, total: 0 };
 
@@ -16347,8 +16427,8 @@ const pnlCrossStats = { pass: 0, total: 0 };
  * 十字線の状態（svg の座標）: 線・札・点・読み取り（各文字の getBBox が描画域と svg の内側か）と、目盛りから逆に読む
  * 横 / 縦の値（札の確かめ用）
  */
-const pnlCrossState = (page) =>
-  page.evaluate(() => {
+const pnlCrossState = async (page) => {
+  const st = await page.evaluate(() => {
     const c = document.querySelector('section.stage .chart');
     const svg = c?.querySelector(':scope > svg');
     if (!c || !svg) return null;
@@ -16421,11 +16501,32 @@ const pnlCrossState = (page) =>
       ticksX,
       ticksY,
       unit: (svg.querySelector('.ax .unit')?.textContent ?? '').trim(),
+      // 格子の線の数（#349: 札と重なる目盛りは文字だけ隠すので、線の数 − 文字の数 = 隠れた目盛り）
+      gridY: [...svg.querySelectorAll(':scope > .grid line')].filter(
+        (l) => l.getAttribute('y1') === l.getAttribute('y2'),
+      ).length,
+      gridX: [...svg.querySelectorAll(':scope > .grid line')].filter(
+        (l) => l.getAttribute('x1') === l.getAttribute('x2'),
+      ).length,
       handleX: vline ? Number(vline.getAttribute('x1')) : null,
       left: box.left,
       top: box.top,
     };
   });
+  if (st) st.tickHits = await tagTickHits(page, 'section.stage .chart');
+  return st;
+};
+
+/**
+ * 横軸の目盛りの位置（#349: 十字線の札と重なる目盛りの文字は隠れるので、文字の並びではなく、描いている目盛りから逆に読んだ
+ * 描画域の左端の値で比べる。パンしたかの判定用）
+ */
+const xAxisAt = (st) => (st ? fromTicks(st.ticksX, st.plot.x) : null);
+const sameXAxis = (a, b) => {
+  const va = xAxisAt(a);
+  const vb = xAxisAt(b);
+  return va !== null && vb !== null && Math.abs(va - vb) < 1;
+};
 
 /** 目盛りの 2 点から画素 → 値 */
 function fromTicks(ticks, px) {
@@ -16445,6 +16546,12 @@ function pnlCrossOk(st) {
   if (!st) return ['描画域が無い'];
   if (st.lines !== 2) bad.push(`線 ${st.lines} 本`);
   if (st.tags.length !== 2 || !st.tags.every((t) => t.inside && t.fits)) bad.push('札');
+  if (st.tickHits.length) bad.push(`札と目盛りの文字の重なり ${st.tickHits.join(' ')}`);
+  // 隠れるのは軸ごとに札の裏の高々 2 個（#349 AC3）
+  if (st.gridY - st.ticksY.length > 2 || st.gridX - st.ticksX.length > 2)
+    bad.push(
+      `隠れた目盛り 縦 ${st.gridY - st.ticksY.length}・横 ${st.gridX - st.ticksX.length}（高々 2 個）`,
+    );
   const vals = st.reads.filter((r) => r.cls.includes('xh-val'));
   if (vals.length < 2 || vals.length > 3) bad.push(`読み取り ${vals.length} 行`);
   if (!st.reads.every((r) => r.inPlot && r.inSvg)) bad.push('読み取りが描画域の外');
@@ -16520,9 +16627,87 @@ async function pnlCrossAll() {
         if (fx === 0.88)
           await report(page, `next ${theme} 十字線`, w, h, `next-${w}x${h}-${theme}-pnl-cross`);
       }
+      await pnlTickHide(page, st0, `${theme} ${w}x${h}`);
       await ctx.close();
     }
   }
+}
+
+/**
+ * #349: 十字線の札と重なる目盛りの文字だけを隠す（格子の線・十字線の無いときは今のまま）。
+ * (a) 十字線なし: 目盛りの文字の数 = 格子の線の数・単位あり、(b) 横線を縦の目盛りの高さ +6px → 縦の目盛りが 1 個以上隠れ 2 個以上
+ * 残る、(c) 縦線を横の目盛り +5px → 横の目盛りが 1 個以上隠れ 2 個以上残る、(d) 横線を描画域の上端（単位の高さ）→ 単位を隠す。
+ * どれも札と目盛りの文字が重ならず、札 = 残った目盛りから逆に読んだ値（pnlCrossOk）
+ */
+async function pnlTickHide(page, st0, lbl) {
+  const { plot } = st0;
+  const one = (name, ok, detail) => {
+    pnlCrossStats.total++;
+    if (ok) pnlCrossStats.pass++;
+    else failed = true;
+    console.log(`#349 ${lbl} ${name}: ${detail} ${ok ? 'pass' : '← NG'}`);
+  };
+  one(
+    '十字線なしでは目盛りの文字を全部描く（文字の数 = 格子の線の数・単位あり）',
+    st0.ticksY.length === st0.gridY && st0.ticksX.length === st0.gridX && st0.unit !== '',
+    `縦 ${st0.ticksY.length}/${st0.gridY}・横 ${st0.ticksX.length}/${st0.gridX}・単位「${st0.unit}」`,
+  );
+  const inner = (v, lo, len) => v > lo + 12 && v < lo + len - 12;
+  const ty = st0.ticksY.filter(([py]) => inner(py, plot.y, plot.h));
+  const tx = st0.ticksX.filter(([px]) => inner(px, plot.x, plot.w));
+  const cases = [];
+  if (ty.length) {
+    const [py] = ty[Math.floor(ty.length / 2)];
+    cases.push(['横線を縦の目盛り +6px', st0.left + plot.x + plot.w * 0.5, st0.top + py + 6, 'y']);
+  } else one('縦の目盛り', false, '描画域の内側に目盛りが無い');
+  if (tx.length) {
+    const [px] = tx[Math.floor(tx.length / 2)];
+    cases.push(['縦線を横の目盛り +5px', st0.left + px + 5, st0.top + plot.y + plot.h * 0.5, 'x']);
+  } else one('横の目盛り', false, '描画域の内側に目盛りが無い');
+  cases.push([
+    '横線を描画域の上端',
+    st0.left + plot.x + plot.w * 0.5,
+    st0.top + plot.y + 3,
+    'unit',
+  ]);
+  for (const [name, mx, my, axis] of cases) {
+    await page.mouse.move(mx, my);
+    await page.waitForTimeout(100);
+    const st = await pnlCrossState(page);
+    const bad = pnlCrossOk(st);
+    let detail = '-';
+    if (st) {
+      const hy = st.gridY - st.ticksY.length;
+      const hx = st.gridX - st.ticksX.length;
+      if (axis === 'y' && !(hy >= 1 && hy <= 2 && st.ticksY.length >= 2))
+        bad.push(`縦の目盛り 隠れ ${hy}・残り ${st.ticksY.length}`);
+      if (axis === 'x' && !(hx >= 1 && hx <= 2 && st.ticksX.length >= 2))
+        bad.push(`横の目盛り 隠れ ${hx}・残り ${st.ticksX.length}`);
+      if (axis === 'unit' && st.unit !== '') bad.push(`単位「${st.unit}」が残る`);
+      detail = `札 ${st.xTag} / ${st.yTag}・縦 ${st.ticksY.length}/${st.gridY}・横 ${st.ticksX.length}/${st.gridX}・単位「${st.unit}」`;
+    }
+    one(
+      `${name}: 札と重なる目盛りの文字だけ隠れ（格子の線は残る）、札と目盛りの文字が重ならない`,
+      bad.length === 0,
+      `${detail}${bad.length ? `・${bad.join('・')}` : ''}`,
+    );
+  }
+  // 外れると元に戻る（描画域の svg の上、上に余白が無ければ下）
+  await page.mouse.move(
+    st0.left + plot.x + plot.w / 2,
+    st0.top > 30 ? st0.top - 20 : st0.top + st0.H + 20,
+  );
+  await page.waitForTimeout(120);
+  const out = await pnlCrossState(page);
+  one(
+    'マウスが外れると目盛りの文字・単位が元に戻る',
+    out !== null &&
+      out.lines === 0 &&
+      out.ticksY.length === out.gridY &&
+      out.ticksX.length === out.gridX &&
+      out.unit !== '',
+    `線 ${out?.lines}・縦 ${out?.ticksY.length}/${out?.gridY}・横 ${out?.ticksX.length}/${out?.gridX}・単位「${out?.unit}」`,
+  );
 }
 
 /** --flows（#201 AC-5）: 1440×900 のホバー（横の札 = X・縦の札 = マウスの高さ・外れて 0）、ドラッグのパン・長押しは今のまま */
@@ -16594,8 +16779,8 @@ async function pnlCrossFlows(vp) {
   const panned = await pnlCrossState(page);
   check(
     `#201 ${tag} ドラッグでパン（横の目盛りが変わる）、ハンドルは動かない`,
-    panned !== null && panned.ticksX.map((t) => t[1]).join() !== ticks0,
-    `${ticks0} → ${panned?.ticksX.map((t) => t[1]).join()}`,
+    panned !== null && xAxisAt(panned) !== null && !sameXAxis(st0, panned),
+    `${ticks0} → ${panned?.ticksX.map((t) => t[1]).join()}（左端の値 ${Math.round(xAxisAt(st0) ?? Number.NaN)} → ${Math.round(xAxisAt(panned) ?? Number.NaN)}）`,
   );
   // 長押し 600ms でシナリオ点をつかんで動かす（今のまま）。#223: つかんで動かす間（離す前）は十字線を出さない
   const h0 = (await pnlCrossState(page))?.handleX ?? null;
@@ -16703,7 +16888,6 @@ async function pnlCrossTouchFlow() {
     `${pnlCrossDesc(st1)}${bad1.length ? `・${bad1.join('・')}` : ''}・× ${st1?.close}`,
   );
   // (b) 交点を押してドラッグ: 十字線が動き、パンしない
-  const ticks1 = st1?.ticksX.map((t) => t[1]).join();
   const cx = Math.round((st1?.left ?? 0) + (st1?.vx ?? 0));
   const cy = Math.round((st1?.top ?? 0) + (st1?.hy ?? 0));
   await touch('touchStart', [{ x: cx + 4, y: cy + 3, id: 0 }]);
@@ -16723,10 +16907,10 @@ async function pnlCrossTouchFlow() {
       Math.abs((st2.vx ?? 0) - ((st1?.vx ?? 0) + 60)) <= 3 &&
       Math.abs((st2.hy ?? 0) - ((st1?.hy ?? 0) + 24)) <= 1 &&
       st2.xTag !== st1?.xTag &&
-      st2.ticksX.map((t) => t[1]).join() === ticks1 &&
+      sameXAxis(st1, st2) &&
       s1.sheet === s0.sheet &&
       s1.sy === s0.sy,
-    `x ${st1?.vx} → ${st2?.vx}・y ${st1?.hy} → ${st2?.hy}・札 ${st1?.xTag} → ${st2?.xTag}・目盛り ${st2?.ticksX.map((t) => t[1]).join() === ticks1 ? '同じ' : '変わった'}`,
+    `x ${st1?.vx} → ${st2?.vx}・y ${st1?.hy} → ${st2?.hy}・札 ${st1?.xTag} → ${st2?.xTag}・目盛り ${sameXAxis(st1, st2) ? '同じ' : '変わった'}（左端の値 ${Math.round(xAxisAt(st1) ?? Number.NaN)} → ${Math.round(xAxisAt(st2) ?? Number.NaN)}）`,
   );
   if (shotsDir) await page.screenshot({ path: join(shotsDir, `flows-pnl-cross-${tag}.png`) });
   // (c) 読み取りの箱（× 以外 = 最後の行）のタップでも消える（#217。移さない）、× のタップで消える
@@ -16855,8 +17039,8 @@ async function pnlCrossTouchFlow() {
 const cross217Stats = { pass: 0, total: 0 };
 
 /** 描画域の svg の中の .xc（十字線）の状態: 線・札（svg の内側・文字が矩形に収まる）・読み取り（svg の内側）と svg の位置 */
-const xcState = (page, host) =>
-  page.evaluate((q) => {
+const xcState = async (page, host) => {
+  const st = await page.evaluate((q) => {
     const el = document.querySelector(q);
     if (!el) return null;
     const g = el.querySelector('.xc');
@@ -16905,6 +17089,10 @@ const xcState = (page, host) =>
       hy: h ? Number(h.getAttribute('y1')) : null,
     };
   }, host);
+  // #349: 札と目盛りの文字が重ならない
+  if (st) st.tickHits = await tagTickHits(page, host);
+  return st;
+};
 
 /** 線 2 本・札 2 個（svg の内側・文字が収まる）・読み取りが svg の内側 */
 function xcOk(st, wantRead) {
@@ -16912,6 +17100,7 @@ function xcOk(st, wantRead) {
   const bad = [];
   if (st.lines !== 2) bad.push(`線 ${st.lines} 本`);
   if (st.tags.length !== 2 || !st.tags.every((t) => t.inside && t.fits)) bad.push('札');
+  if (st.tickHits.length) bad.push(`札と目盛りの文字の重なり（#349）${st.tickHits.join(' ')}`);
   if (wantRead && st.reads.length !== 1) bad.push(`読み取り ${st.reads.length}`);
   if (!st.reads.every((r) => r.inside)) bad.push('読み取りが svg の外');
   return bad;
@@ -17847,8 +18036,8 @@ async function optSweep() {
 }
 
 /** 十字線の状態（2 段それぞれ: 縦線・横線・札の数と横の札の文字） */
-const optCrossState = (page) =>
-  page.evaluate(() => {
+const optCrossState = async (page) => {
+  const st = await page.evaluate(() => {
     const plots = [...document.querySelectorAll('section.smile .opt-stack > .iv-wrap')];
     return plots.map((p) => {
       const svg = p.querySelector('svg');
@@ -17865,6 +18054,10 @@ const optCrossState = (page) =>
       };
     });
   });
+  // #349: 2 段の札と目盛りの文字が重ならない（配列に付ける）
+  st.tickHits = await tagTickHits(page, 'section.smile .opt-stack > .iv-wrap');
+  return st;
+};
 
 /** --cross（AC 6）: PC のホバーで 2 段の縦線がそろい、横線と縦軸の札は触っている段だけ。外れて消える */
 async function optCrossAll() {
@@ -17895,7 +18088,7 @@ async function optCrossAll() {
       const other = st[1 - i];
       const me = st[i];
       check(
-        `${lbl} ${name}にホバー: 2 段に縦線（同じ x・同じ時刻の札）、横線と縦軸の札はその段だけ・横線はマウスの高さ`,
+        `${lbl} ${name}にホバー: 2 段に縦線（同じ x・同じ時刻の札）、横線と縦軸の札はその段だけ・横線はマウスの高さ、札と目盛りの文字が重ならない（#349）`,
         me?.v === 1 &&
           other?.v === 1 &&
           Math.abs(me.vx - other.vx) <= 0.5 &&
@@ -17905,8 +18098,9 @@ async function optCrossAll() {
           me.yTag === 1 &&
           other.h === 0 &&
           other.yTag === 0 &&
-          Math.abs(me.hy - (b.y + b.h * 0.45 - me.top)) <= 0.6,
-        `${JSON.stringify(st.map(({ v, h, yTag, xTag, vx, hy }) => ({ v, h, yTag, xTag, vx, hy })))}・マウスの高さ ${(b.y + b.h * 0.45 - (me?.top ?? 0)).toFixed(1)}`,
+          Math.abs(me.hy - (b.y + b.h * 0.45 - me.top)) <= 0.6 &&
+          st.tickHits.length === 0,
+        `${JSON.stringify(st.map(({ v, h, yTag, xTag, vx, hy }) => ({ v, h, yTag, xTag, vx, hy })))}・マウスの高さ ${(b.y + b.h * 0.45 - (me?.top ?? 0)).toFixed(1)}${st.tickHits.length ? `・札と目盛りの文字の重なり（#349）${st.tickHits.join(' ')}` : ''}`,
       );
     }
     await page.mouse.move(2, 2);

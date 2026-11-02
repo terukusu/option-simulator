@@ -3,7 +3,12 @@ import type { IvBar } from '../../../data';
 import type { Domain } from '../../chart/scale';
 import { pure } from '../../components/pure';
 import { useChartGestures } from '../../components/useChartGestures';
-import { CROSS_TOUCH_GRAB_PX, crossTapAction } from '../../view/crosshair';
+import {
+  CROSS_TOUCH_GRAB_PX,
+  crossTapAction,
+  ticksClearX,
+  ticksClearY,
+} from '../../view/crosshair';
 import {
   IV_MIN_BARS,
   IV_PLOT_LABEL,
@@ -77,6 +82,11 @@ export interface IvPlotProps {
   /** 足 0 本のときの文言（無ければ「データがありません」） */
   emptyText?: string;
 }
+
+/** 目盛りの位置と文字（#349 の札との重なりの判定に渡す） */
+const tickY = (t: { y: number }) => t.y;
+const tickX = (t: { x: number }) => t.x;
+const tickLabel = (t: { label: string }) => t.label;
 
 /**
  * IV 推移の描画域（#79。自前の SVG。docs/ui-redesign.md §4.7）。座標は ui/view/ivHistory.ts の ivChartModel、
@@ -262,12 +272,15 @@ function IvPlotView(p: IvPlotProps) {
             ))}
           </g>
           <g class="ax">
-            {model.yTicks.map((t) => (
-              <text key={`y${t.label}`} x={range[0] - 5} y={t.y} class="ty">
-                {t.label}
-              </text>
-            ))}
-            {model.xTicks.map((t) => (
+            {/* 十字線の札と重なる目盛りの文字は描かない（#349。格子の線は残す。横線なしの使い方では縦の札が無い） */}
+            {ticksClearY(model.yTicks, cross && p.crossH !== false ? cross.yTag : null, tickY).map(
+              (t) => (
+                <text key={`y${t.label}`} x={range[0] - 5} y={t.y} class="ty">
+                  {t.label}
+                </text>
+              ),
+            )}
+            {ticksClearX(model.xTicks, cross ? cross.xTag : null, tickX, tickLabel).map((t) => (
               <text key={`x${t.x}`} x={t.x} y={h - 7} class="tx">
                 {t.label}
               </text>
