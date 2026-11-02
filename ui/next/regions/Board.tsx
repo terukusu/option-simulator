@@ -28,6 +28,7 @@ import { Icon } from '../parts/Icon';
 import { ManualLinks } from '../parts/ManualLinks';
 import { Popover } from '../parts/Popover';
 import { Seg } from '../parts/Seg';
+import { watchSize } from '../useSize';
 
 const NO_TEXTS = new Map<number, BoardRowText>();
 
@@ -100,25 +101,14 @@ function BoardView(p: BoardRegionProps) {
   useLayoutEffect(() => {
     const sec = bodyRef.current?.closest('section');
     if (!sec) return;
-    const update = () => {
-      const w = sec.getBoundingClientRect().width;
+    // 枠線を含む幅（設計 §2.4）から左の余白を除く（スマホの横向きのパネルの列は左に 18px のつまみ。#348。ほかの段は 0）。
+    // 通知の扱い（次のフレーム・シートの補間の間は止める = #123）は watchSize に任せる
+    return watchSize(sec, () => {
+      const w =
+        sec.getBoundingClientRect().width -
+        (Number.parseFloat(getComputedStyle(sec).paddingLeft) || 0);
       if (w > 0) setWidth((old) => (old === w ? old : w));
-    };
-    update();
-    let frame = 0;
-    const ro = new ResizeObserver(() => {
-      if (!frame) {
-        frame = requestAnimationFrame(() => {
-          frame = 0;
-          update();
-        });
-      }
     });
-    ro.observe(sec);
-    return () => {
-      if (frame) cancelAnimationFrame(frame);
-      ro.disconnect();
-    };
   }, []);
   const cols = boardPanelColumns(width);
 

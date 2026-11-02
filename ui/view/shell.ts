@@ -96,7 +96,7 @@ export type ShellAction =
   | { type: 'dock'; panel: PanelId; tier: Tier }
   /** そのパネルを開く（閉じない。hidden なら peek。舞台の足マーカーのタップなど。#82） */
   | { type: 'open'; panel: PanelId; tier: Tier }
-  /** つまみの縦の移動量（下向き正。離したときの値） */
+  /** つまみの移動量（縦向きは縦・横向きは横。正 = 狭く。離したときの値。grabDelta） */
   | { type: 'grab'; dy: number }
   | { type: 'market'; market: MarketView }
   | { type: 'chart'; chart: ChartMode }
@@ -258,6 +258,14 @@ const forTier = (panel: PanelId, tier: Tier): PanelId =>
 /** いま見せるパネル（幅がタブレットに変わったときの scenario → positions） */
 export function visiblePanel(s: ShellState, tier: Tier): PanelId {
   return forTier(s.panel, tier);
+}
+
+/**
+ * つまみの移動量（#348）: 縦向きのシートは縦（dy。下向き正）、横向きのパネルの列は横（dx。右向き正）。どちらも正 = 狭く
+ * （シートを下げる / 列を右へ寄せる）なので、grab の規則（タップ・40px で 1 段）をそのまま使う
+ */
+export function grabDelta(land: boolean, dx: number, dy: number): number {
+  return land ? dx : dy;
 }
 
 function grab(sheet: SheetStage, dy: number): SheetStage {

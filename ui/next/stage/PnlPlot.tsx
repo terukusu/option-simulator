@@ -4,14 +4,17 @@ import type { Chain } from '../../../data';
 import type { Scenario } from '../../../model';
 import { type Domain, pixelToValue } from '../../chart/scale';
 import { useChartGestures } from '../../components/useChartGestures';
+import { useMediaQuery } from '../../components/useMediaQuery';
 import type { Action, UiLeg } from '../../state';
 import { ticksClearX, ticksClearY } from '../../view/crosshair';
 import { fmtNum } from '../../view/format';
+import { LAND_QUERY } from '../../view/layout';
 import type { AmountUnit } from '../../view/metrics';
 import type { PinLabel } from '../../view/pins';
 import { type PnlBase, type PnlChartModel, Y_UNIT_LABEL } from '../../view/pnlChart';
 import {
   CROSS_GRAB_PX,
+  cursorAfterTurn,
   markLabelBox,
   type PnlCursor,
   pnlCrosshair,
@@ -134,6 +137,14 @@ export function PnlPlot(p: {
   useEffect(() => {
     if (!crossOn) setCursor(null);
   }, [crossOn]);
+  // 画面の向き（スマホの横向き）が変わったら十字線を消す（回転。#348。docs/ui-redesign.md §4.1）
+  const land = useMediaQuery(LAND_QUERY);
+  const landRef = useRef(land);
+  useEffect(() => {
+    const prev = landRef.current;
+    landRef.current = land;
+    setCursor((c) => cursorAfterTurn(c, prev, land));
+  }, [land]);
   /** 面の十字線（#217。PC のホバーだけ = タッチは押すとすぐ点をつかむ）。値の座標 */
   const [surfCursor, setSurfCursor] = useState<SurfaceCursor | null>(null);
   useEffect(() => {

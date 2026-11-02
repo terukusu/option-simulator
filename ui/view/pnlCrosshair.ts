@@ -264,3 +264,18 @@ export function pnlCursorAt(
     y: linear([bottom, plot.top], chart.yDomain as Domain)(cy),
   };
 }
+
+/**
+ * 画面の向き（スマホの横向き = ui/view/layout.ts の LAND_QUERY）が変わったあとのカーソル（#348。docs/ui-redesign.md §4.1）。
+ * 同じなら同じ参照、変われば null（消す）。回転で配置ががらりと変わると、置いた位置（指の下の値）と画面の対応が崩れるので
+ * 置き直してもらう。カーソルは値の座標なので、シートの開閉・窓の大きさ・読み取りの桁の変化など、向きの変わらない大きさの
+ * 変化では残す（#348 のレビュー B-1・N-6）
+ */
+export function cursorAfterTurn(
+  c: PnlCursor | null,
+  prevLand: boolean,
+  nextLand: boolean,
+): PnlCursor | null {
+  if (c === null) return null;
+  return prevLand === nextLand ? c : null;
+}

@@ -14,6 +14,7 @@ import {
 } from '../../ui/view/pnlChart';
 import {
   CROSS_X_STEP,
+  cursorAfterTurn,
   markLabelBox,
   type PnlCursor,
   pnlCrosshair,
@@ -384,5 +385,21 @@ describe('#227: タッチのタップ（pnlTapCursor）。表示範囲の外の�
     expect(placed).toEqual({ x: at?.x, y: at?.y, pinned: true });
     // 描画域の外のタップは置かない
     expect(pnlTapCursor(panned, false, plot.left - 5, sy)).toBeNull();
+  });
+});
+
+describe('cursorAfterTurn（#348: 向きが変わったら十字線を消す。大きさだけの変化では残す）', () => {
+  const c: PnlCursor = { x: 38_000, y: -12_000, pinned: true };
+  it('向きが同じなら同じ参照（シートの開閉・読み取りの桁の変化で描画域の大きさが変わっても残す）', () => {
+    expect(cursorAfterTurn(c, false, false)).toBe(c);
+    expect(cursorAfterTurn(c, true, true)).toBe(c);
+  });
+  it('縦 ⇄ 横で null', () => {
+    expect(cursorAfterTurn(c, false, true)).toBeNull();
+    expect(cursorAfterTurn(c, true, false)).toBeNull();
+  });
+  it('null は null', () => {
+    expect(cursorAfterTurn(null, false, true)).toBeNull();
+    expect(cursorAfterTurn(null, true, true)).toBeNull();
   });
 });

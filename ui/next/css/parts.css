@@ -640,7 +640,8 @@ svg.ic {
   height: 14px;
 }
 
-@media (max-width: 719.98px) {
+@media (max-width: 719.98px),
+  (pointer: coarse) and (min-width: 560px) and (max-width: 1199.98px) and (max-height: 500px) {
   .btn.icon.sm {
     width: 32px;
     height: 32px;

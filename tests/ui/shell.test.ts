@@ -7,6 +7,7 @@ import {
   DOCK_LABELS,
   dockPanels,
   futVisible,
+  grabDelta,
   holdMapActive,
   INITIAL_SHELL,
   initialShell,
@@ -76,6 +77,31 @@ describe('shellReduce', () => {
     expect(shellReduce(at({ sheet: 'peek' }), { type: 'grab', dy: -40 }).sheet).toBe('full');
     expect(shellReduce(at({ sheet: 'peek' }), { type: 'grab', dy: -39 }).sheet).toBe('peek');
     expect(shellReduce(at({ sheet: 'full' }), { type: 'grab', dy: -40 }).sheet).toBe('full');
+  });
+
+  it('横向きのつまみ（#348）: 横の移動量（右向き正 = 狭く）を渡すと縦と同じ遷移', () => {
+    // 縦向きは dy、横向きは dx（もう一方の軸の移動は見ない）
+    expect(grabDelta(false, 100, -3)).toBe(-3);
+    expect(grabDelta(true, -3, 100)).toBe(-3);
+    const g = (sheet: ShellState['sheet'], dx: number, dy = 0) =>
+      shellReduce(at({ sheet }), { type: 'grab', dy: grabDelta(true, dx, dy) }).sheet;
+    // タップ（< 6px）: peek ⇄ full。縦に大きく動いても横が小さければタップ
+    expect(g('peek', 0)).toBe('full');
+    expect(g('full', 5)).toBe('peek');
+    expect(g('peek', -5.9, 120)).toBe('full');
+    // 左へ 40px 以上 = 1 段広く（peek → full。full は full のまま）
+    expect(g('peek', -40)).toBe('full');
+    expect(g('peek', -39)).toBe('peek');
+    expect(g('full', -40)).toBe('full');
+    // 右へ 40px 以上 = 1 段狭く（full → peek → hidden。1 回で 1 段だけ）
+    expect(g('full', 40)).toBe('peek');
+    expect(g('peek', 40)).toBe('hidden');
+    expect(g('full', 400)).toBe('peek');
+    expect(g('full', 39)).toBe('full');
+    expect(g('peek', 6)).toBe('peek');
+    // hidden ではつまみが出ない
+    expect(g('hidden', 0)).toBe('hidden');
+    expect(g('hidden', -40)).toBe('hidden');
   });
 
   it('hidden ではつまみが出ないので grab は何もしない', () => {

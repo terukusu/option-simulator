@@ -269,8 +269,10 @@ section.panel .board-wrap:focus-visible {
   }
 }
 
-/* ===== タブレット 720〜1199: 舞台 + シナリオ | ドック + パネル 1 枚 ===== */
-@media (min-width: 720px) and (max-width: 1199.98px) {
+/* ===== タブレット 720〜1199（横向きでない。ui/view/layout.ts の TABLET_MEDIA）: 舞台 + シナリオ | ドック + パネル 1 枚 ===== */
+@media (min-width: 720px) and (max-width: 1199.98px) and (pointer: fine),
+  (min-width: 720px) and (max-width: 1199.98px) and (pointer: none),
+  (min-width: 720px) and (max-width: 1199.98px) and (min-height: 500.02px) {
   .layout {
     grid-template-columns: minmax(0, 1.15fr) minmax(320px, 0.85fr);
     grid-template-rows: auto minmax(0, 1fr) auto;
@@ -327,8 +329,9 @@ section.panel .board-wrap:focus-visible {
   }
 }
 
-/* ===== スマホ < 720: 舞台 / シート / ドック ===== */
-@media (max-width: 719.98px) {
+/* ===== スマホ < 720 と横向き（PHONE_QUERY）: 舞台 / シート / ドック。横向きの配置は下の規則で上書きする ===== */
+@media (max-width: 719.98px),
+  (pointer: coarse) and (min-width: 560px) and (max-width: 1199.98px) and (max-height: 500px) {
   .top {
     gap: var(--sp-2);
     padding: 0 10px;
@@ -400,5 +403,88 @@ section.panel .board-wrap:focus-visible {
 
   .toasts {
     bottom: calc(var(--dock-h) + var(--sp-2));
+  }
+}
+
+/*
+ * ===== スマホの横向き（#348。§2.5。ui/view/layout.ts の LAND_QUERY）: 舞台 | パネルの列 | 右端の縦のドック =====
+ * 上のスマホの規則（縦のシート・下のドック）の後に置き、同じセレクタで上書きする。シートの 3 状態は右の列の幅:
+ * hidden = 列なし（舞台が最大）/ peek = clamp(379px, 45vw, 420px)（中身 ≥ 360px。舞台は縮む・重ねない）/ full = 窓 − ドック − 読み取りの列
+ * （舞台は読み取りの列だけ。縦向きの全開のミニに当たる）。つまみは列の左端に縦（横の移動量。ui/next/Shell.tsx）
+ */
+@media (pointer: coarse) and (min-width: 560px) and (max-width: 1199.98px) and (max-height: 500px) {
+  .layout {
+    grid-template-columns: minmax(0, 1fr) auto var(--dock-w);
+    grid-template-rows: minmax(0, 1fr);
+    grid-template-areas: "stage sheet dock";
+  }
+
+  .dock {
+    flex-direction: column;
+    padding-bottom: 0;
+    border-top: 0;
+    border-left: 1px solid var(--line);
+  }
+
+  .dock > button {
+    width: 100%;
+    height: auto;
+    min-height: 0;
+  }
+
+  .dock .cnt {
+    top: 2px;
+  }
+
+  section.panel.side,
+  section.scenario {
+    position: relative;
+    height: auto;
+    padding-left: 18px;
+    border-top: 0;
+    border-left: 1px solid var(--line-2);
+    border-radius: var(--r-sheet) 0 0 var(--r-sheet);
+    transition: width var(--dur) var(--ease);
+  }
+
+  /*
+   * 覗く: 中身の幅 ≥ 360px（縦向きの 360 幅と同じ。板の 5 列が切れない）= 360 + つまみ 18 + 線 1。45vw は 844×390 で
+   * 舞台 ≥ 400px（読み取りを縦の列にする形）を残すため（46vw だと 399.8px の端数で狭い形に落ちた。#348 のレビュー N-3）
+   */
+  .layout[data-sheet="peek"] section.panel.side,
+  .layout[data-sheet="peek"] section.scenario {
+    width: clamp(379px, 45vw, 420px);
+    height: auto;
+  }
+
+  .layout[data-sheet="full"] section.panel.side,
+  .layout[data-sheet="full"] section.scenario {
+    width: calc(100vw - var(--dock-w) - var(--land-mini-w));
+    height: auto;
+  }
+
+  /* つまみ: 列の左端に縦（横のドラッグ・タップ）。印は見た目の 18px の中央 */
+  .grabber {
+    position: absolute;
+    inset-block: 0;
+    /* 当たり判定は 24px（WCAG 2.5.8 の床。#348 のレビュー N-5）: 見た目の 18px（列の余白）に加えて列の外（舞台の右端）へ 6px */
+    left: -6px;
+    width: 24px;
+    height: auto;
+    padding-left: 6px;
+    cursor: ew-resize;
+  }
+
+  .grabber::before {
+    width: 4px;
+    height: 36px;
+    margin: 0 auto;
+  }
+
+  /* トースト: 舞台の下（ドックの列に重ねない） */
+  .toasts {
+    bottom: var(--sp-2);
+    left: calc((100vw - var(--dock-w)) / 2);
+    max-width: calc(100vw - var(--dock-w) - 16px);
   }
 }
