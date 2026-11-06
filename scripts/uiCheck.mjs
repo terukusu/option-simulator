@@ -6991,16 +6991,34 @@ async function runFlows() {
     check('AC-11(c) 再読み込み後もライト', (await theme()) === 'light');
     await page.click('button[aria-label="テーマ"]');
     await page.click('[role="menuitemradio"]:has-text("端末に合わせる")');
-    await page.emulateMedia({ colorScheme: 'light' });
-    await page.waitForTimeout(100);
-    const t1 = await theme();
-    await page.emulateMedia({ colorScheme: 'dark' });
-    await page.waitForTimeout(100);
-    const t2 = await theme();
+    // 端末のテーマを変えて、期待する data-theme になるまで待つ（#317: Chromium は media の change を次の描画の
+    // 更新で配るので、舞台が重いと固定の 100ms を超える）。上限に達しても止めずに今の値で判定する
+    const follow = async (scheme) => {
+      const t0 = Date.now();
+      await page.emulateMedia({ colorScheme: scheme });
+      await page
+        .waitForFunction((w) => document.documentElement.dataset.theme === w, scheme, {
+          timeout: 3000,
+        })
+        .catch(() => null);
+      const ms = Date.now() - t0;
+      const mq = await page.evaluate(() => matchMedia('(prefers-color-scheme: light)').matches);
+      return { t: await theme(), ms, mqOk: mq === (scheme === 'light') };
+    };
+    // 「端末に合わせる」が効いて、端末（dark）のまま data-theme が dark に戻ったことを先に見る（ライトのまま
+    // 残ると light への追従を待たずに通るため。どちらの向きが崩れたかを detail で読み分ける）
+    await page
+      .waitForFunction(() => document.documentElement.dataset.theme === 'dark', null, {
+        timeout: 3000,
+      })
+      .catch(() => null);
+    const s0 = await theme();
+    const a = await follow('light');
+    const b = await follow('dark');
     check(
       'AC-11(c) 端末に合わせる: emulateMedia light / dark に追従',
-      t1 === 'light' && t2 === 'dark',
-      `${t1} / ${t2}`,
+      s0 === 'dark' && a.mqOk && b.mqOk && a.t === 'light' && b.t === 'dark',
+      `${a.t} / ${b.t}・${a.ms}ms / ${b.ms}ms・切り替え直後 ${s0}${a.mqOk && b.mqOk ? '' : '・前提崩れ: matchMedia が emulateMedia に合わない'}`,
     );
     await ctx.close();
   }
