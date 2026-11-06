@@ -6,7 +6,7 @@
 // 作業の保存（版 2）として localStorage に入れて開く（UI の操作に依存しない）。
 //
 //   npm run ui:check                       画面（クエリなし。#91 で既定に切り替え旧画面を削除）: 360 / 390 / 900 / 1440 ×
-//                                          ダーク / ライト、
+//                                          ダーク / ライト（と 1440×900 の拡大 200% = 720×450・DPR 2。#328）、
 //                                          スマホはシート hidden / peek / full × パネル 5 つ。各状態で舞台の読み取り
 //                                          （.readout .ro）が画面内に見えているか（スマホ 3・900 と 1440 で 5。#82・#274）。
 //                                          シナリオ（#83）の .stepper .val b・チップが切れていないか（scrollWidth ≤ clientWidth）を
@@ -189,6 +189,10 @@
 //   --land                                 #348 のスマホの横向きの項目だけ（既定の検査にも入る）。--flows と一緒なら回転（390×844 ⇄
 //                                          844×390 でパネル・シート・拡大・シナリオ・銘柄の推移・板から追加の帯を保ち十字線は消える）と
 //                                          横向きのつまみ（タップ・左右 40px・Enter / Space・ドック）の手順だけ（--flows にも入る）
+//   --zoom                                 #328 のブラウザの文字の拡大 200%（PC 1440×900 の窓 = 720×450・DPR 2・マウス = タブレットの段）の
+//                                          項目だけ（既定の検査にも入る）。窓の値の行と、タブレットの手順（wideSteps）× ダーク / ライト。
+//                                          折り返しは 1 件でも NG、読み取りの行は pass でも期待の個数つきで出す。--flows・--land・
+//                                          --parts とは一緒に使えない（エラーで止める）
 //   --cross                                #217 の十字線の項目だけ（既定の検査・--flows とも。--flows は #201・#130・#207 のタッチの流れも。手元の確かめ用）
 //   --back                                 #320 の戻るの項目だけ（--flows にも入る）: 390×844・1440×900 で、設定・保存一覧・ⓘ の吹き出し・
 //                                          ⋯ のメニュー・説明カード・（PC）パレットを開く → 戻る 1 回でそれだけ閉じ URL・フォーカスが Esc と同じ、
@@ -314,6 +318,7 @@ const known = new Set([
   '--popovers',
   '--targets',
   '--land',
+  '--zoom',
 ]);
 for (const a of args) {
   if (a.startsWith('--') && !known.has(a)) {
@@ -347,6 +352,12 @@ const importOnly = flag('--import');
 const popoversOnly = flag('--popovers');
 const targetsOnly = flag('--targets');
 const landOnly = flag('--land');
+const zoomOnly = flag('--zoom');
+if (zoomOnly && (flows || landOnly || parts)) {
+  // 拡大の状態はほかの振り分けに負けて黙って流れなくなるので、組み合わせはエラーにする（#328）
+  console.error('--zoom は --flows・--land・--parts と一緒に使えない');
+  process.exit(2);
+}
 const mode = parts ? 'parts' : 'next';
 
 // ---- 足 2 本の作業（版 2）: workspace-v2.json のタブ A だけ（fixture は変えない）
@@ -615,13 +626,17 @@ function oldClassHits(page) {
   }, OLD_CLASSES);
 }
 
+/** 文字の拡大 200%（#328）の手順の間だけ true: 折り返しの基準を 0 件に、読み取りの行を pass でも出す */
+let zoomWraps0 = false;
+
 async function report(page, label, w, h, shotName, shot = true) {
   const r = await measure(page);
   const hits = await oldClassHits(page);
   oldClassStats.states++;
   oldClassStats.found += hits.length;
   const bad = r.v > 0 || r.h > 0 || hits.length > 0 || OLD_CLASSES.length === 0;
-  const over = maxWraps !== null && r.wraps.length > maxWraps;
+  const limit = zoomWraps0 ? 0 : maxWraps;
+  const over = limit !== null && r.wraps.length > limit;
   if (bad || over) failed = true;
   const mark = bad || over ? '  ← NG' : '';
   const old =
@@ -671,6 +686,7 @@ async function readoutCheck(page, label, want) {
   if (ok) readoutStats.pass++;
   else failed = true;
   if (!ok) console.log(`${label}: 読み取り ${r.n} / ${want} つ ${r.bad.join('・')}  ← NG`);
+  else if (zoomWraps0) console.log(`${label}: 読み取り ${r.n} / ${want} つ pass`);
   await subCheck(page, label, 'readout', true);
   return ok;
 }
@@ -1445,66 +1461,8 @@ async function measureAll() {
           }
         }
       } else {
-        await report(page, tag, w, h, name);
-        if (mode === 'next') {
-          const want = 5;
-          await readoutCheck(page, `${tag} ${w}x${h}`, want);
-          await scenarioCheck(page, `${tag} ${w}x${h}`);
-          await positionsCheck(page, `${tag} ${w}x${h}`);
-          await advOpenCheck(page, tag, w, h, `${name}-adv`, want);
-          await detailOpenCheck(page, tag, w, h, `${name}-detail`, want);
-          if (w >= 1200) {
-            // PC は指標が常に見えている
-            await hedgeRowsCheck(page, `${tag} ${w}x${h}`, 1);
-            if (w === 1440 && h === 900) await foldCheck(page, `${tag} ${w}x${h}`);
-            await metricsCheck(page, `${tag} ${w}x${h}`);
-            await breakdownOpenCheck(page, tag, w, h, `${name}-kv`, want);
-            // 市場（#85）: 板（既定）→ 市場の Seg でスマイル（選択なし / あり）→ 板へ戻す
-            await marketCheck(page, `${tag} board ${w}x${h}`, { cols: marketCols(w) });
-            await page.click('section.board .panel-head .seg button:has-text("スマイル")');
-            await page.waitForTimeout(150);
-            await report(page, `${tag} smile`, w, h, `${name}-smile`);
-            await readoutCheck(page, `${tag} smile ${w}x${h}`, want);
-            await marketCheck(page, `${tag} smile ${w}x${h}`, {});
-            // 市場の列がスマイルのときも指標のタイルの副題の検査（#107）が通る
-            await metricsCheck(page, `${tag} smile ${w}x${h}`);
-            await smilePick(page, true);
-            await report(page, `${tag} smile 選択あり`, w, h, `${name}-smile-pick`);
-            await marketCheck(page, `${tag} smile 選択あり ${w}x${h}`, {});
-            await smilePick(page, false);
-            await page.click('section.smile .panel-head .seg button:has-text("板")');
-            await page.waitForTimeout(150);
-          } else {
-            // タブレットはドックで「指標」を開いて測り、「ポジ」で戻す
-            await page.click('.dock button[data-panel="metrics"]');
-            await page.waitForTimeout(150);
-            await report(page, `${tag} metrics`, w, h, `${name}-metrics`);
-            await readoutCheck(page, `${tag} metrics ${w}x${h}`, want);
-            await metricsCheck(page, `${tag} metrics ${w}x${h}`);
-            await breakdownOpenCheck(page, `${tag} metrics`, w, h, `${name}-metrics-kv`, want);
-            // 市場（#85）: ドックで「板」「スマイル」（選択なし / あり）。#130: ドックの IV は初めは IV 推移 → [スマイル]
-            await dockIvCheck(page, `${tag} ${w}x${h}`, false);
-            for (const view of ['board', 'smile']) {
-              await page.click(`.dock button[data-panel="${view}"]`);
-              await page.waitForTimeout(150);
-              if (view === 'smile') {
-                await ivFirstOpenCheck(page, `${tag} ${view} ${w}x${h}`);
-                await smileTab(page);
-              }
-              await report(page, `${tag} ${view}`, w, h, `${name}-${view}`);
-              await readoutCheck(page, `${tag} ${view} ${w}x${h}`, want);
-              await marketCheck(page, `${tag} ${view} ${w}x${h}`, { cols: marketCols(w) });
-              if (view === 'smile') {
-                await smilePick(page, true);
-                await report(page, `${tag} smile 選択あり`, w, h, `${name}-smile-pick`);
-                await marketCheck(page, `${tag} smile 選択あり ${w}x${h}`, {});
-                await smilePick(page, false);
-              }
-            }
-            await page.click('.dock button[data-panel="positions"]');
-            await page.waitForTimeout(150);
-          }
-        }
+        // 900・1440 は舞台 ≥ 480px の設計なので 5 で固定（舞台が縮む退行を見逃さない。#328 のレビュー 2）
+        await wideSteps(page, tag, w, h, name, 5);
       }
       if (domFile) domOut.push(`## ${w}x${h} ${theme}`, await domList(page));
       await ctx.close();
@@ -1653,11 +1611,88 @@ async function measureAll() {
     await hintTargetSweep();
     // スマホの横向き（#348 AC-3〜AC-6）
     await landAll();
+    // 文字の拡大 200%（#328）
+    await zoomAll();
   }
   // 旧のクラス名（#91・EPIC #92 の終了条件 8）: report を通ったすべての状態の合計
   console.log(
     `旧のクラス名の検査（#91）: ${OLD_CLASSES.length} 個の名前 × ${oldClassStats.states} 状態で当たり ${oldClassStats.found} 件${OLD_CLASSES.length === 0 || oldClassStats.found ? '  ← NG' : ''}`,
   );
+}
+
+/**
+ * 舞台の読み取りの個数の期待（ui/next/stage/BigReadout.tsx: section.stage の幅 ≥ 480 → 5、< 480 → 3。landState と同じ規則）。
+ * 拡大 200%（#328。720×450）の手順だけが使う（舞台 < 480 で 3）。既定の実行の 900・1440 は 5 で固定（舞台が縮む退行を見逃さない）
+ */
+const readoutWant = (page) =>
+  page.evaluate(() =>
+    (document.querySelector('section.stage')?.getBoundingClientRect().width ?? 0) >= 480 ? 5 : 3,
+  );
+
+/**
+ * スマホでない段（タブレット・PC）の 1 つの窓の手順（measureAll と文字の拡大 200% の zoomAll（#328）で共用）。
+ * 読み取り・シナリオ・ポジション・前提 / 詳細を開く → PC は指標・市場の列、タブレットはドックで指標・板・スマイル。want = 読み取りの期待の個数
+ */
+async function wideSteps(page, tag, w, h, name, want) {
+  await report(page, tag, w, h, name);
+  if (mode === 'next') {
+    await readoutCheck(page, `${tag} ${w}x${h}`, want);
+    await scenarioCheck(page, `${tag} ${w}x${h}`);
+    await positionsCheck(page, `${tag} ${w}x${h}`);
+    await advOpenCheck(page, tag, w, h, `${name}-adv`, want);
+    await detailOpenCheck(page, tag, w, h, `${name}-detail`, want);
+    if (w >= 1200) {
+      // PC は指標が常に見えている
+      await hedgeRowsCheck(page, `${tag} ${w}x${h}`, 1);
+      if (w === 1440 && h === 900) await foldCheck(page, `${tag} ${w}x${h}`);
+      await metricsCheck(page, `${tag} ${w}x${h}`);
+      await breakdownOpenCheck(page, tag, w, h, `${name}-kv`, want);
+      // 市場（#85）: 板（既定）→ 市場の Seg でスマイル（選択なし / あり）→ 板へ戻す
+      await marketCheck(page, `${tag} board ${w}x${h}`, { cols: marketCols(w) });
+      await page.click('section.board .panel-head .seg button:has-text("スマイル")');
+      await page.waitForTimeout(150);
+      await report(page, `${tag} smile`, w, h, `${name}-smile`);
+      await readoutCheck(page, `${tag} smile ${w}x${h}`, want);
+      await marketCheck(page, `${tag} smile ${w}x${h}`, {});
+      // 市場の列がスマイルのときも指標のタイルの副題の検査（#107）が通る
+      await metricsCheck(page, `${tag} smile ${w}x${h}`);
+      await smilePick(page, true);
+      await report(page, `${tag} smile 選択あり`, w, h, `${name}-smile-pick`);
+      await marketCheck(page, `${tag} smile 選択あり ${w}x${h}`, {});
+      await smilePick(page, false);
+      await page.click('section.smile .panel-head .seg button:has-text("板")');
+      await page.waitForTimeout(150);
+    } else {
+      // タブレットはドックで「指標」を開いて測り、「ポジ」で戻す
+      await page.click('.dock button[data-panel="metrics"]');
+      await page.waitForTimeout(150);
+      await report(page, `${tag} metrics`, w, h, `${name}-metrics`);
+      await readoutCheck(page, `${tag} metrics ${w}x${h}`, want);
+      await metricsCheck(page, `${tag} metrics ${w}x${h}`);
+      await breakdownOpenCheck(page, `${tag} metrics`, w, h, `${name}-metrics-kv`, want);
+      // 市場（#85）: ドックで「板」「スマイル」（選択なし / あり）。#130: ドックの IV は初めは IV 推移 → [スマイル]
+      await dockIvCheck(page, `${tag} ${w}x${h}`, false);
+      for (const view of ['board', 'smile']) {
+        await page.click(`.dock button[data-panel="${view}"]`);
+        await page.waitForTimeout(150);
+        if (view === 'smile') {
+          await ivFirstOpenCheck(page, `${tag} ${view} ${w}x${h}`);
+          await smileTab(page);
+        }
+        await report(page, `${tag} ${view}`, w, h, `${name}-${view}`);
+        await readoutCheck(page, `${tag} ${view} ${w}x${h}`, want);
+        await marketCheck(page, `${tag} ${view} ${w}x${h}`, { cols: marketCols(w) });
+        if (view === 'smile') {
+          await smilePick(page, true);
+          await report(page, `${tag} smile 選択あり`, w, h, `${name}-smile-pick`);
+          await marketCheck(page, `${tag} smile 選択あり ${w}x${h}`, {});
+          await smilePick(page, false);
+        }
+      }
+      await page.click('.dock button[data-panel="positions"]');
+      await page.waitForTimeout(150);
+    }
+  }
 }
 
 // ---- 市場（#85）: 板の列の数・切れ・スマイルの描画域の高さ
@@ -20068,6 +20103,75 @@ async function landFlows() {
   await portraitCrossKeepFlow();
 }
 
+// ---- 文字の拡大 200%（#328。docs/ui-guidelines.md P8）: PC の 1440×900 の窓をブラウザの拡大 200% にした画面は
+// CSS の窓 720×450・devicePixelRatio 2・マウス（pointer: fine）= タブレットの段。measureAll のタブレットの手順（wideSteps）を
+// ダーク / ライトで流す。CSS の zoom・ピンチ（setPageScaleFactor）・フォントサイズの設定は等価でないので使わない
+const ZOOM_VP = { width: 720, height: 450 };
+/** 拡大 200% のエミュレーション（hasTouch なし = マウス。横向きの条件 pointer: coarse に当たらない） */
+const ZOOM_EXTRA = { deviceScaleFactor: 2 };
+const zoomStats = { pass: 0, total: 0 };
+
+function zoomRecord(label, ok, detail) {
+  zoomStats.total++;
+  if (ok) zoomStats.pass++;
+  else failed = true;
+  console.log(`${label}: ${detail}${ok ? '' : '  ← NG'}`);
+}
+
+async function zoomAll() {
+  if (shotsDir) mkdirSync(shotsDir, { recursive: true });
+  const { width: w, height: h } = ZOOM_VP;
+  for (const theme of ['dark', 'light']) {
+    const ctx = await newContext(
+      ZOOM_VP,
+      { [WORKSPACE_KEY]: twoLegs, [PREFS_KEY]: prefsText(theme) },
+      theme,
+      ZOOM_EXTRA,
+    );
+    const page = await ctx.newPage();
+    await page.goto(pageUrl('next'));
+    await waitReady(page, 'next');
+    const tag = `next ${theme} 拡大 200%`;
+    const name = `zoom-${w}x${h}-${theme}`;
+    // 窓の値（再現の前提）。崩れていればその後の手順は流さない（崩れた再現で測った値を pass にしない）
+    const g = await page.evaluate(
+      (q) => ({
+        vw: innerWidth,
+        vh: innerHeight,
+        dpr: devicePixelRatio,
+        fine: matchMedia('(pointer: fine)').matches,
+        phone: matchMedia(`(max-width: 719.98px), ${q}`).matches,
+        pc: matchMedia('(min-width: 1200px)').matches,
+        stage: document.querySelector('section.stage')?.getBoundingClientRect().width ?? 0,
+      }),
+      LAND_QUERY,
+    );
+    const want = g.stage >= 480 ? 5 : 3;
+    const okWin = g.vw === w && g.vh === h && g.dpr === 2 && g.fine && !g.phone && !g.pc;
+    zoomRecord(
+      `#328 ${tag} 窓の値 ${w}x${h}`,
+      okWin,
+      `innerWidth ${g.vw}・innerHeight ${g.vh}・devicePixelRatio ${g.dpr}・pointer: fine ${g.fine}・段 ${g.phone ? 'スマホ' : g.pc ? 'PC' : 'タブレット'}・舞台 ${Math.round(g.stage)}px → 読み取り ${want} つ`,
+    );
+    if (okWin) {
+      // 手順: 各検査の NG の行はそのまま出る。この窓の手順の合否は failed で一括に見る
+      const prev = failed;
+      failed = false;
+      zoomWraps0 = true;
+      await topBarCheck(page, `${tag} ${w}x${h}`);
+      await h1Check(page, `${tag} ${w}x${h}`);
+      await legendCheck(page, `${tag} ${w}x${h}`);
+      await wideSteps(page, tag, w, h, name, await readoutWant(page));
+      zoomWraps0 = false;
+      const ok = !failed;
+      failed = prev;
+      zoomRecord(`#328 ${tag} 手順 ${w}x${h}`, ok, ok ? '各状態 pass' : '上の NG を参照');
+    }
+    await ctx.close();
+  }
+  console.log(`文字の拡大 200%（#328）: ${zoomStats.pass} / ${zoomStats.total} で pass`);
+}
+
 // 開く URL（#91: 既定はクエリなし。--parts は ?parts）
 console.log(`URL: ${pageUrl(mode)}`);
 try {
@@ -20107,6 +20211,8 @@ try {
   } else if (landOnly && !parts) {
     if (flows) await landFlows();
     else await landAll();
+  } else if (zoomOnly && !parts && !flows) {
+    await zoomAll();
   } else if (aiOnly && !parts) {
     if (flows)
       for (const vp of [

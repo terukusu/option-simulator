@@ -610,6 +610,16 @@ table.board .legbadge.buy {
   white-space: nowrap;
 }
 
+/*
+ * 枠の幅 < 340px（720px 前後のタブレットのパネル = PC の窓の拡大 200% も）では間を詰める（銘柄の 2 行目
+ * 「IV 25.1 理論 1,926」が 8px 入らないため。値は切らず副題も隠さない。#328）
+ */
+@container (max-width: 339.98px) {
+  .smile-act {
+    gap: var(--sp-1);
+  }
+}
+
 .smile-act > .who {
   display: flex;
   flex-direction: column;
