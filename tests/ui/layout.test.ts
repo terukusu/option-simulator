@@ -12,7 +12,7 @@ import {
  * #348: 画面の段階の条件（ui/view/layout.ts）と CSS の @media の照合（docs/ui-redesign.md §2.5・§10.1）。
  *
  * (a) 定数の文字列（横向き・スマホ・PC）
- * (b) ui/**\/*.css の @media の条件（prefers-* を除く）がすべて CSS_MEDIA のどれか（JS と CSS の食い違い 0）。
+ * (b) ui/**\/*.css の @media の条件（prefers-*・forced-colors を除く）がすべて CSS_MEDIA のどれか（JS と CSS の食い違い 0）。
  *     段の CSS（スマホ・タブレット・タブレット以上）がそれぞれ少なくとも 1 か所で使われている
  * (c) タブレットの条件は横向きを含まない（pointer: fine / pointer: none / min-height: 500.02px の 3 つの和）
  * (d) 条件の意味: 代表の窓（幅・高さ・pointer）で、スマホ・タブレット・PC のちょうど 1 つに当たる
@@ -81,7 +81,10 @@ describe('画面の段階の条件（#348）', () => {
   it('(b) CSS の @media の条件はすべて ui/view/layout.ts の一覧のどれか', () => {
     expect(all.length).toBeGreaterThan(10);
     const allowed = new Set(CSS_MEDIA);
-    const bad = all.filter(({ q }) => !q.startsWith('(prefers-') && !allowed.has(q));
+    // prefers-*・forced-colors は利用者の環境のメディア特性で、画面の段の条件ではない（#327: 強制カラーの ⓘ の輪）
+    const bad = all.filter(
+      ({ q }) => !q.startsWith('(prefers-') && !q.startsWith('(forced-colors:') && !allowed.has(q),
+    );
     expect(bad).toEqual([]);
   });
 

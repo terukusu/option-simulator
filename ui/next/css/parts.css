@@ -435,6 +435,59 @@
   color: var(--ink);
 }
 
+/*
+ * スマホ（縦と横向き。.btn.icon.sm の 32px と同じ条件 = ui/view/layout.ts の PHONE_QUERY）の ⓘ: 当たりを 24×24px の正方形に
+ * （WCAG 2.5.8。docs/ui-guidelines.md P8・#327。border-radius を付けない = 当たりを円に切らない）。負の margin で並びの幅・
+ * 高さは 18px のまま（行の配置・折り返しを変えない）、丸い枠とフォーカスの輪は ::before（今と同じ 18px の丸・輪の大きさ）。
+ * PC・タブレットは上の 18px のまま
+ */
+@media (max-width: 719.98px),
+  (pointer: coarse) and (min-width: 560px) and (max-width: 1199.98px) and (max-height: 500px) {
+  .hintbtn {
+    position: relative;
+    width: 24px;
+    height: 24px;
+    margin: -3px;
+    border: 0;
+    border-radius: 0;
+  }
+
+  .hintbtn::before {
+    content: "";
+    position: absolute;
+    inset: 3px;
+    border: 1px solid var(--line-2);
+    border-radius: 50%;
+    pointer-events: none;
+  }
+
+  /* フォーカスの輪は箱（正方形）でなく丸に（base.css の :focus-visible と同じ線・すき間） */
+  .hintbtn:focus-visible {
+    outline: none;
+  }
+
+  .hintbtn:focus-visible::before {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
+  }
+
+  /*
+   * 強制カラー（Windows のハイコントラスト）: 変更前のボタンと同じく、フォーカスの間は輪と丸い枠をシステムのフォーカスの色に
+   * （疑似要素は強制カラーで CanvasText になり、ボタンに付くフォーカスの色が移らないため）
+   */
+  @media (forced-colors: active) {
+    .hintbtn:focus-visible::before {
+      outline-color: Highlight;
+      border-color: Highlight;
+    }
+  }
+
+  /* 追証マップ・過去の急落の再生の見出し: 左の開閉の行（.hm-toggle）と箱が重ならない（丸の位置は変わらない） */
+  .hm-head > .pop-wrap {
+    margin-left: 3px;
+  }
+}
+
 /* ===== ダイアログ ===== */
 dialog.sheet {
   width: min(520px, calc(100vw - 32px));
@@ -611,7 +664,7 @@ dialog.sheet::backdrop {
  * 記号のボタン（⟳ ⟲ ＋ − × ⋯ ⇄ ⓘ ☾）と折りたたみの印を 18 の格子の SVG で描く。色は currentColor（親の文字色）。
  * セレクタは svg.ic（ドックの字形のアイコンの span.ic と分ける）。箱の大きさは今のまま、中のアイコンを箱に合わせる
  * （.btn.icon 16px・.btn.icon.sm 14px・.hintbtn 12px・ステッパーと Seg 14px）。スマホ（< 720px）だけ記号ボタン
- * .btn.icon.sm を 32px・中のアイコンを 18px にする（docs/ui-redesign.md §2.2・§5）
+ * .btn.icon.sm を 32px・中のアイコンを 18px にする（docs/ui-redesign.md §2.2・§5）。ⓘ の当たり（スマホの箱 24px）は .hintbtn の節（#327）
  */
 svg.ic {
   display: block;

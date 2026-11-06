@@ -58,7 +58,7 @@ const PATHS: Record<IconName, ComponentChildren> = {
       <path d="M14.5 11.5h-11M6.5 8.5l-3 3 3 3" />
     </>
   ),
-  // i の字（丸い枠は .hintbtn の border）。小さく描くので線を太く
+  // i の字（丸い枠は .hintbtn の border。スマホは ::before。#327）。小さく描くので線を太く
   info: (
     <>
       <circle cx="9" cy="4.8" r="1.3" {...DOT} />

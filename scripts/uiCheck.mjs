@@ -184,6 +184,8 @@
 //                                          #242 のツールの結果を待つ間のカードは --ai（--flows なし）でだけ
 //   --icons                                #292 のボタンのアイコンの項目だけ（既定の検査。手元の確かめ用）
 //   --popovers                             #344 のポップオーバーが窓の中の項目だけ（既定の検査にも入る。手元の確かめ用）
+//   --targets                              #327 のスマホの ⓘ の当たり判定（箱 24px・5 点が覆われない・行の内側・ほかの押せる要素と重ならない・
+//                                          13 個を測る）と PC / タブレットの ⓘ が 18px のままの項目だけ（既定の検査にも入る。手元の確かめ用）
 //   --land                                 #348 のスマホの横向きの項目だけ（既定の検査にも入る）。--flows と一緒なら回転（390×844 ⇄
 //                                          844×390 でパネル・シート・拡大・シナリオ・銘柄の推移・板から追加の帯を保ち十字線は消える）と
 //                                          横向きのつまみ（タップ・左右 40px・Enter / Space・ドック）の手順だけ（--flows にも入る）
@@ -310,6 +312,7 @@ const known = new Set([
   '--shapes',
   '--import',
   '--popovers',
+  '--targets',
   '--land',
 ]);
 for (const a of args) {
@@ -342,6 +345,7 @@ const pickOnly = flag('--pick');
 const shapesOnly = flag('--shapes');
 const importOnly = flag('--import');
 const popoversOnly = flag('--popovers');
+const targetsOnly = flag('--targets');
 const landOnly = flag('--land');
 const mode = parts ? 'parts' : 'next';
 
@@ -1645,6 +1649,8 @@ async function measureAll() {
     await fontSweep();
     // ポップオーバーが窓の中（#344 AC-2〜AC-4）
     await popoverSweep();
+    // ⓘ の当たり判定（#327 AC-1〜AC-4）
+    await hintTargetSweep();
     // スマホの横向き（#348 AC-3〜AC-6）
     await landAll();
   }
@@ -18844,6 +18850,281 @@ async function popoverSweep() {
   console.log(`ポップオーバーが窓の中の検査（#344）: ${popStats.pass} / ${popStats.total} で pass`);
 }
 
+// ---- ⓘ の当たり判定（#327。docs/ui-guidelines.md P8・5 章 5）: AC-1〜AC-4（既定の実行と --targets）
+/** 13 個の ⓘ（Popover の既定のボタン .hintbtn）の aria-label。スマホの窓では全部を測る */
+const HINT_NAMES = [
+  '損益グラフの前提',
+  'シナリオの操作',
+  'ポジションのグリークと建値ずれ',
+  '金額の単位・テール表・証拠金',
+  '板の使い方',
+  'スマイルの操作',
+  'IV 推移の操作',
+  '先物推移の操作',
+  '銘柄の推移の操作',
+  '追証マップの読み方',
+  '過去の急落の再生の読み方',
+  '保存したポジション',
+  '保有ポジション',
+];
+/** ⓘ を含む見出しの行（AC-4） */
+const HINT_ROWS = '.panel-head, .stage-tools, .hm-head, dialog .sheet-head';
+const hintStats = { pass: 0, total: 0 };
+
+/** detail が null なら数えるだけで行を出さない（pass の繰り返し） */
+function hintRecord(label, ok, detail) {
+  hintStats.total++;
+  if (ok) hintStats.pass++;
+  else failed = true;
+  if (detail !== null) console.log(`${label}: ${detail}${ok ? '' : '  ← NG'}`);
+}
+
+/**
+ * 見えている ⓘ を測る（ダイアログが開いていればその中だけ = 背景は覆われている）。窓の中に全部が入っているものだけ。
+ * 箱・中の svg.ic・5 点（中心と上下左右 11px）の elementFromPoint・行の内側と高さ・窓の中のほかの押せる要素との重なり
+ */
+const hintMeasure = (page) =>
+  page.evaluate(
+    ({ ROWS }) => {
+      const dlg = document.querySelector('dialog[open]');
+      const scope = dlg ?? document;
+      const SEL =
+        'button, a[href], summary, input:not([type=hidden]), select, textarea, [tabindex], [role=button], [role=tab], [role=menuitem]';
+      const name = (e) =>
+        e.getAttribute?.('aria-label') ||
+        `${e.tagName?.toLowerCase() ?? '?'}${e.classList?.length ? `.${e.classList[0]}` : ''}`;
+      return [...scope.querySelectorAll('button.hintbtn')]
+        .filter((b) => b.getClientRects().length > 0)
+        .map((b) => {
+          const r = b.getBoundingClientRect();
+          const inView =
+            r.left >= -0.5 &&
+            r.top >= -0.5 &&
+            r.right <= innerWidth + 0.5 &&
+            r.bottom <= innerHeight + 0.5;
+          if (!inView) return null;
+          const svg = b.querySelector('svg.ic')?.getBoundingClientRect();
+          const cx = r.left + r.width / 2;
+          const cy = r.top + r.height / 2;
+          const miss = [
+            [0, 0],
+            [11, 0],
+            [-11, 0],
+            [0, 11],
+            [0, -11],
+          ]
+            .map(([dx, dy]) => {
+              const e = document.elementFromPoint(cx + dx, cy + dy);
+              return e && (e === b || b.contains(e))
+                ? null
+                : `(${dx},${dy}) ${e ? name(e) : 'null'}`;
+            })
+            .filter(Boolean);
+          const row = b.closest(ROWS);
+          const rr = row?.getBoundingClientRect();
+          // 窓の中の押せる要素全部（行に限らない。[tabindex] を含む）と箱が交わるか。交わりの中心の重なりの順で、ⓘ と
+          // その .pop-wrap を除いた一番上がその要素のときだけ数える（sticky の見出しの下に潜った本文の要素 = 見出しに
+          // 覆われていて押せない、は数えない）
+          const wrap = b.closest('.pop-wrap');
+          const overlaps = [...scope.querySelectorAll(SEL)]
+            .filter(
+              (o) => o !== b && !o.contains(b) && !b.contains(o) && o.getClientRects().length > 0,
+            )
+            .filter((o) => {
+              const q = o.getBoundingClientRect();
+              const x0 = Math.max(q.left, r.left);
+              const x1 = Math.min(q.right, r.right);
+              const y0 = Math.max(q.top, r.top);
+              const y1 = Math.min(q.bottom, r.bottom);
+              if (x1 - x0 <= 0.5 || y1 - y0 <= 0.5) return false;
+              const e = document
+                .elementsFromPoint((x0 + x1) / 2, (y0 + y1) / 2)
+                .find((x) => x !== b && !b.contains(x) && x !== wrap);
+              return !!e && (e === o || o.contains(e));
+            })
+            .map(name);
+          return {
+            name: b.getAttribute('aria-label') ?? '?',
+            x: r.left,
+            y: r.top,
+            w: r.width,
+            h: r.height,
+            sw: svg?.width ?? 0,
+            sh: svg?.height ?? 0,
+            miss,
+            row: row ? (row.className.split(' ')[0] ?? '') : null,
+            rowH: rr?.height ?? 0,
+            inRow: rr ? r.top >= rr.top - 0.5 && r.bottom <= rr.bottom + 0.5 : false,
+            overlaps,
+          };
+        })
+        .filter(Boolean);
+    },
+    { ROWS: HINT_ROWS },
+  );
+
+/** スマホの窓の 1 状態: names を見える所へ寄せてから測り、AC-1・AC-2・AC-4・重なりを 1 行ずつ出す */
+async function hintPhoneState(page, tag, state, names, seen) {
+  for (const n of names) {
+    await page
+      .locator(`button.hintbtn[aria-label="${n}"]`)
+      .locator('visible=true')
+      .first()
+      .scrollIntoViewIfNeeded()
+      .catch(() => {});
+  }
+  await page.waitForTimeout(120);
+  const list = await hintMeasure(page);
+  for (const n of names) {
+    if (!list.some((m) => m.name === n))
+      hintRecord(`#327 ${tag} ${state} ${n}`, false, '見えない（測れない）');
+  }
+  for (const m of list) {
+    // 判定は状態ごとに毎回。出力の行だけ、同じ位置の同じ ⓘ が pass のままなら窓の中で 2 回目から省く
+    const key = `${m.name}@${Math.round(m.x)},${Math.round(m.y)}`;
+    const repeat = seen.keys.has(key);
+    seen.keys.add(key);
+    seen.names.add(m.name);
+    const size =
+      m.w >= 23.5 && m.h >= 23.5 && Math.abs(m.sw - 12) <= 0.5 && Math.abs(m.sh - 12) <= 0.5;
+    const ok = size && m.miss.length === 0 && m.row !== null && m.inRow && m.overlaps.length === 0;
+    hintRecord(
+      `#327 ${tag} ${state} ${m.name}`,
+      ok,
+      repeat && ok
+        ? null
+        : `箱 ${m.w.toFixed(1)}×${m.h.toFixed(1)}・i ${m.sw}×${m.sh}・5 点 ${m.miss.length ? `覆われる ${m.miss.join(' / ')}` : 'ok'}・行 ${m.row ?? 'なし'} 高さ ${m.rowH.toFixed(1)}px ${m.inRow ? '内側' : 'はみ出す'}・重なり ${m.overlaps.length ? m.overlaps.join(' / ') : 'なし'}`,
+    );
+  }
+}
+
+/**
+ * AC-1〜AC-4（#327）: スマホ（360×780・390×844 × ダーク / ライト、844×390・667×375 のダーク = タッチ）で状態を回り、
+ * 見えている ⓘ が箱 24×24px 以上・i 12px・5 点が覆われない・行の内側・窓の中のほかの押せる要素と重ならない。13 個が測れなければ fail。
+ * PC / タブレット（1440×900・900×1100）は見えている ⓘ が 18×18px・i 12px・枠は border 1px のまま（AC-3）
+ */
+async function hintTargetSweep() {
+  for (const [w, h, theme, touch] of [
+    [360, 780, 'dark'],
+    [360, 780, 'light'],
+    [390, 844, 'dark'],
+    [390, 844, 'light'],
+    [844, 390, 'dark', true],
+    [667, 375, 'dark', true],
+  ]) {
+    const tag = `${theme} ${w}x${h}`;
+    const ctx = await newContext(
+      { width: w, height: h },
+      { [WORKSPACE_KEY]: twoLegs, [PREFS_KEY]: prefsText(theme) },
+      theme,
+      touch ? LAND_TOUCH : {},
+    );
+    const page = await ctx.newPage();
+    await page.goto(pageUrl('next'));
+    await waitReady(page, 'next');
+    const seen = { keys: new Set(), names: new Set() };
+    await setShell(page, 'positions', 'peek');
+    await hintPhoneState(
+      page,
+      tag,
+      '舞台 + ポジション peek',
+      ['損益グラフの前提', 'ポジションのグリークと建値ずれ'],
+      seen,
+    );
+    await setShell(page, 'positions', 'full');
+    await hintPhoneState(page, tag, 'ポジション full', ['ポジションのグリークと建値ずれ'], seen);
+    await setShell(page, 'board', 'full');
+    await hintPhoneState(page, tag, '板 full', ['板の使い方'], seen);
+    await setShell(page, 'scenario', 'full');
+    await hintPhoneState(page, tag, 'シナリオ full', ['シナリオの操作'], seen);
+    await setShell(page, 'metrics', 'full');
+    await hintPhoneState(page, tag, '指標 full', ['金額の単位・テール表・証拠金'], seen);
+    await hintPhoneState(
+      page,
+      tag,
+      '指標 full 下',
+      ['追証マップの読み方', '過去の急落の再生の読み方'],
+      seen,
+    );
+    await openIv(page, w, 'full', true);
+    await hintPhoneState(page, tag, 'IV 推移', ['IV 推移の操作'], seen);
+    await smileTab(page);
+    await hintPhoneState(page, tag, 'スマイル', ['スマイルの操作'], seen);
+    await openFut(page, w, 'full', true);
+    await hintPhoneState(page, tag, '先物推移', ['先物推移の操作'], seen);
+    if (await openOptFromBoard(page, w, 'put', true)) {
+      await setShell(page, 'smile', 'full');
+      await hintPhoneState(page, tag, '銘柄の推移', ['銘柄の推移の操作'], seen);
+    }
+    await openFromMore(page, '保存一覧', BOOK);
+    await hintPhoneState(page, tag, '保存一覧', ['保存したポジション'], seen);
+    await closeDialog(page);
+    await openFromMore(page, '保有ポジション…', HOLDINGS);
+    await hintPhoneState(page, tag, '保有ポジション', ['保有ポジション'], seen);
+    await closeDialog(page);
+    const missing = HINT_NAMES.filter((n) => !seen.names.has(n));
+    hintRecord(
+      `#327 ${tag} 13 個の ⓘ`,
+      missing.length === 0,
+      missing.length ? `測れない ${missing.join('・')}` : `${seen.names.size} 個を測った`,
+    );
+    await ctx.close();
+  }
+  // PC / タブレット（AC-3）: 見えている ⓘ（パネルは開いているもの。タブレットはドックで指標も）は 18px のまま
+  for (const [w, h] of [
+    [1440, 900],
+    [900, 1100],
+  ]) {
+    const tag = `dark ${w}x${h}`;
+    const ctx = await newContext(
+      { width: w, height: h },
+      { [WORKSPACE_KEY]: twoLegs, [PREFS_KEY]: prefsText('dark') },
+    );
+    const page = await ctx.newPage();
+    await page.goto(pageUrl('next'));
+    await waitReady(page, 'next');
+    const pcCheck = async (state) => {
+      const list = await page.evaluate(() =>
+        [...document.querySelectorAll('button.hintbtn')]
+          .filter((b) => b.getClientRects().length > 0)
+          .map((b) => {
+            const r = b.getBoundingClientRect();
+            const s = b.querySelector('svg.ic')?.getBoundingClientRect();
+            return {
+              name: b.getAttribute('aria-label') ?? '?',
+              w: r.width,
+              h: r.height,
+              sw: s?.width ?? 0,
+              sh: s?.height ?? 0,
+              border: getComputedStyle(b).borderTopWidth,
+            };
+          }),
+      );
+      const bad = list.filter(
+        (m) =>
+          Math.abs(m.w - 18) > 0.5 ||
+          Math.abs(m.h - 18) > 0.5 ||
+          Math.abs(m.sw - 12) > 0.5 ||
+          Math.abs(m.sh - 12) > 0.5 ||
+          m.border !== '1px',
+      );
+      hintRecord(
+        `#327 ${tag} ${state} ⓘ は 18px のまま（AC-3）`,
+        list.length > 0 && bad.length === 0,
+        `${list.length} 個（${list.map((m) => m.name).join('・')}）${bad.length ? `・違う ${bad.map((m) => `${m.name} ${m.w.toFixed(1)}×${m.h.toFixed(1)} i ${m.sw} 枠 ${m.border}`).join(' / ')}` : '・すべて 18×18・i 12・枠 1px'}`,
+      );
+    };
+    await pcCheck('既定');
+    if (w < 1200) {
+      await page.click('.dock button[data-panel="metrics"]');
+      await page.waitForTimeout(150);
+      await pcCheck('指標');
+    }
+    await ctx.close();
+  }
+  console.log(`ⓘ の当たり判定の検査（#327）: ${hintStats.pass} / ${hintStats.total} で pass`);
+}
+
 // ---- スマホの横向き（#348。docs/ui-redesign.md §2.5）: AC-3〜AC-6（既定の実行と --land）・AC-7・AC-8（--flows と --land --flows）
 /** 横向きの判定（ui/view/layout.ts の LAND_QUERY と同じ文字列） */
 const LAND_QUERY =
@@ -19821,6 +20102,8 @@ try {
     await fontSweep();
   } else if (popoversOnly && !parts && !flows) {
     await popoverSweep();
+  } else if (targetsOnly && !parts && !flows) {
+    await hintTargetSweep();
   } else if (landOnly && !parts) {
     if (flows) await landFlows();
     else await landAll();
