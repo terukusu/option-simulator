@@ -24,6 +24,7 @@ import {
 } from '../persist';
 import { DEFAULT_MARGIN_PREFS, isAiProfile, isMarginPrefValue, type MarginPrefs } from '../prefs';
 import { initialState, reduce, type State } from '../state';
+import { DETACHED_TEXT, detachAttachments } from './aiAttach';
 import { type AiChatState, DIAGNOSE_TEXT, numberSources, TOOL_LIMIT_NOTE } from './aiChat';
 import { aiEnvFromState } from './aiContext';
 import type { IvStatsData } from './aiIvStats';
@@ -145,7 +146,7 @@ export function userTurns(messages: readonly AiMessage[], log?: AiTurnLog): AiEv
 function utteranceOf(m: AiMessage): string {
   if (m.role !== 'user') return '';
   return m.content
-    .filter((b) => b.type === 'text' && b.text !== TOOL_LIMIT_NOTE)
+    .filter((b) => b.type === 'text' && b.text !== TOOL_LIMIT_NOTE && b.text !== DETACHED_TEXT)
     .map((b) => (b as { text: string }).text)
     .join('\n');
 }
@@ -277,7 +278,8 @@ export function aiEvalCase(p: {
     note: p.note,
     turns,
     context,
-    messages,
+    // 添付は残さない（#369。base64・本文・名前を書かない = 外した印に置き換える）
+    messages: detachAttachments(messages),
     answer: {
       text: block.text,
       matched: check.matched,

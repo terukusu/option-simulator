@@ -17,11 +17,21 @@ tool_result の後ろ）。
 中継はそれを context と同じ形で検査し、`<context_update>{決定的な JSON}</context_update>` の text block にしてその位置に
 置く。前の messages は変えない（追記だけ = Opus 5.5 の preserved thinking と prompt caching の前置きを保つ。
 docs/design.md 14 章）。
+
+利用者の発言には添付（#369 = docs/adr-0010-ai-chat-attachments.md）を置ける: 画像の `image` block（Messages API と
+同じ形。検査は読み取り #318 と共用の ai/images.py）とテキストのファイルの `attachment_text` block（名前・種類・
+本文）。位置の規則は text と同じ（tool_result の後ろ）。1 件の発言に MAX_ATTACHMENTS まで、会話全体で画像
+MAX_IMAGES 枚・テキストの添付の字数の合計 MAX_ATTACH_TEXT_TOTAL まで（自由文の合計 MAX_FREE_TEXT_TOTAL には
+数えない）。送る本文では image は検査済みの値から組み立て直し、attachment_text は
+`<attachment>{escape した決定的な JSON}</attachment>` の text block にする（本文に `</attachment>`・`</context>`
+などを書かれても印を偽装できない）。
 """
 
 import json
+import re
 from dataclasses import dataclass
 
+from . import images
 from .shape import DATE, INSTANT, MONTH, Arr, Bad, Bool, Enum, Map, Num, Obj, Str, Text, TrueOnly
 from .tools import Registry
 
@@ -59,6 +69,24 @@ CONTEXT_OPEN = "<context>"  # 送る本文で context を包む印（system prom
 CONTEXT_CLOSE = "</context>"
 UPDATE_OPEN = "<context_update>"  # 会話の途中の文脈の更新（#135）
 UPDATE_CLOSE = "</context_update>"
+# 会話の添付（#369。ui/view/aiAttach.ts の上限と同じ数 = tests/ui/aiAttach.test.ts が突き合わせる。MAX_IMAGES・
+# MAX_ATTACH_TEXT_TOTAL は settings.AI_CHAT_MAX_IMAGES・AI_ATTACH_TEXT_MAX_TOTAL とも同じ = tests/test_ai_settings.py）
+MAX_ATTACHMENTS = 3  # 1 件の発言の添付（image + attachment_text）
+MAX_IMAGES = 5  # 会話全体の画像
+MAX_ATTACH_TEXT = 20_000  # テキストの添付 1 つの字数
+MAX_ATTACH_TEXT_TOTAL = 40_000  # 会話全体のテキストの添付の字数の合計
+MAX_ATTACH_NAME = 120  # 添付の名前の字数
+ATTACH_MEDIA_TYPES = ("text/csv", "text/tab-separated-values", "application/json", "application/xml", "text/xml",
+                      "text/plain")
+ATTACH_OPEN = "<attachment>"  # 送る本文でテキストの添付を包む印（system prompt が参照する）
+ATTACH_CLOSE = "</attachment>"
+ATTACH_TYPES = ("image", "attachment_text")
+# 再読み込みで外れた添付の代わりにブラウザが置く text（ui/view/aiAttach.ts の DETACHED_TEXT と同じ文。名前は入れない）
+DETACHED_TEXT = "［添付は再読み込みで外れました］"
+# 名前に入れない文字: C0・DEL・C1 の制御文字とサロゲート
+_NAME_BAD = re.compile("[\x00-\x1f\x7f-\x9f\ud800-\udfff]")
+# 本文に入れない文字: NUL と \t\n\r 以外の C0・DEL・C1 とサロゲート
+_TEXT_BAD = re.compile("[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f\ud800-\udfff]")
 
 POS = Num(0, MAX_PRICE, lo_open=True)
 NONNEG = Num(0, MAX_PRICE)
@@ -117,6 +145,10 @@ class AiRequest:
     messages: list[dict]
     # [AI に聞く] の場所・定型の ID（kind が ask / preset のときだけ。ログ用。Anthropic には送らない）
     topic: str | None = None
+    # 会話の画像の枚数（予約額の見積もり用）と、添付の数・画像の生のバイト数の合計・テキストの添付の字数の合計（ログ用。
+    # 名前・本文・base64 は出さない。#369）
+    n_images: int = 0
+    attachment_stats: tuple[int, int, int] = (0, 0, 0)
 
     def profile_chars(self) -> int:
         """自分の前提の字数（ログ用。本文は出さない。無ければ 0）"""
@@ -182,10 +214,55 @@ def _check_tool_json(text, spec, path: str):
     return spec.check(value, path)
 
 
+def _keys(block: dict, path: str, allowed: tuple[str, ...]):
+    for k in block:
+        if k not in allowed:
+            raise Bad(f"{path}.<unknown>", "unknown_key")
+    for k in allowed:
+        if k not in block:
+            raise Bad(f"{path}.{k}", "missing")
+
+
+def _image_block(block: dict, path: str) -> tuple[dict, int]:
+    """画像の block（#369）→ (組み立て直した block, 生のバイト数)"""
+    _keys(block, path, ("type", "source"))
+    src = block["source"]
+    spath = f"{path}.source"
+    if not isinstance(src, dict):
+        raise Bad(spath, "type")
+    _keys(src, spath, ("type", "media_type", "data"))
+    Enum(("base64",)).check(src["type"], f"{spath}.type")
+    info = images.check_image(src["media_type"], src["data"], spath)
+    out = {"type": "image", "source": {"type": "base64", "media_type": src["media_type"], "data": src["data"]}}
+    return out, info.n_bytes
+
+
+def _attachment_text_block(block: dict, path: str) -> dict:
+    """テキストのファイルの block（#369）"""
+    _keys(block, path, ("type", "name", "media_type", "text"))
+    name = Text(MAX_ATTACH_NAME, 1).check(block["name"], f"{path}.name")
+    if _NAME_BAD.search(name):
+        raise Bad(f"{path}.name", "chars")
+    media_type = Enum(ATTACH_MEDIA_TYPES).check(block["media_type"], f"{path}.media_type")
+    text = Text(MAX_ATTACH_TEXT, 1).check(block["text"], f"{path}.text")
+    if _TEXT_BAD.search(text):
+        raise Bad(f"{path}.text", "chars")
+    return {"type": "attachment_text", "name": name, "media_type": media_type, "text": text}
+
+
 def _user_block(block, path: str, pending: dict[str, str], registry: Registry, seen_text: bool):
+    """利用者の block → (検査済みの block, 画像の生のバイト数（画像でなければ 0）)"""
     if not isinstance(block, dict):
         raise Bad(path, "type")
     kind = block.get("type")
+    if kind == "image":
+        return _image_block(block, path)
+    if kind == "attachment_text":
+        return _attachment_text_block(block, path), 0
+    return _user_core_block(block, kind, path, pending, registry, seen_text), 0
+
+
+def _user_core_block(block: dict, kind, path: str, pending: dict[str, str], registry: Registry, seen_text: bool):
     if kind == "context_update":
         for k in block:
             if k not in ("type", "context"):
@@ -249,7 +326,7 @@ def _free_text(block) -> int:
     return 0
 
 
-def _check_messages(raw, registry: Registry) -> list[dict]:
+def _check_messages(raw, registry: Registry) -> tuple[list[dict], int, tuple[int, int, int]]:
     if not isinstance(raw, list):
         raise Bad("messages", "type")
     if not 1 <= len(raw) <= MAX_MESSAGES:
@@ -257,6 +334,7 @@ def _check_messages(raw, registry: Registry) -> list[dict]:
     out: list[dict] = []
     pending: dict[str, str] = {}  # 直前の assistant の tool_use の id → 名前
     total = 0
+    n_images = image_bytes = attach_chars = n_attach = 0
     for i, m in enumerate(raw):
         path = f"messages[{i}]"
         if not isinstance(m, dict):
@@ -275,8 +353,24 @@ def _check_messages(raw, registry: Registry) -> list[dict]:
         blocks = []
         if role == "user":
             seen_text = False
+            here = 0  # この発言の添付の数
             for j, b in enumerate(content):
-                blocks.append(_user_block(b, f"{path}.content[{j}]", pending, registry, seen_text))
+                bpath = f"{path}.content[{j}]"
+                block, n_bytes = _user_block(b, bpath, pending, registry, seen_text)
+                blocks.append(block)
+                if block["type"] in ATTACH_TYPES:
+                    here += 1
+                    if here > MAX_ATTACHMENTS:
+                        raise Bad(f"{path}.content", "attachments")
+                    if block["type"] == "image":
+                        n_images += 1
+                        image_bytes += n_bytes
+                        if n_images > MAX_IMAGES:
+                            raise Bad(bpath, "images")
+                    else:
+                        attach_chars += len(block["text"])
+                        if attach_chars > MAX_ATTACH_TEXT_TOTAL:
+                            raise Bad(f"{bpath}.text", "total")
                 if blocks[-1]["type"] == "context_update" and (i == 0 or any(
                         x["type"] == "context_update" for x in blocks[:-1])):
                     # 最初の発言は context で送る。1 件の発言に 1 つまで
@@ -284,6 +378,7 @@ def _check_messages(raw, registry: Registry) -> list[dict]:
                 seen_text = seen_text or blocks[-1]["type"] != "tool_result"
             if pending:
                 raise Bad(f"{path}.content", "missing_tool_result")
+            n_attach += here
         else:
             for j, b in enumerate(content):
                 blocks.append(_assistant_block(b, f"{path}.content[{j}]", registry))
@@ -297,7 +392,7 @@ def _check_messages(raw, registry: Registry) -> list[dict]:
         out.append({"role": role, "content": blocks})
     if out[-1]["role"] != "user":
         raise Bad("messages", "order")  # 最後は user（AI の続きを書かせない）
-    return out
+    return out, n_images, (n_attach, image_bytes, attach_chars)
 
 
 def parse_request(raw: bytes, registry: Registry) -> AiRequest:
@@ -322,20 +417,37 @@ def parse_request(raw: bytes, registry: Registry) -> AiRequest:
     elif "topic" in body:
         raise Bad("topic", "unknown_key")
     context = _check_context(body["context"], registry)
-    messages = _check_messages(body["messages"], registry)
-    return AiRequest(kind=kind, context=context, messages=messages, topic=topic)
+    messages, n_images, stats = _check_messages(body["messages"], registry)
+    return AiRequest(kind=kind, context=context, messages=messages, topic=topic, n_images=n_images,
+                     attachment_stats=stats)
+
+
+def escaped_json(value) -> str:
+    """包みの印の中に置く JSON（canonical の `<`・`>` を \\u003c・\\u003e にした同じ値の JSON。決定的）。中の自由な
+    文字列に `</context>`・`<context_update>`・`</attachment>` などの印の文字列を書かれても、印を偽装させない"""
+    return canonical(value).replace("<", "\\u003c").replace(">", "\\u003e")
 
 
 def context_json(ctx: dict) -> str:
-    """包みの印の中に置く context の JSON（canonical の `<`・`>` を \\u003c・\\u003e にした同じ値の JSON）。自分の前提
-    （#156。自由な文字列）に `</context>`・`<context_update>` などの印の文字列を書かれても、印を偽装させない。
+    """包みの印の中に置く context の JSON（escaped_json）。自分の前提（#156。自由な文字列）の印を偽装させない。
     ほかの値は `<`・`>` を含まない（列挙・数・日付の形）ので、前提の無い context のバイト列は変わらない"""
-    return canonical(ctx).replace("<", "\\u003c").replace(">", "\\u003e")
+    return escaped_json(ctx)
+
+
+def attachment_text(b: dict) -> str:
+    """テキストの添付の送る文（#369）: `<attachment>{"media_type","name","text" の escape した JSON}</attachment>`"""
+    body = escaped_json({"media_type": b["media_type"], "name": b["name"], "text": b["text"]})
+    return f"{ATTACH_OPEN}{body}{ATTACH_CLOSE}"
 
 
 def _upstream_block(b: dict) -> dict:
     if b["type"] == "context_update":
         return {"type": "text", "text": f"{UPDATE_OPEN}{context_json(b['context'])}{UPDATE_CLOSE}"}
+    if b["type"] == "attachment_text":
+        return {"type": "text", "text": attachment_text(b)}
+    if b["type"] == "image":
+        src = b["source"]
+        return {"type": "image", "source": {"type": "base64", "media_type": src["media_type"], "data": src["data"]}}
     return dict(b)
 
 

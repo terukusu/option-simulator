@@ -40,6 +40,12 @@ stream(params, cancel) は事象（thinking / text / tool_use / final）を返�
   <TMPDIR>/claude-<uid>/…/images/ に書いて残すので、要求の後に一時ディレクトリごと消す = 画像をディスクに残さない）
 - 読み取りの要求（params["mode"] == "read"。#318 = ADR-0009）: 組み込みのツール・スキル・プラグインなし、turn 1。
   ツールは params["tools"] の report_positions 1 本（mcp__sim__report_positions。フックが deny + continue_=False）
+- 会話の添付の画像（#369 = docs/adr-0010-ai-chat-attachments.md。CLI 2.1.283 の観測）: 前の発言（transcript の
+  履歴）の image block も、最後の user（prompt）の image block も、上流へ media_type・data ともバイトのまま届く。
+  CLI が作り直すのは最後の user の画像だけで、履歴の画像は作り直さない（上限は中継の検査 = ai/images.py が唯一の守り）。
+  CLI は最後の user の末尾に画像 1 枚ごとに `[Image: source: <要求ごとの一時ディレクトリの中のパス>]` の text を足し、
+  利用者の text の末尾に改行を 1 つ足す（履歴には足さない）。CLI は prompt の user の message を base64 ごと stdout の
+  1 行の JSON で返すので、SDK の行のバッファ（max_buffer_size。既定 1 MiB）を AI_SDK_MAX_BUFFER_BYTES に広げる
 - 再試行しない（CLAUDE_CODE_MAX_RETRIES=0。既定では 429 を 100 秒以上再試行する）。出力の上限は max_tokens を
   CLAUDE_CODE_MAX_OUTPUT_TOKENS で
 
@@ -551,6 +557,9 @@ class AgentSdkGateway:
             env=child_env(self._credential, self._secret, cfg_dir, params["max_tokens"], resume_turn, self._wif,
                           identity_token, self._extra_env, tmp_dir=f"{base_dir}/tmp"),
             stderr=lambda line: None,  # CLI の標準エラーは本文を含みうるので捨てる
+            # CLI は prompt の user の message を画像の base64 ごと stdout の 1 行で返す（#369 の F5。既定の 1 MiB では
+            # 上限近い画像 3 枚で CLIJSONDecodeError）
+            max_buffer_size=st.AI_SDK_MAX_BUFFER_BYTES,
             **kw,
         )
 

@@ -31,7 +31,39 @@ export type AiUserBlock =
       is_error?: boolean;
     }
   /** 会話の途中の文脈の更新（2 件目以降の user の発言・tool_result の後ろに 1 つまで。#135） */
-  | { type: 'context_update'; context: AiContext };
+  | { type: 'context_update'; context: AiContext }
+  /**
+   * 添付の画像（#369 = docs/adr-0010-ai-chat-attachments.md。Messages API と同じ形。作り直しは ui/imageEncode.ts、
+   * 中継の検査は api/src/simulator_api/ai/images.py。位置の規則は text と同じ = tool_result の後ろ）
+   */
+  | AiImageBlock
+  /** 添付のテキストのファイル（#369。中継が `<attachment>` の text block にして上流へ送る） */
+  | AiAttachmentTextBlock;
+
+/** 添付の画像の種類（ブラウザが PNG / JPEG に作り直す） */
+export type AiImageMediaType = 'image/png' | 'image/jpeg';
+/** 添付のテキストの種類（中継の allowlist.ATTACH_MEDIA_TYPES と同じ列挙） */
+export type AiAttachTextType =
+  | 'text/csv'
+  | 'text/tab-separated-values'
+  | 'application/json'
+  | 'application/xml'
+  | 'text/xml'
+  | 'text/plain';
+
+export interface AiImageBlock {
+  type: 'image';
+  source: { type: 'base64'; media_type: AiImageMediaType; data: string };
+}
+
+export interface AiAttachmentTextBlock {
+  type: 'attachment_text';
+  /** 1〜120 字・制御文字なし */
+  name: string;
+  media_type: AiAttachTextType;
+  /** 1〜20,000 字・NUL と \t\n\r 以外の制御文字なし */
+  text: string;
+}
 
 export type AiAssistantBlock =
   | { type: 'text'; text: string }

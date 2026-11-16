@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { parseChainJson, validateChainJson } from '../../data/chainJson';
+import aiAttach from '../../fixtures/synthetic/ai_attach.json';
 import aiTools from '../../fixtures/synthetic/ai_tools.json';
 import { buildFixtureFiles, sessionStart } from '../../scripts/synthBoard';
 import { RAW_FIXTURES, rawFixture } from '../support/fixtures';
@@ -25,12 +26,13 @@ describe('板の JSON の検証', () => {
 
   it('コミット済みの固定 JSON は生成器の出力と一致する（npm run fixtures で作り直す）', () => {
     const files = buildFixtureFiles();
-    // 板の 3 つと、ツールの出力の見本（#135。板ではない）
+    // 板の 3 つと、ツールの出力の見本（#135。板ではない）・添付の見本の要求（#369）
     expect(Object.keys(files).sort()).toEqual(
-      [...Object.keys(RAW_FIXTURES), 'ai_tools.json'].sort(),
+      [...Object.keys(RAW_FIXTURES), 'ai_tools.json', 'ai_attach.json'].sort(),
     );
+    const other: Record<string, unknown> = { 'ai_tools.json': aiTools, 'ai_attach.json': aiAttach };
     for (const [name, text] of Object.entries(files)) {
-      expect(JSON.parse(text)).toEqual(name === 'ai_tools.json' ? aiTools : RAW_FIXTURES[name]);
+      expect(JSON.parse(text)).toEqual(other[name] ?? RAW_FIXTURES[name]);
     }
   });
 

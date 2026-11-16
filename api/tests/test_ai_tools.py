@@ -102,12 +102,11 @@ def test_result_unknown_key_rejected():
 
 
 def test_sample_body_size_within_limits():
-    # 事前計算つきの文脈で診断の最初の要求が本文の上限（512 KiB）より十分小さい
-    from simulator_api import settings as st
-
+    # 事前計算つきの文脈で診断の最初の要求が、添付の無い会話の本文の枠（512 KiB。#369 で上限は添付の分を足した
+    # AI_MAX_BODY_BYTES）より十分小さい
     for case in SAMPLE["cases"]:
         body = ai_body(context=case["context"], kind="diagnose")
-        assert len(json.dumps(body, ensure_ascii=False).encode()) < st.AI_MAX_BODY_BYTES / 8
+        assert len(json.dumps(body, ensure_ascii=False).encode()) < 512 * 1024 / 8
 
 
 def test_technicals_sample_passes_shapes():
