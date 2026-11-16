@@ -242,3 +242,13 @@ def test_metadata_identity_token_errors_without_body(opener):
     with pytest.raises(gw.IdentityTokenError) as e:
         gw.metadata_identity_token(opener)
     assert "not a token" not in str(e.value) and "unreachable" not in str(e.value)
+
+
+def test_attach_limits_match_allowlist():
+    # #369: 本文の上限の式に使う数（settings）と許可リストの上限（allowlist）が同じ
+    from simulator_api.ai import allowlist
+
+    assert st.AI_CHAT_MAX_IMAGES == allowlist.MAX_IMAGES == 5
+    assert st.AI_ATTACH_TEXT_MAX_TOTAL == allowlist.MAX_ATTACH_TEXT_TOTAL == 40_000
+    assert st.AI_MAX_BODY_BYTES == (512 * 1024 + st.AI_CHAT_MAX_IMAGES * (-(-st.AI_IMAGE_MAX_BYTES // 3) * 4)
+                                    + st.AI_ATTACH_TEXT_MAX_TOTAL * 4 + 64 * 1024)

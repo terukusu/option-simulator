@@ -179,8 +179,9 @@ def test_body_over_read_limit_413():
 
 
 def test_read_limit_separate_from_chat_limit():
-    # 会話の上限（512 KiB）は変えない。読み取りの上限は base64 の 500,000 B が入る大きさ
-    assert st.AI_MAX_BODY_BYTES == 512 * 1024
+    # 読み取りの上限（768 KiB）は会話の上限と別（会話の上限は #369 で添付の分を足した = tests/test_ai_relay.py）。
+    # 読み取りの上限は base64 の 500,000 B が入る大きさ
+    assert st.AI_READ_MAX_BODY_BYTES == 768 * 1024
     assert st.AI_READ_MAX_BODY_BYTES > -(-st.AI_IMAGE_MAX_BYTES // 3) * 4 + 200
 
 
@@ -424,13 +425,14 @@ def test_concurrency_shared_with_chat():
     assert read_post(client, read_body(PNG)).status_code == 200
 
 
-def test_chat_endpoint_unchanged():
-    # 会話の要求に image は入れられない（許可リストの外 = 400）
+def test_chat_accepts_image_since_369():
+    # 会話の要求の image は #369 から受ける（会話の添付。tests/test_ai_allowlist.py）。読み取りの口・上限・形とは別
     client, gw, _, _ = ai_app()
     body = ai_body()
     body = copy.deepcopy(body)
     body["messages"][0]["content"].append(
         {"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": b64(PNG)}})
     res = post(client, body)
-    assert res.status_code == 400 and gw.count() == 0
+    res.get_data()
+    assert res.status_code == 200 and gw.count() == 1
     assert SAME_ORIGIN  # 同じ見出しで送っている

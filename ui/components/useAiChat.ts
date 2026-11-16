@@ -11,6 +11,8 @@
  * - technicals（#200）の tool_use があるときだけ、ツールを実行する前に先物の足を読む（tech。読めなければツールは no_data）。
  *   iv_stats（#138・#158）も同じく、tool_use があるときだけ日次の値と今の IV を読む（ivStats）。両方あれば並べて読む
  * - 保存は sessionStorage の AI_SESSION_KEY だけ（タブを閉じたら消える）。読めない・書けないときは保存せずに続ける
+ * - 添付（#369）: 送信・[AI に聞く] は送る前の添付（state.pending）を発言に移して送る（本文が空でも添付があれば送る）。
+ *   [もう一度] は失敗した発言の添付を送り直す。添付は保存しない（encodeAiChat が外す）
  */
 
 import { useCallback, useEffect, useRef, useState } from 'preact/hooks';
@@ -22,6 +24,7 @@ import {
   postAiMessages,
 } from '../../data/aiStream';
 import { readKey, removeKey, writeKey } from '../storage';
+import { type AiAttachment, ATTACH_ONLY_TEXT, type AttachReason } from '../view/aiAttach';
 import {
   AI_SESSION_KEY,
   type AiChatAction,
@@ -65,13 +68,22 @@ export interface AiChatController {
   status: AiStatusView;
   diagnose: () => void;
   send: (text: string) => void;
-  /** [AI に聞く]（#136）: 場所の topic つきで送る（kind ask） */
-  ask: (text: string, topic: string) => void;
+  /**
+   * [AI に聞く]（#136）: 場所の topic つきで送る（kind ask）。withAttachments: 入力欄から送るときだけ送る前の添付も
+   * 送る（#369。パネルのボタンから直に送るときは添付を巻き込まない）
+   */
+  ask: (text: string, topic: string, withAttachments?: boolean) => void;
   /** 定型のチップ（#140）: 決まった文を定型の ID つきで送る（kind preset） */
   preset: (p: AiPreset) => void;
   retry: () => void;
   abort: () => void;
   reset: () => void;
+  /** 添付を足す（#369。上限を超えた分は state.attachError） */
+  attach: (items: AiAttachment[]) => void;
+  /** 送る前の添付を外す（#369） */
+  detach: (id: string) => void;
+  /** 添付を読めなかった理由（#369。null で消す） */
+  attachFail: (reason: AttachReason | null) => void;
   /** 送った発言の文 → kind・topic の控え（#159 の評価に残す。messages は kind を持たない。[新しい会話] で消す） */
   turnLog: () => AiTurnLog;
   /**
@@ -236,16 +248,19 @@ export function useAiChat(
   }, [apply, loadStatus]);
 
   const start = useCallback(
-    (kind: AiKind, text: string, topic?: string) => {
+    (kind: AiKind, text: string, topic?: string, attachments?: AiAttachment[]) => {
       apply({
         type: 'begin',
         kind,
         text,
         now: Date.now(),
         ...(topic !== undefined && { topic }),
+        ...(attachments && attachments.length > 0 && { attachments }),
       });
       if (!(stateRef.current as AiChatState).turn) return;
-      logRef.current.set(text, { kind, ...(topic !== undefined && { topic }) });
+      // 添付だけの発言は決まった文で送る（控えの鍵も送る文）
+      const said = text === '' ? ATTACH_ONLY_TEXT : text;
+      logRef.current.set(said, { kind, ...(topic !== undefined && { topic }) });
       // 「計算中」を描いてから計算する（同じタスクで計算すると表示が計算の後になる）
       setTimeout(() => {
         const e = envRef.current();
@@ -271,22 +286,33 @@ export function useAiChat(
   const send = useCallback(
     (text: string) => {
       const t = text.trim();
-      if (t !== '') start('chat', t);
+      const atts = (stateRef.current as AiChatState).pending;
+      if (t !== '' || atts.length > 0) start('chat', t, undefined, atts);
     },
     [start],
   );
   const ask = useCallback(
-    (text: string, topic: string) => {
+    (text: string, topic: string, withAttachments = false) => {
       const t = text.trim();
-      if (t !== '') start('ask', t, topic);
+      const atts = withAttachments ? (stateRef.current as AiChatState).pending : undefined;
+      if (t !== '') start('ask', t, topic, atts);
     },
     [start],
   );
   const preset = useCallback((p: AiPreset) => start('preset', p.text, p.id), [start]);
   const retry = useCallback(() => {
     const f = (stateRef.current as AiChatState).failed;
-    if (f) start(f.kind, f.userText, f.topic);
+    if (f) start(f.kind, f.userText, f.topic, f.attachments);
   }, [start]);
+  const attach = useCallback(
+    (items: AiAttachment[]) => apply({ type: 'attachAdd', items }),
+    [apply],
+  );
+  const detach = useCallback((id: string) => apply({ type: 'attachRemove', id }), [apply]);
+  const attachFail = useCallback(
+    (reason: AttachReason | null) => apply({ type: 'attachError', reason }),
+    [apply],
+  );
   const abort = useCallback(() => abortRef.current?.abort(), []);
   const reset = useCallback(() => {
     abortRef.current?.abort();
@@ -315,6 +341,9 @@ export function useAiChat(
     retry,
     abort,
     reset,
+    attach,
+    detach,
+    attachFail,
     turnLog,
     evalSourceAt,
   };

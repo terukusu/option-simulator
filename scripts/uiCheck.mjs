@@ -1609,6 +1609,8 @@ async function measureAll() {
     await popoverSweep();
     // ⓘ の当たり判定（#327 AC-1〜AC-4）
     await hintTargetSweep();
+    // 添付の [添付]・[外す] の当たり判定（#369 AC11）
+    await attachTargetSweep();
     // スマホの横向き（#348 AC-3〜AC-6）
     await landAll();
     // 文字の拡大 200%（#328）
@@ -7331,6 +7333,8 @@ async function runFlows() {
   for (const vp of [pc, phone]) await holdToggleFlow(vp);
   // #135 AI のチャットの進み具合・中止・終端なし・ツールのカード・会話の保存（AC6）
   for (const vp of [phone, pc]) await aiFlows(vp);
+  // #369 AI のチャットの添付（[添付]・送信・上限・貼り付け・ドロップ・再読み込み）
+  for (const vp of [{ width: 360, height: 780 }, pc]) await aiAttachFlow(vp);
   // #348 スマホの横向き: 回転で保つもの・横向きのつまみ（AC-7・AC-8）
   await landFlows();
 }
@@ -15855,6 +15859,7 @@ async function aiSweep() {
         await readoutCheck(page, lbl, want);
         const r = await aiCheck(page, lbl, w);
         if (w === 1440 && h === 900) await aiSideCheck(page, lbl);
+        await aiAttachCheck(page, lbl, w, h, `ai-${w}x${h}-${theme}-${sheet ?? 'open'}-attach`);
         if (sheet !== 'full' && !r.disclaimer) {
           failed = true;
           console.log(`${lbl}: 初めて開いたのに免責の文が無い  ← NG`);
@@ -15885,6 +15890,456 @@ async function aiSweep() {
     }
   }
   console.log(`AI のチャットの検査（#135）: ${aiStats.pass} / ${aiStats.total} で pass`);
+}
+
+// ---- AI のチャットの添付（#369。docs/adr-0010-ai-chat-attachments.md）
+/** 添付の理由の文（ui/view/aiAttach.ts の too_many） */
+const ATTACH_TOO_MANY = '添付は 1 回に 3 つまでです';
+/** 添付 3 つのときの会話の枠（.panel-body）の高さの床（px） */
+const ATTACH_BODY_MIN = 80;
+/** 合成の CSV（架空の値） */
+const ATTACH_CSV = '日付,銘柄,数量\n2026-10-01,P 29000,2\n';
+
+/** 合成の単色の PNG（ページの OffscreenCanvas で作る。実データのスクリーンショットを使わない） */
+async function attachPng(page, color) {
+  const arr = await page.evaluate(async (color) => {
+    const c = new OffscreenCanvas(320, 200);
+    const g = c.getContext('2d');
+    g.fillStyle = color;
+    g.fillRect(0, 0, 320, 200);
+    return [...new Uint8Array(await (await c.convertToBlob({ type: 'image/png' })).arrayBuffer())];
+  }, color);
+  return Buffer.from(arr);
+}
+
+/** 添付の 3 つ（PNG 2 枚・CSV 1 つ）の setInputFiles の値 */
+async function attachFiles(page, n = 3) {
+  const files = [
+    {
+      name: '取引アプリの画面.png',
+      mimeType: 'image/png',
+      buffer: await attachPng(page, '#2f6db5'),
+    },
+    { name: 'chart.png', mimeType: 'image/png', buffer: await attachPng(page, '#c0392b') },
+    { name: '約定の記録.csv', mimeType: 'text/csv', buffer: Buffer.from(ATTACH_CSV) },
+    { name: 'memo.txt', mimeType: 'text/plain', buffer: Buffer.from('架空のメモ') },
+  ];
+  return files.slice(0, n);
+}
+
+/** [添付] から files を選び、チップが want 個になるまで待つ */
+async function attachSet(page, files, want) {
+  await page.setInputFiles('section.ai input[data-ai="attach-input"]', files);
+  return page
+    .waitForFunction(
+      (want) => document.querySelectorAll('section.ai [data-ai="attach"] li').length === want,
+      want,
+      { timeout: 8000 },
+    )
+    .then(() => true)
+    .catch(() => false);
+}
+
+/** 送る前の添付を全部外す */
+async function attachClear(page) {
+  const sel = 'section.ai button[data-ai="attach-remove"]';
+  for (let i = 0; i < 6; i++) {
+    const n = await page.locator(sel).count();
+    if (n === 0) break;
+    await page.locator(sel).first().click();
+    // 描き直しを待つ（同じチップを 2 回押さない）
+    await page
+      .waitForFunction(
+        (n) => document.querySelectorAll('section.ai button[data-ai="attach-remove"]').length < n,
+        n,
+        {
+          timeout: 3000,
+        },
+      )
+      .catch(() => {});
+  }
+}
+
+/**
+ * #369 AC10: 添付 3 つ（PNG 2 枚・CSV 1 つ）の状態で、縦・横スクロール 0px（report）、チップの行・注意の文・[添付]・
+ * textarea・[送信] が窓の中、.panel-body と足元が横にはみ出さない。チップの名前は切れてよい（省略記号）
+ */
+async function aiAttachCheck(page, label, w, h, shotName) {
+  const lbl = `${label} #369 添付 3 つ`;
+  if (!(await attachSet(page, await attachFiles(page), 3))) {
+    aiStat(lbl, false, 'チップが 3 つにならない');
+    return;
+  }
+  await page.waitForTimeout(150);
+  await report(page, lbl, w, h, shotName);
+  const r = await page.evaluate(() => {
+    const sec = document.querySelector('section.ai');
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    const inWin = (el) => {
+      if (!el) return false;
+      const q = el.getBoundingClientRect();
+      return (
+        q.width > 0 &&
+        q.height > 0 &&
+        q.left >= -0.5 &&
+        q.right <= vw + 0.5 &&
+        q.top >= -0.5 &&
+        q.bottom <= vh + 0.5
+      );
+    };
+    const over = (el) => !!el && el.scrollWidth > el.clientWidth + 0.5;
+    return {
+      row: inWin(sec?.querySelector('[data-ai="attach"]')),
+      note: inWin(sec?.querySelector('[data-ai="attach-note"]')),
+      btn: inWin(sec?.querySelector('.ai-attach-btn')),
+      input: inWin(sec?.querySelector('.ai-input textarea')),
+      send: inWin(sec?.querySelector('button[data-ai="send"]')),
+      sendOn: !sec?.querySelector('button[data-ai="send"]')?.disabled,
+      bodyOver: over(sec?.querySelector('.panel-body')),
+      bodyH: sec?.querySelector('.panel-body')?.getBoundingClientRect().height ?? 0,
+      footOver: over(sec?.querySelector('.ai-foot')),
+      chips: [...(sec?.querySelectorAll('[data-ai="attach"] li') ?? [])].map((li) => ({
+        kind: li.getAttribute('data-kind'),
+        thumb: !!li.querySelector('canvas.ai-att-thumb'),
+      })),
+    };
+  });
+  const bad = [];
+  if (!r.row) bad.push('チップの行が窓の外');
+  if (!r.note) bad.push('注意の文が窓の外');
+  if (!r.btn) bad.push('[添付] が窓の外');
+  if (!r.input || !r.send) bad.push('入力欄・送信が窓の外');
+  if (!r.sendOn) bad.push('[送信] が押せない（本文が空でも添付があれば押せる）');
+  if (r.bodyOver || r.footOver) bad.push('横にはみ出す');
+  // 会話の枠が潰れない（レビュー指摘 5。送った直後の返答が見える高さ）
+  if (r.bodyH < ATTACH_BODY_MIN)
+    bad.push(`会話の枠の高さ ${Math.round(r.bodyH)}px < ${ATTACH_BODY_MIN}px`);
+  const kinds = r.chips.map((c) => c.kind).join(',');
+  if (kinds !== 'image,image,text') bad.push(`チップ ${kinds}`);
+  if (r.chips.filter((c) => c.thumb).length !== 2) bad.push('画像の縮小が 2 つでない');
+  aiStat(
+    lbl,
+    bad.length === 0,
+    bad.join('・') ||
+      `チップ 3 つ・注意・入力欄・送信が窓の中・会話の枠の高さ ${Math.round(r.bodyH)}px`,
+  );
+  await attachClear(page);
+}
+
+/** ファイルを貼り付け（ClipboardEvent）・ドロップ（DragEvent）で渡す（ページの中で File を作る） */
+async function attachDispatch(page, how) {
+  return page.evaluate(
+    ({ how, csv }) => {
+      const dt = new DataTransfer();
+      dt.items.add(new File([csv], `${how}.csv`, { type: 'text/csv' }));
+      if (how === 'paste-text') {
+        // Excel の表のコピー（文字 + 絵）: 文字があれば添付にしない = 既定の動き（文字の貼り付け）を止めない
+        dt.setData('text/plain', '日付\t数量\n2026-10-01\t2');
+        const ta = document.querySelector('section.ai .ai-input textarea');
+        const ev = new ClipboardEvent('paste', {
+          clipboardData: dt,
+          bubbles: true,
+          cancelable: true,
+        });
+        ta?.dispatchEvent(ev);
+        return !ev.defaultPrevented;
+      }
+      if (how === 'outside') {
+        // パネルの外（舞台・body）に落としたファイルはブラウザが開かない（既定の動きを止める）・添付にもしない
+        const target = document.querySelector('section.stage') ?? document.body;
+        const over = new DragEvent('dragover', {
+          dataTransfer: dt,
+          bubbles: true,
+          cancelable: true,
+        });
+        target.dispatchEvent(over);
+        const drop = new DragEvent('drop', { dataTransfer: dt, bubbles: true, cancelable: true });
+        target.dispatchEvent(drop);
+        return over.defaultPrevented && drop.defaultPrevented;
+      }
+      if (how === 'paste') {
+        const ta = document.querySelector('section.ai .ai-input textarea');
+        const ev = new ClipboardEvent('paste', {
+          clipboardData: dt,
+          bubbles: true,
+          cancelable: true,
+        });
+        ta?.dispatchEvent(ev);
+        return ev.defaultPrevented;
+      }
+      const sec = document.querySelector('section.ai .ai-body');
+      const enter = new DragEvent('dragenter', {
+        dataTransfer: dt,
+        bubbles: true,
+        cancelable: true,
+      });
+      sec?.dispatchEvent(enter);
+      const marked = document.querySelector('section.ai')?.getAttribute('data-drop') === 'true';
+      const drop = new DragEvent('drop', { dataTransfer: dt, bubbles: true, cancelable: true });
+      sec?.dispatchEvent(drop);
+      return marked && drop.defaultPrevented && !document.querySelector('section.ai[data-drop]');
+    },
+    { how, csv: ATTACH_CSV },
+  );
+}
+
+/**
+ * #369 AC12 の自動の分（--flows。偽の SSE）: [添付] で画像 2 枚と CSV 1 つ → チップ 3 つと注意 → 本文なしで送信 →
+ * 発言にチップ 3 つ・合成の返答・送る前の添付は空 → 4 つ選ぶと理由の文（3 つまで入る）→ 外す → 貼り付け・ドロップで
+ * 添付 → 再読み込みで会話が戻り、添付のあった発言に「添付（再読み込みで外れた）」→ そのまま次の質問を送れる
+ */
+async function aiAttachFlow(vp) {
+  const tag = `#369 ${vp.width}x${vp.height}`;
+  const ctx = await newContext(vp, { [WORKSPACE_KEY]: twoLegs, [PREFS_KEY]: prefsText('dark') });
+  const page = await ctx.newPage();
+  await page.goto(pageUrl('next'));
+  await waitReady(page, 'next');
+  await openAi(page, vp.width, 'full');
+  const set = await attachSet(page, await attachFiles(page), 3);
+  const note = await page.locator('section.ai [data-ai="attach-note"]').isVisible();
+  check(`${tag} [添付] で画像 2 枚・CSV 1 つ → チップ 3 つと注意の 1 文`, set && note);
+  await page.click('section.ai button[data-ai="send"]');
+  await page
+    .waitForSelector('section.ai .ai-progress', { state: 'detached', timeout: 15000 })
+    .catch(() => {});
+  const sent = await page.evaluate(() => {
+    const users = document.querySelectorAll('section.ai .ai-log .ai-msg.user');
+    const u = users[users.length - 1];
+    const ans = [...document.querySelectorAll('section.ai .ai-log .ai-msg.answer')].at(-1);
+    return {
+      chips: [...(u?.querySelectorAll('.ai-att') ?? [])].map((x) => x.getAttribute('data-kind')),
+      bubble: !!u?.querySelector('.ai-bubble'),
+      answer: (ans?.textContent ?? '').includes('画像 2 枚・テキストのファイル 1 個'),
+      pending: document.querySelectorAll('section.ai [data-ai="attach"] li').length,
+    };
+  });
+  check(
+    `${tag} 送信 → 発言にチップ 3 つ（本文なし = 吹き出しの文なし）・合成の返答・送る前の添付は空`,
+    sent.chips.join(',') === 'image,image,text' &&
+      !sent.bubble &&
+      sent.answer &&
+      sent.pending === 0,
+    `チップ ${sent.chips.join(',')}・返答 ${sent.answer}・残り ${sent.pending}`,
+  );
+  await page.setInputFiles('section.ai input[data-ai="attach-input"]', await attachFiles(page, 4));
+  await page
+    .waitForSelector('section.ai [data-ai="attach-error"]', { timeout: 8000 })
+    .catch(() => {});
+  const over = await page.evaluate(() => ({
+    n: document.querySelectorAll('section.ai [data-ai="attach"] li').length,
+    why: document.querySelector('section.ai [data-ai="attach-error"]')?.textContent ?? '',
+  }));
+  check(
+    `${tag} 4 つ選ぶと 3 つまで入り、入力欄の下に理由の文`,
+    over.n === 3 && over.why === ATTACH_TOO_MANY,
+    `${over.n} 個・「${over.why}」`,
+  );
+  // キーボードで [外す]: フォーカスは同じ位置の [外す]、最後の 1 つを外したら入力欄（レビュー指摘 3）
+  await attachClear(page);
+  const set2 = await attachSet(page, await attachFiles(page, 2), 2);
+  await page.locator('section.ai button[data-ai="attach-remove"]').first().focus();
+  await page.keyboard.press('Enter');
+  const f1 = await page.evaluate(
+    () => document.activeElement?.getAttribute('data-ai') ?? document.activeElement?.tagName,
+  );
+  await page.keyboard.press('Enter');
+  const f2 = await page.evaluate(() => document.activeElement?.tagName ?? '');
+  check(
+    `${tag} キーボードで [外す] → フォーカスは次の [外す]、最後は入力欄`,
+    set2 && f1 === 'attach-remove' && f2 === 'TEXTAREA',
+    `${f1} → ${f2}`,
+  );
+  await attachClear(page);
+  const textFirst = await attachDispatch(page, 'paste-text');
+  await page.waitForTimeout(300);
+  const noChip = await page.evaluate(
+    () => document.querySelectorAll('section.ai [data-ai="attach"] li').length === 0,
+  );
+  check(
+    `${tag} 文字と一緒の貼り付け（Excel の表）は添付にせず文字の貼り付けのまま（レビュー指摘 1）`,
+    textFirst && noChip,
+    `既定の動き ${textFirst ? '止めない' : '止めた'}・チップ ${noChip ? 0 : 'あり'}`,
+  );
+  const outside = await attachDispatch(page, 'outside');
+  await page.waitForTimeout(300);
+  const noChip2 = await page.evaluate(
+    () => document.querySelectorAll('section.ai [data-ai="attach"] li').length === 0,
+  );
+  check(
+    `${tag} パネルの外に落としたファイルはブラウザが開かず添付にもならない（レビュー指摘 6）`,
+    outside && noChip2 && page.url().startsWith('http'),
+  );
+  // AI を開いたまま [画像から建玉を読み取る] の [画像を選ぶ]（透明な file input）に落とす: 既定の動き（input に入る）を
+  // 止めない（2 回目のレビュー 2-1。PC だけ = AI を左の列に開いたままダイアログを開ける）
+  if (vp.width >= 1200) {
+    const opened = await importOpen(page);
+    const r = opened
+      ? await page.evaluate((dlg) => {
+          const input = document.querySelector(`${dlg} input[type="file"]`);
+          const dt = new DataTransfer();
+          dt.items.add(
+            new File([new Uint8Array([0x89, 0x50, 0x4e, 0x47])], 'shot.png', { type: 'image/png' }),
+          );
+          // 合成の DataTransfer の dropEffect はドラッグの外では書けない（none のまま）ので、既定の動きを止めたかだけを見る
+          const over = new DragEvent('dragover', {
+            dataTransfer: dt,
+            bubbles: true,
+            cancelable: true,
+          });
+          input?.dispatchEvent(over);
+          const drop = new DragEvent('drop', { dataTransfer: dt, bubbles: true, cancelable: true });
+          input?.dispatchEvent(drop);
+          return {
+            input: !!input,
+            overOk: !over.defaultPrevented,
+            dropOk: !drop.defaultPrevented,
+          };
+        }, IMPORT_DLG)
+      : { input: false, overOk: false, dropOk: false };
+    check(
+      `${tag} AI を開いたまま読み取りのダイアログの [画像を選ぶ] に落とすと既定の動きを止めない（2 回目のレビュー 2-1）`,
+      opened && r.input && r.overOk && r.dropOk,
+      `ダイアログ ${opened}・input ${r.input}・dragover ${r.overOk ? '止めない' : '止めた'}・drop ${r.dropOk ? '止めない' : '止めた'}`,
+    );
+    await page.keyboard.press('Escape');
+    await page.waitForSelector(IMPORT_DLG, { state: 'detached', timeout: 3000 }).catch(() => {});
+    await openAi(page, vp.width, 'full');
+  }
+  const pasted = await attachDispatch(page, 'paste');
+  const pasteOk = await page
+    .waitForFunction(
+      () => document.querySelectorAll('section.ai [data-ai="attach"] li').length === 1,
+    )
+    .then(() => true)
+    .catch(() => false);
+  const dropped = await attachDispatch(page, 'drop');
+  const dropOk = await page
+    .waitForFunction(
+      () => document.querySelectorAll('section.ai [data-ai="attach"] li').length === 2,
+    )
+    .then(() => true)
+    .catch(() => false);
+  check(
+    `${tag} 入力欄への貼り付け・AI の枠へのドロップで添付（ドロップを受ける間は data-drop）`,
+    pasted && pasteOk && dropped && dropOk,
+    `貼り付け ${pasted && pasteOk}・ドロップ ${dropped && dropOk}`,
+  );
+  await attachClear(page);
+  // 保存に添付が入らない（base64・本文・名前）
+  const saved = await page.evaluate(() => sessionStorage.getItem('optsim.ai.v1') ?? '');
+  check(
+    `${tag} 会話の保存に添付（本文・名前・base64）が入らない`,
+    saved.includes('［添付は再読み込みで外れました］') &&
+      !saved.includes('P 29000') &&
+      !saved.includes('約定の記録') &&
+      !saved.includes('iVBORw0KGgo'),
+    `${saved.length} 字`,
+  );
+  await page.reload();
+  await waitReady(page, 'next');
+  await openAi(page, vp.width, 'full');
+  const back = await page.evaluate(() => {
+    const u = [...document.querySelectorAll('section.ai .ai-log .ai-msg.user')].at(-1);
+    return [...(u?.querySelectorAll('.ai-att') ?? [])].map((x) => (x.textContent ?? '').trim());
+  });
+  await page.fill('section.ai .ai-input textarea', '続けて、さっきの記録は？');
+  await page.click('section.ai button[data-ai="send"]');
+  await page
+    .waitForSelector('section.ai .ai-progress', { state: 'detached', timeout: 15000 })
+    .catch(() => {});
+  const err = await page.$('section.ai [data-ai="error"]');
+  check(
+    `${tag} 再読み込みで戻した発言に「添付（再読み込みで外れた）」・そのまま次の質問を送れる`,
+    back.length === 1 && back[0] === '添付（再読み込みで外れた）' && !err,
+    `${back.join('・')}${err ? '・失敗の行' : ''}`,
+  );
+  await ctx.close();
+}
+
+/**
+ * 押せる要素の箱と、中心の elementFromPoint がその要素の中か。チップの行は横にスクロールするので、1 つずつ見える所へ
+ * 寄せてから測る
+ */
+async function targetBoxes(page, sel) {
+  const loc = page.locator(sel);
+  const out = [];
+  for (let i = 0; i < (await loc.count()); i++) {
+    await loc
+      .nth(i)
+      .scrollIntoViewIfNeeded()
+      .catch(() => {});
+    await page.waitForTimeout(60);
+    out.push(...(await targetBox(page, sel, i)));
+  }
+  return out;
+}
+const targetBox = (page, sel, i) =>
+  page.evaluate(
+    ({ sel, i }) => {
+      return [...document.querySelectorAll(sel)]
+        .filter((e, j) => j === i && e.getClientRects().length > 0)
+        .map((e) => {
+          const r = e.getBoundingClientRect();
+          const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+          return {
+            name: e.getAttribute('aria-label') ?? e.getAttribute('title') ?? '?',
+            w: r.width,
+            h: r.height,
+            hit: !!hit && (hit === e || e.contains(hit)),
+          };
+        });
+    },
+    { sel, i },
+  );
+
+/**
+ * #369 AC11（--targets）: [添付]（クリップ）・[外す] の当たり判定。スマホ（360×780・390×844）は 32×32px（記号ボタンの
+ * 規則。床 24px）、PC（1440×900）は 26×26px。中心の elementFromPoint がそのボタン（覆われない）
+ */
+const attachTgtStats = { pass: 0, total: 0 };
+function attachRecord(label, ok, detail) {
+  attachTgtStats.total++;
+  if (ok) attachTgtStats.pass++;
+  else failed = true;
+  console.log(`${label}: ${detail}${ok ? '' : '  ← NG'}`);
+}
+
+async function attachTargetSweep() {
+  for (const [w, h] of [
+    [360, 780],
+    [390, 844],
+    [1440, 900],
+  ]) {
+    const tag = `#369 dark ${w}x${h}`;
+    const ctx = await newContext(
+      { width: w, height: h },
+      { [WORKSPACE_KEY]: twoLegs, [PREFS_KEY]: prefsText('dark') },
+    );
+    const page = await ctx.newPage();
+    await page.goto(pageUrl('next'));
+    await waitReady(page, 'next');
+    await openAi(page, w, 'full');
+    const want = w <= PHONE_MAX ? 32 : 26;
+    await attachSet(page, await attachFiles(page), 3);
+    const boxes = [
+      ...(await targetBoxes(page, 'section.ai label.ai-attach-btn')),
+      ...(await targetBoxes(page, 'section.ai button[data-ai="attach-remove"]')),
+    ];
+    for (const b of boxes) {
+      const ok = b.w >= want - 0.5 && b.h >= want - 0.5 && b.w >= 24 && b.h >= 24 && b.hit;
+      attachRecord(
+        `${tag} ${b.name}`,
+        ok,
+        `箱 ${b.w.toFixed(1)}×${b.h.toFixed(1)}（${want}px 以上）・中心 ${b.hit ? 'ok' : '覆われる'}`,
+      );
+    }
+    attachRecord(`${tag} [添付] と [外す] 3 つ`, boxes.length === 4, `${boxes.length} 個を測った`);
+    await ctx.close();
+  }
+  console.log(
+    `添付の当たり判定の検査（#369）: ${attachTgtStats.pass} / ${attachTgtStats.total} で pass`,
+  );
 }
 
 // ---- 数字・パネルから [AI に聞く]（#136 AC4）
@@ -20208,6 +20663,7 @@ try {
     await popoverSweep();
   } else if (targetsOnly && !parts && !flows) {
     await hintTargetSweep();
+    await attachTargetSweep();
   } else if (landOnly && !parts) {
     if (flows) await landFlows();
     else await landAll();
@@ -20218,8 +20674,10 @@ try {
       for (const vp of [
         { width: 390, height: 844 },
         { width: 1440, height: 900 },
-      ])
+      ]) {
         await aiFlows(vp);
+        await aiAttachFlow(vp);
+      }
     else {
       await aiSweep();
       await aiAskSweep();

@@ -566,3 +566,16 @@ def read_post(client, body, headers=None, raw: bytes | None = None, content_type
     data = raw if raw is not None else json.dumps(body, ensure_ascii=False).encode("utf-8")
     return client.post("/api/ai/read_positions", data=data, headers=SAME_ORIGIN if headers is None else headers,
                        content_type=content_type, **kw)
+
+
+# ---- 会話の添付（#369）: 画像・テキストの添付の block（値は架空）
+
+def image_block(raw: bytes, media_type="image/png") -> dict:
+    import base64
+
+    return {"type": "image", "source": {"type": "base64", "media_type": media_type,
+                                        "data": base64.b64encode(raw).decode("ascii")}}
+
+
+def attach_block(text="日付,数量\n2026-10-01,2\n", name="記録.csv", media_type="text/csv") -> dict:
+    return {"type": "attachment_text", "name": name, "media_type": media_type, "text": text}

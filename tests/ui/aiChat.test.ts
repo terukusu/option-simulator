@@ -4,6 +4,7 @@ import { BOOK_KEY } from '../../ui/book';
 import { BOARD_KEY, serializeWorkspace, toSaved, WORKSPACE_KEY } from '../../ui/persist';
 import { PREFS_KEY } from '../../ui/prefs';
 import { initialState } from '../../ui/state';
+import { type AiAttachment, ATTACH_ONLY_TEXT, DETACHED_TEXT } from '../../ui/view/aiAttach';
 import {
   AI_SESSION_KEY,
   type AiChatAction,
@@ -704,7 +705,7 @@ describe('#263 送った発言の位置（発言ごとの塊・送った発言�
   it('先頭に user の無い部分は key head の塊', () => {
     const gs = chatGroups([
       { kind: 'answer', text: 'a', key: 'x', live: false, failed: null },
-      { kind: 'user', text: 'q', updated: false, key: 'm1' },
+      { kind: 'user', text: 'q', updated: false, key: 'm1', attachments: [] },
     ]);
     expect(gs.map((g) => [g.key, g.items.length])).toEqual([
       ['head', 1],
@@ -1053,5 +1054,188 @@ describe('#277 AI パネルの整理（利用者の画面に常に出る開発�
     const open = src.lastIndexOf('<details class="ai-more">', at);
     expect(open).toBeGreaterThan(0);
     expect(src.slice(open, at)).not.toContain('</details>');
+  });
+});
+
+describe('#369 AC7 添付（保存しない・外れた印・照合・受け付け前の失敗）', () => {
+  const PNG_B64 = 'iVBORw0KGgoAAAANSUhEUg==';
+  const img: AiAttachment = {
+    id: 'i1',
+    kind: 'image',
+    name: '取引アプリ.png',
+    mediaType: 'image/png',
+    base64: PNG_B64,
+    bytes: 16,
+    width: 10,
+    height: 10,
+  };
+  const csv: AiAttachment = {
+    id: 't1',
+    kind: 'text',
+    name: '約定の記録_SECRET.csv',
+    mediaType: 'text/csv',
+    text: '日付,数量,メモ\n2026-10-01,7,"損益 1,234 円"\n',
+  };
+  /** 添付 2 つを足して送り、返答まで終えた会話 */
+  const withAtt = run(
+    first,
+    { type: 'attachAdd', items: [img, csv] },
+    { type: 'begin', kind: 'chat', text: 'これを見て', now: 2000, attachments: [img, csv] },
+    { type: 'send', context: CTX(0), key: 'k0' },
+    ev({ type: 'accepted', remaining_usd: 2.6, limit_usd: 3, counted: true }),
+    DONE_TEXT('見ました'),
+  );
+
+  it('送ると送る前の添付は空になり、発言の content は [画像, テキスト, text]', () => {
+    expect(withAtt.pending).toEqual([]);
+    const sent = withAtt.messages[2];
+    expect(sent?.content.map((b) => b.type)).toEqual(['image', 'attachment_text', 'text']);
+    const items = chatItems(withAtt).filter((i) => i.kind === 'user');
+    expect(items.at(-1)).toMatchObject({ text: 'これを見て' });
+    const atts = items.at(-1)?.kind === 'user' ? items.at(-1)?.attachments : [];
+    expect(atts?.map((a) => a.kind)).toEqual(['image', 'text']);
+  });
+
+  it('(a) encodeAiChat の JSON に base64・テキストの添付の本文・ファイル名が含まれない', () => {
+    const json = encodeAiChat(withAtt);
+    expect(json).not.toContain(PNG_B64);
+    expect(json).not.toContain('2026-10-01,7');
+    expect(json).not.toContain('SECRET');
+    expect(json).not.toContain('取引アプリ');
+    expect(json).toContain(DETACHED_TEXT);
+  });
+
+  it('(b) decodeAiChat で戻した発言は外れた印を持ち、送る messages では添付が決まった text 1 つ（ほかは同じ順）', () => {
+    const saved = decodeAiChat(encodeAiChat(withAtt));
+    expect(saved).not.toBeNull();
+    const back = run(
+      INITIAL_AI_CHAT,
+      { type: 'restore', saved: saved as NonNullable<typeof saved> },
+      { type: 'begin', kind: 'chat', text: '続き', now: 3000 },
+      { type: 'send', context: CTX(0), key: 'k0' },
+    );
+    const msg = back.messages[2];
+    expect(msg?.content).toEqual([
+      { type: 'text', text: DETACHED_TEXT },
+      { type: 'text', text: 'これを見て' },
+    ]);
+    // ほかの発言は同じ
+    expect(back.messages.slice(0, 2)).toEqual(withAtt.messages.slice(0, 2));
+    const req = requestOf(back);
+    expect(req?.messages.at(-1)?.content).toEqual([{ type: 'text', text: '続き' }]);
+    // 吹き出し: 文はそのまま・「外れた」の印のチップ
+    const u = chatItems(back).filter((i) => i.kind === 'user')[1];
+    expect(u).toMatchObject({ text: 'これを見て', attachments: [{ kind: 'detached' }] });
+    // 外れた添付は会話の画像の数に数えない（admit）
+    expect(
+      aiChatReduce(back, {
+        type: 'attachAdd',
+        items: [1, 2, 3].map((n) => ({ ...img, id: `n${n}` })),
+      }).attachError,
+    ).toBeNull();
+  });
+
+  it('(c) numberSources はテキストの添付の数字を入れ、画像からは入れない', () => {
+    const src = numberSources(withAtt);
+    expect(checkNumbers('資料では 1,234 円', src).matched).toBe(1);
+    const noText = run(
+      first,
+      { type: 'begin', kind: 'chat', text: 'これを見て', now: 2000, attachments: [img] },
+      { type: 'send', context: CTX(0), key: 'k0' },
+    );
+    expect(checkNumbers('資料では 1,234 円', numberSources(noText)).matched).toBe(0);
+  });
+
+  it('(d) 受け付けの前に失敗したら添付は入力欄（pending）に戻り、受け付けた後の失敗は戻さない', () => {
+    const sending = run(
+      first,
+      { type: 'attachAdd', items: [img, csv] },
+      { type: 'begin', kind: 'chat', text: 'これを見て', now: 2000, attachments: [img, csv] },
+      { type: 'send', context: CTX(0), key: 'k0' },
+    );
+    expect(sending.pending).toEqual([]);
+    for (const code of ['bad_request', 'network', 'too_large', 'aborted']) {
+      const f = aiChatReduce(sending, { type: 'fail', code });
+      expect(f.pending).toEqual([img, csv]);
+      expect(f.failed?.attachments).toEqual([img, csv]);
+      expect(f.messages).toEqual(first.messages);
+    }
+    // 送る前（板が無い）も同じ
+    const noBoard = run(
+      first,
+      { type: 'begin', kind: 'chat', text: 'x', now: 2000, attachments: [img] },
+      { type: 'fail', code: 'no_board' },
+    );
+    expect(noBoard.pending).toEqual([img]);
+    // 受け付けた後の失敗は戻さない（[もう一度] で送り直す）
+    const after = run(
+      sending,
+      ev({ type: 'accepted', remaining_usd: 2.6, limit_usd: 3, counted: true }),
+      ev({ type: 'error', code: 'timeout' }),
+    );
+    expect(after.pending).toEqual([]);
+    expect(after.failed?.attachments).toEqual([img, csv]);
+    const fu = chatItems(after).find((i) => i.key === 'failed-user');
+    expect(fu?.kind === 'user' && fu.attachments.map((a) => a.kind)).toEqual(['image', 'text']);
+    // [もう一度] は同じ添付を送り、送る前の添付から同じ id を除く（二重に送らない）
+    const back = aiChatReduce(sending, { type: 'fail', code: 'network' });
+    const retry = aiChatReduce(back, {
+      type: 'begin',
+      kind: 'chat',
+      text: 'これを見て',
+      now: 3000,
+      attachments: back.failed?.attachments ?? [],
+    });
+    expect(retry.pending).toEqual([]);
+    expect(retry.turn?.attachments).toEqual([img, csv]);
+  });
+
+  it('受け付けの前の失敗で入力欄に別の添付があれば、上限（1 件 3 つ）の内だけ後ろに足す（レビュー指摘 8）', () => {
+    const sending = run(
+      first,
+      { type: 'begin', kind: 'chat', text: 'これを見て', now: 2000, attachments: [img, csv] },
+      { type: 'send', context: CTX(0), key: 'k0' },
+      // 送っている間に入力欄に 2 つ足した
+      {
+        type: 'attachAdd',
+        items: [
+          { ...img, id: 'n1' },
+          { ...csv, id: 'n2' },
+        ],
+      },
+    );
+    expect(sending.pending.map((a) => a.id)).toEqual(['n1', 'n2']);
+    const f = aiChatReduce(sending, { type: 'fail', code: 'network' });
+    expect(f.pending.map((a) => a.id)).toEqual(['n1', 'n2', 'i1']);
+    // 入らなかった分も失敗の行には残る（[もう一度]）
+    expect(f.failed?.attachments).toEqual([img, csv]);
+  });
+
+  it('上限を超えた添付は足さずに理由。[外す] と [新しい会話]（送る前の添付は残す）', () => {
+    const s = aiChatReduce(INITIAL_AI_CHAT, {
+      type: 'attachAdd',
+      items: [img, csv, { ...img, id: 'i2' }, { ...img, id: 'i3' }],
+    });
+    expect(s.pending.map((a) => a.id)).toEqual(['i1', 't1', 'i2']);
+    expect(s.attachError).toBe('too_many');
+    const r = aiChatReduce(s, { type: 'attachRemove', id: 't1' });
+    expect(r.pending.map((a) => a.id)).toEqual(['i1', 'i2']);
+    expect(r.attachError).toBeNull();
+    const reset = aiChatReduce({ ...withAtt, pending: r.pending }, { type: 'reset' });
+    expect(reset.messages).toEqual([]);
+    expect(reset.pending.map((a) => a.id)).toEqual(['i1', 'i2']);
+  });
+
+  it('本文が空で添付だけの発言は決まった文を送り、吹き出しには文を出さずチップだけ', () => {
+    const s = run(
+      first,
+      { type: 'begin', kind: 'chat', text: '', now: 2000, attachments: [img] },
+      { type: 'send', context: CTX(0), key: 'k0' },
+    );
+    expect(s.messages.at(-1)?.content.at(-1)).toEqual({ type: 'text', text: ATTACH_ONLY_TEXT });
+    const u = chatItems(s)
+      .filter((i) => i.kind === 'user')
+      .at(-1);
+    expect(u).toMatchObject({ text: '', attachments: [{ kind: 'image' }] });
   });
 });

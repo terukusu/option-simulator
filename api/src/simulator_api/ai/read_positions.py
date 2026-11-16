@@ -13,20 +13,18 @@ docs/adr-0009-ai-image-read-positions.md）。純関数（要求の検査・画�
   → その欄だけ null。返す行は全欄そろえる（読めない欄は null）
 """
 
-import base64
-import binascii
 import math
 import re
 from dataclasses import dataclass
 from datetime import date
 
 from .. import settings as st
-from . import allowlist, budget
+from . import allowlist, budget, images
 from .shape import Bad
 
 SCHEMA_VERSION = 1
 TOOL_NAME = "report_positions"
-MEDIA_TYPES = ("image/png", "image/jpeg")
+MEDIA_TYPES = images.MEDIA_TYPES
 KINDS = ("positions", "not_positions")
 PRODUCTS = ("op_large", "fut_large", "fut_mini", "fut_micro", "unknown")
 ROW_KEYS = ("product", "expiry_year", "expiry_month", "type", "strike", "side", "qty", "price", "opened_on")
@@ -35,15 +33,7 @@ MAX_QTY = allowlist.MAX_QTY
 MAX_PRICE = allowlist.MAX_PRICE
 YEAR_MIN, YEAR_MAX = 2000, 2100
 
-PNG_SIG = b"\x89PNG\r\n\x1a\n"
-# 寸法を持つ JPEG の SOF（C4 = DHT・C8 = JPG・CC = DAC を除く C0〜CF）
-_SOF = frozenset(range(0xC0, 0xD0)) - {0xC4, 0xC8, 0xCC}
-# 長さを持たないマーカー（TEM・RSTn・SOI）
-_NO_LENGTH = frozenset({0x01, *range(0xD0, 0xD9)})
-_B64_RE = re.compile(r"[A-Za-z0-9+/]*={0,2}")
 _DATE_RE = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}")
-# base64 の字数の上限（生のバイト数の上限から。超えたら復号しない）
-_MAX_B64 = -(-st.AI_IMAGE_MAX_BYTES // 3) * 4
 
 
 @dataclass(frozen=True)
@@ -53,56 +43,6 @@ class ReadRequest:
     n_bytes: int
     width: int
     height: int
-
-
-def _png_dims(raw: bytes) -> tuple[int, int]:
-    if len(raw) < 24 or raw[12:16] != b"IHDR":
-        raise Bad("image.data", "image")
-    w = int.from_bytes(raw[16:20], "big")
-    h = int.from_bytes(raw[20:24], "big")
-    return w, h
-
-
-def _jpeg_dims(raw: bytes) -> tuple[int, int]:
-    i = 2
-    n = len(raw)
-    while i < n:
-        if raw[i] != 0xFF:
-            raise Bad("image.data", "image")
-        while i < n and raw[i] == 0xFF:  # 詰めの FF
-            i += 1
-        if i >= n:
-            break
-        marker = raw[i]
-        i += 1
-        if marker in _NO_LENGTH:
-            continue
-        if marker in (0xD9, 0xDA):  # EOI・SOS（寸法の前に画素が始まった）
-            break
-        if i + 2 > n:
-            break
-        length = int.from_bytes(raw[i:i + 2], "big")
-        if length < 2:
-            break
-        if marker in _SOF:
-            if i + 7 > n:
-                break
-            h = int.from_bytes(raw[i + 3:i + 5], "big")
-            w = int.from_bytes(raw[i + 5:i + 7], "big")
-            return w, h
-        i += length
-    raise Bad("image.data", "image")
-
-
-def image_info(media_type: str, raw: bytes) -> tuple[int, int]:
-    """マジックバイトが media_type と一致することを確かめて (幅, 高さ) を返す。外れたら Bad"""
-    if media_type == "image/png":
-        if not raw.startswith(PNG_SIG):
-            raise Bad("image.data", "image")
-        return _png_dims(raw)
-    if not raw.startswith(b"\xff\xd8\xff"):
-        raise Bad("image.data", "image")
-    return _jpeg_dims(raw)
 
 
 def parse_read_request(raw: bytes) -> ReadRequest:
@@ -127,28 +67,9 @@ def parse_read_request(raw: bytes) -> ReadRequest:
     for k in ("media_type", "data"):
         if k not in img:
             raise Bad(f"image.{k}", "missing")
-    media_type = img["media_type"]
-    if not isinstance(media_type, str) or media_type not in MEDIA_TYPES:
-        raise Bad("image.media_type", "enum")
-    data = img["data"]
-    if not isinstance(data, str):
-        raise Bad("image.data", "type")
-    if len(data) > _MAX_B64:
-        raise Bad("image.data", "size")
-    if not data or len(data) % 4 != 0 or not _B64_RE.fullmatch(data):
-        raise Bad("image.data", "base64")
-    try:
-        decoded = base64.b64decode(data, validate=True)
-    except (binascii.Error, ValueError):
-        raise Bad("image.data", "base64") from None
-    if not 1 <= len(decoded) <= st.AI_IMAGE_MAX_BYTES:
-        raise Bad("image.data", "size")
-    w, h = image_info(media_type, decoded)
-    if w < 1 or h < 1:
-        raise Bad("image.data", "image")
-    if max(w, h) > st.AI_IMAGE_MAX_EDGE:
-        raise Bad("image.data", "dimensions")
-    return ReadRequest(media_type=media_type, data=data, n_bytes=len(decoded), width=w, height=h)
+    info = images.check_image(img["media_type"], img["data"], "image")
+    return ReadRequest(media_type=img["media_type"], data=img["data"], n_bytes=info.n_bytes, width=info.width,
+                       height=info.height)
 
 
 # ---------------------------------------------------------------- 送るもの
@@ -242,9 +163,7 @@ def read_estimate(params: dict) -> int:
     """入力トークンの見積もり（上界）: 画像の data を空にした本文のバイト数 + 余裕 + CLI の分 + 画像 1 枚の上界。
     base64 のバイト数は数えない（画像のトークンは寸法で決まり、上界は AI_IMAGE_MAX_TOKENS）"""
     # 画像の block だけ data を空にした写しを作る（base64 を複製しない）
-    messages = [{**m, "content": [{**b, "source": {**b["source"], "data": ""}} if b.get("type") == "image" else b
-                                  for b in m["content"]]} for m in params["messages"]]
-    blank = {"system": params["system"], "tools": params["tools"], "messages": messages}
+    blank = {"system": params["system"], "tools": params["tools"], "messages": images.blank_images(params["messages"])}
     return budget.estimate_input_tokens(allowlist.canonical(blank)) + st.AI_IMAGE_MAX_TOKENS
 
 

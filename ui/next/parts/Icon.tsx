@@ -20,6 +20,7 @@ export const ICON_NAMES = [
   'chevron',
   'back',
   'chart',
+  'attach',
 ] as const;
 
 export type IconName = (typeof ICON_NAMES)[number];
@@ -76,6 +77,10 @@ const PATHS: Record<IconName, ComponentChildren> = {
       <path d="M3 3v12h12" />
       <path d="M5.5 11.5l3-3.5 2.5 2 4-5" />
     </>
+  ),
+  // クリップ（#369。AI のチャットのファイルの添付）
+  attach: (
+    <path d="M14.5 8.4l-5.7 5.7a3.3 3.3 0 0 1-4.6-4.6l6.1-6.1a2.2 2.2 0 0 1 3.1 3.1l-6 6a1.1 1.1 0 0 1-1.6-1.6l5.6-5.6" />
   ),
 };
 

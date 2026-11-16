@@ -5,6 +5,7 @@
  */
 
 import { useState } from 'preact/hooks';
+import { type AiAttachment, pendingViews } from '../../view/aiAttach';
 import { AUTH_EXPIRED_TEXT, RELOAD_PAGE_LABEL } from '../../view/reloadPage';
 import { Chip, ChipRow } from '../parts/Chip';
 import { Dialog } from '../parts/Dialog';
@@ -14,6 +15,7 @@ import { Popover } from '../parts/Popover';
 import { Seg } from '../parts/Seg';
 import { Stepper } from '../parts/Stepper';
 import { ToastSlot, useToastHost, useToasts } from '../parts/Toast';
+import { AttachBubble, AttachPending } from '../regions/AiAttach';
 import './gallery.css';
 
 const DAYS = { min: 0, max: 30, step: 1, def: 0 };
@@ -22,6 +24,39 @@ const BETA = { min: 0, max: 1, step: 0.1, def: 0.5 };
 
 const signed = (v: number, digits = 0) =>
   `${v > 0 ? '+' : v < 0 ? '−' : '±'}${Math.abs(v).toFixed(digits)}`;
+
+/** 1×1 の PNG（架空。縮小の canvas に描く） */
+const GAL_PNG =
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+const GAL_ATTACH: AiAttachment[] = [
+  {
+    id: 'g1',
+    kind: 'image',
+    name: '取引アプリの建玉の画面のスクリーンショット.png',
+    mediaType: 'image/png',
+    base64: GAL_PNG,
+    bytes: 412_345,
+    width: 1600,
+    height: 1000,
+  },
+  {
+    id: 'g2',
+    kind: 'text',
+    name: '約定の記録_2026-10.csv',
+    mediaType: 'text/csv',
+    text: '日付,数量\n2026-10-01,2\n',
+  },
+  {
+    id: 'g3',
+    kind: 'image',
+    name: 'chart.jpg',
+    mediaType: 'image/png',
+    base64: GAL_PNG,
+    bytes: 98_000,
+    width: 800,
+    height: 600,
+  },
+];
 
 const JUMPS = ['ATM', 'OTM 10%', '20%', '30%', '40%', '|Δ| .05', '.10', '.20', '.30', '.40'];
 
@@ -264,6 +299,20 @@ export function PartsGallery() {
           <button type="button" tabIndex={-1}>
             閉じる
           </button>
+        </div>
+      </section>
+
+      {/* AI のチャットの添付（#369）: 送る前のチップ（画像 2・テキスト 1。長い名前は省略記号）と注意の 1 文、
+          会話の吹き出しのチップ（画像・テキスト・外れた印） */}
+      <section class="gal-sec" aria-label="AI の添付">
+        <h2>AI の添付</h2>
+        <div class="ai-foot">
+          <AttachPending items={GAL_ATTACH} onRemove={() => setPicked('外す')} />
+        </div>
+        <div class="ai-msg user">
+          <AttachBubble
+            views={pendingViews(GAL_ATTACH, 'g').concat({ kind: 'detached', key: 'gd' })}
+          />
         </div>
       </section>
 

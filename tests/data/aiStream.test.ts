@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
+  type AiAttachmentTextBlock,
   type AiEvent,
+  type AiImageBlock,
   type AiRequest,
   AiRequestError,
   getAiStatus,
@@ -9,6 +11,8 @@ import {
   toAiEvent,
   toAiStatus,
 } from '../../data/aiStream';
+import aiAttach from '../../fixtures/synthetic/ai_attach.json';
+import { buildAiAttachFixture } from '../../scripts/aiAttachFixture';
 import { aiErrorText } from '../../ui/view/aiChat';
 
 /**
@@ -309,5 +313,38 @@ describe('getAiStatus', () => {
         resets_at: null,
       })?.enabled,
     ).toBe(false);
+  });
+});
+
+describe('#369 AC8 添付の block（中継の許可リストと同じ見本の要求）', () => {
+  // 画面の組み立て（scripts/aiAttachFixture.ts）で作った見本。中継の pytest（test_ai_allowlist.py）も同じ要求を通す
+  const req = aiAttach.request as AiRequest;
+  const blocks = req.messages.flatMap((m) => (m.role === 'user' ? m.content : []));
+
+  it('要求の型に画像・テキストの添付の block が入り、キーは中継の許可リストと同じ', () => {
+    const imgs = blocks.filter((b): b is AiImageBlock => b.type === 'image');
+    const texts = blocks.filter((b): b is AiAttachmentTextBlock => b.type === 'attachment_text');
+    expect(imgs).toHaveLength(2);
+    expect(texts).toHaveLength(2);
+    for (const b of imgs) {
+      expect(Object.keys(b).sort()).toEqual(['source', 'type']);
+      expect(Object.keys(b.source).sort()).toEqual(['data', 'media_type', 'type']);
+      expect(b.source.type).toBe('base64');
+      expect(['image/png', 'image/jpeg']).toContain(b.source.media_type);
+    }
+    for (const b of texts) {
+      expect(Object.keys(b).sort()).toEqual(['media_type', 'name', 'text', 'type']);
+    }
+    // 位置: 添付は text の前（tool_result の後ろ = text と同じ位置の規則）
+    expect(req.messages[0]?.content.map((b) => b.type)).toEqual([
+      'image',
+      'attachment_text',
+      'text',
+    ]);
+  });
+
+  it('送る JSON は見本と同じ（生成器の出力 = コミット済み。作り直しは npm run fixtures）', () => {
+    expect(JSON.parse(buildAiAttachFixture())).toEqual(aiAttach);
+    expect(JSON.stringify(JSON.parse(JSON.stringify(req)))).toBe(JSON.stringify(aiAttach.request));
   });
 });

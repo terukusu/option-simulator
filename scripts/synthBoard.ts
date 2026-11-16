@@ -22,6 +22,7 @@ import { roundOptionPrice } from '../model/tick';
 import { jstInstant, sqInstant, yearFraction } from '../model/time';
 import type { Quote } from '../model/types';
 import { makeSvi, rng, sviTotalVariance, synthChain } from '../tests/support/synthChain';
+import { buildAiAttachFixture } from './aiAttachFixture';
 import { buildAiToolsFixture } from './aiToolsFixture';
 
 export interface MonthSpec {
@@ -501,6 +502,8 @@ export function buildFixtureFiles(): Record<string, string> {
     JSON.parse(out[`${latest.name}.json`] as string),
     buildLaterChainJson(),
   );
+  // 会話の添付の見本の要求（#369。中継の pytest と vitest が同じ要求を使う）
+  out['ai_attach.json'] = buildAiAttachFixture();
   return out;
 }
 

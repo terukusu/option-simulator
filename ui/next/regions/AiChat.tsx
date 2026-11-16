@@ -1,10 +1,12 @@
 import type { ComponentChildren } from 'preact';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks';
 import type { AiStatus } from '../../../data/aiStream';
+import { attachReader } from '../../aiAttachRead';
 import { pure } from '../../components/pure';
 import { type AiChatController, type AiStatusView, useAiChat } from '../../components/useAiChat';
 import { downloadText } from '../../download';
 import type { AiAsk } from '../../view/aiAsk';
+import { ATTACH_ACCEPT, attachReasonText, pasteAttachFiles } from '../../view/aiAttach';
 import {
   type AiGate,
   aiErrorAction,
@@ -54,6 +56,7 @@ import { Icon } from '../parts/Icon';
 import { ReloadButton } from '../parts/ReloadButton';
 import { useScrollMore } from '../parts/scrollMore';
 import { openManualRef, openTerm } from '../parts/termCard';
+import { AttachBubble, AttachPending } from './AiAttach';
 
 /** 免責の文（端末で最初の 1 回だけ。AI の返答には書かせない。#135） */
 export const AI_DISCLAIMER =
@@ -73,6 +76,10 @@ const UNMATCHED_LABEL = '計算結果に無い数字';
 const TERM_LABEL = '用語の説明';
 /** マニュアルの根拠の節の読み上げ（#322） */
 const MANUAL_REF_LABEL = 'マニュアルの節';
+/** [添付] の読み上げ名（#369） */
+const ATTACH_LABEL = 'ファイルを添付';
+/** 添付を読んでいる間の文（#369。画像の作り直し） */
+const ATTACH_READING_TEXT = '添付を読んでいます…';
 /** 横にスクロールする表の枠の名前（#234） */
 const TABLE_SCROLL_LABEL = '表（横にスクロール）';
 /** 提案の差分の印の読み上げ（#139） */
@@ -247,6 +254,7 @@ function AiPanelView(p: {
   return (
     <AiChat
       chat={chat}
+      visible={p.visible}
       gate={gate}
       x0={p.x0}
       disclaimerSeen={p.disclaimerSeen}
@@ -288,6 +296,8 @@ export function AiChat(p: {
   onKeep?: (key: string) => void;
   /** 評価に残せなかった理由（#159） */
   keepNote?: string | null;
+  /** パネルが見えている（#369。パネルの外へのファイルのドロップを止める間。省略は見えている扱い） */
+  visible?: boolean;
 }) {
   const { chat } = p;
   const { state, status } = chat;
@@ -411,15 +421,97 @@ export function AiChat(p: {
     state.remainingUsd,
   );
   const turn = state.turn;
+  const hasPending = state.pending.length > 0;
   const submit = () => {
-    if (sendReason !== null || text.trim() === '') return;
+    if (sendReason !== null || (text.trim() === '' && !hasPending)) return;
     const d = draftRef.current;
-    if (d && text === d.text) chat.ask(text, d.topic);
+    if (d && text === d.text) chat.ask(text, d.topic, true);
     else chat.send(text);
     draftRef.current = null;
     setKept(false);
     setText('');
   };
+  // 添付（#369）: [添付]・貼り付け・ドロップのファイルを読み（画像は作り直し）、読めた分を足す。[新しい会話]・
+  // パネルを閉じた（部品が外れた）ら読んでいる途中の結果を捨てる
+  const reader = useRef(attachReader());
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+  const [reading, setReading] = useState(0);
+  const addFiles = (files: readonly File[]) => {
+    if (files.length === 0) return;
+    setReading((n) => n + 1);
+    void reader.current
+      .read(files)
+      .then((r) => {
+        if (!r) return;
+        if (r.items.length > 0) chat.attach(r.items);
+        if (r.reason !== null) chat.attachFail(r.reason);
+      })
+      .finally(() => setReading((n) => Math.max(0, n - 1)));
+  };
+  const addRef = useRef(addFiles);
+  addRef.current = addFiles;
+  useEffect(() => {
+    const r = reader.current;
+    return () => r.cancel();
+  }, []);
+  // AI の枠（section.ai）へのドラッグ・ドロップ（ファイルのときだけ受ける。受けている間は data-drop = 枠の色）
+  useEffect(() => {
+    const sec = logRef.current?.closest('section.ai');
+    if (!(sec instanceof HTMLElement)) return;
+    const isFiles = (e: DragEvent) =>
+      !!e.dataTransfer && Array.from(e.dataTransfer.types).includes('Files');
+    const over = (e: DragEvent) => {
+      if (!isFiles(e)) return;
+      e.preventDefault();
+      if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
+      sec.setAttribute('data-drop', 'true');
+    };
+    const leave = (e: DragEvent) => {
+      const to = e.relatedTarget;
+      if (to instanceof Node && sec.contains(to)) return;
+      sec.removeAttribute('data-drop');
+    };
+    const drop = (e: DragEvent) => {
+      sec.removeAttribute('data-drop');
+      if (!isFiles(e)) return;
+      e.preventDefault();
+      addRef.current(Array.from(e.dataTransfer?.files ?? []));
+    };
+    sec.addEventListener('dragenter', over);
+    sec.addEventListener('dragover', over);
+    sec.addEventListener('dragleave', leave);
+    sec.addEventListener('drop', drop);
+    return () => {
+      sec.removeAttribute('data-drop');
+      sec.removeEventListener('dragenter', over);
+      sec.removeEventListener('dragover', over);
+      sec.removeEventListener('dragleave', leave);
+      sec.removeEventListener('drop', drop);
+    };
+  }, []);
+  // AI のパネルが見えている間は、パネルの外に落としたファイルをブラウザが開かないようにする（開くとアプリから離れて作業中の
+  // 状態が消える。#369 レビュー指摘 6）。パネルの中のドロップは上の listener が受ける
+  const visible = p.visible !== false;
+  useEffect(() => {
+    if (!visible) return;
+    const sec = logRef.current?.closest('section.ai');
+    const outside = (e: DragEvent) => {
+      if (!e.dataTransfer || !Array.from(e.dataTransfer.types).includes('Files')) return;
+      if (sec && e.target instanceof Node && sec.contains(e.target)) return;
+      // ファイルの input（[画像から建玉を読み取る] の [画像を選ぶ] は全面に透明な input を重ねる）への落としは既定の動きの
+      // まま（input にファイルが入る。#369 の 2 回目のレビュー 2-1）。無効の input（読み取りの最中）は止める
+      if (e.target instanceof HTMLInputElement && e.target.type === 'file' && !e.target.disabled)
+        return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'none';
+    };
+    window.addEventListener('dragover', outside);
+    window.addEventListener('drop', outside);
+    return () => {
+      window.removeEventListener('dragover', outside);
+      window.removeEventListener('drop', outside);
+    };
+  }, [visible]);
   const long = nearLimit(state);
   const prominent = diagnoseProminent(items);
   return (
@@ -436,6 +528,7 @@ export function AiChat(p: {
             stick.current = true;
             measured.current = false;
             setEndFor(null);
+            reader.current.cancel();
             chat.reset();
           }}
         >
@@ -528,7 +621,7 @@ export function AiChat(p: {
             </button>
           </div>
         )}
-        <div class="ai-presets" data-ai="presets">
+        <div class="ai-presets" data-ai="presets" data-collapsed={hasPending ? 'true' : undefined}>
           <ChipRow label={PRESETS_LABEL}>
             {!prominent && (
               <button
@@ -556,6 +649,11 @@ export function AiChat(p: {
             })}
           </ChipRow>
         </div>
+        <AttachPending
+          items={state.pending}
+          onRemove={chat.detach}
+          focusAfterEmpty={() => inputRef.current?.focus()}
+        />
         <form
           class="ai-input"
           onSubmit={(e) => {
@@ -563,7 +661,25 @@ export function AiChat(p: {
             submit();
           }}
         >
+          <label class="btn icon sm ai-attach-btn" title={ATTACH_LABEL}>
+            <input
+              type="file"
+              class="ai-attach-input"
+              multiple
+              accept={ATTACH_ACCEPT}
+              aria-label={ATTACH_LABEL}
+              data-ai="attach-input"
+              onChange={(e) => {
+                const input = e.currentTarget;
+                addFiles(Array.from(input.files ?? []));
+                // 同じファイルを選び直せるように（値は持たない）
+                input.value = '';
+              }}
+            />
+            <Icon name="attach" />
+          </label>
           <textarea
+            ref={inputRef}
             rows={2}
             maxLength={MAX_USER_TEXT}
             value={text}
@@ -578,16 +694,37 @@ export function AiChat(p: {
               e.preventDefault();
               submit();
             }}
+            onPaste={(e) => {
+              // 文字の無いファイル（画像のコピー・ファイルのコピー）の貼り付けだけ添付にする。文字があれば文字の貼り付けの
+              // まま（Excel の表は文字と一緒に絵も入る。pasteAttachFiles）
+              const files = pasteAttachFiles(
+                Array.from(e.clipboardData?.files ?? []),
+                e.clipboardData?.getData('text/plain') ?? '',
+              );
+              if (files.length === 0) return;
+              e.preventDefault();
+              addFiles(files);
+            }}
           />
           <button
             type="submit"
             class="btn"
             data-ai="send"
-            disabled={sendReason !== null || text.trim() === ''}
+            disabled={sendReason !== null || (text.trim() === '' && !hasPending)}
           >
             送信
           </button>
         </form>
+        {reading > 0 && (
+          <p class="ai-reason" data-ai="attach-reading" role="status">
+            {ATTACH_READING_TEXT}
+          </p>
+        )}
+        {state.attachError !== null && (
+          <p class="ai-reason" data-ai="attach-error" role="status">
+            {attachReasonText(state.attachError)}
+          </p>
+        )}
       </div>
     </>
   );
@@ -632,7 +769,8 @@ function ChatRow(p: {
     case 'user':
       return (
         <div class="ai-msg user">
-          <p class="ai-bubble">{it.text}</p>
+          <AttachBubble views={it.attachments} />
+          {it.text !== '' && <p class="ai-bubble">{it.text}</p>}
           {it.updated && <p class="ai-meta">画面の変更（板・ポジション・シナリオ）を送りました</p>}
         </div>
       );

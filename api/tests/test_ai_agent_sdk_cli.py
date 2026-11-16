@@ -842,3 +842,102 @@ def test_read_image_over_edge_is_rebuilt_by_cli(read_tmp):
     assert evs[-1]["type"] == "final"
     imgs = _images(up)
     assert len(imgs) == 1 and imgs[0]["source"]["data"] != data
+
+
+# ---- 会話の添付（#369 AC3。docs/adr-0010-ai-chat-attachments.md）----
+
+def _attach_history(last_images: list[bytes], hist_image: bytes) -> list[dict]:
+    """1 件目の発言に画像 1 枚 + テキストの添付、最後の発言に画像（許可リストを通す形 = built）"""
+    from support import attach_block, image_block
+
+    return [
+        {"role": "user", "content": [image_block(hist_image), attach_block("日付,数量\n2026-10-01,2\n"),
+                                     {"type": "text", "text": "これを見て"}]},
+        {"role": "assistant", "content": [
+            {"type": "thinking", "thinking": "考え。", "signature": "U0lHLWhpc3QtQQ=="},
+            {"type": "text", "text": "はい。"}]},
+        {"role": "user", "content": [*(image_block(b) for b in last_images), {"type": "text", "text": "比べて"}]},
+    ]
+
+
+def _blank(body_or_params: dict) -> dict:
+    """画像の data を空にした system・tools・messages（CLI の上乗せの比較用）"""
+    out = json.loads(json.dumps({k: body_or_params.get(k) for k in ("system", "tools", "messages")}))
+    for m in out["messages"]:
+        if isinstance(m["content"], list):
+            for b in m["content"]:
+                if b.get("type") == "image":
+                    b["source"]["data"] = ""
+    return out
+
+
+def test_chat_attachments_reach_upstream_byte_identical(read_tmp):
+    """AC3 (a)〜(c): 最後の発言の上限近い画像 3 枚（各 約 493 KB = SDK の既定の行の上限 1 MiB を超える。#369 の F5 の
+    回帰。max_buffer_size が無いと CLIJSONDecodeError）と、前の発言（transcript の履歴）の画像 1 枚が、上流の該当の
+    位置に media_type・data ともバイト一致で届く。テキストの添付は <attachment> の text のまま届く。CLI は最後の
+    発言の末尾に画像の数だけ `[Image: source: <要求ごとの一時ディレクトリの中>]` を足し、履歴には足さない。
+    CLI の上乗せ（画像の data を除く）は AI_CLI_OVERHEAD_TOKENS 以下。一時ディレクトリは read_tmp が確かめる"""
+    hist = png_bytes(300, 200, noise_seed=3)
+    last = [png_bytes(470, 350, noise_seed=10 + k) for k in range(3)]
+    assert all(490_000 < len(b) <= st.AI_IMAGE_MAX_BYTES for b in last)
+    p = built(_attach_history(last, hist))
+    sent = [b["source"]["data"] for m in p["messages"] for b in m["content"] if b.get("type") == "image"]
+    assert sent == [base64.b64encode(b).decode() for b in [hist, *last]]
+    with FakeMessagesApi("plain") as api:
+        evs = list(gateway(api).stream(p, threading.Event()))
+        posts = api.posts()
+    assert evs[-1]["type"] == "final", evs[-1]
+    assert len(posts) == 1
+    up = posts[0]["body"]
+    users = [m for m in up["messages"] if m["role"] == "user"]
+    # (a) 位置とバイト一致: 履歴の 1 件目に 1 枚、最後の発言に 3 枚
+    first = [b for b in users[0]["content"] if isinstance(users[0]["content"], list) and b.get("type") == "image"]
+    lastc = users[-1]["content"]
+    assert [b["source"]["data"] for b in first] == sent[:1]
+    assert [b["source"]["data"] for b in lastc if b.get("type") == "image"] == sent[1:]
+    assert all(b["source"]["media_type"] == "image/png" for b in _images(up))
+    # テキストの添付は中継が包んだ text のまま
+    att = [b["text"] for b in users[0]["content"] if b.get("type") == "text" and b["text"].startswith("<attachment>")]
+    assert att == [p["messages"][0]["content"][2]["text"]]
+    # (c) `[Image: source:]` は最後の発言の末尾に画像の数だけ・パスは要求ごとの一時ディレクトリの中・履歴には無い
+    tail = [b.get("text", "") for b in lastc if b.get("type") == "text"]
+    added = [t for t in tail if t.startswith("[Image: source: ")]
+    assert len(added) == 3 and tail[-3:] == added
+    for t in added:
+        path = t[len("[Image: source: "):].rstrip("]")
+        assert path.startswith(f"{read_tmp}/ai-sdk-") and "/tmp/" in path[len(str(read_tmp)):]
+    at = max(i for i, m in enumerate(up["messages"]) if m["role"] == "user")  # 後ろに CLI の環境の system がある
+    assert "[Image: source:" not in json.dumps(up["messages"][:at], ensure_ascii=False)
+    # 利用者の文は CLI が末尾に改行を 1 つ足すことがある（中身は変えない）
+    assert [t.rstrip("\n") for t in tail if t not in added] == ["比べて"]
+    # CLI の上乗せ（画像の data を除いた本文の差）は見積もりの余裕の内。テストの一時ディレクトリ（read_tmp = pytest の
+    # 長いパス）は本番の TMPDIR（/tmp）の長さに直して数える（`[Image: source:]` と環境の cwd にパスが入る）
+    text = json.dumps(_blank(up), ensure_ascii=False, separators=(",", ":"))
+    long_ = sum(text.count(x) * (len(x) - len(y)) for x, y in ((str(read_tmp), "/tmp"),
+                                                             (str(read_tmp).replace("/", "-"), "-tmp")))
+    sent_bytes = len(text.encode()) - long_
+    base = len(relay.params_text(p).encode())
+    # 画像なしの上乗せ（AI_CLI_OVERHEAD_TOKENS）+ 最後の発言の画像ごとの `[Image: source:]`
+    # （AI_IMAGE_SOURCE_TEXT_TOKENS）
+    assert relay.last_user_images(p) == 3
+    assert sent_bytes - base <= st.AI_CLI_OVERHEAD_TOKENS + 3 * st.AI_IMAGE_SOURCE_TEXT_TOKENS
+    assert relay.input_estimate(p, 4) >= sent_bytes + st.AI_INPUT_OVERHEAD_TOKENS
+
+
+def test_chat_history_detached_text_ok(read_tmp):
+    """再読み込みで外れた添付の印（決まった text）に置き換えた履歴も、そのまま上流へ届く（F6）"""
+    from simulator_api.ai import allowlist
+
+    msgs = [{"role": "user", "content": [{"type": "text", "text": allowlist.DETACHED_TEXT},
+                                         {"type": "text", "text": "これを見て"}]},
+            {"role": "assistant", "content": [
+                {"type": "thinking", "thinking": "考え。", "signature": "U0lHLWhpc3QtQQ=="},
+                {"type": "text", "text": "はい。"}]},
+            {"role": "user", "content": [{"type": "text", "text": "続き"}]}]
+    p = built(msgs)
+    with FakeMessagesApi("plain") as api:
+        evs = list(gateway(api).stream(p, threading.Event()))
+        up = api.posts()[0]["body"]
+    assert evs[-1]["type"] == "final"
+    first = up["messages"][0]["content"]
+    assert [b.get("text") for b in first if b.get("type") == "text"][1] == allowlist.DETACHED_TEXT

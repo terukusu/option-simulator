@@ -694,6 +694,16 @@ export function synthAiReply(body) {
     .map((b) => b.text)
     .join('');
   const pre = body?.context?.precomputed ?? {};
+  // 添付（#369）: 最後の発言に添付があれば数だけ返す（中身は読まない。架空の文）
+  const nImg = blocks.filter((b) => b?.type === 'image').length;
+  const nTxt = blocks.filter((b) => b?.type === 'attachment_text').length;
+  if (!result && nImg + nTxt > 0) {
+    return {
+      thinking: '添付を見る',
+      text: `画像 ${nImg} 枚・テキストのファイル ${nTxt} 個を受け取りました（合成の応答。中身は読んでいません）。`,
+      stop: 'end_turn',
+    };
+  }
   if (result) {
     let r = {};
     try {

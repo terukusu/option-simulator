@@ -178,7 +178,6 @@ AI_DOCS_DIR_ENV = "AI_DOCS_DIR"
 # 締め切りの直前に final が来ると精算（Firestore の書き込み、最大 AI_FIRESTORE_TIMEOUT_SECONDS = 5 秒）が
 # その後に走るので、最悪 50 + 5 = 55 秒で Cloud Run の 60 秒の内側に収まる
 AI_DEADLINE_SECONDS = 50
-AI_MAX_BODY_BYTES = 512 * 1024  # 要求の本文の上限（413）
 AI_MAX_CONCURRENT = 2  # インスタンスごとに同時に流す本数（gunicorn の 8 スレッドのうち 6 本は /api/chain などに残す）
 AI_RATE_PER_MINUTE = 10  # インスタンスごとの 1 分の回数
 # 入力トークンの見積もり = 送る本文（system・tools・messages）の UTF-8 のバイト数 + AI_INPUT_OVERHEAD_TOKENS。
@@ -203,6 +202,27 @@ AI_IMAGE_MAX_EDGE = 2000  # 画像の長辺（px）の上限（400）
 # 上流が縮めて 4,784 に収める前提（崩れても過少は最大 約 400 トークン = 約 $0.003 で精算で戻る。
 # モデル・SDK の更新時に見直す）
 AI_IMAGE_MAX_TOKENS = 4784
+# CLI が最後の発言の画像 1 枚ごとに足す text `[Image: source: <要求ごとの一時ディレクトリの中のパス>]`
+# （#369 の F3）の分。
+# CLI 2.1.283 の実測で 1 つ 約 315 B（block の枠・パスの cwd 名と uuid を含む。本番の /tmp の長さに直した値。画像 3 枚で
+# CLI の上乗せが 2,884 → 3,825 B）に余裕を足した上界。AI_CLI_OVERHEAD_TOKENS（画像なしの上乗せ）とは別に、最後の発言の
+# 画像の枚数ぶん見積もり E に足す（relay.input_estimate。tests/test_ai_agent_sdk_cli.py が上乗せ ≤ 両方の和を固定する）
+AI_IMAGE_SOURCE_TEXT_TOKENS = 400
+# 会話の添付（#369 = docs/adr-0010-ai-chat-attachments.md）: 会話全体の画像の枚数とテキストの添付の字数の合計の上限。
+# allowlist.py の MAX_IMAGES・MAX_ATTACH_TEXT_TOTAL と同じ値（settings は allowlist を import しない。
+# tests/test_ai_settings.py が一致を固定する）
+AI_CHAT_MAX_IMAGES = 5
+AI_ATTACH_TEXT_MAX_TOTAL = 40_000
+# 会話の要求の本文の上限（413）= 添付の無い会話（自由文・context・ツールの結果）の 512 KiB + 画像 5 枚の base64
+# （1 枚 ⌈500,000 / 3⌉ × 4 = 666,668 字）+ テキストの添付の JSON の最悪（1 code point が UTF-8 で 4 B。
+# \t\n\r・"・\ の 2 B の escape も 4 B 以内）+ 枠 64 KiB（block のキー・名前 120 字 × 15 など）= 4,083,164 B
+# （約 3.9 MiB。IAP / Cloud Run の HTTP/1 の 32 MiB の内側）。読み取り（AI_READ_MAX_BODY_BYTES）とは別
+AI_MAX_BODY_BYTES = (512 * 1024 + AI_CHAT_MAX_IMAGES * (-(-AI_IMAGE_MAX_BYTES // 3) * 4)
+                     + AI_ATTACH_TEXT_MAX_TOTAL * 4 + 64 * 1024)
+# Claude Agent SDK が CLI の stdout の 1 行を読むバッファの上限（SDK の既定 1 MiB）。CLI は prompt の user の message を
+# 画像の base64 ごと 1 行の JSON で返すので、最後の発言に上限近い画像 3 枚（約 2 MB）で既定を超えて CLIJSONDecodeError
+# になる（#369 の spike F5）。本文の上限の 2 倍（バッファは実際の行の大きさまでしか育たない）
+AI_SDK_MAX_BUFFER_BYTES = 2 * AI_MAX_BODY_BYTES
 AI_READ_MAX_TOKENS = 6000  # 読み取りの出力の上限（thinking を含む。Opus 5.5 は thinking を切れない）
 AI_READ_EFFORT = "low"  # 読み取りの output_config.effort
 AI_FIRESTORE_DATABASE = "simulator-ai"  # 日の計上の置き場所（Firestore の名前つき DB。infra/bootstrap/ai_budget.tf）

@@ -10,6 +10,9 @@
  * - 失敗・中止: その turn の履歴を戻し（次に送る会話の形を壊さない）、途中までの文と理由を failed に残す（[もう一度]）
  * - 保存: sessionStorage の 1 キー（AI_SESSION_KEY）だけ。タブを閉じたら消える。保存一覧・URL 共有・書き出しには
  *   載せない（オーナー判断 2026-10-19）
+ * - 添付（#369 = docs/adr-0010-ai-chat-attachments.md。規則は ui/view/aiAttach.ts）: 送る前の添付（pending）はメモリ
+ *   だけ。送ると turn に移り、発言の content は [添付の block…, text]。受け付けの前（accepted の前）に失敗したら
+ *   入力欄（pending）に戻す。保存には添付を書かない（detachAttachments）
  */
 
 import type {
@@ -23,6 +26,18 @@ import type {
   AiUserBlock,
 } from '../../data/aiStream';
 import { betaAddPt } from '../../model/scenario';
+import {
+  type AiAttachment,
+  ATTACH_ONLY_TEXT,
+  type AttachReason,
+  type AttachView,
+  admit,
+  attachViews,
+  DETACHED_TEXT,
+  detachAttachments,
+  pendingViews,
+  userContent,
+} from './aiAttach';
 import { displayedValues } from './aiNumbers';
 import { RELOAD_PAGE_REF } from './reloadPage';
 
@@ -68,6 +83,10 @@ export interface AiTurn {
   awaitingTools: boolean;
   /** 失敗したら戻す前の状態 */
   prev: { context: AiContext | null; lastKey: string | null; length: number };
+  /** この発言の添付（#369。送る前の添付から移したもの） */
+  attachments: AiAttachment[];
+  /** 中継が受け付けた（accepted の事象。#369: これより前の失敗は添付を入力欄に戻す） */
+  accepted: boolean;
 }
 
 export interface AiFailed {
@@ -78,6 +97,8 @@ export interface AiFailed {
   partial: string;
   code: string;
   remainingUsd: number | null;
+  /** 失敗した発言の添付（#369。[もう一度] で文と同じく送り直す） */
+  attachments: AiAttachment[];
 }
 
 export interface AiChatState {
@@ -92,6 +113,10 @@ export interface AiChatState {
   stop: string | null;
   /** accepted / done の今日の残り（USD。数えないときは null） */
   remainingUsd: number | null;
+  /** 送る前の添付（#369。メモリだけ。[新しい会話] でも残す） */
+  pending: AiAttachment[];
+  /** 添付を断った理由（#369。入力欄の下。次の添付の操作・送信で消す） */
+  attachError: AttachReason | null;
 }
 
 export const INITIAL_AI_CHAT: AiChatState = {
@@ -102,16 +127,31 @@ export const INITIAL_AI_CHAT: AiChatState = {
   failed: null,
   stop: null,
   remainingUsd: null,
+  pending: [],
+  attachError: null,
 };
 
 export type AiChatAction =
-  | { type: 'begin'; kind: AiKind; text: string; now: number; topic?: string }
+  | {
+      type: 'begin';
+      kind: AiKind;
+      text: string;
+      now: number;
+      topic?: string;
+      /** この発言の添付（#369。送信・[AI に聞く] は送る前の添付、[もう一度] は失敗した発言の添付） */
+      attachments?: AiAttachment[];
+    }
   | { type: 'send'; context: AiContext; key: string }
   | { type: 'event'; event: AiEvent }
   | { type: 'toolResults'; blocks: AiUserBlock[] }
   | { type: 'fail'; code: string; remainingUsd?: number | null }
   | { type: 'reset' }
-  | { type: 'restore'; saved: SavedAiChat };
+  | { type: 'restore'; saved: SavedAiChat }
+  /** 添付を足す（#369。上限を超えた分は足さずに理由） */
+  | { type: 'attachAdd'; items: AiAttachment[] }
+  | { type: 'attachRemove'; id: string }
+  /** 添付を読めなかった（#369。形式・大きさ） */
+  | { type: 'attachError'; reason: AttachReason | null };
 
 const STOP_NOTES = new Set(['refusal', 'max_tokens', 'pause_turn']);
 
@@ -121,8 +161,14 @@ export const hasTopic = (k: AiKind): boolean => k === 'ask' || k === 'preset';
 function fail(s: AiChatState, code: string, remainingUsd: number | null = null): AiChatState {
   const t = s.turn;
   if (!t) return s;
+  // 受け付けの前の失敗（4xx・通信・送る前）: 添付を入力欄に戻す。入力欄に別の添付があれば、その後ろに上限の内だけ
+  // 足す（入らない分は失敗の行の [もう一度] で送り直す）
+  const back = !t.accepted && t.attachments.length > 0;
+  const kept = s.messages.slice(0, t.prev.length);
+  const restored = back ? admit(kept, s.pending, t.attachments).accepted : [];
   return {
     ...s,
+    ...(restored.length > 0 && { pending: [...s.pending, ...restored] }),
     context: t.prev.context,
     lastKey: t.prev.lastKey,
     messages: s.messages.slice(0, t.prev.length),
@@ -134,6 +180,7 @@ function fail(s: AiChatState, code: string, remainingUsd: number | null = null):
       partial: t.text,
       code,
       remainingUsd,
+      attachments: t.attachments,
     },
     stop: null,
   };
@@ -144,7 +191,11 @@ function onEvent(s: AiChatState, ev: AiEvent): AiChatState {
   if (!t) return s;
   switch (ev.type) {
     case 'accepted':
-      return { ...s, remainingUsd: ev.remaining_usd, turn: { ...t, phase: 'accepted' } };
+      return {
+        ...s,
+        remainingUsd: ev.remaining_usd,
+        turn: { ...t, phase: 'accepted', accepted: true },
+      };
     case 'progress':
       return t.phase === ev.phase ? s : { ...s, turn: { ...t, phase: ev.phase } };
     case 'thinking':
@@ -195,12 +246,16 @@ const isAssistantBlock = (b: unknown): b is AiAssistantBlock => {
 /** 変わらないときは同じ参照を返す */
 export function aiChatReduce(s: AiChatState, a: AiChatAction): AiChatState {
   switch (a.type) {
-    case 'begin':
+    case 'begin': {
       if (s.turn) return s;
+      const atts = a.attachments ?? [];
+      const ids = new Set(atts.map((x) => x.id));
       return {
         ...s,
         failed: null,
         stop: null,
+        pending: ids.size === 0 ? s.pending : s.pending.filter((x) => !ids.has(x.id)),
+        attachError: null,
         turn: {
           kind: a.kind,
           userText: a.text,
@@ -213,23 +268,26 @@ export function aiChatReduce(s: AiChatState, a: AiChatAction): AiChatState {
           rounds: 0,
           awaitingTools: false,
           prev: { context: s.context, lastKey: s.lastKey, length: s.messages.length },
+          attachments: atts,
+          accepted: false,
         },
       };
+    }
     case 'send': {
       const t = s.turn;
       if (t?.phase !== 'computing') return s;
-      const text: AiUserBlock = { type: 'text', text: t.userText };
+      const said = userContent(t.userText, t.attachments);
       if (s.context === null) {
         return {
           ...s,
           context: a.context,
           lastKey: a.key,
-          messages: [...s.messages, { role: 'user', content: [text] }],
+          messages: [...s.messages, { role: 'user', content: said }],
           turn: { ...t, phase: 'sending' },
         };
       }
       const content: AiUserBlock[] =
-        a.key === s.lastKey ? [text] : [text, { type: 'context_update', context: a.context }];
+        a.key === s.lastKey ? said : [...said, { type: 'context_update', context: a.context }];
       return {
         ...s,
         lastKey: a.key,
@@ -251,6 +309,8 @@ export function aiChatReduce(s: AiChatState, a: AiChatAction): AiChatState {
     case 'fail':
       return fail(s, a.code, a.remainingUsd ?? null);
     case 'reset':
+      // 送る前の添付は残す（入力欄の文と同じ）
+      if (s.pending.length > 0) return { ...INITIAL_AI_CHAT, pending: s.pending };
       return s === INITIAL_AI_CHAT ? s : INITIAL_AI_CHAT;
     case 'restore':
       return {
@@ -259,6 +319,22 @@ export function aiChatReduce(s: AiChatState, a: AiChatAction): AiChatState {
         lastKey: a.saved.lastKey,
         messages: a.saved.messages,
       };
+    case 'attachAdd': {
+      const r = admit(s.messages, s.pending, a.items);
+      if (r.accepted.length === 0 && r.reason === s.attachError) return s;
+      return {
+        ...s,
+        pending: r.accepted.length === 0 ? s.pending : [...s.pending, ...r.accepted],
+        attachError: r.reason,
+      };
+    }
+    case 'attachRemove': {
+      const pending = s.pending.filter((x) => x.id !== a.id);
+      if (pending.length === s.pending.length && s.attachError === null) return s;
+      return { ...s, pending, attachError: null };
+    }
+    case 'attachError':
+      return s.attachError === a.reason ? s : { ...s, attachError: a.reason };
   }
 }
 
@@ -540,7 +616,14 @@ export function aiErrorText(code: string, remainingUsd: number | null = null): s
 export type ToolStatus = 'ok' | 'error' | 'pending' | 'missing';
 
 export type ChatItem =
-  | { kind: 'user'; text: string; updated: boolean; key: string }
+  | {
+      kind: 'user';
+      text: string;
+      updated: boolean;
+      key: string;
+      /** 添付のチップ（#369。無ければ空） */
+      attachments: AttachView[];
+    }
   | { kind: 'thinking'; text: string; key: string; live: boolean }
   | {
       kind: 'answer';
@@ -568,6 +651,9 @@ const parseJson = (t: string): unknown => {
   }
 };
 
+/** 吹き出しに出さない利用者の text（ツールの上限の知らせ・添付だけの発言の文・外れた添付の印 = チップで出す） */
+const HIDDEN_USER_TEXT = new Set([TOOL_LIMIT_NOTE, ATTACH_ONLY_TEXT, DETACHED_TEXT]);
+
 /** 会話 → 表示の項目（user の吹き出し・考え中・返答・ツールのカード。流れの途中・失敗も） */
 export function chatItems(s: AiChatState): ChatItem[] {
   const out: ChatItem[] = [];
@@ -585,13 +671,14 @@ export function chatItems(s: AiChatState): ChatItem[] {
   }
   s.messages.forEach((m, i) => {
     if (m.role === 'user') {
+      const atts = attachViews(m.content, `m${i}`);
       const text = m.content
-        .filter((b) => b.type === 'text' && b.text !== TOOL_LIMIT_NOTE)
+        .filter((b) => b.type === 'text' && !HIDDEN_USER_TEXT.has(b.text))
         .map((b) => (b as { text: string }).text)
         .join('\n');
-      if (text !== '') {
+      if (text !== '' || atts.length > 0) {
         const updated = m.content.some((b) => b.type === 'context_update');
-        out.push({ kind: 'user', text, updated, key: `m${i}` });
+        out.push({ kind: 'user', text, updated, key: `m${i}`, attachments: atts });
       }
       return;
     }
@@ -625,7 +712,13 @@ export function chatItems(s: AiChatState): ChatItem[] {
   }
   const f = s.failed;
   if (f) {
-    out.push({ kind: 'user', text: f.userText, updated: false, key: 'failed-user' });
+    out.push({
+      kind: 'user',
+      text: f.userText,
+      updated: false,
+      key: 'failed-user',
+      attachments: pendingViews(f.attachments, 'failed'),
+    });
     out.push({
       kind: 'answer',
       text: f.partial,
@@ -764,7 +857,11 @@ export function numberSources(s: AiChatState): unknown[] {
     for (const b of m.content) {
       if (b.type === 'context_update') out.push(...contextSources(b.context));
       else if (b.type === 'tool_result') out.push(parseJson(b.content[0].text));
-      else if (b.type === 'text') {
+      else if (b.type === 'attachment_text') {
+        // #369: テキストの添付の数字は利用者の発言と同じく足す（画像からは足さない = 照合できない数字の印が付く）
+        const shown = displayedValues(b.text);
+        if (Object.keys(shown).length > 0) out.push(shown);
+      } else if (b.type === 'text') {
         const shown = displayedValues(b.text);
         if (Object.keys(shown).length > 0) out.push(shown);
       }
@@ -781,9 +878,14 @@ export interface SavedAiChat {
   messages: AiMessage[];
 }
 
-/** 書く形（版 1）。turn・failed は書かない */
+/** 書く形（版 1）。turn・failed・送る前の添付は書かない。会話の添付は外した印に置き換える（#369。base64・本文・名前を書かない） */
 export function encodeAiChat(s: AiChatState): string {
-  return JSON.stringify({ v: 1, context: s.context, lastKey: s.lastKey, messages: s.messages });
+  return JSON.stringify({
+    v: 1,
+    context: s.context,
+    lastKey: s.lastKey,
+    messages: detachAttachments(s.messages),
+  });
 }
 
 const isObj = (v: unknown): v is Record<string, unknown> =>
