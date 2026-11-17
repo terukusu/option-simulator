@@ -195,12 +195,12 @@ describe('数値入力（AC-4）', () => {
       [
         dxPct,
         ['-100', '-99.5', '900.5', '1000', 'NaN', 'Infinity', '-Infinity', '', 'abc', '1e400'],
-        '原資産 ΔXは −99.0〜900.0 %',
+        '原資産 ΔFは −99.0〜900.0 %',
       ],
       [
         yen,
         [String(-X0), '-67132', '610291', 'NaN', 'Infinity', '', 'x'],
-        '原資産 ΔXは −67,131〜610,290 円',
+        '原資産 ΔFは −67,131〜610,290 円',
       ],
     ] as Array<[SliderSpec, string[], string]>) {
       for (const t of bad) {

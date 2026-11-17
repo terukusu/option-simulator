@@ -112,7 +112,7 @@ export function stepperSub(
     case 'dX': {
       if (!validX0(input.x0)) return undefined;
       const yen = fromDisplay('dX', fin(v), input.x0, input.dXUnit);
-      const x = `X ${fmtNum(input.x0 + yen, 0)}`;
+      const x = `F ${fmtNum(input.x0 + yen, 0)}`;
       return input.dXUnit === 'pct'
         ? `${fmtSigned(yen, 0)} 円 · ${x}`
         : `${fmtSigned((yen / input.x0) * 100, 1)}% · ${x}`;
@@ -318,7 +318,7 @@ export function betaNote(): string {
   const up =
     BETA_SHAPE.upSlope === 0 ? '上げでは 0' : `上げ +5% で ${fmtSigned(betaAddPt(5, 1), 2)}pt`;
   return (
-    `β（IV–原資産連動）: 実測の形 g(ΔX%) の倍率。Δσ_β = β × g。β 1.0 = ${BETA_SHAPE.period} の実測の中央値の形` +
+    `β（IV–原資産連動）: 実測の形 g(ΔF%) の倍率。Δσ_β = β × g。β 1.0 = ${BETA_SHAPE.period} の実測の中央値の形` +
     `（測った日 ${BETA_SHAPE.measuredOn}）: ${pts}pt（${up}、上乗せは最大 ${fmtNum(BETA_SHAPE.capPt, 0)}pt）。` +
     '0 で連動なし、2 で 2 倍。形は sticky strike（既定）用。'
   );
@@ -329,7 +329,7 @@ export function advSummary(input: ScenarioRegionInput): string {
   const s = input.scenario;
   const dyn = s.ivDynamics === 'sticky_moneyness' ? 'sticky moneyness' : 'sticky strike';
   const basis = input.futureBasis === 'decay' ? '減衰' : '固定';
-  return `β ×${fmtNum(fin(s.beta), 1)} · ${dyn} · basis ${basis} · ΔX ${input.dXUnit === 'yen' ? '円' : '%'}`;
+  return `β ×${fmtNum(fin(s.beta), 1)} · ${dyn} · basis ${basis} · ΔF ${input.dXUnit === 'yen' ? '円' : '%'}`;
 }
 
 export function dynamicsAction(v: IvDynamics): Action {

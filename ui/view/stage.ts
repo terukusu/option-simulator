@@ -654,7 +654,7 @@ export function bigReadout(r: ReadoutModel, evalTime: number | null): BigReadout
       u,
       // Δσ は IV レールの吹き出しで読む（副題を 1 行に収める。#107）。|ΔX| ≥ 100% は % を整数にする
       // （+900% と円の最大でも幅 360px に収める。#144）
-      `X ${r.text.x} (${r.text.dX}/${Math.abs(r.dXPct) >= 100 ? fmtSigned(r.dXPct, 0) : r.text.dXPct}%)`,
+      `F ${r.text.x} (${r.text.dX}/${Math.abs(r.dXPct) >= 100 ? fmtSigned(r.dXPct, 0) : r.text.dXPct}%)`,
       true,
     ),
     item('expiry', 'base', '満期（SQ）', r.text.pnlExpiry, u, `今日 ${r.text.pnlToday}`, true),

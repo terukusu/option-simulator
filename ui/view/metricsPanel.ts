@@ -157,7 +157,7 @@ export const ROOM_NO_CAPITAL_TEXT = '資金は ⋯ > 設定…';
 export const MARGIN_CALL_MARK = '追証';
 /** ⓘ の証拠金の文（方式・物差し・NOV・JSCC との違い・既定の決め方・未確認の形・Web 試算で確かめる。設計 5.10・#150） */
 export const MARGIN_HINT =
-  '必要証拠金は概算: 原資産 ±R・±R/2・0 × 足の今の IV の ×(1 + 上げ) / ×1 / ×(1 − 下げ) × 経過 0 / 2 営業日の格子で、損失の最悪値に掛け目を掛ける。証券会社の建てる前の必要委託証拠金と同じ基準で、受け取るプレミアム（NOV）を含まない。JSCC の VaR 証拠金（過去の値動きとストレスシナリオ）の再現ではない。既定（R 5%・IV +50% / −25%・掛け目 100%）は 1 枚ずつの売りの 6 通りのポジションでの答え合わせ（0.98〜1.07 倍）で決めた。ストレス日・先物との組み合わせなどは未確認で、実額と違いうる。建てる前に JSCC の Web 試算か証券会社の額で確かめ、⋯ > 設定… の幅・掛け目で合わせる。余力 = 資金 − 支払 + 受取 − 手数料 + 先物の評価損益 − (必要証拠金 − NOV)。値はシナリオの点（見出しの横に d・ΔX・Δσ・Δs のうち 0 でないもの。全部 0 なら「今」）、副題は今。証券会社の額は前営業日の清算値で 1 日固定（場中に計算し直しても同じ額）、simulator は今の板で計算するので場中の値動きの分だけ違う。';
+  '必要証拠金は概算: 原資産 ±R・±R/2・0 × 足の今の IV の ×(1 + 上げ) / ×1 / ×(1 − 下げ) × 経過 0 / 2 営業日の格子で、損失の最悪値に掛け目を掛ける。証券会社の建てる前の必要委託証拠金と同じ基準で、受け取るプレミアム（NOV）を含まない。JSCC の VaR 証拠金（過去の値動きとストレスシナリオ）の再現ではない。既定（R 5%・IV +50% / −25%・掛け目 100%）は 1 枚ずつの売りの 6 通りのポジションでの答え合わせ（0.98〜1.07 倍）で決めた。ストレス日・先物との組み合わせなどは未確認で、実額と違いうる。建てる前に JSCC の Web 試算か証券会社の額で確かめ、⋯ > 設定… の幅・掛け目で合わせる。余力 = 資金 − 支払 + 受取 − 手数料 + 先物の評価損益 − (必要証拠金 − NOV)。値はシナリオの点（見出しの横に d・ΔF・Δσ・Δs のうち 0 でないもの。全部 0 なら「今」）、副題は今。証券会社の額は前営業日の清算値で 1 日固定（場中に計算し直しても同じ額）、simulator は今の板で計算するので場中の値動きの分だけ違う。';
 
 /** 内訳・全文のシナリオ点の行の見出し（#164） */
 export const MARGIN_POINT_ROW_LABEL = 'シナリオ点';
@@ -178,7 +178,7 @@ export function marginPointParts(at: MarginPointAt): string[] {
   if (at.days !== 0) out.push(`d ${fmtDays(at.days)} 日`);
   if (at.dX !== 0) {
     const pct = fmtSigned(at.dXPct, 1);
-    out.push(/^0(\.0+)?$/.test(pct) ? `ΔX ${fmtSigned(at.dX, 0)} 円` : `ΔX ${pct}%`);
+    out.push(/^0(\.0+)?$/.test(pct) ? `ΔF ${fmtSigned(at.dX, 0)} 円` : `ΔF ${pct}%`);
   }
   if (at.dSigma !== 0)
     out.push(`Δσ ${fmtSigned(at.dSigma, 1)}${at.dSigmaUnit === '%' ? '%' : ' pt'}`);
@@ -241,7 +241,7 @@ function maxProfitRows(m: MetricsModel, withX: boolean): FullRow[] {
   if (expiry.profitFinite) {
     rows.push({ k: 'call 側 ∞ / put 側', v: amountText(expiry.profitFinite.value, m.unit, true) });
   } else if (withX && expiry.maxProfit.x !== null) {
-    rows.push({ k: 'X', v: fmtNum(expiry.maxProfit.x) });
+    rows.push({ k: 'F', v: fmtNum(expiry.maxProfit.x) });
   }
   return rows;
 }
@@ -256,13 +256,13 @@ function maxLossRows(m: MetricsModel, withX: boolean): FullRow[] {
       { k: '満期 最大損失', v: 'call 側 −∞' },
       { k: atLo ? 'put 側（SQ = 下端）' : 'put 側', v: amountText(lf.value, m.unit, true) },
     ];
-    if (!atLo) rows.push({ k: 'put 側の X', v: fmtNum(lf.x) });
+    if (!atLo) rows.push({ k: 'put 側の F', v: fmtNum(lf.x) });
     return rows;
   }
   const rows: FullRow[] = [
     { k: '満期 最大損失', v: amountText(expiry.maxLoss.value, m.unit, true) },
   ];
-  if (withX && expiry.maxLoss.x !== null) rows.push({ k: 'X', v: fmtNum(expiry.maxLoss.x) });
+  if (withX && expiry.maxLoss.x !== null) rows.push({ k: 'F', v: fmtNum(expiry.maxLoss.x) });
   return rows;
 }
 
@@ -271,7 +271,7 @@ function scenarioRows(m: MetricsModel): FullRow[] {
   const sp = m.scenarioPoint;
   return [
     { k: 'd', v: `${fmtNum(m.days, 2)} 日` },
-    { k: 'X', v: `${fmtNum(sp.x)}（ΔX ${fmtSigned(sp.dXPct, 1)}%）` },
+    { k: 'F', v: `${fmtNum(sp.x)}（ΔF ${fmtSigned(sp.dXPct, 1)}%）` },
   ];
 }
 
@@ -356,7 +356,7 @@ function worstValues(c: MarginCalc | null, p: MarginParams): string[] | null {
   const w = c?.result.worst;
   if (!c || !w || !(c.result.pfe > 0) || !(c.result.margin > 0)) return null;
   const pct = fmtSigned(Math.round(w.priceStep * p.range * 1000) / 10, 1);
-  return [`X ${pct}%`, `IV ${ivScaleText(w.ivScale)}`, `経過 +${fmtNum(w.days)} 日`];
+  return [`F ${pct}%`, `IV ${ivScaleText(w.ivScale)}`, `経過 +${fmtNum(w.days)} 日`];
 }
 
 const marginOf = (c: MarginCalc | null) => (c ? c.result.margin : null);
@@ -528,15 +528,15 @@ export function metricTiles(m: MetricsModel, margin: MarginView | null = null): 
   const maxProfitS = expiry.profitFinite
     ? `put 側 ${fmtAmount(expiry.profitFinite.value, u, true)}`
     : expiry.maxProfit.x !== null
-      ? `X ${fmtNum(expiry.maxProfit.x)}`
+      ? `F ${fmtNum(expiry.maxProfit.x)}`
       : '';
 
   const maxLossV = fmtAmount(expiry.maxLoss.value, u, true);
   const lf = expiry.lossFinite;
   const maxLossS = lf
-    ? `put 側 ${fmtAmount(lf.value, u, true)} · ${lf.x === expiry.xLo ? '下端' : `X ${fmtNum(lf.x)}`}`
+    ? `put 側 ${fmtAmount(lf.value, u, true)} · ${lf.x === expiry.xLo ? '下端' : `F ${fmtNum(lf.x)}`}`
     : expiry.maxLoss.x !== null
-      ? `X ${fmtNum(expiry.maxLoss.x)}`
+      ? `F ${fmtNum(expiry.maxLoss.x)}`
       : '';
 
   const prem =

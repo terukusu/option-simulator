@@ -375,7 +375,7 @@ describe('bigReadout（AC-2 d）', () => {
     expect(bigReadout({ ...fake, text: { ...fake.text, pnlDate: '0' } }, null)[0]?.tone).toBeNull();
     expect(by.date?.label).toMatch(/^損益 · d 3（\d\d\/\d\d）$/);
     // #107: Δσ は IV レールの吹き出しで読む。副題は X と ΔX（円と %）だけ
-    expect(by.date?.sub).toBe(`X ${r.text.x} (${r.text.dX}/${r.text.dXPct}%)`);
+    expect(by.date?.sub).toBe(`F ${r.text.x} (${r.text.dX}/${r.text.dXPct}%)`);
     expect(by.delta?.label).toBe('Δ ラージ(ミニ)');
   });
 

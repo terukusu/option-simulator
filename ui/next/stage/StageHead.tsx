@@ -204,8 +204,8 @@ export function StageHead(p: {
               <p>
                 Δσ {fmtNum(scenario.dSigma, 1)}pt・Δs {fmtNum(scenario.skew, 1)}・β ×
                 {fmtNum(scenario.beta, 1)}・{DYNAMICS_LABEL[scenario.ivDynamics]}{' '}
-                は面の全体に効く。点 = シナリオ点（ΔX・d）。点を押して動かすと ΔX と d
-                が同時に動く（離れた所を押すとそこへ。2 本指・横ホイールでパン）。キーは ← → ΔX、[ ]
+                は面の全体に効く。点 = シナリオ点（ΔF・d）。点を押して動かすと ΔF と d
+                が同時に動く（離れた所を押すとそこへ。2 本指・横ホイールでパン）。キーは ← → ΔF、[ ]
                 d。
               </p>
             </>

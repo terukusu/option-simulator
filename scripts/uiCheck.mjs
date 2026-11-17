@@ -2692,7 +2692,7 @@ async function wideDXCheck() {
   await measureAll('+900%');
   // 円の最大: 範囲の外を入れて文言の上端を読み、その値を入れる
   await page.click('section.scenario details.adv summary');
-  await page.click('section.scenario .seg[aria-label="ΔX の単位"] button:has-text("円")');
+  await page.click('section.scenario .seg[aria-label="ΔF の単位"] button:has-text("円")');
   await page.click('section.scenario details.adv summary');
   await page.click(val);
   await page.waitForSelector(input);
@@ -7827,7 +7827,7 @@ async function scenarioFlows(vp) {
     await page.keyboard.press('r');
     await page.waitForTimeout(100);
     const sub = (await page.textContent(`${val('dX')} small`)) ?? '';
-    const x0 = Number((/X ([\d,]+)/.exec(sub)?.[1] ?? 'NaN').replaceAll(',', ''));
+    const x0 = Number((/F ([\d,]+)/.exec(sub)?.[1] ?? 'NaN').replaceAll(',', ''));
     const input = `${val('dX')} input`;
     const enter = async (text) => {
       await page.click(val('dX'));
@@ -7858,7 +7858,7 @@ async function scenarioFlows(vp) {
     const b = (await saved()).scenario;
     check(
       `#144 AC-12 ${tag} -100 → aria-invalid="true"・保存は変わらない`,
-      inv === 'true' && b?.dX === dX && alert.startsWith('原資産 ΔXは'),
+      inv === 'true' && b?.dX === dX && alert.startsWith('原資産 ΔFは'),
       `「${alert}」`,
     );
     await page.keyboard.press('Escape');
@@ -7923,7 +7923,7 @@ async function scenarioFlows(vp) {
       c.basis === 'decay',
       `${c.basis}`,
     );
-    await page.click('section.scenario .seg[aria-label="ΔX の単位"] button:has-text("円")');
+    await page.click('section.scenario .seg[aria-label="ΔF の単位"] button:has-text("円")');
     const d = (await saved()).scenario;
     const text = (await page.textContent(`${val('dX')} b`)) ?? '';
     const yen = await now('dX');
@@ -7935,10 +7935,10 @@ async function scenarioFlows(vp) {
     const vals = await page.textContent('section.scenario details.adv .vals');
     check(
       `#83 AC-10(e) ${tag} 前提の要約`,
-      vals === 'β ×1.1 · sticky moneyness · basis 減衰 · ΔX 円',
+      vals === 'β ×1.1 · sticky moneyness · basis 減衰 · ΔF 円',
       `${vals}`,
     );
-    await page.click('section.scenario .seg[aria-label="ΔX の単位"] button:has-text("%")');
+    await page.click('section.scenario .seg[aria-label="ΔF の単位"] button:has-text("%")');
     await page.click('section.scenario details.adv summary');
   }
 
@@ -8826,7 +8826,7 @@ async function subtitleFlows(vp) {
     const first = i.rows[0] ?? ['', ''];
     let content =
       i.rows.length > 0 &&
-      i.rows.every(([rk, rv]) => rv !== '' && (rk === 'X' || kvHas(rv))) &&
+      i.rows.every(([rk, rv]) => rv !== '' && (rk === 'F' || kvHas(rv))) &&
       first[0].startsWith(i.k) &&
       first[1] === i.vText;
     if (k === 'premium') {
@@ -11768,8 +11768,8 @@ async function bookSettingsFlows(vp) {
     SET,
   );
   check(
-    `#275 ${tag} 設定に 縦軸・先物の basis・ΔX の単位が無く、テーマは${phoneSize ? 'ある（スマホ）' : '無い'}`,
-    !gone.some((g) => ['縦軸', '先物の basis', 'ΔX の単位'].includes(g)) &&
+    `#275 ${tag} 設定に 縦軸・先物の basis・ΔF の単位が無く、テーマは${phoneSize ? 'ある（スマホ）' : '無い'}`,
+    !gone.some((g) => ['縦軸', '先物の basis', 'ΔF の単位'].includes(g)) &&
       gone.includes('テーマ') === phoneSize,
     JSON.stringify(gone),
   );

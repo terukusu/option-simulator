@@ -32,6 +32,13 @@ describe('findTerms', () => {
       ['Δσ', 'iv-shift'],
       ['Δs', 'skew'],
     ]);
+    // #372: 画面の表記は ΔF・F₀（旧表記の ΔX・X₀ も別名で残る）
+    expect(ids('ΔF と Δσ')).toEqual([
+      ['ΔF', 'dx'],
+      ['Δσ', 'iv-shift'],
+    ]);
+    expect(ids('F₀ から −5%')).toEqual([['F₀', 'dx']]);
+    expect(ids('X₀ から −5%')).toEqual([['X₀', 'dx']]);
     expect(ids('必要証拠金と証拠金所要額')).toEqual([
       ['必要証拠金', 'margin'],
       ['証拠金所要額', 'requirement'],

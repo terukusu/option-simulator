@@ -28,7 +28,7 @@ export const DOC_QUESTIONS: DocQuestion[] = [
     text: 'β と IV の平行移動 Δσ はどう組み合わさって効くの？急落のプリセットで ATM の IV はどうなる？',
     expect: ['design:5.4', 'user-guide:6', 'user-guide:6.2', 'user-guide:6.4', 'user-guide:16.1'],
     points:
-      'Δσ_total = Δσ + Δσ_β − Δs × x_eff / 0.1、Δσ_β = β × g(ΔX%)（β は実測の形 g の倍率。評価点ごとの下落率で効き、上げでは 0）。プリセットの Δσ は β と独立に足される（β 1.0 で −10% のプリセットなら ATM は +20pt + 19.45pt = +39.45pt）',
+      'Δσ_total = Δσ + Δσ_β − Δs × x_eff / 0.1、Δσ_β = β × g(ΔF%)（β は実測の形 g の倍率。評価点ごとの下落率で効き、上げでは 0）。プリセットの Δσ は β と独立に足される（β 1.0 で −10% のプリセットなら ATM は +20pt + 19.45pt = +39.45pt）',
   },
   {
     id: 'iv30',
@@ -84,7 +84,7 @@ export const DOC_QUESTIONS: DocQuestion[] = [
     text: '2 限月の足を入れると、満期の線の折れ点が行使価格からずれるのはなぜ？',
     expect: ['design:5.5', 'user-guide:16', 'user-guide:16.2'],
     points:
-      '横軸は 1 限月の基準価格 X。他の限月の原資産は X との差 basis を一定に保つ（円モード F_i′ = X′ + basis_i）ので、折れ点は K − basis_i に出る',
+      '横軸は 1 限月の基準価格 F（F₀ が基準）。他の限月の原資産は F との差 basis を一定に保つ（円モード F_i′ = F′ + basis_i）ので、折れ点は K − basis_i に出る',
   },
   {
     id: 'greek-units',
