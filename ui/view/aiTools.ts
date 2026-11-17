@@ -626,7 +626,7 @@ export function toolCard(
   switch (name) {
     case 'evaluate_scenario': {
       const sc = obj(r.scenario);
-      const inputText = `ΔX ${pctText(sc.dx_pct)}% · ${fmtNum(num(sc.days), 1)} 日 · IV ${pctText(sc.iv_shift_pt)}pt · スキュー ${pctText(sc.skew_pt)}`;
+      const inputText = `ΔF ${pctText(sc.dx_pct)}% · ${fmtNum(num(sc.days), 1)} 日 · IV ${pctText(sc.iv_shift_pt)}pt · スキュー ${pctText(sc.skew_pt)}`;
       return {
         title,
         input: inputText,

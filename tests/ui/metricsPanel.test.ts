@@ -241,8 +241,8 @@ describe('タイル 6 枚（#86 AC-2・#131・#274）', () => {
     const t1 = tile(tiles, 'maxProfit');
     const t2 = tile(tiles, 'maxLoss');
     expect(t2.v).toBe(fmtAmount(m.expiry.maxLoss.value, m.unit, true));
-    expect(t1.s).toBe(m.expiry.maxProfit.x === null ? '' : `X ${fmtNum(m.expiry.maxProfit.x)}`);
-    expect(t2.s).toBe(m.expiry.maxLoss.x === null ? '' : `X ${fmtNum(m.expiry.maxLoss.x)}`);
+    expect(t1.s).toBe(m.expiry.maxProfit.x === null ? '' : `F ${fmtNum(m.expiry.maxProfit.x)}`);
+    expect(t2.s).toBe(m.expiry.maxLoss.x === null ? '' : `F ${fmtNum(m.expiry.maxLoss.x)}`);
     expect(t2.unit).toBe(AMOUNT_UNIT_LABEL[m.unit]);
   });
 
@@ -252,7 +252,7 @@ describe('タイル 6 枚（#86 AC-2・#131・#274）', () => {
     if (!lf) throw new Error('lossFinite が無い');
     expect(lf.x).not.toBe(m.expiry.xLo);
     expect(tile(metricTiles(m), 'maxLoss').s).toBe(
-      `put 側 ${fmtAmount(lf.value, m.unit, true)} · X ${fmtNum(lf.x)}`,
+      `put 側 ${fmtAmount(lf.value, m.unit, true)} · F ${fmtNum(lf.x)}`,
     );
   });
 
@@ -370,7 +370,7 @@ describe('内訳（#86 AC-3: 旧 Metrics と同じ順・同じ値）', () => {
       r('put 側（SQ = 下端）', A(lf.value, true)),
       r('満期 BEP', fmtXs(m.expiry.breakevens)),
       r('指定日 + シナリオ', `d = ${fmtNum(m.days, 2)} 日`),
-      r('X', `${fmtNum(m.scenarioPoint.x)}（ΔX ${fmtSigned(m.scenarioPoint.dXPct, 1)}%）`),
+      r('F', `${fmtNum(m.scenarioPoint.x)}（ΔF ${fmtSigned(m.scenarioPoint.dXPct, 1)}%）`),
       r('損益', A(m.scenarioPoint.pnl, true)),
       r('BEP', fmtXs(m.dateBreakevens)),
       r('合計グリーク（シナリオ点）', '', true),
@@ -606,7 +606,7 @@ describe('全文（#107 AC-1）', () => {
         for (const r of t.full) {
           expect(r.v).not.toBe('');
           expect(r.v.includes('\n') || r.k.includes('\n')).toBe(false);
-          if (r.k === 'X' || r.k === 'd') continue;
+          if (r.k === 'F' || r.k === 'd') continue;
           expect(bd.some((b) => b.v.includes(r.v))).toBe(true);
         }
       }
@@ -627,7 +627,7 @@ describe('全文（#107 AC-1）', () => {
     const tiles = metricTiles(m);
     expect(tile(tiles, 'maxProfit').full).toEqual([
       fr('満期 最大利益', A(m.expiry.maxProfit.value, true)),
-      ...(m.expiry.maxProfit.x === null ? [] : [fr('X', fmtNum(m.expiry.maxProfit.x))]),
+      ...(m.expiry.maxProfit.x === null ? [] : [fr('F', fmtNum(m.expiry.maxProfit.x))]),
     ]);
     expect(tile(tiles, 'maxLoss').full).toEqual([
       fr('満期 最大損失', 'call 側 −∞'),
@@ -704,7 +704,7 @@ describe('全文（#107 AC-1）', () => {
     const t2 = tile(tiles, 'maxLoss');
     expect(t2.full[0]).toEqual(fr('満期 最大損失', amt(m.expiry.maxLoss.value, u, true)));
     expect(t2.full.slice(1)).toEqual(
-      m.expiry.maxLoss.x === null ? [] : [fr('X', fmtNum(m.expiry.maxLoss.x))],
+      m.expiry.maxLoss.x === null ? [] : [fr('F', fmtNum(m.expiry.maxLoss.x))],
     );
     const noX: MetricsModel = {
       ...m,
@@ -724,7 +724,7 @@ describe('全文（#107 AC-1）', () => {
     expect(tile(metricTiles(c), 'maxLoss').full).toEqual([
       fr('満期 最大損失', 'call 側 −∞'),
       fr('put 側', amt(lf.value, c.unit, true)),
-      fr('put 側の X', fmtNum(lf.x)),
+      fr('put 側の F', fmtNum(lf.x)),
     ]);
   });
 });

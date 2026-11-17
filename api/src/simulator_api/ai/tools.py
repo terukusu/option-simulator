@@ -134,7 +134,7 @@ EVAL_INPUT_SCHEMA = {
     "type": "object",
     "properties": {
         "dx_pct": {"type": "number", "minimum": -60, "maximum": 60,
-                   "description": "原資産の変化（今の X₀ に対する %。例 -6 は 6% 安）。x と片方だけ"},
+                   "description": "原資産の変化（今の F₀（横軸の基準）に対する %。例 -6 は 6% 安）。x と片方だけ"},
         "x": {"type": "number", "exclusiveMinimum": 0, "description": "原資産の水準（円）。dx_pct と片方だけ"},
         "days": {"type": "number", "minimum": 0, "maximum": 400,
                  "description": "今からの経過日数（暦日。最遠の足の SQ までに収める）"},

@@ -49,7 +49,7 @@ export const HOLD_MAP_RETRY = '再試行';
 export const HOLD_MAP_IDLE_READOUT = '点かマスを触ると値を出す（矢印キーでマスを動かす）';
 /** 見出しの下の説明の頭（何の図か・軸） */
 const CAPTION_HEAD =
-  '原資産と IV が同時に動いたときの余力。横 = 原資産の変化（今の X₀ に対する %）、縦 = ATM の IV の倍率（限月ごと）。';
+  '原資産と IV が同時に動いたときの余力。横 = 原資産の変化（今の F₀ に対する %）、縦 = ATM の IV の倍率（限月ごと）。';
 /** 見出しの下の説明の尾 */
 const CAPTION_TAIL = '、十字 = 今。β・Δσ は使わない';
 /**

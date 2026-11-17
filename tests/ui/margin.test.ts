@@ -350,7 +350,7 @@ describe('タイル（#131 AC14）', () => {
     expect(point.result.pfe).toBeGreaterThan(0);
     const wi = tm.full.findIndex((r) => r.k === '最悪の点');
     expect(wi).toBeGreaterThan(0);
-    expect(tm.full[wi]?.v).toBe('X −5.0%');
+    expect(tm.full[wi]?.v).toBe('F −5.0%');
     expect(tm.full[wi + 1]).toEqual({ k: '', v: 'IV ×1.5' });
     expect(tm.full[wi + 2]?.v).toMatch(/^経過 \+\d+ 日$/);
   });
@@ -569,7 +569,7 @@ describe('#164 シナリオの点の印・#161 タイルの全文の行', () => 
     // 全文・内訳の行は長い形のまま
     expect(
       marginPointParts({ ...zero, days: 7, dX: -3000, dXPct: -4.42, dSigma: 5, skew: -0.5 }),
-    ).toEqual(['d 7 日', 'ΔX −4.4%', 'Δσ +5.0 pt', 'Δs −0.5']);
+    ).toEqual(['d 7 日', 'ΔF −4.4%', 'Δσ +5.0 pt', 'Δs −0.5']);
     expect(marginPointText({ ...zero, days: 7, dSigma: 5 })).toBe('d7 · Δσ+5.0');
     // 位置の数: d は clampDays、非有限は 0、dXPct = ΔX / X₀ × 100
     const base = baseOf(putSellDown);
@@ -612,7 +612,7 @@ describe('#164 シナリオの点の印・#161 タイルの全文の行', () => 
     expect(tile(metricTiles(m0, viewOf(putSell, withCapital(null))), 'margin').at).toBe('· 今');
     expect(tile(metricTiles(m0, viewOf(putSell, withCapital(null))), 'room').at).toBe('· 今');
     const md = metricsOf(putSellDown);
-    const dPct = marginPointParts(viewOf(putSellDown, withCapital(null)).at)[1]?.replace('ΔX ', '');
+    const dPct = marginPointParts(viewOf(putSellDown, withCapital(null)).at)[1]?.replace('ΔF ', '');
     expect(tile(metricTiles(md, viewOf(putSellDown, withCapital(null))), 'room').at).toBe(
       `· d1 · ${dPct} · Δσ+5.0`,
     );

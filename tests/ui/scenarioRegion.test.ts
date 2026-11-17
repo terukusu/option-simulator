@@ -136,7 +136,7 @@ describe('#83 AC-3 (a) ステッパー 4 つ + β', () => {
     expect(yen.value).toBe(-700);
     expect(yen.text).toBe('−700 円');
     expect(pct.text.endsWith('%')).toBe(true);
-    expect(pct.sub).toBe(`−700 円 · X ${Math.round(input.x0 - 700).toLocaleString('en-US')}`);
+    expect(pct.sub).toBe(`−700 円 · F ${Math.round(input.x0 - 700).toLocaleString('en-US')}`);
   });
 
   it('文字と副題（§5.2）、既定でないものだけ hot、d の副題は evalInstant の日時', () => {
@@ -240,7 +240,7 @@ describe('#83 AC-3 (c) 評価時刻のチップ', () => {
 describe('#83 AC-3 (d) 前提の要約', () => {
   it('β・sticky・basis・ΔX 単位の組み合わせ', () => {
     const input = inputOf(twoLegs);
-    expect(advSummary(input)).toBe('β ×1.0 · sticky strike · basis 固定 · ΔX %');
+    expect(advSummary(input)).toBe('β ×1.0 · sticky strike · basis 固定 · ΔF %');
     expect(
       advSummary({
         ...input,
@@ -248,9 +248,9 @@ describe('#83 AC-3 (d) 前提の要約', () => {
         futureBasis: 'decay',
         dXUnit: 'yen',
       }),
-    ).toBe('β ×2.5 · sticky moneyness · basis 減衰 · ΔX 円');
+    ).toBe('β ×2.5 · sticky moneyness · basis 減衰 · ΔF 円');
     expect(advSummary({ ...input, scenario: { ...input.scenario, beta: 0 }, dXUnit: 'yen' })).toBe(
-      'β ×0.0 · sticky strike · basis 固定 · ΔX 円',
+      'β ×0.0 · sticky strike · basis 固定 · ΔF 円',
     );
   });
 });

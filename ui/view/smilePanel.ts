@@ -120,7 +120,7 @@ export const SMILE_HINT =
 
 /** ⓘ の印の意味（凡例は狭い列で短い形になるので全文はここ） */
 export const SMILE_LEGEND_HINT =
-  '● mid / bid / ask = OTM 側の IV · ─ 節点の区間 · ┄ 補間・外挿の区間 · × IV 不安定 · ┆ ATM（基準 A / B） · │ シナリオ ATM（ΔX ≠ 0 のとき。損益グラフと同じ線） · ─ 効率（シナリオ点）/ ┄ 効率（今）= [効率] の売りの効率の線（右の目盛り %）';
+  '● mid / bid / ask = OTM 側の IV · ─ 節点の区間 · ┄ 補間・外挿の区間 · × IV 不安定 · ┆ ATM（基準 A / B） · │ シナリオ ATM（ΔF ≠ 0 のとき。損益グラフと同じ線） · ─ 効率（シナリオ点）/ ┄ 効率（今）= [効率] の売りの効率の線（右の目盛り %）';
 
 /** 描画域の操作の説明（今の Smile の aria-label） */
 export const SMILE_PLOT_LABEL =

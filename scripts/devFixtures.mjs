@@ -796,7 +796,7 @@ export function synthAiReply(body) {
       '## 弱点 1: 急落で損が膨らむ',
       `下の BEP は ${yenX(bes[0])} です。SQ で −10% なら ${thousand(r10.sq_pnl_yen)}、−20% なら ${thousand(r20.sq_pnl_yen)} と、下げるほど損が加速します。`,
       '## 弱点 2: IV の上昇に弱い',
-      `V は ${thousand(vega)} / pt で、IV が上がるほど損が出ます。今のシナリオの点（${sp.days ?? '—'} 日後・ΔX ${pct(sp.dx_pct)}）では ${thousand(sp.pnl_yen)} で、下げと IV の上昇が重なると時間の利益を打ち消します。`,
+      `V は ${thousand(vega)} / pt で、IV が上がるほど損が出ます。今のシナリオの点（${sp.days ?? '—'} 日後・ΔF ${pct(sp.dx_pct)}）では ${thousand(sp.pnl_yen)} で、下げと IV の上昇が重なると時間の利益を打ち消します。`,
       calls.length > 0 ? '## 弱点 3: 追証の線までの距離' : '## 弱点 3: 時間の経過に頼る',
       calls.length > 0
         ? `余力（概算）が 0 になる原資産は ${calls.map(yenX).join('、')} です。下側の線を越えると、資金を足すか建玉を減らす必要があります。`

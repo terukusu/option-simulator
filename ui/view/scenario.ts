@@ -100,7 +100,7 @@ export function sliderSpec(field: SliderField, ctx: SliderContext): SliderSpec {
       if (!validX0(ctx.x0)) {
         return {
           field,
-          label: '原資産 ΔX',
+          label: '原資産 ΔF',
           unit: '%',
           min: 0,
           max: 0,
@@ -112,7 +112,7 @@ export function sliderSpec(field: SliderField, ctx: SliderContext): SliderSpec {
       if (ctx.dXUnit === 'pct') {
         return {
           field,
-          label: '原資産 ΔX',
+          label: '原資産 ΔF',
           unit: '%',
           min: DX_MIN_RATIO * 100,
           max: DX_MAX_RATIO * 100,
@@ -126,7 +126,7 @@ export function sliderSpec(field: SliderField, ctx: SliderContext): SliderSpec {
       // 円: 100 円の格子（0 を含む）に乗る内側の端
       return {
         field,
-        label: '原資産 ΔX',
+        label: '原資産 ΔF',
         unit: '円',
         min: Math.ceil((DX_MIN_RATIO * ctx.x0) / DX_YEN_STEP) * DX_YEN_STEP,
         max: Math.floor((DX_MAX_RATIO * ctx.x0) / DX_YEN_STEP) * DX_YEN_STEP,

@@ -151,8 +151,8 @@ export function Scenario(p: { c: AppController; dXUnit: DXUnit; onDXUnit: (u: DX
             はスマイルが原資産と一緒に動く。
           </p>
           <p>
-            先物 basis: 先物の足をその SQ より前に評価するとき F = X' + basis。減衰は先物の SQ で 0
-            へ線形。
+            先物 basis: 先物の足をその SQ より前に評価するとき 先物 = F′ + basis。減衰は先物の SQ で
+            0 へ線形。
           </p>
           <TermLinks ids={HINT_TERMS.scenario} />
           <ManualLinks place="scenario" />
@@ -212,9 +212,9 @@ export function Scenario(p: { c: AppController; dXUnit: DXUnit; onDXUnit: (u: DX
               />
             </span>
             <span class="item">
-              <span class="lab">ΔX の単位</span>
+              <span class="lab">ΔF の単位</span>
               <Seg<DXUnit>
-                label="ΔX の単位"
+                label="ΔF の単位"
                 value={dXUnit}
                 options={[
                   { value: 'pct', text: '%', disabled: !x0ok },
