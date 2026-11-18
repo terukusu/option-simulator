@@ -175,7 +175,10 @@ function SmileView(p: SmileRegionProps) {
           ) : (
             <>
               <span class="who">
-                <span class="k">{act.title}</span>
+                <span class="line1">
+                  <span class="k">{act.title}</span>
+                  {act.unstable && <span class="tag warn">IV 不安定</span>}
+                </span>
                 <span class="sub">
                   <span class="iv">{act.iv}</span>
                   {act.fair && (
@@ -184,10 +187,8 @@ function SmileView(p: SmileRegionProps) {
                     </span>
                   )}
                   {act.fair?.extrapolated && <span class="tag">外挿</span>}
-                  {act.unstable && <span class="tag warn">IV 不安定</span>}
                 </span>
               </span>
-              <span class="spacer" />
               <button
                 type="button"
                 class="btn sm"
