@@ -193,6 +193,12 @@
 //                                          項目だけ（既定の検査にも入る）。窓の値の行と、タブレットの手順（wideSteps）× ダーク / ライト。
 //                                          折り返しは 1 件でも NG、読み取りの行は pass でも期待の個数つきで出す。--flows・--land・
 //                                          --parts とは一緒に使えない（エラーで止める）
+//   --smile-act                            #364 のスマイルの操作行の最も混む選択の項目だけ（既定の検査にも入る）: 360×780・390×844・
+//                                          667×375・844×390（タッチ）・720×450（DPR 2）・720×1000・900×1100・1200×900・1440×900 ×
+//                                          既定の字幅 / 実機相当の字幅（ダーク）で、全体に縮めて ATM と両翼の端から 12 本ずつを選び、
+//                                          操作行とその中の要素が切れない・タグが行の箱の中・行の高さ 48px・銘柄の 1 行目と 2 行目の
+//                                          左端が揃う・銘柄の欄の中（タグを除く）に枠線と内側の余白が無い・タグ 2 つの行使価格を 1 本以上
+//                                          選んだ。ほかの振り分けの引数（--flows・--parts・--land・--zoom など）とは一緒に使えない（エラーで止める）
 //   --cross                                #217 の十字線の項目だけ（既定の検査・--flows とも。--flows は #201・#130・#207 のタッチの流れも。手元の確かめ用）
 //   --back                                 #320 の戻るの項目だけ（--flows にも入る）: 390×844・1440×900 で、設定・保存一覧・ⓘ の吹き出し・
 //                                          ⋯ のメニュー・説明カード・（PC）パレットを開く → 戻る 1 回でそれだけ閉じ URL・フォーカスが Esc と同じ、
@@ -319,6 +325,7 @@ const known = new Set([
   '--targets',
   '--land',
   '--zoom',
+  '--smile-act',
 ]);
 for (const a of args) {
   if (a.startsWith('--') && !known.has(a)) {
@@ -353,9 +360,33 @@ const popoversOnly = flag('--popovers');
 const targetsOnly = flag('--targets');
 const landOnly = flag('--land');
 const zoomOnly = flag('--zoom');
+const smileActOnly = flag('--smile-act');
 if (zoomOnly && (flows || landOnly || parts)) {
   // 拡大の状態はほかの振り分けに負けて黙って流れなくなるので、組み合わせはエラーにする（#328）
   console.error('--zoom は --flows・--land・--parts と一緒に使えない');
+  process.exit(2);
+}
+const smileActOthers = [
+  ['--flows', flows],
+  ['--parts', parts],
+  ['--land', landOnly],
+  ['--zoom', zoomOnly],
+  ['--cross', crossOnly],
+  ['--icons', iconsOnly],
+  ['--fonts', fontsOnly],
+  ['--popovers', popoversOnly],
+  ['--targets', targetsOnly],
+  ['--ai', aiOnly],
+  ['--manual', manualOnly],
+  ['--tabs', tabsOnly],
+  ['--pick', pickOnly],
+  ['--shapes', shapesOnly],
+  ['--import', importOnly],
+  ['--back', backOnly],
+].filter(([, on]) => on);
+if (smileActOnly && smileActOthers.length) {
+  // ほかの振り分けに負けて黙って流れなくなるので、組み合わせはエラーにする（#364。--zoom と同じ）
+  console.error(`--smile-act は ${smileActOthers.map(([n]) => n).join('・')} と一緒に使えない`);
   process.exit(2);
 }
 const mode = parts ? 'parts' : 'next';
@@ -1615,6 +1646,8 @@ async function measureAll() {
     await landAll();
     // 文字の拡大 200%（#328）
     await zoomAll();
+    // スマイルの操作行の最も混む選択（#364）
+    await smileActCrowdAll();
   }
   // 旧のクラス名（#91・EPIC #92 の終了条件 8）: report を通ったすべての状態の合計
   console.log(
@@ -20627,6 +20660,160 @@ async function zoomAll() {
   console.log(`文字の拡大 200%（#328）: ${zoomStats.pass} / ${zoomStats.total} で pass`);
 }
 
+// ---- スマイルの操作行の最も混む選択（#364。docs/ui-guidelines.md P7「最も混む状態で測る」）: 外挿と IV 不安定のタグが
+// 両方付く翼の行使価格と、理論価格が 4 桁になる ATM を選び、操作行（.smile-act とその中の要素）が切れない
+// （scrollWidth ≤ clientWidth）・タグが行の箱の中に見えることを、市場の検査（ATM の 1 本だけ）が測らない窓も含めて
+// 既定の字幅 / 実機相当の字幅で測る。幅で決まる配置なのでテーマはダークだけ
+const SMILE_ACT_WINS = [
+  { w: 360, h: 780, extra: LAND_TOUCH },
+  { w: 390, h: 844, extra: LAND_TOUCH },
+  { w: 667, h: 375, extra: LAND_TOUCH },
+  { w: 844, h: 390, extra: LAND_TOUCH },
+  { w: 720, h: 450, extra: ZOOM_EXTRA },
+  { w: 720, h: 1000, extra: {} },
+  { w: 900, h: 1100, extra: {} },
+  { w: 1200, h: 900, extra: {} },
+  { w: 1440, h: 900, extra: {} },
+];
+/** 翼の端から選ぶ本数（合成の既定の板では端から 10 本前後がタグ 2 つ） */
+const SMILE_ACT_WING_STEPS = 12;
+const smileActStats = { pass: 0, total: 0, skip: 0 };
+
+/** 操作行の今の選択を測る（選択が無ければ null） */
+function smileActMeasure(page) {
+  return page.evaluate(() => {
+    const act = document.querySelector('section.smile .smile-act');
+    const who = act?.querySelector(':scope > .who');
+    if (!act || !who) return null;
+    const ar = act.getBoundingClientRect();
+    const cut = [act, ...act.querySelectorAll('*')]
+      .filter((el) => el.getClientRects().length > 0 && el.scrollWidth > el.clientWidth)
+      .map(
+        (el) =>
+          `${el.tagName.toLowerCase()}.${(el.getAttribute('class') ?? '').trim().replace(/\s+/g, '.')} ${el.scrollWidth}/${el.clientWidth}`,
+      );
+    // 1 行目（銘柄）と 2 行目（IV）の左端が揃う・銘柄の欄の中（タグを除く）に枠線と内側の余白が無い
+    // （ほかの所の規則が漏れて 1 行目がずれる・線が出るのを止める。#364 のレビュー）
+    const k = who.querySelector('.k');
+    const iv = who.querySelector('.iv');
+    const skew =
+      k && iv ? Math.abs(k.getBoundingClientRect().left - iv.getBoundingClientRect().left) : 0;
+    const boxed = [who, ...who.querySelectorAll('*')]
+      .filter((el) => !el.closest('.tag'))
+      .filter((el) => {
+        const cs = getComputedStyle(el);
+        return ['Top', 'Right', 'Bottom', 'Left'].some(
+          (d) =>
+            Number.parseFloat(cs[`border${d}Width`]) > 0 ||
+            Number.parseFloat(cs[`padding${d}`]) > 0,
+        );
+      })
+      .map((el) => `${el.tagName.toLowerCase()}.${(el.getAttribute('class') ?? '').trim()}`);
+    const tags = [...who.querySelectorAll('.tag')];
+    const out = tags.filter((t) => {
+      const r = t.getBoundingClientRect();
+      return r.width === 0 || r.left < ar.left - 0.5 || r.right > ar.right + 0.5;
+    });
+    return {
+      k: (who.querySelector('.k')?.textContent ?? '').trim(),
+      tags: tags.length,
+      height: Math.round(ar.height),
+      cut,
+      out: out.map((t) => (t.textContent ?? '').trim()),
+      skew: Math.round(skew * 10) / 10,
+      boxed,
+    };
+  });
+}
+
+async function smileActCrowdAll() {
+  for (const mono of ['既定の字幅', '実機相当の字幅']) {
+    for (const { w, h, extra } of SMILE_ACT_WINS) {
+      const ctx = await newContext(
+        { width: w, height: h },
+        { [WORKSPACE_KEY]: twoLegs, [PREFS_KEY]: prefsText('dark') },
+        'dark',
+        extra,
+      );
+      const page = await ctx.newPage();
+      await page.goto(pageUrl('next'));
+      await waitReady(page, 'next');
+      const lbl = `#364 next dark ${mono} ${w}x${h}`;
+      if (mono === '実機相当の字幅') {
+        if (!(await realMonoAvailable(page))) {
+          console.log(`${lbl}: DejaVu Sans Mono が無いので skip`);
+          smileActStats.skip++;
+          await ctx.close();
+          continue;
+        }
+        await useRealMono(page);
+      }
+      if (w >= 1200) {
+        await page.click('section.board .panel-head .seg button:has-text("スマイル")');
+      } else {
+        await page.click('.dock button[data-panel="smile"]');
+        await page.waitForTimeout(150);
+        await smileTab(page);
+      }
+      await page
+        .waitForSelector('section.smile .smile-month:not(.inactive) .smile-wrap', {
+          timeout: 10000,
+        })
+        .catch(() => null);
+      await page.waitForTimeout(150);
+      const plot = page.locator('section.smile .smile-month:not(.inactive) .smile-wrap');
+      await plot.focus();
+      // 全体が見えるまで縮める（キーの選択は表示範囲の中の点だけを動く）
+      for (let i = 0; i < 8; i++) await page.keyboard.press('-');
+      await page.waitForTimeout(150);
+      const seen = new Map();
+      const take = async () => {
+        await page.waitForTimeout(40);
+        const r = await smileActMeasure(page);
+        if (r && !seen.has(r.k)) seen.set(r.k, r);
+      };
+      // ATM（表示範囲の外の選択が無いので最初の . は ATM）
+      await page.keyboard.press('.');
+      await take();
+      // 左の翼の端から内へ・右の翼の端から内へ
+      for (const [edge, step] of [
+        ['<', '.'],
+        ['>', ','],
+      ]) {
+        for (let i = 0; i < 40; i++) await page.keyboard.press(edge);
+        await take();
+        for (let i = 1; i < SMILE_ACT_WING_STEPS; i++) {
+          await page.keyboard.press(step);
+          await take();
+        }
+      }
+      const rows = [...seen.values()];
+      const two = rows.filter((r) => r.tags === 2).length;
+      const bad = rows
+        .filter(
+          (r) => r.cut.length || r.out.length || r.height !== 48 || r.skew > 0.5 || r.boxed.length,
+        )
+        .map(
+          (r) =>
+            `${r.k}（タグ ${r.tags}）${r.cut.length ? ` 切れ ${r.cut.join('・')}` : ''}${r.out.length ? ` 箱の外 ${r.out.join('・')}` : ''}${r.height !== 48 ? ` 高さ ${r.height}px` : ''}${r.skew > 0.5 ? ` 1 行目と 2 行目の左端の差 ${r.skew}px` : ''}${r.boxed.length ? ` 枠線・余白 ${r.boxed.join('・')}` : ''}`,
+        );
+      if (two === 0) bad.push('タグ 2 つの行使価格を選べなかった');
+      const ok = bad.length === 0;
+      smileActStats.total++;
+      if (ok) smileActStats.pass++;
+      else failed = true;
+      console.log(
+        `${lbl}: スマイルの操作行 ${rows.length} 本（タグ 2 つ ${two} 本）${ok ? ' 切れ 0・タグは箱の中・高さ 48px・左端が揃う・枠線なし pass' : `  ← NG`}`,
+      );
+      for (const s of bad.slice(0, 6)) console.log(`    ${s}`);
+      await ctx.close();
+    }
+  }
+  console.log(
+    `スマイルの操作行の最も混む選択（#364）: ${smileActStats.pass} / ${smileActStats.total} で pass${smileActStats.skip ? `（skip ${smileActStats.skip}）` : ''}`,
+  );
+}
+
 // 開く URL（#91: 既定はクエリなし。--parts は ?parts）
 console.log(`URL: ${pageUrl(mode)}`);
 try {
@@ -20669,6 +20856,8 @@ try {
     else await landAll();
   } else if (zoomOnly && !parts && !flows) {
     await zoomAll();
+  } else if (smileActOnly && !parts && !flows) {
+    await smileActCrowdAll();
   } else if (aiOnly && !parts) {
     if (flows)
       for (const vp of [
