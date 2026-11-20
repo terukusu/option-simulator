@@ -154,6 +154,7 @@ section.panel .board-wrap:focus-visible {
 
 /* ===== シートのつまみ（スマホだけ JS が出す） ===== */
 .grabber {
+  position: relative;
   display: block;
   flex: 0 0 auto;
   width: 100%;
@@ -172,6 +173,16 @@ section.panel .board-wrap:focus-visible {
   margin: 0 auto;
   border-radius: 2px;
   background: var(--line-2);
+  content: "";
+}
+
+/*
+ * 当たり判定は高さ 24px（WCAG 2.5.8 の床。#366）: 並びの高さ 18px と棒はそのまま、舞台側（上）へ 6px 広げる
+ * （つまみの真上は舞台の読み取りの下端で押せる物は無い。横向きは下の塊で列の外へ 6px = #348）
+ */
+.grabber::after {
+  position: absolute;
+  inset: -6px 0 0;
   content: "";
 }
 
@@ -479,6 +490,11 @@ section.panel .board-wrap:focus-visible {
     width: 4px;
     height: 36px;
     margin: 0 auto;
+  }
+
+  /* 横向きの当たりは上の width 24px（縦向きの上へ広げる ::after は使わない。#366） */
+  .grabber::after {
+    display: none;
   }
 
   /* トースト: 舞台の下（ドックの列に重ねない） */

@@ -79,6 +79,8 @@
 }
 
 .seg > button {
+  /* 幅 24px 以上（WCAG 2.5.8 の床。1 字のボタン「線」「Δ」が 17〜18px だった。#366） */
+  min-width: 24px;
   height: 26px;
   padding: 0 10px;
   border: 0;

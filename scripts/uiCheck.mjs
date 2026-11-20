@@ -186,6 +186,9 @@
 //   --popovers                             #344 のポップオーバーが窓の中の項目だけ（既定の検査にも入る。手元の確かめ用）
 //   --targets                              #327 のスマホの ⓘ の当たり判定（箱 24px・5 点が覆われない・行の内側・ほかの押せる要素と重ならない・
 //                                          13 個を測る）と PC / タブレットの ⓘ が 18px のままの項目だけ（既定の検査にも入る。手元の確かめ用）
+//                                          #366: 窓の中で中心が押せる要素の 24px 未満（例外は PC・タブレットの ⓘ と枚数の .val で間隔の
+//                                          例外を満たすこと）・Seg のボタン 24px 以上・つまみの当たり 24px（並び 18px・棒 36×4）・
+//                                          先物推移の段のチップの当たり 24px（凡例の行の高さは枠 18px + 上下の余白のまま）も
 //   --land                                 #348 のスマホの横向きの項目だけ（既定の検査にも入る）。--flows と一緒なら回転（390×844 ⇄
 //                                          844×390 でパネル・シート・拡大・シナリオ・銘柄の推移・板から追加の帯を保ち十字線は消える）と
 //                                          横向きのつまみ（タップ・左右 40px・Enter / Space・ドック）の手順だけ（--flows にも入る）
@@ -1643,6 +1646,8 @@ async function measureAll() {
     await hintTargetSweep();
     // 添付の [添付]・[外す] の当たり判定（#369 AC11）
     await attachTargetSweep();
+    // 24px 未満の押せる要素（#366 AC-1〜AC-4）
+    await smallTargetSweep();
     // スマホの横向き（#348 AC-3〜AC-6）
     await landAll();
     // 文字の拡大 200%（#328）
@@ -19649,6 +19654,324 @@ async function hintTargetSweep() {
   console.log(`ⓘ の当たり判定の検査（#327）: ${hintStats.pass} / ${hintStats.total} で pass`);
 }
 
+// ---- 24px 未満の押せる要素（#366。docs/ui-guidelines.md P8・5 章 5）: AC-1〜AC-4（既定の実行と --targets）
+const smallStats = { pass: 0, total: 0 };
+
+/** detail が null なら数えるだけで行を出さない（pass の繰り返し） */
+function smallRecord(label, ok, detail) {
+  smallStats.total++;
+  if (ok) smallStats.pass++;
+  else failed = true;
+  if (detail !== null) console.log(`${label}: ${detail}${ok ? '' : '  ← NG'}`);
+}
+
+/**
+ * 窓の中で中心が押せる要素（入れ子は外側だけ）の当たりの箱（矩形を ::after の absolute の inset で広げたもの）を測る。
+ * 24px 未満のものに WCAG 2.5.8 の間隔の例外（中心の直径 24px の円がほかの対象・ほかの小さい対象の円と交わらない）を当て、
+ * Seg のボタン・つまみ・段の切替のチップは種類ごとに返す。ダイアログが開いていればその中だけ
+ */
+const smallTargetMeasure = (page) =>
+  page.evaluate(() => {
+    const dlg = document.querySelector('dialog[open]');
+    const scope = dlg ?? document;
+    const SEL =
+      'button, a[href], summary, input:not([type=hidden]), select, textarea, [tabindex]:not([tabindex="-1"]), [role=button], [role=tab], [role=menuitem], [role=slider], [role=spinbutton]';
+    const name = (e) =>
+      `${e.getAttribute('aria-label') || e.textContent?.trim().slice(0, 12) || '?'} <${e.tagName.toLowerCase()}${e.classList.length ? `.${[...e.classList].join('.')}` : ''}>`;
+    const px = (v) => (v === 'auto' ? 0 : Number.parseFloat(v) || 0);
+    // 当たりの箱: ::after が absolute で中身があれば、その inset（負 = 外へ。基準は padding の箱 = 枠の内側）だけ広げる
+    // （::before は見た目に使うので見ない）
+    const hitBox = (e) => {
+      const r = e.getBoundingClientRect();
+      const a = getComputedStyle(e, '::after');
+      if (a.content === 'none' || a.position !== 'absolute' || a.display === 'none') return r;
+      const cs = getComputedStyle(e);
+      const t = Math.min(0, px(a.top) + px(cs.borderTopWidth));
+      const b = Math.min(0, px(a.bottom) + px(cs.borderBottomWidth));
+      const l = Math.min(0, px(a.left) + px(cs.borderLeftWidth));
+      const rr = Math.min(0, px(a.right) + px(cs.borderRightWidth));
+      return {
+        left: r.left + l,
+        right: r.right - rr,
+        top: r.top + t,
+        bottom: r.bottom - b,
+        width: r.width - l - rr,
+        height: r.height - t - b,
+      };
+    };
+    const owns = (e, x) => !!x && (x === e || e.contains(x));
+    const all = [...scope.querySelectorAll(SEL)]
+      .filter((e) => e.getClientRects().length > 0)
+      .filter((e) => {
+        const cs = getComputedStyle(e);
+        return cs.visibility !== 'hidden' && cs.pointerEvents !== 'none';
+      })
+      .map((e) => ({ e, r: e.getBoundingClientRect() }))
+      .filter(
+        ({ r }) =>
+          r.width > 0 &&
+          r.height > 0 &&
+          r.right > 0 &&
+          r.bottom > 0 &&
+          r.left < innerWidth &&
+          r.top < innerHeight,
+      )
+      .filter(({ e, r }) => {
+        const x = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+        return owns(e, x) || (!!x && x.contains(e));
+      });
+    const outer = all
+      .filter((a) => !all.some((b) => b !== a && b.e.contains(a.e)))
+      .map(({ e }) => ({ e, h: hitBox(e) }));
+    const isSmall = (h) => h.width < 23.5 || h.height < 23.5;
+    const dist = (cx, cy, r) =>
+      Math.hypot(Math.max(r.left - cx, 0, cx - r.right), Math.max(r.top - cy, 0, cy - r.bottom));
+    const spacing = (t) => {
+      const cx = (t.h.left + t.h.right) / 2;
+      const cy = (t.h.top + t.h.bottom) / 2;
+      return outer
+        .filter((o) => o.e !== t.e)
+        .filter(
+          (o) =>
+            dist(cx, cy, o.h) < 12 ||
+            (isSmall(o.h) &&
+              Math.hypot(cx - (o.h.left + o.h.right) / 2, cy - (o.h.top + o.h.bottom) / 2) < 24),
+        )
+        .map((o) => name(o.e));
+    };
+    // 当たりの箱がほかの押せる要素と交わるか。交わりの中心で一番上がその要素（t の当たりが下に隠れる）でも、t（t の
+    // ::after が相手を覆って奪う）でも数える。どちらでもない（ほかの物が上にある）交わりは押せないので数えない
+    const overlaps = (t) =>
+      outer
+        .filter((o) => o.e !== t.e)
+        .filter((o) => {
+          const x0 = Math.max(o.h.left, t.h.left);
+          const x1 = Math.min(o.h.right, t.h.right);
+          const y0 = Math.max(o.h.top, t.h.top);
+          const y1 = Math.min(o.h.bottom, t.h.bottom);
+          if (x1 - x0 <= 0.5 || y1 - y0 <= 0.5) return false;
+          const x = document.elementFromPoint((x0 + x1) / 2, (y0 + y1) / 2);
+          return owns(o.e, x) || owns(t.e, x);
+        })
+        .map((o) => name(o.e));
+    // 当たりの箱の点（上端 +1・中心・下端 −1 × 左・中・右）が覆われないか
+    const miss = (t) => {
+      const xs = [t.h.left + 2, (t.h.left + t.h.right) / 2, t.h.right - 2];
+      const ys = [t.h.top + 1, (t.h.top + t.h.bottom) / 2, t.h.bottom - 1];
+      return xs
+        .flatMap((x) => ys.map((y) => [x, y]))
+        .filter(([x, y]) => x >= 0 && y >= 0 && x < innerWidth && y < innerHeight)
+        .filter(([x, y]) => !owns(t.e, document.elementFromPoint(x, y)))
+        .map(([x, y]) => {
+          const o = document.elementFromPoint(x, y);
+          return `(${Math.round(x)},${Math.round(y)}) ${o ? name(o) : 'null'}`;
+        });
+    };
+    const box = (t) => ({ name: name(t.e), w: t.h.width, h: t.h.height });
+    const small = outer
+      .filter((t) => isSmall(t.h))
+      .map((t) => ({
+        ...box(t),
+        kind: t.e.classList.contains('hintbtn')
+          ? 'hint'
+          : t.e.matches('.stepper .val')
+            ? 'val'
+            : 'other',
+        near: spacing(t),
+      }));
+    const segs = outer.filter((t) => t.e.matches('.seg > button')).map(box);
+    const grab = outer
+      .filter((t) => t.e.matches('.grabber'))
+      .map((t) => {
+        const bar = getComputedStyle(t.e, '::before');
+        return {
+          ...box(t),
+          layoutH: t.e.offsetHeight,
+          layoutW: t.e.offsetWidth,
+          bar: `${bar.width}×${bar.height}`,
+          miss: miss(t),
+          overlaps: overlaps(t),
+        };
+      });
+    const chips = outer
+      .filter((t) => t.e.matches('.iv-legend .ind-toggles .chip'))
+      .map((t) => ({ ...box(t), miss: miss(t), overlaps: overlaps(t), layoutH: t.e.offsetHeight }));
+    // 凡例の行の高さと、段のチップの枠（18px）から決まる高さ（上下の padding・枠 + 18。::after は並びに入らない）
+    const legend = [...document.querySelectorAll('section.smile .iv-legend')].find(
+      (e) => e.getClientRects().length > 0,
+    );
+    const lcs = legend ? getComputedStyle(legend) : null;
+    const legendWant = lcs
+      ? 18 +
+        px(lcs.paddingTop) +
+        px(lcs.paddingBottom) +
+        px(lcs.borderTopWidth) +
+        px(lcs.borderBottomWidth)
+      : 0;
+    return {
+      small,
+      segs,
+      grab,
+      chips,
+      legendH: legend?.getBoundingClientRect().height ?? 0,
+      legendWant,
+    };
+  });
+
+/**
+ * 1 状態: 24px 未満（例外のほかは NG）・Seg のボタン（AC-1）・つまみ（AC-2）・段の切替のチップ（AC-3）を 1 行ずつ出す。
+ * seen は窓の中で同じ pass の行を 2 回目から省く（判定は毎回）
+ */
+async function smallTargetState(page, tag, state, seen, phone) {
+  await page.waitForTimeout(150);
+  const m = await smallTargetMeasure(page);
+  const out = (key, label, ok, detail) => {
+    const repeat = seen.has(key);
+    seen.add(key);
+    smallRecord(`#366 ${tag} ${state} ${label}`, ok, repeat && ok ? null : detail);
+  };
+  for (const s of m.small) {
+    // 例外（AC-4）: PC・タブレットの ⓘ と枚数の .val だけ。どちらも間隔の例外を満たす
+    const allowed = (s.kind === 'hint' && !phone) || s.kind === 'val';
+    const ok = allowed && s.near.length === 0;
+    out(
+      `small ${s.name} ${s.w.toFixed(1)} ${s.h.toFixed(1)}`,
+      `24px 未満 ${s.name}`,
+      ok,
+      `${s.w.toFixed(1)}×${s.h.toFixed(1)}・${allowed ? '例外' : '例外でない'}・間隔 ${s.near.length ? `交わる ${s.near.join(' / ')}` : 'ok'}`,
+    );
+  }
+  // Seg のボタン（AC-1）: 数が多いので pass の行は出さず、状態ごとに一番狭いものだけ出す
+  for (const s of m.segs) {
+    const ok = s.w >= 23.5 && s.h >= 23.5;
+    smallRecord(
+      `#366 ${tag} ${state} Seg ${s.name}`,
+      ok,
+      ok ? null : `${s.w.toFixed(1)}×${s.h.toFixed(1)}`,
+    );
+  }
+  if (m.segs.length > 0) {
+    const min = m.segs.reduce((a, b) => (b.w < a.w ? b : a));
+    out(
+      `segmin ${min.name} ${min.w.toFixed(1)}`,
+      `Seg ${m.segs.length} 個の最も狭いもの ${min.name}`,
+      min.w >= 23.5 && min.h >= 23.5,
+      `${min.w.toFixed(1)}×${min.h.toFixed(1)}`,
+    );
+  }
+  for (const g of m.grab) {
+    // 縦向き = 並びの高さ 18px・棒 36×4（当たりは ::after で上へ 6px）、横向き（#348）= 並びの幅 24px・棒 4×36
+    const shape =
+      g.bar === '4px×36px'
+        ? Math.abs(g.layoutW - 24) <= 0.5
+        : g.bar === '36px×4px' && Math.abs(g.layoutH - 18) <= 0.5;
+    const ok =
+      g.w >= 23.5 && g.h >= 23.5 && shape && g.miss.length === 0 && g.overlaps.length === 0;
+    out(
+      `grab ${g.w.toFixed(1)} ${g.h.toFixed(1)}`,
+      'つまみ',
+      ok,
+      `当たり ${g.w.toFixed(1)}×${g.h.toFixed(1)}・並び ${g.layoutW}×${g.layoutH}px・棒 ${g.bar}・9 点 ${g.miss.length ? `覆われる ${g.miss.join(' / ')}` : 'ok'}・重なり ${g.overlaps.length ? g.overlaps.join(' / ') : 'なし'}`,
+    );
+  }
+  for (const c of m.chips) {
+    const ok =
+      c.h >= 23.5 &&
+      Math.abs(c.layoutH - 18) <= 0.5 &&
+      c.miss.length === 0 &&
+      c.overlaps.length === 0;
+    out(
+      `chip ${c.name} ${c.w.toFixed(1)}`,
+      `段のチップ ${c.name}`,
+      ok,
+      `当たり ${c.w.toFixed(1)}×${c.h.toFixed(1)}・枠 ${c.layoutH}px・9 点 ${c.miss.length ? `覆われる ${c.miss.join(' / ')}` : 'ok'}・重なり ${c.overlaps.length ? c.overlaps.join(' / ') : 'なし'}`,
+    );
+  }
+  return m;
+}
+
+/**
+ * AC-1〜AC-4（#366）: スマホ（360×780・390×844 × 6 パネル × peek / full、844×390 のタッチ）・タブレット 900×1100・
+ * PC 1440×900 のダークで、IV 推移（ローソク / 線）・スマイル・先物推移・銘柄の推移を回る。先物推移の凡例の行の高さは
+ * 段のチップの枠 18px + 上下の余白・枠のまま（当たりの ::after が並びに入らない。AC-3）。Seg のボタン・つまみ・段のチップが 1 個も測れなければ fail
+ */
+async function smallTargetSweep() {
+  for (const [w, h, touch] of [
+    [360, 780],
+    [390, 844],
+    [844, 390, true],
+    [900, 1100],
+    [1440, 900],
+  ]) {
+    const phone = w <= PHONE_MAX || !!touch;
+    const tag = `dark ${w}x${h}`;
+    const ctx = await newContext(
+      { width: w, height: h },
+      { [WORKSPACE_KEY]: twoLegs, [PREFS_KEY]: prefsText('dark') },
+      'dark',
+      touch ? LAND_TOUCH : {},
+    );
+    const page = await ctx.newPage();
+    await page.goto(pageUrl('next'));
+    await waitReady(page, 'next');
+    const seen = new Set();
+    const count = { states: 0, segs: 0, grab: 0, chips: 0 };
+    const add = (m) => {
+      count.states++;
+      count.segs += m.segs.length;
+      count.grab += m.grab.length;
+      count.chips += m.chips.length;
+    };
+    add(await smallTargetState(page, tag, '既定', seen, phone));
+    if (phone && !touch) {
+      for (const p of ['positions', 'board', 'scenario', 'metrics', 'smile', 'ai'])
+        for (const st of ['peek', 'full']) {
+          await setShell(page, p, st);
+          add(await smallTargetState(page, tag, `${p} ${st}`, seen, phone));
+        }
+    }
+    await openIv(page, w, 'full', phone);
+    add(await smallTargetState(page, tag, 'IV 推移', seen, phone));
+    await page.click('section.smile .iv-tools .seg button[aria-label="折れ線"]');
+    add(await smallTargetState(page, tag, 'IV 推移 線', seen, phone));
+    if (w < 1200) await smileTab(page);
+    else await page.click('section.market:visible .panel-head .seg button:text-is("スマイル")');
+    await page.waitForTimeout(150);
+    add(await smallTargetState(page, tag, 'スマイル', seen, phone));
+    await openFut(page, w, 'full', phone);
+    const fut = await smallTargetState(page, tag, '先物推移', seen, phone);
+    add(fut);
+    smallRecord(
+      `#366 ${tag} 先物推移の凡例の行の高さ（AC-3）`,
+      fut.legendH > 0 && Math.abs(fut.legendH - fut.legendWant) <= 0.5,
+      `${fut.legendH.toFixed(1)}px（段のチップの枠 18px + 上下の余白・枠 = ${fut.legendWant.toFixed(1)}px）`,
+    );
+    // タブレットは板をドックで開いてから（openOptFromBoard は PC の市場の Seg とスマホのシートだけを扱う）
+    if (!phone && w < 1200) await page.click('.dock button[data-panel="board"]');
+    // 銘柄の推移の Seg は AC-1 で名指し。開けなければ測れないので fail
+    const optOpened = await openOptFromBoard(page, w, 'put', phone);
+    if (optOpened) {
+      if (phone && !touch) await setShell(page, 'smile', 'full');
+      add(await smallTargetState(page, tag, '銘柄の推移', seen, phone));
+    }
+    smallRecord(`#366 ${tag} 銘柄の推移を開いて測る`, optOpened, optOpened ? '開けた' : '開けない');
+    // 測った状態: 既定・IV 推移 2・スマイル・先物推移・銘柄の推移（スマホの縦向きは 6 パネル × peek / full の 12 も）
+    const wantStates = 6 + (phone && !touch ? 12 : 0);
+    smallRecord(
+      `#366 ${tag} 測った数`,
+      count.states === wantStates &&
+        count.segs > 0 &&
+        count.chips >= 4 &&
+        (phone && !touch ? count.grab > 0 : true),
+      `状態 ${count.states} / ${wantStates}・Seg のボタン ${count.segs}・つまみ ${count.grab}・段のチップ ${count.chips}（状態の延べ）`,
+    );
+    await ctx.close();
+  }
+  console.log(
+    `24px 未満の押せる要素の検査（#366）: ${smallStats.pass} / ${smallStats.total} で pass`,
+  );
+}
+
 // ---- スマホの横向き（#348。docs/ui-redesign.md §2.5）: AC-3〜AC-6（既定の実行と --land）・AC-7・AC-8（--flows と --land --flows）
 /** 横向きの判定（ui/view/layout.ts の LAND_QUERY と同じ文字列） */
 const LAND_QUERY =
@@ -20936,6 +21259,7 @@ try {
   } else if (targetsOnly && !parts && !flows) {
     await hintTargetSweep();
     await attachTargetSweep();
+    await smallTargetSweep();
   } else if (landOnly && !parts) {
     if (flows) await landFlows();
     else await landAll();

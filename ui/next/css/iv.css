@@ -669,9 +669,20 @@
 }
 
 .iv-legend > .ind-toggles .chip {
+  position: relative;
   height: 18px;
   padding: 0 6px;
   font-size: var(--fs-xs);
+}
+
+/*
+ * 当たり判定は高さ 24px（WCAG 2.5.8 の床。#366）: 見た目の 18px の枠の外へ上下 3px（padding の箱から 4px）。凡例の行の
+ * 上下の padding 6px の中に収まるので行の高さも見た目も変わらない
+ */
+.iv-legend > .ind-toggles .chip::after {
+  position: absolute;
+  inset: -4px 0;
+  content: "";
 }
 
 /*
