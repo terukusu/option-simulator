@@ -101,6 +101,37 @@ export function ticksClearY<T>(
 }
 
 /**
+ * 文字どうしが重ならない縦軸の目盛り（#365。低い描画域 = PC の窓の拡大 200% など）。中心の差が文字の高さ + 隙間
+ * （2 × TICK_TEXT_HALF_H + TICK_TAG_GAP）未満の文字は描かない（格子の線は呼び出し側で全部描く）。prefer（損益の 0 など）を
+ * 先に残し、残りは元の順に残せるものから。keepOut（単位の文字の箱など）と重なる文字は ticksClearY と同じ式で落とす。
+ * 落とすものが無ければ同じ配列を返す。元の順を保つ
+ */
+export function ticksSpacedY<T>(
+  ticks: readonly T[],
+  at: (t: T) => number,
+  prefer?: (t: T) => boolean,
+  keepOut: ReadonlyArray<Pick<CrossTagBox, 'y' | 'h'>> = [],
+): readonly T[] {
+  const min = 2 * TICK_TEXT_HALF_H + TICK_TAG_GAP;
+  const ys = ticks.map(at);
+  const free = ticks.map((_, i) =>
+    keepOut.every((box) => ticksClearY([ys[i] as number], box, (v) => v).length > 0),
+  );
+  const idx = ticks.map((_, i) => i).filter((i) => free[i]);
+  const order = prefer
+    ? [...idx.filter((i) => prefer(ticks[i] as T)), ...idx.filter((i) => !prefer(ticks[i] as T))]
+    : idx;
+  const kept: number[] = [];
+  for (const i of order) {
+    const y = ys[i] as number;
+    if (kept.every((k) => Math.abs((ys[k] as number) - y) >= min - TICK_EPS)) kept.push(i);
+  }
+  if (kept.length === ticks.length) return ticks;
+  const keep = new Set(kept);
+  return ticks.filter((_, i) => keep.has(i));
+}
+
+/**
  * 横軸の札と重ならない目盛り（#349。規則は ticksClearY と同じ）。目盛りの行は札と同じ行なので幅だけで見る:
  * 文字の区間 [at − labelPx/2, at + labelPx/2] と [札の左 − GAP, 札の右 + GAP] が交わらなければ残す（ちょうど接するなら残す）
  */

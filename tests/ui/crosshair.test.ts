@@ -6,6 +6,7 @@ import {
   TICK_TEXT_HALF_H,
   ticksClearX,
   ticksClearY,
+  ticksSpacedY,
 } from '../../ui/view/crosshair';
 import { IV_TAG_H, labelPx } from '../../ui/view/ivHistory';
 
@@ -87,5 +88,63 @@ describe('札と目盛りの文字の重なり（#349）', () => {
       ];
       expect(ticksClearX(ticks, tag, atX, lab).map(lab)).toEqual(['30,000']);
     });
+  });
+});
+
+/** #365: 低い描画域で縦軸の目盛りの文字が互いに・単位と重ならない（架空の値。格子の線は呼び出し側で全部描く） */
+describe('目盛りの文字の間引き（#365）', () => {
+  const at = (t: { v: number; px: number }) => t.px;
+  const isZero = (t: { v: number }) => t.v === 0;
+  const gap = 2 * TICK_TEXT_HALF_H + TICK_TAG_GAP;
+
+  it('文字の中心の差の下限は 文字の高さ + 隙間 = 14px', () => {
+    expect(gap).toBe(14);
+  });
+
+  it('間隔が足りていれば全部残す（同じ配列）', () => {
+    const ticks = [
+      { v: 0, px: 10 },
+      { v: -2000, px: 24 },
+      { v: -4000, px: 38 },
+    ];
+    expect(ticksSpacedY(ticks, at, isZero)).toBe(ticks);
+  });
+
+  it('10px 間隔の 5 本は 0 と 1 つおきを残す（元の順を保つ）', () => {
+    const ticks = [
+      { v: 0, px: 10 },
+      { v: -1000, px: 20 },
+      { v: -2000, px: 30 },
+      { v: -3000, px: 40 },
+      { v: -4000, px: 50 },
+    ];
+    expect(ticksSpacedY(ticks, at, isZero).map((t) => t.v)).toEqual([0, -2000, -4000]);
+  });
+
+  it('0 を先に残す（元の順で前にある目盛りと近くても）', () => {
+    const ticks = [
+      { v: 2000, px: 10 },
+      { v: 0, px: 20 },
+      { v: -2000, px: 30 },
+    ];
+    expect(ticksSpacedY(ticks, at, isZero).map((t) => t.v)).toEqual([0]);
+    // prefer なしなら元の順の貪欲
+    expect(ticksSpacedY(ticks, at).map((t) => t.v)).toEqual([2000, -2000]);
+  });
+
+  it('避ける箱（単位）と重なる文字を落とす（ちょうど境界は残す）', () => {
+    // 単位の箱: 中心 2・高さ 10 → 境界 = 5 + 6 + 2 = 13
+    const unit = { y: -3, h: 10 };
+    const ticks = [
+      { v: 0, px: 14.9 },
+      { v: -2000, px: 30 },
+    ];
+    expect(ticksSpacedY(ticks, at, isZero, [unit]).map((t) => t.v)).toEqual([-2000]);
+    const edge = [{ v: 0, px: 15 }];
+    expect(ticksSpacedY(edge, at, isZero, [unit])).toBe(edge);
+  });
+
+  it('空の配列', () => {
+    expect(ticksSpacedY([], at, isZero)).toEqual([]);
   });
 });
