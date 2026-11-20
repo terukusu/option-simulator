@@ -15,8 +15,9 @@
  * - PFE = max(0, max_格子 (V(S) − V(格子)))、NOV = Σ_M の足のうち OP 符号 × 枚数 × 乗数 × 評価価格
  * - 必要証拠金（概算）= k × PFE（NOV を含まない。証券会社の建てる前の必要委託証拠金と同じ物差し）
  * - 証拠金所要額 = max(0, k × PFE − NOV)（掛け目を NOV に掛けない。負にしない）
- * - 余力 A = 資金 − 支払 + 受取 − 手数料（全足）+ 先物の評価損益（生きている足）+ 決済済みの足の清算額
- *   − 証拠金所要額
+ * - 余力 A = 資金 − 支払 + 受取 − 手数料（全足）+ min(0, 先物の評価損益（生きている足の合計）)
+ *   + 決済済みの足の清算額 − 証拠金所要額（先物の評価益は足さない = 証券会社の計算式の拘束金額の
+ *   先物建玉評価損。#375）
  *
  * 生きている足 = S の時点で T > 0 の足。S で SQ を過ぎた足は格子・NOV に入れず、清算額だけを余力に入れる
  * （OP は 符号 × 枚数 × 乗数 × 本源的価値、先物は 符号 × 枚数 × 乗数 × (F' − 建値)、F' = X'）。
@@ -91,7 +92,7 @@ export interface MarginResult {
   margin: number;
   /** 証拠金所要額（円）= max(0, k × PFE − NOV)（余力・倍数・追証の線はこれ） */
   requirement: number;
-  /** 生きている先物の足の評価損益（手数料抜き、円） */
+  /** 生きている先物の足の評価損益の合計（手数料抜き、円。益も損も。余力には負のときだけ入る。#375） */
   futuresPnl: number;
   /** S で SQ を過ぎた足の清算額（円） */
   settledCash: number;
@@ -191,7 +192,7 @@ function marginOn(
   };
 }
 
-/** 状態 S の必要証拠金（概算）と、余力に入る先物の評価損益・決済済みの清算額。 */
+/** 状態 S の必要証拠金（概算）と、余力に入る先物の評価損益（合計）・決済済みの清算額。 */
 export function marginAt(
   legs: readonly PreparedLeg[],
   state: MarginState,
@@ -202,14 +203,20 @@ export function marginAt(
   return marginOn(legs, state, ctx, settings, params);
 }
 
-/** 余力 A = 資金 − 支払 + 受取 − 手数料 + 先物の評価損益 + 決済済みの清算額 − 証拠金所要額（円）。 */
+/**
+ * 余力 A = 資金 − 支払 + 受取 − 手数料 + min(0, 先物の評価損益) + 決済済みの清算額 − 証拠金所要額（円）。
+ * 先物の評価益は足さない（証券会社の計算式: 余力 = 受入証拠金 − 必要委託証拠金 − 拘束金額、拘束金額の
+ * 先物建玉評価損。評価損益は生きている先物の足どうしで差し引いた合計。#375・設計 5.10）。
+ * 受渡の済んだ状態の評価なので、支払・受取・手数料は受入証拠金に入り（拘束金額の買 OP 購入代金・手数料は 0）、
+ * 余力 < 0 ⇔ 追加証拠金 > 0（受入証拠金 − 先物の評価損 < 維持証拠金。注文なしで必要委託 = 維持）。
+ */
 export function marginRoom(capital: number, premium: PremiumSummary, r: MarginResult): number {
   return (
     capital -
     premium.paid +
     premium.received -
     premium.fees +
-    r.futuresPnl +
+    Math.min(0, r.futuresPnl) +
     r.settledCash -
     r.requirement
   );
@@ -217,7 +224,7 @@ export function marginRoom(capital: number, premium: PremiumSummary, r: MarginRe
 
 /**
  * 今のポジションの枚数の何倍まで余力 ≥ 0 を保てるか（整数）。全項が枚数に 1 次同次なので
- * A(m) = 資金 + m × s（s = A(1) − 資金。所要額も max(0, m·a) = m·max(0, a)）。s ≥ 0 なら上限なし（Infinity）。資金が 0 / 非有限なら null。
+ * A(m) = 資金 + m × s（s = A(1) − 資金。所要額も max(0, m·a) = m·max(0, a)、先物の評価損も min(0, m·f) = m·min(0, f)）。s ≥ 0 なら上限なし（Infinity）。資金が 0 / 非有限なら null。
  */
 export function maxMultiple(
   capital: number,
@@ -231,8 +238,34 @@ export function maxMultiple(
 }
 
 /**
+ * 生きている先物の足の評価損益の合計（円）。X に対して 1 次（F' は X + basis か X × 比）なので、追証の線で
+ * 余力が折れる点（合計 = 0）を求めるのに使う。marginOn の futuresPnl と同じ足・同じ評価。
+ */
+function liveFuturesPnl(
+  legs: readonly PreparedLeg[],
+  x: number,
+  scenario: Scenario,
+  ctx: MarketContext,
+  settings: ModelSettings,
+): { pnl: number; any: boolean } {
+  let pnl = 0;
+  let any = false;
+  for (const p of legs) {
+    if (p.leg.kind !== 'future' || !Number.isFinite(p.F)) continue;
+    if (!(p.T0 - scenario.days / 365 > 0)) continue;
+    any = true;
+    pnl +=
+      p.sign * p.leg.qty * p.multiplier * (legValue(p, x, scenario, ctx, settings) - p.leg.entry);
+  }
+  return { pnl, any };
+}
+
+/**
  * 追証の線: シナリオ（ΔX 以外はそのまま）で X だけを動かしたとき余力 A(X) = 0 になる X（1 円に丸め、
  * 昇順）。range を samples 等分して符号の変化を囲い二分法（findBreakevens と同じ作り）。
+ * 余力は生きている先物の評価損益の合計 = 0 の X で折れる（評価益を足さない。#375）ので、その点が range の内側に
+ * あれば区間をそこで 2 つに分ける（分割の数は長さに比例して配り、合計は samples + 1 以下）。先物だけの
+ * ポジションでは折れ点の両側に 1 つずつ根がありうるので、刻みより近い 2 根を取りこぼさない。
  * 資金が 0 / 非有限、または余力がどこでも正なら []。
  */
 export function marginCallLevels(
@@ -260,5 +293,24 @@ export function marginCallLevels(
         params,
       ),
     );
-  return findBreakevens(f, range.lo, range.hi, samples).sort((a, b) => a - b);
+  const { lo, hi } = range;
+  const g = (x: number) => liveFuturesPnl(legs, x, scenario, ctx, settings);
+  const gl = g(lo);
+  const gh = g(hi);
+  if (
+    gl.any &&
+    hi > lo &&
+    Number.isFinite(gl.pnl) &&
+    Number.isFinite(gh.pnl) &&
+    gl.pnl * gh.pnl < 0
+  ) {
+    const kink = lo + ((hi - lo) * gl.pnl) / (gl.pnl - gh.pnl);
+    if (kink > lo && kink < hi) {
+      const n1 = Math.max(1, Math.round((samples * (kink - lo)) / (hi - lo)));
+      const n2 = Math.max(1, samples - n1);
+      const xs = [...findBreakevens(f, lo, kink, n1), ...findBreakevens(f, kink, hi, n2)];
+      return [...new Set(xs)].sort((a, b) => a - b);
+    }
+  }
+  return findBreakevens(f, lo, hi, samples).sort((a, b) => a - b);
 }

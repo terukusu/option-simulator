@@ -1681,7 +1681,7 @@
         "scenario_pnl_yen": -1468245,
         "scenario_ratio": -1.2,
         "margin_yen": 2765876,
-        "room_yen": 765879
+        "room_yen": 426819
        },
        {
         "shock_pct": -10,
@@ -1691,7 +1691,7 @@
         "scenario_pnl_yen": -4468944,
         "scenario_ratio": -3.5,
         "margin_yen": 3208696,
-        "room_yen": -2677640
+        "room_yen": -3355759
        },
        {
         "shock_pct": -20,
@@ -1701,7 +1701,7 @@
         "scenario_pnl_yen": -10043114,
         "scenario_ratio": -7.9,
         "margin_yen": 3331558,
-        "room_yen": -8374672
+        "room_yen": -9730910
        },
        {
         "shock_pct": -30,
@@ -1711,7 +1711,7 @@
         "scenario_pnl_yen": -15413703,
         "scenario_ratio": -12.2,
         "margin_yen": 2625605,
-        "room_yen": -13039308
+        "room_yen": -15073665
        },
        {
         "shock_pct": -40,
@@ -1721,7 +1721,7 @@
         "scenario_pnl_yen": -21343687,
         "scenario_ratio": -16.9,
         "margin_yen": 1990224,
-        "room_yen": -18333912
+        "room_yen": -21046389
        }
       ]
      },
@@ -1753,7 +1753,7 @@
        "multiple_unbounded": false
       },
       "call_levels_x": [
-       63529,
+       63955,
        124249
       ]
      },
@@ -9921,7 +9921,7 @@
       "call_width_x": null,
       "short_gap_x": null,
       "call_levels_x": [
-       63529,
+       63955,
        124249
       ]
      },
