@@ -6,7 +6,7 @@ import { type Domain, pixelToValue } from '../../chart/scale';
 import { useChartGestures } from '../../components/useChartGestures';
 import { useMediaQuery } from '../../components/useMediaQuery';
 import type { Action, UiLeg } from '../../state';
-import { ticksClearX, ticksClearY } from '../../view/crosshair';
+import { ticksClearX, ticksClearY, ticksSpacedY } from '../../view/crosshair';
 import { fmtNum } from '../../view/format';
 import { LAND_QUERY } from '../../view/layout';
 import type { AmountUnit } from '../../view/metrics';
@@ -59,6 +59,10 @@ const STAGE_GRAB_PX = 14;
 /** 目盛りの位置と文字（#349 の札との重なりの判定に渡す） */
 const tickPx = (t: { px: number }) => t.px;
 const tickLabel = (t: { label: string }) => t.label;
+const tickIsZero = (t: { v: number }) => t.v === 0;
+/** 縦軸の単位の文字の中心（描画域の上端からの px）と高さの半分（9.5px の文字。#365 で目盛りの文字が避ける箱） */
+const UNIT_DY = 2;
+const UNIT_HALF_H = 5;
 
 const KIND_CLASS = { expiry: 'expiry', date: 'date', today: 'today' } as const;
 
@@ -453,9 +457,15 @@ export function PnlPlot(p: {
   // 十字線の札と重なる目盛りの文字・単位は描かない（#349。格子の線は残す。十字線が無いときは同じ配列）
   const tagY = cross ? cross.yTag : (surfCross?.yTag ?? null);
   const tagX = cross ? cross.xTag : (surfCross?.xTag ?? null);
-  const yTickTexts = ticksClearY(yTicks, tagY, tickPx);
+  const unitShown = ticksClearY([plot.top + UNIT_DY], tagY, (v) => v).length > 0;
+  // 低い描画域（PC の窓の拡大 200% など。#365）では目盛りの文字どうし・単位と重なる文字も描かない（0 を先に残す）
+  const yTickTexts = ticksSpacedY(
+    ticksClearY(yTicks, tagY, tickPx),
+    tickPx,
+    tickIsZero,
+    unitShown ? [{ y: plot.top + UNIT_DY - UNIT_HALF_H, h: 2 * UNIT_HALF_H }] : [],
+  );
   const xTickTexts = ticksClearX(model.xTicks, tagX, tickPx, tickLabel);
-  const unitShown = ticksClearY([plot.top + 2], tagY, (v) => v).length > 0;
   /** ● の縦の画素（面モードは d の画素） */
   const dotPy = surfaceOn ? (point?.py ?? null) : (handle?.dotPy ?? null);
 
@@ -574,7 +584,7 @@ export function PnlPlot(p: {
                 </text>
               ))}
               {unitShown && (
-                <text class="unit" x={plot.left - 6} y={plot.top + 2}>
+                <text class="unit" x={plot.left - 6} y={plot.top + UNIT_DY}>
                   {unit}
                 </text>
               )}

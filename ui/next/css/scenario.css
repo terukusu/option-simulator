@@ -149,12 +149,15 @@ section.scenario .popover p + p {
 
 /*
  * PC・タブレット: 舞台の下に常設（グリッドの行は auto）。画面の高さの 40% を超えれば中だけスクロール（舞台の読み取りを
- * 縮めすぎない）。行が auto なので % ではなく dvh で決める
+ * 縮めすぎない）。行が auto なので % ではなく dvh で決める。
+ * 低い窓（高さ < 580px。#365）は舞台に 300px（凡例 40 + 時間レール 44 + 読み取り 77 + 描画域 ≈ 100 と上下の目盛りの
+ * 余白）を残すまで下げる。ただし見出しとステッパー 1 行が入る 25dvh は下回らない（高さ ≈ 464px 未満は下限に当たる。
+ * PC の窓のブラウザの拡大 200% = 720×450 は 25dvh ≈ 113px で舞台 ≈ 290px・描画域 92px）
  */
 @media (min-width: 1200px), (min-width: 720px) and (max-width: 1199.98px) and (pointer: fine),
   (min-width: 720px) and (max-width: 1199.98px) and (pointer: none),
   (min-width: 720px) and (max-width: 1199.98px) and (min-height: 500.02px) {
   section.scenario {
-    max-height: 40dvh;
+    max-height: min(40dvh, max(25dvh, calc(100dvh - var(--top-h) - 300px)));
   }
 }

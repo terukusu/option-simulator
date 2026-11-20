@@ -191,8 +191,9 @@
 //                                          横向きのつまみ（タップ・左右 40px・Enter / Space・ドック）の手順だけ（--flows にも入る）
 //   --zoom                                 #328 のブラウザの文字の拡大 200%（PC 1440×900 の窓 = 720×450・DPR 2・マウス = タブレットの段）の
 //                                          項目だけ（既定の検査にも入る）。窓の値の行と、タブレットの手順（wideSteps）× ダーク / ライト。
-//                                          折り返しは 1 件でも NG、読み取りの行は pass でも期待の個数つきで出す。--flows・--land・
-//                                          --parts とは一緒に使えない（エラーで止める）
+//                                          折り返しは 1 件でも NG、読み取りの行は pass でも期待の個数つきで出す。#365: 初期状態と
+//                                          スマイルで行使価格を選んだ状態（選択の成立を確かめる）で舞台の重なり（損益グラフの描画域の
+//                                          高さ ≥ 80px・縦軸の目盛りの文字が 1 個以上・目盛りと単位・札（F₀ を含む）の箱が互いに重ならない）。--flows・--land・--parts とは一緒に使えない（エラーで止める）
 //   --smile-act                            #364 のスマイルの操作行の最も混む選択の項目だけ（既定の検査にも入る）: 360×780・390×844・
 //                                          667×375・844×390（タッチ）・720×450（DPR 2）・720×1000・900×1100・1200×900・1440×900 ×
 //                                          既定の字幅 / 実機相当の字幅（ダーク）で、全体に縮めて ATM と両翼の端から 12 本ずつを選び、
@@ -20606,6 +20607,71 @@ function zoomRecord(label, ok, detail) {
   console.log(`${label}: ${detail}${ok ? '' : '  ← NG'}`);
 }
 
+/** 拡大 200% の舞台の描画域の高さの下限（px。#365。修正前は 25px で目盛りと札が重なっていた） */
+const ZOOM_PLOT_MIN = 80;
+
+/**
+ * 舞台の重なり（#365）: 損益グラフの描画域（svg.clip）の高さ ≥ ZOOM_PLOT_MIN、縦軸の目盛りの文字が 1 個以上（間引きで
+ * 全部落ちていない）、目盛りの文字と単位の箱が互いに重ならない、交点の札・ピンの札・追証の札・F₀ の札・IV レールの吹き出しの
+ * 箱が互いに重ならない（1px までの接しは許す）
+ */
+async function stageOverlapCheck(page, label) {
+  const r = await page.evaluate(() => {
+    const box = (el) => {
+      const b = el.getBoundingClientRect();
+      return {
+        // IV レールの吹き出し（rect）は文字も class も無いので固定の名前（NG の行で読める名前にする）
+        t:
+          el.textContent?.trim() ||
+          (el.closest('.ivrail') ? 'IV レールの吹き出し' : el.getAttribute('class') || el.tagName),
+        x0: b.left,
+        x1: b.right,
+        y0: b.top,
+        y1: b.bottom,
+      };
+    };
+    const shown = (el) => el.getClientRects().length > 0;
+    const clip = document.querySelector('section.stage .chart svg.clip');
+    const plotH = clip ? clip.getBoundingClientRect().height : 0;
+    const pairs = (els) => {
+      const bs = els.filter(shown).map(box);
+      const out = [];
+      for (let i = 0; i < bs.length; i++)
+        for (let j = i + 1; j < bs.length; j++) {
+          const a = bs[i];
+          const b = bs[j];
+          if (
+            Math.min(a.x1, b.x1) - Math.max(a.x0, b.x0) > 1 &&
+            Math.min(a.y1, b.y1) - Math.max(a.y0, b.y0) > 1
+          )
+            out.push(`「${a.t}」×「${b.t}」`);
+        }
+      return { n: bs.length, out };
+    };
+    const ax = pairs([
+      ...document.querySelectorAll(
+        'section.stage .chart .ax .tick-y, section.stage .chart .ax .unit',
+      ),
+    ]);
+    const lbl = pairs([
+      ...document.querySelectorAll(
+        'section.stage .chart .xpt-lbl, section.stage .chart .pinlbl, section.stage .chart .mcall-lbl, section.stage .chart .x0-lbl, section.stage .ivrail .cur rect',
+      ),
+    ]);
+    const ticks = [...document.querySelectorAll('section.stage .chart .ax .tick-y')].filter(
+      shown,
+    ).length;
+    return { plotH, ticks, ax, lbl };
+  });
+  const ok =
+    r.plotH >= ZOOM_PLOT_MIN && r.ticks >= 1 && r.ax.out.length === 0 && r.lbl.out.length === 0;
+  zoomRecord(
+    `#365 ${label} 舞台の重なり`,
+    ok,
+    `描画域の高さ ${Math.round(r.plotH)}px（≥ ${ZOOM_PLOT_MIN}）・目盛りの文字 ${r.ticks} 個（≥ 1）・目盛りと単位 ${r.ax.n} 個の重なり ${r.ax.out.length}${r.ax.out.length ? ` ${r.ax.out.join(' ')}` : ''}・札 ${r.lbl.n} 個の重なり ${r.lbl.out.length}${r.lbl.out.length ? ` ${r.lbl.out.join(' ')}` : ''}`,
+  );
+}
+
 async function zoomAll() {
   if (shotsDir) mkdirSync(shotsDir, { recursive: true });
   const { width: w, height: h } = ZOOM_VP;
@@ -20649,7 +20715,26 @@ async function zoomAll() {
       await topBarCheck(page, `${tag} ${w}x${h}`);
       await h1Check(page, `${tag} ${w}x${h}`);
       await legendCheck(page, `${tag} ${w}x${h}`);
+      await stageOverlapCheck(page, `${tag} ${w}x${h}`);
       await wideSteps(page, tag, w, h, name, await readoutWant(page));
+      // スマイルで行使価格を選んだ状態（舞台にシナリオ ATM の線が増える。札は増えない）も測る。選択が成り立った
+      // （操作行に [選択を消す] がある）ことを確かめてから測る（選べないと初期状態と同じ値で pass になるため）
+      await page.click('.dock button[data-panel="smile"]');
+      await page.waitForTimeout(150);
+      await smileTab(page);
+      await smilePick(page, true);
+      const picked =
+        (await page.locator('section.smile .smile-act button[aria-label="選択を消す"]').count()) >
+        0;
+      zoomRecord(
+        `#365 ${tag} smile 選択あり ${w}x${h} 選択の成立`,
+        picked,
+        picked ? 'スマイルで行使価格を選べた' : 'スマイルで行使価格を選べていない',
+      );
+      await stageOverlapCheck(page, `${tag} smile 選択あり ${w}x${h}`);
+      await smilePick(page, false);
+      await page.click('.dock button[data-panel="positions"]');
+      await page.waitForTimeout(150);
       zoomWraps0 = false;
       const ok = !failed;
       failed = prev;
