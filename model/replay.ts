@@ -10,7 +10,8 @@
  *   のと同じ）。どちらかの日の期間構造が無い・値が使えなければ iv30 の比（iv_k / iv_0）に戻す
  * - 最も遠い足の SQ を過ぎた日（d_k > maxDays）は出さない（ended）。全部の足が満期の後は損益が SQ の値で決まり、
  *   その後の原資産の動きを当てると誤りになる。途中で SQ を過ぎた足は今どおり本源的価値
- * - 余力 = 5.10 の marginAt + marginRoom（h = k 日目から 2 営業日後までの暦日）。損益 = theoreticalPnl（手数料込み）。
+ * - 余力 = 5.10 の marginAt + marginRoom（h = k 日目から 2 営業日後までの暦日。今から k 日目までに値洗いをまたいだら
+ *   先物の評価益も入る = marginMarked。#381）。損益 = theoreticalPnl（手数料込み）。
  *   追証になった日の後も入金して持ち続けた前提（余力は資金 + 損益で計り直すだけ。入金額は足さない）
  *
  * 純関数（DOM・通信・時計に依存しない）。
@@ -18,7 +19,13 @@
 
 import { CM_M2_DAYS } from './constantMaturity';
 import { holdMapLegsBy, holdMapScenario } from './holdMap';
-import { MARGIN_HORIZON_BUSINESS_DAYS, type MarginParams, marginAt, marginRoom } from './margin';
+import {
+  MARGIN_HORIZON_BUSINESS_DAYS,
+  type MarginParams,
+  marginAt,
+  marginMarked,
+  marginRoom,
+} from './margin';
 import {
   type MarketContext,
   type ModelSettings,
@@ -145,7 +152,13 @@ export function replayDay(
   const room = marginRoom(
     capital,
     premium,
-    marginAt(legsK, { x, scenario, horizonDays }, ctx, settings, params),
+    marginAt(
+      legsK,
+      { x, scenario, horizonDays, marked: marginMarked(ctx.evalTime, days, holidays) },
+      ctx,
+      settings,
+      params,
+    ),
   );
   const pnl = theoreticalPnl(legsK, x, scenario, ctx, settings);
   let near: PreparedLeg | null = null;

@@ -5,6 +5,8 @@
  * - 状態: 今 = X₀・d = Δσ = Δs = 0（β・動き方・IV の入れ方は今のシナリオのまま）/ シナリオの点 = X₀ + ΔX /
  *   テールの各行 = X₀ × (1 + 下落率)（ΔX 以外はシナリオのまま）。d は損益グラフ・指標と同じく clampDays
  * - h（保有期間の暦日）= S の時点（板の時刻 + d）から 2 営業日後まで（businessDaysAhead。休業日は引数）
+ * - 値洗い（marginMarked）= 板の時刻から S（板の時刻 + d）までに営業日の 15:45 をまたいだか（休業日は h と同じ）。
+ *   またいだら余力に先物の評価益も入る（#381）。今（d = 0）はまたがない
  * - 原資産・評価が有限でなければ null（表示は「—」。model は検証済みの値を受ける前提のため、ここで止める）
  * - memo の単位（useAppController）: 今 = 足・板・設定・β / 動き方 / IV の入れ方、シナリオの点 = シナリオ、
  *   テール = ΔX 以外のシナリオ。どれも資金・パラメータ（端末の設定）が変われば作り直す
@@ -22,6 +24,7 @@ import {
   type MarginResult,
   marginAt,
   marginCallLevels,
+  marginMarked,
   marginRoom,
   maxMultiple,
   premiumSummary,
@@ -155,7 +158,8 @@ export function marginCalc(
     MARGIN_HORIZON_BUSINESS_DAYS,
     holidays,
   );
-  const result = marginAt(legs, { x, scenario: sc, horizonDays }, ctx, settings, params);
+  const marked = marginMarked(ctx.evalTime, days, holidays);
+  const result = marginAt(legs, { x, scenario: sc, horizonDays, marked }, ctx, settings, params);
   if (!finite(result)) return null;
   if (capital === null) return { x, result, room: null, multiple: null };
   const premium = premiumSummary(legs, settings);
@@ -261,6 +265,7 @@ export function marginLine(
     MARGIN_HORIZON_BUSINESS_DAYS,
     holidays,
   );
+  const marked = marginMarked(ctx.evalTime, days, holidays);
   const premium = premiumSummary(legs, settings);
   const xs = new Set<number>();
   for (const r of marginLineRanges(base)) {
@@ -271,6 +276,7 @@ export function marginLine(
       settings,
       params,
       horizonDays,
+      marked,
       capital,
       premium,
       r,

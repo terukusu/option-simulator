@@ -21,7 +21,13 @@ import {
   holdMapScenario,
   holdMapValueAt,
 } from '../../model/holdMap';
-import { DEFAULT_MARGIN_PARAMS, type MarginParams, marginAt, marginRoom } from '../../model/margin';
+import {
+  DEFAULT_MARGIN_PARAMS,
+  type MarginParams,
+  marginAt,
+  marginMarked,
+  marginRoom,
+} from '../../model/margin';
 import {
   DEFAULT_SETTINGS,
   type Leg,
@@ -149,7 +155,12 @@ function reference(
   const h = businessDaysAhead(ctx.evalTime + base.days * DAY_MS, 2, []);
   const r = marginAt(
     refLegs(p, u, c, base.ivDynamics, settings),
-    { x: ctx.x0 * (1 + u), scenario: cellScenario(base, u), horizonDays: h },
+    {
+      x: ctx.x0 * (1 + u),
+      scenario: cellScenario(base, u),
+      horizonDays: h,
+      marked: marginMarked(ctx.evalTime, base.days, []),
+    },
     ctx,
     settings,
     params,
@@ -528,6 +539,7 @@ describe('#305 縦軸は ATM の IV の倍率', () => {
       params: PARAMS,
       base,
       horizonDays: businessDaysAhead(market.evalTime + base.days * DAY_MS, 2, []),
+      marked: marginMarked(market.evalTime, base.days, []),
       capital: CAPITAL,
       premium: premiumSummary(prepared, settings),
     };
@@ -535,10 +547,10 @@ describe('#305 縦軸は ATM の IV の倍率', () => {
 
   /** 今まで（足の IV を一律に c 倍）の余力・損益 */
   function timesC(calc: HoldMapCalc, u: number, c: number) {
-    const { legs, ctx: m, settings, base, horizonDays, params, capital, premium } = calc;
+    const { legs, ctx: m, settings, base, horizonDays, marked, params, capital, premium } = calc;
     const sc = timesCScenario(base, u, c, m);
     const x = m.x0 * (1 + u);
-    const r = marginAt(legs, { x, scenario: sc, horizonDays }, m, settings, params);
+    const r = marginAt(legs, { x, scenario: sc, horizonDays, marked }, m, settings, params);
     return { room: marginRoom(capital, premium, r), pnl: theoreticalPnl(legs, x, sc, m, settings) };
   }
 
@@ -771,5 +783,32 @@ describe('#305 縦軸は ATM の IV の倍率', () => {
     const p = preparePosition([op('put', 62000, 'sell')], noF, SETTINGS)[0] as PreparedLeg;
     expect(holdMapIvAdd(p, -0.1, 1.5, noF, SETTINGS, 'sticky_strike')).toBe(0);
     expect(holdMapLegs([p], -0.1, 1.5, noF, SETTINGS, 'sticky_strike')[0]).toBe(p);
+  });
+});
+
+describe('#381 マスの余力: d が値洗いをまたいだら先物の評価益も入る', () => {
+  it('先物の買い + put の売り: d = 1（またぐ）は値洗いあり、d = 0.5 はなし。差 = max(0, 先物の評価損益)', () => {
+    const legs = [fut('buy', 3), op('put', 64000, 'sell')];
+    const base = baseOf(legs);
+    const axes: HoldMapAxes = { us: [-0.05, 0, 0.05], cs: [1, 1.3] };
+    const calcOf = (days: number) => {
+      const input = holdMapInput(base, { ...ZERO_SCENARIO, days }, PARAMS, CAPITAL, []);
+      if (!input) throw new Error('入力が無い');
+      return holdMapCalcOf(input);
+    };
+    expect(calcOf(0.5).marked).toBe(false);
+    const c1 = calcOf(1);
+    expect(c1.marked).toBe(true);
+    const c0: HoldMapCalc = { ...c1, marked: false };
+    for (let i = 0; i < axes.us.length; i++) {
+      const u = axes.us[i] as number;
+      const gain = 3 * 100 * u * ctx.x0; // ミニ 3 枚・basis 固定（F' − 建値 = ΔX）
+      const a1 = holdMapColumn(c1, axes, i);
+      const a0 = holdMapColumn(c0, axes, i);
+      for (let j = 0; j < axes.cs.length; j++) {
+        const d = (a1[j] as number) - (a0[j] as number);
+        expect(Math.abs(d - Math.max(0, gain)), `u=${u}`).toBeLessThanOrEqual(1e-3);
+      }
+    }
   });
 });

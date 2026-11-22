@@ -59,7 +59,7 @@ describe('売りの効率（#163）', () => {
         const p = prepareLeg(sellLeg(inp), ctx, DEFAULT_SETTINGS);
         const m = marginAt(
           [p],
-          { x: inp.x, scenario: sc, horizonDays: H },
+          { x: inp.x, scenario: sc, horizonDays: H, marked: false },
           ctx,
           DEFAULT_SETTINGS,
           P,
