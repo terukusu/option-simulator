@@ -9,6 +9,7 @@ import {
   MARGIN_LINE_SAMPLES,
   type ModelSettings,
   marginAt,
+  marginMarked,
   marginRoom,
   premiumSummary,
   TAIL_SHOCKS,
@@ -209,7 +210,12 @@ describe('計算の単位（ui/view/margin.ts）', () => {
     );
     const r = marginAt(
       base.legs,
-      { x, scenario: { ...sc, dX: sc.dX }, horizonDays: h },
+      {
+        x,
+        scenario: { ...sc, dX: sc.dX },
+        horizonDays: h,
+        marked: marginMarked(base.ctx.evalTime, sc.days, holidays),
+      },
       base.ctx,
       base.settings,
       DEFAULT_MARGIN_PARAMS,
@@ -1012,5 +1018,61 @@ describe('前の板で建てた足の NOV（#299 AC11）', () => {
       .reduce((a, r) => a - r.qty * 1000 * (r.heldMark?.price as number), 0);
     expect(pm.rows.every((r) => r.heldMark !== null)).toBe(true);
     expect(now?.result.nov).toBeCloseTo(want, 3);
+  });
+});
+
+describe('#381 値洗いをまたいだら先物の評価益も余力に入る（今・シナリオの点・追証の線）', () => {
+  // 合成の板の時刻は火曜 21:31（架空）。最初の値洗いは水曜 15:45
+  const futBuy = run(loaded(chain), { type: 'addFutureLeg', input: { side: 'buy', qty: 1 } });
+  const capital = 20_000_000;
+  const at = (days: number, dX: number) =>
+    run(futBuy, { type: 'setScenario', patch: { days, dX } });
+
+  it('今（d = 0）・水曜の朝（d = 0.5）はまたがない、d = 1 はまたぐ。またいだら評価益の分だけ余力が大きい', () => {
+    const base = baseOf(futBuy);
+    expect(marginMarked(base.ctx.evalTime, 0.5, holidays)).toBe(false);
+    expect(marginMarked(base.ctx.evalTime, 1, holidays)).toBe(true);
+    const now = marginNow(base, at(1, 2000).scenario, DEFAULT_MARGIN_PARAMS, capital, holidays);
+    expect(now?.result.futuresMarked).toBe(false);
+    const half = marginPoint(
+      base,
+      at(0.5, 2000).scenario,
+      DEFAULT_MARGIN_PARAMS,
+      capital,
+      holidays,
+    );
+    const one = marginPoint(base, at(1, 2000).scenario, DEFAULT_MARGIN_PARAMS, capital, holidays);
+    if (!half || !one || half.room === null || one.room === null) throw new Error('余力が無い');
+    expect(half.result.futuresMarked).toBe(false);
+    expect(one.result.futuresMarked).toBe(true);
+    expect(one.result.futuresPnl).toBeGreaterThan(0);
+    // 先物だけ（basis 固定）なので所要額は d に依らない。差 = 評価益
+    expect(Math.abs(one.result.requirement - half.result.requirement)).toBeLessThanOrEqual(1e-6);
+    expect(Math.abs(one.room - half.room - one.result.futuresPnl)).toBeLessThanOrEqual(1e-6);
+    // テールの各行も同じ判定（d = 1）
+    for (const row of marginTail(
+      base,
+      at(1, 0).scenario,
+      DEFAULT_MARGIN_PARAMS,
+      capital,
+      holidays,
+    )) {
+      expect(row.calc?.result.futuresMarked).toBe(true);
+    }
+  });
+
+  it('追証の線: 先物の買い 1 枚、またがなければ上げ側にも線、またいだら益で所要額の増えを相殺して下だけ', () => {
+    const base = baseOf(futBuy);
+    const x0 = base.ctx.x0;
+    // 上げで所要額（5% × X × 乗数）が資金を超える水準が ΔX の数値欄の範囲に入る資金（今の所要額の 1.2 倍）
+    const now = marginNow(base, futBuy.scenario, DEFAULT_MARGIN_PARAMS, 1, holidays);
+    if (!now) throw new Error('今が無い');
+    const cap = now.result.requirement * 1.2;
+    const half = marginLine(base, at(0.5, 0).scenario, DEFAULT_MARGIN_PARAMS, cap, holidays);
+    const one = marginLine(base, at(1, 0).scenario, DEFAULT_MARGIN_PARAMS, cap, holidays);
+    expect(half.filter((x) => x > x0)).toHaveLength(1);
+    expect(half.filter((x) => x < x0)).toHaveLength(1);
+    expect(one.filter((x) => x > x0)).toHaveLength(0);
+    expect(one.filter((x) => x < x0)).toHaveLength(1);
   });
 });

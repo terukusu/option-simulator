@@ -70,6 +70,29 @@ export function businessDaysAhead(instant: number, n: number, holidays: Holidays
   return Math.round((parseDate(d) - parseDate(start)) / DAY_MS);
 }
 
+/** 日中の立会の終わり（値洗いの時刻）15:45 JST。夜間 → 日中で 1 取引日なので、1 取引日の値洗いは 1 回。 */
+export const DAY_CLOSE_HOUR = 15;
+export const DAY_CLOSE_MINUTE = 45;
+
+/**
+ * instant より後の最初の値洗い（営業日の 15:45 JST）の epoch ミリ秒。instant ちょうどの引けは含めない
+ * （15:45 の板で建てた足には、その引けの値洗いは建てる前のもの）。証拠金の余力の先物の項（設計 5.10・#381）に使う。
+ */
+export function nextDayClose(instant: number, holidays: Holidays): number {
+  const set = toSet(holidays);
+  let d = formatDate(Math.floor((instant + JST_OFFSET_MS) / DAY_MS) * DAY_MS);
+  if (!isBusinessDay(d, set) || jstInstant(d, DAY_CLOSE_HOUR, DAY_CLOSE_MINUTE) <= instant) {
+    d = nextBusinessDay(d, set);
+  }
+  return jstInstant(d, DAY_CLOSE_HOUR, DAY_CLOSE_MINUTE);
+}
+
+/** from < c ≤ to の値洗い c（営業日の 15:45 JST）があるか。どちらかが有限でなければ false。 */
+export function crossesDayClose(from: number, to: number, holidays: Holidays): boolean {
+  if (!Number.isFinite(from) || !Number.isFinite(to) || to <= from) return false;
+  return nextDayClose(from, holidays) <= to;
+}
+
 /** その月の第 2 金曜（month は 1〜12）。 */
 export function secondFriday(year: number, month: number): string {
   const first = Date.UTC(year, month - 1, 1);

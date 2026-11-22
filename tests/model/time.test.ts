@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
   businessDaysAhead,
+  crossesDayClose,
+  DAY_MS,
   daysUntil,
   isBusinessDay,
   jstInstant,
@@ -8,6 +10,7 @@ import {
   lastTradingDay,
   monthlyExpiry,
   nextBusinessDay,
+  nextDayClose,
   secondFriday,
   sqDate,
   sqInstant,
@@ -117,5 +120,52 @@ describe('n 営業日後までの暦日（証拠金の保有期間。設計 5.10
 
   it('n = 0 → 0', () => {
     expect(businessDaysAhead(jstInstant('2026-10-17', 12, 0), 0, [])).toBe(0);
+  });
+});
+
+describe('値洗い（営業日の 15:45 JST）をまたぐか（証拠金の余力の先物の項。設計 5.10・#381）', () => {
+  // 2026-11-10 は火曜。11-12（木）・11-13（金）は架空の休業日（HOLIDAYS）
+  const close = (d: string) => jstInstant(d, 15, 45);
+
+  it('日中 10:00 の板: + 0.2 日（14:48）はまたがない、+ 0.25 日（16:00）はまたぐ', () => {
+    const t = jstInstant('2026-11-10', 10, 0);
+    expect(nextDayClose(t, HOLIDAYS)).toBe(close('2026-11-10'));
+    expect(crossesDayClose(t, t + 0.2 * DAY_MS, HOLIDAYS)).toBe(false);
+    expect(crossesDayClose(t, t + 0.25 * DAY_MS, HOLIDAYS)).toBe(true);
+    // 15:45 ちょうどに着く状態はまたぐ（その引けの値洗いの後）
+    expect(crossesDayClose(t, close('2026-11-10'), HOLIDAYS)).toBe(true);
+    expect(crossesDayClose(t, close('2026-11-10') - 1, HOLIDAYS)).toBe(false);
+  });
+
+  it('15:45 ちょうどの板はその引けを数えない（次は翌営業日の 15:45）。+ 0 はまたがない', () => {
+    const t = close('2026-11-10');
+    expect(nextDayClose(t, HOLIDAYS)).toBe(close('2026-11-11'));
+    expect(crossesDayClose(t, t, HOLIDAYS)).toBe(false);
+    expect(crossesDayClose(t, t + DAY_MS - 1, HOLIDAYS)).toBe(false);
+    expect(crossesDayClose(t, t + DAY_MS, HOLIDAYS)).toBe(true);
+  });
+
+  it('金曜の夜間・土曜の朝の板: 月曜 15:45 まではまたがない、その後はまたぐ', () => {
+    for (const t of [jstInstant('2026-11-06', 20, 0), jstInstant('2026-11-07', 5, 0)]) {
+      expect(nextDayClose(t, HOLIDAYS)).toBe(close('2026-11-09'));
+      expect(crossesDayClose(t, close('2026-11-09') - 1, HOLIDAYS)).toBe(false);
+      expect(crossesDayClose(t, close('2026-11-09'), HOLIDAYS)).toBe(true);
+    }
+  });
+
+  it('休業日の 15:45 は数えない（水曜の夜 → 木・金が休業日・土日 → 月曜 15:45）', () => {
+    const t = jstInstant('2026-11-11', 20, 0);
+    expect(nextDayClose(t, HOLIDAYS)).toBe(close('2026-11-16'));
+    expect(crossesDayClose(t, close('2026-11-13'), HOLIDAYS)).toBe(false);
+    expect(crossesDayClose(t, close('2026-11-16'), HOLIDAYS)).toBe(true);
+    // 休業日の一覧が空なら木曜 15:45
+    expect(nextDayClose(t, [])).toBe(close('2026-11-12'));
+  });
+
+  it('有限でない・逆向きは false', () => {
+    const t = jstInstant('2026-11-10', 10, 0);
+    expect(crossesDayClose(Number.NaN, t, HOLIDAYS)).toBe(false);
+    expect(crossesDayClose(t, Number.POSITIVE_INFINITY, HOLIDAYS)).toBe(false);
+    expect(crossesDayClose(t + 2 * DAY_MS, t, HOLIDAYS)).toBe(false);
   });
 });

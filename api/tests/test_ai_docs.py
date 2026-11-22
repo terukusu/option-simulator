@@ -205,7 +205,8 @@ def test_read_errors_have_no_body(idx, args, want):
 def test_request_byte_cap(idx):
     r = docs.Reader(idx)
     total = 0
-    for p in range(1, 4):  # 5.10 は 8 KiB 近い part が 2 つ以上 → 3 つ目までに上限
+    # 5.10 は 16 KiB を超える（part の切れ目は節の中の段落による）→ 途中の part で上限
+    for p in range(1, docs.PART_MAX + 1):
         text, err = r({"file": "design", "section": "5.10", "part": p})
         if err:
             assert "上限" in text

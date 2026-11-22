@@ -13,7 +13,7 @@ import {
   holdMapPnlColumn,
   holdMapScenario,
 } from '../../model/holdMap';
-import { DEFAULT_MARGIN_PARAMS, type MarginParams } from '../../model/margin';
+import { DEFAULT_MARGIN_PARAMS, type MarginParams, marginMarked } from '../../model/margin';
 import { expiryPnl } from '../../model/pnl';
 import {
   DEFAULT_SETTINGS,
@@ -37,7 +37,7 @@ import {
 } from '../../model/replay';
 import { type IvDynamics, ZERO_SCENARIO } from '../../model/scenario';
 import type { Smile } from '../../model/smile';
-import { businessDaysAhead, DAY_MS } from '../../model/time';
+import { businessDaysAhead, DAY_MS, jstInstant } from '../../model/time';
 import { FUT, M1, M2, makeMarket, quoteOf } from '../support/market';
 
 const { ctx, rows } = makeMarket();
@@ -189,6 +189,7 @@ describe('replayDay（k 日目の余力・損益）', () => {
             params: PARAMS,
             base: { ...ZERO_SCENARIO, days, ivDynamics: dynamics, beta: 0 },
             horizonDays: businessDaysAhead(ctx.evalTime + days * DAY_MS, 2, HOLIDAYS),
+            marked: marginMarked(ctx.evalTime, days, HOLIDAYS),
             capital: CAPITAL,
             premium: premiumSummary(prepared, SETTINGS),
           };
@@ -392,5 +393,41 @@ describe('replaySummary', () => {
       firstLoss: null,
       endPnl: Number.NaN,
     });
+  });
+});
+
+describe('#381 再生の k 日目: 板の時刻から引けをまたいだら先物の評価益も余力に入る', () => {
+  it('日中 10:00 の板・先物の買い + put の売り: k = 1（翌日 10:00 = 当日 15:45 をまたぐ）の余力 = 値洗いなしの余力 + max(0, 先物の評価損益)', () => {
+    // 合成の板の日の日中（架空の 2026-10-13 火曜 10:00）
+    const ctxDay: MarketContext = { ...ctx, evalTime: jstInstant('2026-10-13', 10, 0) };
+    const legs = [fut('buy', 3), op(M1.id, 'put', 64000, 'sell')];
+    const prepared = preparePosition(legs, ctxDay, SETTINGS);
+    const calc = calcOf(prepared, 'sticky_strike', SETTINGS, ctxDay);
+    const day0 = { term: flat(20), iv: 20 };
+    for (const u of [0.04, -0.03]) {
+      const got = replayDay(calc, { k: 1, u, term: flat(20), iv: 20 }, day0);
+      expect(got.days).toBe(1);
+      expect(marginMarked(ctxDay.evalTime, got.days, HOLIDAYS)).toBe(true);
+      const hm = (marked: boolean): HoldMapCalc => ({
+        legs: prepared,
+        ctx: ctxDay,
+        settings: SETTINGS,
+        params: PARAMS,
+        base: { ...ZERO_SCENARIO, days: got.days, ivDynamics: 'sticky_strike', beta: 0 },
+        horizonDays: businessDaysAhead(ctxDay.evalTime + got.days * DAY_MS, 2, HOLIDAYS),
+        marked,
+        capital: CAPITAL,
+        premium: premiumSummary(prepared, SETTINGS),
+      });
+      const axes: HoldMapAxes = { us: [u], cs: [1] };
+      const unmarked = holdMapColumn(hm(false), axes, 0)[0] as number;
+      // ミニ 3 枚・basis 固定: 評価損益 = 3 × 100 × uX₀
+      const futPnl = 300 * u * ctxDay.x0;
+      expect(Math.abs(got.room - unmarked - Math.max(0, futPnl)), `u=${u}`).toBeLessThanOrEqual(
+        1e-6,
+      );
+      if (u > 0) expect(got.room).toBeGreaterThan(unmarked);
+      else expect(Math.abs(got.room - unmarked)).toBeLessThanOrEqual(1e-6);
+    }
   });
 });

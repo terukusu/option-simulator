@@ -215,6 +215,8 @@ export interface HoldMapCalc {
   base: Scenario;
   /** h = S の時点から 2 営業日後までの暦日 */
   horizonDays: number;
+  /** 今から S（d の時点）までに値洗いをまたいだか（marginMarked。余力に先物の評価益も入る。#381） */
+  marked: boolean;
   /** 資金（円、> 0） */
   capital: number;
   premium: PremiumSummary;
@@ -222,7 +224,7 @@ export interface HoldMapCalc {
 
 /** 列 i（u = axes.us[i]）の各行の余力（円。長さ cs.length。有限でなければ NaN） */
 export function holdMapColumn(calc: HoldMapCalc, axes: HoldMapAxes, i: number): Float64Array {
-  const { legs, ctx, settings, params, base, horizonDays, capital, premium } = calc;
+  const { legs, ctx, settings, params, base, horizonDays, marked, capital, premium } = calc;
   const u = axes.us[i] as number;
   const x = ctx.x0 * (1 + u);
   const scenario = holdMapScenario(base, u, ctx.x0);
@@ -230,7 +232,7 @@ export function holdMapColumn(calc: HoldMapCalc, axes: HoldMapAxes, i: number): 
   const out = new Float64Array(axes.cs.length);
   for (let j = 0; j < axes.cs.length; j++) {
     const c = axes.cs[j] as number;
-    const r = marginAt(legsAt(c), { x, scenario, horizonDays }, ctx, settings, params);
+    const r = marginAt(legsAt(c), { x, scenario, horizonDays, marked }, ctx, settings, params);
     const room = marginRoom(capital, premium, r);
     out[j] = Number.isFinite(room) ? room : Number.NaN;
   }

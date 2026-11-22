@@ -27,6 +27,7 @@ import {
   holdMapValueAt,
   MARGIN_HORIZON_BUSINESS_DAYS,
   type MarginParams,
+  marginMarked,
   premiumSummary,
   type Scenario,
   ZERO_SCENARIO,
@@ -164,6 +165,7 @@ export function holdMapCalcOf(input: HoldMapInput): HoldMapCalc {
     params,
     base: { ...input.scenario, days },
     horizonDays,
+    marked: marginMarked(ctx.evalTime, days, holidays),
     capital,
     premium: premiumSummary(legs, settings),
   };

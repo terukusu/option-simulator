@@ -89,7 +89,8 @@ export function sellEfficiency(
   if (e.state !== 'live' && e.state !== 'near_expiry') return null;
   const r = marginAt(
     [p],
-    { x, scenario: input.scenario, horizonDays: input.horizonDays },
+    // M（k × PFE）だけを使い余力を見ないので、値洗いの判定（先物の項だけに効く）は渡さない
+    { x, scenario: input.scenario, horizonDays: input.horizonDays, marked: false },
     ctx,
     settings,
     params,

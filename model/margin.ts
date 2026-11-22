@@ -15,9 +15,10 @@
  * - PFE = max(0, max_格子 (V(S) − V(格子)))、NOV = Σ_M の足のうち OP 符号 × 枚数 × 乗数 × 評価価格
  * - 必要証拠金（概算）= k × PFE（NOV を含まない。証券会社の建てる前の必要委託証拠金と同じ物差し）
  * - 証拠金所要額 = max(0, k × PFE − NOV)（掛け目を NOV に掛けない。負にしない）
- * - 余力 A = 資金 − 支払 + 受取 − 手数料（全足）+ min(0, 先物の評価損益（生きている足の合計）)
- *   + 決済済みの足の清算額 − 証拠金所要額（先物の評価益は足さない = 証券会社の計算式の拘束金額の
- *   先物建玉評価損。#375）
+ * - 余力 A = 資金 − 支払 + 受取 − 手数料（全足）+ 先物の項 + 決済済みの足の清算額 − 証拠金所要額。
+ *   先物の項 = S までに値洗い（日中の引け）をまたがなければ min(0, 先物の評価損益（生きている足の合計）)
+ *   （評価益は足さない = 証券会社の計算式の拘束金額の先物建玉評価損。#375）、1 回以上またいだら評価損益の
+ *   合計をそのまま（最後の値洗いの価格 = S の価格と見なし、値洗いで受入証拠金に入った益も数える。#381・ADR-0012）
  *
  * 生きている足 = S の時点で T > 0 の足。S で SQ を過ぎた足は格子・NOV に入れず、清算額だけを余力に入れる
  * （OP は 符号 × 枚数 × 乗数 × 本源的価値、先物は 符号 × 枚数 × 乗数 × (F' − 建値)、F' = X'）。
@@ -35,6 +36,7 @@ import {
   type PreparedLeg,
 } from './position';
 import type { Scenario } from './scenario';
+import { crossesDayClose, DAY_MS, type Holidays } from './time';
 
 export interface MarginParams {
   /** 原資産の値動き幅 R（小数。0.05 = ±5%） */
@@ -74,6 +76,11 @@ export interface MarginState {
   scenario: Scenario;
   /** h = S の時点から 2 営業日後までの暦日 */
   horizonDays: number;
+  /**
+   * 今（板の時刻）から S までに値洗い（営業日の 15:45 JST）を 1 回以上またいだか（marginMarked）。true なら余力に
+   * 先物の評価損益を益も損も入れる（#381）。false なら評価損だけ（#375）
+   */
+  marked: boolean;
 }
 
 export interface MarginWorst {
@@ -92,8 +99,13 @@ export interface MarginResult {
   margin: number;
   /** 証拠金所要額（円）= max(0, k × PFE − NOV)（余力・倍数・追証の線はこれ） */
   requirement: number;
-  /** 生きている先物の足の評価損益の合計（手数料抜き、円。益も損も。余力には負のときだけ入る。#375） */
+  /**
+   * 生きている先物の足の評価損益の合計（手数料抜き、円。益も損も）。余力には、値洗いをまたいでいなければ負のときだけ
+   * （#375）、またいでいれば益も損も入る（#381）
+   */
   futuresPnl: number;
+  /** 状態 S が値洗いをまたいだか（MarginState.marked の写し。marginRoom が読む） */
+  futuresMarked: boolean;
   /** S で SQ を過ぎた足の清算額（円） */
   settledCash: number;
   /** 損失が最大になった格子の点（M の足が無ければ null） */
@@ -143,6 +155,7 @@ function marginOn(
       margin: 0,
       requirement: 0,
       futuresPnl: 0,
+      futuresMarked: state.marked,
       settledCash,
       worst: null,
     };
@@ -187,6 +200,7 @@ function marginOn(
     margin,
     requirement: Math.max(0, margin - nov),
     futuresPnl,
+    futuresMarked: state.marked,
     settledCash,
     worst,
   };
@@ -204,9 +218,13 @@ export function marginAt(
 }
 
 /**
- * 余力 A = 資金 − 支払 + 受取 − 手数料 + min(0, 先物の評価損益) + 決済済みの清算額 − 証拠金所要額（円）。
- * 先物の評価益は足さない（証券会社の計算式: 余力 = 受入証拠金 − 必要委託証拠金 − 拘束金額、拘束金額の
- * 先物建玉評価損。評価損益は生きている先物の足どうしで差し引いた合計。#375・設計 5.10）。
+ * 余力 A = 資金 − 支払 + 受取 − 手数料 + 先物の項 + 決済済みの清算額 − 証拠金所要額（円）。
+ * 先物の項（評価損益は生きている先物の足どうしで差し引いた合計）:
+ * - 値洗いをまたいでいない（r.futuresMarked = false）: min(0, 評価損益)。評価益は足さない（証券会社の計算式:
+ *   余力 = 受入証拠金 − 必要委託証拠金 − 拘束金額、拘束金額の先物建玉評価損 = 前営業日の値洗い価格（当日約定は建値）
+ *   からの当日分の損。#375・設計 5.10）
+ * - またいだ: 評価損益そのもの（最後の値洗いの価格 = S の価格と見なす近似。値洗いまでの損益は益も損も受入証拠金に
+ *   入り、値洗いから S までの当日分は 0。#381・ADR-0012）
  * 受渡の済んだ状態の評価なので、支払・受取・手数料は受入証拠金に入り（拘束金額の買 OP 購入代金・手数料は 0）、
  * 余力 < 0 ⇔ 追加証拠金 > 0（受入証拠金 − 先物の評価損 < 維持証拠金。注文なしで必要委託 = 維持）。
  */
@@ -216,15 +234,25 @@ export function marginRoom(capital: number, premium: PremiumSummary, r: MarginRe
     premium.paid +
     premium.received -
     premium.fees +
-    Math.min(0, r.futuresPnl) +
+    (r.futuresMarked ? r.futuresPnl : Math.min(0, r.futuresPnl)) +
     r.settledCash -
     r.requirement
   );
 }
 
 /**
+ * 今（板の時刻 evalTime）から経過 days 日（暦日。小数可）の状態 S までに値洗い（営業日の 15:45 JST）を 1 回以上
+ * またぐか（MarginState.marked。#381）。休業日は保有期間 h と同じ集合を渡す。days ≤ 0・非有限は false。
+ */
+export function marginMarked(evalTime: number, days: number, holidays: Holidays): boolean {
+  if (!Number.isFinite(days) || days <= 0) return false;
+  return crossesDayClose(evalTime, evalTime + days * DAY_MS, holidays);
+}
+
+/**
  * 今のポジションの枚数の何倍まで余力 ≥ 0 を保てるか（整数）。全項が枚数に 1 次同次なので
- * A(m) = 資金 + m × s（s = A(1) − 資金。所要額も max(0, m·a) = m·max(0, a)、先物の評価損も min(0, m·f) = m·min(0, f)）。s ≥ 0 なら上限なし（Infinity）。資金が 0 / 非有限なら null。
+ * A(m) = 資金 + m × s（s = A(1) − 資金。所要額も max(0, m·a) = m·max(0, a)、先物の評価損も min(0, m·f) = m·min(0, f)、
+ * 値洗いをまたいだ先物の評価損益は m·f）。s ≥ 0 なら上限なし（Infinity）。資金が 0 / 非有限なら null。
  */
 export function maxMultiple(
   capital: number,
@@ -263,9 +291,10 @@ function liveFuturesPnl(
 /**
  * 追証の線: シナリオ（ΔX 以外はそのまま）で X だけを動かしたとき余力 A(X) = 0 になる X（1 円に丸め、
  * 昇順）。range を samples 等分して符号の変化を囲い二分法（findBreakevens と同じ作り）。
- * 余力は生きている先物の評価損益の合計 = 0 の X で折れる（評価益を足さない。#375）ので、その点が range の内側に
- * あれば区間をそこで 2 つに分ける（分割の数は長さに比例して配り、合計は samples + 1 以下）。先物だけの
- * ポジションでは折れ点の両側に 1 つずつ根がありうるので、刻みより近い 2 根を取りこぼさない。
+ * 値洗いをまたがない（marked = false）とき、余力は生きている先物の評価損益の合計 = 0 の X で折れる（評価益を
+ * 足さない。#375）ので、その点が range の内側にあれば区間をそこで 2 つに分ける（分割の数は長さに比例して配り、
+ * 合計は samples + 1 以下）。先物だけのポジションでは折れ点の両側に 1 つずつ根がありうるので、刻みより近い 2 根を
+ * 取りこぼさない。またいだら（marked = true）評価損益をそのまま入れるので折れない（分けない。#381）。
  * 資金が 0 / 非有限、または余力がどこでも正なら []。
  */
 export function marginCallLevels(
@@ -275,6 +304,7 @@ export function marginCallLevels(
   settings: ModelSettings,
   params: MarginParams,
   horizonDays: number,
+  marked: boolean,
   capital: number,
   premium: PremiumSummary,
   range: { lo: number; hi: number },
@@ -287,13 +317,14 @@ export function marginCallLevels(
       premium,
       marginOn(
         legs,
-        { x, scenario: { ...scenario, dX: x - ctx.x0 }, horizonDays },
+        { x, scenario: { ...scenario, dX: x - ctx.x0 }, horizonDays, marked },
         ctx,
         settings,
         params,
       ),
     );
   const { lo, hi } = range;
+  if (marked) return findBreakevens(f, lo, hi, samples).sort((a, b) => a - b);
   const g = (x: number) => liveFuturesPnl(legs, x, scenario, ctx, settings);
   const gl = g(lo);
   const gh = g(hi);
