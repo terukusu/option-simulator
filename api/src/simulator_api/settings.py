@@ -115,6 +115,18 @@ JSCC_SET_CACHE_SIZE = 8  # シナリオの並び・パラメータのキャッ�
 JSCC_ROWS_CACHE_SIZE = 6  # 限月の行のキャッシュの件数（キー = (日, run_id, 限月)。1 件 約 4 MB）
 JSCC_MAX_AGE_SECONDS = 600  # Cache-Control（ok・inconsistent）
 JSCC_NOT_READY_MAX_AGE_SECONDS = 60  # Cache-Control（not_ready）
+# 当て直しの r・g（/api/jscc_factors。表 jscc_var_scenario_factor、#387・ADR-0014）
+# 1 要求の限月（p）の上限（読むのは 1 日分の 1 クエリ。保有の一覧の合計でも 1 回で日がそろう）
+JSCC_FACTOR_MAX_PERIODS = 24
+JSCC_FACTOR_CACHE_SIZE = 4  # 1 日分の r・g のキャッシュの件数（キー = (日, run_id)。1 件 約 20 限月 × 約 80 KB）
+# 遡る範囲（オーナーの承認「正確になるように」）: 基準日の表が無い・使えないときは、
+# それより前の直近の使える日の JSCC のシナリオを今の状態に当て直す。遡るのは JSCC の営業日
+# （succeeded のある日）で 10 日まで（数日ではシナリオの規模はほぼ変わらないが、
+# 急変の後は EWMA で変わるので遠い日は使わない。設計 5.10・ADR-0014）
+JSCC_FACTOR_MAX_BACK = 10
+JSCC_FACTOR_RANGE_DAYS = 21  # 探す暦日の幅（10 営業日を年末年始・連休でも含む）
+JSCC_FACTOR_MAX_MEDIAN_REL = 0.05  # 限月の推定の質の閾値（画面の JSCC_REFIT_MAX_MEDIAN_REL と同じ）
+JSCC_FACTOR_INDEX_CACHE_SIZE = 8  # 遡りの索引（取り込みの記録・質）のキャッシュの件数（キー = 要求の基準日）
 
 # クエリごとの maximum_bytes_billed の上限（設定の MAX_BYTES_BILLED との小さい方。#79 の判断 6: 予期しない全期間・全列の
 # 読み込みの保険。atm_cm_iv は 2 列で全期間 ≈ 20 MiB、全列 ≈ 112 MiB。atm_cm_daily は 8 列（m1_iv・m2_iv は #307）
@@ -127,10 +139,12 @@ JSCC_NOT_READY_MAX_AGE_SECONDS = 60  # Cache-Control（not_ready）
 # パーティションが大きくなって越えそうなら上限を見直す（tests/test_sql_bq.py が前月のパーティションで見る）
 # jscc_scenario（#382）は jscc_var_scenario の 1 日のパーティション全部（約 131 MiB。クラスタの絞りはこの大きさでは
 # 効かず、1 銘柄の等号でも同じ課金）なので 1 日の 2 倍弱の 256 MiB。ほかの JSCC の 3 表は 1 日で 10 MiB（最小課金）
+# jscc_factor（#387）は 1 日 約 3 MB（最小課金 10 MiB）
 QUERY_MAX_BYTES_BILLED: dict[str, int] = {"atm_cm_iv": 64 * MiB, "atm_cm_daily": 128 * MiB, "future_bars": 64 * MiB,
                                           "option_bars": 64 * MiB, "jscc_runs": 64 * MiB,
                                           "jscc_scenario_set": 64 * MiB, "jscc_parameter": 64 * MiB,
-                                          "jscc_scenario": 256 * MiB}
+                                          "jscc_scenario": 256 * MiB, "jscc_factor": 64 * MiB,
+                                          "jscc_runs_range": 64 * MiB, "jscc_factor_quality": 64 * MiB}
 
 # ---- 中立の気配の一覧（DATA_SOURCE=quotes。quotes.py・service.QuotesFileService。#154） ----
 QUOTES_MAX_FILE_BYTES = 16 * MiB  # QUOTES_FILE・CALENDAR_FILE の大きさの上限（超えたら読まずに 503）

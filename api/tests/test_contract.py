@@ -81,6 +81,8 @@ def test_pinned_commit_format():
 @pytest.mark.parametrize("name", contract.QUERY_NAMES)
 def test_contract_matches_optionchan_schema(name):
     rel = contract.RELATIONS[name]
+    if rel.pending:
+        pytest.skip(f"{rel.name} は optionchan の固定コミットにまだ無い（依頼中。#387）")
     path = Path(SCHEMA_DIR) / rel.schema_file
     assert path.is_file(), f"{rel.schema_file} が無い（OPTIONCHAN_SCHEMA_DIR を確認）"
     fields = {f["name"]: f for f in json.loads(path.read_text(encoding="utf-8"))}
@@ -115,6 +117,14 @@ def test_jscc_relations():
     for q in names:
         assert contract.RELATIONS[q].schema_file == f"tokyo/{names[q]}.json"
         assert q not in contract.OUTPUTS
+
+
+def test_no_pending_relations():
+    # #387: optionchan #168 の表（jscc_var_scenario_factor）は固定コミット f8d90be に入った = 照合しない表は無い
+    assert not [q for q, r in contract.RELATIONS.items() if r.pending]
+    fr = contract.RELATIONS["jscc_factor"]
+    assert fr.repeated == {"nodes", "r", "g"} and dict(fr.columns)["r"] == "FLOAT"
+    assert dict(fr.columns)["check_median_rel"] == "FLOAT" and "check_median_rel" not in fr.required
 
 
 @pytest.mark.skipif(not SCHEMA_DIR, reason="OPTIONCHAN_SCHEMA_DIR（固定コミットの schema/）のときだけ")

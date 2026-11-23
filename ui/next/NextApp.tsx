@@ -490,6 +490,9 @@ export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
   // 今の必要証拠金の JSCC の入力（#382。margin_summary の now が指標と同じ値になるように）
   const jsccRef = useRef(c.jscc);
   jsccRef.current = c.jscc;
+  // 当て直しの r・g（#387。margin_summary の point・tail_table・追証の線が指標と同じ値になるように）
+  const jsccFactorsRef = useRef(c.jsccFactors);
+  jsccFactorsRef.current = c.jsccFactors;
   const aiEnv = useCallback(
     () =>
       aiEnvFromState(
@@ -498,6 +501,7 @@ export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
         profileRef.current,
         otherHeldCount(stateRef.current, bookReadRef.current),
         jsccRef.current,
+        jsccFactorsRef.current,
       ),
     [],
   );

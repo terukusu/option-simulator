@@ -15,7 +15,7 @@
  */
 
 import type { AiContext } from '../../data/aiStream';
-import type { JsccInput } from '../../data/jscc';
+import type { JsccFactorsInput, JsccInput } from '../../data/jscc';
 import { DEFAULT_SETTINGS, type ModelSettings } from '../../model';
 import { isAiProfile, type MarginPrefs } from '../prefs';
 import { activeHeld, type State, type UiLeg } from '../state';
@@ -56,6 +56,7 @@ export function aiEnvFromState(
   profile?: string,
   otherHeld = 0,
   jscc: JsccInput | null = null,
+  factors: JsccFactorsInput | null = null,
 ): AiToolEnv | null {
   const chain = state.chain;
   if (!chain) return null;
@@ -78,7 +79,7 @@ export function aiEnvFromState(
     base,
     scenario: state.scenario,
     atmBasis: state.atmBasis,
-    margin: { params: marginParamsOf(margin), capital: capitalOf(margin), jscc },
+    margin: { params: marginParamsOf(margin), capital: capitalOf(margin), jscc, factors },
     holidays: state.calendar.holidays,
     draft: { legs: state.legs, evalLegs },
     ...(profile !== undefined && { profile }),

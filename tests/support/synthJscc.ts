@@ -4,7 +4,13 @@
  * scripts/devFixtures.mjs の中に別に持つ（イメージに tests/ を入れないため）。
  */
 
-import type { JsccData, JsccInstrument, JsccScenarioSet } from '../../model';
+import type {
+  JsccData,
+  JsccFactorRow,
+  JsccFactors,
+  JsccInstrument,
+  JsccScenarioSet,
+} from '../../model';
 
 /** 種つきの一様乱数（mulberry32） */
 export function rng(seed: number): () => number {
@@ -60,4 +66,49 @@ export function jsccData(
   businessDate = '2026-10-09',
 ): JsccData {
   return { businessDate, set, instruments: new Map(Object.entries(instruments)) };
+}
+
+/** z の節点（#383 と同じ 13 個） */
+export const REFIT_NODES = [-5, -4, -3, -2, -1.5, -1, -0.5, 0, 0.5, 1, 1.5, 2, 3] as const;
+
+/**
+ * 架空の r・g（#387）。r = 2 日の対数リターン風（裾の厚い一様乱数の 3 乗）、g = 平行 + 傾き + 小さな揺れの折れ線
+ * （下げのシナリオほど IV が上がる向き）。futuresOnly のキーは g を持たない（先物だけの限月）
+ */
+export function synthFactors(
+  set: JsccScenarioSet,
+  keys: readonly string[],
+  seed = 387,
+  opts: { futuresOnly?: readonly string[]; businessDate?: string; scale?: number } = {},
+): JsccFactors {
+  const r = rng(seed);
+  const n = set.isHist.length;
+  const sc = opts.scale ?? 1;
+  const ret = new Float64Array(n);
+  const level = new Float64Array(n);
+  const slope = new Float64Array(n);
+  for (let j = 0; j < n; j++) {
+    ret[j] = sc * 0.08 * (r() * 2 - 1) ** 3;
+    level[j] = -3 * (ret[j] as number) + sc * 0.05 * (r() * 2 - 1);
+    slope[j] = sc * 0.02 * (r() * 2 - 1);
+  }
+  const rows = new Map<string, JsccFactorRow>();
+  for (const key of keys) {
+    const rr = new Float64Array(n);
+    for (let j = 0; j < n; j++) rr[j] = (ret[j] as number) * (1 + 0.01 * (r() - 0.5));
+    let g: Float64Array | null = null;
+    if (!opts.futuresOnly?.includes(key)) {
+      g = new Float64Array(n * REFIT_NODES.length);
+      for (let j = 0; j < n; j++) {
+        for (let m = 0; m < REFIT_NODES.length; m++) {
+          g[j * REFIT_NODES.length + m] =
+            (level[j] as number) +
+            (slope[j] as number) * (REFIT_NODES[m] as number) +
+            sc * 0.005 * (r() - 0.5);
+        }
+      }
+    }
+    rows.set(key, { r: rr, g });
+  }
+  return { businessDate: opts.businessDate ?? '2026-10-09', set, nodes: REFIT_NODES, rows };
 }

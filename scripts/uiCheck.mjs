@@ -2655,7 +2655,15 @@ async function marginLineCheck(page, lbl, shotName) {
   await page.focus('.chart:not(.mini)');
   await page.keyboard.press(']');
   const hidden = (await read()).lines;
-  await page.waitForTimeout(400);
+  // #387: 当て直しの追証の線は止まってから（120 ms）状態 1 つずつ切れごとに作る（合計 0.3〜0.6 s。負荷で延びる）ので、
+  // 線が戻るまで最大 3 秒待つ（前は 400 ms 固定）
+  await page
+    .waitForFunction(
+      () => document.querySelectorAll('.chart:not(.mini) line.mcall').length > 0,
+      null,
+      { timeout: 3000 },
+    )
+    .catch(() => {});
   const back = (await read()).lines;
   const ok =
     r.lines >= 1 &&
@@ -9071,6 +9079,13 @@ async function marginFull360() {
             v.textContent = '−1,234 千円';
             full.append(k, v);
           }
+          // 開いたときの Popover と同じく、吹き出しの下端が .panel-body の中に見えるまで .panel-body をスクロールする
+          // （revealDelta。行を後から足したので開いたときの調整が効いていない。#387 で今の行が 11 → 8 行になり、
+          // 足す行が 1 → 4 行に増えて、調整なしでは下にはみ出すようになった）
+          const ph = pop.getBoundingClientRect();
+          const hh = host.getBoundingClientRect();
+          if (ph.bottom > hh.bottom)
+            host.scrollTop += Math.min(ph.bottom - hh.bottom, ph.top - hh.top);
         }
         const rows = full.querySelectorAll(':scope > span').length / 2;
         const within = (q, h) =>

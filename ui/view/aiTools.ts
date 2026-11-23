@@ -15,7 +15,7 @@
  * - strike_quote（#266）も足が無くても使える（任意の行使価格のスマイルの IV・理論価格・気配。ui/view/aiQuote.ts）
  */
 
-import type { Chain, JsccInput } from '../../data';
+import type { Chain, JsccFactorsInput, JsccInput } from '../../data';
 import {
   type AtmBasis,
   evaluatePosition,
@@ -47,7 +47,13 @@ export interface AiToolEnv {
   scenario: Scenario;
   atmBasis: AtmBasis;
   /** 証拠金の設定と、今の必要証拠金の JSCC の入力（#382。無ければ概算） */
-  margin: { params: MarginParams; capital: number | null; jscc?: JsccInput | null };
+  margin: {
+    params: MarginParams;
+    capital: number | null;
+    jscc?: JsccInput | null;
+    /** 当て直しの r・g（#387。シナリオの点・テール・追証の線。無ければ概算） */
+    factors?: JsccFactorsInput | null;
+  };
   holidays: Holidays;
   /** 先物の日足・1 時間足（technicals のツールだけ。#200。呼ばれたときだけフックが読んで入れる。無ければ no_data） */
   technicals?: TechnicalsData | null;
@@ -205,7 +211,15 @@ function positionSummary(env: AiToolEnv, base: PnlBase): ToolResult {
 function tailTableTool(env: AiToolEnv, base: PnlBase): ToolResult {
   const m = metricsModel({ base, scenario: env.scenario, unit: 'yen' });
   const { params, capital } = env.margin;
-  const margin = marginTail(base, { ...env.scenario, dX: 0 }, params, capital, env.holidays);
+  const margin = marginTail(
+    base,
+    { ...env.scenario, dX: 0 },
+    params,
+    capital,
+    env.holidays,
+    undefined,
+    env.margin.factors ?? null,
+  );
   return {
     days: r1(m.days),
     base: { kind: m.tail.premiumBase.kind, amount_yen: yen(m.tail.premiumBase.amount) },
@@ -220,6 +234,7 @@ function tailTableTool(env: AiToolEnv, base: PnlBase): ToolResult {
         scenario_ratio: r1(r.scenario.ratio),
         margin_yen: c ? yen(c.result.margin) : null,
         room_yen: c ? yen(c.room) : null,
+        margin_source: c ? sourceOf(c) : null,
       };
     }),
   };
@@ -249,20 +264,33 @@ function marginState(c: MarginCalc | null): ToolResult {
   };
 }
 
-/** 今の出どころ（#382）: source = jscc（JSCC の計算）/ estimate（概算）、jscc_business_date = 基準日（JSCC のときだけ） */
-function marginNowState(c: MarginCalc | null): ToolResult {
+/** 出どころ（#382・#387）: jscc = JSCC の計算、jscc_refit = JSCC のシナリオの当て直し（推定）、estimate = 概算 */
+function sourceOf(c: MarginCalc): 'jscc' | 'jscc_refit' | 'estimate' {
+  return c.basis.kind === 'estimate' ? 'estimate' : c.basis.kind;
+}
+
+/** 今・シナリオの点の出どころ: source と jscc_business_date（JSCC・当て直しのときだけ基準日） */
+function marginSourceState(c: MarginCalc | null): ToolResult {
   const b = c?.basis;
   return {
     ...marginState(c),
-    source: b?.kind === 'jscc' ? 'jscc' : 'estimate',
-    jscc_business_date: b?.kind === 'jscc' ? b.businessDate : null,
+    source: c ? sourceOf(c) : 'estimate',
+    jscc_business_date: b && b.kind !== 'estimate' ? b.businessDate : null,
   };
 }
 
 function marginSummary(env: AiToolEnv, base: PnlBase): ToolResult {
   const { params, capital } = env.margin;
   const sc = env.scenario;
-  const now = marginNow(base, sc, params, capital, env.holidays, env.margin.jscc ?? null);
+  const now = marginNow(
+    base,
+    sc,
+    params,
+    capital,
+    env.holidays,
+    env.margin.jscc ?? null,
+    env.margin.factors ?? null,
+  );
   return {
     capital_yen: capital === null ? null : yen(capital),
     params: {
@@ -272,9 +300,13 @@ function marginSummary(env: AiToolEnv, base: PnlBase): ToolResult {
       factor_pct: r1(params.factor * 100),
       ignore_long_options: params.ignoreLongOptions,
     },
-    now: marginNowState(now),
-    point: marginState(marginPointOrNow(base, sc, params, capital, env.holidays, now)),
-    call_levels_x: marginLine(base, sc, params, capital, env.holidays).slice(0, 40).map(yen),
+    now: marginSourceState(now),
+    point: marginSourceState(
+      marginPointOrNow(base, sc, params, capital, env.holidays, now, env.margin.factors ?? null),
+    ),
+    call_levels_x: marginLine(base, sc, params, capital, env.holidays, env.margin.factors ?? null)
+      .slice(0, 40)
+      .map(yen),
   };
 }
 

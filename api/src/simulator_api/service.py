@@ -226,11 +226,16 @@ class ChainService:
     def jscc_scenarios(self, req: jscc.JsccRequest) -> "JsccPayload":
         return self._jscc.get(req)
 
+    def jscc_factors(self, req: jscc.FactorRequest) -> "JsccPayload":
+        return self._jscc.factors(req)
+
 
 @dataclass(frozen=True)
 class JsccPayload(Payload):
     status: str = "ok"  # ok / unavailable
-    reason: str = ""  # unavailable の理由（not_ready / inconsistent / no_source）
+    reason: str = ""  # unavailable の理由（not_ready / inconsistent / no_source / no_recent）
+    # 当て直しの r・g で基準日より前の日に遡った（#387。Cache-Control を短く = 取り込みの後に読み直す）
+    back: bool = False
 
 
 def jscc_unavailable(d, reason: str) -> JsccPayload:
@@ -248,6 +253,8 @@ class JsccService:
         self._runs = ExpiringLRUCache(st.JSCC_SET_CACHE_SIZE, monotonic)
         self._sets = LRUCache(st.JSCC_SET_CACHE_SIZE)
         self._rows = LRUCache(st.JSCC_ROWS_CACHE_SIZE)
+        self._factors = LRUCache(st.JSCC_FACTOR_CACHE_SIZE)
+        self._factor_index = ExpiringLRUCache(st.JSCC_FACTOR_INDEX_CACHE_SIZE, monotonic)
 
     def _run_id(self, d, budget: _Budget, loaded: list) -> str | None:
         def load():
@@ -299,6 +306,70 @@ class JsccService:
         # 銘柄（i）は利用者の検討内容なのでログに出さない（数だけ）
         log("INFO", "jscc_served", status=payload.status, reason=payload.reason or None, keys=len(req.keys),
             periods=len(req.periods), queries=len(loaded), cache="miss" if loaded else "hit",
+            elapsed_ms=round((self.monotonic() - started) * 1000))
+        return payload
+
+    def _factor_day(self, d, run_id: str, n: int, budget: _Budget, loaded: list) -> jscc.FactorDay:
+        def load():
+            loaded.append("factor")
+            budget.check()
+            return jscc.factor_day(run_id, self.runner("jscc_factor", {"d": d}), n)
+
+        return self._factors.get((d, run_id), load)
+
+    def _index(self, d, budget: _Budget, loaded: list) -> tuple[list, list]:
+        """遡りの索引（#387）: d から JSCC_FACTOR_RANGE_DAYS 暦日の取り込みの記録と当て直しの表の質（配列を読まない
+        小さい 2 クエリ）。キー = d。d に succeeded があれば 600 秒、無ければ 60 秒（当日の取り込みを待つ）"""
+        d0 = max(jscc.MIN_DATE, d - timedelta(days=st.JSCC_FACTOR_RANGE_DAYS))
+
+        def load():
+            loaded.append("index")
+            budget.check()
+            runs = self.runner("jscc_runs_range", {"d0": d0, "d": d})
+            budget.check()
+            quality = self.runner("jscc_factor_quality", {"d0": d0, "d": d})
+            return runs, quality
+
+        def ttl_of(v):
+            today = [r for r in v[0] if r.get("business_date") == d]
+            return st.JSCC_RUNS_TTL_SECONDS if jscc.pick_run(today) else st.JSCC_RUNS_MISS_TTL_SECONDS
+
+        return self._factor_index.get(d, load, st.JSCC_RUNS_TTL_SECONDS, ttl_of=ttl_of)
+
+    def factors(self, req: jscc.FactorRequest) -> JsccPayload:
+        """/api/jscc_factors の中身（#387）。基準日の表が無い・要求の限月がそろわない・質が閾値を超えるときは、それより
+        前で直近の使える日（JSCC_FACTOR_MAX_BACK 営業日まで）に遡る（jscc.pick_factor_date。オーナーの承認）。
+        並び・パラメータは /api/jscc_scenarios と共用のキャッシュ、r・g の表は 1 日分を (日, run_id) でキャッシュ。
+        使える日が無ければ unavailable / no_recent"""
+        started = self.monotonic()
+        budget = _Budget(self.monotonic)
+        loaded: list = []
+        dropped = 0
+        back = None
+        try:
+            runs, quality = self._index(req.date, budget, loaded)
+            picked = jscc.pick_factor_date(req, runs, quality)
+            if picked is None:
+                payload = jscc_unavailable(req.date, "no_recent")
+            else:
+                d, run_id = picked
+                back = (req.date - d).days
+                s = self._set(d, run_id, budget, loaded)
+                day = self._factor_day(d, run_id, len(s.types), budget, loaded)
+                dropped = day.dropped
+                if not day.rows:
+                    self._factors.pop((d, run_id))
+                    payload = jscc_unavailable(req.date, "not_ready")
+                else:
+                    body, gz = _encode(jscc.factors_ok_json(req, s, day, d))
+                    payload = JsccPayload(body, gz, None, back=d != req.date)
+        except jscc.Inconsistent as e:
+            log("WARNING", "jscc_inconsistent", table=e.args[0] if e.args else None)
+            payload = jscc_unavailable(req.date, "inconsistent")
+        # 限月（p）は利用者の検討内容に近いのでログに出さない（数だけ）
+        log("INFO", "jscc_factors_served", status=payload.status, reason=payload.reason or None,
+            periods=len(req.periods), dropped=dropped, back_days=back, queries=len(loaded),
+            cache="miss" if loaded else "hit",
             elapsed_ms=round((self.monotonic() - started) * 1000))
         return payload
 
@@ -533,6 +604,9 @@ class FileChainService:
     def jscc_scenarios(self, req) -> Payload:
         return jscc_unavailable(req.date, "no_source")
 
+    def jscc_factors(self, req) -> Payload:
+        return jscc_unavailable(req.date, "no_source")
+
 
 class QuotesFileService:
     """DATA_SOURCE=quotes: 利用者が自分の API から書き出した中立の気配の一覧（QUOTES_FILE）と取引カレンダー
@@ -598,4 +672,7 @@ class QuotesFileService:
         raise Unavailable("quotes_source")
 
     def jscc_scenarios(self, req) -> Payload:
+        return jscc_unavailable(req.date, "no_source")
+
+    def jscc_factors(self, req) -> Payload:
         return jscc_unavailable(req.date, "no_source")

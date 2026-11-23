@@ -86,8 +86,12 @@ POSITION_SUMMARY = Obj({
 TAIL_TABLE = Obj({
     "days": DAYS,
     "base": Obj({"kind": Enum(("received", "paid")), "amount_yen": YEN}),
+    # margin_source（#387）: 行の必要証拠金の出どころ（jscc_refit = JSCC のシナリオの当て直し / estimate = 概算）。
+    # 古い JS は送らないので任意
     "rows": Arr(Obj({"shock_pct": PCT, "x": LEVEL, "sq_pnl_yen": YEN, "sq_ratio": RATIO, "scenario_pnl_yen": YEN,
-                     "scenario_ratio": RATIO, "margin_yen": YEN, "room_yen": YEN}), 10),
+                     "scenario_ratio": RATIO, "margin_yen": YEN, "room_yen": YEN,
+                     "margin_source": Nullable(Enum(("jscc", "jscc_refit", "estimate")))},
+                    frozenset({"margin_source"})), 10),
 })
 
 _MARGIN_STATE_FIELDS = {"x": LEVEL, "margin_yen": YEN, "requirement_yen": YEN, "nov_yen": YEN, "room_yen": YEN,
@@ -95,14 +99,18 @@ _MARGIN_STATE_FIELDS = {"x": LEVEL, "margin_yen": YEN, "requirement_yen": YEN, "
 MARGIN_STATE = Obj(_MARGIN_STATE_FIELDS)
 # 今（#382）: source = jscc（JSCC の VaR 証拠金の計算）/ estimate（概算）、jscc_business_date = JSCC の基準日（JSCC の
 # ときだけ。概算は null）。デプロイ前に開いた画面（古い JS）は送らないので任意
-MARGIN_NOW = Obj({**_MARGIN_STATE_FIELDS, "source": Enum(("jscc", "estimate")), "jscc_business_date": Nullable(DATE)},
+MARGIN_NOW = Obj({**_MARGIN_STATE_FIELDS, "source": Enum(("jscc", "jscc_refit", "estimate")),
+                  "jscc_business_date": Nullable(DATE)},
                  frozenset({"source", "jscc_business_date"}))
+# シナリオの点（#387）: 今と同じ形。source = jscc_refit（JSCC のシナリオの当て直し = 推定）のとき jscc_business_date は
+# 当て直したシナリオの基準日。古い JS は送らないので任意
+MARGIN_POINT = MARGIN_NOW
 MARGIN_SUMMARY = Obj({
     "capital_yen": YEN,
     "params": Obj({"range_pct": PCT, "iv_up_pct": PCT, "iv_down_pct": PCT, "factor_pct": PCT,
                    "ignore_long_options": Bool()}),
     "now": MARGIN_NOW,
-    "point": MARGIN_STATE,
+    "point": MARGIN_POINT,
     "call_levels_x": Arr(LEVEL, 40),
 })
 
@@ -532,11 +540,17 @@ REGISTRY: Registry = {t.name: t for t in (
           "診断では最初の <context> の precomputed に入っている", POSITION_SUMMARY),
     _spec("tail_table",
           "急落のテール表（画面のテール表と同じ）。原資産 −5・−10・−20・−30・−40% の行ごとに、SQ（満期）の損益と、"
-          "今のシナリオの日数・IV での損益（円）、受取（または掛け金）に対する倍率、資金があれば必要証拠金と余力（円）",
+          "今のシナリオの日数・IV での損益（円）、受取（または掛け金）に対する倍率、資金があれば必要証拠金と"
+          "余力（円）と"
+          "その出どころ（margin_source = jscc_refit は JSCC のシナリオの当て直し、estimate は概算）",
           TAIL_TABLE),
     _spec("margin_summary",
           "証拠金（画面の証拠金のタイルと同じ）。今は JSCC の VaR 証拠金の計算（now.source = jscc。基準日は"
-          " now.jscc_business_date = 前営業日の清算値で 1 日固定）で、JSCC のデータが無いときとシナリオの点は概算"
+          " now.jscc_business_date = 前営業日の清算値で 1 日固定）。基準日の JSCC のデータが使えないとき（平日"
+          "17:00〜18:30 など）の今は now.source = jscc_refit で、直近の使える日（now.jscc_business_date。基準日より前も"
+          "ある。10 営業日まで）の JSCC のシナリオで今を推定した値（正確な値ではない）。シナリオの点と追証の水準は、"
+          "その日の JSCC のシナリオを"
+          "動かした先に当て直した推定（point.source = jscc_refit）。JSCC のデータが無いときは概算"
           "（source = estimate。格子の最悪値）。今とシナリオの点の必要証拠金・所要額・NOV・"
           "余力（円。資金が未設定なら null）・何倍まで建てられるか、"
           "追証の水準（余力が 0 になる原資産。資金があるとき）、"

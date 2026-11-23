@@ -27,7 +27,6 @@
  */
 
 import { type JsccData, type JsccPosition, jsccKeyOfLeg, jsccVarMargin } from './jsccMargin';
-import { findBreakevens } from './pnl';
 import {
   legSigma,
   legValue,
@@ -114,9 +113,12 @@ export interface MarginResult {
   settledCash: number;
   /** 損失が最大になった格子の点（M の足が無い・JSCC の計算なら null） */
   worst: MarginWorst | null;
-  /** 必要証拠金の出どころ: grid = 格子の概算、jscc = JSCC の VaR 証拠金額（今だけ。#382） */
-  source: 'grid' | 'jscc';
-  /** JSCC の計算の内訳（source = jscc のときだけ） */
+  /**
+   * 必要証拠金の出どころ: grid = 格子の概算、jscc = JSCC の VaR 証拠金額（今だけ。#382）、jscc_refit = JSCC のシナリオを
+   * 状態 S に当て直した VaR 証拠金額（シナリオの点・テール・追証の線。model/jsccRefit.ts。#387）
+   */
+  source: 'grid' | 'jscc' | 'jscc_refit';
+  /** JSCC の計算の内訳（source = jscc / jscc_refit のとき。jscc_refit の novSettle は状態 S の NOV） */
   jscc?: MarginJsccDetail;
 }
 
@@ -132,7 +134,7 @@ export interface MarginJsccDetail {
 }
 
 /** M の足・NOV・先物の評価損益・清算額（格子と JSCC の両方で使う最初のループ） */
-interface MarginLegs {
+export interface MarginLegs {
   /** 足ごとに M に入れるか（生きていて、オンなら買いの OP を除く） */
   inMargin: boolean[];
   /** Σ_M 符号 × 枚数 × 乗数 × 評価価格（状態 S） */
@@ -143,7 +145,7 @@ interface MarginLegs {
   anyInMargin: boolean;
 }
 
-function marginLegs(
+export function marginLegs(
   legs: readonly PreparedLeg[],
   state: MarginState,
   ctx: MarketContext,
@@ -430,6 +432,101 @@ function liveFuturesPnl(
 }
 
 /**
+ * 追証の線の評価（状態の原資産 x → 余力）。refine は符号の変わる区間 [xa, xb]（両端の値 fa・fb は room で求めた値）の
+ * 二分法を速く回す版（当て直しの裾の候補の絞り込み。#387）で、根（1 円に丸める前）か、使えなければ null（room で
+ * 二分法をやり直す）を返す生成器。1 回の yield = 状態 1 つの評価（画面が切れごとに回す単位）
+ */
+export interface RoomEvaluator {
+  room(x: number): number;
+  refine?(xa: number, xb: number, fa: number, fb: number): Generator<void, number | null, void>;
+}
+
+/** findBreakevens（model/pnl.ts）と同じ囲い方・二分法の生成器版。評価 1 回ごとに yield する */
+export function* breakevenSteps(
+  ev: RoomEvaluator,
+  lo: number,
+  hi: number,
+  n: number,
+): Generator<void, number[], void> {
+  const out: number[] = [];
+  const step = (hi - lo) / n;
+  let xa = lo;
+  let fa = ev.room(xa);
+  yield;
+  if (fa === 0) out.push(xa);
+  for (let i = 1; i <= n; i++) {
+    const xb = i === n ? hi : lo + step * i;
+    const fb = ev.room(xb);
+    yield;
+    if (fb === 0) out.push(xb);
+    else if (fa * fb < 0) {
+      const fast = ev.refine ? yield* ev.refine(xa, xb, fa, fb) : null;
+      if (fast !== null) out.push(fast);
+      else {
+        let a = xa;
+        let b = xb;
+        let va = fa;
+        while (b - a > 0.5) {
+          const m = 0.5 * (a + b);
+          const vm = ev.room(m);
+          yield;
+          if (vm === 0) {
+            a = m;
+            b = m;
+            break;
+          }
+          if (va * vm < 0) b = m;
+          else {
+            a = m;
+            va = vm;
+          }
+        }
+        out.push(0.5 * (a + b));
+      }
+    }
+    xa = xb;
+    fa = fb;
+  }
+  return [...new Set(out.map((x) => Math.round(x)))];
+}
+
+/** 生成器を最後まで回して値を返す（同期で使う所: AI のツール・テスト） */
+export function drainSteps<T>(g: Generator<void, T, void>): T {
+  for (;;) {
+    const r = g.next();
+    if (r.done) return r.value;
+  }
+}
+
+/** 格子の概算の余力（状態 x。ΔX 以外のシナリオはそのまま） */
+export function gridRoomEvaluator(
+  legs: readonly PreparedLeg[],
+  scenario: Scenario,
+  ctx: MarketContext,
+  settings: ModelSettings,
+  params: MarginParams,
+  horizonDays: number,
+  marked: boolean,
+  capital: number,
+  premium: PremiumSummary,
+): RoomEvaluator {
+  return {
+    room: (x) =>
+      marginRoom(
+        capital,
+        premium,
+        marginOn(
+          legs,
+          { x, scenario: { ...scenario, dX: x - ctx.x0 }, horizonDays, marked },
+          ctx,
+          settings,
+          params,
+        ),
+      ),
+  };
+}
+
+/**
  * 追証の線: シナリオ（ΔX 以外はそのまま）で X だけを動かしたとき余力 A(X) = 0 になる X（1 円に丸め、
  * 昇順）。range を samples 等分して符号の変化を囲い二分法（findBreakevens と同じ作り）。
  * 値洗いをまたがない（marked = false）とき、余力は生きている先物の評価損益の合計 = 0 の X で折れる（評価益を
@@ -452,20 +549,38 @@ export function marginCallLevels(
   samples: number = MARGIN_LINE_SAMPLES,
 ): number[] {
   if (!Number.isFinite(capital) || capital <= 0) return [];
-  const f = (x: number) =>
-    marginRoom(
-      capital,
-      premium,
-      marginOn(
-        legs,
-        { x, scenario: { ...scenario, dX: x - ctx.x0 }, horizonDays, marked },
-        ctx,
-        settings,
-        params,
-      ),
-    );
+  const ev = gridRoomEvaluator(
+    legs,
+    scenario,
+    ctx,
+    settings,
+    params,
+    horizonDays,
+    marked,
+    capital,
+    premium,
+  );
+  return drainSteps(
+    marginCallLevelsSteps(legs, scenario, ctx, settings, marked, ev, range, samples),
+  );
+}
+
+/**
+ * marginCallLevels の生成器版（余力の評価 ev を外から渡す = 格子 / JSCC の当て直し。#387）。評価 1 回ごとに yield。
+ * 折れ点の分け方（値洗いをまたがないとき）は marginCallLevels と同じ。資金の検査は呼び出し側
+ */
+export function* marginCallLevelsSteps(
+  legs: readonly PreparedLeg[],
+  scenario: Scenario,
+  ctx: MarketContext,
+  settings: ModelSettings,
+  marked: boolean,
+  ev: RoomEvaluator,
+  range: { lo: number; hi: number },
+  samples: number = MARGIN_LINE_SAMPLES,
+): Generator<void, number[], void> {
   const { lo, hi } = range;
-  if (marked) return findBreakevens(f, lo, hi, samples).sort((a, b) => a - b);
+  if (marked) return (yield* breakevenSteps(ev, lo, hi, samples)).sort((a, b) => a - b);
   const g = (x: number) => liveFuturesPnl(legs, x, scenario, ctx, settings);
   const gl = g(lo);
   const gh = g(hi);
@@ -480,9 +595,12 @@ export function marginCallLevels(
     if (kink > lo && kink < hi) {
       const n1 = Math.max(1, Math.round((samples * (kink - lo)) / (hi - lo)));
       const n2 = Math.max(1, samples - n1);
-      const xs = [...findBreakevens(f, lo, kink, n1), ...findBreakevens(f, kink, hi, n2)];
+      const xs = [
+        ...(yield* breakevenSteps(ev, lo, kink, n1)),
+        ...(yield* breakevenSteps(ev, kink, hi, n2)),
+      ];
       return [...new Set(xs)].sort((a, b) => a - b);
     }
   }
-  return findBreakevens(f, lo, hi, samples).sort((a, b) => a - b);
+  return (yield* breakevenSteps(ev, lo, hi, samples)).sort((a, b) => a - b);
 }

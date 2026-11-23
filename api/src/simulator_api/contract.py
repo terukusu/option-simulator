@@ -23,6 +23,9 @@ class Relation:
     required: frozenset[str]  # コードが非 NULL を前提にする列（schema で REQUIRED であること）
     # 配列の列（schema で REPEATED であること。#382 の pnl・scenarios）。それ以外の列は REPEATED でないこと
     repeated: frozenset[str] = field(default_factory=frozenset)
+    # optionchan の固定コミットにまだ無い表（依頼中。#387 の jscc_factor = optionchan #168）。schema との照合を飛ばす。
+    # optionchan の PR がマージされたら固定コミットを上げて False にする（tests/test_contract.py）
+    pending: bool = False
 
 
 RELATIONS = {
@@ -191,6 +194,43 @@ RELATIONS = {
         required=frozenset({"jscc_run_id", "product_code", "contract_type", "contract_period_code",
                             "contract_size", "aggregation_group"}),
         repeated=frozenset({"pnl"}),
+    ),
+    # 遡り（#387）: 基準日から JSCC_FACTOR_RANGE_DAYS 暦日の取り込みの記録（日ごとの succeeded の run_id）
+    "jscc_runs_range": Relation(
+        name="jscc_ingest_runs",
+        schema_file="tokyo/jscc_ingest_runs.json",
+        columns=(("business_date", "DATE"), ("jscc_run_id", "STRING"), ("status", "STRING"),
+                 ("finished_at", "TIMESTAMP")),
+        required=frozenset({"business_date", "jscc_run_id", "status", "finished_at"}),
+    ),
+    # 遡り（#387）: 同じ範囲の当て直しの表の日・限月ごとの推定の質（配列の列を読まない）
+    "jscc_factor_quality": Relation(
+        name="jscc_var_scenario_factor",
+        schema_file="tokyo/jscc_var_scenario_factor.json",
+        columns=(("business_date", "DATE"), ("jscc_run_id", "STRING"), ("product_code", "STRING"),
+                 ("contract_period_code", "STRING"), ("check_median_rel", "FLOAT")),
+        required=frozenset({"business_date", "jscc_run_id", "product_code", "contract_period_code"}),
+    ),
+    # 当て直しの r・g（#387。optionchan #168 が jscc_var_scenario から毎日当てはめる派生の表。
+    # 1 行 = 日 × 商品 × 限月）。r は限月の先物の対数リターン（長さ = シナリオの本数。添字は pnl と同じ）、
+    # g は 13 節点の IV の対数変化（13 × 本数。シナリオごとに 13 個ずつ）、nodes は z の節点。先物だけの限月の行は
+    # g・nodes が空。check_median_rel / check_p90_rel は基準の状態で当て直した 1 枚の売りの ES と JSCC の値の相対誤差
+    # （比。中央値・90 パーセンタイル）で、画面が限月ごとの推定の質として出し、中央値が大きい限月は格子に戻す
+    "jscc_factor": Relation(
+        name="jscc_var_scenario_factor",
+        schema_file="tokyo/jscc_var_scenario_factor.json",
+        columns=(
+            ("jscc_run_id", "STRING"),
+            ("product_code", "STRING"),
+            ("contract_period_code", "STRING"),
+            ("nodes", "FLOAT"),
+            ("r", "FLOAT"),
+            ("g", "FLOAT"),
+            ("check_median_rel", "FLOAT"),
+            ("check_p90_rel", "FLOAT"),
+        ),
+        required=frozenset({"jscc_run_id", "product_code", "contract_period_code"}),
+        repeated=frozenset({"nodes", "r", "g"}),
     ),
 }
 

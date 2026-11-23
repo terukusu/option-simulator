@@ -10,11 +10,17 @@ import {
   JSCC_MAX_PERIODS,
   jsccBaseDate,
   jsccChunks,
+  jsccFactorChunks,
+  jsccFactorPeriods,
+  jsccFactorsUrl,
   jsccRequestKeys,
   jsccUrl,
+  loadJsccFactors,
   loadJsccScenarios,
+  mergeJsccFactors,
   mergeJsccResponses,
   tradingDayOf,
+  validateJsccFactorsJson,
   validateJsccJson,
 } from '../../data';
 import type { Leg } from '../../model';
@@ -293,5 +299,252 @@ describe('dev の合成の応答（scripts/devFixtures.mjs）', () => {
     expect(jsccQuery('/fixtures/jscc_scenarios?date=2026-10-13&i=bad')).toBeNull();
     // 合成の板 latest の時刻の基準日 = SYNTH_JSCC_DATE（dev は下限を見ない）
     expect(jsccBaseDate(jstInstant('2026-10-13', 21, 31), new Set(), null)).toBe(SYNTH_JSCC_DATE);
+  });
+});
+
+describe('#387 当て直しの r・g の応答（validateJsccFactorsJson・loadJsccFactors）', () => {
+  const NODES = [-5, -4, -3, -2, -1.5, -1, -0.5, 0, 0.5, 1, 1.5, 2, 3];
+  const n = TYPES.length;
+  const factorsJson = (over: Record<string, unknown> = {}) => ({
+    schema_version: 1,
+    status: 'ok',
+    business_date: D,
+    requested_date: D,
+    confidence_level: 97.5,
+    stress_scenario_number: 1,
+    scenario_types: TYPES,
+    nodes: NODES,
+    scale: { r: 1_000_000, g: 10_000 },
+    rows: [
+      {
+        key: 'NK225E-202612',
+        r: [10000, -20000, 0, 5, -80000],
+        g: Array(13 * n).fill(1500),
+        check_median_rel: 0.002,
+        check_p90_rel: 0.15,
+      },
+      {
+        key: 'NK225F-202703',
+        r: [1, 2, 3, 4, 5],
+        g: null,
+        check_median_rel: null,
+        check_p90_rel: null,
+      },
+    ],
+    missing: ['202706'],
+    ...over,
+  });
+  const P = ['202612', '202703', '202706'];
+
+  it('ok は整数を刻みで割った r・g（g の無い行は null）、missing はそのまま', () => {
+    const r = validateJsccFactorsJson(factorsJson(), D, P);
+    expect(r.ok).toBe(true);
+    if (!r.ok || r.value.status !== 'ok') return;
+    const row = r.value.data.rows.get('NK225E-202612');
+    expect(Array.from(row?.r ?? [])).toEqual([0.01, -0.02, 0, 0.000005, -0.08]);
+    expect(row?.g?.[0]).toBeCloseTo(0.15, 12);
+    expect(r.value.data.rows.get('NK225F-202703')?.g).toBeNull();
+    expect(row?.checkMedianRel).toBe(0.002);
+    expect(row?.checkP90Rel).toBe(0.15);
+    expect(r.value.data.rows.get('NK225F-202703')?.checkMedianRel).toBeNull();
+    expect(r.value.data.set).toEqual({
+      isHist: [true, true, true, true, false],
+      confidence: 97.5,
+      nStress: 1,
+    });
+    expect(r.value.missing).toEqual(['202706']);
+    expect(r.value.data.nodes).toEqual(NODES);
+  });
+
+  it.each([
+    ['刻みが違う', { scale: { r: 1000, g: 10_000 } }],
+    ['節点が 12 個', { nodes: NODES.slice(1) }],
+    ['節点が昇順でない', { nodes: [...NODES.slice(0, 12), 2] }],
+    ['要求していない限月の行', { rows: [{ key: 'NK225E-202709', r: [0, 0, 0, 0, 0], g: null }] }],
+    ['r の長さ', { rows: [{ key: 'NK225E-202612', r: [0, 0], g: null }] }],
+    ['r の範囲', { rows: [{ key: 'NK225E-202612', r: [2_000_000, 0, 0, 0, 0], g: null }] }],
+    ['g の長さ', { rows: [{ key: 'NK225E-202612', r: [0, 0, 0, 0, 0], g: [1] }] }],
+    [
+      'g が整数でない',
+      { rows: [{ key: 'NK225E-202612', r: [0, 0, 0, 0, 0], g: Array(13 * n).fill(0.5) }] },
+    ],
+    [
+      '質が負',
+      { rows: [{ key: 'NK225E-202612', r: [0, 0, 0, 0, 0], g: null, check_median_rel: -0.1 }] },
+    ],
+    [
+      '質が文字列',
+      { rows: [{ key: 'NK225E-202612', r: [0, 0, 0, 0, 0], g: null, check_p90_rel: 'x' }] },
+    ],
+    ['週次の行', { rows: [{ key: 'NK225W1-202612', r: [0, 0, 0, 0, 0], g: null }] }],
+    ['重複', { rows: [factorsJson().rows[0], factorsJson().rows[0]] }],
+    ['使った日が基準日より後', { business_date: '2026-11-21' }],
+    ['使った日が遡る範囲より前', { business_date: '2026-10-29' }],
+    ['要求の基準日が違う', { requested_date: '2026-11-19' }],
+    ['missing が要求していない限月', { missing: ['202901'] }],
+  ])('不正: %s', (_name, over) => {
+    expect(validateJsccFactorsJson(factorsJson(over), D, P).ok).toBe(false);
+  });
+
+  it('遡った日（基準日より前の直近の使える日。#387）は business_date がその日', () => {
+    const r = validateJsccFactorsJson(factorsJson({ business_date: '2026-11-13' }), D, P);
+    expect(r.ok && r.value.status === 'ok' && r.value.data.businessDate).toBe('2026-11-13');
+  });
+
+  it('unavailable は理由（inconsistent は not_ready と同じ、no_recent はそのまま）', () => {
+    for (const [reason, want] of [
+      ['not_ready', 'not_ready'],
+      ['inconsistent', 'not_ready'],
+      ['no_source', 'no_source'],
+      ['no_recent', 'no_recent'],
+    ] as const) {
+      const r = validateJsccFactorsJson(
+        { schema_version: 1, status: 'unavailable', reason, business_date: D },
+        D,
+        P,
+      );
+      expect(r).toEqual({ ok: true, value: { status: 'unavailable', reason: want } });
+    }
+  });
+
+  it('要求する限月: 足の OP の限月と先物の限月（基準日の月より前は入れない・昇順・重複なし）', () => {
+    const legs = [
+      {
+        kind: 'option',
+        product: 'op_large',
+        type: 'put',
+        expiry: '2027-03',
+        strike: 1,
+        side: 'sell',
+        qty: 1,
+        entry: 1,
+      },
+      {
+        kind: 'option',
+        product: 'op_large',
+        type: 'put',
+        expiry: '2026-12',
+        strike: 1,
+        side: 'sell',
+        qty: 1,
+        entry: 1,
+      },
+      { kind: 'future', product: 'fut_micro', contract: '2026-12', side: 'buy', qty: 1, entry: 1 },
+      {
+        kind: 'option',
+        product: 'op_large',
+        type: 'put',
+        expiry: '2026-10',
+        strike: 1,
+        side: 'sell',
+        qty: 1,
+        entry: 1,
+      },
+      {
+        kind: 'option',
+        product: 'op_large',
+        type: 'put',
+        expiry: 'M1',
+        strike: 1,
+        side: 'sell',
+        qty: 1,
+        entry: 1,
+      },
+    ] as Leg[];
+    expect(jsccFactorPeriods(legs, D, HOL)).toEqual(['202612', '202703']);
+    // B1: 基準日の月で SQ を過ぎた限月（2026-11 の SQ = 11/13 ≤ 基準日 11/20）は入れない。SQ 当日も入れない（保守的に）
+    const nov: Leg = { ...(legs[1] as Leg), expiry: '2026-11' } as Leg;
+    expect(jsccFactorPeriods([nov, ...legs], D, HOL)).toEqual(['202612', '202703']);
+    expect(jsccFactorPeriods([nov], '2026-11-12', HOL)).toEqual(['202611']);
+    expect(jsccFactorPeriods([nov], '2026-11-13', HOL)).toEqual([]);
+    const many = Array.from(
+      { length: 26 },
+      (_, i) => `${2027 + Math.floor(i / 12)}${String((i % 12) + 1).padStart(2, '0')}`,
+    );
+    expect(jsccFactorChunks(many).map((c) => c.length)).toEqual([24, 2]);
+    expect(jsccFactorsUrl('/api/jscc_factors', D, ['202612', '202703'])).toBe(
+      `/api/jscc_factors?date=${D}&p=202612&p=202703`,
+    );
+  });
+
+  it('読み込み（既定の読み先・分けて読んで 1 つに・壊れた応答は ChainLoadError）', async () => {
+    const urls: string[] = [];
+    const f = async (url: string) => {
+      urls.push(url);
+      return {
+        ok: true,
+        status: 200,
+        text: async () => JSON.stringify(factorsJson({ rows: [], missing: [] })),
+      };
+    };
+    const r = await loadJsccFactors(D, ['202612'], { fetch: f });
+    expect(r.status).toBe('ok');
+    expect(urls).toEqual([`/api/jscc_factors?date=${D}&p=202612`]);
+    const bad = async () => ({ ok: true, status: 200, text: async () => '{"schema_version":1}' });
+    await expect(loadJsccFactors(D, ['202612'], { fetch: bad })).rejects.toBeInstanceOf(
+      ChainLoadError,
+    );
+    const ok = mergeJsccFactors([]);
+    expect(ok).toBeNull();
+    // N3: 限月が上限を超えて分けて読むときは、2 回目以降を 1 回目の日（at）にそろえる
+    const many = Array.from(
+      { length: 26 },
+      (_, i) => `${2027 + Math.floor(i / 12)}${String((i % 12) + 1).padStart(2, '0')}`,
+    );
+    const urls2: string[] = [];
+    const f2 = async (url: string) => {
+      urls2.push(url);
+      return {
+        ok: true,
+        status: 200,
+        text: async () =>
+          JSON.stringify(factorsJson({ business_date: '2026-11-19', rows: [], missing: [] })),
+      };
+    };
+    const r2 = await loadJsccFactors(D, many, { fetch: f2 });
+    expect(r2.status === 'ok' && r2.data.businessDate).toBe('2026-11-19');
+    expect(urls2).toHaveLength(2);
+    expect(urls2[0]).not.toContain('at=');
+    expect(urls2[1]).toContain('&at=2026-11-19');
+  });
+
+  it('dev の合成の応答: latest の基準日は検証に通り、r = ln(1 + 変化率)・g は節点で同じ（平行）、後の日は遡る・前の日は no_recent', async () => {
+    const { SYNTH_JSCC_DATE, jsccFactorQuery, synthJsccFactors } = await import(
+      '../../scripts/devFixtures.mjs'
+    );
+    const periods = ['202609', '202611', '202612'];
+    const r = validateJsccFactorsJson(
+      synthJsccFactors(SYNTH_JSCC_DATE, periods),
+      SYNTH_JSCC_DATE,
+      periods,
+    );
+    expect(r.ok).toBe(true);
+    if (!r.ok || r.value.status !== 'ok') return;
+    expect(r.value.data.set.isHist.length).toBe(1422);
+    expect([...r.value.data.rows.keys()].sort()).toEqual([
+      'NK225E-202611',
+      'NK225E-202612',
+      'NK225F-202612',
+    ]);
+    expect(r.value.missing).toEqual(['202609']);
+    const g = r.value.data.rows.get('NK225E-202611')?.g as Float64Array;
+    expect(g[13 * 5]).toBe(g[13 * 5 + 12]);
+    expect(
+      validateJsccFactorsJson(synthJsccFactors('2026-10-12', periods), '2026-10-12', periods),
+    ).toEqual({ ok: true, value: { status: 'unavailable', reason: 'no_recent' } });
+    // 基準日より後の要求は latest の日に遡る（#387）
+    const back = validateJsccFactorsJson(
+      synthJsccFactors('2026-10-16', periods),
+      '2026-10-16',
+      periods,
+    );
+    expect(back.ok && back.value.status === 'ok' && back.value.data.businessDate).toBe(
+      SYNTH_JSCC_DATE,
+    );
+    expect(jsccFactorQuery(`/fixtures/jscc_factors?date=${SYNTH_JSCC_DATE}&p=202612`)).toEqual({
+      date: SYNTH_JSCC_DATE,
+      periods: ['202612'],
+    });
+    expect(jsccFactorQuery('/fixtures/jscc_factors?date=2026-10-13&p=2026-12')).toBeNull();
   });
 });
