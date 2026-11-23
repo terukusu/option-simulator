@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest';
+import { type JsccPosition, jsccVarMargin } from '../../model/jsccMargin';
 import { expiryPnlFn, expiryProfile, tailTable } from '../../model/pnl';
 import { evaluatePosition, preparePosition, theoreticalPnl } from '../../model/position';
 import { type Scenario, ZERO_SCENARIO } from '../../model/scenario';
 import { makeMarket } from '../support/market';
 import { BUDGET_MS, expectWithinBudget } from '../support/perf';
 import { PERF_LEGS } from '../support/perfPosition';
+import { realisticSet, rng, synthFuture, synthOption } from '../support/synthJscc';
 
 /**
  * AC8 の計算部分: 4 スライダーの 1 回の描き直しに要る計算（横軸 1 画素 1 点 = 1,000 点 × 足 10 本の
@@ -39,6 +41,32 @@ describe('性能（AC8 の計算部分）', () => {
   it(`1 回の描き直しの計算が ${BUDGET_MS} ms 以内（30 回の最小値）`, () => {
     // 他のテストファイルと並列に走りうるので、割り込みの影響を除くため最小値で判定する（中央値は参考に表示）
     expectWithinBudget('AC8 計算部分', redraw, {
+      warmup: 20,
+      runs: 30,
+      after: (v) => expect(Number.isFinite(v)).toBe(true),
+    });
+  });
+});
+
+/**
+ * #382 AC7: 今の必要証拠金の JSCC の計算（足 30 本 × シナリオ 1,422 本の和 + 並べ替え 1 回 + BigInt の和）。
+ * 描画の 16 ms の経路では作り直さない（memo は足・板・設定・JSCC の応答だけ）が、足の編集 1 回で 1 回走るので同じ予算で見る
+ */
+describe('性能（#382 今の JSCC の計算）', () => {
+  const set = realisticSet();
+  const n = set.isHist.length;
+  const r = rng(30);
+  const positions: JsccPosition[] = Array.from({ length: 30 }, (_, i) =>
+    i % 5 === 4
+      ? { inst: synthFuture(n, 100, r), qty: (i % 2 === 0 ? 1 : -1) * (1 + (i % 3)), option: false }
+      : {
+          inst: synthOption(n, 50 + i * 20, r),
+          qty: (i % 2 === 0 ? -1 : 1) * (1 + (i % 4)),
+          option: true,
+        },
+  );
+  it(`足 30 本の VaR 証拠金額が ${BUDGET_MS} ms 以内（30 回の最小値）`, () => {
+    expectWithinBudget('#382 JSCC 足 30 本', () => jsccVarMargin(positions, set).varMargin, {
       warmup: 20,
       runs: 30,
       after: (v) => expect(Number.isFinite(v)).toBe(true),

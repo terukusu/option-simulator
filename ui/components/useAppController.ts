@@ -12,6 +12,8 @@ import {
   type Chain,
   type ChainJson,
   ChainLoadError,
+  jsccBaseDate,
+  jsccRequestKeys,
   monthOf,
 } from '../../data';
 import {
@@ -43,6 +45,8 @@ import {
   describeLoadError,
   fixtureUrl,
   initialSource,
+  JSCC_FIXTURE_ENDPOINT,
+  jsccEndpointOf,
   loadBoardFromApi,
   loadBoardFromUrl,
   loadCalendarFromApi,
@@ -90,8 +94,8 @@ import {
   type MarginView,
   marginNow,
   marginParamsKeep,
-  marginPoint,
   marginPointAt,
+  marginPointOrNow,
   marginTail,
 } from '../view/margin';
 import { metricsModel } from '../view/metrics';
@@ -121,6 +125,7 @@ import { clampDXInput, evalTimeTargets } from '../view/scenario';
 import { scenarioAtmMark } from '../view/scenarioAtm';
 import type { SmileEffBase } from '../view/smileEff';
 import { openInNewTabError, tabsModel } from '../view/tabs';
+import { useJsccScenarios } from './useJsccScenarios';
 import type { MarginLineInput } from './useMarginLine';
 
 /** dev サーバーだけが配る合成の板（本番のビルドではこの分岐ごと消える） */
@@ -619,10 +624,39 @@ export function useAppController(boot: Boot = NO_BOOT, margin: MarginPrefs = DEF
     () => ({ ...ZERO_SCENARIO, beta, ivDynamics, ivShift }),
     [beta, ivDynamics, ivShift],
   );
+  // 今の必要証拠金の JSCC の VaR パラメータ（#382）: 基準日（板の時刻の取引日の前営業日）と足の銘柄が変わったときだけ
+  // 読む（自動のポーリングはしない）。dev の合成の板・ファイルは dev だけ /fixtures/jscc_scenarios
+  const jsccEndpoint = jsccEndpointOf(import.meta.env.DEV, state.sourceLabel);
+  const jsccDate = useMemo(
+    () =>
+      chain
+        ? jsccBaseDate(
+            chain.snapshotAt,
+            holidays,
+            // dev の合成の応答だけ下限を見ない（本番のビルドでは比較ごと消える）
+            import.meta.env.DEV && jsccEndpoint === JSCC_FIXTURE_ENDPOINT ? null : undefined,
+          )
+        : null,
+    [chain, holidays, jsccEndpoint],
+  );
+  const jsccKeys = useMemo(
+    () =>
+      jsccDate
+        ? jsccRequestKeys(
+            state.legs.map((l) => l.leg),
+            jsccDate,
+          )
+        : [],
+    [jsccDate, state.legs],
+  );
+  // 板の読み直し（[最新]・自動の読み込み。取得時刻）で、期限切れの not_ready・失敗を読み直す（#382 レビュー N1）
+  const jsccReload = state.fetchedAt ?? chain?.snapshotAt ?? null;
+  const jscc = useJsccScenarios(jsccDate, jsccKeys, jsccEndpoint, jsccReload);
   // 今・テールは全域（ΔX で広がる）を使わないので板の基礎（pnlBoard）で memo する（ΔX が全域の格子を跨いでも作り直さない）
   const marginNowCalc = useMemo(
-    () => (pnlBoard ? marginNow(pnlBoard, nowScenario, marginParams, capital, holidays) : null),
-    [pnlBoard, nowScenario, marginParams, capital, holidays],
+    () =>
+      pnlBoard ? marginNow(pnlBoard, nowScenario, marginParams, capital, holidays, jscc) : null,
+    [pnlBoard, nowScenario, marginParams, capital, holidays, jscc],
   );
   const marginTailRows = useMemo(
     () => (pnlBoard ? marginTail(pnlBoard, lineScenario, marginParams, capital, holidays) : []),
@@ -660,7 +694,15 @@ export function useAppController(boot: Boot = NO_BOOT, margin: MarginPrefs = DEF
             capital,
             params: marginParams,
             now: marginNowCalc,
-            point: marginPoint(pnlBase, state.scenario, marginParams, capital, holidays),
+            // 今と同じ点は今の結果（JSCC の計算）をそのまま（#382）
+            point: marginPointOrNow(
+              pnlBase,
+              state.scenario,
+              marginParams,
+              capital,
+              holidays,
+              marginNowCalc,
+            ),
             at: marginPointAt(pnlBase, state.scenario),
             tail: marginTailRows,
           }
@@ -1042,6 +1084,10 @@ export function useAppController(boot: Boot = NO_BOOT, margin: MarginPrefs = DEF
     nowScenario,
     marginParams,
     capital,
+    jscc,
+    jsccDate,
+    jsccEndpoint,
+    jsccReload,
     onFixture,
     onFile,
     onLatest,

@@ -1,8 +1,9 @@
 /**
- * 証拠金の概算（格子の最悪値・掛け目）。設計 docs/design.md 5.10。
+ * 証拠金（今は JSCC の計算・ほかは格子の概算）。設計 docs/design.md 5.10。
  *
- * JSCC の VaR 証拠金（HS-ES）の再現ではなく、証券会社の建てる前の必要委託証拠金に近い物差しの概算
- * （既定は 6 点の答え合わせで決めた。#150）:
+ * 今（シナリオ 0）の必要証拠金は JSCC の VaR 証拠金の計算（marginNowJscc・jsccEligibility。model/jsccMargin.ts。#382・
+ * ADR-0013）。JSCC のデータが無いときの今と、シナリオの点・テール・追証の線などは、証券会社の建てる前の必要委託証拠金に
+ * 近い物差しの格子の概算（既定は 6 点の答え合わせで決めた。#150）:
  *
  * - 状態 S = (x_S, シナリオ)。格子 = 原資産 x_S × (1 + s·R)（s ∈ MARGIN_PRICE_STEPS）
  *   × IV の倍率 {1 + ivUp, 1, 1 − ivDown} × 経過 {0, h}（h = S から 2 営業日後までの暦日）
@@ -25,6 +26,7 @@
  * F が決まらない足（no_forward）は入れない。h・休業日・現在時刻は呼び出し側が決めて渡す。
  */
 
+import { type JsccData, type JsccPosition, jsccKeyOfLeg, jsccVarMargin } from './jsccMargin';
 import { findBreakevens } from './pnl';
 import {
   legSigma,
@@ -60,7 +62,9 @@ export const DEFAULT_MARGIN_PARAMS: MarginParams = {
   ivUp: 0.5,
   ivDown: 0.25,
   factor: 1,
-  ignoreLongOptions: true,
+  // 既定は全足で相殺する（今の必要証拠金を JSCC の計算にしたので JSCC と同じ形。#382。証券会社によっては
+  // 買いの OP で減らさない扱いがあり、設定でオンにできる）
+  ignoreLongOptions: false,
 };
 
 export const MARGIN_PRICE_STEPS = [-1, -0.5, 0, 0.5, 1] as const;
@@ -108,21 +112,46 @@ export interface MarginResult {
   futuresMarked: boolean;
   /** S で SQ を過ぎた足の清算額（円） */
   settledCash: number;
-  /** 損失が最大になった格子の点（M の足が無ければ null） */
+  /** 損失が最大になった格子の点（M の足が無い・JSCC の計算なら null） */
   worst: MarginWorst | null;
+  /** 必要証拠金の出どころ: grid = 格子の概算、jscc = JSCC の VaR 証拠金額（今だけ。#382） */
+  source: 'grid' | 'jscc';
+  /** JSCC の計算の内訳（source = jscc のときだけ） */
+  jscc?: MarginJsccDetail;
 }
 
-function marginOn(
+export interface MarginJsccDetail {
+  /** JSCC の営業日（前営業日の清算値で 1 日固定の、その日。YYYY-MM-DD） */
+  businessDate: string;
+  /** VaR 証拠金額（円）= max(0, ES, ceil(−NOV_清算)) */
+  varMargin: number;
+  /** 符号つきの ES（円） */
+  esSigned: number;
+  /** NOV_清算（円。清算値段の NOV） */
+  novSettle: number;
+}
+
+/** M の足・NOV・先物の評価損益・清算額（格子と JSCC の両方で使う最初のループ） */
+interface MarginLegs {
+  /** 足ごとに M に入れるか（生きていて、オンなら買いの OP を除く） */
+  inMargin: boolean[];
+  /** Σ_M 符号 × 枚数 × 乗数 × 評価価格（状態 S） */
+  v0: number;
+  nov: number;
+  futuresPnl: number;
+  settledCash: number;
+  anyInMargin: boolean;
+}
+
+function marginLegs(
   legs: readonly PreparedLeg[],
   state: MarginState,
   ctx: MarketContext,
   settings: ModelSettings,
   params: MarginParams,
-): MarginResult {
+): MarginLegs {
   const sc = state.scenario;
-  // M に入れる足（格子の内側では配列の参照だけ）と、生きている OP の足の状態 S の σ（それ以外は null）
   const inMargin: boolean[] = [];
-  const sigmaS: Array<number | null> = [];
   let v0 = 0;
   let nov = 0;
   let futuresPnl = 0;
@@ -133,7 +162,6 @@ function marginOn(
     const longOption = p.leg.kind === 'option' && p.sign > 0;
     const counted = live && !(params.ignoreLongOptions && longOption);
     inMargin.push(counted);
-    sigmaS.push(counted ? legSigma(p, state.x, sc, ctx, settings) : null);
     if (!Number.isFinite(p.F)) continue;
     const w = p.sign * p.leg.qty * p.multiplier;
     if (live && !counted) continue; // 生きている買いの OP（オン）: 支払は余力の他の項に入っている
@@ -147,19 +175,44 @@ function marginOn(
     if (p.leg.kind === 'option') nov += w * v;
     else futuresPnl += w * (v - p.leg.entry);
   }
+  return { inMargin, v0, nov, futuresPnl, settledCash, anyInMargin };
+}
+
+function emptyResult(state: MarginState, settledCash: number): MarginResult {
   // M の足が無い = 生きている先物も無い（先物は常に M の足）ので futuresPnl も 0
-  if (!anyInMargin) {
-    return {
-      pfe: 0,
-      nov: 0,
-      margin: 0,
-      requirement: 0,
-      futuresPnl: 0,
-      futuresMarked: state.marked,
-      settledCash,
-      worst: null,
-    };
-  }
+  return {
+    pfe: 0,
+    nov: 0,
+    margin: 0,
+    requirement: 0,
+    futuresPnl: 0,
+    futuresMarked: state.marked,
+    settledCash,
+    worst: null,
+    source: 'grid',
+  };
+}
+
+function marginOn(
+  legs: readonly PreparedLeg[],
+  state: MarginState,
+  ctx: MarketContext,
+  settings: ModelSettings,
+  params: MarginParams,
+): MarginResult {
+  const sc = state.scenario;
+  const { inMargin, v0, nov, futuresPnl, settledCash, anyInMargin } = marginLegs(
+    legs,
+    state,
+    ctx,
+    settings,
+    params,
+  );
+  if (!anyInMargin) return emptyResult(state, settledCash);
+  // 生きている M の OP の足の状態 S の σ（それ以外は null）
+  const sigmaS: Array<number | null> = legs.map((p, i) =>
+    inMargin[i] ? legSigma(p, state.x, sc, ctx, settings) : null,
+  );
   let maxLoss = Number.NEGATIVE_INFINITY;
   let worst: MarginWorst = { priceStep: 0, ivScale: 1, days: 0 };
   const times = state.horizonDays > 0 ? [0, state.horizonDays] : [0];
@@ -203,6 +256,7 @@ function marginOn(
     futuresMarked: state.marked,
     settledCash,
     worst,
+    source: 'grid',
   };
 }
 
@@ -215,6 +269,93 @@ export function marginAt(
   params: MarginParams,
 ): MarginResult {
   return marginOn(legs, state, ctx, settings, params);
+}
+
+/** JSCC の計算にできない理由（model が決めるもの。none = M の足が無い = 0 円で格子と同じ） */
+export type JsccIneligible = 'missing' | 'groups' | 'fractional' | 'none';
+
+type JsccPlan = { ok: true; positions: JsccPosition[] } | { ok: false; reason: JsccIneligible };
+
+function jsccPlan(
+  legs: readonly PreparedLeg[],
+  inMargin: readonly boolean[],
+  data: JsccData,
+): JsccPlan {
+  const positions: JsccPosition[] = [];
+  const groups = new Set<string>();
+  let fractional = false;
+  for (let i = 0; i < legs.length; i++) {
+    if (!inMargin[i]) continue;
+    const p = legs[i] as PreparedLeg;
+    if (!Number.isInteger(p.leg.qty)) {
+      fractional = true;
+      continue;
+    }
+    const key = jsccKeyOfLeg(p.leg);
+    const inst = key === null ? undefined : data.instruments.get(key);
+    const option = p.leg.kind === 'option';
+    if (!inst || (option && (inst.price === null || !Number.isFinite(inst.price)))) {
+      return { ok: false, reason: 'missing' };
+    }
+    groups.add(inst.aggregationGroup);
+    positions.push({ inst, qty: p.sign * p.leg.qty, option });
+  }
+  if (fractional) return { ok: false, reason: 'fractional' };
+  if (positions.length === 0) return { ok: false, reason: 'none' };
+  if (groups.size > 1) return { ok: false, reason: 'groups' };
+  return { ok: true, positions };
+}
+
+/**
+ * 今のポジションを JSCC の計算にできるか（できなければ理由）。M の足は marginAt と同じ（生きている足、
+ * ignoreLongOptions なら買いの OP を除く）。理由の順: 枚数が整数でない足 → fractional、行が無い（キーにできない・
+ * OP の清算値段が無い）→ missing、集計グループが 2 つ以上 → groups、M の足が無い → none
+ */
+export function jsccEligibility(
+  legs: readonly PreparedLeg[],
+  state: MarginState,
+  ctx: MarketContext,
+  settings: ModelSettings,
+  params: MarginParams,
+  data: JsccData,
+): { ok: true } | { ok: false; reason: JsccIneligible } {
+  const { inMargin } = marginLegs(legs, state, ctx, settings, params);
+  const plan = jsccPlan(legs, inMargin, data);
+  return plan.ok ? { ok: true } : { ok: false, reason: plan.reason };
+}
+
+/**
+ * 今の必要証拠金を JSCC の計算で（#382・設計 5.10・ADR-0013）:
+ * - 必要証拠金 = k × V（V = VaR 証拠金額。jsccVarMargin）
+ * - NOV・先物の評価損益・清算額は marginAt と同じ（今の評価価格。NOV は所要額で 2 回効く = 証券会社の形）
+ * - 所要額 = max(0, k × V − NOV)
+ * JSCC の計算にできなければ（jsccEligibility）null = 呼び出し側が格子の概算に戻す。state は今（d = 0）を渡す前提
+ */
+export function marginNowJscc(
+  legs: readonly PreparedLeg[],
+  state: MarginState,
+  ctx: MarketContext,
+  settings: ModelSettings,
+  params: MarginParams,
+  data: JsccData,
+): MarginResult | null {
+  const base = marginLegs(legs, state, ctx, settings, params);
+  const plan = jsccPlan(legs, base.inMargin, data);
+  if (!plan.ok) return null;
+  const { esSigned, novSettle, varMargin } = jsccVarMargin(plan.positions, data.set);
+  const margin = params.factor * varMargin;
+  return {
+    pfe: varMargin,
+    nov: base.nov,
+    margin,
+    requirement: Math.max(0, margin - base.nov),
+    futuresPnl: base.futuresPnl,
+    futuresMarked: state.marked,
+    settledCash: base.settledCash,
+    worst: null,
+    source: 'jscc',
+    jscc: { businessDate: data.businessDate, varMargin, esSigned, novSettle },
+  };
 }
 
 /**

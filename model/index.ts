@@ -9,6 +9,7 @@ export * from './hedge';
 export * from './holdMap';
 export * from './iv';
 export * from './ivStats';
+export * from './jsccMargin';
 export * from './margin';
 export * from './normal';
 export * from './pnl';

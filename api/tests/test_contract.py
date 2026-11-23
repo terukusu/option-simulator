@@ -89,3 +89,39 @@ def test_contract_matches_optionchan_schema(name):
         assert fields[col]["type"] == typ, f"{rel.name}.{col}: {fields[col]['type']} != {typ}"
         if col in rel.required:
             assert fields[col].get("mode") == "REQUIRED", f"{rel.name}.{col} が REQUIRED でない"
+        # 配列の列は REPEATED、ほかは REPEATED でない（#382。pnl・scenarios）
+        repeated = fields[col].get("mode") == "REPEATED"
+        assert repeated == (col in rel.repeated), f"{rel.name}.{col}: REPEATED の宣言が schema と違う"
+
+
+def test_repeated_columns_are_declared():
+    for rel in contract.RELATIONS.values():
+        assert rel.repeated <= {c for c, _ in rel.columns}, rel.name
+        assert not (rel.repeated & rel.required), rel.name
+
+
+def test_jscc_relations():
+    # #382: JSCC の 4 表（optionchan の #164）。pnl は 1 枚あたりの INTEGER の配列、scenarios は RECORD の配列
+    names = {q: contract.RELATIONS[q].name for q in ("jscc_runs", "jscc_scenario_set", "jscc_parameter",
+                                                     "jscc_scenario")}
+    assert names == {"jscc_runs": "jscc_ingest_runs", "jscc_scenario_set": "jscc_var_scenario_set",
+                     "jscc_parameter": "jscc_var_parameter", "jscc_scenario": "jscc_var_scenario"}
+    sc = contract.RELATIONS["jscc_scenario"]
+    assert dict(sc.columns)["pnl"] == "INTEGER" and sc.repeated == {"pnl"}
+    assert dict(sc.columns)["strike_price"] == "NUMERIC"
+    assert "instrument_code" not in dict(sc.columns)
+    ss = contract.RELATIONS["jscc_scenario_set"]
+    assert dict(ss.columns)["scenarios"] == "RECORD" and ss.repeated == {"scenarios"}
+    for q in names:
+        assert contract.RELATIONS[q].schema_file == f"tokyo/{names[q]}.json"
+        assert q not in contract.OUTPUTS
+
+
+@pytest.mark.skipif(not SCHEMA_DIR, reason="OPTIONCHAN_SCHEMA_DIR（固定コミットの schema/）のときだけ")
+def test_jscc_scenario_set_nested_columns():
+    # #382: コードは scenarios の中の scenario_type（'H' / 'S'）を読む（jscc.scenario_set）
+    path = Path(SCHEMA_DIR) / contract.RELATIONS["jscc_scenario_set"].schema_file
+    fields = {f["name"]: f for f in json.loads(path.read_text(encoding="utf-8"))}
+    sub = {f["name"]: f for f in fields["scenarios"].get("fields", [])}
+    assert sub["scenario_type"]["type"] == "STRING"
+    assert sub["scenario_type"].get("mode") == "REQUIRED"

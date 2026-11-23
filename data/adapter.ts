@@ -13,6 +13,8 @@
  * 開いたときだけ `/api/future_bars`（loadFutureBars。#190）。
  * 銘柄の推移は銘柄のチャートを開いたときだけ `/api/option_bars`（loadOptionBars。#319）。
  * 日次の値は追証マップを開いたときだけ同一オリジンの `/api/atm_daily` を読む（loadAtmDaily。7.1。#152）。
+ * JSCC の VaR パラメータは今の必要証拠金のために基準日・銘柄が変わったときだけ `/api/jscc_scenarios`（loadJsccScenarios。
+ * #382）。
  */
 
 import { type AtmDailyData, validateAtmDailyJson } from './atmDaily';
@@ -20,6 +22,13 @@ import { type AtmIvData, type AtmIvSource, atmIvUrl, validateAtmIvJson } from '.
 import { type CalendarJson, validateCalendarJson } from './calendar';
 import { type ChainJson, parseChainJson } from './chainJson';
 import { type FutureBarsData, futureBarsUrl, validateFutureBarsJson } from './futureBars';
+import {
+  type JsccResponse,
+  jsccChunks,
+  jsccUrl,
+  mergeJsccResponses,
+  validateJsccJson,
+} from './jscc';
 import { type Chain, type NormalizeOptions, normalizeChain } from './normalize';
 import {
   type OptionBarsData,
@@ -101,7 +110,14 @@ async function fetchText(
   label: string,
   base: Omit<FetchInit, 'signal'>,
   /** 何を読むか（エラーの文言の名詞） */
-  what: '板' | 'カレンダー' | 'IV 推移' | '先物推移' | '銘柄の推移' | '過去の値動き' = '板',
+  what:
+    | '板'
+    | 'カレンダー'
+    | 'IV 推移'
+    | '先物推移'
+    | '銘柄の推移'
+    | '過去の値動き'
+    | 'JSCC のデータ' = '板',
 ): Promise<string> {
   const init: FetchInit = { ...base };
   if (opts.signal) init.signal = opts.signal;
@@ -339,6 +355,52 @@ export async function loadAtmDaily(opts: AtmDailyLoadOptions = {}): Promise<AtmD
   const r = validateAtmDailyJson(parsed);
   if (!r.ok) throw new ChainLoadError('過去の値動きの JSON が不正（api）', r.errors);
   return r.value;
+}
+
+export interface JsccLoadOptions {
+  /** API の URL（既定は同一オリジンの /api/jscc_scenarios。dev の合成の応答は /fixtures/jscc_scenarios） */
+  endpoint?: string;
+  fetch?: FetchLike;
+  signal?: AbortSignal;
+}
+
+/**
+ * JSCC の VaR パラメータ（`/api/jscc_scenarios`。#382）を基準日 date・銘柄 keys（昇順・重複なし）で読んで検証する。
+ * API の上限（銘柄 64・限月 4）を超えるときは分けて読んで 1 つにする。HTTP のキャッシュ（max-age）に任せる
+ * （`redirect: 'manual'` でログイン切れを検出）。失敗は ChainLoadError（応答の本文は入れない）。AbortError はそのまま投げる
+ */
+export async function loadJsccScenarios(
+  date: string,
+  keys: readonly string[],
+  opts: JsccLoadOptions = {},
+): Promise<JsccResponse> {
+  const load: LoadOptions = opts.signal ? { signal: opts.signal } : {};
+  const endpoint = opts.endpoint ?? '/api/jscc_scenarios';
+  const one = async (chunk: readonly string[]): Promise<JsccResponse> => {
+    const text = await fetchText(
+      opts.fetch ?? defaultFetch,
+      jsccUrl(endpoint, date, chunk),
+      load,
+      'api',
+      { redirect: 'manual' },
+      'JSCC のデータ',
+    );
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      throw new ChainLoadError('JSCC のデータの JSON が不正（api）', [
+        '$: JSON として解析できない',
+      ]);
+    }
+    const r = validateJsccJson(parsed, date, chunk);
+    if (!r.ok) throw new ChainLoadError('JSCC のデータの JSON が不正（api）', r.errors);
+    return r.value;
+  };
+  const merged = mergeJsccResponses(await Promise.all(jsccChunks(keys).map(one)));
+  if (!merged)
+    throw new ChainLoadError('JSCC のデータの JSON が不正（api）', ['$: 分けた応答が合わない']);
+  return merged;
 }
 
 /** 読んで正規化まで（UI の既定の経路）。 */

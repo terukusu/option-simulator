@@ -27,6 +27,17 @@ export const MAX_ERROR_LINES = 20;
 /** API から読んだ板のデータ元のラベル（Loader の「表示中」・ヘッダの取得時刻に出す） */
 export const API_LABEL = 'API';
 
+/**
+ * JSCC の VaR パラメータの読み先（#382）: 本番は /api/jscc_scenarios、dev で API 以外の板（合成の板・ファイル）は
+ * dev サーバーの合成の応答 /fixtures/jscc_scenarios（IV 推移・銘柄の推移と同じ規則）
+ */
+export function jsccEndpointOf(isDev: boolean, sourceLabel: string | null): string {
+  return isDev && sourceLabel !== API_LABEL ? JSCC_FIXTURE_ENDPOINT : '/api/jscc_scenarios';
+}
+
+/** dev サーバーの合成の応答（基準日の下限を見ない = 合成の板の古い日付でも読む） */
+export const JSCC_FIXTURE_ENDPOINT = '/fixtures/jscc_scenarios';
+
 /** 保存した最後の板で表示しているときのデータ元の表示（#23） */
 export function savedBoardLabel(label: string): string {
   return `保存した板（${label}）`;

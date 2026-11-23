@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { type Chain, normalizeChain } from '../../data';
+import { type Chain, jsccRequestKeys, normalizeChain } from '../../data';
 import {
   DEFAULT_SETTINGS,
   evaluatePosition,
@@ -21,6 +21,7 @@ import {
   groupHoldings,
   HOLDINGS_EMPTY_TEXT,
   type HoldingsInput,
+  holdingLegs,
   holdingSources,
   holdingsModel,
   legFingerprint,
@@ -35,6 +36,7 @@ import { positionModel } from '../../ui/view/position';
 import { TABS_FULL_TEXT } from '../../ui/view/tabs';
 import { fixture } from '../support/fixtures';
 import { boardsT0AndLater } from '../support/laterChain';
+import { jsccData, rng as jsccRng, realisticSet, synthOption } from '../support/synthJscc';
 
 /**
  * #302 保有ポジションの一覧（ui/view/holdings.ts）。合成の板（latest と t₀ + 3 日。値は架空）で、対象・同じ玉の判定・
@@ -286,7 +288,8 @@ describe('行の値（AC3）', () => {
         50,
       ).pnl,
     );
-    expect(v.rows[0]?.marginText).toMatch(/^[\d,]+$/);
+    // JSCC の入力が無ければ概算（#382）
+    expect(v.rows[0]?.marginText).toMatch(/^[\d,]+ · 概算$/);
     expect(v.rows[0]?.deltaText).toMatch(/枚（ミニ /);
   });
 
@@ -527,5 +530,33 @@ describe('行の操作（AC8）', () => {
       entryId: 'e',
       disabled: TABS_FULL_TEXT,
     });
+  });
+});
+
+describe('#382 今の必要証拠金の JSCC の計算（行・合計の印）', () => {
+  it('一覧の全部の足の銘柄で読み、行・合計の必要証拠金と余力に `JSCC 10/13`、読めなければ `概算`', () => {
+    const s = twoHeld();
+    const legs = holdingLegs(s.tabs, s.activeTab, s.legs, EMPTY);
+    const keys = jsccRequestKeys(legs, '2026-10-13');
+    expect(keys).toHaveLength(2); // put の売り・call の売り
+    const set = realisticSet();
+    const r = jsccRng(5);
+    const data = jsccData(
+      set,
+      Object.fromEntries(keys.map((k) => [k, synthOption(set.isHist.length, 200, r)])),
+      '2026-10-13',
+    );
+    const v = holdingsModel({ ...input(s, EMPTY, 50_000_000), jscc: { status: 'ok', data } });
+    for (const row of v.rows) expect(row.marginText).toMatch(/^[\d,]+ · JSCC 10\/13$/);
+    expect(v.total?.marginText).toMatch(/ · JSCC 10\/13$/);
+    expect(v.total?.roomText).toMatch(/ · JSCC 10\/13$/);
+    const nr = holdingsModel({
+      ...input(s, EMPTY, 50_000_000),
+      jscc: { status: 'unavailable', reason: 'not_ready' },
+    });
+    expect(nr.total?.marginText).toMatch(/ · 概算$/);
+    // 合計 = まとめたポジションの JSCC の額（行の和にならない）
+    const sum = v.rows.reduce((a, x) => a + (x.values.margin ?? 0), 0);
+    expect(v.total?.values.margin).toBeLessThanOrEqual(sum + 1);
   });
 });

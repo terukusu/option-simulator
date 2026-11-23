@@ -8,6 +8,7 @@ import json
 import threading
 from collections import defaultdict
 from datetime import UTC, date, datetime, time, timedelta, timezone
+from decimal import Decimal
 
 from conftest import REPO_ROOT
 
@@ -122,6 +123,11 @@ class World:
         self.fut: list[dict] = []
         # option_price_hourly の行（last_trading_day・target_price・type と 12 列。#319）
         self.opt: list[dict] = []
+        # JSCC の 4 表の行（#382。どれも business_date を持つ。jscc_scenario は contract_period_code で限月を引く）
+        self.jscc_runs: list[dict] = []
+        self.jscc_set: list[dict] = []
+        self.jscc_param: list[dict] = []
+        self.jscc_rows: list[dict] = []
 
     def add(self, at, options, future_price, spot_price=None, rows_option=800, finished_after=40):
         """rows_option は latest_runs の行数（判定用の小さな板でも既定は 800 行として扱う）"""
@@ -209,6 +215,8 @@ class FakeRunner:
         w = self.world
         if name == "trading_calendar":
             return [dict(r) for r in w.calendar]
+        if name.startswith("jscc_"):
+            return self._jscc(name, params)
         start, end = params["start_at"], params["end_at"]
         if name == "option_bars":
             return [{k: v for k, v in r.items() if k not in ("last_trading_day", "target_price", "type")}
@@ -226,6 +234,60 @@ class FakeRunner:
             return sorted(rows, key=lambda r: r["snapshot_at"], reverse=True)
         table = {"option_price": w.options, "future_price": w.futures, "spot_price": w.spots}[name]
         return [dict(r) for at, rows in table.items() if start <= at < end for r in rows]
+
+
+    def _jscc(self, name, params):
+        w = self.world
+        d = params["d"]
+        strip = lambda r: {k: v for k, v in r.items() if k != "business_date"}  # noqa: E731
+        if name == "jscc_runs":
+            return [strip(r) for r in w.jscc_runs if r["business_date"] == d]
+        if name == "jscc_scenario_set":
+            return [strip(r) for r in w.jscc_set if r["business_date"] == d]
+        if name == "jscc_parameter":
+            return [strip(r) for r in w.jscc_param if r["business_date"] == d and r["record_id"] == 0
+                    and r["aggregation_group"] == "IDX_IDX"]
+        if name == "jscc_scenario":
+            cp = str(params["cp"])
+            return [strip(r) for r in w.jscc_rows if r["business_date"] == d and r["contract_period_code"] == cp
+                    and r["product_code"] in ("NK225E", "NK225F", "NK225MF", "NK225MCF")]
+        raise KeyError(name)
+
+
+# ---- JSCC の合成の表（#382。値はすべて架空 = 種つき乱数）----
+
+JSCC_TYPES = "H" * 12 + "S" * 4  # 合成の並び（本物は H 1,250・S 172。テストは短く）
+
+
+def jscc_world(w: "World", d: date, run_id="run-1", periods=("202612",), status="succeeded", seed=1,
+               strikes=(30000, 31000), types=JSCC_TYPES, n_stress=2, conf=97.5) -> None:
+    """World に基準日 d の JSCC の 4 表を足す（架空の値）"""
+    import random
+
+    rnd = random.Random(seed)
+    w.jscc_runs.append({"business_date": d, "jscc_run_id": run_id, "status": status,
+                        "finished_at": datetime(d.year, d.month, d.day, 9, 40, tzinfo=UTC)})
+    w.jscc_set.append({"business_date": d, "jscc_run_id": run_id,
+                       "scenarios": [{"scenario_id": str(i), "scenario_type": t} for i, t in enumerate(types)]})
+    w.jscc_param.append({"business_date": d, "jscc_run_id": run_id, "aggregation_group": "IDX_IDX", "record_id": 0,
+                         "confidence_level": conf, "stress_scenario_number": n_stress})
+    w.jscc_param.append({"business_date": d, "jscc_run_id": run_id, "aggregation_group": "OTHER", "record_id": 0,
+                         "confidence_level": 99.0, "stress_scenario_number": 1})
+    n = len(types)
+    for cp in periods:
+        for k in strikes:
+            for pc in ("C", "P"):
+                w.jscc_rows.append({"business_date": d, "jscc_run_id": run_id, "product_code": "NK225E",
+                                    "contract_type": "OOP", "put_call_type": pc, "contract_period_code": cp,
+                                    "strike_price": Decimal(k), "contract_size": 1000,
+                                    "aggregation_group": "IDX_IDX", "price": float(rnd.randint(1, 900)),
+                                    "pnl": [rnd.randint(0, 2_000_000) for _ in range(n)]})
+        for prod, size in (("NK225F", 1000), ("NK225MF", 100), ("NK225MCF", 10)):
+            w.jscc_rows.append({"business_date": d, "jscc_run_id": run_id, "product_code": prod,
+                                "contract_type": "FUT", "put_call_type": None, "contract_period_code": cp,
+                                "strike_price": None, "contract_size": size, "aggregation_group": "IDX_IDX",
+                                "price": 30000.0, "pnl": [rnd.randint(-3_000_000, 3_000_000) // (1000 // size)
+                                                          for _ in range(n)]})
 
 
 def cm_rows(start: datetime, end: datetime, every_minutes=1, value=lambda t: 20.0) -> list[tuple]:

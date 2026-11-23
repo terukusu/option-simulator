@@ -1,9 +1,10 @@
 import type { ComponentChildren } from 'preact';
 import { useMemo } from 'preact/hooks';
-import type { Calendar, Chain } from '../../data';
+import { type Calendar, type Chain, jsccRequestKeys } from '../../data';
 import type { AtmBasis, MarginParams, ModelSettings, Scenario } from '../../model';
 import type { BookRead } from '../book';
 import type { BookMessage } from '../components/useAppController';
+import { useJsccScenarios } from '../components/useJsccScenarios';
 import { useMarginLineState } from '../components/useMarginLine';
 import type { MetricsUnitSetting, TabSlot, UiLeg } from '../state';
 import {
@@ -11,6 +12,7 @@ import {
   distanceParts,
   HOLDINGS_EMPTY_TEXT,
   type HoldingsTotalView,
+  holdingLegs,
   holdingsModel,
   TOTAL_LABEL,
 } from '../view/holdings';
@@ -37,6 +39,11 @@ export interface HoldingsDialogProps {
   nowScenario: Scenario;
   params: MarginParams;
   capital: number | null;
+  /** 今の必要証拠金の JSCC の基準日と読み先（#382。useAppController の jsccDate・jsccEndpoint） */
+  jsccDate: string | null;
+  jsccEndpoint: string;
+  /** 板の読み直しの印（useAppController の jsccReload。期限切れの not_ready・失敗を読み直す） */
+  jsccReload: number | null;
   message: BookMessage | null;
   onClose: () => void;
   onSwitchTab: (id: number) => void;
@@ -81,7 +88,9 @@ export function HoldingsDialog(p: HoldingsDialogProps) {
             と call が相殺するので行の和にならない。手数料・先物の basis
             は作業中の値。余力は端末の設定の資金に対する値。追証までの距離 = 今の IV
             のまま原資産だけを動かして余力が 0 になる水準のうち今に最も近い下と上（β・IV
-            の動き方は画面の設定）。IV の急騰と同時の危なさは追証マップ（作業中のタブ）で見る。
+            の動き方は画面の設定）。IV
+            の急騰と同時の危なさは追証マップ（作業中のタブ）で見る。値の後の「JSCC
+            11/20」「概算」は指標と同じ印。
           </p>
           <ManualLinks place="holdings" />
         </Popover>
@@ -108,7 +117,16 @@ function HoldingsBody(p: HoldingsDialogProps) {
     nowScenario,
     params,
     capital,
+    jsccDate,
+    jsccEndpoint,
+    jsccReload,
   } = p;
+  // 一覧の全部の足の銘柄で JSCC の VaR パラメータを読む（#382。指標と同じメモリを共有）
+  const jsccKeys = useMemo(
+    () => (jsccDate ? jsccRequestKeys(holdingLegs(tabs, activeTab, legs, read), jsccDate) : []),
+    [jsccDate, tabs, activeTab, legs, read],
+  );
+  const jscc = useJsccScenarios(jsccDate, jsccKeys, jsccEndpoint, jsccReload);
   const view = useMemo(
     () =>
       holdingsModel({
@@ -125,6 +143,7 @@ function HoldingsBody(p: HoldingsDialogProps) {
         nowScenario,
         params,
         capital,
+        jscc,
       }),
     [
       chain,
@@ -140,6 +159,7 @@ function HoldingsBody(p: HoldingsDialogProps) {
       nowScenario,
       params,
       capital,
+      jscc,
     ],
   );
   const hasBoard = chain !== null;

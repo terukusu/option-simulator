@@ -218,7 +218,7 @@ describe('証拠金の欄（#131）', () => {
       rangePct: 5,
       ivUpPct: 50,
       ivDownPct: 25,
-      ignoreLongOptions: true,
+      ignoreLongOptions: false,
     });
     expect('capitalYen' in MARGIN_RESET).toBe(false);
     const notes = MARGIN_SETTINGS_NOTES.join(' ');
@@ -232,17 +232,17 @@ describe('証拠金の欄（#131）', () => {
 });
 
 describe('#149 買いの OP の設定', () => {
-  it('#149 証拠金の節に買いの OP の 2 択、既定に戻すでオン', () => {
+  it('#149 証拠金の節に買いの OP の 2 択、既定に戻すでオフ（#382 で既定を相殺するに）', () => {
     expect(MARGIN_LONG_OPTIONS).toEqual([
       { value: 'ignore', text: '減らさない' },
       { value: 'offset', text: '相殺する' },
     ]);
-    expect(marginLongValue(DEFAULT_MARGIN_PREFS)).toBe('ignore');
-    expect(marginLongValue({ ...DEFAULT_MARGIN_PREFS, ignoreLongOptions: false })).toBe('offset');
+    expect(marginLongValue(DEFAULT_MARGIN_PREFS)).toBe('offset');
+    expect(marginLongValue({ ...DEFAULT_MARGIN_PREFS, ignoreLongOptions: true })).toBe('ignore');
     expect(marginLongPatch('offset')).toEqual({ ignoreLongOptions: false });
     expect(marginLongPatch('ignore')).toEqual({ ignoreLongOptions: true });
-    // [既定に戻す] はオンに戻す。資金は戻さない
-    expect(MARGIN_RESET.ignoreLongOptions).toBe(true);
+    // [既定に戻す] はオフ（相殺する）に戻す。資金は戻さない
+    expect(MARGIN_RESET.ignoreLongOptions).toBe(false);
     expect('capitalYen' in MARGIN_RESET).toBe(false);
     // 数値の欄には入れない（2 択は別の行）
     expect(MARGIN_FIELDS.map((f) => f.key as string)).not.toContain('ignoreLongOptions');

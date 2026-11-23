@@ -291,7 +291,7 @@
        "iv_up_pct": 50,
        "iv_down_pct": 25,
        "factor_pct": 100,
-       "ignore_long_options": true
+       "ignore_long_options": false
       },
       "now": {
        "x": 67812,
@@ -300,7 +300,9 @@
        "nov_yen": -780000,
        "room_yen": 2808601,
        "multiple": 2,
-       "multiple_unbounded": false
+       "multiple_unbounded": false,
+       "source": "estimate",
+       "jscc_business_date": null
       },
       "point": {
        "x": 67812,
@@ -924,8 +926,8 @@
         "sq_ratio": 0.2,
         "scenario_pnl_yen": -207280,
         "scenario_ratio": -0.3,
-        "margin_yen": 3073234,
-        "room_yen": -2173970
+        "margin_yen": 507814,
+        "room_yen": 2284906
        },
        {
         "shock_pct": -10,
@@ -934,8 +936,8 @@
         "sq_ratio": -1.9,
         "scenario_pnl_yen": -587677,
         "scenario_ratio": -0.9,
-        "margin_yen": 3897996,
-        "room_yen": -6398595
+        "margin_yen": 339609,
+        "room_yen": 2072715
        },
        {
         "shock_pct": -20,
@@ -944,8 +946,8 @@
         "sq_ratio": -1.9,
         "scenario_pnl_yen": -914401,
         "scenario_ratio": -1.3,
-        "margin_yen": 4292964,
-        "room_yen": -12810113
+        "margin_yen": 243496,
+        "room_yen": 1842103
        },
        {
         "shock_pct": -30,
@@ -954,8 +956,8 @@
         "sq_ratio": -1.9,
         "scenario_pnl_yen": -1157464,
         "scenario_ratio": -1.7,
-        "margin_yen": 3191021,
-        "room_yen": -17322188
+        "margin_yen": 132473,
+        "room_yen": 1710063
        },
        {
         "shock_pct": -40,
@@ -964,8 +966,8 @@
         "sq_ratio": -1.9,
         "scenario_pnl_yen": -1280036,
         "scenario_ratio": -1.9,
-        "margin_yen": 2291418,
-        "room_yen": -22934459
+        "margin_yen": 28522,
+        "room_yen": 1691442
        }
       ]
      },
@@ -976,24 +978,26 @@
        "iv_up_pct": 50,
        "iv_down_pct": 25,
        "factor_pct": 100,
-       "ignore_long_options": true
+       "ignore_long_options": false
       },
       "now": {
        "x": 67812,
-       "margin_yen": 2334873,
-       "requirement_yen": 4024873,
-       "nov_yen": -1690000,
-       "room_yen": -334873,
-       "multiple": 0,
-       "multiple_unbounded": false
+       "margin_yen": 325224,
+       "requirement_yen": 1015224,
+       "nov_yen": -690000,
+       "room_yen": 2674776,
+       "multiple": 9,
+       "multiple_unbounded": false,
+       "source": "estimate",
+       "jscc_business_date": null
       },
       "point": {
        "x": 67812,
-       "margin_yen": 2334873,
-       "requirement_yen": 4024873,
-       "nov_yen": -1690000,
-       "room_yen": -334873,
-       "multiple": 0,
+       "margin_yen": 325224,
+       "requirement_yen": 1015224,
+       "nov_yen": -690000,
+       "room_yen": 2674776,
+       "multiple": 9,
        "multiple_unbounded": false
       },
       "call_levels_x": []
@@ -1732,7 +1736,7 @@
        "iv_up_pct": 50,
        "iv_down_pct": 25,
        "factor_pct": 100,
-       "ignore_long_options": true
+       "ignore_long_options": false
       },
       "now": {
        "x": 67812,
@@ -1741,7 +1745,9 @@
        "nov_yen": -1265000,
        "room_yen": 2761248,
        "multiple": 2,
-       "multiple_unbounded": false
+       "multiple_unbounded": false,
+       "source": "estimate",
+       "jscc_business_date": null
       },
       "point": {
        "x": 67812,
@@ -2341,8 +2347,8 @@
         "sq_ratio": -1,
         "scenario_pnl_yen": 38989,
         "scenario_ratio": 0,
-        "margin_yen": 2074133,
-        "room_yen": -523396
+        "margin_yen": 696585,
+        "room_yen": 2130000
        },
        {
         "shock_pct": -10,
@@ -2351,8 +2357,8 @@
         "sq_ratio": -1,
         "scenario_pnl_yen": 316959,
         "scenario_ratio": 0.4,
-        "margin_yen": 2039559,
-        "room_yen": -510203
+        "margin_yen": 848578,
+        "room_yen": 2130000
        },
        {
         "shock_pct": -20,
@@ -2361,8 +2367,8 @@
         "sq_ratio": -1,
         "scenario_pnl_yen": 263048,
         "scenario_ratio": 0.3,
-        "margin_yen": 1608759,
-        "room_yen": 191701
+        "margin_yen": 874898,
+        "room_yen": 2130000
        },
        {
         "shock_pct": -30,
@@ -2371,8 +2377,8 @@
         "sq_ratio": -1,
         "scenario_pnl_yen": -451980,
         "scenario_ratio": -0.5,
-        "margin_yen": 577394,
-        "room_yen": 1517097
+        "margin_yen": 383584,
+        "room_yen": 2130000
        },
        {
         "shock_pct": -40,
@@ -2381,8 +2387,8 @@
         "sq_ratio": -1,
         "scenario_pnl_yen": -782759,
         "scenario_ratio": -0.9,
-        "margin_yen": 118974,
-        "room_yen": 2009739
+        "margin_yen": 85449,
+        "room_yen": 2130000
        }
       ]
      },
@@ -2393,29 +2399,29 @@
        "iv_up_pct": 50,
        "iv_down_pct": 25,
        "factor_pct": 100,
-       "ignore_long_options": true
+       "ignore_long_options": false
       },
       "now": {
        "x": 67812,
-       "margin_yen": 3002904,
-       "requirement_yen": 4847904,
-       "nov_yen": -1845000,
-       "room_yen": -2717904,
-       "multiple": 0,
-       "multiple_unbounded": false
+       "margin_yen": 422569,
+       "requirement_yen": 0,
+       "nov_yen": 870000,
+       "room_yen": 2130000,
+       "multiple": 3,
+       "multiple_unbounded": false,
+       "source": "estimate",
+       "jscc_business_date": null
       },
       "point": {
        "x": 67812,
-       "margin_yen": 2918104,
-       "requirement_yen": 4542498,
-       "nov_yen": -1624394,
-       "room_yen": -2412498,
-       "multiple": 0,
+       "margin_yen": 532500,
+       "requirement_yen": 0,
+       "nov_yen": 1040207,
+       "room_yen": 2130000,
+       "multiple": 3,
        "multiple_unbounded": false
       },
-      "call_levels_x": [
-       55001
-      ]
+      "call_levels_x": []
      },
      "scenario_grid": {
       "beta": 1,
@@ -3099,7 +3105,7 @@
        "iv_up_pct": 50,
        "iv_down_pct": 25,
        "factor_pct": 100,
-       "ignore_long_options": true
+       "ignore_long_options": false
       },
       "now": {
        "x": 66930,
@@ -3108,7 +3114,9 @@
        "nov_yen": -970000,
        "room_yen": 2468612,
        "multiple": 1,
-       "multiple_unbounded": false
+       "multiple_unbounded": false,
+       "source": "estimate",
+       "jscc_business_date": null
       },
       "point": {
        "x": 66930,
@@ -5381,9 +5389,9 @@
       "max_loss_yen": -60030000,
       "max_loss_x": 0,
       "max_loss_unbounded": false,
-      "margin_yen": 4034661,
-      "room_yen": 2685339,
-      "multiple": 1,
+      "margin_yen": 1449046,
+      "room_yen": 6550954,
+      "multiple": 5,
       "delta_large": 0.02,
       "delta_mini": 0.24,
       "theta_yen_per_day": 19967,
@@ -5402,7 +5410,7 @@
        "leg_premium_yen": -169000,
        "max_loss_yen": -3699000,
        "max_loss_unbounded": false,
-       "margin_yen": 4034661,
+       "margin_yen": 286387,
        "delta_large": -0.03,
        "delta_mini": -0.26,
        "meets_floor": false
@@ -5413,7 +5421,7 @@
        "leg_premium_yen": -178000,
        "max_loss_yen": -3458000,
        "max_loss_unbounded": false,
-       "margin_yen": 4034661,
+       "margin_yen": 259197,
        "delta_large": -0.03,
        "delta_mini": -0.28,
        "meets_floor": false
@@ -5424,7 +5432,7 @@
        "leg_premium_yen": -187000,
        "max_loss_yen": -3217000,
        "max_loss_unbounded": false,
-       "margin_yen": 4034661,
+       "margin_yen": 232757,
        "delta_large": -0.03,
        "delta_mini": -0.31,
        "meets_floor": false
@@ -5435,7 +5443,7 @@
        "leg_premium_yen": -198000,
        "max_loss_yen": -2978000,
        "max_loss_unbounded": false,
-       "margin_yen": 4034661,
+       "margin_yen": 201829,
        "delta_large": -0.03,
        "delta_mini": -0.34,
        "meets_floor": false
@@ -5446,7 +5454,7 @@
        "leg_premium_yen": -206000,
        "max_loss_yen": -2736000,
        "max_loss_unbounded": false,
-       "margin_yen": 4034661,
+       "margin_yen": 179368,
        "delta_large": -0.04,
        "delta_mini": -0.37,
        "meets_floor": false
@@ -5457,7 +5465,7 @@
        "leg_premium_yen": -216000,
        "max_loss_yen": -2496000,
        "max_loss_unbounded": false,
-       "margin_yen": 4034661,
+       "margin_yen": 166789,
        "delta_large": -0.04,
        "delta_mini": -0.4,
        "meets_floor": false
@@ -5468,7 +5476,7 @@
        "leg_premium_yen": -228000,
        "max_loss_yen": -2258000,
        "max_loss_unbounded": false,
-       "margin_yen": 4034661,
+       "margin_yen": 178129,
        "delta_large": -0.04,
        "delta_mini": -0.43,
        "meets_floor": false
@@ -5479,7 +5487,7 @@
        "leg_premium_yen": -241000,
        "max_loss_yen": -2021000,
        "max_loss_unbounded": false,
-       "margin_yen": 4034661,
+       "margin_yen": 190378,
        "delta_large": -0.05,
        "delta_mini": -0.47,
        "meets_floor": false
@@ -5490,7 +5498,7 @@
        "leg_premium_yen": -251000,
        "max_loss_yen": -1781000,
        "max_loss_unbounded": false,
-       "margin_yen": 4034661,
+       "margin_yen": 199834,
        "delta_large": -0.05,
        "delta_mini": -0.51,
        "meets_floor": false
@@ -5501,7 +5509,7 @@
        "leg_premium_yen": -265000,
        "max_loss_yen": -1545000,
        "max_loss_unbounded": false,
-       "margin_yen": 4034661,
+       "margin_yen": 212974,
        "delta_large": -0.05,
        "delta_mini": -0.55,
        "meets_floor": false
@@ -5512,7 +5520,7 @@
        "leg_premium_yen": -278000,
        "max_loss_yen": -1308000,
        "max_loss_unbounded": false,
-       "margin_yen": 4034661,
+       "margin_yen": 225173,
        "delta_large": -0.06,
        "delta_mini": -0.59,
        "meets_floor": false
@@ -5523,7 +5531,7 @@
        "leg_premium_yen": -292000,
        "max_loss_yen": -1072000,
        "max_loss_unbounded": false,
-       "margin_yen": 4034661,
+       "margin_yen": 238275,
        "delta_large": -0.06,
        "delta_mini": -0.63,
        "meets_floor": false
@@ -5534,7 +5542,7 @@
        "leg_premium_yen": -315000,
        "max_loss_yen": -845000,
        "max_loss_unbounded": false,
-       "margin_yen": 4034661,
+       "margin_yen": 259549,
        "delta_large": -0.07,
        "delta_mini": -0.69,
        "meets_floor": true
@@ -5545,7 +5553,7 @@
        "leg_premium_yen": -350000,
        "max_loss_yen": -380000,
        "max_loss_unbounded": false,
-       "margin_yen": 4034661,
+       "margin_yen": 291942,
        "delta_large": -0.08,
        "delta_mini": -0.79,
        "meets_floor": true
@@ -5556,7 +5564,7 @@
        "leg_premium_yen": -360000,
        "max_loss_yen": -390000,
        "max_loss_unbounded": false,
-       "margin_yen": 4034661,
+       "margin_yen": 301366,
        "delta_large": -0.08,
        "delta_mini": -0.83,
        "meets_floor": true
@@ -5567,7 +5575,7 @@
        "leg_premium_yen": -390000,
        "max_loss_yen": -420000,
        "max_loss_unbounded": false,
-       "margin_yen": 4034661,
+       "margin_yen": 328683,
        "delta_large": -0.09,
        "delta_mini": -0.9,
        "meets_floor": true
@@ -5578,7 +5586,7 @@
        "leg_premium_yen": -405000,
        "max_loss_yen": -435000,
        "max_loss_unbounded": false,
-       "margin_yen": 4034661,
+       "margin_yen": 342562,
        "delta_large": -0.1,
        "delta_mini": -0.95,
        "meets_floor": true
@@ -5589,7 +5597,7 @@
        "leg_premium_yen": -425000,
        "max_loss_yen": -455000,
        "max_loss_unbounded": false,
-       "margin_yen": 4034661,
+       "margin_yen": 360867,
        "delta_large": -0.1,
        "delta_mini": -1.02,
        "meets_floor": true
@@ -5600,7 +5608,7 @@
        "leg_premium_yen": -445000,
        "max_loss_yen": -475000,
        "max_loss_unbounded": false,
-       "margin_yen": 4034661,
+       "margin_yen": 379149,
        "delta_large": -0.11,
        "delta_mini": -1.08,
        "meets_floor": true
@@ -5611,7 +5619,7 @@
        "leg_premium_yen": -455000,
        "max_loss_yen": -485000,
        "max_loss_unbounded": false,
-       "margin_yen": 4034661,
+       "margin_yen": 388284,
        "delta_large": -0.11,
        "delta_mini": -1.11,
        "meets_floor": true
@@ -5622,7 +5630,7 @@
        "leg_premium_yen": -465000,
        "max_loss_yen": -495000,
        "max_loss_unbounded": false,
-       "margin_yen": 4034661,
+       "margin_yen": 397417,
        "delta_large": -0.11,
        "delta_mini": -1.14,
        "meets_floor": true
@@ -5633,7 +5641,7 @@
        "leg_premium_yen": -490000,
        "max_loss_yen": -520000,
        "max_loss_unbounded": false,
-       "margin_yen": 4034661,
+       "margin_yen": 419599,
        "delta_large": -0.12,
        "delta_mini": -1.2,
        "meets_floor": true
@@ -5644,7 +5652,7 @@
        "leg_premium_yen": -490000,
        "max_loss_yen": -520000,
        "max_loss_unbounded": false,
-       "margin_yen": 4034661,
+       "margin_yen": 420027,
        "delta_large": -0.12,
        "delta_mini": -1.21,
        "meets_floor": true
@@ -5655,7 +5663,7 @@
        "leg_premium_yen": -515000,
        "max_loss_yen": -545000,
        "max_loss_unbounded": false,
-       "margin_yen": 4034661,
+       "margin_yen": 442116,
        "delta_large": -0.13,
        "delta_mini": -1.27,
        "meets_floor": true
@@ -5666,7 +5674,7 @@
        "leg_premium_yen": -530000,
        "max_loss_yen": -560000,
        "max_loss_unbounded": false,
-       "margin_yen": 4034661,
+       "margin_yen": 455507,
        "delta_large": -0.13,
        "delta_mini": -1.31,
        "meets_floor": true
@@ -5695,9 +5703,9 @@
       "max_loss_yen": -60030000,
       "max_loss_x": 0,
       "max_loss_unbounded": false,
-      "margin_yen": 4034661,
-      "room_yen": 2685339,
-      "multiple": 1,
+      "margin_yen": 1449046,
+      "room_yen": 6550954,
+      "multiple": 5,
       "delta_large": 0.02,
       "delta_mini": 0.24,
       "theta_yen_per_day": 19967,
@@ -5716,7 +5724,7 @@
        "leg_premium_yen": -3850000,
        "max_loss_yen": -63880000,
        "max_loss_unbounded": false,
-       "margin_yen": 4034661,
+       "margin_yen": 2893067,
        "delta_large": 1.04,
        "delta_mini": 10.42,
        "meets_floor": null
@@ -5727,7 +5735,7 @@
        "leg_premium_yen": -3710000,
        "max_loss_yen": -63740000,
        "max_loss_unbounded": false,
-       "margin_yen": 4034661,
+       "margin_yen": 2800531,
        "delta_large": 1.02,
        "delta_mini": 10.22,
        "meets_floor": null
@@ -5738,7 +5746,7 @@
        "leg_premium_yen": -3600000,
        "max_loss_yen": -63630000,
        "max_loss_unbounded": false,
-       "margin_yen": 4034661,
+       "margin_yen": 2724776,
        "delta_large": 1,
        "delta_mini": 10.01,
        "meets_floor": null
@@ -5749,7 +5757,7 @@
        "leg_premium_yen": -3460000,
        "max_loss_yen": -63490000,
        "max_loss_unbounded": false,
-       "margin_yen": 4034661,
+       "margin_yen": 2630724,
        "delta_large": 0.98,
        "delta_mini": 9.8,
        "meets_floor": null
@@ -5760,7 +5768,7 @@
        "leg_premium_yen": -3360000,
        "max_loss_yen": -63390000,
        "max_loss_unbounded": false,
-       "margin_yen": 4034661,
+       "margin_yen": 2559125,
        "delta_large": 0.96,
        "delta_mini": 9.6,
        "meets_floor": null
@@ -5771,7 +5779,7 @@
        "leg_premium_yen": -3240000,
        "max_loss_yen": -63270000,
        "max_loss_unbounded": false,
-       "margin_yen": 4034661,
+       "margin_yen": 2484606,
        "delta_large": 0.94,
        "delta_mini": 9.4,
        "meets_floor": null
@@ -5782,7 +5790,7 @@
        "leg_premium_yen": -3100000,
        "max_loss_yen": -63130000,
        "max_loss_unbounded": false,
-       "margin_yen": 4034661,
+       "margin_yen": 2409519,
        "delta_large": 0.92,
        "delta_mini": 9.18,
        "meets_floor": null
@@ -5793,7 +5801,7 @@
        "leg_premium_yen": -2990000,
        "max_loss_yen": -63020000,
        "max_loss_unbounded": false,
-       "margin_yen": 4034661,
+       "margin_yen": 2344990,
        "delta_large": 0.9,
        "delta_mini": 8.98,
        "meets_floor": null
@@ -5804,7 +5812,7 @@
        "leg_premium_yen": -2880000,
        "max_loss_yen": -62910000,
        "max_loss_unbounded": false,
-       "margin_yen": 4034661,
+       "margin_yen": 2280153,
        "delta_large": 0.88,
        "delta_mini": 8.77,
        "meets_floor": null
@@ -5815,7 +5823,7 @@
        "leg_premium_yen": -2780000,
        "max_loss_yen": -62810000,
        "max_loss_unbounded": false,
-       "margin_yen": 4034661,
+       "margin_yen": 2220711,
        "delta_large": 0.86,
        "delta_mini": 8.57,
        "meets_floor": null
@@ -5826,7 +5834,7 @@
        "leg_premium_yen": -2660000,
        "max_loss_yen": -62690000,
        "max_loss_unbounded": false,
-       "margin_yen": 4034661,
+       "margin_yen": 2153812,
        "delta_large": 0.84,
        "delta_mini": 8.35,
        "meets_floor": null
@@ -5837,7 +5845,7 @@
        "leg_premium_yen": -2570000,
        "max_loss_yen": -62600000,
        "max_loss_unbounded": false,
-       "margin_yen": 4034661,
+       "margin_yen": 2098300,
        "delta_large": 0.82,
        "delta_mini": 8.16,
        "meets_floor": null
@@ -5848,7 +5856,7 @@
        "leg_premium_yen": -2470000,
        "max_loss_yen": -62500000,
        "max_loss_unbounded": false,
-       "margin_yen": 4034661,
+       "margin_yen": 2038721,
        "delta_large": 0.8,
        "delta_mini": 7.95,
        "meets_floor": null
@@ -5859,7 +5867,7 @@
        "leg_premium_yen": -2380000,
        "max_loss_yen": -62410000,
        "max_loss_unbounded": false,
-       "margin_yen": 4034661,
+       "margin_yen": 1983145,
        "delta_large": 0.78,
        "delta_mini": 7.76,
        "meets_floor": null
@@ -5870,7 +5878,7 @@
        "leg_premium_yen": -2280000,
        "max_loss_yen": -62310000,
        "max_loss_unbounded": false,
-       "margin_yen": 4034661,
+       "margin_yen": 1923151,
        "delta_large": 0.76,
        "delta_mini": 7.55,
        "meets_floor": null
@@ -5881,7 +5889,7 @@
        "leg_premium_yen": -2210000,
        "max_loss_yen": -62240000,
        "max_loss_unbounded": false,
-       "margin_yen": 4034661,
+       "margin_yen": 1876223,
        "delta_large": 0.74,
        "delta_mini": 7.37,
        "meets_floor": null
@@ -5892,7 +5900,7 @@
        "leg_premium_yen": -2110000,
        "max_loss_yen": -62140000,
        "max_loss_unbounded": false,
-       "margin_yen": 4034661,
+       "margin_yen": 1826192,
        "delta_large": 0.72,
        "delta_mini": 7.16,
        "meets_floor": null
@@ -5903,7 +5911,7 @@
        "leg_premium_yen": -2020000,
        "max_loss_yen": -62050000,
        "max_loss_unbounded": false,
-       "margin_yen": 4034661,
+       "margin_yen": 1796846,
        "delta_large": 0.7,
        "delta_mini": 6.96,
        "meets_floor": null
@@ -5914,7 +5922,7 @@
        "leg_premium_yen": -1930000,
        "max_loss_yen": -61960000,
        "max_loss_unbounded": false,
-       "margin_yen": 4034661,
+       "margin_yen": 1768728,
        "delta_large": 0.68,
        "delta_mini": 6.76,
        "meets_floor": null
@@ -5925,7 +5933,7 @@
        "leg_premium_yen": -1860000,
        "max_loss_yen": -61890000,
        "max_loss_unbounded": false,
-       "margin_yen": 4034661,
+       "margin_yen": 1739657,
        "delta_large": 0.66,
        "delta_mini": 6.58,
        "meets_floor": null
@@ -5936,7 +5944,7 @@
        "leg_premium_yen": -1790000,
        "max_loss_yen": -61820000,
        "max_loss_unbounded": false,
-       "margin_yen": 4034661,
+       "margin_yen": 1711885,
        "delta_large": 0.64,
        "delta_mini": 6.4,
        "meets_floor": null
@@ -5947,7 +5955,7 @@
        "leg_premium_yen": -1720000,
        "max_loss_yen": -61750000,
        "max_loss_unbounded": false,
-       "margin_yen": 4034661,
+       "margin_yen": 1685377,
        "delta_large": 0.62,
        "delta_mini": 6.22,
        "meets_floor": null
@@ -5958,7 +5966,7 @@
        "leg_premium_yen": -1660000,
        "max_loss_yen": -61690000,
        "max_loss_unbounded": false,
-       "margin_yen": 4034661,
+       "margin_yen": 1659063,
        "delta_large": 0.61,
        "delta_mini": 6.06,
        "meets_floor": null
@@ -5969,7 +5977,7 @@
        "leg_premium_yen": -1580000,
        "max_loss_yen": -61610000,
        "max_loss_unbounded": false,
-       "margin_yen": 4034661,
+       "margin_yen": 1636036,
        "delta_large": 0.59,
        "delta_mini": 5.87,
        "meets_floor": null
@@ -5980,7 +5988,7 @@
        "leg_premium_yen": -1520000,
        "max_loss_yen": -61550000,
        "max_loss_unbounded": false,
-       "margin_yen": 4034661,
+       "margin_yen": 1612140,
        "delta_large": 0.57,
        "delta_mini": 5.7,
        "meets_floor": null
@@ -7216,9 +7224,9 @@
         "max_loss_yen": -2040000,
         "max_loss_x": 76500,
         "max_loss_unbounded": false,
-        "margin_yen": 1781830,
-        "room_yen": 5879170,
-        "multiple": 3,
+        "margin_yen": 396284,
+        "room_yen": 7603716,
+        "multiple": 20,
         "delta_large": -0.02,
         "delta_mini": -0.23,
         "theta_yen_per_day": 8446,
@@ -7226,10 +7234,7 @@
         "put_width_x": 1750,
         "call_width_x": 2250,
         "short_gap_x": 14250,
-        "call_levels_x": [
-         60089,
-         77704
-        ]
+        "call_levels_x": []
        }
       },
       {
@@ -7307,9 +7312,9 @@
         "max_loss_yen": -1925000,
         "max_loss_x": 75250,
         "max_loss_unbounded": false,
-        "margin_yen": 2016128,
-        "room_yen": 5478872,
-        "multiple": 3,
+        "margin_yen": 413131,
+        "room_yen": 7586869,
+        "multiple": 19,
         "delta_large": -0.03,
         "delta_mini": -0.28,
         "theta_yen_per_day": 9680,
@@ -7317,10 +7322,7 @@
         "put_width_x": 1875,
         "call_width_x": 2250,
         "short_gap_x": 11125,
-        "call_levels_x": [
-         60844,
-         76691
-        ]
+        "call_levels_x": []
        }
       },
       {
@@ -7398,9 +7400,9 @@
         "max_loss_yen": -1648000,
         "max_loss_x": 74125,
         "max_loss_unbounded": false,
-        "margin_yen": 2215349,
-        "room_yen": 5096651,
-        "multiple": 2,
+        "margin_yen": 415129,
+        "room_yen": 7584871,
+        "multiple": 19,
         "delta_large": -0.03,
         "delta_mini": -0.3,
         "theta_yen_per_day": 10815,
@@ -7408,10 +7410,7 @@
         "put_width_x": 1875,
         "call_width_x": 2125,
         "short_gap_x": 8750,
-        "call_levels_x": [
-         61372,
-         75899
-        ]
+        "call_levels_x": []
        }
       },
       {
@@ -7489,9 +7488,9 @@
         "max_loss_yen": -1510000,
         "max_loss_x": 73375,
         "max_loss_unbounded": false,
-        "margin_yen": 2335119,
-        "room_yen": 4769881,
-        "multiple": 2,
+        "margin_yen": 380523,
+        "room_yen": 7619477,
+        "multiple": 21,
         "delta_large": -0.03,
         "delta_mini": -0.28,
         "theta_yen_per_day": 10461,
@@ -7499,10 +7498,7 @@
         "put_width_x": 1875,
         "call_width_x": 2125,
         "short_gap_x": 6875,
-        "call_levels_x": [
-         61806,
-         75315
-        ]
+        "call_levels_x": []
        }
       },
       {
@@ -7580,9 +7576,9 @@
         "max_loss_yen": -1325000,
         "max_loss_x": 72625,
         "max_loss_unbounded": false,
-        "margin_yen": 2444646,
-        "room_yen": 4465354,
-        "multiple": 2,
+        "margin_yen": 364148,
+        "room_yen": 7635852,
+        "multiple": 21,
         "delta_large": -0.03,
         "delta_mini": -0.3,
         "theta_yen_per_day": 10348,
@@ -7590,10 +7586,7 @@
         "put_width_x": 2000,
         "call_width_x": 2125,
         "short_gap_x": 5250,
-        "call_levels_x": [
-         62123,
-         74775
-        ]
+        "call_levels_x": []
        }
       }
      ]
@@ -7667,9 +7660,9 @@
         "max_loss_yen": -1661000,
         "max_loss_x": 0,
         "max_loss_unbounded": false,
-        "margin_yen": 1558675,
-        "room_yen": 6200325,
-        "multiple": 4,
+        "margin_yen": 198885,
+        "room_yen": 7801115,
+        "multiple": 40,
         "delta_large": 0.03,
         "delta_mini": 0.28,
         "theta_yen_per_day": 2987,
@@ -7677,9 +7670,7 @@
         "put_width_x": 1750,
         "call_width_x": null,
         "short_gap_x": null,
-        "call_levels_x": [
-         59505
-        ]
+        "call_levels_x": []
        }
       },
       {
@@ -7738,9 +7729,9 @@
         "max_loss_yen": -1735000,
         "max_loss_x": 0,
         "max_loss_unbounded": false,
-        "margin_yen": 1833968,
-        "room_yen": 5816032,
-        "multiple": 3,
+        "margin_yen": 241526,
+        "room_yen": 7758474,
+        "multiple": 33,
         "delta_large": 0.04,
         "delta_mini": 0.44,
         "theta_yen_per_day": 3288,
@@ -7748,9 +7739,7 @@
         "put_width_x": 1875,
         "call_width_x": null,
         "short_gap_x": null,
-        "call_levels_x": [
-         60404
-        ]
+        "call_levels_x": []
        }
       },
       {
@@ -7809,9 +7798,9 @@
         "max_loss_yen": -1660000,
         "max_loss_x": 0,
         "max_loss_unbounded": false,
-        "margin_yen": 2069708,
-        "room_yen": 5475292,
-        "multiple": 3,
+        "margin_yen": 295000,
+        "room_yen": 7705000,
+        "multiple": 27,
         "delta_large": 0.06,
         "delta_mini": 0.63,
         "theta_yen_per_day": 3870,
@@ -7819,9 +7808,7 @@
         "put_width_x": 1875,
         "call_width_x": null,
         "short_gap_x": null,
-        "call_levels_x": [
-         61027
-        ]
+        "call_levels_x": []
        }
       },
       {
@@ -7880,9 +7867,9 @@
         "max_loss_yen": -1590000,
         "max_loss_x": 0,
         "max_loss_unbounded": false,
-        "margin_yen": 2267938,
-        "room_yen": 5157062,
-        "multiple": 2,
+        "margin_yen": 358844,
+        "room_yen": 7641156,
+        "multiple": 22,
         "delta_large": 0.08,
         "delta_mini": 0.8,
         "theta_yen_per_day": 3670,
@@ -7890,9 +7877,7 @@
         "put_width_x": 1875,
         "call_width_x": null,
         "short_gap_x": null,
-        "call_levels_x": [
-         61528
-        ]
+        "call_levels_x": []
        }
       },
       {
@@ -7951,9 +7936,9 @@
         "max_loss_yen": -1635000,
         "max_loss_x": 0,
         "max_loss_unbounded": false,
-        "margin_yen": 2429261,
-        "room_yen": 4885739,
-        "multiple": 2,
+        "margin_yen": 470900,
+        "room_yen": 7529100,
+        "multiple": 16,
         "delta_large": 0.1,
         "delta_mini": 0.99,
         "theta_yen_per_day": 3248,
@@ -7961,9 +7946,7 @@
         "put_width_x": 2000,
         "call_width_x": null,
         "short_gap_x": null,
-        "call_levels_x": [
-         61919
-        ]
+        "call_levels_x": []
        }
       }
      ]
@@ -8037,9 +8020,9 @@
         "max_loss_yen": -2129000,
         "max_loss_x": 76500,
         "max_loss_unbounded": false,
-        "margin_yen": 1510819,
-        "room_yen": 6391181,
-        "multiple": 4,
+        "margin_yen": 415621,
+        "room_yen": 7584379,
+        "multiple": 19,
         "delta_large": -0.05,
         "delta_mini": -0.51,
         "theta_yen_per_day": 5459,
@@ -8047,9 +8030,7 @@
         "put_width_x": null,
         "call_width_x": 2250,
         "short_gap_x": null,
-        "call_levels_x": [
-         77687
-        ]
+        "call_levels_x": []
        }
       },
       {
@@ -8108,9 +8089,9 @@
         "max_loss_yen": -2065000,
         "max_loss_x": 75250,
         "max_loss_unbounded": false,
-        "margin_yen": 1784277,
-        "room_yen": 6060723,
-        "multiple": 4,
+        "margin_yen": 466140,
+        "room_yen": 7533860,
+        "multiple": 17,
         "delta_large": -0.07,
         "delta_mini": -0.73,
         "theta_yen_per_day": 6392,
@@ -8118,9 +8099,7 @@
         "put_width_x": null,
         "call_width_x": 2250,
         "short_gap_x": null,
-        "call_levels_x": [
-         76646
-        ]
+        "call_levels_x": []
        }
       },
       {
@@ -8179,9 +8158,9 @@
         "max_loss_yen": -1863000,
         "max_loss_x": 74125,
         "max_loss_unbounded": false,
-        "margin_yen": 2038486,
-        "room_yen": 5728514,
-        "multiple": 3,
+        "margin_yen": 492394,
+        "room_yen": 7507606,
+        "multiple": 16,
         "delta_large": -0.09,
         "delta_mini": -0.92,
         "theta_yen_per_day": 6946,
@@ -8189,9 +8168,7 @@
         "put_width_x": null,
         "call_width_x": 2125,
         "short_gap_x": null,
-        "call_levels_x": [
-         75810
-        ]
+        "call_levels_x": []
        }
       },
       {
@@ -8250,9 +8227,9 @@
         "max_loss_yen": -1795000,
         "max_loss_x": 73375,
         "max_loss_unbounded": false,
-        "margin_yen": 2233850,
-        "room_yen": 5446150,
-        "multiple": 3,
+        "margin_yen": 494749,
+        "room_yen": 7505251,
+        "multiple": 16,
         "delta_large": -0.11,
         "delta_mini": -1.08,
         "theta_yen_per_day": 6791,
@@ -8260,9 +8237,7 @@
         "put_width_x": null,
         "call_width_x": 2125,
         "short_gap_x": null,
-        "call_levels_x": [
-         75186
-        ]
+        "call_levels_x": []
        }
       },
       {
@@ -8321,9 +8296,9 @@
         "max_loss_yen": -1690000,
         "max_loss_x": 72625,
         "max_loss_unbounded": false,
-        "margin_yen": 2424054,
-        "room_yen": 5170946,
-        "multiple": 2,
+        "margin_yen": 527055,
+        "room_yen": 7472945,
+        "multiple": 15,
         "delta_large": -0.13,
         "delta_mini": -1.29,
         "theta_yen_per_day": 7100,
@@ -8331,9 +8306,7 @@
         "put_width_x": null,
         "call_width_x": 2125,
         "short_gap_x": null,
-        "call_levels_x": [
-         74604
-        ]
+        "call_levels_x": []
        }
       }
      ]
@@ -8408,9 +8381,9 @@
         "max_loss_yen": -55845000,
         "max_loss_x": 0,
         "max_loss_unbounded": false,
-        "margin_yen": 3117350,
-        "room_yen": 4002650,
-        "multiple": 2,
+        "margin_yen": 833749,
+        "room_yen": 7166251,
+        "multiple": 9,
         "delta_large": -0.05,
         "delta_mini": -0.52,
         "theta_yen_per_day": 9229,
@@ -8419,7 +8392,7 @@
         "call_width_x": null,
         "short_gap_x": null,
         "call_levels_x": [
-         63607
+         56664
         ]
        }
       },
@@ -8480,9 +8453,9 @@
         "max_loss_yen": -58595000,
         "max_loss_x": 0,
         "max_loss_unbounded": false,
-        "margin_yen": 3667937,
-        "room_yen": 3257063,
-        "multiple": 1,
+        "margin_yen": 1222810,
+        "room_yen": 6777190,
+        "multiple": 6,
         "delta_large": -0.01,
         "delta_mini": -0.06,
         "theta_yen_per_day": 15965,
@@ -8491,7 +8464,7 @@
         "call_width_x": null,
         "short_gap_x": null,
         "call_levels_x": [
-         64479
+         58500
         ]
        }
       },
@@ -8551,9 +8524,9 @@
         "max_loss_yen": -60440000,
         "max_loss_x": 0,
         "max_loss_unbounded": false,
-        "margin_yen": 4139415,
-        "room_yen": 2580585,
-        "multiple": 1,
+        "margin_yen": 1553800,
+        "room_yen": 6446200,
+        "multiple": 5,
         "delta_large": 0.05,
         "delta_mini": 0.47,
         "theta_yen_per_day": 21559,
@@ -8562,7 +8535,7 @@
         "call_width_x": null,
         "short_gap_x": null,
         "call_levels_x": [
-         65299
+         59530
         ]
        }
       },
@@ -8622,9 +8595,9 @@
         "max_loss_yen": -61815000,
         "max_loss_x": 0,
         "max_loss_unbounded": false,
-        "margin_yen": 4535876,
-        "room_yen": 1929124,
-        "multiple": 1,
+        "margin_yen": 1807502,
+        "room_yen": 6192498,
+        "multiple": 4,
         "delta_large": 0.1,
         "delta_mini": 0.96,
         "theta_yen_per_day": 25343,
@@ -8633,7 +8606,7 @@
         "call_width_x": null,
         "short_gap_x": null,
         "call_levels_x": [
-         66021
+         60200
         ]
        }
       },
@@ -8693,9 +8666,9 @@
         "max_loss_yen": -62790000,
         "max_loss_x": 0,
         "max_loss_unbounded": false,
-        "margin_yen": 4858521,
-        "room_yen": 1376479,
-        "multiple": 1,
+        "margin_yen": 2022451,
+        "room_yen": 5977549,
+        "multiple": 3,
         "delta_large": 0.15,
         "delta_mini": 1.46,
         "theta_yen_per_day": 28364,
@@ -8704,7 +8677,7 @@
         "call_width_x": null,
         "short_gap_x": null,
         "call_levels_x": [
-         66589
+         60662
         ]
        }
       }
@@ -8780,7 +8753,7 @@
         "max_loss_yen": -572000,
         "max_loss_x": 60000,
         "max_loss_unbounded": false,
-        "margin_yen": 0,
+        "margin_yen": 430412,
         "room_yen": 7428000,
         "multiple": 13,
         "delta_large": 0,
@@ -8850,7 +8823,7 @@
         "max_loss_yen": -875000,
         "max_loss_x": 61875,
         "max_loss_unbounded": false,
-        "margin_yen": 0,
+        "margin_yen": 588308,
         "room_yen": 7125000,
         "multiple": 9,
         "delta_large": 0,
@@ -8920,7 +8893,7 @@
         "max_loss_yen": -1195000,
         "max_loss_x": 63250,
         "max_loss_unbounded": false,
-        "margin_yen": 0,
+        "margin_yen": 717794,
         "room_yen": 6805000,
         "multiple": 6,
         "delta_large": 0,
@@ -8990,7 +8963,7 @@
         "max_loss_yen": -1545000,
         "max_loss_x": 64375,
         "max_loss_unbounded": false,
-        "margin_yen": 0,
+        "margin_yen": 826623,
         "room_yen": 6455000,
         "multiple": 5,
         "delta_large": 0,
@@ -9060,7 +9033,7 @@
         "max_loss_yen": -1935000,
         "max_loss_x": 65250,
         "max_loss_unbounded": false,
-        "margin_yen": 0,
+        "margin_yen": 917791,
         "room_yen": 6065000,
         "multiple": 4,
         "delta_large": 0,
@@ -9145,7 +9118,7 @@
         "max_loss_yen": -3925000,
         "max_loss_x": 67750,
         "max_loss_unbounded": false,
-        "margin_yen": 0,
+        "margin_yen": 1078895,
         "room_yen": 4075000,
         "multiple": 2,
         "delta_large": 0.04,
@@ -9229,9 +9202,9 @@
         "max_loss_yen": -910000,
         "max_loss_x": 0,
         "max_loss_unbounded": false,
-        "margin_yen": 2612327,
-        "room_yen": 3397673,
-        "multiple": 1,
+        "margin_yen": 677607,
+        "room_yen": 7090000,
+        "multiple": 8,
         "delta_large": 0.17,
         "delta_mini": 1.65,
         "theta_yen_per_day": -3546,
@@ -9239,9 +9212,7 @@
         "put_width_x": null,
         "call_width_x": 2000,
         "short_gap_x": null,
-        "call_levels_x": [
-         72360
-        ]
+        "call_levels_x": []
        }
       }
      ]
@@ -9315,9 +9286,9 @@
         "max_loss_yen": -755000,
         "max_loss_x": 67750,
         "max_loss_unbounded": false,
-        "margin_yen": 2523517,
-        "room_yen": 3541483,
-        "multiple": 1,
+        "margin_yen": 546296,
+        "room_yen": 7245000,
+        "multiple": 10,
         "delta_large": -0.15,
         "delta_mini": -1.5,
         "theta_yen_per_day": -1248,
@@ -9325,9 +9296,7 @@
         "put_width_x": 2000,
         "call_width_x": null,
         "short_gap_x": null,
-        "call_levels_x": [
-         63144
-        ]
+        "call_levels_x": []
        }
       }
      ]
@@ -9411,9 +9380,9 @@
         "max_loss_yen": -435000,
         "max_loss_x": 0,
         "max_loss_unbounded": false,
-        "margin_yen": 6095492,
-        "room_yen": -2470492,
-        "multiple": 0,
+        "margin_yen": 132959,
+        "room_yen": 7565000,
+        "multiple": 18,
         "delta_large": -0.01,
         "delta_mini": -0.14,
         "theta_yen_per_day": 3028,
@@ -9421,9 +9390,7 @@
         "put_width_x": null,
         "call_width_x": null,
         "short_gap_x": null,
-        "call_levels_x": [
-         65831
-        ]
+        "call_levels_x": []
        }
       }
      ]
@@ -9495,9 +9462,9 @@
         "max_loss_yen": -867782,
         "max_loss_x": 0,
         "max_loss_unbounded": false,
-        "margin_yen": 2898748,
-        "room_yen": 2386252,
-        "multiple": 1,
+        "margin_yen": 400280,
+        "room_yen": 7205000,
+        "multiple": 10,
         "delta_large": 0.01,
         "delta_mini": 0.09,
         "theta_yen_per_day": 8238,
@@ -9505,9 +9472,7 @@
         "put_width_x": null,
         "call_width_x": null,
         "short_gap_x": null,
-        "call_levels_x": [
-         64639
-        ]
+        "call_levels_x": []
        }
       }
      ]
@@ -9599,9 +9564,9 @@
       "max_loss_yen": -60030000,
       "max_loss_x": 0,
       "max_loss_unbounded": false,
-      "margin_yen": 4034661,
-      "room_yen": 2685339,
-      "multiple": 1,
+      "margin_yen": 1449046,
+      "room_yen": 6550954,
+      "multiple": 5,
       "delta_large": 0.02,
       "delta_mini": 0.24,
       "theta_yen_per_day": 19967,
@@ -9610,7 +9575,7 @@
       "call_width_x": null,
       "short_gap_x": null,
       "call_levels_x": [
-       65166
+       59288
       ]
      },
      "after": {
@@ -9621,9 +9586,9 @@
       "max_loss_yen": -845000,
       "max_loss_x": 0,
       "max_loss_unbounded": false,
-      "margin_yen": 4034661,
-      "room_yen": 2370339,
-      "multiple": 1,
+      "margin_yen": 259549,
+      "room_yen": 7655000,
+      "multiple": 23,
       "delta_large": -0.07,
       "delta_mini": -0.69,
       "theta_yen_per_day": 974,
@@ -9631,9 +9596,7 @@
       "put_width_x": null,
       "call_width_x": null,
       "short_gap_x": null,
-      "call_levels_x": [
-       65426
-      ]
+      "call_levels_x": []
      }
     }
    },
@@ -9716,9 +9679,9 @@
       "max_loss_yen": -60030000,
       "max_loss_x": 0,
       "max_loss_unbounded": false,
-      "margin_yen": 4034661,
-      "room_yen": 2685339,
-      "multiple": 1,
+      "margin_yen": 1449046,
+      "room_yen": 6550954,
+      "multiple": 5,
       "delta_large": 0.02,
       "delta_mini": 0.24,
       "theta_yen_per_day": 19967,
@@ -9727,7 +9690,7 @@
       "call_width_x": null,
       "short_gap_x": null,
       "call_levels_x": [
-       65166
+       59288
       ]
      },
      "after": {
@@ -9738,9 +9701,9 @@
       "max_loss_yen": -520000,
       "max_loss_x": 65500,
       "max_loss_unbounded": false,
-      "margin_yen": 2017330,
-      "room_yen": 4837670,
-      "multiple": 2,
+      "margin_yen": 434600,
+      "room_yen": 7480000,
+      "multiple": 15,
       "delta_large": -0.13,
       "delta_mini": -1.3,
       "theta_yen_per_day": -5422,
@@ -9748,9 +9711,7 @@
       "put_width_x": 2500,
       "call_width_x": null,
       "short_gap_x": null,
-      "call_levels_x": [
-       61529
-      ]
+      "call_levels_x": []
      }
     }
    },
@@ -9825,9 +9786,9 @@
       "max_loss_yen": -1310000,
       "max_loss_x": 0,
       "max_loss_unbounded": false,
-      "margin_yen": 2334873,
-      "room_yen": -334873,
-      "multiple": 0,
+      "margin_yen": 325224,
+      "room_yen": 2674776,
+      "multiple": 9,
       "delta_large": -0.01,
       "delta_mini": -0.13,
       "theta_yen_per_day": 9991,
@@ -9845,9 +9806,9 @@
       "max_loss_yen": -65320000,
       "max_loss_x": 0,
       "max_loss_unbounded": false,
-      "margin_yen": 4688305,
-      "room_yen": -2688305,
-      "multiple": 0,
+      "margin_yen": 2616579,
+      "room_yen": 383421,
+      "multiple": 1,
       "delta_large": 0.27,
       "delta_mini": 2.7,
       "theta_yen_per_day": 39897,
@@ -9855,7 +9816,9 @@
       "put_width_x": 2000,
       "call_width_x": 2000,
       "short_gap_x": 6000,
-      "call_levels_x": []
+      "call_levels_x": [
+       67158
+      ]
      }
     }
    },
@@ -10091,9 +10054,9 @@
       "max_loss_yen": -60030000,
       "max_loss_x": 0,
       "max_loss_unbounded": false,
-      "margin_yen": 4034661,
-      "room_yen": 2685339,
-      "multiple": 1,
+      "margin_yen": 1449046,
+      "room_yen": 6550954,
+      "multiple": 5,
       "delta_large": 0.02,
       "delta_mini": 0.24,
       "theta_yen_per_day": 19967,
@@ -10102,7 +10065,7 @@
       "call_width_x": null,
       "short_gap_x": null,
       "call_levels_x": [
-       65166
+       59288
       ]
      },
      "after": {
@@ -10113,9 +10076,9 @@
       "max_loss_yen": -845000,
       "max_loss_x": 0,
       "max_loss_unbounded": false,
-      "margin_yen": 4034661,
-      "room_yen": 2370339,
-      "multiple": 1,
+      "margin_yen": 259549,
+      "room_yen": 7655000,
+      "multiple": 23,
       "delta_large": -0.07,
       "delta_mini": -0.69,
       "theta_yen_per_day": 974,
@@ -10123,9 +10086,7 @@
       "put_width_x": null,
       "call_width_x": null,
       "short_gap_x": null,
-      "call_levels_x": [
-       65426
-      ]
+      "call_levels_x": []
      }
     }
    },
@@ -10201,9 +10162,9 @@
       "max_loss_yen": -1310000,
       "max_loss_x": 0,
       "max_loss_unbounded": false,
-      "margin_yen": 2334873,
-      "room_yen": -334873,
-      "multiple": 0,
+      "margin_yen": 325224,
+      "room_yen": 2674776,
+      "multiple": 9,
       "delta_large": -0.01,
       "delta_mini": -0.13,
       "theta_yen_per_day": 9991,
@@ -10221,9 +10182,9 @@
       "max_loss_yen": -1479000,
       "max_loss_x": 56500,
       "max_loss_unbounded": false,
-      "margin_yen": 2334873,
-      "room_yen": -503873,
-      "multiple": 0,
+      "margin_yen": 347958,
+      "room_yen": 2652042,
+      "multiple": 8,
       "delta_large": -0.06,
       "delta_mini": -0.63,
       "theta_yen_per_day": -3128,
@@ -10306,9 +10267,9 @@
       "max_loss_yen": -1925000,
       "max_loss_x": 75250,
       "max_loss_unbounded": false,
-      "margin_yen": 2016128,
-      "room_yen": 5478872,
-      "multiple": 3,
+      "margin_yen": 413131,
+      "room_yen": 7586869,
+      "multiple": 19,
       "delta_large": -0.03,
       "delta_mini": -0.28,
       "theta_yen_per_day": 9680,
@@ -10316,10 +10277,7 @@
       "put_width_x": 1875,
       "call_width_x": 2250,
       "short_gap_x": 11125,
-      "call_levels_x": [
-       60844,
-       76691
-      ]
+      "call_levels_x": []
      }
     }
    }

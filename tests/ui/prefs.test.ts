@@ -21,7 +21,7 @@ const M0 = DEFAULT_MARGIN_PREFS;
 const DEF = { theme: 'auto', margin: M0 };
 /** 証拠金の既定のキー（書き出しの末尾） */
 const M0_JSON =
-  '"margin_k_pct":100,"margin_r_pct":5,"margin_iv_up_pct":50,"margin_iv_down_pct":25,"margin_ignore_long_options":true';
+  '"margin_k_pct":100,"margin_r_pct":5,"margin_iv_up_pct":50,"margin_iv_down_pct":25,"margin_exclude_long_options":false';
 
 describe('readPrefs', () => {
   it('キーと版', () => {
@@ -35,7 +35,7 @@ describe('readPrefs', () => {
       rangePct: 5,
       ivUpPct: 50,
       ivDownPct: 25,
-      ignoreLongOptions: true,
+      ignoreLongOptions: false,
     });
   });
 
@@ -114,7 +114,7 @@ describe('証拠金の設定（#131 AC15）', () => {
       margin_r_pct: 10.5,
       margin_iv_up_pct: 37.5,
       margin_iv_down_pct: 0,
-      margin_ignore_long_options: false,
+      margin_exclude_long_options: false,
     });
     expect(readPrefs(text)).toEqual({ prefs: { theme: 'dark', margin: custom }, writable: true });
     // 範囲の両端
@@ -249,8 +249,8 @@ describe('#180 許容損失の設定', () => {
   });
 });
 
-describe('#149 買いの OP の設定', () => {
-  it('#149 買いの OP の設定: 無い・不正 → 既定（オン）、オフを往復、版は 1', () => {
+describe('#149 買いの OP の設定（#382 で既定をオフに・キーを新しく）', () => {
+  it('#382 買いの OP の設定: 無い・不正 → 既定（オフ = 相殺する）、オンを往復、版は 1', () => {
     const custom: MarginPrefs = {
       capitalYen: 5_000_000,
       allowedLossYen: null,
@@ -258,36 +258,49 @@ describe('#149 買いの OP の設定', () => {
       rangePct: 10,
       ivUpPct: 12,
       ivDownPct: 2,
-      ignoreLongOptions: false,
+      ignoreLongOptions: true,
     };
     const good = JSON.parse(serializePrefs({ theme: 'dark', margin: custom }));
     expect(good.schema_version).toBe(1);
-    expect(good.margin_ignore_long_options).toBe(false);
-    // オフの往復・オンの往復
+    expect(good.margin_exclude_long_options).toBe(true);
+    expect('margin_ignore_long_options' in good).toBe(false);
+    // オンの往復・オフの往復
     expect(readPrefs(JSON.stringify(good)).prefs.margin).toEqual(custom);
-    const on = { ...custom, ignoreLongOptions: true };
-    expect(readPrefs(serializePrefs({ theme: 'dark', margin: on })).prefs.margin).toEqual(on);
-    // キーなし（#149 より前の保存）→ オン、他の項目はそのまま
-    const { margin_ignore_long_options: _, ...noKey } = good;
+    const off = { ...custom, ignoreLongOptions: false };
+    expect(readPrefs(serializePrefs({ theme: 'dark', margin: off })).prefs.margin).toEqual(off);
+    // キーなし → オフ、他の項目はそのまま
+    const { margin_exclude_long_options: _, ...noKey } = good;
     expect(readPrefs(JSON.stringify(noKey))).toEqual({
-      prefs: { theme: 'dark', margin: on },
+      prefs: { theme: 'dark', margin: off },
       writable: true,
     });
-    // boolean でない値 → オン、他の項目とテーマは残る
-    for (const v of ['false', 0, 1, null, [], {}]) {
-      const r = readPrefs(JSON.stringify({ ...good, margin_ignore_long_options: v }));
+    // boolean でない値 → オフ、他の項目とテーマは残る
+    for (const v of ['true', 0, 1, null, [], {}]) {
+      const r = readPrefs(JSON.stringify({ ...good, margin_exclude_long_options: v }));
       expect(r.writable, String(v)).toBe(true);
       expect(r.prefs.theme).toBe('dark');
-      expect(r.prefs.margin, JSON.stringify(v)).toEqual(on);
+      expect(r.prefs.margin, JSON.stringify(v)).toEqual(off);
     }
-    // 書き出しは常に書く（boolean でなければ既定 = オン）
+    // 書き出しは常に書く（boolean でなければ既定 = オフ）
     expect(serializePrefs({ theme: 'auto', margin: M0 })).toContain(
-      '"margin_ignore_long_options":true',
+      '"margin_exclude_long_options":false',
     );
     const broken = { ...M0, ignoreLongOptions: 0 as unknown as boolean };
     expect(
-      JSON.parse(serializePrefs({ theme: 'auto', margin: broken })).margin_ignore_long_options,
-    ).toBe(true);
+      JSON.parse(serializePrefs({ theme: 'auto', margin: broken })).margin_exclude_long_options,
+    ).toBe(false);
+  });
+
+  it('#382 旧キー margin_ignore_long_options は読まない・書かない（#150 と同じ割り切り）', () => {
+    const { margin_exclude_long_options: _, ...base } = JSON.parse(
+      serializePrefs({ theme: 'dark', margin: { ...M0, capitalYen: 3_000_000 } }),
+    );
+    for (const v of [true, false]) {
+      const r = readPrefs(JSON.stringify({ ...base, margin_ignore_long_options: v }));
+      expect(r.prefs.margin.ignoreLongOptions).toBe(false);
+      expect(r.prefs.margin.capitalYen).toBe(3_000_000);
+      expect(serializePrefs(r.prefs)).not.toContain('margin_ignore_long_options');
+    }
   });
 });
 
@@ -329,7 +342,7 @@ describe('#150 IV の幅は比率のキー、古い pt のキーは読まない�
       margin_iv_up_pct: 50,
       margin_iv_down_pct: 25,
       capital_yen: 5_000_000,
-      margin_ignore_long_options: false,
+      margin_exclude_long_options: false,
     });
   });
 

@@ -145,3 +145,10 @@ export function synthOptionBars(
     trade_iv: number | null;
   }[];
 };
+
+/** JSCC の VaR パラメータの合成の応答の基準日（#382。合成の板 latest の基準日） */
+export const SYNTH_JSCC_DATE: string;
+/** `?date=&i=…` を読む（形が違えば null） */
+export function jsccQuery(url: string): { date: string; keys: string[] } | null;
+/** `/api/jscc_scenarios` と同じ形の合成の応答（架空の値） */
+export function synthJscc(date: string, keys: readonly string[]): unknown;

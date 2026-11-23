@@ -15,6 +15,10 @@
  * （margin_factor_pct・margin_range_pct・margin_iv_up_pt・margin_iv_down_pt）は読まない・書かない。
  * 書き出しは触っていない項目も既定値で書くので、古い値が利用者の選んだ値か旧既定かを区別できず、読むと新しい
  * 既定が効かないため。資金・買いの OP のキーは今のまま。版は 1 のまま。
+ * #382 で今の必要証拠金を JSCC の計算にしたので「買いの OP で証拠金を減らさない」の既定を false（相殺する = JSCC の形）
+ * にした。キーを新しくし（margin_exclude_long_options）、古いキー（margin_ignore_long_options）は読まない・書かない
+ * （書き出しは触っていない項目も既定値で書くので、古い true が利用者の選んだ値か旧既定かを区別できないため。#150 と同じ
+ * 割り切り）。版は 1 のまま。
  * #135 で「AI の免責の文を見た」（ai_disclaimer_seen。boolean。既定 false。true のときだけ書く）を足した。版は 1 のまま
  * （無い・boolean でない → false。古い画面はこのキーを読まずに書き直すので消えるが、免責の文がもう 1 回出るだけ）。
  * #205 でテクニカル指標の期間（RSI・MACD・ストキャスティクス。model の TechParams）を足した。版は 1 のまま。キーは
@@ -86,7 +90,7 @@ export interface MarginPrefs {
   ivUpPct: number;
   /** IV の下げ（%。25 = 状態 S の IV の ×0.75） */
   ivDownPct: number;
-  /** 買いの OP で証拠金を減らさない（true = 売りの OP と先物だけで計算。#149） */
+  /** 買いの OP で証拠金を減らさない（true = 売りの OP と先物だけで計算。#149。既定 false = 相殺する。#382） */
   ignoreLongOptions: boolean;
 }
 
@@ -111,11 +115,11 @@ export const DEFAULT_MARGIN_PREFS: MarginPrefs = {
   rangePct: 5,
   ivUpPct: 50,
   ivDownPct: 25,
-  ignoreLongOptions: true,
+  ignoreLongOptions: false,
 };
 
-/** 買いの OP の設定の JSON のキー（#149） */
-const IGNORE_LONG_JSON_KEY = 'margin_ignore_long_options';
+/** 買いの OP の設定の JSON のキー（#149。#382 で既定を false にしてキーを新しくした。旧 margin_ignore_long_options は読まない） */
+const IGNORE_LONG_JSON_KEY = 'margin_exclude_long_options';
 
 /** JSON のキー（項目ごと。掛け目・R・IV は #150 で新しくした） */
 const MARGIN_JSON_KEY: Record<MarginPrefKey, string> = {

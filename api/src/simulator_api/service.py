@@ -22,6 +22,11 @@ runner: (name, params) -> 行（dict）のリスト。name は sql/<name>.sql、
   期限付きの LRU（24 時間、ATM_DAILY_CACHE_SIZE 件）+ single-flight。範囲の終わりが変わる（JST 8:00）と読み直す
 - /api/future_bars（#190）: FutureBarsService。AtmIvService と同じ形（キー = (tf, start, end)、確定した範囲 24 時間・
   それ以外 300 秒、ATM_IV_CACHE_SIZE 件 + single-flight）。限月を求めるのでどの足もカレンダーを使う
+- /api/jscc_scenarios（#382）: JsccService。取り込みの記録（キー = 基準日。succeeded の run_id は
+  JSCC_RUNS_TTL_SECONDS、まだ無ければ JSCC_RUNS_MISS_TTL_SECONDS）・シナリオの並びとパラメータ（キー = (日, run_id)。
+  LRU）・限月の全行（キー = (日, run_id, 限月)。LRU。1 日のパーティションはクラスタで絞っても同じ課金なので限月ごとに
+  1 回だけ読む）+ single-flight。
+  応答は要求の銘柄の行だけ（毎回作る）。file・quotes は unavailable / no_source（200）
 - /api/option_bars（#319）: OptionBarsService。行のキャッシュ（キー = (ltd, k, type)。1h と 1d は同じ行から作る =
   1 銘柄 1 クエリ）と応答のキャッシュ（キー = (ltd, k, type, tf)）。どちらも期限付きの LRU（確定した銘柄 24 時間・
   それ以外 300 秒、OPTION_BARS_CACHE_SIZE 件）+ single-flight。範囲の外の限月はクエリを出さない。日足だけカレンダー
@@ -36,7 +41,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from . import atm_daily, atm_iv, chain, future_bars, option_bars, quotes, usable
+from . import atm_daily, atm_iv, chain, future_bars, jscc, option_bars, quotes, usable
 from . import calendar as cal_mod
 from . import settings as st
 from .atm_iv import AtmIvRequest
@@ -124,6 +129,7 @@ class ChainService:
         self._atm_daily = AtmDailyService(runner, clock, monotonic)
         self._future_bars = FutureBarsService(runner, clock, monotonic, calendar=self._calendar_value)
         self._option_bars = OptionBarsService(runner, clock, monotonic, calendar=self._calendar_value)
+        self._jscc = JsccService(runner, clock, monotonic)
 
     def _query(self, budget: _Budget, name: str, params: dict) -> list[dict]:
         budget.check()
@@ -216,6 +222,85 @@ class ChainService:
 
     def option_bars(self, req: option_bars.OptionBarsRequest) -> Payload:
         return self._option_bars.get(req)
+
+    def jscc_scenarios(self, req: jscc.JsccRequest) -> "JsccPayload":
+        return self._jscc.get(req)
+
+
+@dataclass(frozen=True)
+class JsccPayload(Payload):
+    status: str = "ok"  # ok / unavailable
+    reason: str = ""  # unavailable の理由（not_ready / inconsistent / no_source）
+
+
+def jscc_unavailable(d, reason: str) -> JsccPayload:
+    body, gz = _encode(jscc.unavailable_json(d, reason))
+    return JsccPayload(body, gz, None, status="unavailable", reason=reason)
+
+
+class JsccService:
+    """/api/jscc_scenarios の中身（#382）"""
+
+    def __init__(self, runner, clock, monotonic=time.monotonic):
+        self.runner = runner
+        self.clock = clock
+        self.monotonic = monotonic
+        self._runs = ExpiringLRUCache(st.JSCC_SET_CACHE_SIZE, monotonic)
+        self._sets = LRUCache(st.JSCC_SET_CACHE_SIZE)
+        self._rows = LRUCache(st.JSCC_ROWS_CACHE_SIZE)
+
+    def _run_id(self, d, budget: _Budget, loaded: list) -> str | None:
+        def load():
+            loaded.append("runs")
+            budget.check()
+            return jscc.pick_run(self.runner("jscc_runs", {"d": d}))
+
+        return self._runs.get(d, load, st.JSCC_RUNS_TTL_SECONDS,
+                              ttl_of=lambda v: st.JSCC_RUNS_TTL_SECONDS if v is not None
+                              else st.JSCC_RUNS_MISS_TTL_SECONDS)
+
+    def _set(self, d, run_id: str, budget: _Budget, loaded: list) -> jscc.ScenarioSet:
+        def load():
+            loaded.append("set")
+            budget.check()
+            set_rows = self.runner("jscc_scenario_set", {"d": d})
+            budget.check()
+            param_rows = self.runner("jscc_parameter", {"d": d})
+            return jscc.scenario_set(run_id, set_rows, param_rows)
+
+        return self._sets.get((d, run_id), load)
+
+    def _period(self, d, run_id: str, period: str, n: int, budget: _Budget, loaded: list) -> dict:
+        def load():
+            loaded.append("rows")
+            budget.check()
+            rows = self.runner("jscc_scenario", {"d": d, "cp": int(period)})
+            return jscc.instruments_from_rows(run_id, rows, n)
+
+        return self._rows.get((d, run_id, period), load)
+
+    def get(self, req: jscc.JsccRequest) -> JsccPayload:
+        started = self.monotonic()
+        budget = _Budget(self.monotonic)
+        loaded: list = []
+        try:
+            run_id = self._run_id(req.date, budget, loaded)
+            if run_id is None:
+                payload = jscc_unavailable(req.date, "not_ready")
+            else:
+                s = self._set(req.date, run_id, budget, loaded)
+                by_period = {p: self._period(req.date, run_id, p, len(s.types), budget, loaded)
+                             for p in req.periods}
+                body, gz = _encode(jscc.ok_json(req, s, by_period))
+                payload = JsccPayload(body, gz, None)
+        except jscc.Inconsistent as e:
+            log("WARNING", "jscc_inconsistent", table=e.args[0] if e.args else None)
+            payload = jscc_unavailable(req.date, "inconsistent")
+        # 銘柄（i）は利用者の検討内容なのでログに出さない（数だけ）
+        log("INFO", "jscc_served", status=payload.status, reason=payload.reason or None, keys=len(req.keys),
+            periods=len(req.periods), queries=len(loaded), cache="miss" if loaded else "hit",
+            elapsed_ms=round((self.monotonic() - started) * 1000))
+        return payload
 
 
 class AtmIvService:
@@ -445,6 +530,9 @@ class FileChainService:
     def option_bars(self, req) -> Payload:
         raise Unavailable("file_source")
 
+    def jscc_scenarios(self, req) -> Payload:
+        return jscc_unavailable(req.date, "no_source")
+
 
 class QuotesFileService:
     """DATA_SOURCE=quotes: 利用者が自分の API から書き出した中立の気配の一覧（QUOTES_FILE）と取引カレンダー
@@ -508,3 +596,6 @@ class QuotesFileService:
 
     def option_bars(self, req) -> Payload:
         raise Unavailable("quotes_source")
+
+    def jscc_scenarios(self, req) -> Payload:
+        return jscc_unavailable(req.date, "no_source")
