@@ -241,7 +241,16 @@ export function marginNow(
   const { legs, ctx, settings } = base;
   const { sc, horizonDays, marked } = stateAt(base, x, sc0, holidays);
   const state = { x, scenario: sc, horizonDays, marked };
-  const r = marginNowJscc(legs, state, ctx, settings, params, jscc.data);
+  let r: MarginResult | null;
+  try {
+    r = marginNowJscc(legs, state, ctx, settings, params, jscc.data);
+  } catch {
+    // 検証済みの応答では起きない（安全な整数を越える和・本数の違いなど）。memo の中で投げて画面を落とさない
+    return marginCalc(base, x, sc0, params, capital, holidays, {
+      kind: 'estimate',
+      reason: 'error',
+    });
+  }
   if (r !== null) {
     return calcOf(base, x, r, capital, { kind: 'jscc', businessDate: jscc.data.businessDate });
   }

@@ -215,14 +215,14 @@ describe('jsccKeyOfLeg', () => {
     product: 'op_large',
     type: 'put',
     expiry: '2026-12',
-    strike: 50000,
+    strike: 45000,
     side: 'sell',
     qty: 1,
     entry: 100,
     ...o,
   });
   it('OP・先物 3 商品のキー（API の i= と同じ形）', () => {
-    expect(jsccKeyOfLeg(op())).toBe('NK225E-202612-P-50000');
+    expect(jsccKeyOfLeg(op())).toBe('NK225E-202612-P-45000');
     expect(jsccKeyOfLeg(op({ type: 'call', strike: 51250 }))).toBe('NK225E-202612-C-51250');
     const fut = (product: 'fut_large' | 'fut_mini' | 'fut_micro'): Leg => ({
       kind: 'future',
@@ -239,7 +239,7 @@ describe('jsccKeyOfLeg', () => {
   it('限月の形・行使価格が外れたら null', () => {
     expect(jsccKeyOfLeg(op({ expiry: 'M1' }))).toBeNull();
     expect(jsccKeyOfLeg(op({ expiry: '2026-13' }))).toBeNull();
-    expect(jsccKeyOfLeg(op({ strike: 50000.5 }))).toBeNull();
+    expect(jsccKeyOfLeg(op({ strike: 45000.5 }))).toBeNull();
     expect(jsccKeyOfLeg(op({ strike: 0 }))).toBeNull();
   });
 });

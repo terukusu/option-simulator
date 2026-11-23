@@ -3154,9 +3154,9 @@ async function termCardSweep() {
       await page.waitForTimeout(100);
       await page.keyboard.press('Enter');
       await termCardCheck(page, `${tag} パレット`, w, h, `${name}-palette`, '追証の線');
-      // (2) 関連する用語の先頭（余力（概算））へ。中身が替わり、フォーカスはカードの中
+      // (2) 関連する用語の先頭（余力）へ。中身が替わり、フォーカスはカードの中
       await page.click(`${TERM_CARD} .tc-related .term-link >> nth=0`).catch(() => {});
-      await termCardCheck(page, `${tag} 関連する用語`, w, h, `${name}-related`, '余力（概算）');
+      await termCardCheck(page, `${tag} 関連する用語`, w, h, `${name}-related`, '余力');
       // #320 第 2 弾: Esc は 1 つ前の用語へ、× で全部閉じる
       await page.keyboard.press('Escape');
       const prevTitle = await page
@@ -6126,7 +6126,9 @@ async function manualFlows(vp) {
     if (hasTerm) await page.click(term);
     const t0 = await tcWait(page, '必要証拠金（JSCC の計算 / 概算）');
     const a =
-      t0 === '必要証拠金（JSCC の計算 / 概算）' ? await tcClickIn(page, '.tc-guide .tc-link', 0, t0) : null;
+      t0 === '必要証拠金（JSCC の計算 / 概算）'
+        ? await tcClickIn(page, '.tc-guide .tc-link', 0, t0)
+        : null;
     const b = a ? await tcManualLink(page, [t0, a.title]) : null;
     const c = b ? await tcManualLink(page, [t0, a.title, b.title]) : null;
     const dTop = await backWait(page, 4);

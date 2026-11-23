@@ -42,6 +42,8 @@ export interface HoldingsDialogProps {
   /** 今の必要証拠金の JSCC の基準日と読み先（#382。useAppController の jsccDate・jsccEndpoint） */
   jsccDate: string | null;
   jsccEndpoint: string;
+  /** 板の読み直しの印（useAppController の jsccReload。期限切れの not_ready・失敗を読み直す） */
+  jsccReload: number | null;
   message: BookMessage | null;
   onClose: () => void;
   onSwitchTab: (id: number) => void;
@@ -117,13 +119,14 @@ function HoldingsBody(p: HoldingsDialogProps) {
     capital,
     jsccDate,
     jsccEndpoint,
+    jsccReload,
   } = p;
   // 一覧の全部の足の銘柄で JSCC の VaR パラメータを読む（#382。指標と同じメモリを共有）
   const jsccKeys = useMemo(
     () => (jsccDate ? jsccRequestKeys(holdingLegs(tabs, activeTab, legs, read), jsccDate) : []),
     [jsccDate, tabs, activeTab, legs, read],
   );
-  const jscc = useJsccScenarios(jsccDate, jsccKeys, jsccEndpoint);
+  const jscc = useJsccScenarios(jsccDate, jsccKeys, jsccEndpoint, jsccReload);
   const view = useMemo(
     () =>
       holdingsModel({

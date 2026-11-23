@@ -633,7 +633,8 @@ export function useAppController(boot: Boot = NO_BOOT, margin: MarginPrefs = DEF
         ? jsccBaseDate(
             chain.snapshotAt,
             holidays,
-            jsccEndpoint === JSCC_FIXTURE_ENDPOINT ? null : undefined,
+            // dev の合成の応答だけ下限を見ない（本番のビルドでは比較ごと消える）
+            import.meta.env.DEV && jsccEndpoint === JSCC_FIXTURE_ENDPOINT ? null : undefined,
           )
         : null,
     [chain, holidays, jsccEndpoint],
@@ -648,7 +649,9 @@ export function useAppController(boot: Boot = NO_BOOT, margin: MarginPrefs = DEF
         : [],
     [jsccDate, state.legs],
   );
-  const jscc = useJsccScenarios(jsccDate, jsccKeys, jsccEndpoint);
+  // 板の読み直し（[最新]・自動の読み込み。取得時刻）で、期限切れの not_ready・失敗を読み直す（#382 レビュー N1）
+  const jsccReload = state.fetchedAt ?? chain?.snapshotAt ?? null;
+  const jscc = useJsccScenarios(jsccDate, jsccKeys, jsccEndpoint, jsccReload);
   // 今・テールは全域（ΔX で広がる）を使わないので板の基礎（pnlBoard）で memo する（ΔX が全域の格子を跨いでも作り直さない）
   const marginNowCalc = useMemo(
     () =>
@@ -1084,6 +1087,7 @@ export function useAppController(boot: Boot = NO_BOOT, margin: MarginPrefs = DEF
     jscc,
     jsccDate,
     jsccEndpoint,
+    jsccReload,
     onFixture,
     onFile,
     onLatest,

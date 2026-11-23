@@ -308,7 +308,7 @@ export const DISTANCE_CALL_NOW = '今 追証の側';
 const deltaText = (large: number, mini: number) =>
   `${fmtSigned(large, 3)} 枚（ミニ ${fmtSigned(mini, 2)}）`;
 
-/** 金額の後に出どころの印（`1,968 · JSCC 11/20`。印が無ければ金額だけ） */
+/** 金額の後に出どころの印（`1,200 · JSCC 11/20`。印が無ければ金額だけ） */
 function withMark(text: string, basis: MarginBasis | null): string {
   const mark = marginBasisMark(basis);
   return mark ? `${text} · ${mark}` : text;

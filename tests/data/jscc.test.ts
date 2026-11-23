@@ -22,7 +22,7 @@ import { jstInstant } from '../../model/time';
 
 const HOL = new Set(['2026-11-23']); // 架空の休業日（月曜）
 const D = '2026-11-20';
-const KP = 'NK225E-202612-P-50000';
+const KP = 'NK225E-202612-P-45000';
 const KF = 'NK225MCF-202612';
 const TYPES = 'HHHHS';
 
@@ -87,16 +87,16 @@ describe('要求の銘柄', () => {
   });
   it('重複なし・昇順、基準日の月より前の限月・キーにできない足は入れない', () => {
     const legs: Leg[] = [
-      op('2026-12', 50000),
-      op('2026-12', 50000),
+      op('2026-12', 45000),
+      op('2026-12', 45000),
       op('2026-11', 49000),
-      op('2027-01', 52000, 'call'),
-      op('M1', 50000),
+      op('2027-01', 47000, 'call'),
+      op('M1', 45000),
       { kind: 'future', product: 'fut_micro', contract: '2026-12', side: 'sell', qty: 3, entry: 1 },
     ];
     expect(jsccRequestKeys(legs, '2026-12-01')).toEqual([
-      'NK225E-202612-P-50000',
-      'NK225E-202701-C-52000',
+      'NK225E-202612-P-45000',
+      'NK225E-202701-C-47000',
       'NK225MCF-202612',
     ]);
     expect(jsccRequestKeys(legs, '2026-11-20')).toContain('NK225E-202611-P-49000');
@@ -171,7 +171,7 @@ describe('応答の検証', () => {
       {
         instruments: [
           {
-            key: 'NK225E-202612-C-50000',
+            key: 'NK225E-202612-C-45000',
             aggregation_group: 'IDX_IDX',
             contract_size: 1000,
             price: 1,
@@ -214,7 +214,7 @@ describe('応答の検証', () => {
       okJson({
         instruments: [
           {
-            key: 'NK225E-202703-P-50000',
+            key: 'NK225E-202703-P-45000',
             aggregation_group: 'IDX_IDX',
             contract_size: 1000,
             price: 5,
@@ -224,13 +224,13 @@ describe('応答の検証', () => {
         missing: [],
       }),
       D,
-      ['NK225E-202703-P-50000'],
+      ['NK225E-202703-P-45000'],
     );
     if (!a.ok || !b.ok) throw new Error('検証に通らない');
     const m = mergeJsccResponses([a.value, b.value]);
     expect(m?.status).toBe('ok');
     if (m?.status === 'ok')
-      expect([...m.data.instruments.keys()].sort()).toEqual([KP, 'NK225E-202703-P-50000']);
+      expect([...m.data.instruments.keys()].sort()).toEqual([KP, 'NK225E-202703-P-45000']);
     const c = validateJsccJson(okJson({ stress_scenario_number: 0 }), D, [KP, KF]);
     if (!c.ok) throw new Error('検証に通らない');
     expect(mergeJsccResponses([a.value, c.value])).toBeNull();

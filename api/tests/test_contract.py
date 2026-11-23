@@ -115,3 +115,13 @@ def test_jscc_relations():
     for q in names:
         assert contract.RELATIONS[q].schema_file == f"tokyo/{names[q]}.json"
         assert q not in contract.OUTPUTS
+
+
+@pytest.mark.skipif(not SCHEMA_DIR, reason="OPTIONCHAN_SCHEMA_DIR（固定コミットの schema/）のときだけ")
+def test_jscc_scenario_set_nested_columns():
+    # #382: コードは scenarios の中の scenario_type（'H' / 'S'）を読む（jscc.scenario_set）
+    path = Path(SCHEMA_DIR) / contract.RELATIONS["jscc_scenario_set"].schema_file
+    fields = {f["name"]: f for f in json.loads(path.read_text(encoding="utf-8"))}
+    sub = {f["name"]: f for f in fields["scenarios"].get("fields", [])}
+    assert sub["scenario_type"]["type"] == "STRING"
+    assert sub["scenario_type"].get("mode") == "REQUIRED"

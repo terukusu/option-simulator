@@ -1175,9 +1175,9 @@ describe('#382 今の必要証拠金を JSCC の計算で（表示）', () => {
     const mv: MarginView = { ...viewOf(sNow, withCapital(50_000_000)), now };
     const tm = tile(metricTiles(m, mv), 'margin');
     expect(tm.s.endsWith(' · 概算')).toBe(true);
-    expect(tile(metricTiles(m, mv), 'room').full.find((r) => r.k === MARGIN_BASIS_ROW_LABEL)?.v).toBe(
-      `概算（${JSCC_REASON_TEXT[reason]}）`,
-    );
+    expect(
+      tile(metricTiles(m, mv), 'room').full.find((r) => r.k === MARGIN_BASIS_ROW_LABEL)?.v,
+    ).toBe(`概算（${JSCC_REASON_TEXT[reason]}）`);
     expect(metricsPanel(m, 0, mv).headSub).toContain(MARGIN_APPROX_SUB);
   });
 
@@ -1195,5 +1195,38 @@ describe('#382 今の必要証拠金を JSCC の計算で（表示）', () => {
     for (const w of ['JSCC の計算', '前営業日の清算値', '1 日固定', '概算に戻り', 'NOV', '17:00']) {
       expect(MARGIN_HINT).toContain(w);
     }
+  });
+});
+
+describe('#382 レビュー N2: JSCC の計算の例外で画面を落とさない', () => {
+  it('pnl の長さが並びと違う（検証を通らない形）→ 概算 + 理由 error', () => {
+    const base = baseOf(putSell);
+    const keys = jsccRequestKeys(
+      putSell.legs.map((l) => l.leg),
+      '2026-10-13',
+    );
+    const bad = jsccData(
+      realisticSet(),
+      Object.fromEntries(
+        keys.map((k) => [
+          k,
+          { aggregationGroup: 'IDX_IDX', contractSize: 1000, price: 100, pnl: new Float64Array(3) },
+        ]),
+      ),
+      '2026-10-13',
+    );
+    const now = marginNow(
+      base,
+      putSell.scenario,
+      marginParamsOf(DEFAULT_MARGIN_PREFS),
+      null,
+      holidays,
+      {
+        status: 'ok',
+        data: bad,
+      },
+    );
+    expect(now?.basis).toEqual({ kind: 'estimate', reason: 'error' });
+    expect(now?.result.source).toBe('grid');
   });
 });

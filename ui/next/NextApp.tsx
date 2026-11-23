@@ -1312,6 +1312,7 @@ export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
         capital={c.capital}
         jsccDate={c.jsccDate}
         jsccEndpoint={c.jsccEndpoint}
+        jsccReload={c.jsccReload}
         message={c.holdingsMsg}
         onImport={onHoldingsImport}
         importBlocked={importBlocked}
