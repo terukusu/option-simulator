@@ -238,6 +238,9 @@ _PERIOD_RE = re.compile(r"(\d{4})(\d{2})")
 class FactorRequest:
     date: date
     periods: tuple[str, ...]  # YYYYMM（昇順・重複なし）
+    # 使う日を決めて要求する（#387 レビュー N3: 限月が多くて要求を分けたとき、2 回目以降を 1 回目と同じ日にそろえる）。
+    # date 以前・遡る範囲の中。その日が要求の限月に使えなければ no_recent
+    at: date | None = None
 
 
 def parse_factor_request(args, now: datetime) -> FactorRequest:
@@ -261,7 +264,18 @@ def parse_factor_request(args, now: datetime) -> FactorRequest:
         m = _PERIOD_RE.fullmatch(p) if isinstance(p, str) else None
         if not m or not 1 <= int(m.group(2)) <= 12:
             raise BadRequest("p")
-    return FactorRequest(d, tuple(sorted(ps)))
+    ats = args.getlist("at") if hasattr(args, "getlist") else ([args["at"]] if "at" in args else [])
+    at = None
+    if ats:
+        if len(ats) != 1 or not _DATE_RE.fullmatch(ats[0]):
+            raise BadRequest("at")
+        try:
+            at = date.fromisoformat(ats[0])
+        except ValueError:
+            raise BadRequest("at") from None
+        if at > d or at < d - timedelta(days=st.JSCC_FACTOR_RANGE_DAYS):
+            raise BadRequest("at")
+    return FactorRequest(d, tuple(sorted(ps)), at)
 
 
 @dataclass(frozen=True)
@@ -350,6 +364,8 @@ def pick_factor_date(req: FactorRequest, runs: list[dict], quality: list[dict],
             by_date.setdefault(d, []).append(r)
     days = sorted(((d, pick_run(rs)) for d, rs in by_date.items()), key=lambda x: x[0], reverse=True)
     days = [(d, run) for d, run in days if run is not None and d >= MIN_DATE][:max_back]
+    if req.at is not None:
+        days = [(d, run) for d, run in days if d == req.at]
     for d, run in days:
         have: set[str] = set()
         bad: set[str] = set()

@@ -58,6 +58,7 @@ import {
   MARGIN_FULL_LABEL,
   MARGIN_GROUP_LABEL,
   MARGIN_GROUP_LABEL_JSCC,
+  MARGIN_GROUP_LABEL_NOW_REFIT,
   MARGIN_GROUP_LABEL_REFIT,
   MARGIN_HINT,
   MARGIN_JSCC_SUB,
@@ -67,6 +68,7 @@ import {
   MARGIN_POINT_ROW_LABEL,
   MARGIN_POINT_SAME_TEXT,
   MARGIN_REFIT_QUALITY_ROW_LABEL,
+  MARGIN_REFIT_SUB,
   MARGIN_TAIL_BUSY_MARK,
   MARGIN_TAIL_TITLE,
   MARGIN_TILE_LABEL,
@@ -1265,6 +1267,7 @@ describe('#387 シナリオの点・テール・追証の線を JSCC のシナ�
     jsccFactorPeriods(
       st.legs.map((l) => l.leg),
       D,
+      holidays,
     );
   const factorsOf = (st: State): JsccFactorsInput => ({
     status: 'ok',
@@ -1438,7 +1441,7 @@ describe('#387 シナリオの点・テール・追証の線を JSCC のシナ�
         ),
       },
     });
-    const wide = marginPoint(b, s.scenario, params, capital, holidays, withQ(0.002, 0.17));
+    const wide = marginPoint(b, s.scenario, params, capital, holidays, withQ(0.003, 0.08));
     expect(wide?.basis.kind).toBe('jscc_refit');
     expect(marginBasisMark(wide?.basis ?? null)).toBe('JSCC 推定 10/13・誤差大');
     // 全文の見出しは基準日を省いて 1 行に（360px の peek）
@@ -1450,8 +1453,8 @@ describe('#387 シナリオの点・テール・追証の線を JSCC のシナ�
     const bd = metricsBreakdown(m, mv);
     const qi = bd.findIndex((r) => r.k === MARGIN_REFIT_QUALITY_ROW_LABEL);
     expect(qi).toBeGreaterThan(-1);
-    expect(bd[qi]?.v).toMatch(/^\d+月 中央 0\.20% · p90 17%$/);
-    const narrow = marginPoint(b, s.scenario, params, capital, holidays, withQ(0.002, 0.01));
+    expect(bd[qi]?.v).toMatch(/^\d+月 中央 0\.30% · p90 8\.0%$/);
+    const narrow = marginPoint(b, s.scenario, params, capital, holidays, withQ(0.003, 0.01));
     expect(marginBasisMark(narrow?.basis ?? null)).toBe('JSCC 推定 10/13');
     const poor = marginPoint(b, s.scenario, params, capital, holidays, withQ(0.08, 0.2));
     expect(poor?.basis).toEqual({ kind: 'estimate', reason: 'poor_fit' });
@@ -1488,6 +1491,21 @@ describe('#387 シナリオの点・テール・追証の線を JSCC のシナ�
         expect(widthUnits(t.s), `${t.key}: ${t.s}`).toBeLessThanOrEqual(SUB_MAX_UNITS);
       }
     }
+    // N1: 今が JSCC 推定なら見出し行の副題・内訳の群の見出しも JSCC 推定
+    const nowR = marginNow(
+      b0,
+      sNow.scenario,
+      params,
+      capital,
+      holidays,
+      { status: 'unavailable', reason: 'not_ready' },
+      older,
+    );
+    const mvR: MarginView = { ...viewOf(sNow, withCapital(capital)), now: nowR, point: nowR };
+    expect(metricsPanel(m, 0, mvR).headSub).toContain(MARGIN_REFIT_SUB);
+    expect(
+      metricsBreakdown(m, mvR).some((r) => r.group && r.k === MARGIN_GROUP_LABEL_NOW_REFIT),
+    ).toBe(true);
     // 基準日の BPF があればそちら（JSCC の計算）、r・g も無ければ格子 + 理由
     expect(
       marginNow(b0, sNow.scenario, params, capital, holidays, nowJscc(sNow), older)?.basis.kind,

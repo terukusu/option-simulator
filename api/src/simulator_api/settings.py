@@ -116,11 +116,12 @@ JSCC_ROWS_CACHE_SIZE = 6  # 限月の行のキャッシュの件数（キー = (
 JSCC_MAX_AGE_SECONDS = 600  # Cache-Control（ok・inconsistent）
 JSCC_NOT_READY_MAX_AGE_SECONDS = 60  # Cache-Control（not_ready）
 # 当て直しの r・g（/api/jscc_factors。表 jscc_var_scenario_factor、#387・ADR-0014）
-JSCC_FACTOR_MAX_PERIODS = 8  # 1 要求の限月（p）の上限（読むのは 1 日分の 1 クエリ。応答の大きさの上限）
+# 1 要求の限月（p）の上限（読むのは 1 日分の 1 クエリ。保有の一覧の合計でも 1 回で日がそろう）
+JSCC_FACTOR_MAX_PERIODS = 24
 JSCC_FACTOR_CACHE_SIZE = 4  # 1 日分の r・g のキャッシュの件数（キー = (日, run_id)。1 件 約 20 限月 × 約 80 KB）
-# 遡る範囲（オーナーの承認 2026-11-23「正確になるように」）: 基準日の表が無い・使えないときは、
+# 遡る範囲（オーナーの承認「正確になるように」）: 基準日の表が無い・使えないときは、
 # それより前の直近の使える日の JSCC のシナリオを今の状態に当て直す。遡るのは JSCC の営業日
-# （succeeded のある日）で 10 日まで（11/16 と 11/20 のシナリオの規模の比は約 1.009 = 数日では変わらないが、
+# （succeeded のある日）で 10 日まで（数日ではシナリオの規模はほぼ変わらないが、
 # 急変の後は EWMA で変わるので遠い日は使わない。設計 5.10・ADR-0014）
 JSCC_FACTOR_MAX_BACK = 10
 JSCC_FACTOR_RANGE_DAYS = 21  # 探す暦日の幅（10 営業日を年末年始・連休でも含む）

@@ -675,9 +675,10 @@ export function useAppController(boot: Boot = NO_BOOT, margin: MarginPrefs = DEF
         ? jsccFactorPeriods(
             state.legs.map((l) => l.leg),
             jsccDate,
+            holidays,
           )
         : [],
-    [jsccDate, state.legs],
+    [jsccDate, state.legs, holidays],
   );
   const jsccFactors = useJsccFactors(
     jsccDate,
@@ -726,9 +727,16 @@ export function useAppController(boot: Boot = NO_BOOT, margin: MarginPrefs = DEF
     [pnlBoard, lineScenario, marginParams, capital, holidays, jsccFactors],
   );
   const marginTailDone = useSettledSteps(marginTailInput, tailSteps);
-  const marginTailLast = useRef<MarginTailRow[]>([]);
-  if (marginTailDone) marginTailLast.current = marginTailDone;
-  const marginTailRows = marginTailInput ? (marginTailDone ?? marginTailLast.current) : [];
+  // 前の行は同じ板の基礎のときだけ残す（板・タブを切り替えた直後に前の板の行を出さない。#387 レビュー n6）
+  const marginTailLast = useRef<{ board: unknown; rows: MarginTailRow[] }>({
+    board: null,
+    rows: [],
+  });
+  if (marginTailDone) marginTailLast.current = { board: pnlBoard, rows: marginTailDone };
+  const marginTailRows = marginTailInput
+    ? (marginTailDone ??
+      (marginTailLast.current.board === pnlBoard ? marginTailLast.current.rows : []))
+    : [];
   const marginTailBusy = marginTailInput !== null && marginTailDone === null;
   // 追証の線の入力（段 C）: ΔX 以外のシナリオと板の基礎・資金・パラメータだけ（ΔX・パン・拡大で参照が変わらない）。
   // 線は舞台（useMarginLine）が止まってから作る。資金が未設定なら null（線なし）

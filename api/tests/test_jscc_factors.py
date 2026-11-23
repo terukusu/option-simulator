@@ -69,11 +69,23 @@ def test_parse_ok_sorted():
 
 
 @pytest.mark.parametrize("ps", [[], ["2026-12"], ["202613"], ["202600"], ["202612", "202612"],
-                                [f"2027{m:02d}" for m in range(1, 10)], ["<x>"]])
+                                [f"{2027 + m // 12}{m % 12 + 1:02d}" for m in range(25)], ["<x>"]])
 def test_parse_bad_periods(ps):
     with pytest.raises(atm_iv.BadRequest) as e:
         jscc.parse_factor_request(args(date="2026-11-20", p=ps), NOW)
     assert e.value.param == "p"
+
+
+@pytest.mark.parametrize("at", ["2026-11-21", "2026-10-29", "x", ["2026-11-19", "2026-11-18"]])
+def test_parse_bad_at(at):
+    with pytest.raises(atm_iv.BadRequest) as e:
+        jscc.parse_factor_request(args(date="2026-11-20", p="202612", at=at), NOW)
+    assert e.value.param == "at"
+
+
+def test_parse_at_ok():
+    r = jscc.parse_factor_request(args(date="2026-11-20", p="202612", at="2026-11-19"), NOW)
+    assert r.at == date(2026, 11, 19)
 
 
 @pytest.mark.parametrize("d", ["2026-11-15", "2026-12-31", "2026-02-30", "x"])
@@ -231,6 +243,17 @@ def test_service_skips_day_with_poor_quality_or_missing_period():
     jscc_factor_world(w, days[2], run_id="run-2", periods=("202703",), futures_only=())
     s2, _, _ = svc(w)
     assert json.loads(s2.factors(req("202612", "202703")).json_bytes)["business_date"] == days[2].isoformat()
+
+
+def test_service_at_forces_the_day():
+    # N3: 要求を分けたとき、2 回目以降は 1 回目の日（at）にそろえる。その日が使えなければ no_recent
+    w, days = back_world(3)
+    s, _, _ = svc(w)
+    r = jscc.FactorRequest(D, ("202612",), days[1])
+    assert json.loads(s.factors(r).json_bytes)["business_date"] == days[1].isoformat()
+    w.jscc_factors = [x for x in w.jscc_factors if x["business_date"] != days[2]]
+    s2, _, _ = svc(w)
+    assert s2.factors(jscc.FactorRequest(D, ("202612",), days[2])).reason == "no_recent"
 
 
 def test_service_back_limit(monkeypatch):

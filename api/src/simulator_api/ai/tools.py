@@ -546,7 +546,9 @@ REGISTRY: Registry = {t.name: t for t in (
           TAIL_TABLE),
     _spec("margin_summary",
           "証拠金（画面の証拠金のタイルと同じ）。今は JSCC の VaR 証拠金の計算（now.source = jscc。基準日は"
-          " now.jscc_business_date = 前営業日の清算値で 1 日固定）。シナリオの点と追証の水準は、"
+          " now.jscc_business_date = 前営業日の清算値で 1 日固定）。基準日の JSCC のデータが使えないとき（平日"
+          "17:00〜18:30 など）の今は now.source = jscc_refit で、直近の使える日（now.jscc_business_date。基準日より前も"
+          "ある。10 営業日まで）の JSCC のシナリオで今を推定した値（正確な値ではない）。シナリオの点と追証の水準は、"
           "その日の JSCC のシナリオを"
           "動かした先に当て直した推定（point.source = jscc_refit）。JSCC のデータが無いときは概算"
           "（source = estimate。格子の最悪値）。今とシナリオの点の必要証拠金・所要額・NOV・"

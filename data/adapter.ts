@@ -420,10 +420,10 @@ export async function loadJsccFactors(
 ): Promise<JsccFactorsResponse> {
   const load: LoadOptions = opts.signal ? { signal: opts.signal } : {};
   const endpoint = opts.endpoint ?? '/api/jscc_factors';
-  const one = async (chunk: readonly string[]): Promise<JsccFactorsResponse> => {
+  const one = async (chunk: readonly string[], at: string | null): Promise<JsccFactorsResponse> => {
     const text = await fetchText(
       opts.fetch ?? defaultFetch,
-      jsccFactorsUrl(endpoint, date, chunk),
+      jsccFactorsUrl(endpoint, date, chunk, at),
       load,
       'api',
       { redirect: 'manual' },
@@ -441,7 +441,12 @@ export async function loadJsccFactors(
     if (!r.ok) throw new ChainLoadError('JSCC のシナリオの JSON が不正（api）', r.errors);
     return r.value;
   };
-  const merged = mergeJsccFactors(await Promise.all(jsccFactorChunks(periods).map(one)));
+  // 分けて読むときは 1 回目の使った日に 2 回目以降をそろえる（API が限月の集合ごとに日を選ぶので。#387 レビュー N3）
+  const [head, ...rest] = jsccFactorChunks(periods);
+  const first = await one(head ?? [], null);
+  const used = first.status === 'ok' ? first.data.businessDate : null;
+  const others = used === null ? [] : await Promise.all(rest.map((c) => one(c, used)));
+  const merged = mergeJsccFactors([first, ...others]);
   if (!merged)
     throw new ChainLoadError('JSCC のシナリオの JSON が不正（api）', ['$: 分けた応答が合わない']);
   return merged;

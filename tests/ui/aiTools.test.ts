@@ -168,7 +168,7 @@ describe.each(AI_EVAL_CASES.map((c) => c.name))('ツール = 画面の表示モ�
 
   it('#387 margin_summary・tail_table: r・g があればシナリオの点・テール・追証の水準は JSCC の当て直し（画面と同じ値・出どころ）', () => {
     const legs = base.legs.map((p) => p.leg);
-    const periods = jsccFactorPeriods(legs, '2026-10-13');
+    const periods = jsccFactorPeriods(legs, '2026-10-13', env.holidays);
     if (periods.length === 0) return;
     const set = realisticSet();
     const factors: JsccFactorsInput = {

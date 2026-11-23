@@ -451,9 +451,17 @@ describe('#387 当て直しの r・g の応答（validateJsccFactorsJson・loadJ
         entry: 1,
       },
     ] as Leg[];
-    expect(jsccFactorPeriods(legs, D)).toEqual(['202612', '202703']);
-    const many = Array.from({ length: 10 }, (_, i) => `2027${String(i + 1).padStart(2, '0')}`);
-    expect(jsccFactorChunks(many).map((c) => c.length)).toEqual([8, 2]);
+    expect(jsccFactorPeriods(legs, D, HOL)).toEqual(['202612', '202703']);
+    // B1: 基準日の月で SQ を過ぎた限月（2026-11 の SQ = 11/13 ≤ 基準日 11/20）は入れない。SQ 当日も入れない（保守的に）
+    const nov: Leg = { ...(legs[1] as Leg), expiry: '2026-11' } as Leg;
+    expect(jsccFactorPeriods([nov, ...legs], D, HOL)).toEqual(['202612', '202703']);
+    expect(jsccFactorPeriods([nov], '2026-11-12', HOL)).toEqual(['202611']);
+    expect(jsccFactorPeriods([nov], '2026-11-13', HOL)).toEqual([]);
+    const many = Array.from(
+      { length: 26 },
+      (_, i) => `${2027 + Math.floor(i / 12)}${String((i % 12) + 1).padStart(2, '0')}`,
+    );
+    expect(jsccFactorChunks(many).map((c) => c.length)).toEqual([24, 2]);
     expect(jsccFactorsUrl('/api/jscc_factors', D, ['202612', '202703'])).toBe(
       `/api/jscc_factors?date=${D}&p=202612&p=202703`,
     );
@@ -478,6 +486,26 @@ describe('#387 当て直しの r・g の応答（validateJsccFactorsJson・loadJ
     );
     const ok = mergeJsccFactors([]);
     expect(ok).toBeNull();
+    // N3: 限月が上限を超えて分けて読むときは、2 回目以降を 1 回目の日（at）にそろえる
+    const many = Array.from(
+      { length: 26 },
+      (_, i) => `${2027 + Math.floor(i / 12)}${String((i % 12) + 1).padStart(2, '0')}`,
+    );
+    const urls2: string[] = [];
+    const f2 = async (url: string) => {
+      urls2.push(url);
+      return {
+        ok: true,
+        status: 200,
+        text: async () =>
+          JSON.stringify(factorsJson({ business_date: '2026-11-19', rows: [], missing: [] })),
+      };
+    };
+    const r2 = await loadJsccFactors(D, many, { fetch: f2 });
+    expect(r2.status === 'ok' && r2.data.businessDate).toBe('2026-11-19');
+    expect(urls2).toHaveLength(2);
+    expect(urls2[0]).not.toContain('at=');
+    expect(urls2[1]).toContain('&at=2026-11-19');
   });
 
   it('dev の合成の応答: latest の基準日は検証に通り、r = ln(1 + 変化率)・g は節点で同じ（平行）、後の日は遡る・前の日は no_recent', async () => {

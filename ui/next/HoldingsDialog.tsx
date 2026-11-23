@@ -131,8 +131,11 @@ function HoldingsBody(p: HoldingsDialogProps) {
   const jscc = useJsccScenarios(jsccDate, jsccKeys, jsccEndpoint, jsccReload);
   // 合計の追証までの距離の当て直しの r・g（#387。指標と同じメモリを共有）
   const factorPeriods = useMemo(
-    () => (jsccDate ? jsccFactorPeriods(holdingLegs(tabs, activeTab, legs, read), jsccDate) : []),
-    [jsccDate, tabs, activeTab, legs, read],
+    () =>
+      jsccDate
+        ? jsccFactorPeriods(holdingLegs(tabs, activeTab, legs, read), jsccDate, calendar.holidays)
+        : [],
+    [jsccDate, tabs, activeTab, legs, read, calendar],
   );
   const factors = useJsccFactors(
     jsccDate,

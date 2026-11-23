@@ -14,7 +14,13 @@
 
 import type { JsccData, JsccFactorRow, JsccFactors, JsccInstrument, Leg } from '../model';
 import { jsccKeyOfLeg } from '../model';
-import { type Holidays, isBusinessDay, nextBusinessDay, previousBusinessDay } from '../model/time';
+import {
+  type Holidays,
+  isBusinessDay,
+  nextBusinessDay,
+  previousBusinessDay,
+  sqDate,
+} from '../model/time';
 import { isIsoDate, jstDate } from './calendar';
 import type { ValidationResult } from './chainJson';
 
@@ -290,7 +296,7 @@ export function jsccUrl(endpoint: string, date: string, keys: readonly string[])
 /** 遡る範囲の暦日の上限（API の JSCC_FACTOR_RANGE_DAYS と同じ。応答の business_date の検査） */
 export const JSCC_FACTOR_MAX_BACK_DAYS = 21;
 /** `/api/jscc_factors` の 1 要求の限月の上限（API と同じ。超えたら分けて読む） */
-export const JSCC_FACTOR_MAX_PERIODS = 8;
+export const JSCC_FACTOR_MAX_PERIODS = 24;
 /** r・g の整数の刻み（API の scale と同じでなければ不正） */
 export const JSCC_FACTOR_SCALE = { r: 1_000_000, g: 10_000 } as const;
 /** 行のキー（`商品-YYYYMM`） */
@@ -310,7 +316,11 @@ export type JsccFactorsResponse =
 /**
  * 要求する限月（YYYYMM。足の OP の限月・先物の限月。昇順・重複なし）。基準日の月より前（SQ を過ぎた）は入れない
  */
-export function jsccFactorPeriods(legs: readonly Leg[], baseDate: string): string[] {
+export function jsccFactorPeriods(
+  legs: readonly Leg[],
+  baseDate: string,
+  holidays: Holidays,
+): string[] {
   const minPeriod = baseDate.slice(0, 4) + baseDate.slice(5, 7);
   const out = new Set<string>();
   for (const leg of legs) {
@@ -318,7 +328,11 @@ export function jsccFactorPeriods(legs: readonly Leg[], baseDate: string): strin
     const m = /^(\d{4})-(0[1-9]|1[0-2])$/.exec(id);
     if (!m) continue;
     const p = `${m[1]}${m[2]}`;
-    if (p >= minPeriod) out.add(p);
+    if (p < minPeriod) continue;
+    // SQ が基準日以前の限月（満了。SQ 当日の表に載るかは未確認なので SQ 当日も入れない = 保守的に）は要求しない。
+    // 満了の限月が混じると API が「限月がすべてある日」を探して基準日を捨ててしまう（#387 レビュー B1）
+    if (p === minPeriod && sqDate(Number(m[1]), Number(m[2]), holidays) <= baseDate) continue;
+    out.add(p);
   }
   return [...out].sort();
 }
@@ -332,11 +346,17 @@ export function jsccFactorChunks(periods: readonly string[]): string[][] {
   return out;
 }
 
-/** 要求の URL（?date=&p=…） */
-export function jsccFactorsUrl(endpoint: string, date: string, periods: readonly string[]): string {
+/** 要求の URL（?date=&p=…。at = 使う日をそろえる = 分けて読む 2 回目以降。#387 レビュー N3） */
+export function jsccFactorsUrl(
+  endpoint: string,
+  date: string,
+  periods: readonly string[],
+  at: string | null = null,
+): string {
   const q = new URLSearchParams();
   q.set('date', date);
   for (const p of periods) q.append('p', p);
+  if (at !== null) q.set('at', at);
   return `${endpoint}?${q.toString()}`;
 }
 

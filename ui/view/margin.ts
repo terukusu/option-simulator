@@ -321,7 +321,9 @@ export function marginNow(
   // 基準日の BPF で計算できなければ（取り込みの前・銘柄が無い・読めないなど）、当て直しの r・g（基準日か、それより前で
   // 直近の使える日）で今の状態を当て直す（JSCC 推定。オーナーの承認 #387 = 格子は使える JSCC がどの日にも無いときだけ）
   if (exact?.basis.kind !== 'estimate' || factors?.status !== 'ok') return exact;
-  if (exact.basis.reason === 'none' || exact.basis.reason === 'fractional') return exact;
+  // none・fractional・groups（#382 で JSCC にしない理由）は当て直しにも戻さない（レビュー n4）
+  const r = exact.basis.reason;
+  if (r === 'none' || r === 'fractional' || r === 'groups') return exact;
   const sc0: Scenario = { ...scenario, days: 0, dX: 0, dSigma: 0, skew: 0 };
   const re = marginCalcAt(base, base.ctx.x0, sc0, params, capital, holidays, factors);
   return re?.basis.kind === 'jscc_refit' ? re : exact;
@@ -477,7 +479,7 @@ export function marginLineRanges(
 /**
  * 追証の線の X（円、1 円に丸め、昇順・重複なし）。scenario は ΔX 以外のシナリオ（ΔX は見ない）、d は clampDays。
  * 資金が未設定・余力がどこでも正・評価が有限でない点は線にしない（[]）。factors が ok で今の状態で当て直せれば
- * 当て直しの余力（裾の候補で絞った二分法。結果は全シナリオと同じ。#387）、そうでなければ格子
+ * 当て直しの余力（裾の候補で絞った二分法。根は全シナリオの根と 1 円以内。#387）、そうでなければ格子
  */
 export function marginLine(
   base: PnlBase,
