@@ -386,7 +386,9 @@ describe('#387 追証の線: 裾の候補で絞った二分法 = 全シナリオ
         marginCallLevelsSteps(p, sc, ctx, S, false, { room: ev.room }, range, 16),
       );
       expect(fast.length).toBe(slow.length);
-      fast.forEach((x, i) => expect(Math.abs(x - (slow[i] as number))).toBeLessThanOrEqual(1));
+      fast.forEach((x, i) => {
+        expect(Math.abs(x - (slow[i] as number))).toBeLessThanOrEqual(1);
+      });
       compared += fast.length;
     }
     // 根のある形が十分にあること（全部 [] で通るのを防ぐ）

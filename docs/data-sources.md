@@ -67,7 +67,7 @@ AI（ツール・文脈。docs/design.md 14 章）は上の欠けうる項目を
 `api/src/simulator_api/sources.py`:
 
 - `DataSource`（Protocol）: `chain()`（`/api/chain`）・`calendar()`（`/api/calendar`）・`atm_iv(req)`・`atm_daily()`・`future_bars(req)`（#190）・`option_bars(req)`（#319）・`jscc_scenarios(req)`（#382。JSCC の VaR パラメータ。今の必要証拠金）。失敗は `service.Unavailable`（503 `{"error":"unavailable"}`。理由の符号だけをログに）か任意の例外（503・ログは型だけ）
-- JSCC の VaR パラメータ（`/api/jscc_scenarios`。#382）は `bigquery` の供給元だけ（optionchan の JSCC の 4 表）。`file`・`quotes` は 200 の `{status: "unavailable", reason: "no_source"}` を返し、画面は今の必要証拠金を概算に戻して理由（データ元に JSCC のデータが無い）を出す。新しい供給元で JSCC のデータを持たないときも同じ（`service.jscc_unavailable`）
+- JSCC の VaR パラメータ（`/api/jscc_scenarios`。#382）は `bigquery` の供給元だけ（optionchan の JSCC の 4 表）。`file`・`quotes` は 200 の `{status: "unavailable", reason: "no_source"}` を返し、画面は今の必要証拠金を概算に戻して理由（データ元に JSCC のデータが無い）を出す。新しい供給元で JSCC のデータを持たないときも同じ（`service.jscc_unavailable`）。当て直しの r・g（`/api/jscc_factors`。#387。optionchan が JSCC の表から当てはめた派生の表）も同じ扱い（`file`・`quotes` は `no_source`、画面はシナリオの点・テール・追証の線を概算に戻す）
 - `BUILDERS`: 環境変数 `DATA_SOURCE` の値 → 実装（`bigquery` = `ChainService`、`file` = `FileChainService`、`quotes` = `QuotesFileService`）。キーは `settings.DATA_SOURCES` と同じ（`api/tests/test_sources.py`）。未知の値は起動時にエラー
 - `bigquery` の読み方・クエリ・キャッシュ・single-flight・`MAX_BYTES_BILLED` は #154 で変えていない（`docs/design.md` 7.2・7.3）
 

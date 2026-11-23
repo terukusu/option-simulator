@@ -65,6 +65,7 @@ import {
 import {
   type MarginView,
   marginLine,
+  marginLineSteps,
   marginNow,
   marginPoint,
   marginPointAt,
@@ -140,6 +141,7 @@ import { M1, M2, makeMarket } from '../support/market';
 import { BUDGET_MS, expectWithinBudget, RECORD_RUNS, record } from '../support/perf';
 import { PERF_LEGS } from '../support/perfPosition';
 import { barsAt, jst } from '../support/synthIv';
+import { realisticSet, synthFactors } from '../support/synthJscc';
 
 /**
  * AC-18 の補助（計算部分）: 322 行の板の限月切替で作り直す表示モデル（板の行・スマイル・ヘッダ）の
@@ -1897,6 +1899,128 @@ describe('性能（#131 AC17: 証拠金と追証の線）', () => {
  * #152 B8: 追証マップの 1 列（足 10 本・全足を評価する側・21 マス）。画面は列ごとに setTimeout(0) で回すので、
  * 1 列が 1 フレーム（16 ms）に収まること。マップ全体（26 列）は記録だけ。
  */
+/**
+ * #387: JSCC のシナリオの当て直し（足 10 本・本物と同じ 1,422 本のシナリオ・合成の r・g）。
+ * (1) スライダー 1 回 = グラフの表示モデル + 指標 + 当て直しのシナリオの点 + 指標パネル（テールは止まってから = 入れない）
+ * (2) 止まってから回す 1 切れの単位 = 状態 1 つの当て直し（テールの 1 行・追証の線の 1 点）
+ * テール 5 行・追証の線の合計（切れの数）・足 30 本の 1 状態は記録だけ（#152 の「1 列を予算・全体は記録」と同じ）
+ */
+describe('性能（#387 JSCC の当て直し）', () => {
+  const { ctx: ctx0, rows } = makeMarket();
+  const ctx = {
+    ...ctx0,
+    options: { '2026-11': ctx0.options[M1.id], '2026-12': ctx0.options[M2.id] },
+    futures: { '2026-12': ctx0.futures.FUT },
+  } as typeof ctx0;
+  const remap = (l: (typeof PERF_LEGS)[number]) =>
+    l.kind === 'option'
+      ? { ...l, expiry: l.expiry === M1.id ? '2026-11' : '2026-12' }
+      : { ...l, contract: '2026-12' };
+  const legs = preparePosition(PERF_LEGS.map(remap), ctx);
+  const board = {
+    months: [
+      { F: M1.F, rows: rows[M1.id] ?? [] },
+      { F: M2.F, rows: rows[M2.id] ?? [] },
+    ],
+  };
+  const built = pnlDomains(board, legs, ctx);
+  if (!built) throw new Error('損益グラフの基礎が作れない');
+  const base = built;
+  const { holidays } = CALENDAR;
+  const capital = 15_000_000;
+  const params = { ...DEFAULT_MARGIN_PARAMS, ignoreLongOptions: false };
+  const factors = {
+    status: 'ok' as const,
+    data: synthFactors(realisticSet(), ['NK225E-202611', 'NK225E-202612'], 387),
+  };
+  const scenario0 = { ...ZERO_SCENARIO, days: 5 };
+  const today = todayLine(base, null, 1000, scenario0);
+  const now = marginNow(base, scenario0, params, capital, holidays);
+  let tick = 0;
+
+  function slide(): number {
+    tick = (tick + 1) % 40;
+    const scenario = {
+      ...scenario0,
+      days: 5 + tick * 0.5,
+      dX: -tick * 100,
+      dSigma: tick * 0.5,
+      skew: (tick % 10) * 0.5,
+    };
+    const m = pnlChartModel({
+      base,
+      scenario,
+      viewport: null,
+      pnlY: DEFAULT_PNL_Y,
+      plotWidth: 1000,
+      plotHeight: 260,
+      todayYs: today,
+    });
+    const mm = metricsModel({ base, scenario, unit: 'auto' });
+    const point = marginPoint(base, scenario, params, capital, holidays, factors);
+    if (point?.basis.kind !== 'jscc_refit') throw new Error('当て直しになっていない');
+    const mv: MarginView = {
+      capital,
+      params,
+      now,
+      point,
+      at: marginPointAt(base, scenario),
+      tail: [],
+      tailBusy: true,
+    };
+    const v = metricsPanel(mm, 0, mv);
+    return m.lines.length + v.tiles.length;
+  }
+
+  it(`スライダー 1 回（#6 + 当て直しのシナリオの点・指標パネル）が ${BUDGET_MS} ms 以内（30 回の最小値）`, () => {
+    expect(slide()).toBeGreaterThan(2);
+    expectWithinBudget('#387 スライダー 1 回（当て直しの点つき）', slide, { warmup: 10, runs: 30 });
+  });
+
+  it(`止まってから回す 1 切れ（状態 1 つの当て直し。足 10 本）が ${BUDGET_MS} ms 以内`, () => {
+    let i = 0;
+    const one = () => {
+      i = (i + 1) % 20;
+      return marginPoint(base, { ...scenario0, dX: -i * 200 }, params, capital, holidays, factors)
+        ?.result.margin;
+    };
+    expectWithinBudget('#387 当て直し 1 状態（足 10 本）', one, { warmup: 5, runs: 30 });
+  });
+
+  it('テール 5 行・追証の線の合計・足 30 本の 1 状態（記録）', () => {
+    record(
+      '#387 テール 5 行（当て直し）',
+      () => marginTail(base, scenario0, params, capital, holidays, undefined, factors).length,
+      { warmup: 1, runs: RECORD_RUNS },
+    );
+    let steps = 0;
+    record(
+      '#387 追証の線の合計（当て直し）',
+      () => {
+        const g = marginLineSteps(base, scenario0, params, capital, holidays, factors);
+        steps = 0;
+        let r = g.next();
+        while (!r.done) {
+          steps++;
+          r = g.next();
+        }
+        return r.value.length;
+      },
+      { warmup: 1, runs: RECORD_RUNS },
+    );
+    console.info(`#387 追証の線の切れの数（状態の評価）: ${steps}`);
+    expect(steps).toBeGreaterThan(0);
+    const legs30 = preparePosition([...PERF_LEGS, ...PERF_LEGS, ...PERF_LEGS].map(remap), ctx);
+    const b30 = pnlDomains(board, legs30, ctx);
+    if (!b30) throw new Error('基礎が作れない');
+    record(
+      '#387 当て直し 1 状態（足 30 本）',
+      () => marginPoint(b30, { ...scenario0, dX: -500 }, params, capital, holidays, factors),
+      { warmup: 2, runs: RECORD_RUNS },
+    );
+  });
+});
+
 describe('性能（#152 追証マップ）', () => {
   const { ctx, rows } = makeMarket();
   const legs = preparePosition(PERF_LEGS, ctx);

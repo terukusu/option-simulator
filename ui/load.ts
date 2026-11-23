@@ -38,6 +38,14 @@ export function jsccEndpointOf(isDev: boolean, sourceLabel: string | null): stri
 /** dev サーバーの合成の応答（基準日の下限を見ない = 合成の板の古い日付でも読む） */
 export const JSCC_FIXTURE_ENDPOINT = '/fixtures/jscc_scenarios';
 
+/**
+ * 当て直しの r・g の読み先（#387）: JSCC の VaR パラメータの読み先と同じ規則（本番は /api/jscc_factors、dev の合成の板・
+ * ファイルは /fixtures/jscc_factors）
+ */
+export function jsccFactorsEndpointOf(jsccEndpoint: string): string {
+  return jsccEndpoint === JSCC_FIXTURE_ENDPOINT ? '/fixtures/jscc_factors' : '/api/jscc_factors';
+}
+
 /** 保存した最後の板で表示しているときのデータ元の表示（#23） */
 export function savedBoardLabel(label: string): string {
   return `保存した板（${label}）`;

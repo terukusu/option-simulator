@@ -18,7 +18,7 @@
  * 呼ぶのは開いている間だけ描くダイアログ（ui/next/HoldingsDialog.tsx）の memo だけ（AC11）。
  */
 
-import type { Calendar, Chain, JsccInput } from '../../data';
+import type { Calendar, Chain, JsccFactorsInput, JsccInput } from '../../data';
 import {
   type AtmBasis,
   evaluatePosition,
@@ -225,6 +225,8 @@ export interface HoldingsInput {
   capital: number | null;
   /** 今の必要証拠金の JSCC の入力（#382。一覧の全部の足の銘柄。無ければ概算） */
   jscc?: JsccInput | null;
+  /** 当て直しの r・g（#387。合計の追証までの距離 = 追証の線。無ければ格子） */
+  factors?: JsccFactorsInput | null;
 }
 
 /** 行の操作 */
@@ -545,6 +547,7 @@ export function holdingsModel(input: HoldingsInput): HoldingsView {
           params: input.params,
           capital,
           holidays: input.calendar.holidays,
+          factors: input.factors ?? null,
         };
       total = {
         count: countedIdx.length,

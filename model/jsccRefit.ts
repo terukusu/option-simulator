@@ -15,8 +15,10 @@
  *   所要額 = max(0, k·V_S − NOV_S)。NOV_S・先物の評価損益・清算額・M の足は marginAt と同じ（marginLegs）
  * - g が空の行（先物だけの限月）は IV を動かさない（g = 0）
  *
- * 行の引き方: OP の足 = `NK225E-YYYYMM`、先物の足 = 自分の商品の `NK225F|NK225MF|NK225MCF-YYYYMM` → 同じ限月の NK225E
- * → 同じ限月のほかの先物の順（r は限月で共通 = 相関 ≥ 0.999）。OP の足に NK225E の行が無ければ当て直せない（missing）。
+ * 行の引き方: OP の足 = `NK225E-YYYYMM`（g が空 = 当てはめられなかった限月は IV を動かさない）。先物の足 = 限月で引き、
+ * 商品は問わない（自分の商品 → 同じ限月の NK225E → ほかの先物の順。optionchan は先物だけの限月に最も優先する先物の行を
+ * 1 つ出し、OP の行の r と先物の行の r は同じ F₀・F′ から作る = optionchan #168）。OP の足に NK225E の行が無ければ
+ * 当て直せない（missing）。
  */
 
 import { black76Price, discountedIntrinsic } from './black76';
@@ -30,6 +32,7 @@ import {
   marginRoom,
   type RoomEvaluator,
 } from './margin';
+import { normCdf } from './normal';
 import {
   legSigma,
   legValue,
@@ -256,44 +259,75 @@ export function jsccRefitPlan(
   };
 }
 
-/** OP の 1 単位の値（下限 1 円・円に丸める） */
-function optionUnit(L: RefitLeg, j: number, plan: JsccRefitPlan): number {
-  const F = L.fS * (L.eR[j] as number);
-  const T = L.tPrime;
-  let v: number;
-  if (T <= 0) v = L.call ? Math.max(F - L.strike, 0) : Math.max(L.strike - F, 0);
-  else if (T <= plan.tMin) v = discountedIntrinsic(L.call ? 'call' : 'put', F, L.strike, T, plan.r);
-  else {
-    let s = L.sigmaS;
-    if (L.g !== null) {
-      const o = j * JSCC_REFIT_NODE_COUNT + L.m;
-      const gv = (1 - L.wt) * (L.g[o] as number) + L.wt * (L.g[o + 1] as number);
-      s *= Math.exp(gv);
+/**
+ * 足 L の 1 枚の値（円の整数。OP = 乗数 × max(1, round(1 単位の値))、先物 = round(乗数 × F_S (e^r − 1))）を、
+ * シナリオ idx（null = 全部）について out に「符号 × 枚数 ×」で足す。OP の Black-76 は black76Price と同じ式を
+ * 足ごとの定数（√T′・割引）を前に出して展開したもの（値は black76Price と同じ。#387 の性能）
+ */
+function accumulate(
+  L: RefitLeg,
+  plan: JsccRefitPlan,
+  out: Float64Array,
+  idx: ArrayLike<number> | null,
+): void {
+  const count = idx === null ? plan.n : idx.length;
+  const eR = L.eR;
+  if (L.future) {
+    for (let t = 0; t < count; t++) {
+      const j = idx === null ? t : (idx[t] as number);
+      out[t] = (out[t] as number) + L.q * Math.round(L.mult * L.fS * ((eR[j] as number) - 1));
     }
-    v = black76Price(L.call ? 'call' : 'put', F, L.strike, T, Math.max(plan.sigmaMin, s), plan.r);
+    return;
   }
-  return Math.max(1, Math.round(v));
+  const T = L.tPrime;
+  const K = L.strike;
+  const call = L.call;
+  const type = call ? 'call' : 'put';
+  const g = L.g;
+  const m = L.m;
+  const wt = L.wt;
+  const w = L.q * L.mult;
+  const fast = T > plan.tMin;
+  const sqrtT = fast ? Math.sqrt(T) : 0;
+  const df = fast ? Math.exp(-plan.r * T) : 1;
+  for (let t = 0; t < count; t++) {
+    const j = idx === null ? t : (idx[t] as number);
+    const F = L.fS * (eR[j] as number);
+    let v: number;
+    if (T <= 0) v = call ? Math.max(F - K, 0) : Math.max(K - F, 0);
+    else if (!fast) v = discountedIntrinsic(type, F, K, T, plan.r);
+    else {
+      let sig = L.sigmaS;
+      if (g !== null) {
+        const o = j * JSCC_REFIT_NODE_COUNT + m;
+        sig *= Math.exp((1 - wt) * (g[o] as number) + wt * (g[o + 1] as number));
+      }
+      sig = Math.max(plan.sigmaMin, sig);
+      const sd = sig * sqrtT;
+      if (!(F > 0) || !(sd > 0) || !Number.isFinite(sd)) {
+        v = black76Price(type, F, K, T, sig, plan.r);
+      } else {
+        const d1 = Math.log(F / K) / sd + sd / 2;
+        const d2 = d1 - sd;
+        v = call
+          ? df * Math.max(F * normCdf(d1) - K * normCdf(d2), F - K, 0)
+          : df * Math.max(K * normCdf(-d2) - F * normCdf(-d1), K - F, 0);
+      }
+    }
+    out[t] = (out[t] as number) + w * Math.max(1, Math.round(v));
+  }
 }
 
-/** シナリオ j のポートフォリオの値（整数） */
-function valueAt(plan: JsccRefitPlan, j: number): number {
-  let v = 0;
-  for (const L of plan.legs) {
-    // 1 枚の値を円の整数にしてから枚数を掛ける（BPF の pnl と同じ = 今の JSCC の計算と同じ足し方）
-    v +=
-      L.q *
-      (L.future
-        ? Math.round(L.mult * L.fS * ((L.eR[j] as number) - 1))
-        : L.mult * optionUnit(L, j, plan));
-  }
-  return v;
+/** シナリオ idx（null = 全部）のポートフォリオの値（整数）。長さ = idx の長さ（null なら本数） */
+function valuesOf(plan: JsccRefitPlan, idx: ArrayLike<number> | null): Float64Array {
+  const out = new Float64Array(idx === null ? plan.n : idx.length);
+  for (const L of plan.legs) accumulate(L, plan, out, idx);
+  return out;
 }
 
 /** 全シナリオの値（整数。長さ = 本数） */
 export function jsccRefitVector(plan: JsccRefitPlan): Float64Array {
-  const v = new Float64Array(plan.n);
-  for (let j = 0; j < plan.n; j++) v[j] = valueAt(plan, j);
-  return v;
+  return valuesOf(plan, null);
 }
 
 function resultOf(
@@ -360,7 +394,10 @@ function tailCandidates(vs: readonly Float64Array[], set: JsccScenarioSet): Int3
 function esOnCandidates(plan: JsccRefitPlan, idx: Int32Array, set: JsccScenarioSet): number {
   const h: number[] = [];
   const s: number[] = [];
-  for (const j of idx) (set.isHist[j] ? h : s).push(valueAt(plan, j));
+  const v = valuesOf(plan, idx);
+  for (let t = 0; t < idx.length; t++) {
+    (set.isHist[idx[t] as number] ? h : s).push(v[t] as number);
+  }
   s.sort((a, b) => a - b);
   const nh = set.isHist.filter(Boolean).length;
   const xs = [...h, ...s.slice(0, set.nStress)].sort((a, b) => a - b);

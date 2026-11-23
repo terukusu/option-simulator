@@ -9,7 +9,10 @@
  *   またいだら余力に先物の評価益も入る（#381）。今（d = 0）はまたがない
  * - 今の必要証拠金は JSCC の計算（#382。model/margin.ts の marginNowJscc。基準日の JSCC の VaR パラメータが読めて、
  *   M の足がそろっていれば）。できなければ格子の概算に戻し、理由を MarginCalc.basis に持つ。シナリオの点が今と同じ
- *   （marginPointAt の 4 つとも 0）なら今の結果をそのまま使う（marginPointOrNow）。それ以外の点・テール・線は格子のまま
+ *   （marginPointAt の 4 つとも 0）なら今の結果をそのまま使う（marginPointOrNow）
+ * - それ以外の点・テール・線は、当て直しの r・g（#387。JsccFactorsInput）が読めれば JSCC のシナリオの当て直し
+ *   （model/jsccRefit.ts。basis = jscc_refit）、読めない・当て直せなければ格子の概算 + 理由。テール・線は生成器
+ *   （1 回の yield = 状態 1 つ）で、画面は操作が止まってから切れごとに回す（useMarginLine）
  * - 原資産・評価が有限でなければ null（表示は「—」。model は検証済みの値を受ける前提のため、ここで止める）
  * - memo の単位（useAppController）: 今 = 足・板・設定・β / 動き方 / IV の入れ方、シナリオの点 = シナリオ、
  *   テール = ΔX 以外のシナリオ。どれも資金・パラメータ（端末の設定）が変われば作り直す
@@ -17,19 +20,24 @@
  * 文字列（タイル・内訳・表）は ui/view/metricsPanel.ts が作る。
  */
 
-import type { JsccFetchReason, JsccInput } from '../../data/jscc';
+import type { JsccFactorsInput, JsccFetchReason, JsccInput } from '../../data/jscc';
 import {
   businessDaysAhead,
   DAY_MS,
+  drainSteps,
+  gridRoomEvaluator,
   type Holidays,
   type JsccIneligible,
   jsccEligibility,
+  jsccRefitPlan,
+  jsccRefitRoomEvaluator,
   MARGIN_HORIZON_BUSINESS_DAYS,
   MARGIN_LINE_SAMPLES,
   type MarginParams,
   type MarginResult,
   marginAt,
-  marginCallLevels,
+  marginAtJsccRefit,
+  marginCallLevelsSteps,
   marginMarked,
   marginNowJscc,
   marginRoom,
@@ -88,6 +96,7 @@ export type JsccReason = JsccFetchReason | JsccIneligible;
  */
 export type MarginBasis =
   | { kind: 'jscc'; businessDate: string }
+  | { kind: 'jscc_refit'; businessDate: string }
   | { kind: 'estimate'; reason: JsccReason | null };
 
 const ESTIMATE: MarginBasis = { kind: 'estimate', reason: null };
@@ -133,6 +142,13 @@ export interface MarginView {
   /** シナリオの点の位置（タイルの見出しの印・内訳のシナリオ点の行。#164） */
   at: MarginPointAt;
   tail: MarginTailRow[];
+  /** テールを作っている間（操作が止まるのを待つ・切れごとに回している。前の行を「計算中…」で出す。#387） */
+  tailBusy?: boolean;
+  /**
+   * 今の状態を当て直した値（#387。今が JSCC の正確な値で r・g があるときだけ。今のすぐ隣の点との跳びの大きさを内訳で
+   * 見せる。補正はしない）
+   */
+  nowRefit?: MarginCalc | null;
 }
 
 const finiteOr0 = (v: number) => (Number.isFinite(v) ? v : 0);
@@ -217,6 +233,69 @@ export function marginCalc(
 }
 
 /**
+ * 状態 S = (x, scenario) の必要証拠金を、r・g があれば JSCC のシナリオの当て直しで（#387）、無い・当て直せなければ格子の
+ * 概算 + 理由。factors = null（入力なし = AI の提案・形のカードなど）は今までどおりの格子（理由 null）
+ */
+export function marginCalcAt(
+  base: PnlBase,
+  x: number,
+  scenario: Scenario,
+  params: MarginParams,
+  capital: number | null,
+  holidays: Holidays,
+  factors: JsccFactorsInput | null,
+): MarginCalc | null {
+  if (factors === null) return marginCalc(base, x, scenario, params, capital, holidays);
+  if (!Number.isFinite(x) || x <= 0) return null;
+  if (factors.status !== 'ok') {
+    return marginCalc(base, x, scenario, params, capital, holidays, {
+      kind: 'estimate',
+      reason: factors.reason,
+    });
+  }
+  const { legs, ctx, settings } = base;
+  const { sc, horizonDays, marked } = stateAt(base, x, scenario, holidays);
+  const state = { x, scenario: sc, horizonDays, marked };
+  try {
+    const r = marginAtJsccRefit(legs, state, ctx, settings, params, factors.data);
+    if (r) {
+      return calcOf(base, x, r.result, capital, {
+        kind: 'jscc_refit',
+        businessDate: factors.data.businessDate,
+      });
+    }
+  } catch {
+    // 検証済みの応答では起きない（安全な整数を越える和など）。画面を落とさず概算に戻す
+    return marginCalc(base, x, scenario, params, capital, holidays, {
+      kind: 'estimate',
+      reason: 'error',
+    });
+  }
+  const plan = jsccRefitPlan(legs, state, ctx, settings, params, factors.data);
+  const reason: JsccReason = plan.ok ? 'missing' : plan.reason;
+  return marginCalc(base, x, scenario, params, capital, holidays, { kind: 'estimate', reason });
+}
+
+/**
+ * 今の状態（marginNow と同じ状態）を当て直した値（#387）。今が JSCC の正確な値で r・g があるときだけ（無ければ null）。
+ * 内訳の「今を当て直すと」の行（今のすぐ隣の点との跳びの大きさ）
+ */
+export function marginNowRefit(
+  base: PnlBase,
+  scenario: Scenario,
+  params: MarginParams,
+  capital: number | null,
+  holidays: Holidays,
+  now: MarginCalc | null,
+  factors: JsccFactorsInput | null,
+): MarginCalc | null {
+  if (now?.basis.kind !== 'jscc' || factors?.status !== 'ok') return null;
+  const sc0: Scenario = { ...scenario, days: 0, dX: 0, dSigma: 0, skew: 0 };
+  const c = marginCalcAt(base, base.ctx.x0, sc0, params, capital, holidays, factors);
+  return c?.basis.kind === 'jscc_refit' ? c : null;
+}
+
+/**
  * 今（X₀・d = Δσ = Δs = 0。β・動き方・IV の入れ方は今のシナリオのまま）。jscc を渡せば JSCC の計算（#382）を試し、
  * できなければ格子の概算 + 理由（basis）。jscc を渡さない呼び出し（AI の提案・テンプレートの形）は格子の概算（理由 null）
  */
@@ -275,21 +354,23 @@ export function marginPointOrNow(
   capital: number | null,
   holidays: Holidays,
   now: MarginCalc | null,
+  factors: JsccFactorsInput | null = null,
 ): MarginCalc | null {
   if (isNowPoint(marginPointAt(base, scenario))) return now;
-  return marginPoint(base, scenario, params, capital, holidays);
+  return marginPoint(base, scenario, params, capital, holidays, factors);
 }
 
-/** シナリオの点（X₀ + ΔX。指標の「指定日 + シナリオ」と同じ点） */
+/** シナリオの点（X₀ + ΔX。指標の「指定日 + シナリオ」と同じ点）。factors があれば当て直し（#387） */
 export function marginPoint(
   base: PnlBase,
   scenario: Scenario,
   params: MarginParams,
   capital: number | null,
   holidays: Holidays,
+  factors: JsccFactorsInput | null = null,
 ): MarginCalc | null {
   const dX = Number.isFinite(scenario.dX) ? scenario.dX : 0;
-  return marginCalc(base, base.ctx.x0 + dX, scenario, params, capital, holidays);
+  return marginCalcAt(base, base.ctx.x0 + dX, scenario, params, capital, holidays, factors);
 }
 
 /** テール表の各行（X₀ × (1 + 下落率)。ΔX 以外はシナリオのまま。テール表と同じ行） */
@@ -300,11 +381,32 @@ export function marginTail(
   capital: number | null,
   holidays: Holidays,
   shocks: readonly number[] = TAIL_SHOCKS,
+  factors: JsccFactorsInput | null = null,
 ): MarginTailRow[] {
-  return shocks.map((shock) => {
+  return drainSteps(marginTailSteps(base, scenario, params, capital, holidays, shocks, factors));
+}
+
+/** marginTail の生成器版（1 行 = 状態 1 つごとに yield。#387） */
+export function* marginTailSteps(
+  base: PnlBase,
+  scenario: Scenario,
+  params: MarginParams,
+  capital: number | null,
+  holidays: Holidays,
+  shocks: readonly number[] = TAIL_SHOCKS,
+  factors: JsccFactorsInput | null = null,
+): Generator<void, MarginTailRow[], void> {
+  const out: MarginTailRow[] = [];
+  for (const shock of shocks) {
     const x = base.ctx.x0 * (1 + shock);
-    return { shock, x, calc: marginCalc(base, x, scenario, params, capital, holidays) };
-  });
+    out.push({
+      shock,
+      x,
+      calc: marginCalcAt(base, x, scenario, params, capital, holidays, factors),
+    });
+    yield;
+  }
+  return out;
 }
 
 /** 追証の線の入力（useMarginLine・保有ポジションの一覧の合計。#302） */
@@ -315,6 +417,8 @@ export interface MarginLineInput {
   params: MarginParams;
   capital: number;
   holidays: Holidays;
+  /** 当て直しの r・g（#387。null = 格子） */
+  factors?: JsccFactorsInput | null;
 }
 
 /** 追証の線: 連続の操作が止まってから作るまでの時間（ms。ピンの線の描き直しの PIN_SETTLE_MS と同じ） */
@@ -343,7 +447,8 @@ export function marginLineRanges(
 
 /**
  * 追証の線の X（円、1 円に丸め、昇順・重複なし）。scenario は ΔX 以外のシナリオ（ΔX は見ない）、d は clampDays。
- * 資金が未設定・余力がどこでも正・評価が有限でない点は線にしない（[]）
+ * 資金が未設定・余力がどこでも正・評価が有限でない点は線にしない（[]）。factors が ok で今の状態で当て直せれば
+ * 当て直しの余力（裾の候補で絞った二分法。結果は全シナリオと同じ。#387）、そうでなければ格子
  */
 export function marginLine(
   base: PnlBase,
@@ -351,8 +456,21 @@ export function marginLine(
   params: MarginParams,
   capital: number | null,
   holidays: Holidays,
+  factors: JsccFactorsInput | null = null,
 ): number[] {
-  if (capital === null) return [];
+  return drainSteps(marginLineSteps(base, scenario, params, capital, holidays, factors));
+}
+
+/** marginLine の生成器版（1 回の yield = 状態 1 つの評価。画面は切れごとに回す。#387） */
+export function* marginLineSteps(
+  base: PnlBase,
+  scenario: Scenario,
+  params: MarginParams,
+  capital: number | null,
+  holidays: Holidays,
+  factors: JsccFactorsInput | null = null,
+): Generator<void, number[], void> {
+  if (capital === null || !Number.isFinite(capital) || capital <= 0) return [];
   const { legs, ctx, settings } = base;
   const { days } = clampDays(scenario, base.maxDays);
   const sc: Scenario = { ...scenario, days, dX: 0 };
@@ -363,21 +481,33 @@ export function marginLine(
   );
   const marked = marginMarked(ctx.evalTime, days, holidays);
   const premium = premiumSummary(legs, settings);
-  const xs = new Set<number>();
-  for (const r of marginLineRanges(base)) {
-    const found = marginCallLevels(
+  const refit =
+    factors?.status === 'ok' &&
+    jsccRefitPlan(
       legs,
-      sc,
+      { x: ctx.x0, scenario: sc, horizonDays, marked },
       ctx,
       settings,
       params,
-      horizonDays,
-      marked,
-      capital,
-      premium,
-      r,
-      r.samples,
-    );
+      factors.data,
+    ).ok;
+  const ev = refit
+    ? jsccRefitRoomEvaluator(
+        legs,
+        sc,
+        ctx,
+        settings,
+        params,
+        horizonDays,
+        marked,
+        capital,
+        premium,
+        factors.data,
+      )
+    : gridRoomEvaluator(legs, sc, ctx, settings, params, horizonDays, marked, capital, premium);
+  const xs = new Set<number>();
+  for (const r of marginLineRanges(base)) {
+    const found = yield* marginCallLevelsSteps(legs, sc, ctx, settings, marked, ev, r, r.samples);
     for (const x of found) if (Number.isFinite(x)) xs.add(x);
   }
   return [...xs].sort((a, b) => a - b);

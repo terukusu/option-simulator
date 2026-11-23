@@ -1,11 +1,13 @@
 import type { ComponentChildren } from 'preact';
 import { useMemo } from 'preact/hooks';
-import { type Calendar, type Chain, jsccRequestKeys } from '../../data';
+import { type Calendar, type Chain, jsccFactorPeriods, jsccRequestKeys } from '../../data';
 import type { AtmBasis, MarginParams, ModelSettings, Scenario } from '../../model';
 import type { BookRead } from '../book';
 import type { BookMessage } from '../components/useAppController';
+import { useJsccFactors } from '../components/useJsccFactors';
 import { useJsccScenarios } from '../components/useJsccScenarios';
 import { useMarginLineState } from '../components/useMarginLine';
+import { jsccFactorsEndpointOf } from '../load';
 import type { MetricsUnitSetting, TabSlot, UiLeg } from '../state';
 import {
   DISTANCE_CALL_NOW,
@@ -127,6 +129,17 @@ function HoldingsBody(p: HoldingsDialogProps) {
     [jsccDate, tabs, activeTab, legs, read],
   );
   const jscc = useJsccScenarios(jsccDate, jsccKeys, jsccEndpoint, jsccReload);
+  // 合計の追証までの距離の当て直しの r・g（#387。指標と同じメモリを共有）
+  const factorPeriods = useMemo(
+    () => (jsccDate ? jsccFactorPeriods(holdingLegs(tabs, activeTab, legs, read), jsccDate) : []),
+    [jsccDate, tabs, activeTab, legs, read],
+  );
+  const factors = useJsccFactors(
+    jsccDate,
+    factorPeriods,
+    jsccFactorsEndpointOf(jsccEndpoint),
+    jsccReload,
+  );
   const view = useMemo(
     () =>
       holdingsModel({
@@ -144,6 +157,7 @@ function HoldingsBody(p: HoldingsDialogProps) {
         params,
         capital,
         jscc,
+        factors,
       }),
     [
       chain,
@@ -160,6 +174,7 @@ function HoldingsBody(p: HoldingsDialogProps) {
       params,
       capital,
       jscc,
+      factors,
     ],
   );
   const hasBoard = chain !== null;

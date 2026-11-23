@@ -13,6 +13,7 @@ import {
   type ChainJson,
   ChainLoadError,
   jsccBaseDate,
+  jsccFactorPeriods,
   jsccRequestKeys,
   monthOf,
 } from '../../data';
@@ -47,6 +48,7 @@ import {
   initialSource,
   JSCC_FIXTURE_ENDPOINT,
   jsccEndpointOf,
+  jsccFactorsEndpointOf,
   loadBoardFromApi,
   loadBoardFromUrl,
   loadCalendarFromApi,
@@ -91,12 +93,14 @@ import {
 } from '../view/holdMap';
 import {
   capitalOf,
+  type MarginTailRow,
   type MarginView,
   marginNow,
+  marginNowRefit,
   marginParamsKeep,
   marginPointAt,
   marginPointOrNow,
-  marginTail,
+  marginTailSteps,
 } from '../view/margin';
 import { metricsModel } from '../view/metrics';
 import {
@@ -125,8 +129,10 @@ import { clampDXInput, evalTimeTargets } from '../view/scenario';
 import { scenarioAtmMark } from '../view/scenarioAtm';
 import type { SmileEffBase } from '../view/smileEff';
 import { openInNewTabError, tabsModel } from '../view/tabs';
+import { useJsccFactors } from './useJsccFactors';
 import { useJsccScenarios } from './useJsccScenarios';
 import type { MarginLineInput } from './useMarginLine';
+import { useSettledSteps } from './useSettledSteps';
 
 /** dev サーバーだけが配る合成の板（本番のビルドではこの分岐ごと消える） */
 export const DEV_FIXTURES: readonly string[] = import.meta.env.DEV
@@ -167,6 +173,16 @@ interface Loaded {
  * margin = 端末の設定の証拠金の項目（usePrefs。#131）。state.ts の reducer・作業の保存・URL 共有には入れない
  * （資金を保存一覧・書き出し・共有の文字列に載せない）。
  */
+/** テールの生成器（useSettledSteps に渡す固定の関数。#387） */
+const tailSteps = (i: {
+  base: Parameters<typeof marginTailSteps>[0];
+  scenario: Scenario;
+  params: Parameters<typeof marginTailSteps>[2];
+  capital: number | null;
+  holidays: Parameters<typeof marginTailSteps>[4];
+  factors: Parameters<typeof marginTailSteps>[6];
+}) => marginTailSteps(i.base, i.scenario, i.params, i.capital, i.holidays, undefined, i.factors);
+
 export function useAppController(boot: Boot = NO_BOOT, margin: MarginPrefs = DEFAULT_MARGIN_PREFS) {
   const [state, dispatch] = useReducer(reduce, boot.read, bootState);
   const seq = useRef(0);
@@ -658,18 +674,75 @@ export function useAppController(boot: Boot = NO_BOOT, margin: MarginPrefs = DEF
       pnlBoard ? marginNow(pnlBoard, nowScenario, marginParams, capital, holidays, jscc) : null,
     [pnlBoard, nowScenario, marginParams, capital, holidays, jscc],
   );
-  const marginTailRows = useMemo(
-    () => (pnlBoard ? marginTail(pnlBoard, lineScenario, marginParams, capital, holidays) : []),
-    [pnlBoard, lineScenario, marginParams, capital, holidays],
+  // 当て直しの r・g（#387）: 基準日は今の JSCC と同じ。限月（足の OP・先物の限月）が変わったときだけ読む
+  const jsccFactorPeriodList = useMemo(
+    () =>
+      jsccDate
+        ? jsccFactorPeriods(
+            state.legs.map((l) => l.leg),
+            jsccDate,
+          )
+        : [],
+    [jsccDate, state.legs],
   );
+  const jsccFactors = useJsccFactors(
+    jsccDate,
+    jsccFactorPeriodList,
+    jsccFactorsEndpointOf(jsccEndpoint),
+    jsccReload,
+  );
+  // 今を当て直した値（#387。今が JSCC のときだけ。内訳の「今を推定で」= 今のすぐ隣の点との跳びの大きさ）
+  const marginNowRefitCalc = useMemo(
+    () =>
+      pnlBoard
+        ? marginNowRefit(
+            pnlBoard,
+            nowScenario,
+            marginParams,
+            capital,
+            holidays,
+            marginNowCalc,
+            jsccFactors,
+          )
+        : null,
+    [pnlBoard, nowScenario, marginParams, capital, holidays, marginNowCalc, jsccFactors],
+  );
+  // テール（#387）: 当て直しは状態 1 つが数 ms なので、操作が止まってから切れごとに作る（useSettledSteps）。作っている
+  // 間は前の行を残す（「計算中…」）。入力は ΔX 以外のシナリオ・板の基礎・設定・資金・r・g（ΔX では作り直さない）
+  const marginTailInput = useMemo(
+    () =>
+      pnlBoard
+        ? {
+            base: pnlBoard,
+            scenario: lineScenario,
+            params: marginParams,
+            capital,
+            holidays,
+            factors: jsccFactors,
+          }
+        : null,
+    [pnlBoard, lineScenario, marginParams, capital, holidays, jsccFactors],
+  );
+  const marginTailDone = useSettledSteps(marginTailInput, tailSteps);
+  const marginTailLast = useRef<MarginTailRow[]>([]);
+  if (marginTailDone) marginTailLast.current = marginTailDone;
+  const marginTailRows = marginTailInput ? (marginTailDone ?? marginTailLast.current) : [];
+  const marginTailBusy = marginTailInput !== null && marginTailDone === null;
   // 追証の線の入力（段 C）: ΔX 以外のシナリオと板の基礎・資金・パラメータだけ（ΔX・パン・拡大で参照が変わらない）。
   // 線は舞台（useMarginLine）が止まってから作る。資金が未設定なら null（線なし）
   const marginLineInput = useMemo<MarginLineInput | null>(
     () =>
       pnlBoard && capital !== null
-        ? { base: pnlBoard, scenario: lineScenario, params: marginParams, capital, holidays }
+        ? {
+            base: pnlBoard,
+            scenario: lineScenario,
+            params: marginParams,
+            capital,
+            holidays,
+            factors: jsccFactors,
+          }
         : null,
-    [pnlBoard, lineScenario, marginParams, capital, holidays],
+    [pnlBoard, lineScenario, marginParams, capital, holidays, jsccFactors],
   );
   // 追証マップの入力（#152）: 板の基礎・d・Δs・動き方・パラメータ・資金・休業日だけ（ΔX・Δσ・β・ivShift・パン・拡大で
   // 参照が変わらない）。マップは useHoldMap が止まってから列ごとに作る。資金が未設定・足なしなら null
@@ -702,12 +775,26 @@ export function useAppController(boot: Boot = NO_BOOT, margin: MarginPrefs = DEF
               capital,
               holidays,
               marginNowCalc,
+              jsccFactors,
             ),
             at: marginPointAt(pnlBase, state.scenario),
             tail: marginTailRows,
+            tailBusy: marginTailBusy,
+            nowRefit: marginNowRefitCalc,
           }
         : null,
-    [pnlBase, state.scenario, marginParams, capital, holidays, marginNowCalc, marginTailRows],
+    [
+      pnlBase,
+      state.scenario,
+      marginParams,
+      capital,
+      holidays,
+      marginNowCalc,
+      marginTailRows,
+      marginTailBusy,
+      marginNowRefitCalc,
+      jsccFactors,
+    ],
   );
   // スマイルの売りの効率の線（#163）の市場・設定。線は足に依らない（板の限月だけ）ので、市場は板・基準だけから作る
   // （positions.ctx は足の変更ごとに新しい参照になり、線を隠して作り直してしまう）
@@ -1085,6 +1172,7 @@ export function useAppController(boot: Boot = NO_BOOT, margin: MarginPrefs = DEF
     marginParams,
     capital,
     jscc,
+    jsccFactors,
     jsccDate,
     jsccEndpoint,
     jsccReload,

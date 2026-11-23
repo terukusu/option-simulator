@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { type Chain, type JsccInput, jsccRequestKeys, normalizeChain } from '../../data';
+import {
+  type Chain,
+  type JsccFactorsInput,
+  type JsccInput,
+  jsccFactorPeriods,
+  jsccRequestKeys,
+  normalizeChain,
+} from '../../data';
 import {
   businessDaysAhead,
   DAY_MS,
@@ -28,13 +35,16 @@ import {
   marginCalc,
   marginLine,
   marginLineRanges,
+  marginLineSteps,
   marginNow,
+  marginNowRefit,
   marginParamsKeep,
   marginParamsOf,
   marginPoint,
   marginPointAt,
   marginPointOrNow,
   marginTail,
+  marginTailSteps,
 } from '../../ui/view/margin';
 import { fmtAmount, type MetricsModel, metricsModel } from '../../ui/view/metrics';
 import {
@@ -48,11 +58,15 @@ import {
   MARGIN_FULL_LABEL,
   MARGIN_GROUP_LABEL,
   MARGIN_GROUP_LABEL_JSCC,
+  MARGIN_GROUP_LABEL_REFIT,
   MARGIN_HINT,
   MARGIN_JSCC_SUB,
+  MARGIN_NOW_REFIT_ROW_LABEL,
+  MARGIN_POINT_BASIS_ROW_LABEL,
   MARGIN_POINT_NOW_TEXT,
   MARGIN_POINT_ROW_LABEL,
   MARGIN_POINT_SAME_TEXT,
+  MARGIN_TAIL_BUSY_MARK,
   MARGIN_TAIL_TITLE,
   MARGIN_TILE_LABEL,
   type MetricTile,
@@ -89,7 +103,13 @@ import {
 } from '../../ui/view/stage';
 import { fixture } from '../support/fixtures';
 import { boardsT0AndLater } from '../support/laterChain';
-import { jsccData, rng as jsccRng, realisticSet, synthOption } from '../support/synthJscc';
+import {
+  jsccData,
+  rng as jsccRng,
+  realisticSet,
+  synthFactors,
+  synthOption,
+} from '../support/synthJscc';
 import { SUB_MAX_UNITS, widthUnits } from '../support/widthUnits';
 
 /** #131 AC14: 証拠金の概算の表示モデル（タイル・内訳・テールの証拠金の表）。合成の板・架空の値。 */
@@ -315,7 +335,8 @@ describe('タイル（#131 AC14）', () => {
     expect(view.headSub).toBe(`${view.unitSub} · 証拠金は概算`);
     expect(metricsPanel(m, putSell.feePerLot, null).headSub).toBe(view.unitSub);
     expect(MARGIN_GROUP_LABEL).toContain('概算');
-    expect(MARGIN_TAIL_TITLE).toContain('概算');
+    // #387: 出どころ（JSCC 推定 / 概算）は表の上の注記に出すので見出しから「概算」を外した
+    expect(MARGIN_TAIL_TITLE).toBe('証拠金（指定日 + シナリオ）');
     expect(MARGIN_HINT).toContain('概算');
     expect(MARGIN_HINT).toContain('JSCC');
     expect(MARGIN_HINT).toContain('NOV');
@@ -1228,5 +1249,185 @@ describe('#382 レビュー N2: JSCC の計算の例外で画面を落とさな�
     );
     expect(now?.basis).toEqual({ kind: 'estimate', reason: 'error' });
     expect(now?.result.source).toBe('grid');
+  });
+});
+
+describe('#387 シナリオの点・テール・追証の線を JSCC のシナリオの当て直しで（表示）', () => {
+  const s = putSellDown; // シナリオが 0 でない点
+  const sNow = putSell;
+  const set = realisticSet();
+  const n = set.isHist.length;
+  const D = '2026-10-13';
+  const capital = 50_000_000;
+  const params = marginParamsOf(withCapital(capital));
+  const periods = (st: State) =>
+    jsccFactorPeriods(
+      st.legs.map((l) => l.leg),
+      D,
+    );
+  const factorsOf = (st: State): JsccFactorsInput => ({
+    status: 'ok',
+    data: synthFactors(
+      set,
+      periods(st).map((p) => `NK225E-${p}`),
+      21,
+      { businessDate: D },
+    ),
+  });
+  const nowJscc = (st: State): JsccInput => {
+    const r = jsccRng(11);
+    return {
+      status: 'ok',
+      data: jsccData(
+        set,
+        Object.fromEntries(
+          jsccRequestKeys(
+            st.legs.map((l) => l.leg),
+            D,
+          ).map((k) => [k, synthOption(n, 300, r)]),
+        ),
+        D,
+      ),
+    };
+  };
+
+  it('r・g があればシナリオの点・テール・線は jscc_refit、今と同じ点は今（jscc）のまま', () => {
+    const b = baseOf(s);
+    const f = factorsOf(s);
+    const p = marginPoint(b, s.scenario, params, capital, holidays, f);
+    expect(p?.basis).toEqual({ kind: 'jscc_refit', businessDate: D });
+    expect(p?.result.source).toBe('jscc_refit');
+    expect(p?.result.margin).toBe(p?.result.jscc?.varMargin);
+    const tail = marginTail(b, { ...s.scenario, dX: 0 }, params, capital, holidays, TAIL_SHOCKS, f);
+    expect(tail.every((r) => r.calc?.basis.kind === 'jscc_refit')).toBe(true);
+    // 下げるほど売り put の必要証拠金は増える（当て直しでも）
+    const ms = tail.map((r) => r.calc?.result.margin ?? 0);
+    expect(ms[ms.length - 1]).toBeGreaterThan(ms[0] as number);
+    const b0 = baseOf(sNow);
+    const now = marginNow(b0, sNow.scenario, params, capital, holidays, nowJscc(sNow));
+    expect(
+      marginPointOrNow(b0, sNow.scenario, params, capital, holidays, now, factorsOf(sNow)),
+    ).toBe(now);
+  });
+
+  it.each([
+    ['loading', { status: 'unavailable', reason: 'loading' }],
+    ['not_ready', { status: 'unavailable', reason: 'not_ready' }],
+    ['no_source', { status: 'unavailable', reason: 'no_source' }],
+  ] as const)('r・g が読めない（%s）→ 格子 + 理由（値は格子と同じ）', (reason, f) => {
+    const b = baseOf(s);
+    const p = marginPoint(b, s.scenario, params, capital, holidays, f);
+    expect(p?.basis).toEqual({ kind: 'estimate', reason });
+    expect(p?.result).toEqual(marginPoint(b, s.scenario, params, capital, holidays)?.result);
+  });
+
+  it('限月の行が無い → 格子 + missing、入力なし（null）→ 今までどおりの格子（理由 null）', () => {
+    const b = baseOf(s);
+    const empty: JsccFactorsInput = {
+      status: 'ok',
+      data: synthFactors(set, [], 1, { businessDate: D }),
+    };
+    expect(marginPoint(b, s.scenario, params, capital, holidays, empty)?.basis).toEqual({
+      kind: 'estimate',
+      reason: 'missing',
+    });
+    expect(marginPoint(b, s.scenario, params, capital, holidays)?.basis).toEqual({
+      kind: 'estimate',
+      reason: null,
+    });
+  });
+
+  it('生成器版は同期版と同じ値（テール・追証の線）', () => {
+    const b = baseOf(s);
+    const f = factorsOf(s);
+    const sc = { ...s.scenario, dX: 0 };
+    const g = marginTailSteps(b, sc, params, capital, holidays, TAIL_SHOCKS, f);
+    let r = g.next();
+    let steps = 0;
+    while (!r.done) {
+      steps++;
+      r = g.next();
+    }
+    expect(steps).toBe(TAIL_SHOCKS.length);
+    expect(r.value).toEqual(marginTail(b, sc, params, capital, holidays, TAIL_SHOCKS, f));
+    const lg = marginLineSteps(b, sc, params, 3_000_000, holidays, f);
+    let lr = lg.next();
+    let ls = 0;
+    while (!lr.done) {
+      ls++;
+      lr = lg.next();
+    }
+    expect(ls).toBeGreaterThan(MARGIN_LINE_SAMPLES);
+    expect(lr.value).toEqual(marginLine(b, sc, params, 3_000_000, holidays, f));
+  });
+
+  it('追証の線は当て直しの余力が 0 になる X（線の点の余力が 0 をまたぐ）', () => {
+    const b = baseOf(s);
+    const f = factorsOf(s);
+    const sc = { ...s.scenario, dX: 0 };
+    const cap = 3_000_000;
+    const xs = marginLine(b, sc, params, cap, holidays, f);
+    expect(xs.length).toBeGreaterThan(0);
+    for (const x of xs) {
+      const lo = marginCalc(b, x - 50, sc, params, cap, holidays);
+      expect(lo).not.toBeNull();
+      const at = (y: number) =>
+        marginPoint(b, { ...sc, dX: y - b.ctx.x0 }, params, cap, holidays, f)?.room ?? Number.NaN;
+      expect(Math.sign(at(x - 30))).not.toBe(Math.sign(at(x + 30)));
+    }
+  });
+
+  it('表示: 全文の 1 行目・内訳の「点の計算」「今を推定で」・群の見出し・テールの注記（計算中…）', () => {
+    const m = metricsOf(s);
+    const b = baseOf(s);
+    const f = factorsOf(s);
+    const b0 = baseOf(sNow);
+    const now = marginNow(b0, sNow.scenario, params, capital, holidays, nowJscc(sNow));
+    const nowRefit = marginNowRefit(b0, sNow.scenario, params, capital, holidays, now, f);
+    expect(nowRefit?.basis.kind).toBe('jscc_refit');
+    const mv: MarginView = {
+      ...viewOf(s, withCapital(capital)),
+      now,
+      point: marginPoint(b, s.scenario, params, capital, holidays, f),
+      tail: marginTail(b, { ...s.scenario, dX: 0 }, params, capital, holidays, TAIL_SHOCKS, f),
+      nowRefit,
+    };
+    const tiles = metricTiles(m, mv);
+    expect(tile(tiles, 'margin').full[0]?.k).toBe('必要証拠金（JSCC 推定 10/13）');
+    for (const t of tiles) expect(t.full.length).toBeLessThanOrEqual(FULL_MAX_ROWS);
+    const bd = metricsBreakdown(m, mv);
+    expect(bd.some((r) => r.group && r.k === MARGIN_GROUP_LABEL_REFIT)).toBe(true);
+    expect(bd.find((r) => r.k === MARGIN_POINT_BASIS_ROW_LABEL)?.v).toBe('JSCC 推定 10/13');
+    expect(bd.find((r) => r.k === MARGIN_NOW_REFIT_ROW_LABEL)?.v).toBe(
+      amountText(nowRefit?.result.margin ?? null, m.unit),
+    );
+    const view = metricsPanel(m, 0, mv);
+    expect(view.marginTailCaption).toContain('JSCC 推定 10/13 · 2 営業日 · 掛け目 100%');
+    expect(view.marginTailCaption).not.toContain('R ±');
+    expect(metricsPanel(m, 0, { ...mv, tailBusy: true }).marginTailCaption).toMatch(
+      new RegExp(` · ${MARGIN_TAIL_BUSY_MARK}$`),
+    );
+    // 格子に戻ったテールの注記は今までの前提と理由
+    const grid = metricsPanel(m, 0, {
+      ...mv,
+      tail: marginTail(b, { ...s.scenario, dX: 0 }, params, capital, holidays, TAIL_SHOCKS, {
+        status: 'unavailable',
+        reason: 'not_ready',
+      }),
+    });
+    expect(grid.marginTailCaption).toContain(`概算（${JSCC_REASON_TEXT.not_ready}）`);
+    expect(grid.marginTailCaption).toContain('R ±');
+    expect(marginBasisMark({ kind: 'jscc_refit', businessDate: '2026-11-20' })).toBe(
+      'JSCC 推定 11/20',
+    );
+    expect(MARGIN_HINT).toContain('JSCC 推定');
+  });
+
+  it('今が JSCC でなければ「今を推定で」は出さない', () => {
+    const b0 = baseOf(sNow);
+    const grid = marginNow(b0, sNow.scenario, params, capital, holidays);
+    expect(
+      marginNowRefit(b0, sNow.scenario, params, capital, holidays, grid, factorsOf(sNow)),
+    ).toBeNull();
   });
 });

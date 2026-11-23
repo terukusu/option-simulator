@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { type JsccInput, jsccRequestKeys } from '../../data';
+import {
+  type JsccFactorsInput,
+  type JsccInput,
+  jsccFactorPeriods,
+  jsccRequestKeys,
+} from '../../data';
 import { DEFAULT_SETTINGS, evaluatePosition, theoreticalPnl, ZERO_SCENARIO } from '../../model';
 import { AI_EVAL_CASES, caseMargin, caseState } from '../../scripts/aiEvalCases';
 import { DEFAULT_MARGIN_PREFS } from '../../ui/prefs';
@@ -19,7 +24,13 @@ import {
 } from '../../ui/view/aiTools';
 import { FAIR_POSITION_LABEL, fairPriceText, fairView } from '../../ui/view/fairValue';
 import { fmtNum } from '../../ui/view/format';
-import { marginNow, marginPoint, marginTail } from '../../ui/view/margin';
+import {
+  marginLine,
+  marginNow,
+  marginPoint,
+  marginPointOrNow,
+  marginTail,
+} from '../../ui/view/margin';
 import { metricsModel } from '../../ui/view/metrics';
 import { todayScenario } from '../../ui/view/pnlChart';
 import { positionModel } from '../../ui/view/position';
@@ -29,6 +40,7 @@ import {
   jsccData,
   rng as jsccRng,
   realisticSet,
+  synthFactors,
   synthFuture,
   synthOption,
 } from '../support/synthJscc';
@@ -152,6 +164,55 @@ describe.each(AI_EVAL_CASES.map((c) => c.name))('ツール = 画面の表示モ�
     expect(r.now.margin_yen).toBe(yen(now?.result.margin));
     expect(r.now.source).toBe(now?.basis.kind === 'jscc' ? 'jscc' : 'estimate');
     if (now?.basis.kind === 'jscc') expect(r.now.jscc_business_date).toBe('2026-10-13');
+  });
+
+  it('#387 margin_summary・tail_table: r・g があればシナリオの点・テール・追証の水準は JSCC の当て直し（画面と同じ値・出どころ）', () => {
+    const legs = base.legs.map((p) => p.leg);
+    const periods = jsccFactorPeriods(legs, '2026-10-13');
+    if (periods.length === 0) return;
+    const set = realisticSet();
+    const factors: JsccFactorsInput = {
+      status: 'ok',
+      data: synthFactors(
+        set,
+        periods.map((p) => `NK225E-${p}`),
+        5,
+        { businessDate: '2026-10-13' },
+      ),
+    };
+    const e2: AiToolEnv = { ...env, margin: { ...env.margin, factors } };
+    const { params, capital } = env.margin;
+    const r = run(e2, 'margin_summary');
+    const pt = marginPointOrNow(
+      base,
+      env.scenario,
+      params,
+      capital,
+      env.holidays,
+      marginNow(base, env.scenario, params, capital, env.holidays),
+      factors,
+    );
+    expect(r.point.margin_yen).toBe(yen(pt?.result.margin));
+    expect(r.point.source).toBe(pt?.basis.kind === 'jscc_refit' ? 'jscc_refit' : 'estimate');
+    expect(r.call_levels_x).toEqual(
+      marginLine(base, env.scenario, params, capital, env.holidays, factors).slice(0, 40).map(yen),
+    );
+    const t = run(e2, 'tail_table');
+    const rows = marginTail(
+      base,
+      { ...env.scenario, dX: 0 },
+      params,
+      capital,
+      env.holidays,
+      undefined,
+      factors,
+    );
+    t.rows.forEach((row: { margin_yen: number; margin_source: string }, i: number) => {
+      expect(row.margin_yen).toBe(yen(rows[i]?.calc?.result.margin));
+      expect(row.margin_source).toBe(
+        rows[i]?.calc?.basis.kind === 'jscc_refit' ? 'jscc_refit' : 'estimate',
+      );
+    });
   });
 
   it('evaluate_scenario: ΔX 0・日数 0・IV 0 の損益 = 舞台の今日の線の X₀ の値', () => {
