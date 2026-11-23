@@ -8852,7 +8852,11 @@ async function subtitleFlows(vp) {
   // #274 でタイルは 6 枚（指定日 + シナリオ・合計グリークは読み取りの帯と内訳だけ）
   const keys = ['maxProfit', 'maxLoss', 'bep', 'premium', 'margin', 'room'];
   const tileBtn = (k) => `${M} .tile[data-tile="${k}"] .tile-btn`;
-  const kvHas = (v) => kv.some(([, bv]) => bv.includes(v));
+  /** #382: 全文の今の値の後の出どころの印（` · JSCC M/D`）は内訳に無いので外して比べる */
+  const kvHas = (v) => {
+    const s = v.replace(/ · JSCC( \d{1,2}\/\d{1,2})?$/, '');
+    return kv.some(([, bv]) => bv.includes(s));
+  };
   /** #164: 証拠金・余力のタイルの見出しの点の印と全文のシナリオ点の行 */
   const pointMarks = [];
   for (const k of keys) {
