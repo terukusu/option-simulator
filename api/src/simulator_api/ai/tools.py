@@ -90,13 +90,18 @@ TAIL_TABLE = Obj({
                      "scenario_ratio": RATIO, "margin_yen": YEN, "room_yen": YEN}), 10),
 })
 
-MARGIN_STATE = Obj({"x": LEVEL, "margin_yen": YEN, "requirement_yen": YEN, "nov_yen": YEN, "room_yen": YEN,
-                    "multiple": RATIO, "multiple_unbounded": Bool()})
+_MARGIN_STATE_FIELDS = {"x": LEVEL, "margin_yen": YEN, "requirement_yen": YEN, "nov_yen": YEN, "room_yen": YEN,
+                        "multiple": RATIO, "multiple_unbounded": Bool()}
+MARGIN_STATE = Obj(_MARGIN_STATE_FIELDS)
+# 今（#382）: source = jscc（JSCC の VaR 証拠金の計算）/ estimate（概算）、jscc_business_date = JSCC の基準日（JSCC の
+# ときだけ。概算は null）。デプロイ前に開いた画面（古い JS）は送らないので任意
+MARGIN_NOW = Obj({**_MARGIN_STATE_FIELDS, "source": Enum(("jscc", "estimate")), "jscc_business_date": Nullable(DATE)},
+                 frozenset({"source", "jscc_business_date"}))
 MARGIN_SUMMARY = Obj({
     "capital_yen": YEN,
     "params": Obj({"range_pct": PCT, "iv_up_pct": PCT, "iv_down_pct": PCT, "factor_pct": PCT,
                    "ignore_long_options": Bool()}),
-    "now": MARGIN_STATE,
+    "now": MARGIN_NOW,
     "point": MARGIN_STATE,
     "call_levels_x": Arr(LEVEL, 40),
 })
@@ -530,7 +535,9 @@ REGISTRY: Registry = {t.name: t for t in (
           "今のシナリオの日数・IV での損益（円）、受取（または掛け金）に対する倍率、資金があれば必要証拠金と余力（円）",
           TAIL_TABLE),
     _spec("margin_summary",
-          "証拠金の概算（画面の証拠金のタイルと同じ。SPAN の近似で概算）。今とシナリオの点の必要証拠金・所要額・NOV・"
+          "証拠金（画面の証拠金のタイルと同じ）。今は JSCC の VaR 証拠金の計算（now.source = jscc。基準日は"
+          " now.jscc_business_date = 前営業日の清算値で 1 日固定）で、JSCC のデータが無いときとシナリオの点は概算"
+          "（source = estimate。格子の最悪値）。今とシナリオの点の必要証拠金・所要額・NOV・"
           "余力（円。資金が未設定なら null）・何倍まで建てられるか、"
           "追証の水準（余力が 0 になる原資産。資金があるとき）、"
           "前提（値動き幅 R・IV の上げ / 下げ・掛け目の %）", MARGIN_SUMMARY),

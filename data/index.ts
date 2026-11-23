@@ -8,6 +8,7 @@ export * from './calendar';
 export * from './chainJson';
 export * from './futureBars';
 export * from './jpxGreeks';
+export * from './jscc';
 export * from './legs';
 export * from './normalize';
 export * from './optionBars';

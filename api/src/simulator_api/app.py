@@ -9,6 +9,9 @@
   要求・Cache-Control は /api/atm_iv と同じ。#190）
 - GET /api/option_bars?ltd=<YYYY-MM-DD>&k=<整数>&type=<call|put>&tf=<1h|1d>: 銘柄の推移（表 option_price_hourly の
   1 時間足と日足。option_bars.py。#319）。4 つとも必須
+- GET /api/jscc_scenarios?date=<YYYY-MM-DD>&i=<銘柄>…: 基準日の JSCC の VaR パラメータ（要求の銘柄のシナリオの値・並び・
+  信頼水準・ストレスの本数。jscc.py。#382）。ok・inconsistent は max-age 600、not_ready は 60、
+  no_source（file・quotes）も 200
 - POST /api/ai/messages: AI の中継（SSE。許可リスト・費用の 1 日上限・同じオリジン。ai/relay.py。#134）
 - GET /api/ai/status: AI が使えるか・1 日の上限と残り（ai/relay.py。#134）
 - POST /api/ai/read_positions: 建玉の一覧の画像 1 枚を読み取る（JSON。ai/relay.py・ai/read_positions.py。#318）
@@ -24,7 +27,7 @@ from datetime import UTC, datetime
 
 from flask import Flask, Response, request, send_from_directory
 
-from . import atm_iv, option_bars, sources
+from . import atm_iv, jscc, option_bars, sources
 from . import settings as st
 from .ai import budget as ai_budget
 from .ai import gateway as ai_gw
@@ -192,6 +195,26 @@ def create_app(runner=None, clock=None, monotonic=None, cfg: st.Settings | None 
         max_age = (st.OPTION_BARS_SETTLED_MAX_AGE_SECONDS if option_bars.is_settled(req, now)
                    else st.OPTION_BARS_MAX_AGE_SECONDS)
         return serve("option_bars", lambda: service.option_bars(req), f"private, max-age={max_age}")
+
+    @app.get("/api/jscc_scenarios")
+    def api_jscc_scenarios():
+        try:
+            req = jscc.parse_request(request.args, clock())
+        except atm_iv.BadRequest as e:
+            # 入力値は応答・ログに出さない（反射しない）。どのパラメータかだけ
+            log("INFO", "bad_request", endpoint="jscc_scenarios", param=e.param)
+            return _error(400, "bad_request")
+        holder = {}
+
+        def produce():
+            holder["p"] = service.jscc_scenarios(req)
+            return holder["p"]
+
+        res = serve("jscc_scenarios", produce, f"private, max-age={st.JSCC_MAX_AGE_SECONDS}")
+        p = holder.get("p")
+        if res.status_code == 200 and getattr(p, "reason", "") == "not_ready":
+            res.headers["Cache-Control"] = f"private, max-age={st.JSCC_NOT_READY_MAX_AGE_SECONDS}"
+        return res
 
     @app.get("/api/atm_daily")
     def api_atm_daily():

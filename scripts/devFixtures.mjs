@@ -8,6 +8,9 @@
 // 合成の板 latest の先物の値で終わる決まった関数。既定の 1 時間足の範囲に限月交代（取引最終日の 17:00）を 1 回含む）。
 // 銘柄の推移（#319）の合成の応答も `/fixtures/option_bars?ltd=&k=&type=&tf=` で配る（`/api/option_bars` と同じ形・同じ
 // 検査。架空の値 = 合成の先物と IV から Black-76 で作る。気配の無い約定だけの足の塊・まばらな約定・bid_iv だけ欠けた足を含む）。
+// JSCC の VaR パラメータ（#382）の合成の応答も `/fixtures/jscc_scenarios?date=&i=` で配る（`/api/jscc_scenarios` と同じ形・
+// 同じ検査。架空の値 = 合成の先物と Black-76 と種つき乱数のシナリオ）。合成の板 latest の基準日（SYNTH_JSCC_DATE）だけ
+// ok、ほかの日は not_ready（両方の表示を dev で見る）。生成はこのファイルの中に閉じる（tests/ を import しない）。
 // 日次の値（#152）の合成の応答も `/fixtures/atm_daily` で配る（`/api/atm_daily` と同じ形。架空の値。種つき）。
 // AI の中継（#135）の偽の応答も `/fixtures/ai/status`・`/fixtures/ai/messages`（偽の SSE。Anthropic を呼ばない）で配る。
 // 画像の読み取り（#318）は `/fixtures/ai/read_positions`（合成の結果 SYNTH_READ_RESULT を返す。画像は読まずに捨てる）。
@@ -1016,6 +1019,119 @@ function serveReadPositions(req, res) {
   });
 }
 
+// ---- JSCC の VaR パラメータの合成の応答（#382。架空の値）
+const JSCC_PATH = '/fixtures/jscc_scenarios';
+/** 合成の板 latest（2026-10-13 火曜の夜間）の基準日 = 取引日（10-14）の前営業日 */
+export const SYNTH_JSCC_DATE = '2026-10-13';
+/** 合成のシナリオの本数（本物と同じ H 1,250・S 172）・信頼水準・ストレスの本数 */
+const JSCC_NH = 1250;
+const JSCC_NS = 172;
+const JSCC_KEY =
+  /^(NK225E)-(\d{4})(\d{2})-([CP])-([1-9]\d{0,6})$|^(NK225F|NK225MF|NK225MCF)-(\d{4})(\d{2})$/;
+const JSCC_SIZE = { NK225E: 1000, NK225F: 1000, NK225MF: 100, NK225MCF: 10 };
+
+/** `?date=&i=…` を読む（サーバーの jscc.parse_request と同じ形の検査。日付の範囲は見ない）。形が違えば null = 400 */
+export function jsccQuery(url) {
+  const q = new URLSearchParams(url.split('?')[1] ?? '');
+  const dates = q.getAll('date');
+  const keys = q.getAll('i');
+  if (dates.length !== 1 || !/^\d{4}-\d{2}-\d{2}$/.test(dates[0])) return null;
+  const date = dates[0];
+  if (new Date(`${date}T00:00:00Z`).toISOString().slice(0, 10) !== date) return null;
+  if (keys.length < 1 || keys.length > 64 || new Set(keys).size !== keys.length) return null;
+  for (const k of keys) {
+    const m = JSCC_KEY.exec(k);
+    const month = m ? Number(m[3] ?? m[8]) : 0;
+    if (!(month >= 1 && month <= 12)) return null;
+  }
+  if (new Set(keys.map((k) => k.split('-')[1])).size > 4) return null;
+  return { date, keys: [...keys].sort() };
+}
+
+/** シナリオ（決まった値）: 原資産の変化率と IV の倍率。H は 2 日の値動き（裾の厚い分布）、S は大きな下げ・上げ */
+let jsccScen = null;
+function jsccScenarios() {
+  if (jsccScen) return jsccScen;
+  const ret = [];
+  const vol = [];
+  for (let j = 0; j < JSCC_NH; j++) {
+    const z = gauss(900_000 + j);
+    const fat = hash01(910_000 + j) < 0.04 ? 2.5 : 1; // 4% の日は 2.5 倍に動く
+    const r = 0.016 * z * fat;
+    ret.push(r);
+    vol.push(Math.max(0.6, 1 - 4 * r + 0.05 * gauss(920_000 + j)));
+  }
+  for (let j = 0; j < JSCC_NS; j++) {
+    const down = hash01(930_000 + j) < 0.75;
+    const r = (down ? -1 : 1) * (0.06 + 0.14 * hash01(940_000 + j));
+    ret.push(r);
+    vol.push(Math.max(0.6, 1 - 3 * r));
+  }
+  jsccScen = { ret, vol, types: 'H'.repeat(JSCC_NH) + 'S'.repeat(JSCC_NS) };
+  return jsccScen;
+}
+
+/** 限月（YYYYMM）の SQ までの年（合成の今から。取引最終日の 15:45 で近似） */
+function jsccYears(period) {
+  const y = Number(period.slice(0, 4));
+  const m = Number(period.slice(4, 6));
+  const ltd = lastTradingDayOf(y, m);
+  return Math.max((ltd * DAY - JST + (15 * 60 + 45) * 60 - SYNTH_IV_NOW) / (365 * DAY), 1 / 365);
+}
+
+/** 1 銘柄の行（OP = シナリオ後の評価額、先物 = シナリオの損益。1 枚あたりの円の整数）。年が過ぎた限月は null */
+function jsccInstrument(key) {
+  const m = JSCC_KEY.exec(key);
+  if (!m) return null;
+  const { ret, vol } = jsccScenarios();
+  const f = futNowPrice();
+  if (m[1]) {
+    const period = `${m[2]}${m[3]}`;
+    const years = jsccYears(period);
+    if (!(years > 1 / 365)) return null;
+    const k = Number(m[5]);
+    const call = m[4] === 'C';
+    const sigma = (k) => Math.max(0.08, 0.19 * (1 - 0.9 * Math.log(k / f)));
+    const after = Math.max(years - 2 / 365, 1 / 365);
+    const price = Math.max(1, Math.round(black76(f, k, years, sigma(k), call)));
+    const pnl = ret.map((r, j) =>
+      Math.max(0, Math.round(black76(f * (1 + r), k, after, sigma(k) * vol[j], call) * 1000)),
+    );
+    return { aggregation_group: 'IDX_IDX', contract_size: 1000, price, pnl };
+  }
+  const size = JSCC_SIZE[m[6]];
+  return {
+    aggregation_group: 'IDX_IDX',
+    contract_size: size,
+    price: Math.round(f),
+    pnl: ret.map((r) => Math.round(f * r * size)),
+  };
+}
+
+/** `/api/jscc_scenarios` と同じ形の合成の応答（架空の値） */
+export function synthJscc(date, keys) {
+  if (date !== SYNTH_JSCC_DATE) {
+    return { schema_version: 1, status: 'unavailable', reason: 'not_ready', business_date: date };
+  }
+  const instruments = [];
+  const missing = [];
+  for (const key of keys) {
+    const inst = jsccInstrument(key);
+    if (inst) instruments.push({ key, ...inst });
+    else missing.push(key);
+  }
+  return {
+    schema_version: 1,
+    status: 'ok',
+    business_date: date,
+    confidence_level: 97.5,
+    stress_scenario_number: 2,
+    scenario_types: jsccScenarios().types,
+    instruments,
+    missing,
+  };
+}
+
 /** @returns {import('vite').Plugin} */
 export function serveSyntheticFixtures() {
   return {
@@ -1043,6 +1159,18 @@ export function serveSyntheticFixtures() {
           res.setHeader('Content-Type', 'application/json; charset=utf-8');
           res.setHeader('Cache-Control', 'no-store');
           res.end(JSON.stringify(synthAtmDaily()));
+          return;
+        }
+        if (path === JSCC_PATH) {
+          const q = jsccQuery(req.url ?? '');
+          res.setHeader('Content-Type', 'application/json; charset=utf-8');
+          res.setHeader('Cache-Control', 'no-store');
+          if (!q) {
+            res.statusCode = 400;
+            res.end('{"error":"bad_request"}');
+            return;
+          }
+          res.end(JSON.stringify(synthJscc(q.date, q.keys)));
           return;
         }
         if (path === OPTION_BARS_PATH) {

@@ -607,7 +607,9 @@ describe('全文（#107 AC-1）', () => {
           expect(r.v).not.toBe('');
           expect(r.v.includes('\n') || r.k.includes('\n')).toBe(false);
           if (r.k === 'F' || r.k === 'd') continue;
-          expect(bd.some((b) => b.v.includes(r.v))).toBe(true);
+          // #382: 必要証拠金（今）の値の後の出どころの印は内訳では「今の計算」の行
+          const v = r.v.replace(/ · (JSCC.*|概算)$/, '');
+          expect(bd.some((b) => b.v.includes(v))).toBe(true);
         }
       }
       // 1 行目は見出し + 値（証拠金の 2 枚は「（概算）」付きの見出し。#274）

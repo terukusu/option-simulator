@@ -129,7 +129,9 @@ class ExpiringLRUCache:
         self._items: OrderedDict = OrderedDict()  # key → (値, 期限)
         self._flight = _SingleFlight()
 
-    def get(self, key, load: Callable[[], object], ttl: float):
+    def get(self, key, load: Callable[[], object], ttl: float, ttl_of: Callable[[object], float] | None = None):
+        """ttl_of: 読んだ値から期限（秒）を決める（無ければ ttl。#382 の取り込みの記録 = 有り 600 秒・無し 60 秒）"""
+
         def lookup():
             item = self._items.get(key)
             if item is not None and self._monotonic() < item[1]:
@@ -138,7 +140,7 @@ class ExpiringLRUCache:
             return False, None
 
         def store(v):
-            self._items[key] = (v, self._monotonic() + ttl)
+            self._items[key] = (v, self._monotonic() + (ttl if ttl_of is None else ttl_of(v)))
             self._items.move_to_end(key)
             while len(self._items) > self.maxsize:
                 self._items.popitem(last=False)

@@ -12,10 +12,13 @@
  *   必要証拠金・余力はまとめたポジションの marginNow（行の和にならない）。追証までの距離は marginLine を後で作る
  *   （total.line を useMarginLineState に渡し、distanceText で整形する）
  *
+ * - 今の必要証拠金は指標と同じく JSCC の計算（#382。input.jscc。読めない・できないなら概算）。値の後に出どころの印
+ *   （`JSCC 11/20` / `概算`。metricsPanel の marginBasisMark）
+ *
  * 呼ぶのは開いている間だけ描くダイアログ（ui/next/HoldingsDialog.tsx）の memo だけ（AC11）。
  */
 
-import type { Calendar, Chain } from '../../data';
+import type { Calendar, Chain, JsccInput } from '../../data';
 import {
   type AtmBasis,
   evaluatePosition,
@@ -39,9 +42,9 @@ import {
   settingsOf,
 } from './bookList';
 import { DASH, fmtDateTime, fmtNum, fmtSigned } from './format';
-import { type MarginLineInput, marginNow } from './margin';
+import { type MarginBasis, type MarginLineInput, marginNow } from './margin';
 import { AMOUNT_UNIT_LABEL, type AmountUnit, amountUnit, fmtAmount } from './metrics';
-import { ROOM_NO_CAPITAL_TEXT } from './metricsPanel';
+import { marginBasisMark, ROOM_NO_CAPITAL_TEXT } from './metricsPanel';
 import { type PnlBase, pnlDomains } from './pnlChart';
 import { daysSinceOpen, positionContext } from './position';
 import { TABS_FULL_TEXT } from './tabs';
@@ -178,6 +181,16 @@ export function groupHoldings(sources: readonly HoldingSource[]): HoldingGroup[]
   return rows.map(({ prints: _p, ...g }) => g);
 }
 
+/** 一覧の全部の足（JSCC の要求の銘柄を集める。#382。板に依らない） */
+export function holdingLegs(
+  tabs: readonly TabSlot[],
+  activeTab: number,
+  legs: readonly UiLeg[],
+  read: BookRead,
+): Leg[] {
+  return holdingSources(tabs, activeTab, legs, read).flatMap((s) => s.legs.map((l) => l.leg));
+}
+
 /**
  * 合計に入れる行のうち作業中のタブ以外の数（AI の position.other_held。#302）。足の比較だけで評価しない（板が無くても数える）
  */
@@ -210,6 +223,8 @@ export interface HoldingsInput {
   params: MarginParams;
   /** 資金（円。未設定なら null） */
   capital: number | null;
+  /** 今の必要証拠金の JSCC の入力（#382。一覧の全部の足の銘柄。無ければ概算） */
+  jscc?: JsccInput | null;
 }
 
 /** 行の操作 */
@@ -293,6 +308,12 @@ export const DISTANCE_CALL_NOW = '今 追証の側';
 const deltaText = (large: number, mini: number) =>
   `${fmtSigned(large, 3)} 枚（ミニ ${fmtSigned(mini, 2)}）`;
 
+/** 金額の後に出どころの印（`1,968 · JSCC 11/20`。印が無ければ金額だけ） */
+function withMark(text: string, basis: MarginBasis | null): string {
+  const mark = marginBasisMark(basis);
+  return mark ? `${text} · ${mark}` : text;
+}
+
 /** 評価損益の文と注記（保存一覧と同じ文） */
 function markTexts(m: MarkResult | null, unit: AmountUnit): { text: string; note: string | null } {
   if (!m) return { text: NO_BOARD_VALUE, note: null };
@@ -307,6 +328,7 @@ interface RowEval {
   mark: MarkResult;
   base: PnlBase | null;
   margin: number | null;
+  basis: MarginBasis | null;
   delta: { large: number; mini: number } | null;
   offBoard: number;
   excluded: number;
@@ -325,7 +347,14 @@ function evalRow(
     s.kind === 'tab' && s.active ? input.legs : refreshedLegs(chain, s.legs, input.calendar);
   const { pm, base } = evalLegs(chain, legs, input.atmBasis, input.calendar, settings);
   const calc = base
-    ? marginNow(base, input.nowScenario, input.params, null, input.calendar.holidays)
+    ? marginNow(
+        base,
+        input.nowScenario,
+        input.params,
+        null,
+        input.calendar.holidays,
+        input.jscc ?? null,
+      )
     : null;
   const total = base ? evaluatePosition(base.legs, ZERO_SCENARIO, base.ctx, settings).total : null;
   let oldest: number | null = null;
@@ -343,6 +372,7 @@ function evalRow(
     ),
     base,
     margin: calc ? calc.result.margin : null,
+    basis: calc ? calc.basis : null,
     delta: total ? { large: total.deltaLarge, mini: total.deltaMini } : null,
     offBoard: pm.rows.filter((r) => r.error !== null).length,
     excluded: s.legs.length - (base?.legs.length ?? 0),
@@ -373,6 +403,7 @@ export function holdingsModel(input: HoldingsInput): HoldingsView {
     base: PnlBase | null;
     margin: number | null;
     room: number | null;
+    basis: MarginBasis | null;
     delta: { large: number; mini: number } | null;
     mark: number | null;
     theoretical: boolean;
@@ -387,7 +418,14 @@ export function holdingsModel(input: HoldingsInput): HoldingsView {
     const ctx = positionContext(chain, legs, input.atmBasis);
     const base = pnlDomains(chain, prepared, ctx, working);
     const calc = base
-      ? marginNow(base, input.nowScenario, input.params, input.capital, input.calendar.holidays)
+      ? marginNow(
+          base,
+          input.nowScenario,
+          input.params,
+          input.capital,
+          input.calendar.holidays,
+          input.jscc ?? null,
+        )
       : null;
     const t = base ? evaluatePosition(base.legs, ZERO_SCENARIO, base.ctx, working).total : null;
     let mark: number | null = 0;
@@ -401,6 +439,7 @@ export function holdingsModel(input: HoldingsInput): HoldingsView {
       base,
       margin: calc ? calc.result.margin : null,
       room: calc ? calc.room : null,
+      basis: calc ? calc.basis : null,
       delta: t ? { large: t.deltaLarge, mini: t.deltaMini } : null,
       mark,
       theoretical,
@@ -445,7 +484,12 @@ export function holdingsModel(input: HoldingsInput): HoldingsView {
       heldText: `建ててから ${e?.heldDays === null || !e ? DASH : `${fmtNum(e.heldDays)} 日`}`,
       markText: s.legs.length === 0 ? DASH : mark.text,
       markNote: mark.note,
-      marginText: s.legs.length === 0 ? DASH : noValue ? NO_BOARD_VALUE : fmtAmount(e.margin, unit),
+      marginText:
+        s.legs.length === 0
+          ? DASH
+          : noValue
+            ? NO_BOARD_VALUE
+            : withMark(fmtAmount(e.margin, unit), e.margin === null ? null : e.basis),
       note: e && e.excluded > 0 ? `一部の足を除く（${e.excluded} 本）` : null,
       deltaText:
         s.legs.length === 0
@@ -506,8 +550,11 @@ export function holdingsModel(input: HoldingsInput): HoldingsView {
         count: countedIdx.length,
         markText: fmtAmount(t.mark, unit, true),
         markNote,
-        marginText: fmtAmount(t.margin, unit),
-        roomText: capital === null ? ROOM_NO_CAPITAL_TEXT : fmtAmount(t.room, unit, true),
+        marginText: withMark(fmtAmount(t.margin, unit), t.margin === null ? null : t.basis),
+        roomText:
+          capital === null
+            ? ROOM_NO_CAPITAL_TEXT
+            : withMark(fmtAmount(t.room, unit, true), t.room === null ? null : t.basis),
         roomWarn,
         deltaText: t.delta ? deltaText(t.delta.large, t.delta.mini) : DASH,
         note: t.excluded > 0 ? `一部の足を除く（${t.excluded} 本）` : null,

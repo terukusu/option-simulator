@@ -6,7 +6,8 @@
  *
  * - タイル 6 枚: 満期 最大利益・満期 最大損失・満期 BEP・受取 − 支払 or 掛け金・必要証拠金・余力（#131。値はシナリオの点、
  *   副題は今。計算は ui/view/margin.ts の MarginView）。指定日 + シナリオ・合計グリークは読み取りの帯と同じ値なので
- *   タイルにしない（#274。内訳には残る）。「概算」は見出し行の副題に 1 回（headSub）
+ *   タイルにしない（#274。内訳には残る）。「概算」は見出し行の副題に 1 回（headSub）。今の必要証拠金が JSCC の計算
+ *   （#382）なら副題の今の値の後に `JSCC 11/20`（基準日）、概算に戻ったら `概算`（理由は全文と内訳）
  * - 内訳: 旧画面の内訳の dl（#91 で削除）の項目を同じ順・同じ桁で 2 列の行に + 証拠金の群（#131）
  * - テール表: 5 行 × {SQ, 指定日 + シナリオ}。損益の大きさのバーの長さ（10 セルの |損益| の最大で正規化）
  * - テールの証拠金の表（#131）: 5 行 × {必要証拠金, 余力}。余力 < 0 は loss の色と「追証」の印
@@ -18,7 +19,7 @@
 import { MARGIN_HORIZON_BUSINESS_DAYS, type MarginParams } from '../../model';
 import { DASH, fmtNum, fmtSigned } from './format';
 import type { TermId } from './glossary';
-import type { MarginCalc, MarginPointAt, MarginView } from './margin';
+import type { JsccReason, MarginBasis, MarginCalc, MarginPointAt, MarginView } from './margin';
 import {
   AMOUNT_UNIT_LABEL,
   type AmountUnit,
@@ -149,7 +150,26 @@ export const MARGIN_FULL_LABEL = '必要証拠金（概算）';
 export const ROOM_FULL_LABEL = '余力（概算）';
 /** 見出し行の副題の末尾（証拠金があるとき。#274） */
 export const MARGIN_APPROX_SUB = ' · 証拠金は概算';
+/** 見出し行の副題の末尾（今の必要証拠金が JSCC の計算のとき。#382） */
+export const MARGIN_JSCC_SUB = ' · 証拠金の今は JSCC';
 export const MARGIN_GROUP_LABEL = '証拠金（概算・保守寄り）';
+/** 内訳の群の見出し（今が JSCC の計算のとき。#382） */
+export const MARGIN_GROUP_LABEL_JSCC = '証拠金（今は JSCC の計算・他は概算）';
+/** 内訳・全文の今の出どころの行の見出し（#382） */
+export const MARGIN_BASIS_ROW_LABEL = '今の計算';
+/** 概算の印（タイルの副題。#382） */
+export const MARGIN_ESTIMATE_MARK = '概算';
+/** 今を JSCC の計算にできなかった理由の文（全文・内訳。#382） */
+export const JSCC_REASON_TEXT: Record<JsccReason, string> = {
+  loading: 'JSCC のデータを読み込み中',
+  not_ready: '基準日の JSCC のデータがまだ無い',
+  missing: 'JSCC のデータに無い銘柄がある',
+  groups: '集計グループが 2 つ以上',
+  fractional: '枚数が整数でない足がある',
+  error: 'JSCC のデータを読めない',
+  no_source: 'データ元に JSCC のデータが無い',
+  none: '証拠金のかかる足が無い',
+};
 export const MARGIN_TAIL_TITLE = '証拠金（概算。指定日 + シナリオ）';
 /** 資金が未設定のときの余力のタイルの副題 */
 export const ROOM_NO_CAPITAL_TEXT = '資金は ⋯ > 設定…';
@@ -157,7 +177,7 @@ export const ROOM_NO_CAPITAL_TEXT = '資金は ⋯ > 設定…';
 export const MARGIN_CALL_MARK = '追証';
 /** ⓘ の証拠金の文（方式・物差し・NOV・JSCC との違い・既定の決め方・未確認の形・Web 試算で確かめる。設計 5.10・#150） */
 export const MARGIN_HINT =
-  '必要証拠金は概算: 原資産 ±R・±R/2・0 × 足の今の IV の ×(1 + 上げ) / ×1 / ×(1 − 下げ) × 経過 0 / 2 営業日の格子で、損失の最悪値に掛け目を掛ける。証券会社の建てる前の必要委託証拠金と同じ基準で、受け取るプレミアム（NOV）を含まない。JSCC の VaR 証拠金（過去の値動きとストレスシナリオ）の再現ではない。既定（R 5%・IV +50% / −25%・掛け目 100%）は 1 枚ずつの売りの 6 通りのポジションでの答え合わせ（0.98〜1.07 倍）で決めた。ストレス日・先物との組み合わせなどは未確認で、実額と違いうる。建てる前に JSCC の Web 試算か証券会社の額で確かめ、⋯ > 設定… の幅・掛け目で合わせる。余力 = 資金 − 支払 + 受取 − 手数料 − 先物の評価損 − (必要証拠金 − NOV)。先物の評価益は、指定日が日中の引け（値洗い）をまたぐまでは足さず、またいだら足す。余力 < 0 が追証（証券会社の計算式の追加証拠金と同じ判定）。値はシナリオの点（見出しの横に d・ΔF・Δσ・Δs のうち 0 でないもの。全部 0 なら「今」）、副題は今。証券会社の額は前営業日の清算値で 1 日固定（場中に計算し直しても同じ額）、simulator は今の板で計算するので場中の値動きの分だけ違う。';
+  '今の必要証拠金は JSCC の計算: JSCC が毎営業日に公開する VaR 証拠金のパラメータ（過去の値動きとストレスシナリオ）で、今のポジションの VaR 証拠金額を JSCC と同じ手順で求め、掛け目を掛ける。証券会社の額と同じく前営業日の清算値で 1 日固定（場中に計算し直しても同じ額）。所要額 = 必要証拠金 − NOV で、NOV は今の板の値段で評価する（証券会社の必要委託と同じ形）。基準日のデータがまだ無い（平日 17:00〜18:30 ごろなど）・銘柄が無い・読めないときは、今も概算に戻り、副題に「概算」と出る。シナリオの点（見出しの横に d・ΔF・Δσ・Δs のうち 0 でないもの。全部 0 なら「今」で、値は今と同じ）・テール・追証の線は概算: 原資産 ±R・±R/2・0 × 足の今の IV の ×(1 + 上げ) / ×1 / ×(1 − 下げ) × 経過 0 / 2 営業日の格子で、損失の最悪値に掛け目を掛ける（受け取るプレミアムの NOV を含まない）。概算の既定（R 5%・IV +50% / −25%）は 1 枚ずつの売りの 6 通りのポジションでの答え合わせ（0.98〜1.07 倍）で決めた。組み合わせによっては JSCC の値と大きくずれうる（売り put 中心は小さめ、売り call 中心は大きめ）。ストレス日・先物との組み合わせなどは未確認で、⋯ > 設定… の幅・掛け目で合わせる。余力 = 資金 − 支払 + 受取 − 手数料 − 先物の評価損 − (必要証拠金 − NOV)。先物の評価益は、指定日が日中の引け（値洗い）をまたぐまでは足さず、またいだら足す。余力 < 0 が追証（証券会社の計算式の追加証拠金と同じ判定）。値はシナリオの点、副題は今。simulator の NOV は今の板で計算するので場中の値動きの分だけ証券会社の額と違う。';
 
 /** 内訳・全文のシナリオ点の行の見出し（#164） */
 export const MARGIN_POINT_ROW_LABEL = 'シナリオ点';
@@ -359,6 +379,33 @@ function worstValues(c: MarginCalc | null, p: MarginParams): string[] | null {
   return [`F ${pct}%`, `IV ${ivScaleText(w.ivScale)}`, `経過 +${fmtNum(w.days)} 日`];
 }
 
+/** 基準日（YYYY-MM-DD）→ `M/D` */
+const monthDay = (d: string) => `${Number(d.slice(5, 7))}/${Number(d.slice(8, 10))}`;
+
+/**
+ * タイルの副題の出どころの印（JSCC → `JSCC 11/20`、概算 → `概算`、M の足が無い → 空）。short = 基準日を省く
+ * （余力のタイルの副題は倍数も並ぶので 360px の 2 列に入れるため `JSCC` だけ。基準日は必要証拠金の副題・全文で読む）
+ */
+export function marginBasisMark(b: MarginBasis | null, short = false): string {
+  if (!b) return '';
+  if (b.kind === 'jscc') return short ? 'JSCC' : `JSCC ${monthDay(b.businessDate)}`;
+  return b.reason === 'none' ? '' : MARGIN_ESTIMATE_MARK;
+}
+
+/** 全文・内訳の出どころの文（JSCC → `JSCC 11/20 の計算`、概算 → `概算（理由）`） */
+export function marginBasisText(b: MarginBasis): string {
+  if (b.kind === 'jscc') return `JSCC ${monthDay(b.businessDate)} の計算`;
+  return b.reason === null
+    ? MARGIN_ESTIMATE_MARK
+    : `${MARGIN_ESTIMATE_MARK}（${JSCC_REASON_TEXT[b.reason]}）`;
+}
+
+/** 全文の 1 行目の見出しの括弧（値 = シナリオの点の出どころ） */
+const fullParen = (c: MarginCalc | null) =>
+  c && c.basis.kind === 'jscc' ? `JSCC ${monthDay(c.basis.businessDate)}` : MARGIN_ESTIMATE_MARK;
+
+const isJsccNow = (mv: MarginView) => mv.now?.basis.kind === 'jscc';
+
 const marginOf = (c: MarginCalc | null) => (c ? c.result.margin : null);
 const roomOf = (c: MarginCalc | null) => (c ? c.room : null);
 const roomTone = (v: number | null): 'loss' | null => (v !== null && v < 0 ? 'loss' : null);
@@ -382,6 +429,8 @@ interface MarginGroups {
   atPoint: MarginStateRows;
   atNow: MarginStateRows;
   multiple: FullRow;
+  /** 今の出どころ（JSCC の計算 / 概算 + 理由。今が無ければ空） */
+  basis: FullRow[];
   worst: FullRow[];
   params: FullRow[];
 }
@@ -406,6 +455,7 @@ function marginGroups(mv: MarginView, u: AmountUnit): MarginGroups {
     atPoint: state('シナリオ点', mv.point),
     atNow: state('今', mv.now),
     multiple: { k: '倍数（今）', v: multipleText(mv.now?.multiple ?? null) },
+    basis: mv.now ? [{ k: MARGIN_BASIS_ROW_LABEL, v: marginBasisText(mv.now.basis) }] : [],
     worst: w === null ? [] : w.map((v, i) => ({ k: i === 0 ? '最悪の点' : '', v })),
     params: [
       { k: '値動き幅 R', v: `±${fmtParam(Math.round(p.range * 1000) / 10)}%` },
@@ -429,22 +479,27 @@ const STATE_TERMS: readonly TermId[] = ['margin', 'nov', 'requirement', 'room'];
 
 /**
  * 必要証拠金のタイルの全文の行（見出しの後。#161）: 値に関わる行だけ、内訳の群と同じ順
- * （シナリオ点・NOV / 証拠金所要額（シナリオ点）・必要証拠金（今）・最悪の点。最大 10 行）
+ * （シナリオ点・NOV / 証拠金所要額（シナリオ点）・必要証拠金（今。値の後に出どころの印）・最悪の点。最大 11 行）
  */
-const marginFullRows = (g: MarginGroups): FullRow[] => [
+const marginFullRows = (g: MarginGroups, mark: string): FullRow[] => [
   ...g.point,
   g.atPoint.nov,
   g.atPoint.requirement,
-  g.atNow.margin,
+  // 今の出どころは行を足さずに値の後に印（360x780 の peek で全文をスクロールさせない。理由は余力の全文・内訳で読む）
+  mark ? { k: g.atNow.margin.k, v: `${g.atNow.margin.v} · ${mark}` } : g.atNow.margin,
   ...g.worst,
 ];
 
-/** 余力のタイルの全文の行（見出しの後。#161）: シナリオ点・証拠金所要額（シナリオ点）・余力（今）・倍数（今）。最大 7 行 */
+/**
+ * 余力のタイルの全文の行（見出しの後。#161）: シナリオ点・証拠金所要額（シナリオ点）・余力（今）・倍数（今）・今の計算。
+ * 最大 8 行
+ */
 const roomFullRows = (g: MarginGroups): FullRow[] => [
   ...g.point,
   g.atPoint.requirement,
   g.atNow.room,
   g.multiple,
+  ...g.basis,
 ];
 
 /** 必要証拠金・余力のタイル（#131。値 = シナリオの点、副題 = 今、見出しの横に点の印 #164） */
@@ -469,15 +524,23 @@ function marginTiles(mv: MarginView | null, u: AmountUnit): MetricTile[] {
   const g = marginGroups(mv, u);
   const at = `· ${marginPointText(mv.at)}`;
   const mV = fmtAmount(marginOf(mv.point), u);
+  const mark = marginBasisMark(mv.now?.basis ?? null);
+  const markSuffix = mark ? ` · ${mark}` : '';
+  const markShort = marginBasisMark(mv.now?.basis ?? null, true);
+  const markShortSuffix = markShort ? ` · ${markShort}` : '';
+  const paren = fullParen(mv.point);
   const marginTile: MetricTile = {
     key: 'margin',
     k: MARGIN_TILE_LABEL,
     at,
     v: mV,
     unit: amountUnitFor(mV, ul),
-    s: `今 ${fmtAmount(marginOf(mv.now), u)}`,
+    s: `今 ${fmtAmount(marginOf(mv.now), u)}${markSuffix}`,
     tone: null,
-    full: [{ k: MARGIN_FULL_LABEL, v: amountText(marginOf(mv.point), u) }, ...marginFullRows(g)],
+    full: [
+      { k: `${MARGIN_TILE_LABEL}（${paren}）`, v: amountText(marginOf(mv.point), u) },
+      ...marginFullRows(g, mark),
+    ],
   };
   const room = roomOf(mv.point);
   const rV = mv.capital === null ? DASH : fmtAmount(room, u);
@@ -490,10 +553,13 @@ function marginTiles(mv: MarginView | null, u: AmountUnit): MetricTile[] {
     s:
       mv.capital === null
         ? ROOM_NO_CAPITAL_TEXT
-        : `今 ${fmtAmount(roomOf(mv.now), u)} · ${multipleText(mv.now?.multiple ?? null)}`,
+        : `今 ${fmtAmount(roomOf(mv.now), u)}${markShortSuffix} · ${multipleText(mv.now?.multiple ?? null)}`,
     tone: roomTone(room),
     full: [
-      { k: ROOM_FULL_LABEL, v: mv.capital === null ? DASH : amountText(room, u) },
+      {
+        k: `${ROOM_TILE_LABEL}（${paren}）`,
+        v: mv.capital === null ? DASH : amountText(room, u),
+      },
       ...roomFullRows(g),
     ],
   };
@@ -641,13 +707,13 @@ export function metricsBreakdown(
   row('建値ずれ', A(premium.entryMismatch, true));
   // 9 証拠金（概算。#131）
   if (margin) {
-    group(MARGIN_GROUP_LABEL);
-    // シナリオ点・シナリオ点 / 今 × 4・倍数・最悪の点・前提の順。状態の 4 行だけ用語を付ける（#167）
+    group(isJsccNow(margin) ? MARGIN_GROUP_LABEL_JSCC : MARGIN_GROUP_LABEL);
+    // シナリオ点・シナリオ点 / 今 × 4・倍数・今の計算・最悪の点・前提の順。状態の 4 行だけ用語を付ける（#167）
     const g = marginGroups(margin, u);
     add(g.point);
     addTerms(stateList(g.atPoint), STATE_TERMS);
     addTerms(stateList(g.atNow), STATE_TERMS);
-    add([g.multiple, ...g.worst, ...g.params]);
+    add([g.multiple, ...g.basis, ...g.worst, ...g.params]);
   }
   return rows;
 }
@@ -706,7 +772,9 @@ export function metricsPanel(
   margin: MarginView | null = null,
 ): MetricsPanelView {
   const unitSub = unitSubOf(m);
-  const headSub = margin ? `${unitSub}${MARGIN_APPROX_SUB}` : unitSub;
+  const headSub = margin
+    ? `${unitSub}${isJsccNow(margin) ? MARGIN_JSCC_SUB : MARGIN_APPROX_SUB}`
+    : unitSub;
   const breakdownNote = `金額の単位 ${unitSub} · 手数料 ${fmtNum(feePerLot)} 円 / 枚`;
   if (m.empty) {
     return {

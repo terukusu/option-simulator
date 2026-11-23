@@ -1,0 +1,283 @@
+/**
+ * JSCC の VaR パラメータ（`/api/jscc_scenarios`。#382・docs/design.md 5.10・7.1・ADR-0013）の応答の型と検証、要求の銘柄の
+ * キー、基準日（純関数。DOM・通信に依存しない）。読み込みは data/adapter.ts の loadJsccScenarios。
+ *
+ * - 応答（ok）: `{ schema_version: 1, status: "ok", business_date, confidence_level, stress_scenario_number,
+ *   scenario_types: "HH…S", instruments: [{ key, aggregation_group, contract_size, price, pnl: [int…] }], missing: [key…] }`
+ * - 応答（unavailable）: `{ schema_version: 1, status: "unavailable", reason, business_date }`。reason = not_ready（基準日の
+ *   取り込みが済んでいない）/ inconsistent（表の間で取り込みの ID が違う = 取り直しの途中）/ no_source（供給元に無い）
+ * - 基準日 = 板の時刻の取引日の前営業日（証券会社の必要委託は前営業日の清算値で 1 日固定）。取引日 = 板の時刻の JST の
+ *   日付、17:00 以降（夜間）か休業日なら次の営業日。休業日は取引カレンダーの版の全行（祝日取引の日は JSCC の営業日に
+ *   数えない読み）
+ * - サーバーは api/src/simulator_api/jscc.py
+ */
+
+import type { JsccData, JsccInstrument, Leg } from '../model';
+import { jsccKeyOfLeg } from '../model';
+import { type Holidays, isBusinessDay, nextBusinessDay, previousBusinessDay } from '../model/time';
+import { isIsoDate, jstDate } from './calendar';
+import type { ValidationResult } from './chainJson';
+
+export const JSCC_SCHEMA_VERSION = 1;
+/** これより前の営業日のデータは無い（optionchan の取り込みの始まり。API の JSCC_MIN_DATE と同じ） */
+export const JSCC_MIN_DATE = '2026-11-16';
+/** 1 要求の銘柄の上限と限月の上限（API と同じ。超えたら分けて読む） */
+export const JSCC_MAX_KEYS = 64;
+export const JSCC_MAX_PERIODS = 4;
+/** 失敗・未取り込み（not_ready）を同じ (日, 銘柄) で聞き直さない時間（ミリ秒） */
+export const JSCC_RETRY_MS = 5 * 60_000;
+
+/** 銘柄のキーの形（API の i= と同じ） */
+export const JSCC_KEY_RE = /^(NK225E-\d{6}-[CP]-[1-9]\d{0,6}|NK225(F|MF|MCF)-\d{6})$/;
+
+/** JSCC の計算にできない理由のうち、読み込みの側のもの */
+export type JsccFetchReason = 'loading' | 'not_ready' | 'error' | 'no_source';
+
+/** 画面が持つ JSCC の状態（今の必要証拠金の入力） */
+export type JsccInput =
+  | { status: 'ok'; data: JsccData }
+  | { status: 'unavailable'; reason: JsccFetchReason };
+
+const JST_HOUR_MS = 3_600_000;
+/** 夜間の始まり（JST の時。17:00 以降は次の取引日） */
+const NIGHT_FROM_HOUR = 17;
+
+/** 板の時刻（epoch ミリ秒）の取引日（YYYY-MM-DD） */
+export function tradingDayOf(t: number, holidays: Holidays): string {
+  const d = jstDate(t);
+  const hour = new Date(t + 9 * JST_HOUR_MS).getUTCHours();
+  if (hour >= NIGHT_FROM_HOUR || !isBusinessDay(d, holidays)) return nextBusinessDay(d, holidays);
+  return d;
+}
+
+/**
+ * 基準日（JSCC の営業日）= 取引日の前営業日。minDate（既定はデータの始まり JSCC_MIN_DATE。dev の合成の応答は null =
+ * 見ない）より前なら null。t が有限でなければ null
+ */
+export function jsccBaseDate(
+  t: number,
+  holidays: Holidays,
+  minDate: string | null = JSCC_MIN_DATE,
+): string | null {
+  if (!Number.isFinite(t)) return null;
+  const base = previousBusinessDay(tradingDayOf(t, holidays), holidays);
+  return minDate === null || base >= minDate ? base : null;
+}
+
+/**
+ * 要求する銘柄のキー（足から。重複なし・昇順）。限月が基準日の月より前の足（SQ を過ぎた）は入れない。
+ * キーにできない足（限月・行使価格の形が外れた）は入れない（計算の側で missing になる）
+ */
+export function jsccRequestKeys(legs: readonly Leg[], baseDate: string): string[] {
+  const minPeriod = baseDate.slice(0, 4) + baseDate.slice(5, 7);
+  const out = new Set<string>();
+  for (const leg of legs) {
+    const key = jsccKeyOfLeg(leg);
+    if (key === null) continue;
+    const period = key.split('-')[1] as string;
+    if (period >= minPeriod) out.add(key);
+  }
+  return [...out].sort();
+}
+
+/** キーの限月（YYYYMM） */
+export const jsccPeriodOf = (key: string): string => key.split('-')[1] as string;
+
+/** 要求を API の上限（銘柄 64・限月 4）で分ける（限月の塊は分けない。1 限月で 64 を超えたらその限月を分ける） */
+export function jsccChunks(keys: readonly string[]): string[][] {
+  const byPeriod = new Map<string, string[]>();
+  for (const k of keys) {
+    const p = jsccPeriodOf(k);
+    const list = byPeriod.get(p);
+    if (list) list.push(k);
+    else byPeriod.set(p, [k]);
+  }
+  const out: string[][] = [];
+  let cur: string[] = [];
+  let periods = new Set<string>();
+  for (const [p, list] of [...byPeriod].sort(([a], [b]) => (a < b ? -1 : 1))) {
+    for (const k of list) {
+      if (cur.length >= JSCC_MAX_KEYS || (!periods.has(p) && periods.size >= JSCC_MAX_PERIODS)) {
+        out.push(cur);
+        cur = [];
+        periods = new Set();
+      }
+      cur.push(k);
+      periods.add(p);
+    }
+  }
+  if (cur.length > 0) out.push(cur);
+  return out;
+}
+
+/** 検証した応答 */
+export type JsccResponse =
+  | { status: 'ok'; data: JsccData; missing: string[] }
+  | { status: 'unavailable'; reason: 'not_ready' | 'no_source' };
+
+const MAX_ERRORS = 50;
+
+/**
+ * `/api/jscc_scenarios` の JSON の検査。date は要求した基準日、keys は要求したキー（応答の銘柄は要求した中にあること）。
+ * 余分なキーは見ない
+ */
+export function validateJsccJson(
+  v: unknown,
+  date: string,
+  keys: readonly string[],
+): ValidationResult<JsccResponse> {
+  const errors: string[] = [];
+  const add = (path: string, msg: string) => {
+    if (errors.length < MAX_ERRORS) errors.push(`${path}: ${msg}`);
+  };
+  if (typeof v !== 'object' || v === null || Array.isArray(v)) {
+    return { ok: false, errors: ['$: オブジェクトでない'] };
+  }
+  const o = v as Record<string, unknown>;
+  if (o.schema_version !== JSCC_SCHEMA_VERSION) {
+    add('$.schema_version', `${JSCC_SCHEMA_VERSION} でない`);
+  }
+  if (o.business_date !== date || !isIsoDate(o.business_date)) {
+    add('$.business_date', '要求した基準日でない');
+  }
+  if (o.status === 'unavailable') {
+    if (errors.length > 0) return { ok: false, errors };
+    // inconsistent（取り直しの途中）も画面では「基準日のデータがまだ無い」と同じ扱い
+    const reason = o.reason === 'no_source' ? 'no_source' : 'not_ready';
+    return { ok: true, value: { status: 'unavailable', reason } };
+  }
+  if (o.status !== 'ok') {
+    add('$.status', 'ok / unavailable でない');
+    return { ok: false, errors };
+  }
+  const conf = o.confidence_level;
+  if (typeof conf !== 'number' || !(conf > 0 && conf < 100)) {
+    add('$.confidence_level', '0 より大きく 100 より小さい数でない');
+  }
+  const types = o.scenario_types;
+  let isHist: boolean[] = [];
+  if (typeof types !== 'string' || !/^[HS]+$/.test(types)) {
+    add('$.scenario_types', 'H と S の並びでない');
+  } else {
+    isHist = [...types].map((c) => c === 'H');
+  }
+  const nh = isHist.filter(Boolean).length;
+  const ns = isHist.length - nh;
+  const nStress = o.stress_scenario_number;
+  if (typeof nStress !== 'number' || !Number.isInteger(nStress) || nStress < 0 || nStress > ns) {
+    add('$.stress_scenario_number', '0〜S の本数の整数でない');
+  }
+  if (isHist.length > 0 && nh === 0) add('$.scenario_types', 'H が無い');
+  const want = new Set(keys);
+  const instruments = new Map<string, JsccInstrument>();
+  if (!Array.isArray(o.instruments)) add('$.instruments', '配列でない');
+  else {
+    o.instruments.forEach((x, i) => {
+      const p = `$.instruments[${i}]`;
+      if (typeof x !== 'object' || x === null || Array.isArray(x)) {
+        add(p, 'オブジェクトでない');
+        return;
+      }
+      const r = x as Record<string, unknown>;
+      const key = r.key;
+      if (typeof key !== 'string' || !want.has(key) || instruments.has(key)) {
+        add(`${p}.key`, '要求した銘柄でない・重複');
+        return;
+      }
+      if (typeof r.aggregation_group !== 'string' || r.aggregation_group === '') {
+        add(`${p}.aggregation_group`, '文字列でない');
+        return;
+      }
+      const cs = r.contract_size;
+      if (typeof cs !== 'number' || !Number.isInteger(cs) || cs <= 0) {
+        add(`${p}.contract_size`, '正の整数でない');
+        return;
+      }
+      const price = r.price;
+      if (price !== null && (typeof price !== 'number' || !Number.isFinite(price))) {
+        add(`${p}.price`, '数か null でない');
+        return;
+      }
+      const pnl = r.pnl;
+      if (!Array.isArray(pnl) || pnl.length !== isHist.length) {
+        add(`${p}.pnl`, 'シナリオの本数の配列でない');
+        return;
+      }
+      const arr = new Float64Array(pnl.length);
+      for (let j = 0; j < pnl.length; j++) {
+        const y = pnl[j];
+        if (typeof y !== 'number' || !Number.isSafeInteger(y)) {
+          add(`${p}.pnl[${j}]`, '整数でない');
+          return;
+        }
+        arr[j] = y;
+      }
+      instruments.set(key, {
+        aggregationGroup: r.aggregation_group,
+        contractSize: cs,
+        price: price as number | null,
+        pnl: arr,
+      });
+    });
+  }
+  const missing: string[] = [];
+  if (!Array.isArray(o.missing)) add('$.missing', '配列でない');
+  else {
+    for (const m of o.missing) {
+      if (typeof m !== 'string' || !want.has(m) || instruments.has(m)) {
+        add('$.missing', '要求した銘柄でない・行のある銘柄');
+        break;
+      }
+      missing.push(m);
+    }
+  }
+  if (errors.length > 0) return { ok: false, errors };
+  return {
+    ok: true,
+    value: {
+      status: 'ok',
+      data: {
+        businessDate: date,
+        set: { isHist, confidence: conf as number, nStress: nStress as number },
+        instruments,
+      },
+      missing,
+    },
+  };
+}
+
+/**
+ * 分けて読んだ応答を 1 つに（どれかが unavailable ならそれ。シナリオの並び・パラメータが違えば null = 読めない扱い）
+ */
+export function mergeJsccResponses(rs: readonly JsccResponse[]): JsccResponse | null {
+  const first = rs[0];
+  if (!first) return null;
+  for (const r of rs) if (r.status === 'unavailable') return r;
+  if (first.status !== 'ok') return first;
+  const instruments = new Map(first.data.instruments);
+  const missing = [...first.missing];
+  const s0 = first.data.set;
+  for (const r of rs.slice(1)) {
+    if (r.status !== 'ok') return r;
+    const s = r.data.set;
+    if (
+      s.confidence !== s0.confidence ||
+      s.nStress !== s0.nStress ||
+      s.isHist.length !== s0.isHist.length ||
+      s.isHist.some((h, i) => h !== s0.isHist[i])
+    ) {
+      return null;
+    }
+    for (const [k, v] of r.data.instruments) instruments.set(k, v);
+    missing.push(...r.missing);
+  }
+  return { status: 'ok', data: { ...first.data, instruments }, missing };
+}
+
+/** 要求の URL（?date=&i=…。キーは昇順のまま） */
+export function jsccUrl(endpoint: string, date: string, keys: readonly string[]): string {
+  const q = new URLSearchParams();
+  q.set('date', date);
+  for (const k of keys) q.append('i', k);
+  return `${endpoint}?${q.toString()}`;
+}

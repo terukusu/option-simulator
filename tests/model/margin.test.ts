@@ -7,14 +7,17 @@
 
 import { describe, expect, it } from 'vitest';
 import { black76Price } from '../../model/black76';
+import { type JsccInstrument, jsccVarMargin } from '../../model/jsccMargin';
 import {
   DEFAULT_MARGIN_PARAMS,
+  jsccEligibility,
   MARGIN_PRICE_STEPS,
   type MarginParams,
   type MarginState,
   marginAt,
   marginCallLevels,
   marginMarked,
+  marginNowJscc,
   marginRoom,
   maxMultiple,
 } from '../../model/margin';
@@ -34,6 +37,13 @@ import { type Scenario, sigmaAt, ZERO_SCENARIO } from '../../model/scenario';
 import { businessDaysAhead } from '../../model/time';
 import { FUT, M1, M2, makeMarket, quoteOf } from '../support/market';
 import { rng } from '../support/synthChain';
+import {
+  jsccData,
+  rng as jsccRng,
+  realisticSet,
+  synthFuture,
+  synthOption,
+} from '../support/synthJscc';
 
 const { ctx, rows } = makeMarket();
 const rows1 = rows[M1.id] as NonNullable<(typeof rows)[string]>;
@@ -115,7 +125,7 @@ describe('既定値と格子', () => {
       ivUp: 0.5,
       ivDown: 0.25,
       factor: 1,
-      ignoreLongOptions: true,
+      ignoreLongOptions: false,
     });
     expect([...MARGIN_PRICE_STEPS]).toEqual([-1, -0.5, 0, 0.5, 1]);
     expect(H).toBe(2);
@@ -530,8 +540,8 @@ describe('#149 買いの OP で減らさない', () => {
     expect(a.worst, name).toEqual(b.worst);
   };
 
-  it('#149 既定は買いの OP で減らさない', () => {
-    expect(DEFAULT_MARGIN_PARAMS.ignoreLongOptions).toBe(true);
+  it('#149 既定は買いの OP で減らさない → #382 で相殺するに', () => {
+    expect(DEFAULT_MARGIN_PARAMS.ignoreLongOptions).toBe(false);
   });
 
   it('#149 オン: 買いだけは必要証拠金 0、余力 = 資金 − 支払 − 手数料', () => {
@@ -1011,8 +1021,8 @@ describe('#150 必要証拠金と NOV を分ける', () => {
     expect(Math.abs(a - (capital - prem.paid - prem.fees))).toBeLessThanOrEqual(1);
   });
 
-  it('オン（既定）の買いだけ: 必要証拠金 = 所要額 = 0', () => {
-    const r = m([op(M1, 'call', 68500, 'buy')], { params: D });
+  it('オン（#382 の前の既定）の買いだけ: 必要証拠金 = 所要額 = 0', () => {
+    const r = m([op(M1, 'call', 68500, 'buy')], { params: { ...D, ignoreLongOptions: true } });
     expect(r.margin).toBe(0);
     expect(r.requirement).toBe(0);
   });
@@ -1611,5 +1621,159 @@ describe('#381 値洗いをまたいだら先物の評価損益を全部入れ�
     expect(lowM).toHaveLength(1);
     expect(low0).toHaveLength(1);
     expect(lowM[0] as number).toBeLessThan(low0[0] as number);
+  });
+});
+
+describe('#382 今の必要証拠金を JSCC の計算で（marginNowJscc）', () => {
+  // 限月 ID を YYYY-MM にした同じ市場（JSCC の銘柄のキーは限月の形から作る）
+  const ctxJ: MarketContext = {
+    ...ctx,
+    options: {
+      '2026-11': ctx.options[M1.id],
+      '2026-12': ctx.options[M2.id],
+    } as MarketContext['options'],
+    futures: { '2026-12': ctx.futures[FUT.id] } as MarketContext['futures'],
+  };
+  const opJ = (
+    month: typeof M1 | typeof M2,
+    type: 'call' | 'put',
+    k: number,
+    side: 'buy' | 'sell',
+    qty = 1,
+  ): Leg => ({
+    ...(op(month, type, k, side, qty) as Extract<Leg, { kind: 'option' }>),
+    expiry: month === M1 ? '2026-11' : '2026-12',
+  });
+  const futJ = (
+    side: 'buy' | 'sell',
+    qty: number,
+    product: 'fut_large' | 'fut_mini' | 'fut_micro',
+  ): Leg => ({
+    ...(fut(side, qty, product) as Extract<Leg, { kind: 'future' }>),
+    contract: '2026-12',
+  });
+  const set = realisticSet();
+  const n = set.isHist.length;
+  const r = jsccRng(382);
+  const inst: Record<string, JsccInstrument> = {
+    'NK225E-202611-P-67000': synthOption(n, 300, r),
+    'NK225E-202611-P-66000': synthOption(n, 150, r),
+    'NK225E-202611-C-69000': synthOption(n, 200, r),
+    'NK225E-202612-P-67000': synthOption(n, 600, r),
+    'NK225MF-202612': synthFuture(n, 100, r),
+  };
+  const data = jsccData(set, inst);
+  const prepJ = (legs: readonly Leg[]) => preparePosition(legs, ctxJ, SETTINGS);
+  const NOWJ: MarginState = { x: ctxJ.x0, scenario: ZERO_SCENARIO, horizonDays: H, marked: false };
+  const legs = [
+    opJ(M1, 'put', 67000, 'sell', 2),
+    opJ(M1, 'put', 66000, 'buy', 1),
+    opJ(M1, 'call', 69000, 'sell', 1),
+    futJ('sell', 3, 'fut_mini'),
+  ];
+
+  it('既定は買いの OP で相殺する（#382）', () => {
+    expect(DEFAULT_MARGIN_PARAMS.ignoreLongOptions).toBe(false);
+  });
+
+  it('必要証拠金 = k × V（jsccVarMargin）、NOV・先物の評価損益・清算額は格子と同じ、所要額 = max(0, k × V − NOV)', () => {
+    const p = prepJ(legs);
+    for (const factor of [1, 1.5]) {
+      const params = { ...P, factor };
+      const j = marginNowJscc(p, NOWJ, ctxJ, SETTINGS, params, data);
+      const g = marginAt(p, NOWJ, ctxJ, SETTINGS, params);
+      if (!j) throw new Error('JSCC の計算にならない');
+      const v = jsccVarMargin(
+        [
+          { inst: inst['NK225E-202611-P-67000'] as JsccInstrument, qty: -2, option: true },
+          { inst: inst['NK225E-202611-P-66000'] as JsccInstrument, qty: 1, option: true },
+          { inst: inst['NK225E-202611-C-69000'] as JsccInstrument, qty: -1, option: true },
+          { inst: inst['NK225MF-202612'] as JsccInstrument, qty: -3, option: false },
+        ],
+        set,
+      );
+      expect(j.source).toBe('jscc');
+      expect(g.source).toBe('grid');
+      expect(j.jscc).toEqual({ businessDate: '2026-10-09', ...v });
+      expect(j.margin).toBe(factor * v.varMargin);
+      expect(j.nov).toBeCloseTo(g.nov, 6);
+      expect(j.futuresPnl).toBeCloseTo(g.futuresPnl, 6);
+      expect(j.settledCash).toBe(g.settledCash);
+      expect(j.requirement).toBeCloseTo(Math.max(0, factor * v.varMargin - g.nov), 6);
+      expect(j.worst).toBeNull();
+      expect(jsccEligibility(p, NOWJ, ctxJ, SETTINGS, params, data)).toEqual({ ok: true });
+    }
+  });
+
+  it('買いの OP で減らさない（オン）なら買いの足を入れない', () => {
+    const p = prepJ(legs);
+    const on = marginNowJscc(p, NOWJ, ctxJ, SETTINGS, ON, data);
+    const sellsOnly = marginNowJscc(
+      prepJ(legs.filter((l) => !(l.kind === 'option' && l.side === 'buy'))),
+      NOWJ,
+      ctxJ,
+      SETTINGS,
+      ON,
+      data,
+    );
+    expect(on?.jscc).toEqual(sellsOnly?.jscc);
+  });
+
+  it('できないとき null と理由: 行が無い（missing）・枚数が整数でない（fractional）・集計グループが 2 つ（groups）・M の足が無い（none）', () => {
+    const missing = prepJ([...legs, opJ(M2, 'call', 70000, 'sell')]);
+    expect(marginNowJscc(missing, NOWJ, ctxJ, SETTINGS, P, data)).toBeNull();
+    expect(jsccEligibility(missing, NOWJ, ctxJ, SETTINGS, P, data)).toEqual({
+      ok: false,
+      reason: 'missing',
+    });
+    const noPrice = jsccData(set, {
+      ...inst,
+      'NK225E-202611-P-67000': {
+        ...(inst['NK225E-202611-P-67000'] as JsccInstrument),
+        price: null,
+      },
+    });
+    expect(jsccEligibility(prepJ(legs), NOWJ, ctxJ, SETTINGS, P, noPrice)).toEqual({
+      ok: false,
+      reason: 'missing',
+    });
+    const frac = prepJ([opJ(M1, 'put', 67000, 'sell', 1.5)]);
+    expect(jsccEligibility(frac, NOWJ, ctxJ, SETTINGS, P, data)).toEqual({
+      ok: false,
+      reason: 'fractional',
+    });
+    const other = jsccData(set, {
+      ...inst,
+      'NK225MF-202612': {
+        ...(inst['NK225MF-202612'] as JsccInstrument),
+        aggregationGroup: 'OTHER',
+      },
+    });
+    expect(jsccEligibility(prepJ(legs), NOWJ, ctxJ, SETTINGS, P, other)).toEqual({
+      ok: false,
+      reason: 'groups',
+    });
+    const longOnly = prepJ([opJ(M1, 'put', 66000, 'buy')]);
+    expect(jsccEligibility(longOnly, NOWJ, ctxJ, SETTINGS, ON, data)).toEqual({
+      ok: false,
+      reason: 'none',
+    });
+    // 買いだけ（オフ）は JSCC の計算で 0（評価額 ≥ 0 の買いは ES ≤ 0）
+    expect(marginNowJscc(longOnly, NOWJ, ctxJ, SETTINGS, P, data)?.margin).toBe(0);
+  });
+
+  it('SQ を過ぎた足は入れない（清算額だけ。行が無くても missing にしない）', () => {
+    const past: MarginState = { ...NOWJ, scenario: { ...ZERO_SCENARIO, days: M1.days + 1 } };
+    const p = prepJ([opJ(M1, 'put', 67000, 'sell'), opJ(M2, 'put', 67000, 'sell')]);
+    const j = marginNowJscc(
+      p,
+      past,
+      ctxJ,
+      SETTINGS,
+      P,
+      jsccData(set, { 'NK225E-202612-P-67000': inst['NK225E-202612-P-67000'] as JsccInstrument }),
+    );
+    expect(j?.source).toBe('jscc');
+    expect(j?.settledCash).toBe(marginAt(p, past, ctxJ, SETTINGS, P).settledCash);
   });
 });

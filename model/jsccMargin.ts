@@ -1,0 +1,177 @@
+/**
+ * JSCC の VaR 証拠金（HS-ES）の計算（純関数。#382・docs/design.md 5.10・ADR-0013）。
+ *
+ * JSCC が毎営業日に公開する VaR パラメータ（銘柄ごとのシナリオの値 pnl。1 枚あたりの円。先物はシナリオの損益、
+ * オプションはシナリオ後の評価額）から、ポートフォリオの VaR 証拠金額を JSCC と同じ手順で求める:
+ *
+ * - v_j = Σ 銘柄 符号 × 枚数 × pnl_j（pnl は 1 枚あたり = Contract Size を掛けない）
+ * - H のシナリオの v の全部と、S のシナリオの v の小さい方から nStress 本を集めて（n 本）昇順に並べ、
+ *   小さい方から t = n × q / 10^6 本（q = round((100 − 信頼水準) × 10^4)）の平均（端数の本は按分）の符号を変えたもの
+ *   （期待ショートフォール）を円に切り上げる = 符号つきの ES。分子は BigInt の有理数で求める（浮動小数では切り上げで
+ *   1 円ずれることがあり、足が多いと 2^53 を超えうる）
+ * - VaR 証拠金額 V = max(0, ES, ceil(−NOV_清算))。NOV_清算 = Σ OP 符号 × 枚数 × 清算値段 × Contract Size
+ *   （JSCC の仕様: VaR リスク額 = VaR 証拠金額（符号付）+ NOV ≥ 0。1 枚の OP の売りの「清算値段 × Contract Size が
+ *   下限」はこの特別な場合）
+ *
+ * 銘柄のキー（API の i= と同じ）: OP = `NK225E-YYYYMM-C|P-行使価格`、先物 = `NK225F|NK225MF|NK225MCF-YYYYMM`。
+ */
+
+import type { Leg } from './position';
+import type { FutureProduct } from './products';
+
+/** シナリオの並び（pnl の添字の意味）と、集計グループのパラメータ（レコード 0） */
+export interface JsccScenarioSet {
+  /** 添字ごとに H（ヒストリカル）なら true、S（ストレス）なら false */
+  isHist: readonly boolean[];
+  /** 信頼水準（%。97.5 など） */
+  confidence: number;
+  /** S のうち損失の大きい方から使う本数 */
+  nStress: number;
+}
+
+/** 1 銘柄の行（API の instruments の 1 件） */
+export interface JsccInstrument {
+  aggregationGroup: string;
+  contractSize: number;
+  /** 清算値段（OP は NOV_清算に使う。NULL なら null） */
+  price: number | null;
+  /** シナリオごとの値（1 枚あたりの円。整数）。長さは JsccScenarioSet.isHist と同じ */
+  pnl: ArrayLike<number>;
+}
+
+/** 基準日の JSCC のデータ（画面が読んだ応答を検証した形） */
+export interface JsccData {
+  /** JSCC の営業日（YYYY-MM-DD。前営業日の清算値で 1 日固定の、その日） */
+  businessDate: string;
+  set: JsccScenarioSet;
+  /** 銘柄のキー → 行（要求した銘柄のうち行のあったもの） */
+  instruments: ReadonlyMap<string, JsccInstrument>;
+}
+
+const FUTURE_CODES: Record<FutureProduct, string> = {
+  fut_large: 'NK225F',
+  fut_mini: 'NK225MF',
+  fut_micro: 'NK225MCF',
+};
+
+const YM = /^(\d{4})-(\d{2})$/;
+
+function periodCode(id: string): string | null {
+  const m = YM.exec(id);
+  if (!m) return null;
+  const month = Number(m[2]);
+  return month >= 1 && month <= 12 ? `${m[1]}${m[2]}` : null;
+}
+
+/** 足 → 銘柄のキー。限月の形式（YYYY-MM）・行使価格（正の整数 7 桁まで）が外れたら null */
+export function jsccKeyOfLeg(leg: Leg): string | null {
+  if (leg.kind === 'option') {
+    const cp = periodCode(leg.expiry);
+    const k = leg.strike;
+    if (cp === null || !Number.isInteger(k) || k <= 0 || k > 9_999_999) return null;
+    return `NK225E-${cp}-${leg.type === 'call' ? 'C' : 'P'}-${k}`;
+  }
+  const cp = periodCode(leg.contract);
+  return cp === null ? null : `${FUTURE_CODES[leg.product]}-${cp}`;
+}
+
+function checkSet(set: JsccScenarioSet, n: number): void {
+  if (set.isHist.length !== n) throw new Error('シナリオの本数が並びと違う');
+  if (!(set.confidence > 0 && set.confidence < 100)) throw new Error('信頼水準が範囲の外');
+  if (!Number.isInteger(set.nStress) || set.nStress < 0) throw new Error('ストレスの本数が不正');
+}
+
+/** ceil(num / den)（den > 0） */
+function ceilDiv(num: bigint, den: bigint): bigint {
+  const q = num / den; // 0 方向に切り捨て
+  return num > 0n && q * den !== num ? q + 1n : q;
+}
+
+/**
+ * 符号つきの ES（円。整数に切り上げ。負 = 裾でも益）。v はシナリオごとのポートフォリオの値（整数）。
+ * v が安全な整数でない・長さが並びと違う・H が 0 本・S が nStress 本より少ないと例外。
+ */
+export function jsccEsSigned(v: ArrayLike<number>, set: JsccScenarioSet): number {
+  checkSet(set, v.length);
+  let nh = 0;
+  let ns = 0;
+  for (let j = 0; j < v.length; j++) {
+    const x = v[j] as number;
+    if (!Number.isSafeInteger(x)) throw new Error('シナリオの値が安全な整数でない');
+    if (set.isHist[j]) nh++;
+    else ns++;
+  }
+  if (nh === 0) throw new Error('H のシナリオが無い');
+  if (ns < set.nStress) throw new Error('S のシナリオが nStress 本より少ない');
+  const hist = new Float64Array(nh);
+  const stress = new Float64Array(ns);
+  let ih = 0;
+  let is = 0;
+  for (let j = 0; j < v.length; j++) {
+    if (set.isHist[j]) hist[ih++] = v[j] as number;
+    else stress[is++] = v[j] as number;
+  }
+  stress.sort();
+  const n = nh + set.nStress;
+  const xs = new Float64Array(n);
+  xs.set(hist, 0);
+  xs.set(stress.subarray(0, set.nStress), nh);
+  xs.sort();
+  const q = Math.round((100 - set.confidence) * 10_000); // 1/10^6 単位の裾の割合
+  const nq = n * q; // t × 10^6（2^53 未満）
+  const k = Math.floor(nq / 1_000_000);
+  let sum = 0n;
+  for (let i = 0; i < k; i++) sum += BigInt(xs[i] as number);
+  let total = sum * 1_000_000n;
+  const frac = nq - k * 1_000_000;
+  if (frac > 0) total += BigInt(frac) * BigInt(xs[k] as number);
+  // ES = −total / nq（nq > 0: q ≥ 1 は信頼水準 < 100 から）
+  return Number(ceilDiv(-total, BigInt(nq)));
+}
+
+export interface JsccVarMargin {
+  /** 符号つきの ES（円） */
+  esSigned: number;
+  /** NOV_清算（円。OP の 符号 × 枚数 × 清算値段 × Contract Size の和） */
+  novSettle: number;
+  /** VaR 証拠金額（円）= max(0, ES, ceil(−NOV_清算)) */
+  varMargin: number;
+}
+
+/** ポートフォリオの 1 つの足（銘柄の行 × 符号つきの枚数） */
+export interface JsccPosition {
+  inst: JsccInstrument;
+  /** 符号つきの枚数（買い +、売り −。整数） */
+  qty: number;
+  /** OP なら true（NOV_清算に入る） */
+  option: boolean;
+}
+
+/**
+ * ポートフォリオの VaR 証拠金額。足の枚数は整数（でなければ例外）、OP の清算値段が null なら例外
+ * （呼び出し側が事前に除く）。足が無ければ 0
+ */
+export function jsccVarMargin(
+  positions: readonly JsccPosition[],
+  set: JsccScenarioSet,
+): JsccVarMargin {
+  const n = set.isHist.length;
+  const v = new Float64Array(n);
+  let novSettle = 0;
+  for (const p of positions) {
+    if (!Number.isSafeInteger(p.qty)) throw new Error('枚数が整数でない');
+    const pnl = p.inst.pnl;
+    if (pnl.length !== n) throw new Error('シナリオの本数が並びと違う');
+    for (let j = 0; j < n; j++) v[j] = (v[j] as number) + p.qty * (pnl[j] as number);
+    if (p.option) {
+      const price = p.inst.price;
+      if (price === null || !Number.isFinite(price)) throw new Error('清算値段が無い');
+      novSettle += p.qty * price * p.inst.contractSize;
+    }
+  }
+  if (positions.length === 0) return { esSigned: 0, novSettle: 0, varMargin: 0 };
+  const esSigned = jsccEsSigned(v, set);
+  // 清算値段 × Contract Size は円の整数（浮動小数の端数を 1e-6 円で吸ってから切り上げる）
+  const floor = Math.ceil(-novSettle - 1e-6);
+  return { esSigned, novSettle, varMargin: Math.max(0, esSigned, floor) };
+}

@@ -5892,7 +5892,7 @@ async function backTermLook() {
     for (const t of [
       '追証の線',
       '追証マップ',
-      '必要証拠金（概算）',
+      '必要証拠金（JSCC の計算 / 概算）',
       'sticky strike / sticky moneyness',
     ]) {
       if ((await tcOpenByPalette(page, t)) !== t) continue;
@@ -6124,9 +6124,9 @@ async function manualFlows(vp) {
     const term = 'section.ai .ai-term[data-term="margin"]';
     const hasTerm = (await page.$(term)) !== null;
     if (hasTerm) await page.click(term);
-    const t0 = await tcWait(page, '必要証拠金（概算）');
+    const t0 = await tcWait(page, '必要証拠金（JSCC の計算 / 概算）');
     const a =
-      t0 === '必要証拠金（概算）' ? await tcClickIn(page, '.tc-guide .tc-link', 0, t0) : null;
+      t0 === '必要証拠金（JSCC の計算 / 概算）' ? await tcClickIn(page, '.tc-guide .tc-link', 0, t0) : null;
     const b = a ? await tcManualLink(page, [t0, a.title]) : null;
     const c = b ? await tcManualLink(page, [t0, a.title, b.title]) : null;
     const dTop = await backWait(page, 4);
@@ -6179,7 +6179,7 @@ async function manualFlows(vp) {
     await backFresh(page);
     const ok = await aiAskRefs(page, vp.width);
     if (ok) await page.click('section.ai .ai-term[data-term="margin"]').catch(() => {});
-    const t0 = await tcWait(page, '必要証拠金（概算）');
+    const t0 = await tcWait(page, '必要証拠金（JSCC の計算 / 概算）');
     const a = t0 ? await tcClickIn(page, '.tc-guide .tc-link', 0, t0) : null;
     const b = a ? await tcManualLink(page, [t0, a.title]) : null;
     await close();
@@ -8613,7 +8613,7 @@ async function metricsFlows(vp) {
         // 旧画面に無い証拠金の群（#131）より前の行だけ
         const kvs = [];
         for (const el of document.querySelector(`${m} .kv-grid`)?.children ?? []) {
-          if (el.classList.contains('grp') && el.textContent === '証拠金（概算・保守寄り）') break;
+          if (el.classList.contains('grp') && el.textContent.startsWith('証拠金（')) break;
           if (el.classList.contains('k') || el.classList.contains('v')) kvs.push(el);
         }
         const tokens = kvs.flatMap((el) => el.textContent.match(new RegExp(re, 'g')) ?? []);

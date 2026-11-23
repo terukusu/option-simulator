@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { type Chain, normalizeChain } from '../../data';
+import { type Chain, type JsccInput, jsccRequestKeys, normalizeChain } from '../../data';
 import {
   businessDaysAhead,
   DAY_MS,
@@ -33,6 +33,7 @@ import {
   marginParamsOf,
   marginPoint,
   marginPointAt,
+  marginPointOrNow,
   marginTail,
 } from '../../ui/view/margin';
 import { fmtAmount, type MetricsModel, metricsModel } from '../../ui/view/metrics';
@@ -40,16 +41,23 @@ import {
   amountText,
   FULL_MAX_ROWS,
   ivScaleText,
+  JSCC_REASON_TEXT,
+  MARGIN_APPROX_SUB,
+  MARGIN_BASIS_ROW_LABEL,
   MARGIN_CALL_MARK,
   MARGIN_FULL_LABEL,
   MARGIN_GROUP_LABEL,
+  MARGIN_GROUP_LABEL_JSCC,
   MARGIN_HINT,
+  MARGIN_JSCC_SUB,
   MARGIN_POINT_NOW_TEXT,
   MARGIN_POINT_ROW_LABEL,
   MARGIN_POINT_SAME_TEXT,
   MARGIN_TAIL_TITLE,
   MARGIN_TILE_LABEL,
   type MetricTile,
+  marginBasisMark,
+  marginBasisText,
   marginParamsText,
   marginPointParts,
   marginPointText,
@@ -81,6 +89,7 @@ import {
 } from '../../ui/view/stage';
 import { fixture } from '../support/fixtures';
 import { boardsT0AndLater } from '../support/laterChain';
+import { jsccData, rng as jsccRng, realisticSet, synthOption } from '../support/synthJscc';
 import { SUB_MAX_UNITS, widthUnits } from '../support/widthUnits';
 
 /** #131 AC14: 証拠金の概算の表示モデル（タイル・内訳・テールの証拠金の表）。合成の板・架空の値。 */
@@ -167,7 +176,7 @@ describe('#180 marginParamsKeep: 計算に使わない設定ではパラメー�
       { rangePct: 8 },
       { ivUpPct: 40 },
       { ivDownPct: 10 },
-      { ignoreLongOptions: false },
+      { ignoreLongOptions: true },
     ] as Partial<MarginPrefs>[]) {
       const p = marginParamsKeep(p0, { ...m0, ...patch });
       expect(p, JSON.stringify(patch)).not.toBe(p0);
@@ -329,7 +338,9 @@ describe('タイル（#131 AC14）', () => {
     expect(point.result.requirement).toBeCloseTo(point.result.margin - point.result.nov, 6);
     expect(tm.v).toBe(fmtAmount(point.result.margin, u));
     expect(tm.unit).toBe('千円');
-    expect(tm.s).toBe(`今 ${fmtAmount(now.result.margin, u)}`);
+    // #382: JSCC の入力を渡さない今は概算（印「概算」）
+    expect(now.basis).toEqual({ kind: 'estimate', reason: null });
+    expect(tm.s).toBe(`今 ${fmtAmount(now.result.margin, u)} · 概算`);
     expect(tm.tone).toBeNull();
     const tr = tile(tiles, 'room');
     expect(point.room).toBeGreaterThan(0);
@@ -337,7 +348,7 @@ describe('タイル（#131 AC14）', () => {
     expect(tr.tone).toBeNull();
     expect(now.multiple).not.toBeNull();
     expect(Number.isFinite(now.multiple)).toBe(true);
-    expect(tr.s).toBe(`今 ${fmtAmount(now.room, u)} · ${fmtNum(now.multiple)} 倍`);
+    expect(tr.s).toBe(`今 ${fmtAmount(now.room, u)} · 概算 · ${fmtNum(now.multiple)} 倍`);
     // 全文: 1 行目は見出し + 値。前提の行は内訳の証拠金の群の末尾（#161 でタイルの全文から外した）
     expect(tm.full[0]).toEqual({ k: MARGIN_FULL_LABEL, v: `${tm.v} 千円` });
     expect(tr.full[0]).toEqual({ k: ROOM_FULL_LABEL, v: `${tr.v} 千円` });
@@ -347,11 +358,9 @@ describe('タイル（#131 AC14）', () => {
       { k: 'IV の幅', v: '×1.5 / ×0.75' },
       { k: '保有期間', v: '2 営業日' },
       { k: '掛け目', v: '100%' },
-      { k: '買いの OP', v: '減らさない' },
+      { k: '買いの OP', v: '相殺する' },
     ]);
-    expect(marginParamsText(mv.params)).toBe(
-      'R ±5% · IV ×1.5 / ×0.75 · 2 営業日 · 掛け目 100% · 買い OP 除く',
-    );
+    expect(marginParamsText(mv.params)).toBe('R ±5% · IV ×1.5 / ×0.75 · 2 営業日 · 掛け目 100%');
     // 最悪の点（PFE > 0 の put 売り）: 下落・IV ×1.5
     expect(point.result.pfe).toBeGreaterThan(0);
     const wi = tm.full.findIndex((r) => r.k === '最悪の点');
@@ -402,10 +411,10 @@ describe('タイル（#131 AC14）', () => {
     expect(mv.point?.result.margin).toBeCloseTo(5 * one, 3);
   });
 
-  it('買いだけ（既定 = 買いの OP で減らさない）: 必要証拠金・所要額 0、余力 = 資金 − 支払 − 手数料、倍数は有限、最悪の点の行は出さない（M = 0）', () => {
+  it('買いだけ（買いの OP で減らさない。#382 の前の既定）: 必要証拠金・所要額 0、余力 = 資金 − 支払 − 手数料、倍数は有限、最悪の点の行は出さない（M = 0）', () => {
     const m = metricsOf(buyOnly);
     const capital = 3_000_000;
-    const mv = viewOf(buyOnly, withCapital(capital));
+    const mv = viewOf(buyOnly, { ...withCapital(capital), ignoreLongOptions: true });
     const p = mv.point;
     if (!p || p.room === null) throw new Error('値が無い');
     expect(p.result.margin).toBe(0);
@@ -478,7 +487,7 @@ describe('内訳とテールの証拠金の表（#131 AC14）', () => {
     expect(all.slice(0, 3)).toEqual(pointRows);
     const rows = all.slice(3);
     // #150: 必要証拠金・NOV・証拠金所要額・余力 × シナリオ点 / 今（PFE の行は出さない）
-    expect(rows.map((r) => r.k).slice(0, 9)).toEqual([
+    expect(rows.map((r) => r.k).slice(0, 10)).toEqual([
       '必要証拠金（シナリオ点）',
       'NOV（シナリオ点）',
       '証拠金所要額（シナリオ点）',
@@ -488,6 +497,7 @@ describe('内訳とテールの証拠金の表（#131 AC14）', () => {
       '証拠金所要額（今）',
       '余力（今）',
       '倍数（今）',
+      MARGIN_BASIS_ROW_LABEL,
     ]);
     expect(rows.map((r) => r.k)).not.toContain('PFE（今）');
     const pt = mv.point?.result;
@@ -681,7 +691,8 @@ describe('#164 シナリオの点の印・#161 タイルの全文の行', () => 
         }
       }
     }
-    // 売り・4 つとも 0 でない・最悪の点ありの必要証拠金が最長（見出し + 点 4 + 3 + 最悪の点 3 = 11）
+    // 売り・4 つとも 0 でない・最悪の点ありの必要証拠金が最長（見出し + 点 4 + 3 + 最悪の点 3 = 11。#382 の今の出どころは
+    // 必要証拠金（今）の値の後の印で、行を足さない = 360x780 の peek で全文がスクロールしない）
     expect(longest).toBe(11);
   });
 
@@ -696,7 +707,9 @@ describe('#164 シナリオの点の印・#161 タイルの全文の行', () => 
         for (const key of ['margin', 'room'] as const) {
           // 部分列（同じ順）: 群の中を前から順に探して全部見つかる
           let j = 0;
-          for (const r of tile(metricTiles(m, mv), key).full.slice(1)) {
+          for (const r0 of tile(metricTiles(m, mv), key).full.slice(1)) {
+            // #382: 必要証拠金（今）の値の後の出どころの印は内訳では「今の計算」の行
+            const r = { k: r0.k, v: r0.v.replace(/ · (JSCC.*|概算)$/, '') };
             while (j < group.length && !(group[j]?.k === r.k && group[j]?.v === r.v)) j++;
             expect(j, `${key}: ${r.k} ${r.v}`).toBeLessThan(group.length);
             j++;
@@ -729,6 +742,7 @@ describe('#164 シナリオの点の印・#161 タイルの全文の行', () => 
       '証拠金所要額（シナリオ点）',
       '余力（今）',
       '倍数（今）',
+      MARGIN_BASIS_ROW_LABEL,
     ]);
   });
 });
@@ -918,7 +932,7 @@ describe('#149 買いの OP の設定', () => {
   });
   const ratio = run(sells2, add(67_875, 'put', 'buy'));
   const scenario = { ...ratio.scenario, days: 1, dX: -2000, dSigma: 3 };
-  const onPrefs = withCapital(30_000_000);
+  const onPrefs: MarginPrefs = { ...withCapital(30_000_000), ignoreLongOptions: true };
   const offPrefs: MarginPrefs = { ...onPrefs, ignoreLongOptions: false };
   const ON = marginParamsOf(onPrefs);
   const OFF = marginParamsOf(offPrefs);
@@ -1009,9 +1023,9 @@ describe('前の板で建てた足の NOV（#299 AC11）', () => {
     const pm = positionModel(later, s.legs, 'B', CALENDAR);
     const base = pnlDomains(later, pm.prepared, pm.ctx, DEFAULT_SETTINGS);
     if (!base) throw new Error('基礎が作れない');
-    const params = marginParamsOf(DEFAULT_MARGIN_PREFS);
+    // 買いの OP を M に入れない（ignoreLongOptions。#382 の前の既定）ので売りの足だけ
+    const params = marginParamsOf({ ...DEFAULT_MARGIN_PREFS, ignoreLongOptions: true });
     const now = marginNow(base, ZERO_SCENARIO, params, null, CALENDAR.holidays);
-    // 既定は買いの OP を M に入れない（ignoreLongOptions）ので売りの足だけ
     expect(params.ignoreLongOptions).toBe(true);
     const want = pm.rows
       .filter((r) => r.side === 'sell')
@@ -1074,5 +1088,112 @@ describe('#381 値洗いをまたいだら先物の評価益も余力に入る�
     expect(half.filter((x) => x < x0)).toHaveLength(1);
     expect(one.filter((x) => x > x0)).toHaveLength(0);
     expect(one.filter((x) => x < x0)).toHaveLength(1);
+  });
+});
+
+describe('#382 今の必要証拠金を JSCC の計算で（表示）', () => {
+  const s = putSellDown; // シナリオが 0 でない（今と違う点）
+  const sNow = putSell; // シナリオ 0
+  const set = realisticSet();
+  const n = set.isHist.length;
+  const keysOf = (st: State) =>
+    jsccRequestKeys(
+      st.legs.map((l) => l.leg),
+      '2026-10-13',
+    );
+  const dataOf = (st: State) => {
+    const r = jsccRng(11);
+    return jsccData(
+      set,
+      Object.fromEntries(keysOf(st).map((k) => [k, synthOption(n, 300, r)])),
+      '2026-10-13',
+    );
+  };
+  const ok = (st: State): JsccInput => ({ status: 'ok', data: dataOf(st) });
+  const params = marginParamsOf(withCapital(50_000_000));
+
+  it('今は JSCC の計算（basis = jscc・source = jscc）、シナリオの点が今と同じなら今の結果をそのまま', () => {
+    const base = baseOf(sNow);
+    const now = marginNow(base, sNow.scenario, params, 50_000_000, holidays, ok(sNow));
+    expect(now?.basis).toEqual({ kind: 'jscc', businessDate: '2026-10-13' });
+    expect(now?.result.source).toBe('jscc');
+    expect(now?.result.margin).toBe(now?.result.jscc?.varMargin);
+    expect(marginPointOrNow(base, sNow.scenario, params, 50_000_000, holidays, now ?? null)).toBe(
+      now,
+    );
+    // 点が今と違えば格子の概算
+    const b2 = baseOf(s);
+    const now2 = marginNow(b2, s.scenario, params, 50_000_000, holidays, ok(s));
+    const p2 = marginPointOrNow(b2, s.scenario, params, 50_000_000, holidays, now2);
+    expect(p2).not.toBe(now2);
+    expect(p2?.basis).toEqual({ kind: 'estimate', reason: null });
+    expect(p2?.result.source).toBe('grid');
+  });
+
+  it('タイルの副題に `JSCC 10/13`、全文の見出しと「今の計算」の行、内訳の群の見出し・見出し行の副題', () => {
+    const m = metricsOf(sNow);
+    const base = baseOf(sNow);
+    const now = marginNow(base, sNow.scenario, params, 50_000_000, holidays, ok(sNow));
+    const mv: MarginView = {
+      ...viewOf(sNow, withCapital(50_000_000)),
+      now,
+      point: marginPointOrNow(base, sNow.scenario, params, 50_000_000, holidays, now),
+    };
+    const tiles = metricTiles(m, mv);
+    const tm = tile(tiles, 'margin');
+    const tr = tile(tiles, 'room');
+    expect(tm.s).toBe(`今 ${fmtAmount(now?.result.margin ?? 0, m.unit)} · JSCC 10/13`);
+    // 余力は倍数も並ぶので印は基準日を省く（360px の 2 列）
+    expect(tr.s).toMatch(/^今 .+ · JSCC · .+ 倍$/);
+    for (const t of tiles.slice(4)) {
+      expect(widthUnits(t.s), `${t.key}: ${t.s}`).toBeLessThanOrEqual(SUB_MAX_UNITS);
+    }
+    expect(tm.full[0]?.k).toBe('必要証拠金（JSCC 10/13）');
+    expect(tr.full[0]?.k).toBe('余力（JSCC 10/13）');
+    expect(tm.full.find((r) => r.k === '必要証拠金（今）')?.v).toMatch(/ · JSCC 10\/13$/);
+    expect(tr.full.find((r) => r.k === MARGIN_BASIS_ROW_LABEL)?.v).toBe('JSCC 10/13 の計算');
+    // JSCC の今は格子が無いので最悪の点の行を出さない
+    expect(tm.full.some((r) => r.k === '最悪の点')).toBe(false);
+    const bd = metricsBreakdown(m, mv);
+    expect(bd.some((r) => r.group && r.k === MARGIN_GROUP_LABEL_JSCC)).toBe(true);
+    expect(metricsPanel(m, 0, mv).headSub).toContain(MARGIN_JSCC_SUB);
+    for (const t of tiles) expect(t.full.length).toBeLessThanOrEqual(FULL_MAX_ROWS);
+  });
+
+  it.each([
+    ['loading', { status: 'unavailable', reason: 'loading' }],
+    ['not_ready', { status: 'unavailable', reason: 'not_ready' }],
+    ['error', { status: 'unavailable', reason: 'error' }],
+    ['no_source', { status: 'unavailable', reason: 'no_source' }],
+  ] as const)('読めない（%s）→ 概算 + 理由', (reason, jscc) => {
+    const m = metricsOf(sNow);
+    const base = baseOf(sNow);
+    const now = marginNow(base, sNow.scenario, params, 50_000_000, holidays, jscc);
+    const grid = marginNow(base, sNow.scenario, params, 50_000_000, holidays);
+    expect(now?.basis).toEqual({ kind: 'estimate', reason });
+    expect(now?.result).toEqual(grid?.result);
+    const mv: MarginView = { ...viewOf(sNow, withCapital(50_000_000)), now };
+    const tm = tile(metricTiles(m, mv), 'margin');
+    expect(tm.s.endsWith(' · 概算')).toBe(true);
+    expect(tile(metricTiles(m, mv), 'room').full.find((r) => r.k === MARGIN_BASIS_ROW_LABEL)?.v).toBe(
+      `概算（${JSCC_REASON_TEXT[reason]}）`,
+    );
+    expect(metricsPanel(m, 0, mv).headSub).toContain(MARGIN_APPROX_SUB);
+  });
+
+  it('行の無い銘柄 → 概算（JSCC のデータに無い銘柄がある）、M の足が無い → 印を付けない', () => {
+    const base = baseOf(sNow);
+    const empty: JsccInput = { status: 'ok', data: jsccData(set, {}, '2026-10-13') };
+    const now = marginNow(base, sNow.scenario, params, null, holidays, empty);
+    expect(now?.basis).toEqual({ kind: 'estimate', reason: 'missing' });
+    expect(marginBasisMark({ kind: 'estimate', reason: 'none' })).toBe('');
+    expect(marginBasisMark({ kind: 'jscc', businessDate: '2026-11-20' })).toBe('JSCC 11/20');
+    expect(marginBasisText({ kind: 'estimate', reason: null })).toBe('概算');
+  });
+
+  it('ⓘ に JSCC の計算・基準日・概算に戻る条件・NOV が 2 回効く形', () => {
+    for (const w of ['JSCC の計算', '前営業日の清算値', '1 日固定', '概算に戻り', 'NOV', '17:00']) {
+      expect(MARGIN_HINT).toContain(w);
+    }
   });
 });

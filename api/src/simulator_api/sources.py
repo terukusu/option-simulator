@@ -1,6 +1,7 @@
 """供給元のアダプタ（docs/data-sources.md「API の供給元のアダプタ」・docs/adr-0003-data-source-abstraction.md。#154）。
 
-画面が読む /api/chain・/api/calendar・/api/atm_iv・/api/atm_daily・/api/future_bars・/api/option_bars の中身を返すものを
+画面が読む /api/chain・/api/calendar・/api/atm_iv・/api/atm_daily・/api/future_bars・/api/option_bars・
+/api/jscc_scenarios（#382）の中身を返すものを
 「供給元」（DataSource）とし、環境変数 DATA_SOURCE の値 → 実装の対応をこのファイルの BUILDERS 1 か所に置く。
 app.py はここで作った供給元を呼ぶだけ。
 
@@ -10,14 +11,15 @@ app.py はここで作った供給元を呼ぶだけ。
 - quotes: 中立の気配の一覧 + 取引カレンダーのファイルから板を組み立てる（service.QuotesFileService・quotes.py）
 
 新しい供給元を足すとき: 下の DataSource を満たすクラスを書き（板は quotes.chain_from_quotes か chain.chain_json で
-版 1 の形にする。無いエンドポイントは Unavailable で 503）、settings.DATA_SOURCES と BUILDERS に名前を足す。
+版 1 の形にする。無いエンドポイントは Unavailable で 503。JSCC は service.jscc_unavailable(日, "no_source")）、
+settings.DATA_SOURCES と BUILDERS に名前を足す。
 """
 
 import time
 from collections.abc import Callable
 from typing import Protocol
 
-from . import atm_iv, bq, option_bars
+from . import atm_iv, bq, jscc, option_bars
 from . import settings as st
 from .atm_iv import AtmIvRequest
 from .service import ChainResult, ChainService, FileChainService, Payload, QuotesFileService
@@ -48,6 +50,11 @@ class DataSource(Protocol):
 
     def option_bars(self, req: option_bars.OptionBarsRequest) -> Payload:
         """/api/option_bars（銘柄の推移。#319）"""
+        ...
+
+    def jscc_scenarios(self, req: jscc.JsccRequest) -> Payload:
+        """/api/jscc_scenarios（JSCC の VaR パラメータ。#382）。供給元に無ければ unavailable / no_source の
+        Payload（200）を返す（service.jscc_unavailable。画面は概算に戻して理由を出す）"""
         ...
 
 

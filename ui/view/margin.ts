@@ -7,6 +7,9 @@
  * - h（保有期間の暦日）= S の時点（板の時刻 + d）から 2 営業日後まで（businessDaysAhead。休業日は引数）
  * - 値洗い（marginMarked）= 板の時刻から S（板の時刻 + d）までに営業日の 15:45 をまたいだか（休業日は h と同じ）。
  *   またいだら余力に先物の評価益も入る（#381）。今（d = 0）はまたがない
+ * - 今の必要証拠金は JSCC の計算（#382。model/margin.ts の marginNowJscc。基準日の JSCC の VaR パラメータが読めて、
+ *   M の足がそろっていれば）。できなければ格子の概算に戻し、理由を MarginCalc.basis に持つ。シナリオの点が今と同じ
+ *   （marginPointAt の 4 つとも 0）なら今の結果をそのまま使う（marginPointOrNow）。それ以外の点・テール・線は格子のまま
  * - 原資産・評価が有限でなければ null（表示は「—」。model は検証済みの値を受ける前提のため、ここで止める）
  * - memo の単位（useAppController）: 今 = 足・板・設定・β / 動き方 / IV の入れ方、シナリオの点 = シナリオ、
  *   テール = ΔX 以外のシナリオ。どれも資金・パラメータ（端末の設定）が変われば作り直す
@@ -14,10 +17,13 @@
  * 文字列（タイル・内訳・表）は ui/view/metricsPanel.ts が作る。
  */
 
+import type { JsccFetchReason, JsccInput } from '../../data/jscc';
 import {
   businessDaysAhead,
   DAY_MS,
   type Holidays,
+  type JsccIneligible,
+  jsccEligibility,
   MARGIN_HORIZON_BUSINESS_DAYS,
   MARGIN_LINE_SAMPLES,
   type MarginParams,
@@ -25,6 +31,7 @@ import {
   marginAt,
   marginCallLevels,
   marginMarked,
+  marginNowJscc,
   marginRoom,
   maxMultiple,
   premiumSummary,
@@ -72,10 +79,24 @@ export function allowedLossOf(m: MarginPrefs): number | null {
   return typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : null;
 }
 
+/** JSCC の計算にできない理由（読み込み + model。none = M の足が無い = 0 円で、印を付けない） */
+export type JsccReason = JsccFetchReason | JsccIneligible;
+
+/**
+ * 必要証拠金の出どころ（#382）: jscc = JSCC の計算（基準日）、estimate = 格子の概算（reason = 今を JSCC にできなかった
+ * 理由。今以外の点・JSCC の入力を渡さない呼び出しは null）
+ */
+export type MarginBasis =
+  | { kind: 'jscc'; businessDate: string }
+  | { kind: 'estimate'; reason: JsccReason | null };
+
+const ESTIMATE: MarginBasis = { kind: 'estimate', reason: null };
+
 export interface MarginCalc {
   /** 基準原資産 X_S（円） */
   x: number;
   result: MarginResult;
+  basis: MarginBasis;
   /** 余力（円）。資金が未設定なら null */
   room: number | null;
   /** 今のポジションの何倍まで余力 ≥ 0 か（Infinity = 上限なし、資金が未設定なら null） */
@@ -140,17 +161,14 @@ const finite = (r: MarginResult) =>
   Number.isFinite(r.futuresPnl) &&
   Number.isFinite(r.settledCash);
 
-/** 状態 S = (x, scenario) の必要証拠金・余力・倍数。x・結果が有限でなければ null */
-export function marginCalc(
-  base: PnlBase,
-  x: number,
-  scenario: Scenario,
-  params: MarginParams,
-  capital: number | null,
-  holidays: Holidays,
-): MarginCalc | null {
-  if (!Number.isFinite(x) || x <= 0) return null;
-  const { legs, ctx, settings } = base;
+interface MarginStateAt {
+  sc: Scenario;
+  horizonDays: number;
+  marked: boolean;
+}
+
+function stateAt(base: PnlBase, x: number, scenario: Scenario, holidays: Holidays): MarginStateAt {
+  const { ctx } = base;
   const { days } = clampDays(scenario, base.maxDays);
   const sc: Scenario = { ...scenario, days, dX: x - ctx.x0 };
   const horizonDays = businessDaysAhead(
@@ -158,30 +176,99 @@ export function marginCalc(
     MARGIN_HORIZON_BUSINESS_DAYS,
     holidays,
   );
-  const marked = marginMarked(ctx.evalTime, days, holidays);
-  const result = marginAt(legs, { x, scenario: sc, horizonDays, marked }, ctx, settings, params);
+  return { sc, horizonDays, marked: marginMarked(ctx.evalTime, days, holidays) };
+}
+
+function calcOf(
+  base: PnlBase,
+  x: number,
+  result: MarginResult,
+  capital: number | null,
+  basis: MarginBasis,
+): MarginCalc | null {
   if (!finite(result)) return null;
-  if (capital === null) return { x, result, room: null, multiple: null };
-  const premium = premiumSummary(legs, settings);
+  if (capital === null) return { x, result, basis, room: null, multiple: null };
+  const premium = premiumSummary(base.legs, base.settings);
   const room = marginRoom(capital, premium, result);
   return {
     x,
     result,
+    basis,
     room: Number.isFinite(room) ? room : null,
     multiple: maxMultiple(capital, premium, result),
   };
 }
 
-/** 今（X₀・d = Δσ = Δs = 0。β・動き方・IV の入れ方は今のシナリオのまま） */
+/** 状態 S = (x, scenario) の必要証拠金（格子の概算）・余力・倍数。x・結果が有限でなければ null */
+export function marginCalc(
+  base: PnlBase,
+  x: number,
+  scenario: Scenario,
+  params: MarginParams,
+  capital: number | null,
+  holidays: Holidays,
+  basis: MarginBasis = ESTIMATE,
+): MarginCalc | null {
+  if (!Number.isFinite(x) || x <= 0) return null;
+  const { legs, ctx, settings } = base;
+  const { sc, horizonDays, marked } = stateAt(base, x, scenario, holidays);
+  const result = marginAt(legs, { x, scenario: sc, horizonDays, marked }, ctx, settings, params);
+  return calcOf(base, x, result, capital, basis);
+}
+
+/**
+ * 今（X₀・d = Δσ = Δs = 0。β・動き方・IV の入れ方は今のシナリオのまま）。jscc を渡せば JSCC の計算（#382）を試し、
+ * できなければ格子の概算 + 理由（basis）。jscc を渡さない呼び出し（AI の提案・テンプレートの形）は格子の概算（理由 null）
+ */
 export function marginNow(
   base: PnlBase,
   scenario: Scenario,
   params: MarginParams,
   capital: number | null,
   holidays: Holidays,
+  jscc: JsccInput | null = null,
 ): MarginCalc | null {
-  const sc: Scenario = { ...scenario, days: 0, dX: 0, dSigma: 0, skew: 0 };
-  return marginCalc(base, base.ctx.x0, sc, params, capital, holidays);
+  const sc0: Scenario = { ...scenario, days: 0, dX: 0, dSigma: 0, skew: 0 };
+  const x = base.ctx.x0;
+  if (jscc === null) return marginCalc(base, x, sc0, params, capital, holidays);
+  if (!Number.isFinite(x) || x <= 0) return null;
+  if (jscc.status !== 'ok') {
+    return marginCalc(base, x, sc0, params, capital, holidays, {
+      kind: 'estimate',
+      reason: jscc.reason,
+    });
+  }
+  const { legs, ctx, settings } = base;
+  const { sc, horizonDays, marked } = stateAt(base, x, sc0, holidays);
+  const state = { x, scenario: sc, horizonDays, marked };
+  const r = marginNowJscc(legs, state, ctx, settings, params, jscc.data);
+  if (r !== null) {
+    return calcOf(base, x, r, capital, { kind: 'jscc', businessDate: jscc.data.businessDate });
+  }
+  const e = jsccEligibility(legs, state, ctx, settings, params, jscc.data);
+  const reason: JsccReason = e.ok ? 'missing' : e.reason;
+  return marginCalc(base, x, sc0, params, capital, holidays, { kind: 'estimate', reason });
+}
+
+/** シナリオの点が今と同じ（marginPointAt の 4 つとも 0）か */
+export function isNowPoint(at: MarginPointAt): boolean {
+  return at.days === 0 && at.dX === 0 && at.dSigma === 0 && at.skew === 0;
+}
+
+/**
+ * シナリオの点の必要証拠金。点が今と同じなら now（今の結果）をそのまま返す（タイルの値と副題を一致させる。#382）、
+ * そうでなければ marginPoint（格子の概算）
+ */
+export function marginPointOrNow(
+  base: PnlBase,
+  scenario: Scenario,
+  params: MarginParams,
+  capital: number | null,
+  holidays: Holidays,
+  now: MarginCalc | null,
+): MarginCalc | null {
+  if (isNowPoint(marginPointAt(base, scenario))) return now;
+  return marginPoint(base, scenario, params, capital, holidays);
 }
 
 /** シナリオの点（X₀ + ΔX。指標の「指定日 + シナリオ」と同じ点） */

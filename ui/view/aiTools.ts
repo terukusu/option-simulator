@@ -15,7 +15,7 @@
  * - strike_quote（#266）も足が無くても使える（任意の行使価格のスマイルの IV・理論価格・気配。ui/view/aiQuote.ts）
  */
 
-import type { Chain } from '../../data';
+import type { Chain, JsccInput } from '../../data';
 import {
   type AtmBasis,
   evaluatePosition,
@@ -34,7 +34,7 @@ import { fin, greeksOf, legId, r1, r2, round, yen } from './aiRound';
 import { type TechnicalsData, technicalsTool } from './aiTechnicals';
 import { FAIR_POSITION_LABEL, fairPriceText } from './fairValue';
 import { fmtNum } from './format';
-import { type MarginCalc, marginLine, marginNow, marginPoint, marginTail } from './margin';
+import { type MarginCalc, marginLine, marginNow, marginPointOrNow, marginTail } from './margin';
 import { AMOUNT_UNIT_LABEL, fmtAmount, metricsModel } from './metrics';
 import { clampDays, type PnlBase, THOUSAND_YEN_FROM } from './pnlChart';
 
@@ -46,7 +46,8 @@ export interface AiToolEnv {
   base: PnlBase | null;
   scenario: Scenario;
   atmBasis: AtmBasis;
-  margin: { params: MarginParams; capital: number | null };
+  /** 証拠金の設定と、今の必要証拠金の JSCC の入力（#382。無ければ概算） */
+  margin: { params: MarginParams; capital: number | null; jscc?: JsccInput | null };
   holidays: Holidays;
   /** 先物の日足・1 時間足（technicals のツールだけ。#200。呼ばれたときだけフックが読んで入れる。無ければ no_data） */
   technicals?: TechnicalsData | null;
@@ -248,9 +249,20 @@ function marginState(c: MarginCalc | null): ToolResult {
   };
 }
 
+/** 今の出どころ（#382）: source = jscc（JSCC の計算）/ estimate（概算）、jscc_business_date = 基準日（JSCC のときだけ） */
+function marginNowState(c: MarginCalc | null): ToolResult {
+  const b = c?.basis;
+  return {
+    ...marginState(c),
+    source: b?.kind === 'jscc' ? 'jscc' : 'estimate',
+    jscc_business_date: b?.kind === 'jscc' ? b.businessDate : null,
+  };
+}
+
 function marginSummary(env: AiToolEnv, base: PnlBase): ToolResult {
   const { params, capital } = env.margin;
   const sc = env.scenario;
+  const now = marginNow(base, sc, params, capital, env.holidays, env.margin.jscc ?? null);
   return {
     capital_yen: capital === null ? null : yen(capital),
     params: {
@@ -260,8 +272,8 @@ function marginSummary(env: AiToolEnv, base: PnlBase): ToolResult {
       factor_pct: r1(params.factor * 100),
       ignore_long_options: params.ignoreLongOptions,
     },
-    now: marginState(marginNow(base, sc, params, capital, env.holidays)),
-    point: marginState(marginPoint(base, sc, params, capital, env.holidays)),
+    now: marginNowState(now),
+    point: marginState(marginPointOrNow(base, sc, params, capital, env.holidays, now)),
     call_levels_x: marginLine(base, sc, params, capital, env.holidays).slice(0, 40).map(yen),
   };
 }

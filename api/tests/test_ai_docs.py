@@ -58,7 +58,8 @@ def test_toc_titles_drop_development_history(idx):
     assert idx.get("design", "5.9").title == "ATM の判定"
     assert idx.get("design", "5.6.1").title == "JPX グリークの単位"
     # 見出しの行（本文の 1 行目）は文書のまま
-    assert idx.get("design", "5.10").text.startswith("### 5.10 証拠金の概算（#131・#150）\n")
+    assert idx.get("design", "5.10").text.startswith(
+        "### 5.10 証拠金の概算（#131・#150。今の必要証拠金は JSCC の計算 = #382）\n")
 
 
 SAMPLE = """# 題

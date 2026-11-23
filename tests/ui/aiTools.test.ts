@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { type JsccInput, jsccRequestKeys } from '../../data';
 import { DEFAULT_SETTINGS, evaluatePosition, theoreticalPnl, ZERO_SCENARIO } from '../../model';
 import { AI_EVAL_CASES, caseMargin, caseState } from '../../scripts/aiEvalCases';
 import { DEFAULT_MARGIN_PREFS } from '../../ui/prefs';
@@ -24,6 +25,13 @@ import { todayScenario } from '../../ui/view/pnlChart';
 import { positionModel } from '../../ui/view/position';
 import { fixture } from '../support/fixtures';
 import { boardsT0AndLater } from '../support/laterChain';
+import {
+  jsccData,
+  rng as jsccRng,
+  realisticSet,
+  synthFuture,
+  synthOption,
+} from '../support/synthJscc';
 
 /**
  * #135 AC3: AI のツール（ui/view/aiTools.ts）。合成の板（fixtures/synthetic/latest.json）と合成のポジション 10 通り
@@ -113,6 +121,37 @@ describe.each(AI_EVAL_CASES.map((c) => c.name))('ツール = 画面の表示モ�
     expect(r.point.requirement_yen).toBe(yen(pt?.result.requirement));
     expect(r.capital_yen).toBe(capital);
     if (capital === null) expect(r.call_levels_x).toEqual([]);
+    // #382: JSCC の入力が無ければ今は概算
+    expect(r.now.source).toBe('estimate');
+    expect(r.now.jscc_business_date).toBeNull();
+  });
+
+  it('#382 margin_summary: JSCC の入力があれば今は JSCC の計算（画面の今と同じ値・基準日）', () => {
+    const legs = base.legs.map((p) => p.leg);
+    const keys = jsccRequestKeys(legs, '2026-10-13');
+    if (keys.length === 0) return;
+    const set = realisticSet();
+    const rr = jsccRng(9);
+    const data = jsccData(
+      set,
+      Object.fromEntries(
+        keys.map((k) => [
+          k,
+          k.startsWith('NK225E')
+            ? synthOption(set.isHist.length, 150, rr)
+            : synthFuture(set.isHist.length, 100, rr),
+        ]),
+      ),
+      '2026-10-13',
+    );
+    const jscc: JsccInput = { status: 'ok', data };
+    const e2: AiToolEnv = { ...env, margin: { ...env.margin, jscc } };
+    const r = run(e2, 'margin_summary');
+    const { params, capital } = env.margin;
+    const now = marginNow(base, env.scenario, params, capital, env.holidays, jscc);
+    expect(r.now.margin_yen).toBe(yen(now?.result.margin));
+    expect(r.now.source).toBe(now?.basis.kind === 'jscc' ? 'jscc' : 'estimate');
+    if (now?.basis.kind === 'jscc') expect(r.now.jscc_business_date).toBe('2026-10-13');
   });
 
   it('evaluate_scenario: ΔX 0・日数 0・IV 0 の損益 = 舞台の今日の線の X₀ の値', () => {

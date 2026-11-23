@@ -487,6 +487,9 @@ export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
   // ほかの保有の数（#302。文脈の position.other_held）は送るときの state と保存一覧の読みから数える（評価しない）
   const bookReadRef = useRef(c.bookRead);
   bookReadRef.current = c.bookRead;
+  // 今の必要証拠金の JSCC の入力（#382。margin_summary の now が指標と同じ値になるように）
+  const jsccRef = useRef(c.jscc);
+  jsccRef.current = c.jscc;
   const aiEnv = useCallback(
     () =>
       aiEnvFromState(
@@ -494,6 +497,7 @@ export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
         marginRef.current,
         profileRef.current,
         otherHeldCount(stateRef.current, bookReadRef.current),
+        jsccRef.current,
       ),
     [],
   );
@@ -1306,6 +1310,8 @@ export function NextApp({ boot, prefs }: { boot: Boot; prefs: PrefsRead }) {
         nowScenario={c.nowScenario}
         params={c.marginParams}
         capital={c.capital}
+        jsccDate={c.jsccDate}
+        jsccEndpoint={c.jsccEndpoint}
         message={c.holdingsMsg}
         onImport={onHoldingsImport}
         importBlocked={importBlocked}

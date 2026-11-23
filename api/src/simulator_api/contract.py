@@ -9,7 +9,7 @@
 - 型の名前は BigQuery の schema JSON の表記（INTEGER / FLOAT / BOOLEAN / ...）
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 
 @dataclass(frozen=True)
@@ -21,6 +21,8 @@ class Relation:
     schema_file: str
     columns: tuple[tuple[str, str], ...]  # (列, 型)。SQL の SELECT の順
     required: frozenset[str]  # コードが非 NULL を前提にする列（schema で REQUIRED であること）
+    # 配列の列（schema で REPEATED であること。#382 の pnl・scenarios）。それ以外の列は REPEATED でないこと
+    repeated: frozenset[str] = field(default_factory=frozenset)
 
 
 RELATIONS = {
@@ -141,6 +143,54 @@ RELATIONS = {
             ("last_at", "TIMESTAMP"),
         ),
         required=frozenset({"started_at"}),
+    ),
+    # JSCC の VaR パラメータ（/api/jscc_scenarios、#382。optionchan の #164）。4 表とも business_date
+    # （JSCC の営業日）の日パーティション。sql/jscc_*.sql は business_date = @d の等号と file_version = '1600' で
+    # 絞る（tests/test_jscc.py の静的検査）。取り込みの記録で status = 'succeeded' の最新の jscc_run_id を選び、
+    # ほかの 3 表の jscc_run_id と照らす
+    "jscc_runs": Relation(
+        name="jscc_ingest_runs",
+        schema_file="tokyo/jscc_ingest_runs.json",
+        columns=(("jscc_run_id", "STRING"), ("status", "STRING"), ("finished_at", "TIMESTAMP")),
+        required=frozenset({"jscc_run_id", "status", "finished_at"}),
+    ),
+    # シナリオの並び（1 日 1 行）。scenarios の 0 始まりの添字が jscc_var_scenario.pnl の添字
+    "jscc_scenario_set": Relation(
+        name="jscc_var_scenario_set",
+        schema_file="tokyo/jscc_var_scenario_set.json",
+        columns=(("jscc_run_id", "STRING"), ("scenarios", "RECORD")),
+        required=frozenset({"jscc_run_id"}),
+        repeated=frozenset({"scenarios"}),
+    ),
+    # VaRParameter のレコード 0（集計グループごとの信頼水準・ストレスの本数）。params（レコード 1・2 の係数）は読まない
+    "jscc_parameter": Relation(
+        name="jscc_var_parameter",
+        schema_file="tokyo/jscc_var_parameter.json",
+        columns=(("jscc_run_id", "STRING"), ("aggregation_group", "STRING"), ("record_id", "INTEGER"),
+                 ("confidence_level", "FLOAT"), ("stress_scenario_number", "INTEGER")),
+        required=frozenset({"jscc_run_id", "aggregation_group", "record_id"}),
+    ),
+    # 銘柄ごとのシナリオの値（require_partition_filter。1 日 約 131 MiB）。pnl は 1 枚あたりの円（Contract Size を掛けた
+    # 後の値なので掛けない。先物はシナリオの損益、OP はシナリオ後の評価額）。price は清算値段（OP の NOV_清算）。
+    # instrument_code・margin_*_jscc は読まない（銘柄は属性で引く）
+    "jscc_scenario": Relation(
+        name="jscc_var_scenario",
+        schema_file="tokyo/jscc_var_scenario.json",
+        columns=(
+            ("jscc_run_id", "STRING"),
+            ("product_code", "STRING"),
+            ("contract_type", "STRING"),
+            ("put_call_type", "STRING"),
+            ("contract_period_code", "STRING"),
+            ("strike_price", "NUMERIC"),
+            ("contract_size", "INTEGER"),
+            ("aggregation_group", "STRING"),
+            ("price", "FLOAT"),
+            ("pnl", "INTEGER"),
+        ),
+        required=frozenset({"jscc_run_id", "product_code", "contract_type", "contract_period_code",
+                            "contract_size", "aggregation_group"}),
+        repeated=frozenset({"pnl"}),
     ),
 }
 
