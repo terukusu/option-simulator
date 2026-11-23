@@ -23,10 +23,15 @@ import { type CalendarJson, validateCalendarJson } from './calendar';
 import { type ChainJson, parseChainJson } from './chainJson';
 import { type FutureBarsData, futureBarsUrl, validateFutureBarsJson } from './futureBars';
 import {
+  type JsccFactorsResponse,
   type JsccResponse,
   jsccChunks,
+  jsccFactorChunks,
+  jsccFactorsUrl,
   jsccUrl,
+  mergeJsccFactors,
   mergeJsccResponses,
+  validateJsccFactorsJson,
   validateJsccJson,
 } from './jscc';
 import { type Chain, type NormalizeOptions, normalizeChain } from './normalize';
@@ -117,7 +122,8 @@ async function fetchText(
     | '先物推移'
     | '銘柄の推移'
     | '過去の値動き'
-    | 'JSCC のデータ' = '板',
+    | 'JSCC のデータ'
+    | 'JSCC のシナリオ' = '板',
 ): Promise<string> {
   const init: FetchInit = { ...base };
   if (opts.signal) init.signal = opts.signal;
@@ -400,6 +406,44 @@ export async function loadJsccScenarios(
   const merged = mergeJsccResponses(await Promise.all(jsccChunks(keys).map(one)));
   if (!merged)
     throw new ChainLoadError('JSCC のデータの JSON が不正（api）', ['$: 分けた応答が合わない']);
+  return merged;
+}
+
+/**
+ * 当て直しの r・g（`/api/jscc_factors`。#387）を基準日 date・限月 periods（昇順・重複なし）で読んで検証する。上限（限月 8）を
+ * 超えるときは分けて読んで 1 つにする。HTTP のキャッシュに任せる。失敗は ChainLoadError。AbortError はそのまま投げる
+ */
+export async function loadJsccFactors(
+  date: string,
+  periods: readonly string[],
+  opts: JsccLoadOptions = {},
+): Promise<JsccFactorsResponse> {
+  const load: LoadOptions = opts.signal ? { signal: opts.signal } : {};
+  const endpoint = opts.endpoint ?? '/api/jscc_factors';
+  const one = async (chunk: readonly string[]): Promise<JsccFactorsResponse> => {
+    const text = await fetchText(
+      opts.fetch ?? defaultFetch,
+      jsccFactorsUrl(endpoint, date, chunk),
+      load,
+      'api',
+      { redirect: 'manual' },
+      'JSCC のシナリオ',
+    );
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      throw new ChainLoadError('JSCC のシナリオの JSON が不正（api）', [
+        '$: JSON として解析できない',
+      ]);
+    }
+    const r = validateJsccFactorsJson(parsed, date, chunk);
+    if (!r.ok) throw new ChainLoadError('JSCC のシナリオの JSON が不正（api）', r.errors);
+    return r.value;
+  };
+  const merged = mergeJsccFactors(await Promise.all(jsccFactorChunks(periods).map(one)));
+  if (!merged)
+    throw new ChainLoadError('JSCC のシナリオの JSON が不正（api）', ['$: 分けた応答が合わない']);
   return merged;
 }
 

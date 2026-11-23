@@ -12,7 +12,7 @@
  * - サーバーは api/src/simulator_api/jscc.py
  */
 
-import type { JsccData, JsccInstrument, Leg } from '../model';
+import type { JsccData, JsccFactorRow, JsccFactors, JsccInstrument, Leg } from '../model';
 import { jsccKeyOfLeg } from '../model';
 import { type Holidays, isBusinessDay, nextBusinessDay, previousBusinessDay } from '../model/time';
 import { isIsoDate, jstDate } from './calendar';
@@ -280,4 +280,226 @@ export function jsccUrl(endpoint: string, date: string, keys: readonly string[])
   q.set('date', date);
   for (const k of keys) q.append('i', k);
   return `${endpoint}?${q.toString()}`;
+}
+
+// ---------------------------------------------------------------- 当て直しの r・g（#387）
+
+/** `/api/jscc_factors` の 1 要求の限月の上限（API と同じ。超えたら分けて読む） */
+export const JSCC_FACTOR_MAX_PERIODS = 8;
+/** r・g の整数の刻み（API の scale と同じでなければ不正） */
+export const JSCC_FACTOR_SCALE = { r: 1_000_000, g: 10_000 } as const;
+/** 行のキー（`商品-YYYYMM`） */
+export const JSCC_FACTOR_KEY_RE = /^(NK225E|NK225F|NK225MF|NK225MCF)-(\d{6})$/;
+const NODE_COUNT = 13;
+
+/** 画面が持つ当て直しの r・g の状態（シナリオの点・テール・追証の線の入力） */
+export type JsccFactorsInput =
+  | { status: 'ok'; data: JsccFactors }
+  | { status: 'unavailable'; reason: JsccFetchReason };
+
+/** 検証した応答 */
+export type JsccFactorsResponse =
+  | { status: 'ok'; data: JsccFactors; missing: string[] }
+  | { status: 'unavailable'; reason: 'not_ready' | 'no_source' };
+
+/**
+ * 要求する限月（YYYYMM。足の OP の限月・先物の限月。昇順・重複なし）。基準日の月より前（SQ を過ぎた）は入れない
+ */
+export function jsccFactorPeriods(legs: readonly Leg[], baseDate: string): string[] {
+  const minPeriod = baseDate.slice(0, 4) + baseDate.slice(5, 7);
+  const out = new Set<string>();
+  for (const leg of legs) {
+    const id = leg.kind === 'option' ? leg.expiry : leg.contract;
+    const m = /^(\d{4})-(0[1-9]|1[0-2])$/.exec(id);
+    if (!m) continue;
+    const p = `${m[1]}${m[2]}`;
+    if (p >= minPeriod) out.add(p);
+  }
+  return [...out].sort();
+}
+
+/** 限月を API の上限で分ける */
+export function jsccFactorChunks(periods: readonly string[]): string[][] {
+  const out: string[][] = [];
+  for (let i = 0; i < periods.length; i += JSCC_FACTOR_MAX_PERIODS) {
+    out.push(periods.slice(i, i + JSCC_FACTOR_MAX_PERIODS));
+  }
+  return out;
+}
+
+/** 要求の URL（?date=&p=…） */
+export function jsccFactorsUrl(endpoint: string, date: string, periods: readonly string[]): string {
+  const q = new URLSearchParams();
+  q.set('date', date);
+  for (const p of periods) q.append('p', p);
+  return `${endpoint}?${q.toString()}`;
+}
+
+/**
+ * `/api/jscc_factors` の JSON の検査（#387）。date は要求した基準日、periods は要求した限月。行は要求した限月だけ、
+ * r は本数の整数（|r| ≤ 1 = 1e6）、g は 13 × 本数の整数（|g| ≤ 3 = 3e4）か null。節点は 13 個の昇順
+ */
+export function validateJsccFactorsJson(
+  v: unknown,
+  date: string,
+  periods: readonly string[],
+): ValidationResult<JsccFactorsResponse> {
+  const errors: string[] = [];
+  const add = (path: string, msg: string) => {
+    if (errors.length < MAX_ERRORS) errors.push(`${path}: ${msg}`);
+  };
+  if (typeof v !== 'object' || v === null || Array.isArray(v)) {
+    return { ok: false, errors: ['$: オブジェクトでない'] };
+  }
+  const o = v as Record<string, unknown>;
+  if (o.schema_version !== JSCC_SCHEMA_VERSION)
+    add('$.schema_version', `${JSCC_SCHEMA_VERSION} でない`);
+  if (o.business_date !== date || !isIsoDate(o.business_date)) {
+    add('$.business_date', '要求した基準日でない');
+  }
+  if (o.status === 'unavailable') {
+    if (errors.length > 0) return { ok: false, errors };
+    const reason = o.reason === 'no_source' ? 'no_source' : 'not_ready';
+    return { ok: true, value: { status: 'unavailable', reason } };
+  }
+  if (o.status !== 'ok') {
+    add('$.status', 'ok / unavailable でない');
+    return { ok: false, errors };
+  }
+  const conf = o.confidence_level;
+  if (typeof conf !== 'number' || !(conf > 0 && conf < 100)) {
+    add('$.confidence_level', '0 より大きく 100 より小さい数でない');
+  }
+  const types = o.scenario_types;
+  let isHist: boolean[] = [];
+  if (typeof types !== 'string' || !/^[HS]+$/.test(types))
+    add('$.scenario_types', 'H と S の並びでない');
+  else isHist = [...types].map((c) => c === 'H');
+  const n = isHist.length;
+  const nh = isHist.filter(Boolean).length;
+  if (n > 0 && nh === 0) add('$.scenario_types', 'H が無い');
+  const nStress = o.stress_scenario_number;
+  if (
+    typeof nStress !== 'number' ||
+    !Number.isInteger(nStress) ||
+    nStress < 0 ||
+    nStress > n - nh
+  ) {
+    add('$.stress_scenario_number', '0〜S の本数の整数でない');
+  }
+  const scale = o.scale as Record<string, unknown> | null;
+  if (
+    typeof scale !== 'object' ||
+    scale === null ||
+    scale.r !== JSCC_FACTOR_SCALE.r ||
+    scale.g !== JSCC_FACTOR_SCALE.g
+  ) {
+    add('$.scale', '刻みが違う');
+  }
+  const nodes = o.nodes;
+  if (
+    !Array.isArray(nodes) ||
+    nodes.length !== NODE_COUNT ||
+    !nodes.every(
+      (x, i) =>
+        typeof x === 'number' && Number.isFinite(x) && (i === 0 || x > (nodes[i - 1] as number)),
+    )
+  ) {
+    add('$.nodes', '13 個の昇順の数でない');
+  }
+  const want = new Set(periods);
+  const rows = new Map<string, JsccFactorRow>();
+  const ints = (a: unknown, len: number, max: number, div: number): Float64Array | null => {
+    if (!Array.isArray(a) || a.length !== len) return null;
+    const out = new Float64Array(len);
+    for (let j = 0; j < len; j++) {
+      const y = a[j];
+      if (typeof y !== 'number' || !Number.isInteger(y) || Math.abs(y) > max) return null;
+      out[j] = y / div;
+    }
+    return out;
+  };
+  if (!Array.isArray(o.rows)) add('$.rows', '配列でない');
+  else {
+    o.rows.forEach((x, i) => {
+      const p = `$.rows[${i}]`;
+      if (typeof x !== 'object' || x === null || Array.isArray(x)) {
+        add(p, 'オブジェクトでない');
+        return;
+      }
+      const r = x as Record<string, unknown>;
+      const key = r.key;
+      const km = typeof key === 'string' ? JSCC_FACTOR_KEY_RE.exec(key) : null;
+      if (!km || !want.has(km[2] as string) || rows.has(key as string)) {
+        add(`${p}.key`, '要求した限月の行でない・重複');
+        return;
+      }
+      const rr = ints(r.r, n, JSCC_FACTOR_SCALE.r, JSCC_FACTOR_SCALE.r);
+      if (!rr) {
+        add(`${p}.r`, '本数の整数（|r| ≤ 1）の配列でない');
+        return;
+      }
+      let g: Float64Array | null = null;
+      if (r.g !== null) {
+        g = ints(r.g, n * NODE_COUNT, 3 * JSCC_FACTOR_SCALE.g, JSCC_FACTOR_SCALE.g);
+        if (!g) {
+          add(`${p}.g`, '13 × 本数の整数（|g| ≤ 3）の配列か null でない');
+          return;
+        }
+      }
+      rows.set(key as string, { r: rr, g });
+    });
+  }
+  const missing: string[] = [];
+  if (!Array.isArray(o.missing)) add('$.missing', '配列でない');
+  else {
+    for (const m of o.missing) {
+      if (typeof m !== 'string' || !want.has(m)) {
+        add('$.missing', '要求した限月でない');
+        break;
+      }
+      missing.push(m);
+    }
+  }
+  if (errors.length > 0) return { ok: false, errors };
+  return {
+    ok: true,
+    value: {
+      status: 'ok',
+      data: {
+        businessDate: date,
+        set: { isHist, confidence: conf as number, nStress: nStress as number },
+        nodes: nodes as number[],
+        rows,
+      },
+      missing,
+    },
+  };
+}
+
+/** 分けて読んだ応答を 1 つに（どれかが unavailable ならそれ。並び・節点が違えば null = 読めない扱い） */
+export function mergeJsccFactors(rs: readonly JsccFactorsResponse[]): JsccFactorsResponse | null {
+  const first = rs[0];
+  if (!first) return null;
+  for (const r of rs) if (r.status === 'unavailable') return r;
+  if (first.status !== 'ok') return first;
+  const rows = new Map(first.data.rows);
+  const missing = [...first.missing];
+  const s0 = first.data.set;
+  for (const r of rs.slice(1)) {
+    if (r.status !== 'ok') return r;
+    const s = r.data.set;
+    if (
+      s.confidence !== s0.confidence ||
+      s.nStress !== s0.nStress ||
+      s.isHist.length !== s0.isHist.length ||
+      s.isHist.some((h, i) => h !== s0.isHist[i]) ||
+      r.data.nodes.some((x, i) => x !== first.data.nodes[i])
+    ) {
+      return null;
+    }
+    for (const [k, v] of r.data.rows) rows.set(k, v);
+    missing.push(...r.missing);
+  }
+  return { status: 'ok', data: { ...first.data, rows }, missing };
 }

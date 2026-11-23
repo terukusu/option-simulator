@@ -12,6 +12,8 @@
 - GET /api/jscc_scenarios?date=<YYYY-MM-DD>&i=<銘柄>…: 基準日の JSCC の VaR パラメータ（要求の銘柄のシナリオの値・並び・
   信頼水準・ストレスの本数。jscc.py。#382）。ok・inconsistent は max-age 600、not_ready は 60、
   no_source（file・quotes）も 200
+- GET /api/jscc_factors?date=<YYYY-MM-DD>&p=<YYYYMM>…: 基準日の当て直しの r・g（optionchan が当てはめた限月ごとの先物の
+  対数リターンと IV の対数変化。整数に量子化。jscc.py。#387）。Cache-Control は /api/jscc_scenarios と同じ
 - POST /api/ai/messages: AI の中継（SSE。許可リスト・費用の 1 日上限・同じオリジン。ai/relay.py。#134）
 - GET /api/ai/status: AI が使えるか・1 日の上限と残り（ai/relay.py。#134）
 - POST /api/ai/read_positions: 建玉の一覧の画像 1 枚を読み取る（JSON。ai/relay.py・ai/read_positions.py。#318）
@@ -211,6 +213,25 @@ def create_app(runner=None, clock=None, monotonic=None, cfg: st.Settings | None 
             return holder["p"]
 
         res = serve("jscc_scenarios", produce, f"private, max-age={st.JSCC_MAX_AGE_SECONDS}")
+        p = holder.get("p")
+        if res.status_code == 200 and getattr(p, "reason", "") == "not_ready":
+            res.headers["Cache-Control"] = f"private, max-age={st.JSCC_NOT_READY_MAX_AGE_SECONDS}"
+        return res
+
+    @app.get("/api/jscc_factors")
+    def api_jscc_factors():
+        try:
+            req = jscc.parse_factor_request(request.args, clock())
+        except atm_iv.BadRequest as e:
+            log("INFO", "bad_request", endpoint="jscc_factors", param=e.param)
+            return _error(400, "bad_request")
+        holder = {}
+
+        def produce():
+            holder["p"] = service.jscc_factors(req)
+            return holder["p"]
+
+        res = serve("jscc_factors", produce, f"private, max-age={st.JSCC_MAX_AGE_SECONDS}")
         p = holder.get("p")
         if res.status_code == 200 and getattr(p, "reason", "") == "not_ready":
             res.headers["Cache-Control"] = f"private, max-age={st.JSCC_NOT_READY_MAX_AGE_SECONDS}"

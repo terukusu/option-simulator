@@ -23,6 +23,9 @@ class Relation:
     required: frozenset[str]  # コードが非 NULL を前提にする列（schema で REQUIRED であること）
     # 配列の列（schema で REPEATED であること。#382 の pnl・scenarios）。それ以外の列は REPEATED でないこと
     repeated: frozenset[str] = field(default_factory=frozenset)
+    # optionchan の固定コミットにまだ無い表（依頼中。#387 の jscc_factor = optionchan #168）。schema との照合を飛ばす。
+    # optionchan の PR がマージされたら固定コミットを上げて False にする（tests/test_contract.py）
+    pending: bool = False
 
 
 RELATIONS = {
@@ -191,6 +194,26 @@ RELATIONS = {
         required=frozenset({"jscc_run_id", "product_code", "contract_type", "contract_period_code",
                             "contract_size", "aggregation_group"}),
         repeated=frozenset({"pnl"}),
+    ),
+    # 当て直しの r・g（#387。optionchan #168 が jscc_var_scenario から毎日当てはめる派生の表。
+    # 1 行 = 日 × 商品 × 限月）。r は限月の先物の対数リターン（長さ = シナリオの本数。添字は pnl と同じ）、
+    # g は 13 節点の IV の対数変化（13 × 本数。
+    # シナリオごとに 13 個ずつ）、nodes は z の節点。先物だけの限月の行は g・nodes が空。列と表の名前は optionchan の
+    # 確定を待つ仮（pending）
+    "jscc_factor": Relation(
+        name="jscc_var_scenario_factor",
+        schema_file="tokyo/jscc_var_scenario_factor.json",
+        columns=(
+            ("jscc_run_id", "STRING"),
+            ("product_code", "STRING"),
+            ("contract_period_code", "STRING"),
+            ("nodes", "FLOAT"),
+            ("r", "FLOAT"),
+            ("g", "FLOAT"),
+        ),
+        required=frozenset({"jscc_run_id", "product_code", "contract_period_code"}),
+        repeated=frozenset({"nodes", "r", "g"}),
+        pending=True,
     ),
 }
 

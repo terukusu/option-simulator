@@ -118,6 +118,8 @@ def dry_run(runner, name, query_params, label, record_property):
 
 @pytest.mark.parametrize("name", contract.QUERY_NAMES)
 def test_dry_run(runner, name, record_property):
+    if contract.RELATIONS[name].pending:
+        pytest.skip(f"{name} の表は optionchan にまだ無い（依頼中。#387）")
     now = datetime.now(UTC).replace(microsecond=0)
     dry_run(runner, name, params(name, now), name, record_property)
 
@@ -151,5 +153,5 @@ def test_option_bars_cap_is_64mib(runner):
 def test_jscc_caps(runner):
     # jscc_var_scenario は 1 日のパーティション全部（約 131 MiB。#382）を読むので 256 MiB、ほかの 3 つは 64 MiB
     assert runner.maximum_bytes_billed("jscc_scenario") == 256 * MiB
-    for name in ("jscc_runs", "jscc_scenario_set", "jscc_parameter"):
+    for name in ("jscc_runs", "jscc_scenario_set", "jscc_parameter", "jscc_factor"):
         assert runner.maximum_bytes_billed(name) == 64 * MiB

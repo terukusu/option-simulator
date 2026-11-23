@@ -128,6 +128,8 @@ class World:
         self.jscc_set: list[dict] = []
         self.jscc_param: list[dict] = []
         self.jscc_rows: list[dict] = []
+        # 当て直しの r・g（#387。jscc_var_scenario_factor の行。business_date を持つ）
+        self.jscc_factors: list[dict] = []
 
     def add(self, at, options, future_price, spot_price=None, rows_option=800, finished_after=40):
         """rows_option は latest_runs の行数（判定用の小さな板でも既定は 800 行として扱う）"""
@@ -251,6 +253,9 @@ class FakeRunner:
             cp = str(params["cp"])
             return [strip(r) for r in w.jscc_rows if r["business_date"] == d and r["contract_period_code"] == cp
                     and r["product_code"] in ("NK225E", "NK225F", "NK225MF", "NK225MCF")]
+        if name == "jscc_factor":
+            return [strip(r) for r in w.jscc_factors if r["business_date"] == d
+                    and r["product_code"] in ("NK225E", "NK225F", "NK225MF", "NK225MCF")]
         raise KeyError(name)
 
 
@@ -288,6 +293,28 @@ def jscc_world(w: "World", d: date, run_id="run-1", periods=("202612",), status=
                                 "strike_price": None, "contract_size": size, "aggregation_group": "IDX_IDX",
                                 "price": 30000.0, "pnl": [rnd.randint(-3_000_000, 3_000_000) // (1000 // size)
                                                           for _ in range(n)]})
+
+
+FACTOR_NODES = [-5, -4, -3, -2, -1.5, -1, -0.5, 0, 0.5, 1, 1.5, 2, 3]
+
+
+def jscc_factor_world(w: "World", d: date, run_id="run-1", periods=("202612",), futures_only=(), seed=2,
+                      n: int | None = None) -> None:
+    """World に基準日 d の当て直しの r・g（#387。架空の値）を足す。periods は OP の行（NK225E。g つき）、futures_only は
+    先物だけの行（NK225F。g・nodes が空）"""
+    import random
+
+    rnd = random.Random(seed)
+    n = len(JSCC_TYPES) if n is None else n
+    for cp in periods:
+        w.jscc_factors.append({"business_date": d, "jscc_run_id": run_id, "product_code": "NK225E",
+                               "contract_period_code": cp, "nodes": list(FACTOR_NODES),
+                               "r": [rnd.uniform(-0.08, 0.08) for _ in range(n)],
+                               "g": [rnd.uniform(-0.5, 0.5) for _ in range(13 * n)]})
+    for cp in futures_only:
+        w.jscc_factors.append({"business_date": d, "jscc_run_id": run_id, "product_code": "NK225F",
+                               "contract_period_code": cp, "nodes": [],
+                               "r": [rnd.uniform(-0.08, 0.08) for _ in range(n)], "g": []})
 
 
 def cm_rows(start: datetime, end: datetime, every_minutes=1, value=lambda t: 20.0) -> list[tuple]:

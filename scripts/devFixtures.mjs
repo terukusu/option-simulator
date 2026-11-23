@@ -8,6 +8,7 @@
 // 合成の板 latest の先物の値で終わる決まった関数。既定の 1 時間足の範囲に限月交代（取引最終日の 17:00）を 1 回含む）。
 // 銘柄の推移（#319）の合成の応答も `/fixtures/option_bars?ltd=&k=&type=&tf=` で配る（`/api/option_bars` と同じ形・同じ
 // 検査。架空の値 = 合成の先物と IV から Black-76 で作る。気配の無い約定だけの足の塊・まばらな約定・bid_iv だけ欠けた足を含む）。
+// 当て直しの r・g（#387）も `/fixtures/jscc_factors?date=&p=` で同じ合成のシナリオから配る。
 // JSCC の VaR パラメータ（#382）の合成の応答も `/fixtures/jscc_scenarios?date=&i=` で配る（`/api/jscc_scenarios` と同じ形・
 // 同じ検査。架空の値 = 合成の先物と Black-76 と種つき乱数のシナリオ）。合成の板 latest の基準日（SYNTH_JSCC_DATE）だけ
 // ok、ほかの日は not_ready（両方の表示を dev で見る）。生成はこのファイルの中に閉じる（tests/ を import しない）。
@@ -1132,6 +1133,60 @@ export function synthJscc(date, keys) {
   };
 }
 
+// ---- 当て直しの r・g の合成の応答（#387。架空の値。上の合成のシナリオから作る = F′ = F(1 + ret)、σ′ = σ·vol で、
+// r = ln(1 + ret)、g = ln(vol) を 13 節点で同じ値（平行）。合成の板 latest の基準日だけ ok）
+const JSCC_FACTOR_PATH = '/fixtures/jscc_factors';
+const JSCC_FACTOR_NODES = [-5, -4, -3, -2, -1.5, -1, -0.5, 0, 0.5, 1, 1.5, 2, 3];
+
+/** `?date=&p=…` を読む（サーバーの jscc.parse_factor_request と同じ形の検査。日付の範囲は見ない）。違えば null = 400 */
+export function jsccFactorQuery(url) {
+  const q = new URLSearchParams(url.split('?')[1] ?? '');
+  const dates = q.getAll('date');
+  const periods = q.getAll('p');
+  if (dates.length !== 1 || !/^\d{4}-\d{2}-\d{2}$/.test(dates[0])) return null;
+  const date = dates[0];
+  if (new Date(`${date}T00:00:00Z`).toISOString().slice(0, 10) !== date) return null;
+  if (periods.length < 1 || periods.length > 8 || new Set(periods).size !== periods.length)
+    return null;
+  for (const p of periods) {
+    const m = /^(\d{4})(\d{2})$/.exec(p);
+    if (!m || !(Number(m[2]) >= 1 && Number(m[2]) <= 12)) return null;
+  }
+  return { date, periods: [...periods].sort() };
+}
+
+/** `/api/jscc_factors` と同じ形の合成の応答（架空の値）。四半期の限月は先物だけの行（NK225F。g なし）も足す */
+export function synthJsccFactors(date, periods) {
+  if (date !== SYNTH_JSCC_DATE) {
+    return { schema_version: 1, status: 'unavailable', reason: 'not_ready', business_date: date };
+  }
+  const { ret, vol, types } = jsccScenarios();
+  const r = ret.map((x) => Math.round(Math.log(1 + x) * 1e6));
+  const g = vol.flatMap((v) => JSCC_FACTOR_NODES.map(() => Math.round(Math.log(v) * 1e4)));
+  const rows = [];
+  const missing = [];
+  for (const p of periods) {
+    if (!(jsccYears(p) > 1 / 365)) {
+      missing.push(p);
+      continue;
+    }
+    rows.push({ key: `NK225E-${p}`, r, g });
+    if (Number(p.slice(4)) % 3 === 0) rows.push({ key: `NK225F-${p}`, r, g: null });
+  }
+  return {
+    schema_version: 1,
+    status: 'ok',
+    business_date: date,
+    confidence_level: 97.5,
+    stress_scenario_number: 2,
+    scenario_types: types,
+    nodes: JSCC_FACTOR_NODES,
+    scale: { r: 1_000_000, g: 10_000 },
+    rows,
+    missing,
+  };
+}
+
 /** @returns {import('vite').Plugin} */
 export function serveSyntheticFixtures() {
   return {
@@ -1159,6 +1214,18 @@ export function serveSyntheticFixtures() {
           res.setHeader('Content-Type', 'application/json; charset=utf-8');
           res.setHeader('Cache-Control', 'no-store');
           res.end(JSON.stringify(synthAtmDaily()));
+          return;
+        }
+        if (path === JSCC_FACTOR_PATH) {
+          const q = jsccFactorQuery(req.url ?? '');
+          res.setHeader('Content-Type', 'application/json; charset=utf-8');
+          res.setHeader('Cache-Control', 'no-store');
+          if (!q) {
+            res.statusCode = 400;
+            res.end('{"error":"bad_request"}');
+            return;
+          }
+          res.end(JSON.stringify(synthJsccFactors(q.date, q.periods)));
           return;
         }
         if (path === JSCC_PATH) {

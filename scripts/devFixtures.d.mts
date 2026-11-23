@@ -152,3 +152,7 @@ export const SYNTH_JSCC_DATE: string;
 export function jsccQuery(url: string): { date: string; keys: string[] } | null;
 /** `/api/jscc_scenarios` と同じ形の合成の応答（架空の値） */
 export function synthJscc(date: string, keys: readonly string[]): unknown;
+/** `?date=&p=…` を読む（#387）。形が違えば null */
+export function jsccFactorQuery(url: string): { date: string; periods: string[] } | null;
+/** `/api/jscc_factors` と同じ形の合成の応答（#387。架空の値） */
+export function synthJsccFactors(date: string, periods: readonly string[]): unknown;

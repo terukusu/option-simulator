@@ -118,6 +118,10 @@ class LRUCache:
 
         return self._flight.run(key, load, lookup, store)
 
+    def pop(self, key) -> None:
+        """キーを捨てる（無ければ何もしない。#387 の表に行が無い日 = 次の要求で読み直す）"""
+        self._items.pop(key, None)
+
 
 class ExpiringLRUCache:
     """キーごとの値を最大 maxsize 件、値ごとの期限（get の ttl 秒）つきで持つ（/api/atm_iv。#79）。

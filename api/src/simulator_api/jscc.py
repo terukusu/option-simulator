@@ -221,3 +221,133 @@ def ok_json(req: JsccRequest, s: ScenarioSet, by_period: dict[str, dict[str, Ins
 def unavailable_json(d: date, reason: str) -> dict:
     return {"schema_version": SCHEMA_VERSION, "status": "unavailable", "reason": reason,
             "business_date": d.isoformat()}
+
+
+# ---- 当て直しの r・g（/api/jscc_factors。#387・docs/design.md 5.10・ADR-0014） ----
+# optionchan が毎日 jscc_var_scenario から当てはめた限月ごとの r（先物の対数リターン）・g（標準化 moneyness の 13 節点の
+# IV の対数変化）を読み、要求の限月の行だけを整数に量子化して返す（当てはめはしない = 計算はブラウザと optionchan）。
+
+FACTOR_PRODUCTS = (OPTION_PRODUCT, *FUTURE_PRODUCTS)
+FACTOR_NODE_COUNT = 13
+FACTOR_SCALE_R = 1_000_000
+FACTOR_SCALE_G = 10_000
+_PERIOD_RE = re.compile(r"(\d{4})(\d{2})")
+
+
+@dataclass(frozen=True)
+class FactorRequest:
+    date: date
+    periods: tuple[str, ...]  # YYYYMM（昇順・重複なし）
+
+
+def parse_factor_request(args, now: datetime) -> FactorRequest:
+    """クエリパラメータ → 要求（date は parse_request と同じ検査、p = YYYYMM を 1〜JSCC_FACTOR_MAX_PERIODS 個・
+    重複なし）。
+    不正なら BadRequest(パラメータの名前)。値は応答・ログに出さない"""
+    dates = args.getlist("date") if hasattr(args, "getlist") else ([args["date"]] if "date" in args else [])
+    if len(dates) != 1 or not _DATE_RE.fullmatch(dates[0]):
+        raise BadRequest("date")
+    try:
+        d = date.fromisoformat(dates[0])
+    except ValueError:
+        raise BadRequest("date") from None
+    today = now.astimezone(JST).date()
+    if d < MIN_DATE or d > today + timedelta(days=st.JSCC_MAX_AHEAD_DAYS):
+        raise BadRequest("date")
+    ps = args.getlist("p") if hasattr(args, "getlist") else ([args["p"]] if "p" in args else [])
+    if not 1 <= len(ps) <= st.JSCC_FACTOR_MAX_PERIODS or len(set(ps)) != len(ps):
+        raise BadRequest("p")
+    for p in ps:
+        m = _PERIOD_RE.fullmatch(p) if isinstance(p, str) else None
+        if not m or not 1 <= int(m.group(2)) <= 12:
+            raise BadRequest("p")
+    return FactorRequest(d, tuple(sorted(ps)))
+
+
+@dataclass(frozen=True)
+class FactorRow:
+    r: array  # int32（r × 1e6）
+    g: array | None  # int32（g × 1e4。13 × 本数）。先物だけ・当てはめられない行は None
+
+
+@dataclass(frozen=True)
+class FactorDay:
+    nodes: tuple[float, ...] | None  # 13 個の昇順（OP の行が 1 つも無ければ None）
+    rows: dict[str, FactorRow]  # キー = 商品-YYYYMM
+    dropped: int  # 範囲の外・形の違う行（使わない）の数
+
+
+def _floats(values) -> list[float] | None:
+    out = []
+    for x in values or []:
+        if isinstance(x, bool) or not isinstance(x, (int, float, Decimal)):
+            return None
+        f = float(x)
+        if not math.isfinite(f):
+            return None
+        out.append(f)
+    return out
+
+
+def factor_day(run_id: str, rows: list[dict], n: int) -> FactorDay:
+    """jscc_factor の行（1 日分）→ キー → 量子化した r・g。run_id の違う行・同じキーが 2 行・行の間で節点が違えば
+    Inconsistent。長さ・範囲（|r| ≤ 1・|g| ≤ 3）の外れた行は使わない（その限月は missing）。週次などは飛ばす"""
+    out: dict[str, FactorRow] = {}
+    nodes: tuple[float, ...] | None = None
+    dropped = 0
+    for row in rows:
+        if row.get("jscc_run_id") != run_id:
+            raise Inconsistent("factor")
+        product = row.get("product_code")
+        cp = row.get("contract_period_code")
+        if product not in FACTOR_PRODUCTS or not isinstance(cp, str) or not _PERIOD_RE.fullmatch(cp):
+            continue
+        key = f"{product}-{cp}"
+        if key in out:
+            raise Inconsistent("factor")
+        r = _floats(row.get("r"))
+        g = _floats(row.get("g"))
+        nd = _floats(row.get("nodes"))
+        if r is None or g is None or nd is None or len(r) != n or any(abs(x) > 1 for x in r):
+            dropped += 1
+            continue
+        if g:
+            if (len(g) != FACTOR_NODE_COUNT * n or any(abs(x) > 3 for x in g) or len(nd) != FACTOR_NODE_COUNT
+                    or any(b <= a for a, b in zip(nd, nd[1:], strict=False))):
+                dropped += 1
+                continue
+            if nodes is None:
+                nodes = tuple(nd)
+            elif nodes != tuple(nd):
+                raise Inconsistent("factor")
+        out[key] = FactorRow(array("i", (round(x * FACTOR_SCALE_R) for x in r)),
+                             array("i", (round(x * FACTOR_SCALE_G) for x in g)) if g else None)
+    return FactorDay(nodes, out, dropped)
+
+
+def factors_ok_json(req: FactorRequest, s: ScenarioSet, day: FactorDay) -> dict:
+    """応答（ok）。要求の限月の行だけ（商品-限月の昇順）。行の 1 つも無い限月は missing。節点が無い日（OP の行が無い）
+    は g のある行を返さない（missing に入る）"""
+    rows = []
+    missing = []
+    for p in req.periods:
+        keys = sorted(k for k in day.rows if k.endswith(f"-{p}"))
+        got = False
+        for k in keys:
+            fr = day.rows[k]
+            rows.append({"key": k, "r": fr.r.tolist(), "g": fr.g.tolist() if fr.g is not None else None})
+            got = True
+        if not got:
+            missing.append(p)
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "status": "ok",
+        "business_date": req.date.isoformat(),
+        "confidence_level": s.confidence_level,
+        "stress_scenario_number": s.stress_scenario_number,
+        "scenario_types": s.types,
+        "nodes": list(day.nodes) if day.nodes is not None else [-5, -4, -3, -2, -1.5, -1, -0.5, 0, 0.5, 1, 1.5, 2, 3],
+        "scale": {"r": FACTOR_SCALE_R, "g": FACTOR_SCALE_G},
+        "rows": rows,
+        "missing": missing,
+    }

@@ -57,6 +57,10 @@ class DataSource(Protocol):
         Payload（200）を返す（service.jscc_unavailable。画面は概算に戻して理由を出す）"""
         ...
 
+    def jscc_factors(self, req: jscc.FactorRequest) -> Payload:
+        """/api/jscc_factors（当て直しの r・g。#387）。供給元に無ければ unavailable / no_source（200）"""
+        ...
+
 
 Builder = Callable[[st.Settings, object, Callable, Callable], DataSource]
 
