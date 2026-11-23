@@ -31,11 +31,13 @@ function fresh(key: string, now: number): boolean {
   return now < e.until;
 }
 
-function store(key: string, input: JsccFactorsInput, now: number): void {
+function store(key: string, input: JsccFactorsInput, now: number, baseDate: string): void {
   memo.delete(key);
+  // 基準日の表なら読み直さない。遡った日（基準日の取り込みの前など。#387）・失敗・not_ready は期限の後に読み直す
+  const final = input.status === 'ok' && input.data.businessDate === baseDate;
   memo.set(key, {
     input,
-    until: input.status === 'ok' ? Number.POSITIVE_INFINITY : now + JSCC_RETRY_MS,
+    until: final ? Number.POSITIVE_INFINITY : now + JSCC_RETRY_MS,
   });
   while (memo.size > JSCC_FACTORS_MEMO_SIZE) {
     memo.delete(memo.keys().next().value as string);
@@ -75,8 +77,9 @@ export function useJsccFactors(
                 ? { status: 'ok', data: r.data }
                 : { status: 'unavailable', reason: r.reason },
               Date.now(),
+              baseDate,
             ),
-          () => store(key, { status: 'unavailable', reason: 'error' }, Date.now()),
+          () => store(key, { status: 'unavailable', reason: 'error' }, Date.now(), baseDate),
         )
         .finally(() => inflight.delete(key));
       inflight.set(key, p);

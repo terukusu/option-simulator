@@ -336,8 +336,41 @@ def factor_day(run_id: str, rows: list[dict], n: int) -> FactorDay:
     return FactorDay(nodes, out, dropped)
 
 
-def factors_ok_json(req: FactorRequest, s: ScenarioSet, day: FactorDay) -> dict:
-    """応答（ok）。要求の限月の行だけ（商品-限月の昇順）。行の 1 つも無い限月は missing。節点が無い日（OP の行が無い）
+def pick_factor_date(req: FactorRequest, runs: list[dict], quality: list[dict],
+                     max_back: int = st.JSCC_FACTOR_MAX_BACK,
+                     max_median: float = st.JSCC_FACTOR_MAX_MEDIAN_REL) -> tuple[date, str] | None:
+    """遡り（#387）: 基準日 req.date 以前で、succeeded のある日を新しい順に max_back 日まで見て、要求の限月がすべて
+    当て直しの表にあり（OP・先物のどちらかの行）、OP（NK225E）の行の推定の質（check_median_rel）が max_median 以下
+    （NULL は分からない = 使う）の最も新しい日と、その日の run_id。無ければ None。runs・quality は
+    jscc_runs_range・jscc_factor_quality の行（日をまたぐ）。行の run_id がその日の run_id と違う行は見ない"""
+    by_date: dict = {}
+    for r in runs:
+        d = r.get("business_date")
+        if isinstance(d, date) and d <= req.date:
+            by_date.setdefault(d, []).append(r)
+    days = sorted(((d, pick_run(rs)) for d, rs in by_date.items()), key=lambda x: x[0], reverse=True)
+    days = [(d, run) for d, run in days if run is not None and d >= MIN_DATE][:max_back]
+    for d, run in days:
+        have: set[str] = set()
+        bad: set[str] = set()
+        for q in quality:
+            if q.get("business_date") != d or q.get("jscc_run_id") != run:
+                continue
+            cp = q.get("contract_period_code")
+            if q.get("product_code") not in FACTOR_PRODUCTS or not isinstance(cp, str):
+                continue
+            have.add(cp)
+            med = _rel(q.get("check_median_rel"))
+            if q.get("product_code") == OPTION_PRODUCT and med is not None and med > max_median:
+                bad.add(cp)
+        if all(p in have and p not in bad for p in req.periods):
+            return d, run
+    return None
+
+
+def factors_ok_json(req: FactorRequest, s: ScenarioSet, day: FactorDay, used: date | None = None) -> dict:
+    """応答（ok）。business_date = 使った日（遡ったときは基準日より前。#387）、requested_date = 要求の基準日。
+    要求の限月の行だけ（商品-限月の昇順）。行の 1 つも無い限月は missing。節点が無い日（OP の行が無い）
     は g のある行を返さない（missing に入る）"""
     rows = []
     missing = []
@@ -354,7 +387,8 @@ def factors_ok_json(req: FactorRequest, s: ScenarioSet, day: FactorDay) -> dict:
     return {
         "schema_version": SCHEMA_VERSION,
         "status": "ok",
-        "business_date": req.date.isoformat(),
+        "business_date": (used or req.date).isoformat(),
+        "requested_date": req.date.isoformat(),
         "confidence_level": s.confidence_level,
         "stress_scenario_number": s.stress_scenario_number,
         "scenario_types": s.types,

@@ -256,6 +256,12 @@ class FakeRunner:
         if name == "jscc_factor":
             return [strip(r) for r in w.jscc_factors if r["business_date"] == d
                     and r["product_code"] in ("NK225E", "NK225F", "NK225MF", "NK225MCF")]
+        if name == "jscc_runs_range":
+            return [dict(r) for r in w.jscc_runs if params["d0"] <= r["business_date"] <= d]
+        if name == "jscc_factor_quality":
+            cols = ("business_date", "jscc_run_id", "product_code", "contract_period_code", "check_median_rel")
+            return [{k: r[k] for k in cols} for r in w.jscc_factors if params["d0"] <= r["business_date"] <= d
+                    and r["product_code"] in ("NK225E", "NK225F", "NK225MF", "NK225MCF")]
         raise KeyError(name)
 
 

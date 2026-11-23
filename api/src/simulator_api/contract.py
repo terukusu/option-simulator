@@ -195,6 +195,22 @@ RELATIONS = {
                             "contract_size", "aggregation_group"}),
         repeated=frozenset({"pnl"}),
     ),
+    # 遡り（#387）: 基準日から JSCC_FACTOR_RANGE_DAYS 暦日の取り込みの記録（日ごとの succeeded の run_id）
+    "jscc_runs_range": Relation(
+        name="jscc_ingest_runs",
+        schema_file="tokyo/jscc_ingest_runs.json",
+        columns=(("business_date", "DATE"), ("jscc_run_id", "STRING"), ("status", "STRING"),
+                 ("finished_at", "TIMESTAMP")),
+        required=frozenset({"business_date", "jscc_run_id", "status", "finished_at"}),
+    ),
+    # 遡り（#387）: 同じ範囲の当て直しの表の日・限月ごとの推定の質（配列の列を読まない）
+    "jscc_factor_quality": Relation(
+        name="jscc_var_scenario_factor",
+        schema_file="tokyo/jscc_var_scenario_factor.json",
+        columns=(("business_date", "DATE"), ("jscc_run_id", "STRING"), ("product_code", "STRING"),
+                 ("contract_period_code", "STRING"), ("check_median_rel", "FLOAT")),
+        required=frozenset({"business_date", "jscc_run_id", "product_code", "contract_period_code"}),
+    ),
     # 当て直しの r・g（#387。optionchan #168 が jscc_var_scenario から毎日当てはめる派生の表。
     # 1 行 = 日 × 商品 × 限月）。r は限月の先物の対数リターン（長さ = シナリオの本数。添字は pnl と同じ）、
     # g は 13 節点の IV の対数変化（13 × 本数。シナリオごとに 13 個ずつ）、nodes は z の節点。先物だけの限月の行は

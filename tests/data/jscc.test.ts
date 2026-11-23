@@ -309,6 +309,7 @@ describe('#387 当て直しの r・g の応答（validateJsccFactorsJson・loadJ
     schema_version: 1,
     status: 'ok',
     business_date: D,
+    requested_date: D,
     confidence_level: 97.5,
     stress_scenario_number: 1,
     scenario_types: TYPES,
@@ -377,17 +378,25 @@ describe('#387 当て直しの r・g の応答（validateJsccFactorsJson・loadJ
     ],
     ['週次の行', { rows: [{ key: 'NK225W1-202612', r: [0, 0, 0, 0, 0], g: null }] }],
     ['重複', { rows: [factorsJson().rows[0], factorsJson().rows[0]] }],
-    ['基準日が違う', { business_date: '2026-11-19' }],
+    ['使った日が基準日より後', { business_date: '2026-11-21' }],
+    ['使った日が遡る範囲より前', { business_date: '2026-10-29' }],
+    ['要求の基準日が違う', { requested_date: '2026-11-19' }],
     ['missing が要求していない限月', { missing: ['202901'] }],
   ])('不正: %s', (_name, over) => {
     expect(validateJsccFactorsJson(factorsJson(over), D, P).ok).toBe(false);
   });
 
-  it('unavailable は理由（inconsistent は not_ready と同じ）', () => {
+  it('遡った日（基準日より前の直近の使える日。#387）は business_date がその日', () => {
+    const r = validateJsccFactorsJson(factorsJson({ business_date: '2026-11-13' }), D, P);
+    expect(r.ok && r.value.status === 'ok' && r.value.data.businessDate).toBe('2026-11-13');
+  });
+
+  it('unavailable は理由（inconsistent は not_ready と同じ、no_recent はそのまま）', () => {
     for (const [reason, want] of [
       ['not_ready', 'not_ready'],
       ['inconsistent', 'not_ready'],
       ['no_source', 'no_source'],
+      ['no_recent', 'no_recent'],
     ] as const) {
       const r = validateJsccFactorsJson(
         { schema_version: 1, status: 'unavailable', reason, business_date: D },
@@ -471,7 +480,7 @@ describe('#387 当て直しの r・g の応答（validateJsccFactorsJson・loadJ
     expect(ok).toBeNull();
   });
 
-  it('dev の合成の応答: latest の基準日は検証に通り、r = ln(1 + 変化率)・g は節点で同じ（平行）、ほかの日は not_ready', async () => {
+  it('dev の合成の応答: latest の基準日は検証に通り、r = ln(1 + 変化率)・g は節点で同じ（平行）、後の日は遡る・前の日は no_recent', async () => {
     const { SYNTH_JSCC_DATE, jsccFactorQuery, synthJsccFactors } = await import(
       '../../scripts/devFixtures.mjs'
     );
@@ -493,8 +502,17 @@ describe('#387 当て直しの r・g の応答（validateJsccFactorsJson・loadJ
     const g = r.value.data.rows.get('NK225E-202611')?.g as Float64Array;
     expect(g[13 * 5]).toBe(g[13 * 5 + 12]);
     expect(
-      validateJsccFactorsJson(synthJsccFactors('2026-10-14', periods), '2026-10-14', periods),
-    ).toEqual({ ok: true, value: { status: 'unavailable', reason: 'not_ready' } });
+      validateJsccFactorsJson(synthJsccFactors('2026-10-12', periods), '2026-10-12', periods),
+    ).toEqual({ ok: true, value: { status: 'unavailable', reason: 'no_recent' } });
+    // 基準日より後の要求は latest の日に遡る（#387）
+    const back = validateJsccFactorsJson(
+      synthJsccFactors('2026-10-16', periods),
+      '2026-10-16',
+      periods,
+    );
+    expect(back.ok && back.value.status === 'ok' && back.value.data.businessDate).toBe(
+      SYNTH_JSCC_DATE,
+    );
     expect(jsccFactorQuery(`/fixtures/jscc_factors?date=${SYNTH_JSCC_DATE}&p=202612`)).toEqual({
       date: SYNTH_JSCC_DATE,
       periods: ['202612'],

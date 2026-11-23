@@ -1155,10 +1155,16 @@ export function jsccFactorQuery(url) {
   return { date, periods: [...periods].sort() };
 }
 
-/** `/api/jscc_factors` と同じ形の合成の応答（架空の値）。四半期の限月は先物だけの行（NK225F。g なし）も足す */
+/**
+ * `/api/jscc_factors` と同じ形の合成の応答（架空の値）。四半期の限月は先物だけの行（NK225F。g なし）も足す。
+ * 合成の板 latest の基準日より後（21 暦日まで）の要求は、その日に遡った応答（#387。ほかの合成の板・ファイルで
+ * 「JSCC 推定 10/13」を見られる）、より前・遠い日は no_recent
+ */
 export function synthJsccFactors(date, periods) {
-  if (date !== SYNTH_JSCC_DATE) {
-    return { schema_version: 1, status: 'unavailable', reason: 'not_ready', business_date: date };
+  const back =
+    (Date.parse(`${date}T00:00:00Z`) - Date.parse(`${SYNTH_JSCC_DATE}T00:00:00Z`)) / 86_400_000;
+  if (!(back >= 0 && back <= 21)) {
+    return { schema_version: 1, status: 'unavailable', reason: 'no_recent', business_date: date };
   }
   const { ret, vol, types } = jsccScenarios();
   const r = ret.map((x) => Math.round(Math.log(1 + x) * 1e6));
@@ -1186,7 +1192,8 @@ export function synthJsccFactors(date, periods) {
   return {
     schema_version: 1,
     status: 'ok',
-    business_date: date,
+    business_date: SYNTH_JSCC_DATE,
+    requested_date: date,
     confidence_level: 97.5,
     stress_scenario_number: 2,
     scenario_types: types,

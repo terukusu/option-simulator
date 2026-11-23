@@ -315,6 +315,26 @@ export function marginNow(
   capital: number | null,
   holidays: Holidays,
   jscc: JsccInput | null = null,
+  factors: JsccFactorsInput | null = null,
+): MarginCalc | null {
+  const exact = marginNowExact(base, scenario, params, capital, holidays, jscc);
+  // 基準日の BPF で計算できなければ（取り込みの前・銘柄が無い・読めないなど）、当て直しの r・g（基準日か、それより前で
+  // 直近の使える日）で今の状態を当て直す（JSCC 推定。オーナーの承認 #387 = 格子は使える JSCC がどの日にも無いときだけ）
+  if (exact?.basis.kind !== 'estimate' || factors?.status !== 'ok') return exact;
+  if (exact.basis.reason === 'none' || exact.basis.reason === 'fractional') return exact;
+  const sc0: Scenario = { ...scenario, days: 0, dX: 0, dSigma: 0, skew: 0 };
+  const re = marginCalcAt(base, base.ctx.x0, sc0, params, capital, holidays, factors);
+  return re?.basis.kind === 'jscc_refit' ? re : exact;
+}
+
+/** 今の必要証拠金を基準日の BPF（#382）で。できなければ格子 + 理由 */
+function marginNowExact(
+  base: PnlBase,
+  scenario: Scenario,
+  params: MarginParams,
+  capital: number | null,
+  holidays: Holidays,
+  jscc: JsccInput | null,
 ): MarginCalc | null {
   const sc0: Scenario = { ...scenario, days: 0, dX: 0, dSigma: 0, skew: 0 };
   const x = base.ctx.x0;

@@ -356,6 +356,7 @@ function evalRow(
         null,
         input.calendar.holidays,
         input.jscc ?? null,
+        input.factors ?? null,
       )
     : null;
   const total = base ? evaluatePosition(base.legs, ZERO_SCENARIO, base.ctx, settings).total : null;
@@ -427,6 +428,7 @@ export function holdingsModel(input: HoldingsInput): HoldingsView {
           input.capital,
           input.calendar.holidays,
           input.jscc ?? null,
+          input.factors ?? null,
         )
       : null;
     const t = base ? evaluatePosition(base.legs, ZERO_SCENARIO, base.ctx, working).total : null;

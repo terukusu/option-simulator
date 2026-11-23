@@ -233,7 +233,9 @@ class ChainService:
 @dataclass(frozen=True)
 class JsccPayload(Payload):
     status: str = "ok"  # ok / unavailable
-    reason: str = ""  # unavailable の理由（not_ready / inconsistent / no_source）
+    reason: str = ""  # unavailable の理由（not_ready / inconsistent / no_source / no_recent）
+    # 当て直しの r・g で基準日より前の日に遡った（#387。Cache-Control を短く = 取り込みの後に読み直す）
+    back: bool = False
 
 
 def jscc_unavailable(d, reason: str) -> JsccPayload:
@@ -252,6 +254,7 @@ class JsccService:
         self._sets = LRUCache(st.JSCC_SET_CACHE_SIZE)
         self._rows = LRUCache(st.JSCC_ROWS_CACHE_SIZE)
         self._factors = LRUCache(st.JSCC_FACTOR_CACHE_SIZE)
+        self._factor_index = ExpiringLRUCache(st.JSCC_FACTOR_INDEX_CACHE_SIZE, monotonic)
 
     def _run_id(self, d, budget: _Budget, loaded: list) -> str | None:
         def load():
@@ -314,34 +317,59 @@ class JsccService:
 
         return self._factors.get((d, run_id), load)
 
+    def _index(self, d, budget: _Budget, loaded: list) -> tuple[list, list]:
+        """遡りの索引（#387）: d から JSCC_FACTOR_RANGE_DAYS 暦日の取り込みの記録と当て直しの表の質（配列を読まない
+        小さい 2 クエリ）。キー = d。d に succeeded があれば 600 秒、無ければ 60 秒（当日の取り込みを待つ）"""
+        d0 = max(jscc.MIN_DATE, d - timedelta(days=st.JSCC_FACTOR_RANGE_DAYS))
+
+        def load():
+            loaded.append("index")
+            budget.check()
+            runs = self.runner("jscc_runs_range", {"d0": d0, "d": d})
+            budget.check()
+            quality = self.runner("jscc_factor_quality", {"d0": d0, "d": d})
+            return runs, quality
+
+        def ttl_of(v):
+            today = [r for r in v[0] if r.get("business_date") == d]
+            return st.JSCC_RUNS_TTL_SECONDS if jscc.pick_run(today) else st.JSCC_RUNS_MISS_TTL_SECONDS
+
+        return self._factor_index.get(d, load, st.JSCC_RUNS_TTL_SECONDS, ttl_of=ttl_of)
+
     def factors(self, req: jscc.FactorRequest) -> JsccPayload:
-        """/api/jscc_factors の中身（#387）。取り込みの記録・並び・パラメータは /api/jscc_scenarios と共用のキャッシュ。
-        r・g の表は 1 日分を 1 回読んで (日, run_id) でキャッシュ。表に行が 1 つも無い日（当てはめの前・失敗）は
-        not_ready（キャッシュしない = 次の要求で読み直す）"""
+        """/api/jscc_factors の中身（#387）。基準日の表が無い・要求の限月がそろわない・質が閾値を超えるときは、それより
+        前で直近の使える日（JSCC_FACTOR_MAX_BACK 営業日まで）に遡る（jscc.pick_factor_date。オーナーの承認）。
+        並び・パラメータは /api/jscc_scenarios と共用のキャッシュ、r・g の表は 1 日分を (日, run_id) でキャッシュ。
+        使える日が無ければ unavailable / no_recent"""
         started = self.monotonic()
         budget = _Budget(self.monotonic)
         loaded: list = []
         dropped = 0
+        back = None
         try:
-            run_id = self._run_id(req.date, budget, loaded)
-            if run_id is None:
-                payload = jscc_unavailable(req.date, "not_ready")
+            runs, quality = self._index(req.date, budget, loaded)
+            picked = jscc.pick_factor_date(req, runs, quality)
+            if picked is None:
+                payload = jscc_unavailable(req.date, "no_recent")
             else:
-                s = self._set(req.date, run_id, budget, loaded)
-                day = self._factor_day(req.date, run_id, len(s.types), budget, loaded)
+                d, run_id = picked
+                back = (req.date - d).days
+                s = self._set(d, run_id, budget, loaded)
+                day = self._factor_day(d, run_id, len(s.types), budget, loaded)
                 dropped = day.dropped
                 if not day.rows:
-                    self._factors.pop((req.date, run_id))
+                    self._factors.pop((d, run_id))
                     payload = jscc_unavailable(req.date, "not_ready")
                 else:
-                    body, gz = _encode(jscc.factors_ok_json(req, s, day))
-                    payload = JsccPayload(body, gz, None)
+                    body, gz = _encode(jscc.factors_ok_json(req, s, day, d))
+                    payload = JsccPayload(body, gz, None, back=d != req.date)
         except jscc.Inconsistent as e:
             log("WARNING", "jscc_inconsistent", table=e.args[0] if e.args else None)
             payload = jscc_unavailable(req.date, "inconsistent")
         # 限月（p）は利用者の検討内容に近いのでログに出さない（数だけ）
         log("INFO", "jscc_factors_served", status=payload.status, reason=payload.reason or None,
-            periods=len(req.periods), dropped=dropped, queries=len(loaded), cache="miss" if loaded else "hit",
+            periods=len(req.periods), dropped=dropped, back_days=back, queries=len(loaded),
+            cache="miss" if loaded else "hit",
             elapsed_ms=round((self.monotonic() - started) * 1000))
         return payload
 

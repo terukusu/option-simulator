@@ -31,7 +31,10 @@ export const JSCC_RETRY_MS = 5 * 60_000;
 export const JSCC_KEY_RE = /^(NK225E-\d{6}-[CP]-[1-9]\d{0,6}|NK225(F|MF|MCF)-\d{6})$/;
 
 /** JSCC の計算にできない理由のうち、読み込みの側のもの */
-export type JsccFetchReason = 'loading' | 'not_ready' | 'error' | 'no_source';
+/**
+ * no_recent = 当て直しの r・g が、基準日から遡って JSCC_FACTOR_MAX_BACK 営業日に使える日が無い（#387。/api/jscc_factors だけ）
+ */
+export type JsccFetchReason = 'loading' | 'not_ready' | 'error' | 'no_source' | 'no_recent';
 
 /** 画面が持つ JSCC の状態（今の必要証拠金の入力） */
 export type JsccInput =
@@ -284,6 +287,8 @@ export function jsccUrl(endpoint: string, date: string, keys: readonly string[])
 
 // ---------------------------------------------------------------- 当て直しの r・g（#387）
 
+/** 遡る範囲の暦日の上限（API の JSCC_FACTOR_RANGE_DAYS と同じ。応答の business_date の検査） */
+export const JSCC_FACTOR_MAX_BACK_DAYS = 21;
 /** `/api/jscc_factors` の 1 要求の限月の上限（API と同じ。超えたら分けて読む） */
 export const JSCC_FACTOR_MAX_PERIODS = 8;
 /** r・g の整数の刻み（API の scale と同じでなければ不正） */
@@ -300,7 +305,7 @@ export type JsccFactorsInput =
 /** 検証した応答 */
 export type JsccFactorsResponse =
   | { status: 'ok'; data: JsccFactors; missing: string[] }
-  | { status: 'unavailable'; reason: 'not_ready' | 'no_source' };
+  | { status: 'unavailable'; reason: 'not_ready' | 'no_source' | 'no_recent' };
 
 /**
  * 要求する限月（YYYYMM。足の OP の限月・先物の限月。昇順・重複なし）。基準日の月より前（SQ を過ぎた）は入れない
@@ -354,14 +359,24 @@ export function validateJsccFactorsJson(
   const o = v as Record<string, unknown>;
   if (o.schema_version !== JSCC_SCHEMA_VERSION)
     add('$.schema_version', `${JSCC_SCHEMA_VERSION} でない`);
-  if (o.business_date !== date || !isIsoDate(o.business_date)) {
-    add('$.business_date', '要求した基準日でない');
+  // 使った日（business_date）は基準日か、それより前で直近の使える日（遡る = #387。JSCC_FACTOR_MAX_BACK_DAYS 暦日まで）
+  const used = o.business_date;
+  if (
+    !isIsoDate(used) ||
+    used > date ||
+    Date.parse(`${date}T00:00:00Z`) - Date.parse(`${used}T00:00:00Z`) >
+      JSCC_FACTOR_MAX_BACK_DAYS * 86_400_000
+  ) {
+    add('$.business_date', '基準日か遡る範囲の日でない');
   }
   if (o.status === 'unavailable') {
+    if (o.business_date !== date) add('$.business_date', '要求した基準日でない');
     if (errors.length > 0) return { ok: false, errors };
-    const reason = o.reason === 'no_source' ? 'no_source' : 'not_ready';
+    const reason =
+      o.reason === 'no_source' ? 'no_source' : o.reason === 'no_recent' ? 'no_recent' : 'not_ready';
     return { ok: true, value: { status: 'unavailable', reason } };
   }
+  if (o.requested_date !== date) add('$.requested_date', '要求した基準日でない');
   if (o.status !== 'ok') {
     add('$.status', 'ok / unavailable でない');
     return { ok: false, errors };
@@ -478,7 +493,7 @@ export function validateJsccFactorsJson(
     value: {
       status: 'ok',
       data: {
-        businessDate: date,
+        businessDate: used as string,
         set: { isHist, confidence: conf as number, nStress: nStress as number },
         nodes: nodes as number[],
         rows,
@@ -505,7 +520,8 @@ export function mergeJsccFactors(rs: readonly JsccFactorsResponse[]): JsccFactor
       s.nStress !== s0.nStress ||
       s.isHist.length !== s0.isHist.length ||
       s.isHist.some((h, i) => h !== s0.isHist[i]) ||
-      r.data.nodes.some((x, i) => x !== first.data.nodes[i])
+      r.data.nodes.some((x, i) => x !== first.data.nodes[i]) ||
+      r.data.businessDate !== first.data.businessDate
     ) {
       return null;
     }

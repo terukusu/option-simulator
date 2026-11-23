@@ -233,7 +233,10 @@ def create_app(runner=None, clock=None, monotonic=None, cfg: st.Settings | None 
 
         res = serve("jscc_factors", produce, f"private, max-age={st.JSCC_MAX_AGE_SECONDS}")
         p = holder.get("p")
-        if res.status_code == 200 and getattr(p, "reason", "") == "not_ready":
+        # 遡っても使える日が無い（no_recent）も、取り込みの後に変わるので短く
+        # 遡った ok も、基準日の取り込みの後に基準日の表に替わるので短く（#387）
+        short = getattr(p, "reason", "") in ("not_ready", "no_recent") or getattr(p, "back", False)
+        if res.status_code == 200 and short:
             res.headers["Cache-Control"] = f"private, max-age={st.JSCC_NOT_READY_MAX_AGE_SECONDS}"
         return res
 

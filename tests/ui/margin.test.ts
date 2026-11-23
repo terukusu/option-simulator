@@ -1460,6 +1460,55 @@ describe('#387 シナリオの点・テール・追証の線を JSCC のシナ�
     );
   });
 
+  it('今: 基準日の BPF が無ければ、直近の使える日の r・g で今の状態を当て直す（JSCC 推定 + 使った日。#387）', () => {
+    const m = metricsOf(sNow);
+    const b0 = baseOf(sNow);
+    const f = factorsOf(sNow);
+    if (f.status !== 'ok') throw new Error('ok でない');
+    const older: JsccFactorsInput = {
+      status: 'ok',
+      data: { ...f.data, businessDate: '2026-10-09' },
+    };
+    for (const reason of ['not_ready', 'error', 'loading'] as const) {
+      const now = marginNow(
+        b0,
+        sNow.scenario,
+        params,
+        capital,
+        holidays,
+        { status: 'unavailable', reason },
+        older,
+      );
+      expect(now?.basis).toMatchObject({ kind: 'jscc_refit', businessDate: '2026-10-09' });
+      expect(now?.result.source).toBe('jscc_refit');
+      const tiles = metricTiles(m, { ...viewOf(sNow, withCapital(capital)), now, point: now });
+      expect(tile(tiles, 'margin').s).toMatch(/ · JSCC 推定 10\/9$/);
+      expect(tile(tiles, 'room').s).toMatch(/ · 推定 · /);
+      for (const t of tiles.slice(4)) {
+        expect(widthUnits(t.s), `${t.key}: ${t.s}`).toBeLessThanOrEqual(SUB_MAX_UNITS);
+      }
+    }
+    // 基準日の BPF があればそちら（JSCC の計算）、r・g も無ければ格子 + 理由
+    expect(
+      marginNow(b0, sNow.scenario, params, capital, holidays, nowJscc(sNow), older)?.basis.kind,
+    ).toBe('jscc');
+    expect(
+      marginNow(
+        b0,
+        sNow.scenario,
+        params,
+        capital,
+        holidays,
+        { status: 'unavailable', reason: 'not_ready' },
+        {
+          status: 'unavailable',
+          reason: 'no_recent',
+        },
+      )?.basis,
+    ).toEqual({ kind: 'estimate', reason: 'not_ready' });
+    expect(JSCC_REASON_TEXT.no_recent).toContain('10 営業日');
+  });
+
   it('今が JSCC でなければ「今を推定で」は出さない', () => {
     const b0 = baseOf(sNow);
     const grid = marginNow(b0, sNow.scenario, params, capital, holidays);

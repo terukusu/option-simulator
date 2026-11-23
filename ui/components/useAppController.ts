@@ -668,12 +668,6 @@ export function useAppController(boot: Boot = NO_BOOT, margin: MarginPrefs = DEF
   // 板の読み直し（[最新]・自動の読み込み。取得時刻）で、期限切れの not_ready・失敗を読み直す（#382 レビュー N1）
   const jsccReload = state.fetchedAt ?? chain?.snapshotAt ?? null;
   const jscc = useJsccScenarios(jsccDate, jsccKeys, jsccEndpoint, jsccReload);
-  // 今・テールは全域（ΔX で広がる）を使わないので板の基礎（pnlBoard）で memo する（ΔX が全域の格子を跨いでも作り直さない）
-  const marginNowCalc = useMemo(
-    () =>
-      pnlBoard ? marginNow(pnlBoard, nowScenario, marginParams, capital, holidays, jscc) : null,
-    [pnlBoard, nowScenario, marginParams, capital, holidays, jscc],
-  );
   // 当て直しの r・g（#387）: 基準日は今の JSCC と同じ。限月（足の OP・先物の限月）が変わったときだけ読む
   const jsccFactorPeriodList = useMemo(
     () =>
@@ -690,6 +684,14 @@ export function useAppController(boot: Boot = NO_BOOT, margin: MarginPrefs = DEF
     jsccFactorPeriodList,
     jsccFactorsEndpointOf(jsccEndpoint),
     jsccReload,
+  );
+  // 今・テールは全域（ΔX で広がる）を使わないので板の基礎（pnlBoard）で memo する（ΔX が全域の格子を跨いでも作り直さない）
+  const marginNowCalc = useMemo(
+    () =>
+      pnlBoard
+        ? marginNow(pnlBoard, nowScenario, marginParams, capital, holidays, jscc, jsccFactors)
+        : null,
+    [pnlBoard, nowScenario, marginParams, capital, holidays, jscc, jsccFactors],
   );
   // 今を当て直した値（#387。今が JSCC のときだけ。内訳の「今を推定で」= 今のすぐ隣の点との跳びの大きさ）
   const marginNowRefitCalc = useMemo(

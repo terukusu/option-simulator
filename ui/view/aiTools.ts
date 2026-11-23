@@ -282,7 +282,15 @@ function marginSourceState(c: MarginCalc | null): ToolResult {
 function marginSummary(env: AiToolEnv, base: PnlBase): ToolResult {
   const { params, capital } = env.margin;
   const sc = env.scenario;
-  const now = marginNow(base, sc, params, capital, env.holidays, env.margin.jscc ?? null);
+  const now = marginNow(
+    base,
+    sc,
+    params,
+    capital,
+    env.holidays,
+    env.margin.jscc ?? null,
+    env.margin.factors ?? null,
+  );
   return {
     capital_yen: capital === null ? null : yen(capital),
     params: {

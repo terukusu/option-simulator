@@ -5,7 +5,7 @@
 import json
 import re
 import threading
-from datetime import date
+from datetime import date, timedelta
 
 import pytest
 from conftest import PKG_DIR
@@ -151,35 +151,111 @@ def test_service_reads_day_once_and_shares_run_cache():
     obj = json.loads(p.json_bytes)
     assert p.status == "ok" and {r["key"] for r in obj["rows"]} == {"NK225E-202612", "NK225F-202703"}
     assert all(len(r["r"]) == N for r in obj["rows"])
-    assert runner.names() == ["jscc_runs", "jscc_scenario_set", "jscc_parameter", "jscc_factor"]
+    assert runner.names() == ["jscc_runs_range", "jscc_factor_quality", "jscc_scenario_set", "jscc_parameter",
+                              "jscc_factor"]
+    assert obj["business_date"] == obj["requested_date"] == "2026-11-20"
+    # 遡りの範囲の日付は DATE のパラメータ（文字列を使わない）
+    assert runner.calls[0][1] == {"d0": max(jscc.MIN_DATE, D - timedelta(days=st.JSCC_FACTOR_RANGE_DAYS)), "d": D}
     runner.reset()
     s.factors(req("202703"))
     assert runner.names() == []
-    # /api/jscc_scenarios と取り込みの記録・並びを共用
+    # /api/jscc_scenarios と並びを共用（取り込みの記録は日ごとの別のキャッシュ）
     assert s.get(jscc.JsccRequest(D, ("NK225E-202612-P-30000",))).status == "ok"
-    assert runner.names() == ["jscc_scenario"]
+    assert runner.names() == ["jscc_runs", "jscc_scenario"]
 
 
-def test_service_empty_table_is_not_ready_and_not_cached():
+def test_service_empty_table_is_no_recent_until_index_ttl():
     w = world(periods=(), futures_only=())
-    s, runner, _ = svc(w)
-    assert s.factors(req()).reason == "not_ready"
+    s, runner, clock = svc(w)
+    assert s.factors(req()).reason == "no_recent"
     jscc_factor_world(w, D)
+    clock.advance(st.JSCC_RUNS_TTL_SECONDS + 1)
     assert s.factors(req()).status == "ok"
 
 
 def test_service_other_run_is_inconsistent():
+    # 要求の限月（202612）の行は使える日でも、同じ日のほかの行（202703 の先物）の run_id が違えば使わない
     w = world()
-    w.jscc_factors[0]["jscc_run_id"] = "other"
+    w.jscc_factors[1]["jscc_run_id"] = "other"
     s, _, _ = svc(w)
     assert s.factors(req()).reason == "inconsistent"
 
 
-def test_service_no_run_is_not_ready():
+def test_service_no_run_is_no_recent():
     w = World()
     jscc_factor_world(w, D)
     s, _, _ = svc(w)
-    assert s.factors(req()).reason == "not_ready"
+    assert s.factors(req()).reason == "no_recent"
+
+
+def back_world(days, d0_quality=0.004, periods=("202612",)):
+    """days 個の営業日（D から前の平日）に JSCC の表と当て直しの表を足す（run_id は日ごと）"""
+    w = World()
+    d = D
+    out = []
+    while len(out) < days:
+        if d.weekday() < 5:
+            out.append(d)
+        d -= timedelta(days=1)
+    for i, x in enumerate(out):
+        jscc_world(w, x, run_id=f"run-{i}")
+        jscc_factor_world(w, x, run_id=f"run-{i}", periods=periods, futures_only=())
+    for r in w.jscc_factors:
+        if r["business_date"] == D:
+            r["check_median_rel"] = d0_quality
+    return w, out
+
+
+def test_service_goes_back_to_latest_usable_day():
+    # 基準日の取り込みが無い（17:00〜18:30 など）→ 前の営業日
+    w, days = back_world(3)
+    w.jscc_runs = [r for r in w.jscc_runs if r["business_date"] != D]
+    s, _, _ = svc(w)
+    obj = json.loads(s.factors(req()).json_bytes)
+    assert obj["business_date"] == days[1].isoformat() and obj["requested_date"] == D.isoformat()
+
+
+def test_app_back_is_short_max_age():
+    w, days = back_world(2)
+    w.jscc_runs = [r for r in w.jscc_runs if r["business_date"] != D]
+    res = client(w).get("/api/jscc_factors?date=2026-11-20&p=202612")
+    assert res.get_json()["business_date"] == days[1].isoformat()
+    assert res.headers["Cache-Control"] == f"private, max-age={st.JSCC_NOT_READY_MAX_AGE_SECONDS}"
+
+
+def test_service_skips_day_with_poor_quality_or_missing_period():
+    w, days = back_world(3, d0_quality=st.JSCC_FACTOR_MAX_MEDIAN_REL + 0.01)
+    s, _, _ = svc(w)
+    assert json.loads(s.factors(req()).json_bytes)["business_date"] == days[1].isoformat()
+    # 限月がそろわない日も飛ばす（前の日にだけ 202703 がある）
+    jscc_factor_world(w, days[2], run_id="run-2", periods=("202703",), futures_only=())
+    s2, _, _ = svc(w)
+    assert json.loads(s2.factors(req("202612", "202703")).json_bytes)["business_date"] == days[2].isoformat()
+
+
+def test_service_back_limit(monkeypatch):
+    # データの始まり（JSCC_MIN_DATE）より前まで遡れるようにして、上限（JSCC_FACTOR_MAX_BACK 営業日）だけを見る
+    monkeypatch.setattr(jscc, "MIN_DATE", date(2026, 10, 1))
+    w, days = back_world(st.JSCC_FACTOR_MAX_BACK + 2)
+    last_ok = days[st.JSCC_FACTOR_MAX_BACK - 1]  # 10 営業日目
+    w.jscc_factors = [r for r in w.jscc_factors if r["business_date"] == last_ok]
+    s, _, _ = svc(w)
+    assert json.loads(s.factors(req()).json_bytes)["business_date"] == last_ok.isoformat()
+    w2, days2 = back_world(st.JSCC_FACTOR_MAX_BACK + 2)
+    w2.jscc_factors = [r for r in w2.jscc_factors if r["business_date"] == days2[st.JSCC_FACTOR_MAX_BACK]]
+    s2, _, _ = svc(w2)
+    assert s2.factors(req()).reason == "no_recent"
+
+
+def test_pick_factor_date_pure():
+    runs = [{"business_date": D, "jscc_run_id": "a", "status": "failed", "finished_at": 1},
+            {"business_date": D - timedelta(days=1), "jscc_run_id": "b", "status": "succeeded", "finished_at": 1}]
+    q = [{"business_date": D, "jscc_run_id": "a", "product_code": "NK225E", "contract_period_code": "202612",
+          "check_median_rel": 0.0},
+         {"business_date": D - timedelta(days=1), "jscc_run_id": "b", "product_code": "NK225F",
+          "contract_period_code": "202612", "check_median_rel": None}]
+    assert jscc.pick_factor_date(req(), runs, q) == (D - timedelta(days=1), "b")
+    assert jscc.pick_factor_date(req(), runs, q, max_back=0) is None
 
 
 def test_service_single_flight():
@@ -189,7 +265,8 @@ def test_service_single_flight():
     runner = FakeRunner(w, gates={"jscc_factor": gate})
     s = JsccService(runner, clock, clock.monotonic)
     out = []
-    ts = [threading.Thread(target=lambda p=p: out.append(s.factors(req(p)))) for p in ("202612", "202703", "202706")]
+    ts = [threading.Thread(target=lambda p=p: out.append(s.factors(req(*p))))
+          for p in (("202612",), ("202703",), ("202612", "202703"))]
     for t in ts:
         t.start()
     runner.started["jscc_factor"].wait(5)
@@ -225,7 +302,7 @@ def test_app_ok_and_cache_control():
 
 def test_app_not_ready_short_max_age():
     res = client(World()).get("/api/jscc_factors?date=2026-11-20&p=202612")
-    assert res.get_json()["reason"] == "not_ready"
+    assert res.get_json()["reason"] == "no_recent"
     assert res.headers["Cache-Control"] == f"private, max-age={st.JSCC_NOT_READY_MAX_AGE_SECONDS}"
 
 

@@ -189,7 +189,7 @@ describe.each(AI_EVAL_CASES.map((c) => c.name))('ツール = 画面の表示モ�
       params,
       capital,
       env.holidays,
-      marginNow(base, env.scenario, params, capital, env.holidays),
+      marginNow(base, env.scenario, params, capital, env.holidays, null, factors),
       factors,
     );
     expect(r.point.margin_yen).toBe(yen(pt?.result.margin));
