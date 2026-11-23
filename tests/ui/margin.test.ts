@@ -1441,6 +1441,11 @@ describe('#387 シナリオの点・テール・追証の線を JSCC のシナ�
     const wide = marginPoint(b, s.scenario, params, capital, holidays, withQ(0.002, 0.17));
     expect(wide?.basis.kind).toBe('jscc_refit');
     expect(marginBasisMark(wide?.basis ?? null)).toBe('JSCC 推定 10/13・誤差大');
+    // 全文の見出しは基準日を省いて 1 行に（360px の peek）
+    expect(
+      tile(metricTiles(m, { ...viewOf(s, withCapital(capital)), point: wide }), 'margin').full[0]
+        ?.k,
+    ).toBe('必要証拠金（JSCC 推定・誤差大）');
     const mv: MarginView = { ...viewOf(s, withCapital(capital)), point: wide };
     const bd = metricsBreakdown(m, mv);
     const qi = bd.findIndex((r) => r.k === MARGIN_REFIT_QUALITY_ROW_LABEL);

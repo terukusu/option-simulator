@@ -445,8 +445,14 @@ export function marginBasisText(b: MarginBasis): string {
 }
 
 /** 全文の 1 行目の見出しの括弧（値 = シナリオの点の出どころ） */
-const fullParen = (c: MarginCalc | null) =>
-  c && c.basis.kind !== 'estimate' ? marginBasisMark(c.basis) : MARGIN_ESTIMATE_MARK;
+const fullParen = (c: MarginCalc | null) => {
+  if (!c || c.basis.kind === 'estimate') return MARGIN_ESTIMATE_MARK;
+  // 誤差大の当て直しは基準日を省く（360px の peek の全文の見出しを 1 行に。基準日は内訳の「点の計算」で読む。#387）
+  if (c.basis.kind === 'jscc_refit' && refitWide(c.basis)) {
+    return `${MARGIN_REFIT_MARK}・${MARGIN_REFIT_WIDE_MARK}`;
+  }
+  return marginBasisMark(c.basis);
+};
 
 const isJsccNow = (mv: MarginView) => mv.now?.basis.kind === 'jscc';
 /** シナリオの点かテールが当て直し（#387） */

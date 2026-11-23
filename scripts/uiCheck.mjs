@@ -9079,6 +9079,13 @@ async function marginFull360() {
             v.textContent = '−1,234 千円';
             full.append(k, v);
           }
+          // 開いたときの Popover と同じく、吹き出しの下端が .panel-body の中に見えるまで .panel-body をスクロールする
+          // （revealDelta。行を後から足したので開いたときの調整が効いていない。#387 で今の行が 11 → 8 行になり、
+          // 足す行が 1 → 4 行に増えて、調整なしでは下にはみ出すようになった）
+          const ph = pop.getBoundingClientRect();
+          const hh = host.getBoundingClientRect();
+          if (ph.bottom > hh.bottom)
+            host.scrollTop += Math.min(ph.bottom - hh.bottom, ph.top - hh.top);
         }
         const rows = full.querySelectorAll(':scope > span').length / 2;
         const within = (q, h) =>
