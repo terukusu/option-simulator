@@ -117,6 +117,27 @@ export function jsccEsSigned(v: ArrayLike<number>, set: JsccScenarioSet): number
   xs.set(hist, 0);
   xs.set(stress.subarray(0, set.nStress), nh);
   xs.sort();
+  return jsccEsOfSorted(xs, n, set);
+}
+
+/**
+ * 裾の本数（ES に入る値の数）: k = floor(n·q / 10^6) 本と、端数があれば k + 1 本目（按分）。n = H の本数 + nStress
+ */
+export function jsccTailCount(n: number, confidence: number): number {
+  const q = Math.round((100 - confidence) * 10_000);
+  const nq = n * q;
+  const k = Math.floor(nq / 1_000_000);
+  return nq - k * 1_000_000 > 0 ? k + 1 : k;
+}
+
+/**
+ * 符号つきの ES（jsccEsSigned の後半）。xs = 集めた n 本（H の全部 + S の小さい方から nStress 本）のうち小さい方から
+ * 昇順に、少なくとも jsccTailCount(n) 本（それより後ろは見ない）。n は集めた本数（xs の長さではない）。
+ * 当て直しの追証の線が、裾の候補のシナリオだけで評価するのに使う（#387）
+ */
+export function jsccEsOfSorted(xs: ArrayLike<number>, n: number, set: JsccScenarioSet): number {
+  if (!(set.confidence > 0 && set.confidence < 100)) throw new Error('信頼水準が範囲の外');
+  if (xs.length < jsccTailCount(n, set.confidence)) throw new Error('裾の本数が足りない');
   const q = Math.round((100 - set.confidence) * 10_000); // 1/10^6 単位の裾の割合
   const nq = n * q; // t × 10^6（2^53 未満）
   const k = Math.floor(nq / 1_000_000);
