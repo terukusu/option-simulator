@@ -87,7 +87,8 @@ def test_parse_bad_date(d):
 
 def frow(**kw):
     r = {"jscc_run_id": "r", "product_code": "NK225E", "contract_period_code": "202612",
-         "nodes": [-5, -4, -3, -2, -1.5, -1, -0.5, 0, 0.5, 1, 1.5, 2, 3], "r": [0.01] * 4, "g": [0.1] * 52}
+         "nodes": [-5, -4, -3, -2, -1.5, -1, -0.5, 0, 0.5, 1, 1.5, 2, 3], "r": [0.01] * 4, "g": [0.1] * 52,
+         "check_median_rel": 0.003, "check_p90_rel": 0.15}
     r.update(kw)
     return r
 
@@ -100,6 +101,13 @@ def test_factor_day_quantizes_and_keeps_futures_only_rows():
     assert day.rows["NK225E-202612"].g.tolist() == [1000] * 52
     assert day.rows["NK225F-202703"].g is None
     assert day.nodes == (-5, -4, -3, -2, -1.5, -1, -0.5, 0, 0.5, 1, 1.5, 2, 3)
+
+
+@pytest.mark.parametrize("v,want", [(0.02, 0.02), (None, None), (float("nan"), None), (-0.1, None), ("x", None),
+                                    (True, None)])
+def test_factor_day_quality_is_nonnegative_finite_or_none(v, want):
+    day = jscc.factor_day("r", [frow(check_median_rel=v)], 4)
+    assert day.rows["NK225E-202612"].check_median_rel == want
 
 
 @pytest.mark.parametrize("bad", [dict(r=[0.01] * 3), dict(r=[2.0] * 4), dict(g=[0.1] * 51), dict(g=[4.0] * 52),
@@ -125,6 +133,7 @@ def test_ok_json_rows_of_requested_periods_and_missing():
     assert obj["scale"] == {"r": 1_000_000, "g": 10_000}
     assert [r["key"] for r in obj["rows"]] == ["NK225E-202612", "NK225F-202703"]
     assert obj["rows"][1]["g"] is None and obj["missing"] == ["202706"]
+    assert obj["rows"][0]["check_median_rel"] == 0.003 and obj["rows"][0]["check_p90_rel"] == 0.15
     assert obj["scenario_types"] == "HHHS" and len(obj["nodes"]) == 13
 
 

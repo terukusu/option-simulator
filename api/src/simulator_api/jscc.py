@@ -268,6 +268,8 @@ def parse_factor_request(args, now: datetime) -> FactorRequest:
 class FactorRow:
     r: array  # int32（r × 1e6）
     g: array | None  # int32（g × 1e4。13 × 本数）。先物だけ・当てはめられない行は None
+    check_median_rel: float | None = None  # 推定の質（基準の状態の 1 枚の売りの ES の相対誤差の中央値。比）
+    check_p90_rel: float | None = None  # 同じ 90 パーセンタイル
 
 
 @dataclass(frozen=True)
@@ -287,6 +289,14 @@ def _floats(values) -> list[float] | None:
             return None
         out.append(f)
     return out
+
+
+def _rel(v) -> float | None:
+    """相対誤差（比）。数でない・有限でない・負は None（質が分からない）"""
+    if isinstance(v, bool) or not isinstance(v, (int, float, Decimal)):
+        return None
+    f = float(v)
+    return f if math.isfinite(f) and f >= 0 else None
 
 
 def factor_day(run_id: str, rows: list[dict], n: int) -> FactorDay:
@@ -321,7 +331,8 @@ def factor_day(run_id: str, rows: list[dict], n: int) -> FactorDay:
             elif nodes != tuple(nd):
                 raise Inconsistent("factor")
         out[key] = FactorRow(array("i", (round(x * FACTOR_SCALE_R) for x in r)),
-                             array("i", (round(x * FACTOR_SCALE_G) for x in g)) if g else None)
+                             array("i", (round(x * FACTOR_SCALE_G) for x in g)) if g else None,
+                             _rel(row.get("check_median_rel")), _rel(row.get("check_p90_rel")))
     return FactorDay(nodes, out, dropped)
 
 
@@ -335,7 +346,8 @@ def factors_ok_json(req: FactorRequest, s: ScenarioSet, day: FactorDay) -> dict:
         got = False
         for k in keys:
             fr = day.rows[k]
-            rows.append({"key": k, "r": fr.r.tolist(), "g": fr.g.tolist() if fr.g is not None else None})
+            rows.append({"key": k, "r": fr.r.tolist(), "g": fr.g.tolist() if fr.g is not None else None,
+                         "check_median_rel": fr.check_median_rel, "check_p90_rel": fr.check_p90_rel})
             got = True
         if not got:
             missing.append(p)

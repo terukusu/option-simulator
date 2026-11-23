@@ -310,11 +310,13 @@ def jscc_factor_world(w: "World", d: date, run_id="run-1", periods=("202612",), 
         w.jscc_factors.append({"business_date": d, "jscc_run_id": run_id, "product_code": "NK225E",
                                "contract_period_code": cp, "nodes": list(FACTOR_NODES),
                                "r": [rnd.uniform(-0.08, 0.08) for _ in range(n)],
-                               "g": [rnd.uniform(-0.5, 0.5) for _ in range(13 * n)]})
+                               "g": [rnd.uniform(-0.5, 0.5) for _ in range(13 * n)],
+                               "check_median_rel": 0.004, "check_p90_rel": 0.012})
     for cp in futures_only:
         w.jscc_factors.append({"business_date": d, "jscc_run_id": run_id, "product_code": "NK225F",
                                "contract_period_code": cp, "nodes": [],
-                               "r": [rnd.uniform(-0.08, 0.08) for _ in range(n)], "g": []})
+                               "r": [rnd.uniform(-0.08, 0.08) for _ in range(n)], "g": [],
+                               "check_median_rel": None, "check_p90_rel": None})
 
 
 def cm_rows(start: datetime, end: datetime, every_minutes=1, value=lambda t: 20.0) -> list[tuple]:

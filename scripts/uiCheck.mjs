@@ -2655,7 +2655,15 @@ async function marginLineCheck(page, lbl, shotName) {
   await page.focus('.chart:not(.mini)');
   await page.keyboard.press(']');
   const hidden = (await read()).lines;
-  await page.waitForTimeout(400);
+  // #387: 当て直しの追証の線は止まってから（120 ms）状態 1 つずつ切れごとに作る（合計 0.3〜0.6 s。負荷で延びる）ので、
+  // 線が戻るまで最大 3 秒待つ（前は 400 ms 固定）
+  await page
+    .waitForFunction(
+      () => document.querySelectorAll('.chart:not(.mini) line.mcall').length > 0,
+      null,
+      { timeout: 3000 },
+    )
+    .catch(() => {});
   const back = (await read()).lines;
   const ok =
     r.lines >= 1 &&

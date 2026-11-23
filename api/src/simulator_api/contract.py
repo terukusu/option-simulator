@@ -197,9 +197,9 @@ RELATIONS = {
     ),
     # 当て直しの r・g（#387。optionchan #168 が jscc_var_scenario から毎日当てはめる派生の表。
     # 1 行 = 日 × 商品 × 限月）。r は限月の先物の対数リターン（長さ = シナリオの本数。添字は pnl と同じ）、
-    # g は 13 節点の IV の対数変化（13 × 本数。
-    # シナリオごとに 13 個ずつ）、nodes は z の節点。先物だけの限月の行は g・nodes が空。列と表の名前は optionchan の
-    # 確定を待つ仮（pending）
+    # g は 13 節点の IV の対数変化（13 × 本数。シナリオごとに 13 個ずつ）、nodes は z の節点。先物だけの限月の行は
+    # g・nodes が空。check_median_rel / check_p90_rel は基準の状態で当て直した 1 枚の売りの ES と JSCC の値の相対誤差
+    # （比。中央値・90 パーセンタイル）で、画面が限月ごとの推定の質として出し、中央値が大きい限月は格子に戻す
     "jscc_factor": Relation(
         name="jscc_var_scenario_factor",
         schema_file="tokyo/jscc_var_scenario_factor.json",
@@ -210,10 +210,11 @@ RELATIONS = {
             ("nodes", "FLOAT"),
             ("r", "FLOAT"),
             ("g", "FLOAT"),
+            ("check_median_rel", "FLOAT"),
+            ("check_p90_rel", "FLOAT"),
         ),
         required=frozenset({"jscc_run_id", "product_code", "contract_period_code"}),
         repeated=frozenset({"nodes", "r", "g"}),
-        pending=True,
     ),
 }
 

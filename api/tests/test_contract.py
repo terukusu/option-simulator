@@ -119,12 +119,12 @@ def test_jscc_relations():
         assert q not in contract.OUTPUTS
 
 
-def test_pending_relations_are_known():
-    # #387: 固定コミットにまだ無い表は jscc_factor（optionchan #168）だけ。マージ後に pending を外して
-    # 固定コミットを上げる
-    assert {q for q, r in contract.RELATIONS.items() if r.pending} == {"jscc_factor"}
+def test_no_pending_relations():
+    # #387: optionchan #168 の表（jscc_var_scenario_factor）は固定コミット f8d90be に入った = 照合しない表は無い
+    assert not [q for q, r in contract.RELATIONS.items() if r.pending]
     fr = contract.RELATIONS["jscc_factor"]
     assert fr.repeated == {"nodes", "r", "g"} and dict(fr.columns)["r"] == "FLOAT"
+    assert dict(fr.columns)["check_median_rel"] == "FLOAT" and "check_median_rel" not in fr.required
 
 
 @pytest.mark.skipif(not SCHEMA_DIR, reason="OPTIONCHAN_SCHEMA_DIR（固定コミットの schema/）のときだけ")
