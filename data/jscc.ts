@@ -439,6 +439,17 @@ export function validateJsccFactorsJson(
         add(`${p}.r`, '本数の整数（|r| ≤ 1）の配列でない');
         return;
       }
+      const rel = (x: unknown, name: string): number | null | undefined => {
+        if (x === undefined || x === null) return null;
+        if (typeof x !== 'number' || !Number.isFinite(x) || x < 0) {
+          add(`${p}.${name}`, '0 以上の数か null でない');
+          return undefined;
+        }
+        return x;
+      };
+      const med = rel(r.check_median_rel, 'check_median_rel');
+      const p90 = rel(r.check_p90_rel, 'check_p90_rel');
+      if (med === undefined || p90 === undefined) return;
       let g: Float64Array | null = null;
       if (r.g !== null) {
         g = ints(r.g, n * NODE_COUNT, 3 * JSCC_FACTOR_SCALE.g, JSCC_FACTOR_SCALE.g);
@@ -447,7 +458,7 @@ export function validateJsccFactorsJson(
           return;
         }
       }
-      rows.set(key as string, { r: rr, g });
+      rows.set(key as string, { r: rr, g, checkMedianRel: med, checkP90Rel: p90 });
     });
   }
   const missing: string[] = [];

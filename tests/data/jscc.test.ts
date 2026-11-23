@@ -315,8 +315,20 @@ describe('#387 当て直しの r・g の応答（validateJsccFactorsJson・loadJ
     nodes: NODES,
     scale: { r: 1_000_000, g: 10_000 },
     rows: [
-      { key: 'NK225E-202612', r: [10000, -20000, 0, 5, -80000], g: Array(13 * n).fill(1500) },
-      { key: 'NK225F-202703', r: [1, 2, 3, 4, 5], g: null },
+      {
+        key: 'NK225E-202612',
+        r: [10000, -20000, 0, 5, -80000],
+        g: Array(13 * n).fill(1500),
+        check_median_rel: 0.002,
+        check_p90_rel: 0.15,
+      },
+      {
+        key: 'NK225F-202703',
+        r: [1, 2, 3, 4, 5],
+        g: null,
+        check_median_rel: null,
+        check_p90_rel: null,
+      },
     ],
     missing: ['202706'],
     ...over,
@@ -331,6 +343,9 @@ describe('#387 当て直しの r・g の応答（validateJsccFactorsJson・loadJ
     expect(Array.from(row?.r ?? [])).toEqual([0.01, -0.02, 0, 0.000005, -0.08]);
     expect(row?.g?.[0]).toBeCloseTo(0.15, 12);
     expect(r.value.data.rows.get('NK225F-202703')?.g).toBeNull();
+    expect(row?.checkMedianRel).toBe(0.002);
+    expect(row?.checkP90Rel).toBe(0.15);
+    expect(r.value.data.rows.get('NK225F-202703')?.checkMedianRel).toBeNull();
     expect(r.value.data.set).toEqual({
       isHist: [true, true, true, true, false],
       confidence: 97.5,
@@ -351,6 +366,14 @@ describe('#387 当て直しの r・g の応答（validateJsccFactorsJson・loadJ
     [
       'g が整数でない',
       { rows: [{ key: 'NK225E-202612', r: [0, 0, 0, 0, 0], g: Array(13 * n).fill(0.5) }] },
+    ],
+    [
+      '質が負',
+      { rows: [{ key: 'NK225E-202612', r: [0, 0, 0, 0, 0], g: null, check_median_rel: -0.1 }] },
+    ],
+    [
+      '質が文字列',
+      { rows: [{ key: 'NK225E-202612', r: [0, 0, 0, 0, 0], g: null, check_p90_rel: 'x' }] },
     ],
     ['週次の行', { rows: [{ key: 'NK225W1-202612', r: [0, 0, 0, 0, 0], g: null }] }],
     ['重複', { rows: [factorsJson().rows[0], factorsJson().rows[0]] }],

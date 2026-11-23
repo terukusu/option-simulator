@@ -1170,8 +1170,18 @@ export function synthJsccFactors(date, periods) {
       missing.push(p);
       continue;
     }
-    rows.push({ key: `NK225E-${p}`, r, g });
-    if (Number(p.slice(4)) % 3 === 0) rows.push({ key: `NK225F-${p}`, r, g: null });
+    // 推定の質（架空）: 最も近い限月は翼の誤差が大きい（p90 12%）、ほかは小さい
+    const near = rows.length === 0;
+    rows.push({
+      key: `NK225E-${p}`,
+      r,
+      g,
+      check_median_rel: near ? 0.004 : 0.001,
+      check_p90_rel: near ? 0.12 : 0.006,
+    });
+    if (Number(p.slice(4)) % 3 === 0) {
+      rows.push({ key: `NK225F-${p}`, r, g: null, check_median_rel: null, check_p90_rel: null });
+    }
   }
   return {
     schema_version: 1,

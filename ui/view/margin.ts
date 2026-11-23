@@ -28,8 +28,11 @@ import {
   gridRoomEvaluator,
   type Holidays,
   type JsccIneligible,
+  type JsccRefitIneligible,
+  type JsccRefitQuality,
   jsccEligibility,
   jsccRefitPlan,
+  jsccRefitQuality,
   jsccRefitRoomEvaluator,
   MARGIN_HORIZON_BUSINESS_DAYS,
   MARGIN_LINE_SAMPLES,
@@ -88,7 +91,7 @@ export function allowedLossOf(m: MarginPrefs): number | null {
 }
 
 /** JSCC の計算にできない理由（読み込み + model。none = M の足が無い = 0 円で、印を付けない） */
-export type JsccReason = JsccFetchReason | JsccIneligible;
+export type JsccReason = JsccFetchReason | JsccIneligible | JsccRefitIneligible;
 
 /**
  * 必要証拠金の出どころ（#382）: jscc = JSCC の計算（基準日）、estimate = 格子の概算（reason = 今を JSCC にできなかった
@@ -96,7 +99,12 @@ export type JsccReason = JsccFetchReason | JsccIneligible;
  */
 export type MarginBasis =
   | { kind: 'jscc'; businessDate: string }
-  | { kind: 'jscc_refit'; businessDate: string }
+  | {
+      kind: 'jscc_refit';
+      businessDate: string;
+      /** 足の OP の限月の推定の質（#387。内訳・注記に出す） */
+      quality: JsccRefitQuality[];
+    }
   | { kind: 'estimate'; reason: JsccReason | null };
 
 const ESTIMATE: MarginBasis = { kind: 'estimate', reason: null };
@@ -262,6 +270,7 @@ export function marginCalcAt(
       return calcOf(base, x, r.result, capital, {
         kind: 'jscc_refit',
         businessDate: factors.data.businessDate,
+        quality: jsccRefitQuality(legs, factors.data),
       });
     }
   } catch {

@@ -10,9 +10,11 @@ import {
   jsccTailCount,
 } from '../../model/jsccMargin';
 import {
+  JSCC_REFIT_MAX_MEDIAN_REL,
   type JsccFactors,
   jsccFactorRowOf,
   jsccRefitPlan,
+  jsccRefitQuality,
   jsccRefitRoomEvaluator,
   jsccRefitVector,
   marginAtJsccRefit,
@@ -314,6 +316,36 @@ describe('#387 当て直しの値（jsccRefitVector）', () => {
         only11,
       ),
     ).toBeNull();
+  });
+
+  it('推定の質: 中央値が閾値を超える限月の OP の足があれば poor_fit、超えなければ当て直す。質の一覧は限月ごと', () => {
+    const f = synthFactors(set, KEYS, 8);
+    const withQ = (med: number | null, p90: number | null): JsccFactors => ({
+      ...f,
+      rows: new Map(
+        [...f.rows].map(([k, r]) => [k, { ...r, checkMedianRel: med, checkP90Rel: p90 }] as const),
+      ),
+    });
+    const p = preparePosition(
+      [op(M1, 'put', 66000, 'sell'), op(M2, 'call', 70000, 'sell')],
+      ctx,
+      S,
+    );
+    const st = nowState(ctx);
+    const plan = (ff: JsccFactors) => {
+      const r = jsccRefitPlan(p, st, ctx, S, P, ff);
+      return r.ok ? 'ok' : r.reason;
+    };
+    expect(plan(withQ(JSCC_REFIT_MAX_MEDIAN_REL, 0.5))).toBe('ok');
+    expect(plan(withQ(JSCC_REFIT_MAX_MEDIAN_REL + 1e-9, 0.5))).toBe('poor_fit');
+    expect(plan(withQ(null, null))).toBe('ok');
+    expect(jsccRefitQuality(p, withQ(0.01, 0.2))).toEqual([
+      { period: '202611', medianRel: 0.01, p90Rel: 0.2 },
+      { period: '202612', medianRel: 0.01, p90Rel: 0.2 },
+    ]);
+    // 先物だけの足は質を見ない
+    const fu = preparePosition([fut('buy', 1, 'fut_mini')], ctx, S);
+    expect(jsccRefitPlan(fu, st, ctx, S, P, withQ(0.5, 0.5)).ok).toBe(true);
   });
 
   it('先物の足の行: 自分の商品 → 同じ限月の NK225E → ほかの先物（先物だけの行は g が空）', () => {

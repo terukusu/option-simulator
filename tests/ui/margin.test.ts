@@ -66,6 +66,7 @@ import {
   MARGIN_POINT_NOW_TEXT,
   MARGIN_POINT_ROW_LABEL,
   MARGIN_POINT_SAME_TEXT,
+  MARGIN_REFIT_QUALITY_ROW_LABEL,
   MARGIN_TAIL_BUSY_MARK,
   MARGIN_TAIL_TITLE,
   MARGIN_TILE_LABEL,
@@ -1295,7 +1296,7 @@ describe('#387 シナリオの点・テール・追証の線を JSCC のシナ�
     const b = baseOf(s);
     const f = factorsOf(s);
     const p = marginPoint(b, s.scenario, params, capital, holidays, f);
-    expect(p?.basis).toEqual({ kind: 'jscc_refit', businessDate: D });
+    expect(p?.basis).toMatchObject({ kind: 'jscc_refit', businessDate: D });
     expect(p?.result.source).toBe('jscc_refit');
     expect(p?.result.margin).toBe(p?.result.jscc?.varMargin);
     const tail = marginTail(b, { ...s.scenario, dX: 0 }, params, capital, holidays, TAIL_SHOCKS, f);
@@ -1417,10 +1418,41 @@ describe('#387 シナリオの点・テール・追証の線を JSCC のシナ�
     });
     expect(grid.marginTailCaption).toContain(`概算（${JSCC_REASON_TEXT.not_ready}）`);
     expect(grid.marginTailCaption).toContain('R ±');
-    expect(marginBasisMark({ kind: 'jscc_refit', businessDate: '2026-11-20' })).toBe(
+    expect(marginBasisMark({ kind: 'jscc_refit', businessDate: '2026-11-20', quality: [] })).toBe(
       'JSCC 推定 11/20',
     );
     expect(MARGIN_HINT).toContain('JSCC 推定');
+  });
+
+  it('推定の質: p90 が閾値を超える限月は「誤差大」の注記と内訳の行、中央値が閾値を超える限月は格子 + poor_fit', () => {
+    const m = metricsOf(s);
+    const b = baseOf(s);
+    const base = factorsOf(s);
+    if (base.status !== 'ok') throw new Error('ok でない');
+    const withQ = (med: number, p90: number): JsccFactorsInput => ({
+      status: 'ok',
+      data: {
+        ...base.data,
+        rows: new Map(
+          [...base.data.rows].map(([k, r]) => [k, { ...r, checkMedianRel: med, checkP90Rel: p90 }]),
+        ),
+      },
+    });
+    const wide = marginPoint(b, s.scenario, params, capital, holidays, withQ(0.002, 0.17));
+    expect(wide?.basis.kind).toBe('jscc_refit');
+    expect(marginBasisMark(wide?.basis ?? null)).toBe('JSCC 推定 10/13・誤差大');
+    const mv: MarginView = { ...viewOf(s, withCapital(capital)), point: wide };
+    const bd = metricsBreakdown(m, mv);
+    const qi = bd.findIndex((r) => r.k === MARGIN_REFIT_QUALITY_ROW_LABEL);
+    expect(qi).toBeGreaterThan(-1);
+    expect(bd[qi]?.v).toMatch(/^\d+月 中央 0\.20% · p90 17%$/);
+    const narrow = marginPoint(b, s.scenario, params, capital, holidays, withQ(0.002, 0.01));
+    expect(marginBasisMark(narrow?.basis ?? null)).toBe('JSCC 推定 10/13');
+    const poor = marginPoint(b, s.scenario, params, capital, holidays, withQ(0.08, 0.2));
+    expect(poor?.basis).toEqual({ kind: 'estimate', reason: 'poor_fit' });
+    expect(marginBasisText(poor?.basis ?? { kind: 'estimate', reason: null })).toBe(
+      `概算（${JSCC_REASON_TEXT.poor_fit}）`,
+    );
   });
 
   it('今が JSCC でなければ「今を推定で」は出さない', () => {

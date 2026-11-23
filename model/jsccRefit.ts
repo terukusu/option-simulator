@@ -47,12 +47,36 @@ import { boardSigmaBase, type Scenario, sigmaAt } from './scenario';
 /** 節点の数（#383。z ∈ {−5, −4, −3, −2, −1.5, −1, −0.5, 0, 0.5, 1, 1.5, 2, 3}） */
 export const JSCC_REFIT_NODE_COUNT = 13;
 
+/**
+ * 推定の質の閾値（比）: 限月の check_median_rel（基準の状態で当て直した 1 枚の売りの ES と JSCC の値の相対誤差の
+ * 中央値。optionchan が毎日記録）がこれを超える限月の OP の足があれば当て直さない（格子に戻す）。2026-11-16〜20 の
+ * 5 日の実データで限月の中央値は 0.01〜2.3%（期近を含む）、#383 の 104 ポジションの同じ日の当て直しの誤差は
+ * p90 1.5%・最大 7%。中央値が 5% を超えるのは当てはめが壊れた限月だけと読む（設計 5.10・ADR-0014）
+ */
+export const JSCC_REFIT_MAX_MEDIAN_REL = 0.05;
+/**
+ * 推定の質の注記の閾値（比）: check_p90_rel がこれを超える限月は「誤差大」の注記を付ける（当て直しはする）。
+ * 期近（SQ まで 1 か月未満）の翼で 1 円の下限に張り付く銘柄の相対誤差が大きく、実データで 12〜17% になる限月がある
+ */
+export const JSCC_REFIT_WIDE_P90_REL = 0.05;
+
 /** 1 行（商品 × 限月）の r・g */
 export interface JsccFactorRow {
   /** シナリオごとの先物の対数リターン（長さ = シナリオの本数） */
   r: Float64Array;
   /** シナリオごとの g の節点の値（長さ = 13 × 本数。g[j·13 + m]）。先物だけの行は null（IV を動かさない） */
   g: Float64Array | null;
+  /** 推定の質（比。基準の状態の 1 枚の売りの ES の相対誤差の中央値・90 パーセンタイル。分からなければ null） */
+  checkMedianRel?: number | null;
+  checkP90Rel?: number | null;
+}
+
+/** 限月の推定の質（画面の内訳・ⓘ に出す） */
+export interface JsccRefitQuality {
+  /** YYYYMM */
+  period: string;
+  medianRel: number | null;
+  p90Rel: number | null;
 }
 
 /** 基準日の r・g（画面が読んだ応答を検証した形） */
@@ -65,8 +89,8 @@ export interface JsccFactors {
   rows: ReadonlyMap<string, JsccFactorRow>;
 }
 
-/** 当て直しにできない理由（none = M の足が無い = 0 円） */
-export type JsccRefitIneligible = 'missing' | 'fractional' | 'none';
+/** 当て直しにできない理由（none = M の足が無い = 0 円、poor_fit = 推定の質が閾値を超える限月の OP の足がある） */
+export type JsccRefitIneligible = 'missing' | 'fractional' | 'none' | 'poor_fit';
 
 const FUTURE_CODES: Record<FutureProduct, string> = {
   fut_large: 'NK225F',
@@ -141,6 +165,27 @@ function expOf(r: Float64Array): Float64Array {
   return e;
 }
 
+/**
+ * 当て直しに使う OP の足の限月の推定の質（限月の昇順・重複なし）。M の足（買いの OP の設定・生きている足）は見ずに
+ * 足の全部の OP の限月（表示の注記用）
+ */
+export function jsccRefitQuality(legs: readonly PreparedLeg[], f: JsccFactors): JsccRefitQuality[] {
+  const out = new Map<string, JsccRefitQuality>();
+  for (const p of legs) {
+    if (p.leg.kind !== 'option') continue;
+    const cp = periodOf(p.leg.expiry);
+    if (cp === null || out.has(cp)) continue;
+    const row = f.rows.get(`${OPTION_CODE}-${cp}`);
+    if (!row) continue;
+    out.set(cp, {
+      period: cp,
+      medianRel: row.checkMedianRel ?? null,
+      p90Rel: row.checkP90Rel ?? null,
+    });
+  }
+  return [...out.values()].sort((a, b) => (a.period < b.period ? -1 : 1));
+}
+
 /** z の節点の添字 m と重み（g = (1 − wt)·G[m] + wt·G[m + 1]）。節点の外は端の値 */
 export function nodeWeight(z: number, nodes: readonly number[]): { m: number; wt: number } {
   const last = nodes.length - 1;
@@ -193,6 +238,7 @@ export function jsccRefitPlan(
   const out: RefitLeg[] = [];
   let fractional = false;
   let missing = false;
+  let poor = false;
   for (let i = 0; i < legs.length; i++) {
     if (!base.inMargin[i]) continue;
     const p = legs[i] as PreparedLeg;
@@ -229,6 +275,8 @@ export function jsccRefitPlan(
       });
       continue;
     }
+    const med = row.checkMedianRel;
+    if (typeof med === 'number' && med > JSCC_REFIT_MAX_MEDIAN_REL) poor = true;
     const fS = forwardAt(p, state.x, ctx, settings);
     const tS = p.T0 - sc.days / 365;
     const sigmaS = legSigma(p, state.x, sc, ctx, settings) ?? settings.sigmaMin;
@@ -252,6 +300,7 @@ export function jsccRefitPlan(
   }
   if (fractional) return { ok: false, reason: 'fractional' };
   if (missing) return { ok: false, reason: 'missing' };
+  if (poor) return { ok: false, reason: 'poor_fit' };
   if (out.length === 0) return { ok: false, reason: 'none' };
   return {
     ok: true,

@@ -16,7 +16,11 @@
  * 掛け金（符号なしの支払いの額）は無色（読み取りの premium と同じ）。
  */
 
-import { MARGIN_HORIZON_BUSINESS_DAYS, type MarginParams } from '../../model';
+import {
+  JSCC_REFIT_WIDE_P90_REL,
+  MARGIN_HORIZON_BUSINESS_DAYS,
+  type MarginParams,
+} from '../../model';
 import { DASH, fmtNum, fmtSigned } from './format';
 import type { TermId } from './glossary';
 import type { JsccReason, MarginBasis, MarginCalc, MarginPointAt, MarginView } from './margin';
@@ -163,6 +167,10 @@ export const MARGIN_REFIT_MARK = 'JSCC 推定';
 export const MARGIN_POINT_BASIS_ROW_LABEL = '点の計算';
 /** 内訳の今を当て直した値の行の見出し（#387。今のすぐ隣の点との跳びの大きさ） */
 export const MARGIN_NOW_REFIT_ROW_LABEL = '今を推定で';
+/** 推定の誤差が大きい（p90 が閾値超え）限月があるときの注記（#387） */
+export const MARGIN_REFIT_WIDE_MARK = '誤差大';
+/** 内訳の推定の質の行の見出し（#387） */
+export const MARGIN_REFIT_QUALITY_ROW_LABEL = '推定の誤差';
 /** テールを作っている間の印（#387） */
 export const MARGIN_TAIL_BUSY_MARK = '計算中…';
 /** 内訳・全文の今の出どころの行の見出し（#382） */
@@ -178,6 +186,7 @@ export const JSCC_REASON_TEXT: Record<JsccReason, string> = {
   fractional: '枚数が整数でない足がある',
   error: 'JSCC のデータを読めない',
   no_source: 'データ元に JSCC のデータが無い',
+  poor_fit: 'JSCC 推定の誤差が大きい限月がある',
   none: '証拠金のかかる足が無い',
 };
 /** テールの証拠金の表の見出し（出どころ = JSCC 推定 / 概算 は表の上の注記。#387） */
@@ -188,7 +197,7 @@ export const ROOM_NO_CAPITAL_TEXT = '資金は ⋯ > 設定…';
 export const MARGIN_CALL_MARK = '追証';
 /** ⓘ の証拠金の文（方式・物差し・NOV・JSCC との違い・既定の決め方・未確認の形・Web 試算で確かめる。設計 5.10・#150） */
 export const MARGIN_HINT =
-  '今の必要証拠金は JSCC の計算: JSCC が毎営業日に公開する VaR 証拠金のパラメータ（過去の値動きとストレスシナリオ）で、今のポジションの VaR 証拠金額を JSCC と同じ手順で求め、掛け目を掛ける。証券会社の額と同じく前営業日の清算値で 1 日固定（場中に計算し直しても同じ額）。所要額 = 必要証拠金 − NOV で、NOV は今の板の値段で評価する（証券会社の必要委託と同じ形）。基準日のデータがまだ無い（平日 17:00〜18:30 ごろなど）・銘柄が無い・読めないときは、今も概算に戻り、副題に「概算」と出る。シナリオの点（見出しの横に d・ΔF・Δσ・Δs のうち 0 でないもの。全部 0 なら「今」で、値は今と同じ）・テール・追証の線は JSCC 推定: 同じ日の JSCC のシナリオ（限月ごとの先物の動きと ATM からの離れ方ごとの IV の動き）を、シナリオで動かした先の状態に当て直して JSCC と同じ手順で求め、掛け目を掛ける。今の値とは前営業日からの値動きと推定の誤差の分だけ違い（内訳の「今を推定で」）、下げた点では数 % 小さめに出うる。テールと追証の線はスライダーを止めてから計算する。JSCC のデータが無いときは概算: 原資産 ±R・±R/2・0 × 足の今の IV の ×(1 + 上げ) / ×1 / ×(1 − 下げ) × 経過 0 / 2 営業日の格子で、損失の最悪値に掛け目を掛ける（受け取るプレミアムの NOV を含まない）。概算の既定（R 5%・IV +50% / −25%）は 1 枚ずつの売りの 6 通りのポジションでの答え合わせ（0.98〜1.07 倍）で決めた。組み合わせによっては JSCC の値と大きくずれうる（売り put 中心は小さめ、売り call 中心は大きめ）。ストレス日・先物との組み合わせなどは未確認で、⋯ > 設定… の幅・掛け目で合わせる。余力 = 資金 − 支払 + 受取 − 手数料 − 先物の評価損 − (必要証拠金 − NOV)。先物の評価益は、指定日が日中の引け（値洗い）をまたぐまでは足さず、またいだら足す。余力 < 0 が追証（証券会社の計算式の追加証拠金と同じ判定）。値はシナリオの点、副題は今。simulator の NOV は今の板で計算するので場中の値動きの分だけ証券会社の額と違う。';
+  '今の必要証拠金は JSCC の計算: JSCC が毎営業日に公開する VaR 証拠金のパラメータ（過去の値動きとストレスシナリオ）で、今のポジションの VaR 証拠金額を JSCC と同じ手順で求め、掛け目を掛ける。証券会社の額と同じく前営業日の清算値で 1 日固定（場中に計算し直しても同じ額）。所要額 = 必要証拠金 − NOV で、NOV は今の板の値段で評価する（証券会社の必要委託と同じ形）。基準日のデータがまだ無い（平日 17:00〜18:30 ごろなど）・銘柄が無い・読めないときは、今も概算に戻り、副題に「概算」と出る。シナリオの点（見出しの横に d・ΔF・Δσ・Δs のうち 0 でないもの。全部 0 なら「今」で、値は今と同じ）・テール・追証の線は JSCC 推定: 同じ日の JSCC のシナリオ（限月ごとの先物の動きと ATM からの離れ方ごとの IV の動き）を、シナリオで動かした先の状態に当て直して JSCC と同じ手順で求め、掛け目を掛ける。今の値とは前営業日からの値動きと推定の誤差の分だけ違い（内訳の「今を推定で」）、下げた点では数 % 小さめに出うる。推定の誤差（その日の JSCC の値に当て直したときの 1 枚の売りの誤差の中央値と 90% 点）は内訳の「推定の誤差」に限月ごとに出し、90% 点が 5% を超える限月があれば印に「誤差大」（期近の翼など）、中央値が 5% を超える限月があれば概算に戻す。テールと追証の線はスライダーを止めてから計算する。JSCC のデータが無いときは概算: 原資産 ±R・±R/2・0 × 足の今の IV の ×(1 + 上げ) / ×1 / ×(1 − 下げ) × 経過 0 / 2 営業日の格子で、損失の最悪値に掛け目を掛ける（受け取るプレミアムの NOV を含まない）。概算の既定（R 5%・IV +50% / −25%）は 1 枚ずつの売りの 6 通りのポジションでの答え合わせ（0.98〜1.07 倍）で決めた。組み合わせによっては JSCC の値と大きくずれうる（売り put 中心は小さめ、売り call 中心は大きめ）。ストレス日・先物との組み合わせなどは未確認で、⋯ > 設定… の幅・掛け目で合わせる。余力 = 資金 − 支払 + 受取 − 手数料 − 先物の評価損 − (必要証拠金 − NOV)。先物の評価益は、指定日が日中の引け（値洗い）をまたぐまでは足さず、またいだら足す。余力 < 0 が追証（証券会社の計算式の追加証拠金と同じ判定）。値はシナリオの点、副題は今。simulator の NOV は今の板で計算するので場中の値動きの分だけ証券会社の額と違う。';
 
 /** 内訳・全文のシナリオ点の行の見出し（#164） */
 export const MARGIN_POINT_ROW_LABEL = 'シナリオ点';
@@ -390,6 +399,22 @@ function worstValues(c: MarginCalc | null, p: MarginParams): string[] | null {
   return [`F ${pct}%`, `IV ${ivScaleText(w.ivScale)}`, `経過 +${fmtNum(w.days)} 日`];
 }
 
+/** 推定の質の p90 が注記の閾値を超える限月があるか（#387） */
+const refitWide = (b: Extract<MarginBasis, { kind: 'jscc_refit' }>) =>
+  b.quality.some((q) => q.p90Rel !== null && q.p90Rel > JSCC_REFIT_WIDE_P90_REL);
+
+/** 相対誤差（比）→ `0.17%` / `17%`（1% 未満は小数 2 桁、10% 未満は 1 桁） */
+const relText = (v: number | null) =>
+  v === null ? '—' : `${(v * 100).toFixed(v < 0.01 ? 2 : v < 0.1 ? 1 : 0)}%`;
+
+/** 推定の質の行（限月ごとに `12月 中央 0.17% · p90 17%`。#387） */
+export function refitQualityValues(b: MarginBasis | null | undefined): string[] {
+  if (b?.kind !== 'jscc_refit') return [];
+  return b.quality.map(
+    (q) => `${Number(q.period.slice(4))}月 中央 ${relText(q.medianRel)} · p90 ${relText(q.p90Rel)}`,
+  );
+}
+
 /** 基準日（YYYY-MM-DD）→ `M/D` */
 const monthDay = (d: string) => `${Number(d.slice(5, 7))}/${Number(d.slice(8, 10))}`;
 
@@ -401,7 +426,8 @@ export function marginBasisMark(b: MarginBasis | null, short = false): string {
   if (!b) return '';
   if (b.kind === 'jscc') return short ? 'JSCC' : `JSCC ${monthDay(b.businessDate)}`;
   if (b.kind === 'jscc_refit') {
-    return short ? MARGIN_REFIT_MARK : `${MARGIN_REFIT_MARK} ${monthDay(b.businessDate)}`;
+    const wide = refitWide(b) ? `・${MARGIN_REFIT_WIDE_MARK}` : '';
+    return short ? MARGIN_REFIT_MARK : `${MARGIN_REFIT_MARK} ${monthDay(b.businessDate)}${wide}`;
   }
   return b.reason === 'none' ? '' : MARGIN_ESTIMATE_MARK;
 }
@@ -412,7 +438,7 @@ export function marginBasisMark(b: MarginBasis | null, short = false): string {
  */
 export function marginBasisText(b: MarginBasis): string {
   if (b.kind === 'jscc') return `JSCC ${monthDay(b.businessDate)} の計算`;
-  if (b.kind === 'jscc_refit') return `${MARGIN_REFIT_MARK} ${monthDay(b.businessDate)}`;
+  if (b.kind === 'jscc_refit') return marginBasisMark(b);
   return b.reason === null
     ? MARGIN_ESTIMATE_MARK
     : `${MARGIN_ESTIMATE_MARK}（${JSCC_REASON_TEXT[b.reason]}）`;
@@ -459,6 +485,8 @@ interface MarginGroups {
   pointBasis: FullRow[];
   /** 今を当て直した値（#387。今が JSCC で r・g があるときだけ） */
   nowRefit: FullRow[];
+  /** 推定の質（#387。シナリオ点が当て直しのとき、限月ごと） */
+  quality: FullRow[];
   worst: FullRow[];
   params: FullRow[];
 }
@@ -489,6 +517,10 @@ function marginGroups(mv: MarginView, u: AmountUnit): MarginGroups {
         ? [{ k: MARGIN_POINT_BASIS_ROW_LABEL, v: marginBasisText(mv.point.basis) }]
         : [],
     nowRefit: mv.nowRefit ? [{ k: MARGIN_NOW_REFIT_ROW_LABEL, v: A(marginOf(mv.nowRefit)) }] : [],
+    quality: refitQualityValues(mv.point?.basis ?? tailBasis(mv)).map((v, i) => ({
+      k: i === 0 ? MARGIN_REFIT_QUALITY_ROW_LABEL : '',
+      v,
+    })),
     worst: w === null ? [] : w.map((v, i) => ({ k: i === 0 ? '最悪の点' : '', v })),
     params: [
       { k: '値動き幅 R', v: `±${fmtParam(Math.round(p.range * 1000) / 10)}%` },
@@ -752,7 +784,15 @@ export function metricsBreakdown(
     add(g.point);
     addTerms(stateList(g.atPoint), STATE_TERMS);
     addTerms(stateList(g.atNow), STATE_TERMS);
-    add([g.multiple, ...g.basis, ...g.nowRefit, ...g.pointBasis, ...g.worst, ...g.params]);
+    add([
+      g.multiple,
+      ...g.basis,
+      ...g.nowRefit,
+      ...g.pointBasis,
+      ...g.quality,
+      ...g.worst,
+      ...g.params,
+    ]);
   }
   return rows;
 }
