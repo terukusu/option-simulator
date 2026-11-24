@@ -585,3 +585,18 @@ def test_design_5_10_keeps_decisions(idx):
     assert "margin_iv_up_pt" in adr2.split("## 詳細", 1)[1] and "| 約 26% OTM の put |" in adr2
     assert "LRU 16 件" in adr13.split("## 詳細", 1)[1]
     assert "adr-0002" in body and "adr-0013" in body
+
+
+def test_design_5_10_1_nov_floor_exemption_fits(idx):
+    """#393: 下限を外す条件（取引最終日まで K 営業日以内・暫定・ポートフォリオは未確認）が 5.10.1 にあり、5.10.1・5.10.2
+    は part 1 つのまま（read_doc の 1 回の読みの上限。#389）。5 章は頭と一覧の 1 回の読みのまま"""
+    s = idx.get("design", "5.10.1")
+    for word in ("下限から外す足", "JSCC_NOV_FLOOR_EXEMPT_BUSINESS_DAYS", "暫定", "両端を含めて", "分からない"):
+        assert word in s.text, word
+    assert "状態 S の基準日" in idx.get("design", "5.10.2").text
+    assert "足ごとに外すのか" in idx.get("design", "5.10.7").text
+    for sid in ("5.10.1", "5.10.2", "5.10.7"):
+        assert len(idx.get("design", sid).parts()) == 1, sid
+        text, err = docs.Reader(idx)({"file": "design", "section": sid})
+        assert not err and len(text.encode("utf-8")) <= st.AI_DOC_READ_MAX_BYTES, sid
+    assert len(idx.get("design", "5").parts()) == 1

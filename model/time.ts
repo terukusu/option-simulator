@@ -70,6 +70,29 @@ export function businessDaysAhead(instant: number, n: number, holidays: Holidays
   return Math.round((parseDate(d) - parseDate(start)) / DAY_MS);
 }
 
+/**
+ * base < d ≤ target の営業日 d の数（base の翌営業日から target まで両端を含む。target ≤ base なら 0）。
+ * limit を渡すと limit を超えた所で止めて limit + 1 を返す（遠い日付で長く回さない）。
+ * JSCC の VaR 証拠金額の下限を外す判定（取引最終日までの営業日数。#393）に使う。
+ */
+export function businessDaysAfter(
+  base: string,
+  target: string,
+  holidays: Holidays,
+  limit = Number.POSITIVE_INFINITY,
+): number {
+  const set = toSet(holidays);
+  const end = parseDate(target);
+  let n = 0;
+  let d = base;
+  for (;;) {
+    d = nextBusinessDay(d, set);
+    if (parseDate(d) > end) return n;
+    n++;
+    if (n > limit) return n;
+  }
+}
+
 /** 日中の立会の終わり（値洗いの時刻）15:45 JST。夜間 → 日中で 1 取引日なので、1 取引日の値洗いは 1 回。 */
 export const DAY_CLOSE_HOUR = 15;
 export const DAY_CLOSE_MINUTE = 45;
