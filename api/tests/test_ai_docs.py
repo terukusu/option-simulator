@@ -111,6 +111,10 @@ def test_parse_rules():
     assert one.startswith("## 1. はじめ\n") and "## 2. コードの中は見出しにしない" in one and "本文 C" in one
     assert "本文 D" not in one
     assert secs[1].text == "### 開き方\n\n本文 A。\n\n#### 細目\n\n本文 B。\n"
+    # #389: 頭（最初の子の見出しの前まで。コードブロックの中の # は子にしない）と子孫の一覧（番号の深さで字下げ）
+    assert secs[0].head.startswith("## 1. はじめ\n") and secs[0].head.endswith("```\n") and "開き方" not in secs[0].head
+    assert secs[0].outline == "- 1.1 開き方\n  - 1.1.1 細目\n- 1.9 番号つき\n"
+    assert secs[1].head == "### 開き方\n\n本文 A。\n" and secs[2].head == secs[2].text and secs[2].outline == ""
     assert "付録" not in secs[-1].text and "本文 E" not in secs[-1].text
     only2 = docs.parse(docs.DocFile("x", "x.md", "X", ("2",)), SAMPLE)
     assert [s.id for s in only2] == ["2"]
@@ -129,12 +133,131 @@ def test_split_parts_roundtrip_and_size(seed):
     assert all(0 < len(p.encode("utf-8")) <= size for p in parts)
 
 
+def direct_children(i, sec):
+    return [c for c in i.sections.values()
+            if c.file == sec.file and c.id.startswith(sec.id + ".") and c.id.count(".") == sec.id.count(".") + 1]
+
+
 def test_large_sections_split(idx):
+    """#389: part の数は 1 回で読めない節の本文（子が無い）か、子のある大きい節の頭だけで決まる。全部の節で
+    頭 + 直接の子の本文 = 節の本文（読めない部分を作らない）"""
     for s in idx.sections.values():
         parts = s.parts()
-        assert "".join(parts) == s.text
+        assert "".join(parts) == (s.head if s.outlined else s.text), (s.file, s.id)
         assert len(parts) <= docs.PART_MAX  # 後ろの part が読めない節を作らない（指摘 3）
-    assert len(idx.get("design", "5.10").parts()) >= 2
+        kids = direct_children(idx, s)
+        assert bool(kids) == bool(s.outline) and (s.head == s.text) == (not kids)
+        rest = s.text[len(s.head):] if s.text.startswith(s.head) else pytest.fail(f"頭が本文の先頭でない {s.id}")
+        for c in kids:  # 子の本文が順に並び、間は空行だけ
+            k = rest.index(c.text)
+            assert rest[:k].strip() == "", (s.file, s.id, c.id)
+            rest = rest[k + len(c.text):]
+        assert rest.strip() == ""
+        # 一覧は listing_max（本文の上限の 1/4）以下（子孫の数によらず。レビュー N1）
+        assert len(s.listing().encode("utf-8")) <= docs.listing_max()
+    assert big_leaves(idx)  # 子の無い大きい節は今どおり part
+    assert idx.get("design", "5").outlined and not idx.get("design", "5.10.1").outlined
+
+
+def test_chapter_5_returns_head_and_outline(idx):
+    """#389 AC: 設計書の 5 章は 1 回の読み（part なし）で、頭と子孫の番号・見出しの一覧。小節の本文は入らない"""
+    r = docs.Reader(idx)
+    text, err = r({"file": "design", "section": "5"})
+    assert not err and text.startswith("[設計書 5「価格モデル」]\n## 5. 価格モデル\n")
+    assert len(idx.get("design", "5").parts()) == 1 and "part" not in text.split("\n", 1)[0]
+    for line in ("- 5.1 ", "- 5.10 証拠金の概算\n", "  - 5.10.1 ", "  - 5.6.1 JPX グリークの単位\n", "- 5.15 "):
+        assert line in text
+    body_5101 = idx.get("design", "5.10.1").text.split("\n", 1)[1].strip()
+    assert body_5101[:40] not in text and "### 5.1 " not in text
+    assert "小節の番号" in text and len(text.encode("utf-8")) <= st.AI_DOC_READ_MAX_BYTES
+    assert r.read == ["design:5"]
+
+
+SYNTH = docs.DocFile("design", "x.md", "設計書", None)  # Reader は file の列挙を見るので design の名前で合成する
+GROW = """## 1. 章
+
+章の頭の段落。
+
+{kids}
+## 2. 次
+
+本文。
+"""
+
+
+@pytest.mark.parametrize("n_kids", [3, 30])
+def test_outline_does_not_grow_with_children(n_kids):
+    """#389 AC: 子の節を足して親が PART_MAX × 1 回の読みを超えても、親の read は 1 回のまま。子はどれも読める"""
+    para = ("価格の例は架空の値。" * 40 + "\n\n") * 6  # 約 7 KB（1 回に収まる）
+    kids = "".join(f"### 1.{k} 小節 {k}\n\n{para}" for k in range(1, n_kids + 1))
+    secs = docs.parse(SYNTH, GROW.format(kids=kids))
+    i = docs.Index({(s.file, s.id): s for s in secs})
+    parent = i.get("design", "1")
+    if n_kids == 30:
+        assert len(parent.text.encode("utf-8")) > docs.PART_MAX * st.AI_DOC_READ_MAX_BYTES
+        assert len(docs.split_parts(parent.text, docs.body_max())) > docs.PART_MAX  # 旧い返し方なら読めない part
+    assert parent.outlined and len(parent.parts()) == 1
+    text, err = docs.Reader(i)({"file": "design", "section": "1"})
+    assert not err and "章の頭の段落" in text and f"- 1.{n_kids} 小節 {n_kids}\n" in text and "架空" not in text
+    for k in range(1, n_kids + 1):
+        sec = i.get("design", f"1.{k}")
+        assert not sec.outlined and len(sec.parts()) == 1
+
+
+def synth_index(text):
+    return docs.Index({(s.file, s.id): s for s in docs.parse(SYNTH, text)})
+
+
+def assert_all_reads_fit(i):
+    for s in i.sections.values():
+        assert len(s.listing().encode("utf-8")) <= docs.listing_max()
+        for p in range(1, len(s.parts()) + 1):
+            got, err = docs.Reader(i)({"file": s.file, "section": s.id, "part": p})
+            assert not err and len(got.encode("utf-8")) <= st.AI_DOC_READ_MAX_BYTES, (s.id, p)
+
+
+def test_outline_many_descendants_lists_direct_children():
+    """レビュー N1: 子孫が多く一覧が listing_max を超えるときは直接の子だけ（孫のある子は「（小節 n）」）"""
+    para = "本文の段落。" * 100 + "\n\n"
+    kids = "".join(f"### 1.{k} 小節 {k}\n\n{para}" + "".join(
+        f"#### 1.{k}.{g} 細目 {g}\n\n{para}" for g in range(1, 16)) for k in range(1, 11))
+    i = synth_index(GROW.format(kids=kids))
+    parent = i.get("design", "1")
+    assert len(parent.outline.encode("utf-8")) > docs.listing_max()  # 子孫の全部なら上限を超える
+    text, err = docs.Reader(i)({"file": "design", "section": "1"})
+    assert not err and "- 1.10 小節 10（小節 15）\n" in text and "1.1.1 " not in text and "ほか" not in text
+    child, err = docs.Reader(i)({"file": "design", "section": "1.3"})
+    assert not err and "  - 1.3.15 細目 15\n" not in child and "- 1.3.15 細目 15\n" in child  # 孫は子を読むと出る
+    assert_all_reads_fit(i)
+
+
+@pytest.mark.parametrize("n_kids", [60, 99, 400])
+def test_outline_many_direct_children_truncated(n_kids):
+    """レビュー N1: 直接の子だけでも収まらなければ、収まるだけ +「ほか n 節」。1 回の読みは 8 KiB を超えない"""
+    kids = "".join(f"### 1.{k} とても長い見出しの小節 {k}\n\n" + "本文。" * 200 + "\n\n" for k in range(1, n_kids + 1))
+    i = synth_index(GROW.format(kids=kids))
+    text, err = docs.Reader(i)({"file": "design", "section": "1"})
+    m = re.search(r"- ほか ([0-9]+) 節", text)
+    shown = len(re.findall(r"^- 1\.[0-9]+ ", text, re.M))
+    assert not err and m and shown >= 1 and shown + int(m.group(1)) == n_kids
+    assert "- 1.1 とても長い見出しの小節 1\n" in text and len(text.encode("utf-8")) <= st.AI_DOC_READ_MAX_BYTES
+    if n_kids < 100:  # section の番号の形は 2 桁まで（1.100 以降は read_doc で引けない）
+        assert_all_reads_fit(i)
+
+
+def test_outline_head_split_when_head_large():
+    """#389: 頭が 1 回に収まらなければ頭だけを part に分け、一覧は最後の part にだけ付く"""
+    head = ("頭の段落。" * 60 + "\n\n") * 30  # 約 27 KB
+    text = f"## 1. 章\n\n{head}### 1.1 小節\n\n本文。\n"
+    secs = docs.parse(SYNTH, text)
+    i = docs.Index({(s.file, s.id): s for s in secs})
+    parent = i.get("design", "1")
+    n = len(parent.parts())
+    assert parent.outlined and n >= 4 and "".join(parent.parts()) == parent.head
+    for p in range(1, n + 1):
+        got, err = docs.Reader(i)({"file": "design", "section": "1", "part": p})
+        assert not err and len(got.encode("utf-8")) <= st.AI_DOC_READ_MAX_BYTES
+        assert ("- 1.1 小節" in got) == (p == n) and ("続きは part=" in got) == (p < n)
 
 
 def test_every_read_fits_read_max_and_two_reads_fit_request(idx):
@@ -145,8 +268,9 @@ def test_every_read_fits_read_max_and_two_reads_fit_request(idx):
             text, err = docs.Reader(idx)({"file": s.file, "section": s.id, "part": p})
             assert not err and len(text.encode("utf-8")) <= st.AI_DOC_READ_MAX_BYTES, (s.file, s.id, p)
     r = docs.Reader(idx)
+    leaf = big_leaves(idx)[0]
     for p in (1, 2):
-        assert not r({"file": "design", "section": "5", "part": p})[1]
+        assert not r({"file": leaf.file, "section": leaf.id, "part": p})[1]
 
 
 # ---- AC2: read_doc ----
@@ -160,15 +284,16 @@ def test_read_known_section(idx):
 
 
 def test_read_parts_join_back(idx):
-    sec = idx.get("design", "5.10")
+    sec = big_leaves(idx)[0]  # 子の無い大きい節（#389 で子のある大きい節は頭と一覧になった）
     n = len(sec.parts())
+    assert n >= 2 and not sec.outline
     got = []
     for p in range(1, n + 1):
         r = docs.Reader(idx)  # 1 要求の上限に掛からないように part ごとに
-        text, err = r({"file": "design", "section": "5.10", "part": p})
+        text, err = r({"file": sec.file, "section": sec.id, "part": p})
         assert not err
         head, body = text.split("\n", 1)
-        assert head == f"[設計書 5.10「証拠金の概算」 part {p}/{n}]"
+        assert head == f"[{docs.label_of(sec.file)} {sec.id}「{sec.title}」 part {p}/{n}]"
         tail = f"\n（続きは part={p + 1}）\n"
         if p < n:
             assert body.endswith(tail)
@@ -203,21 +328,34 @@ def test_read_errors_have_no_body(idx, args, want):
     assert r.read == [] and r.used_bytes == 0
 
 
+def big_leaves(i):
+    """子が無く 2 part 以上の節（文書の順）。名指しにしない = 節を小節に分けても文書に依存しない（レビュー N4）"""
+    return [s for s in i.sections.values() if not s.outline and len(s.parts()) >= 2]
+
+
+def big_leaf_reads(i):
+    """子の無い大きい節の (file, 節, part) を順に。合計は 1 要求の上限を超える"""
+    reads = [(s.file, s.id, p) for s in big_leaves(i) for p in range(1, len(s.parts()) + 1)]
+    assert len(reads) * (docs.body_max() // 2) > st.AI_DOC_REQUEST_MAX_BYTES
+    return reads
+
+
 def test_request_byte_cap(idx):
     r = docs.Reader(idx)
     total = 0
-    # 5 章は 16 KiB を超える（part の切れ目は節の中の段落による）→ 途中の part で上限。5.10 は小節に分けたので（#385）
-    # 小節ごとには上限に掛からない（test_design_5_10_subsections_single_read）
-    for p in range(1, docs.PART_MAX + 1):
-        text, err = r({"file": "design", "section": "5", "part": p})
+    # 子の無い大きい節の part を順に読む → 途中の part で上限（5 章は #389 で頭と一覧の 1 回になった）
+    got = []
+    for file, sec, p in big_leaf_reads(idx):
+        text, err = r({"file": file, "section": sec, "part": p})
         if err:
             assert "上限" in text
             break
         total += len(text.encode("utf-8"))
+        got.append(f"{file}:{sec}" + (f"#{p}" if p > 1 else ""))
     else:
         pytest.fail("上限に達しない")
     assert r.used_bytes == total <= st.AI_DOC_REQUEST_MAX_BYTES
-    assert r.read == ["design:5"] + [f"design:5#{p}" for p in range(2, len(r.read) + 1)]
+    assert r.read == got and len(got) >= 2
 
 
 def test_overhead_bounds_results(idx):
@@ -228,9 +366,11 @@ def test_overhead_bounds_results(idx):
     assert [r.permit() for _ in range(st.AI_DOC_MAX_READS + 2)] == [True] * st.AI_DOC_MAX_READS + [False, False]
     # 上限の後のエラーの文（量・回数）も上限以下
     big = docs.Reader(idx)
-    for p in range(1, 4):
-        big({"file": "design", "section": "5", "part": p})
-    errs = [big({"file": "design", "section": "5", "part": 4})[0]]
+    for file, sec, p in big_leaf_reads(idx):
+        text, err = big({"file": file, "section": sec, "part": p})
+        if err:
+            break
+    errs = [text]
     for _ in range(st.AI_DOC_MAX_READS):
         big({"file": "user-guide", "section": "1"})
     errs.append(big({"file": "user-guide", "section": "1"})[0])

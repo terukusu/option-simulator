@@ -10,6 +10,9 @@
   コードブロックの中の `#` は節にしない。設計書は FILES の chapters の章だけ（4 章の実測・6 章のワイヤー・
   13 章の決定の経緯・14 章は渡さない）
 - 大きさ: 1 回の読みは AI_DOC_READ_MAX_BYTES まで（超える節は part に分ける。全 part をつなぐと節の本文）、
+  ただし 1 回で読めない大きさで子の節がある節は、本文の連番ではなく節の頭（最初の子の見出しの前まで。大きければ part）
+  と子孫の節の番号・見出しの一覧を返す（#389。part の数は頭の大きさだけで決まり、子を足しても増えない。
+  頭 + 子の本文で節の全部が読める）。
   1 要求の合計は AI_DOC_REQUEST_MAX_BYTES、呼び出しは AI_DOC_MAX_READS 回まで（Reader が要求ごとに数える）。
   予約額の上界は budget.doc_tokens（1 要求に 1 回。#338）
 - 文書の置き場所は環境変数 AI_DOCS_DIR（イメージは /app/docs）、未設定ならリポジトリの docs/。読めなければ None
@@ -19,7 +22,7 @@
 import os
 import re
 import threading
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from functools import cache
 from pathlib import Path
 
@@ -58,6 +61,7 @@ TOOL_DEFINITION = {
     "description": (
         "マニュアル（file=\"user-guide\"）と設計書（file=\"design\"）の節の本文を読む。section は system の「目次」の"
         "番号（例 \"8.5\"・\"5.4\"）。大きい節は part（1 から）で分かれて返り、続きがあれば本文の末尾に書いてある。"
+        "小節のある大きい節は、節の頭と小節の一覧が返るので、要る小節を番号で読む。"
         "読む節は 1 回の応答でまとめて呼ぶ。1 回の発言で読める量・回数には上限がある"),
     "input_schema": {
         "type": "object",
@@ -79,10 +83,67 @@ class Section:
     level: int  # 2 = 章、3 = 節、4 = 小節
     title: str  # 番号と開発の経緯を除いた見出し
     text: str  # 見出しの行から次の同じか上の見出しの前まで（子の節を含む）
+    head: str = ""  # text のうち最初の子の見出しの前まで（子が無ければ text と同じ）
+    outline: str = ""  # 子孫の節の「- 番号 見出し」（この節からの深さで字下げ）。子が無ければ ""
+
+    @property
+    def outlined(self) -> bool:
+        """1 回で読めない大きさで子の節がある → 本文の代わりに頭と小節の一覧を返す（#389）"""
+        return bool(self.outline) and len(self.text.encode("utf-8")) > body_max()
+
+    def listing(self) -> str:
+        """outlined の節の最後の part の後ろに付ける文（小節の一覧）。それ以外は空。大きさは listing_max() 以下
+        （子孫が増えても 1 回の読みの上限を超えない。#389 のレビュー N1）:
+        1. 子孫の全部（字下げ）が収まればそれ
+        2. 収まらなければ直接の子だけ（孫のある子は「（小節 n）」。孫は子を読むと一覧で出る）
+        3. それでも収まらなければ直接の子を先頭から収まるだけ +「ほか n 節」（全部の番号は system の目次にある）"""
+        if not self.outlined:
+            return ""
+        room = listing_max() - _nbytes(OUTLINE_LEAD)
+        if _nbytes(self.outline) <= room:
+            return OUTLINE_LEAD + self.outline
+        lines = self.outline.splitlines(keepends=True)
+        direct: list[str] = []
+        for k, line in enumerate(lines):
+            if line.startswith("- "):
+                n = next((j for j in range(k + 1, len(lines)) if lines[j].startswith("- ")), len(lines)) - k - 1
+                direct.append(line[:-1] + (f"（小節 {n}）\n" if n else "\n"))
+        out = ""
+        for k, line in enumerate(direct):
+            rest = len(direct) - k - 1
+            more = OUTLINE_MORE.format(n=rest + 1)
+            if _nbytes(out + line) + (_nbytes(OUTLINE_MORE.format(n=rest)) if rest else 0) > room:
+                out += more
+                break
+            out += line
+        return OUTLINE_LEAD + out
 
     def parts(self) -> list[str]:
-        # 見出しの行と「続きは」の行（AI_DOC_FRAME_BYTES 以下）を足しても 1 回の読みの上限に収まる大きさ
-        return split_parts(self.text, st.AI_DOC_READ_MAX_BYTES - st.AI_DOC_FRAME_BYTES)
+        """返す本文の部分。outlined なら頭だけ（一覧の分を引いた大きさで分ける）、それ以外は本文。
+        見出しの行と「続きは」の行（AI_DOC_FRAME_BYTES 以下）・一覧を足しても 1 回の読みの上限に収まる"""
+        if not self.outlined:
+            return split_parts(self.text, body_max())
+        # 一覧は listing_max() 以下なので、頭の分は本文の上限の 3/4 以上ある
+        room = body_max() - _nbytes(self.listing())
+        return split_parts(self.head, room)
+
+
+OUTLINE_LEAD = "\n（ここまでが節の頭。続きは次の小節に分かれている。要る小節の番号を section に渡して読む）\n"
+OUTLINE_MORE = "- ほか {n} 節（番号は目次にある）\n"
+
+
+def _nbytes(text: str) -> int:
+    return len(text.encode("utf-8"))
+
+
+def listing_max() -> int:
+    """小節の一覧（OUTLINE_LEAD を含む）の上限 = 本文の上限の 1/4"""
+    return body_max() // 4
+
+
+def body_max() -> int:
+    """1 回の読みで返す本文の上限（見出しの行と「続きは」の行の枠を引いた大きさ）"""
+    return st.AI_DOC_READ_MAX_BYTES - st.AI_DOC_FRAME_BYTES
 
 
 @dataclass(frozen=True)
@@ -117,6 +178,8 @@ def parse(file: DocFile, text: str) -> list[Section]:
     chapter_ok = False
     for j, (i, level, raw) in enumerate(heads):
         end = next((k for k, lv, _ in heads[j + 1:] if lv <= level), len(lines))
+        # 範囲の中の最初の見出し = 直接の子（章の中の見出しは全部節になる）
+        child = heads[j + 1][0] if j + 1 < len(heads) and heads[j + 1][0] < end else end
         while stack and stack[-1][0] >= level:
             stack.pop()
         m = _NUM_RE.match(raw)
@@ -139,8 +202,14 @@ def parse(file: DocFile, text: str) -> list[Section]:
         if not chapter_ok:
             continue
         stack.append((level, sid))
-        out.append(Section(file.key, sid, level, clean_title(title), "".join(lines[i:end]).rstrip("\n") + "\n"))
-    return out
+        text = "".join(lines[i:end]).rstrip("\n") + "\n"
+        head = text if child == end else "".join(lines[i:child]).rstrip("\n") + "\n"
+        out.append(Section(file.key, sid, level, clean_title(title), text, head))
+    # 子孫の一覧（番号は必ず親の番号 + "." で始まる = 上の規則。字下げは番号の深さの差）
+    return [replace(s, outline="".join(
+        f"{'  ' * (d.id.count('.') - s.id.count('.') - 1)}- {d.id} {d.title}\n"
+        for d in out if d.id.startswith(s.id + ".")))
+        for s in out]
 
 
 def split_parts(text: str, max_bytes: int) -> list[str]:
@@ -261,7 +330,7 @@ class Reader:
                 return f"この節は part {len(parts)} まで。", True
             head = f"[{label_of(file)} {sec.id}「{sec.title}」"
             head += f" part {part}/{len(parts)}]\n" if len(parts) > 1 else "]\n"
-            tail = f"\n（続きは part={part + 1}）\n" if part < len(parts) else ""
+            tail = f"\n（続きは part={part + 1}）\n" if part < len(parts) else sec.listing()
             text = head + parts[part - 1] + tail
             n = len(text.encode("utf-8"))
             if self.used_bytes + n > st.AI_DOC_REQUEST_MAX_BYTES:
