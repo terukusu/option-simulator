@@ -11,8 +11,10 @@
  * - OP の 1 単位の値 = max(1, round(Black-76))（T′ ≤ tMin は割引本源的価値、T′ ≤ 0 は本源的価値。同じ下限）。
  *   1 枚の値 = 乗数 × 値、先物の 1 枚 = round(乗数 × F_S·(e^{r_j} − 1))（シナリオの損益）。どちらも 1 枚の整数に
  *   符号 × 枚数を掛ける（BPF の pnl は 1 枚あたりの整数 = 今の JSCC の計算と同じ足し方）
- * - v_j の和 → #382 と同じ ES（jsccEsSigned）→ V_S = max(0, ES, ceil(−NOV_S))、必要証拠金 = k·V_S、
- *   所要額 = max(0, k·V_S − NOV_S)。NOV_S・先物の評価損益・清算額・M の足は marginAt と同じ（marginLegs）
+ * - v_j の和 → #382 と同じ ES（jsccEsSigned）→ V_S = max(0, ES, ceil(−NOV_S,下限))、必要証拠金 = k·V_S、
+ *   所要額 = max(0, k·V_S − NOV_S)。NOV_S・先物の評価損益・清算額・M の足は marginAt と同じ（marginLegs）。
+ *   NOV_S,下限 = NOV_S から、状態 S の基準日（floor.baseDate。呼び出し側が S の時刻から jsccBaseDate の規則で決める）で
+ *   取引最終日まで K 営業日以内の OP の足を外したもの（#393。floor = null なら外さない）
  * - g が空の行（先物だけの限月）は IV を動かさない（g = 0）
  *
  * 行の引き方: OP の足 = `NK225E-YYYYMM`（g が空 = 当てはめられなかった限月は IV を動かさない）。先物の足 = 限月で引き、
@@ -22,7 +24,14 @@
  */
 
 import { black76Price, discountedIntrinsic } from './black76';
-import { type JsccScenarioSet, jsccEsOfSorted, jsccEsSigned, jsccTailCount } from './jsccMargin';
+import {
+  type JsccNovFloorBasis,
+  type JsccScenarioSet,
+  jsccEsOfSorted,
+  jsccEsSigned,
+  jsccNovFloorExempt,
+  jsccTailCount,
+} from './jsccMargin';
 import {
   type MarginLegs,
   type MarginParams,
@@ -147,6 +156,8 @@ interface RefitLeg {
 /** 状態 S で当て直す準備（M の足・NOV・先物の評価損益は marginLegs） */
 export interface JsccRefitPlan {
   base: MarginLegs;
+  /** 下限に使う NOV（base.nov から取引最終日が近い OP の足を外した和。#393） */
+  novFloor: number;
   legs: RefitLeg[];
   n: number;
   r: number;
@@ -155,6 +166,25 @@ export interface JsccRefitPlan {
 }
 
 const expCache = new WeakMap<Float64Array, Float64Array>();
+
+/**
+ * 下限を外すかの判定（限月 → 外すか）を floor ごとに 1 回だけ（#393）。追証の線は同じ floor で x ごとに plan を作るので、
+ * 限月ごとの日付の計算を繰り返さない。値は floor と限月だけで決まる（覚えても結果は変わらない）
+ */
+const exemptCache = new WeakMap<JsccNovFloorBasis, Map<string, boolean>>();
+function floorExemptOf(floor: JsccNovFloorBasis, expiry: string): boolean {
+  let m = exemptCache.get(floor);
+  if (!m) {
+    m = new Map();
+    exemptCache.set(floor, m);
+  }
+  let v = m.get(expiry);
+  if (v === undefined) {
+    v = jsccNovFloorExempt(expiry, floor.baseDate, floor.holidays);
+    m.set(expiry, v);
+  }
+  return v;
+}
 function expOf(r: Float64Array): Float64Array {
   let e = expCache.get(r);
   if (!e) {
@@ -222,7 +252,8 @@ function atmSigmaAt(
 
 /**
  * 状態 S の当て直しの準備。M の足（marginLegs と同じ）すべてに行があり、枚数が整数のときだけ ok。
- * 理由の順は jsccEligibility（#382）と同じ: 枚数が整数でない → fractional、行が無い → missing、M の足が無い → none
+ * 理由の順は jsccEligibility（#382）と同じ: 枚数が整数でない → fractional、行が無い → missing、M の足が無い → none。
+ * floor = 状態 S の基準日と休業日（下限を外す OP の足の判定。#393）。null = 外さない
  */
 export function jsccRefitPlan(
   legs: readonly PreparedLeg[],
@@ -231,11 +262,13 @@ export function jsccRefitPlan(
   settings: ModelSettings,
   params: MarginParams,
   factors: JsccFactors,
+  floor: JsccNovFloorBasis | null = null,
 ): { ok: true; plan: JsccRefitPlan } | { ok: false; reason: JsccRefitIneligible } {
   const base = marginLegs(legs, state, ctx, settings, params);
   const sc = state.scenario;
   const n = factors.set.isHist.length;
   const out: RefitLeg[] = [];
+  let novFloor = base.nov;
   let fractional = false;
   let missing = false;
   let poor = false;
@@ -277,6 +310,10 @@ export function jsccRefitPlan(
     }
     const med = row.checkMedianRel;
     if (typeof med === 'number' && med > JSCC_REFIT_MAX_MEDIAN_REL) poor = true;
+    if (floor !== null && floorExemptOf(floor, p.leg.expiry)) {
+      // marginLegs の NOV と同じ値（符号 × 枚数 × 乗数 × 状態 S の評価価格）を下限の NOV から外す
+      novFloor -= q * mult * legValue(p, state.x, sc, ctx, settings);
+    }
     const fS = forwardAt(p, state.x, ctx, settings);
     const tS = p.T0 - sc.days / 365;
     const sigmaS = legSigma(p, state.x, sc, ctx, settings) ?? settings.sigmaMin;
@@ -304,7 +341,15 @@ export function jsccRefitPlan(
   if (out.length === 0) return { ok: false, reason: 'none' };
   return {
     ok: true,
-    plan: { base, legs: out, n, r: ctx.r, tMin: settings.tMin, sigmaMin: settings.sigmaMin },
+    plan: {
+      base,
+      novFloor,
+      legs: out,
+      n,
+      r: ctx.r,
+      tMin: settings.tMin,
+      sigmaMin: settings.sigmaMin,
+    },
   };
 }
 
@@ -387,7 +432,8 @@ function resultOf(
   businessDate: string,
 ): MarginResult {
   const nov = plan.base.nov;
-  const varMargin = Math.max(0, esSigned, Math.ceil(-nov - 1e-6));
+  const novFloor = plan.novFloor;
+  const varMargin = Math.max(0, esSigned, Math.ceil(-novFloor - 1e-6));
   const margin = params.factor * varMargin;
   return {
     pfe: varMargin,
@@ -399,7 +445,7 @@ function resultOf(
     settledCash: plan.base.settledCash,
     worst: null,
     source: 'jscc_refit',
-    jscc: { businessDate, varMargin, esSigned, novSettle: nov },
+    jscc: { businessDate, varMargin, esSigned, novSettle: nov, novFloor },
   };
 }
 
@@ -414,8 +460,9 @@ export function marginAtJsccRefit(
   settings: ModelSettings,
   params: MarginParams,
   factors: JsccFactors,
+  floor: JsccNovFloorBasis | null = null,
 ): { result: MarginResult; v: Float64Array } | null {
-  const planned = jsccRefitPlan(legs, state, ctx, settings, params, factors);
+  const planned = jsccRefitPlan(legs, state, ctx, settings, params, factors, floor);
   if (!planned.ok) return null;
   const v = jsccRefitVector(planned.plan);
   const es = jsccEsSigned(v, factors.set);
@@ -469,6 +516,7 @@ export function jsccRefitRoomEvaluator(
   capital: number,
   premium: PremiumSummary,
   factors: JsccFactors,
+  floor: JsccNovFloorBasis | null = null,
 ): RoomEvaluator {
   const seen = new Map<number, Float64Array>();
   const stateOf = (x: number): MarginState => ({
@@ -478,7 +526,7 @@ export function jsccRefitRoomEvaluator(
     marked,
   });
   const full = (x: number): number => {
-    const r = marginAtJsccRefit(legs, stateOf(x), ctx, settings, params, factors);
+    const r = marginAtJsccRefit(legs, stateOf(x), ctx, settings, params, factors, floor);
     if (!r) return Number.NaN;
     seen.set(x, r.v);
     if (seen.size > 64) seen.delete(seen.keys().next().value as number);
@@ -493,7 +541,7 @@ export function jsccRefitRoomEvaluator(
       const idx = tailCandidates([va, vb], factors.set);
       const fast = (x: number): number => {
         const st = stateOf(x);
-        const planned = jsccRefitPlan(legs, st, ctx, settings, params, factors);
+        const planned = jsccRefitPlan(legs, st, ctx, settings, params, factors, floor);
         if (!planned.ok) return Number.NaN;
         const es = esOnCandidates(planned.plan, idx, factors.set);
         return marginRoom(

@@ -5,14 +5,19 @@
  *   種つき乱数の 1,000 ケースで 1 円も違わない
  * - 性質: 手で計算した値、売り買い同数 → 0、全部 0 → 0、正の倍数、H / S の内側の並べ替え、OP の買いだけ → 0、
  *   OP の売り 1 枚の下限（清算値段 × Contract Size）、入力の検査
+ * - #393: 取引最終日まで K 営業日以内の OP の足を下限の NOV から外す（K・K + 1 の境界、遠い限月、ポートフォリオの混在、
+ *   先物）。営業日数の数え方は optionchan に確認した 3 例の日付だけ（JSCC の値は使わない）
  */
 
 import { describe, expect, it } from 'vitest';
 import {
+  JSCC_NOV_FLOOR_EXEMPT_BUSINESS_DAYS,
+  type JsccInstrument,
   type JsccPosition,
   type JsccScenarioSet,
   jsccEsSigned,
   jsccKeyOfLeg,
+  jsccNovFloorExempt,
   jsccVarMargin,
   type Leg,
 } from '../../model';
@@ -129,8 +134,13 @@ describe('jsccVarMargin', () => {
       ],
       set,
     );
-    expect(out).toEqual({ esSigned: 0, novSettle: 0, varMargin: 0 });
-    expect(jsccVarMargin([], set)).toEqual({ esSigned: 0, novSettle: 0, varMargin: 0 });
+    expect(out).toEqual({ esSigned: 0, novSettle: 0, novFloor: 0, varMargin: 0 });
+    expect(jsccVarMargin([], set)).toEqual({
+      esSigned: 0,
+      novSettle: 0,
+      novFloor: 0,
+      varMargin: 0,
+    });
   });
 
   it('OP の買いだけ → 0（評価額 ≥ 0 なので ES ≤ 0）', () => {
@@ -206,6 +216,138 @@ describe('jsccVarMargin', () => {
     expect(() =>
       jsccVarMargin([{ inst: { ...inst, pnl: new Float64Array(3) }, qty: -1, option: true }], set),
     ).toThrow();
+  });
+});
+
+describe('#393 VaR 証拠金額の下限を外す OP の足（取引最終日まで K 営業日以内）', () => {
+  const K = JSCC_NOV_FLOOR_EXEMPT_BUSINESS_DAYS;
+  const set = realisticSet();
+  const n = set.isHist.length;
+  /** SQ 直前の深い OTM の架空の行: シナリオ後の評価額がどれも清算値段 × 1,000 の 10〜60%（売りの ES < 下限） */
+  const decaying = (price: number, r: () => number): JsccInstrument => ({
+    aggregationGroup: 'IDX_IDX',
+    contractSize: 1000,
+    price,
+    pnl: Float64Array.from({ length: n }, () => Math.round(price * 1000 * (0.1 + 0.5 * r()))),
+  });
+
+  it('K は 3（暫定。optionchan #171 の 22 件に合う中でいちばん小さい）', () => {
+    expect(K).toBe(3);
+  });
+
+  it('営業日数 = 基準日の翌営業日から取引最終日まで両端を含む（optionchan に確認した 3 例。日付だけ）', () => {
+    // 2025-04 限の取引最終日 = 04-10（木）、2026-03 限 = 03-12（木）
+    // 2025-04-07（月）→ 04-08・04-09・04-10 の 3 日 = K ちょうど → 外す
+    expect(jsccNovFloorExempt('2025-04', '2025-04-07', [], 3)).toBe(true);
+    expect(jsccNovFloorExempt('2025-04', '2025-04-07', [], 2)).toBe(false);
+    // 2025-04-09 → 04-10 の 1 日
+    expect(jsccNovFloorExempt('2025-04', '2025-04-09', [], 1)).toBe(true);
+    expect(jsccNovFloorExempt('2025-04', '2025-04-09', [], 0)).toBe(false);
+    // 2026-03-11 → 03-12 の 1 日
+    expect(jsccNovFloorExempt('2026-03', '2026-03-11', [], 1)).toBe(true);
+    expect(jsccNovFloorExempt('2026-03', '2026-03-11', [], 0)).toBe(false);
+  });
+
+  it('境界: K 営業日は外す、K + 1 営業日は外さない。週末・休業日は数えない', () => {
+    // 2025-04 限（取引最終日 04-10 木）。K + 1 = 4 日前の基準日 = 04-04（金）（04-07・08・09・10 の 4 日）
+    expect(jsccNovFloorExempt('2025-04', '2025-04-04', [])).toBe(false);
+    expect(jsccNovFloorExempt('2025-04', '2025-04-07', [])).toBe(true);
+    // 04-08 を休業日にすると 04-04 からは 3 日 → 外す
+    expect(jsccNovFloorExempt('2025-04', '2025-04-04', ['2025-04-08'])).toBe(true);
+    // 取引最終日の当日・その後（SQ の前）は 0 日 → 外す
+    expect(jsccNovFloorExempt('2025-04', '2025-04-10', [])).toBe(true);
+    expect(jsccNovFloorExempt('2025-04', '2025-04-11', [])).toBe(true);
+    // 遠い限月（1 年先）は外さない
+    expect(jsccNovFloorExempt('2026-04', '2025-04-07', [])).toBe(false);
+    // 当月限でも 1 か月前は外さない
+    expect(jsccNovFloorExempt('2025-04', '2025-03-10', [])).toBe(false);
+  });
+
+  it('休業日の取引最終日（SQ の繰り上げ）も取引カレンダーの規則で決める', () => {
+    // 2025-04-11（金。SQ）を休業日にすると SQ = 04-10、取引最終日 = 04-09。04-04 から 04-07・08・09 の 3 日 → 外す
+    expect(jsccNovFloorExempt('2025-04', '2025-04-04', ['2025-04-11'])).toBe(true);
+    expect(jsccNovFloorExempt('2025-04', '2025-04-03', ['2025-04-11'])).toBe(false);
+  });
+
+  it('形が外れた限月・基準日は外さない（下限を残す側）', () => {
+    expect(jsccNovFloorExempt('2025-4', '2025-04-09', [])).toBe(false);
+    expect(jsccNovFloorExempt('2025-13', '2025-04-09', [])).toBe(false);
+    expect(jsccNovFloorExempt('2025-04', '20250409', [])).toBe(false);
+  });
+
+  it('外す足の売り 1 枚: 下限なし = max(0, ES)。外さない足は下限あり = max(0, ES, 清算値段 × Contract Size)', () => {
+    const r = rng(393);
+    let floored = 0;
+    for (let c = 0; c < 50; c++) {
+      const price = 1 + Math.floor(r() * 500);
+      // 半分は SQ 直前の深い OTM（ES が下限を下回る）、半分はふつうの散らばり
+      const inst = c % 2 === 0 ? decaying(price, r) : synthOption(n, price, r);
+      const es = refEs(
+        Array.from(inst.pnl, (x) => -x),
+        set,
+      );
+      const near = jsccVarMargin([{ inst, qty: -1, option: true, floorExempt: true }], set);
+      const far = jsccVarMargin([{ inst, qty: -1, option: true, floorExempt: false }], set);
+      expect(near.esSigned).toBe(es);
+      expect(near.novSettle).toBe(-price * 1000);
+      expect(near.novFloor).toBe(0);
+      expect(near.varMargin).toBe(Math.max(0, es));
+      expect(far.novFloor).toBe(-price * 1000);
+      expect(far.varMargin).toBe(Math.max(0, es, price * 1000));
+      // 下限を外しても V は増えない（max の項が減るだけ）
+      expect(near.varMargin).toBeLessThanOrEqual(far.varMargin);
+      if (far.varMargin > near.varMargin) floored++;
+    }
+    expect(floored).toBeGreaterThan(0); // 下限が効く例が実際にある（テストが空振りしない）
+  });
+
+  it('ポートフォリオに混ざる: 外す足の NOV だけが下限から抜け、ES・NOV_清算は全部の足', () => {
+    const r = rng(394);
+    for (let c = 0; c < 30; c++) {
+      const near: JsccPosition = {
+        inst: decaying(200, r),
+        qty: -2,
+        option: true,
+        floorExempt: true,
+      };
+      const far: JsccPosition = {
+        inst: decaying(80, r),
+        qty: -1,
+        option: true,
+        floorExempt: false,
+      };
+      const fut: JsccPosition = { inst: synthFuture(n, 10, r), qty: 1, option: false };
+      const all = jsccVarMargin([near, far, fut], set);
+      const base = jsccVarMargin(
+        [
+          { ...near, floorExempt: false },
+          { ...far, floorExempt: false },
+          { ...fut, floorExempt: true }, // 先物の floorExempt は効かない（NOV に入らない）
+        ],
+        set,
+      );
+      expect(all.esSigned).toBe(base.esSigned);
+      expect(all.novSettle).toBe(base.novSettle);
+      expect(all.novSettle).toBe(-2 * 200 * 1000 - 80 * 1000);
+      expect(all.novFloor).toBe(-80 * 1000);
+      expect(all.varMargin).toBe(Math.max(0, all.esSigned, 80 * 1000));
+      expect(base.varMargin).toBe(Math.max(0, base.esSigned, 480 * 1000));
+    }
+  });
+
+  it('買いの OP を外すと下限の NOV は小さくなる側（下限が上がりうる）= 足ごとに外すだけ', () => {
+    const r = rng(395);
+    const sell: JsccPosition = { inst: decaying(300, r), qty: -1, option: true };
+    const buyNear: JsccPosition = {
+      inst: decaying(100, r),
+      qty: 1,
+      option: true,
+      floorExempt: true,
+    };
+    const out = jsccVarMargin([sell, buyNear], set);
+    expect(out.novSettle).toBe(-300 * 1000 + 100 * 1000);
+    expect(out.novFloor).toBe(-300 * 1000);
+    expect(out.varMargin).toBeGreaterThanOrEqual(300 * 1000);
   });
 });
 

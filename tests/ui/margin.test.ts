@@ -12,6 +12,7 @@ import {
   DAY_MS,
   DEFAULT_MARGIN_PARAMS,
   DEFAULT_SETTINGS,
+  jstInstant,
   MARGIN_HORIZON_BUSINESS_DAYS,
   MARGIN_LINE_SAMPLES,
   type ModelSettings,
@@ -1533,5 +1534,104 @@ describe('#387 シナリオの点・テール・追証の線を JSCC のシナ�
     expect(
       marginNowRefit(b0, sNow.scenario, params, capital, holidays, grid, factorsOf(sNow)),
     ).toBeNull();
+  });
+});
+
+describe('#393 下限を外す OP の足の判定の日: 今は JSCC の基準日、当て直しは状態 S の基準日', () => {
+  const set = realisticSet();
+  const n = set.isHist.length;
+  const D = '2026-10-13';
+  const capital = 50_000_000;
+  const params = marginParamsOf(withCapital(capital));
+  const b0 = baseOf(putSell);
+  const legsOf = (st: State) => st.legs.map((l) => l.leg);
+  const factors: JsccFactorsInput = {
+    status: 'ok',
+    data: synthFactors(
+      set,
+      jsccFactorPeriods(legsOf(putSell), D, holidays).map((p) => `NK225E-${p}`),
+      21,
+      { businessDate: D },
+    ),
+  };
+  /** 板の時刻から JST の date hh:mm までの経過日数のシナリオ（ΔX = −500 = 今と違う点） */
+  const at = (date: string, hour: number) => ({
+    ...putSell.scenario,
+    dX: -500,
+    days: (jstInstant(date, hour, 0) - b0.ctx.evalTime) / DAY_MS,
+  });
+  const point = (date: string, hour: number) => {
+    const c = marginPoint(b0, at(date, hour), params, capital, holidays, factors);
+    if (c?.basis.kind !== 'jscc_refit' || !c.result.jscc) throw new Error('当て直しにならない');
+    return c.result;
+  };
+
+  it('前提: 足は 2026-11 限（取引最終日 11-12）の put 売り 1 枚だけ', () => {
+    expect(putSell.legs.map((l) => l.leg.kind === 'option' && l.leg.expiry)).toEqual(['2026-11']);
+    expect(m1.lastTradingDay).toBe('2026-11-12');
+  });
+
+  it('S の基準日（S の取引日の前営業日）で数える: 11-09 日中 = 基準日 11-06 → 4 営業日 = 下限あり、11-10 日中 = 11-09 → 3 営業日 = 外す', () => {
+    const far = point('2026-11-09', 10);
+    const near = point('2026-11-10', 10);
+    expect(far.jscc?.novFloor).toBe(far.nov);
+    expect(far.jscc?.varMargin).toBe(
+      Math.max(0, far.jscc?.esSigned ?? Number.NaN, Math.ceil(-far.nov - 1e-6)),
+    );
+    expect(near.jscc?.novFloor).toBeCloseTo(0, 6);
+    expect(near.jscc?.varMargin).toBe(Math.max(0, near.jscc?.esSigned ?? Number.NaN));
+    // 11-09 の夜間（17:00 以降）は取引日 11-10 = 基準日 11-09 → 外す（jsccBaseDate と同じ規則）
+    expect(point('2026-11-09', 18).jscc?.novFloor).toBeCloseTo(0, 6);
+    // 1 か月前の点は下限あり
+    const early = point('2026-10-14', 10);
+    expect(early.jscc?.novFloor).toBe(early.nov);
+  });
+
+  it('今の JSCC の計算は JSCC のデータの基準日で判定（基準日が取引最終日の 3 営業日前なら外す）', () => {
+    const r = jsccRng(11);
+    const inst = Object.fromEntries(
+      jsccRequestKeys(legsOf(putSell), D).map((k) => [k, synthOption(n, 300, r)]),
+    );
+    const nowOf = (date: string): JsccInput => ({ status: 'ok', data: jsccData(set, inst, date) });
+    const far = marginNow(b0, putSell.scenario, params, capital, holidays, nowOf(D));
+    const near = marginNow(b0, putSell.scenario, params, capital, holidays, nowOf('2026-11-09'));
+    expect(far?.basis.kind).toBe('jscc');
+    expect(far?.result.jscc?.novFloor).toBe(far?.result.jscc?.novSettle);
+    expect(far?.result.jscc?.novFloor).toBe(-300 * 1000);
+    expect(near?.result.jscc?.novFloor).toBe(0);
+    expect(near?.result.jscc?.esSigned).toBe(far?.result.jscc?.esSigned);
+  });
+
+  it('今を当て直す（JSCC 推定）ときも S = 今の基準日（r・g を遡った日ではない）', () => {
+    const older: JsccFactorsInput =
+      factors.status === 'ok'
+        ? { status: 'ok', data: { ...factors.data, businessDate: '2026-10-09' } }
+        : factors;
+    // 板の時刻を 11-10（火）の日中に置く = 今の基準日 11-09 → 取引最終日 11-12 まで 3 営業日 = 外す。r・g の日
+    // 10-09 で数えると 20 営業日以上 = 外さない（判定の日を取り違えると novFloor = NOV になって落ちる）
+    const late: PnlBase = { ...b0, ctx: { ...b0.ctx, evalTime: jstInstant('2026-11-10', 10, 0) } };
+    const now = marginNow(
+      late,
+      putSell.scenario,
+      params,
+      capital,
+      holidays,
+      { status: 'unavailable', reason: 'not_ready' },
+      older,
+    );
+    expect(now?.basis).toMatchObject({ kind: 'jscc_refit', businessDate: '2026-10-09' });
+    expect(now?.result.nov).toBeLessThan(0);
+    expect(now?.result.jscc?.novFloor).toBeCloseTo(0, 6);
+    // 板の時刻を元に戻すと（今の基準日も遠い）外さない
+    const early = marginNow(
+      b0,
+      putSell.scenario,
+      params,
+      capital,
+      holidays,
+      { status: 'unavailable', reason: 'not_ready' },
+      older,
+    );
+    expect(early?.result.jscc?.novFloor).toBe(early?.result.nov);
   });
 });

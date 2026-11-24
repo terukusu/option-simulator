@@ -27,6 +27,7 @@ import {
   type MarginState,
   marginCallLevelsSteps,
   marginNowJscc,
+  marginRoom,
 } from '../../model/margin';
 import {
   DEFAULT_SETTINGS,
@@ -210,6 +211,85 @@ describe('#387 当て直しの値（jsccRefitVector）', () => {
     expect(re.result.jscc?.varMargin).toBe(
       Math.max(0, 2000 * unit, Math.ceil(-re.result.nov - 1e-6)),
     );
+  });
+
+  it('#393 状態 S の基準日（floor）で取引最終日まで K 営業日以内の OP の足を下限から外す。null は外さない', () => {
+    const zero: JsccFactors = {
+      ...synthFactors(set, KEYS, 1),
+      rows: new Map(
+        KEYS.map((k) => [k, { r: new Float64Array(n), g: new Float64Array(n * 13) }] as const),
+      ),
+    };
+    // 深い OTM の売り。h を長くとって時間の減価だけのシナリオ（r = g = 0）= ES が下限（−NOV）を下回る
+    const p = preparePosition(
+      [
+        op(M1, 'put', 60000, 'sell', 2),
+        op(M2, 'put', 60000, 'sell', 1),
+        fut('buy', 1, 'fut_micro'),
+      ],
+      ctx,
+      S,
+    );
+    const st = { ...nowState(ctx), horizonDays: 20 };
+    const none = marginAtJsccRefit(p, st, ctx, S, P, zero);
+    // 2026-11 限の取引最終日 = 11-12（木）。11-09（月）→ 3 営業日 = 外す、11-06（金）→ 4 営業日 = 外さない
+    const far = marginAtJsccRefit(p, st, ctx, S, P, zero, { baseDate: '2026-11-06', holidays: [] });
+    const near = marginAtJsccRefit(p, st, ctx, S, P, zero, {
+      baseDate: '2026-11-09',
+      holidays: [],
+    });
+    // 2026-12 限（取引最終日 12-10）まで 3 営業日 = 両方とも外す
+    const both = marginAtJsccRefit(p, st, ctx, S, P, zero, {
+      baseDate: '2026-12-07',
+      holidays: [],
+    });
+    if (!none || !far || !near || !both) throw new Error('計算にならない');
+    const v2 = legValue(p[1] as PreparedLeg, st.x, st.scenario, ctx, S);
+    const nov = none.result.nov;
+    expect(far.result.jscc).toEqual(none.result.jscc);
+    expect(far.result.jscc?.novFloor).toBe(nov);
+    expect(near.result.jscc?.novFloor).toBeCloseTo(-1000 * v2, 6);
+    expect(both.result.jscc?.novFloor).toBeCloseTo(0, 6);
+    for (const r of [far, near, both]) {
+      const j = r.result.jscc;
+      if (!j) throw new Error('内訳が無い');
+      // ES・表示の NOV・所要額の NOV は同じ。下限だけが変わる
+      expect(j.esSigned).toBe(none.result.jscc?.esSigned);
+      expect(r.result.nov).toBe(nov);
+      expect(j.varMargin).toBe(Math.max(0, j.esSigned, Math.ceil(-j.novFloor - 1e-6)));
+      expect(r.result.requirement).toBeCloseTo(Math.max(0, j.varMargin - nov), 6);
+    }
+    // 下限が効いていた = 外すと小さくなる（単調: 外すほど増えない）
+    const vm = (r: typeof none) => r.result.jscc?.varMargin ?? Number.NaN;
+    expect(vm(near)).toBeLessThan(vm(far));
+    expect(vm(both)).toBeLessThanOrEqual(vm(near));
+    expect(vm(both)).toBe(Math.max(0, both.result.jscc?.esSigned ?? Number.NaN));
+  });
+
+  it('#393 追証の線の評価も同じ floor で（全シナリオの余力 = marginAtJsccRefit の余力）', () => {
+    const factors = synthFactors(set, KEYS, 21);
+    const p = preparePosition([op(M1, 'put', 60000, 'sell', 2)], ctx, S);
+    const floor = { baseDate: '2026-11-09', holidays: [] };
+    const prem = premiumSummary(p, S);
+    const ev = jsccRefitRoomEvaluator(
+      p,
+      ZERO_SCENARIO,
+      ctx,
+      S,
+      P,
+      H,
+      false,
+      5e6,
+      prem,
+      factors,
+      floor,
+    );
+    for (const dX of [-3000, 0, 2000]) {
+      const x = ctx.x0 + dX;
+      const re = marginAtJsccRefit(p, nowState(ctx, dX), ctx, S, P, factors, floor);
+      if (!re) throw new Error('計算にならない');
+      expect(ev.room(x)).toBe(marginRoom(5e6, prem, re.result));
+    }
   });
 
   it('同じ銘柄の売り買い同数は 0、枚数を整数倍すると値も同じ倍', () => {

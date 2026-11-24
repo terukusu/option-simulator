@@ -1719,6 +1719,73 @@ describe('#382 今の必要証拠金を JSCC の計算で（marginNowJscc）', (
     expect(on?.jscc).toEqual(sellsOnly?.jscc);
   });
 
+  it('#393 下限から取引最終日まで K 営業日以内の OP の足を外す（基準日 = data.businessDate。holidays 無しは外さない）', () => {
+    const mixed = [...legs, opJ(M2, 'put', 67000, 'sell', 1)];
+    const p = prepJ(mixed);
+    const positions = (nearM1: boolean) => [
+      {
+        inst: inst['NK225E-202611-P-67000'] as JsccInstrument,
+        qty: -2,
+        option: true,
+        floorExempt: nearM1,
+      },
+      {
+        inst: inst['NK225E-202611-P-66000'] as JsccInstrument,
+        qty: 1,
+        option: true,
+        floorExempt: nearM1,
+      },
+      {
+        inst: inst['NK225E-202611-C-69000'] as JsccInstrument,
+        qty: -1,
+        option: true,
+        floorExempt: nearM1,
+      },
+      {
+        inst: inst['NK225MF-202612'] as JsccInstrument,
+        qty: -3,
+        option: false,
+        floorExempt: false,
+      },
+      {
+        inst: inst['NK225E-202612-P-67000'] as JsccInstrument,
+        qty: -1,
+        option: true,
+        floorExempt: false,
+      },
+    ];
+    // 2026-11 限の取引最終日 = 11-12（木）。基準日 11-09（月）→ 3 営業日 = 外す、11-06（金）→ 4 営業日 = 外さない
+    const near = jsccData(set, inst, '2026-11-09');
+    const edge = jsccData(set, inst, '2026-11-06');
+    const jn = marginNowJscc(p, NOWJ, ctxJ, SETTINGS, P, near, []);
+    const je = marginNowJscc(p, NOWJ, ctxJ, SETTINGS, P, edge, []);
+    const jFar = marginNowJscc(p, NOWJ, ctxJ, SETTINGS, P, data, []);
+    const jNone = marginNowJscc(p, NOWJ, ctxJ, SETTINGS, P, near);
+    expect(jn?.jscc).toEqual({
+      businessDate: '2026-11-09',
+      ...jsccVarMargin(positions(true), set),
+    });
+    expect(je?.jscc).toEqual({
+      businessDate: '2026-11-06',
+      ...jsccVarMargin(positions(false), set),
+    });
+    expect(jFar?.jscc).toEqual({
+      businessDate: '2026-10-09',
+      ...jsccVarMargin(positions(false), set),
+    });
+    expect(jNone?.jscc).toEqual({
+      businessDate: '2026-11-09',
+      ...jsccVarMargin(positions(false), set),
+    });
+    // 下限の NOV は 2026-12 限の売り 1 枚だけ（清算値段 600 × 1,000）。ES・NOV_清算は同じ
+    expect(jn?.jscc?.novFloor).toBe(-600 * 1000);
+    expect(jn?.jscc?.esSigned).toBe(je?.jscc?.esSigned);
+    expect(jn?.jscc?.novSettle).toBe(je?.jscc?.novSettle);
+    // 休業日を挟むと 11-06 からも 3 営業日 = 外す
+    const jh = marginNowJscc(p, NOWJ, ctxJ, SETTINGS, P, edge, ['2026-11-10']);
+    expect(jh?.jscc?.novFloor).toBe(-600 * 1000);
+  });
+
   it('できないとき null と理由: 行が無い（missing）・枚数が整数でない（fractional）・集計グループが 2 つ（groups）・M の足が無い（none）', () => {
     const missing = prepJ([...legs, opJ(M2, 'call', 70000, 'sell')]);
     expect(marginNowJscc(missing, NOWJ, ctxJ, SETTINGS, P, data)).toBeNull();

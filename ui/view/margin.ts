@@ -13,6 +13,8 @@
  * - それ以外の点・テール・線は、当て直しの r・g（#387。JsccFactorsInput）が読めれば JSCC のシナリオの当て直し
  *   （model/jsccRefit.ts。basis = jscc_refit）、読めない・当て直せなければ格子の概算 + 理由。テール・線は生成器
  *   （1 回の yield = 状態 1 つ）で、画面は操作が止まってから切れごとに回す（useMarginLine）
+ * - VaR 証拠金額の下限から取引最終日が近い OP の足を外す判定（#393）の日: 今の JSCC の計算は JSCC のデータの基準日、
+ *   当て直しは状態 S の時刻（板の時刻 + d）に jsccBaseDate と同じ規則を当てた日（stateAt の floor）
  * - 原資産・評価が有限でなければ null（表示は「—」。model は検証済みの値を受ける前提のため、ここで止める）
  * - memo の単位（useAppController）: 今 = 足・板・設定・β / 動き方 / IV の入れ方、シナリオの点 = シナリオ、
  *   テール = ΔX 以外のシナリオ。どれも資金・パラメータ（端末の設定）が変われば作り直す
@@ -20,7 +22,12 @@
  * 文字列（タイル・内訳・表）は ui/view/metricsPanel.ts が作る。
  */
 
-import type { JsccFactorsInput, JsccFetchReason, JsccInput } from '../../data/jscc';
+import {
+  type JsccFactorsInput,
+  type JsccFetchReason,
+  type JsccInput,
+  jsccBaseDate,
+} from '../../data/jscc';
 import {
   businessDaysAhead,
   DAY_MS,
@@ -28,6 +35,7 @@ import {
   gridRoomEvaluator,
   type Holidays,
   type JsccIneligible,
+  type JsccNovFloorBasis,
   type JsccRefitIneligible,
   type JsccRefitQuality,
   jsccEligibility,
@@ -189,6 +197,17 @@ interface MarginStateAt {
   sc: Scenario;
   horizonDays: number;
   marked: boolean;
+  /** 当て直しで下限を外す OP の足の判定の日（状態 S の基準日。#393）。S の時刻が有限でなければ null */
+  floor: JsccNovFloorBasis | null;
+}
+
+/**
+ * 状態 S（板の時刻 + days 日）の JSCC の基準日と休業日（#393）。JSCC は S の時点で効いているその日のファイルで下限を
+ * 判定するので、今の JSCC の計算の基準日（jsccBaseDate(板の時刻)）と同じ規則を S の時刻に当てる（d = 0 なら今と同じ日）
+ */
+function floorAt(evalTime: number, days: number, holidays: Holidays): JsccNovFloorBasis | null {
+  const baseDate = jsccBaseDate(evalTime + days * DAY_MS, holidays, null);
+  return baseDate === null ? null : { baseDate, holidays };
 }
 
 function stateAt(base: PnlBase, x: number, scenario: Scenario, holidays: Holidays): MarginStateAt {
@@ -200,7 +219,12 @@ function stateAt(base: PnlBase, x: number, scenario: Scenario, holidays: Holiday
     MARGIN_HORIZON_BUSINESS_DAYS,
     holidays,
   );
-  return { sc, horizonDays, marked: marginMarked(ctx.evalTime, days, holidays) };
+  return {
+    sc,
+    horizonDays,
+    marked: marginMarked(ctx.evalTime, days, holidays),
+    floor: floorAt(ctx.evalTime, days, holidays),
+  };
 }
 
 function calcOf(
@@ -262,10 +286,10 @@ export function marginCalcAt(
     });
   }
   const { legs, ctx, settings } = base;
-  const { sc, horizonDays, marked } = stateAt(base, x, scenario, holidays);
+  const { sc, horizonDays, marked, floor } = stateAt(base, x, scenario, holidays);
   const state = { x, scenario: sc, horizonDays, marked };
   try {
-    const r = marginAtJsccRefit(legs, state, ctx, settings, params, factors.data);
+    const r = marginAtJsccRefit(legs, state, ctx, settings, params, factors.data, floor);
     if (r) {
       return calcOf(base, x, r.result, capital, {
         kind: 'jscc_refit',
@@ -280,7 +304,7 @@ export function marginCalcAt(
       reason: 'error',
     });
   }
-  const plan = jsccRefitPlan(legs, state, ctx, settings, params, factors.data);
+  const plan = jsccRefitPlan(legs, state, ctx, settings, params, factors.data, floor);
   const reason: JsccReason = plan.ok ? 'missing' : plan.reason;
   return marginCalc(base, x, scenario, params, capital, holidays, { kind: 'estimate', reason });
 }
@@ -353,7 +377,7 @@ function marginNowExact(
   const state = { x, scenario: sc, horizonDays, marked };
   let r: MarginResult | null;
   try {
-    r = marginNowJscc(legs, state, ctx, settings, params, jscc.data);
+    r = marginNowJscc(legs, state, ctx, settings, params, jscc.data, holidays);
   } catch {
     // 検証済みの応答では起きない（安全な整数を越える和・本数の違いなど）。memo の中で投げて画面を落とさない
     return marginCalc(base, x, sc0, params, capital, holidays, {
@@ -511,6 +535,7 @@ export function* marginLineSteps(
     holidays,
   );
   const marked = marginMarked(ctx.evalTime, days, holidays);
+  const floor = floorAt(ctx.evalTime, days, holidays);
   const premium = premiumSummary(legs, settings);
   const refit =
     factors?.status === 'ok' &&
@@ -521,6 +546,7 @@ export function* marginLineSteps(
       settings,
       params,
       factors.data,
+      floor,
     ).ok;
   const ev = refit
     ? jsccRefitRoomEvaluator(
@@ -534,6 +560,7 @@ export function* marginLineSteps(
         capital,
         premium,
         factors.data,
+        floor,
       )
     : gridRoomEvaluator(legs, sc, ctx, settings, params, horizonDays, marked, capital, premium);
   const xs = new Set<number>();

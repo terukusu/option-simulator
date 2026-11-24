@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  businessDaysAfter,
   businessDaysAhead,
   crossesDayClose,
   DAY_MS,
@@ -93,6 +94,40 @@ describe('T（SQ 日 9:00 JST まで、暦日 / 365）', () => {
     const before = jstInstant('2026-11-13', 8, 59);
     expect(upcomingMonthlyExpiries(before, 1, [])[0]?.id).toBe('2026-11');
     expect(monthlyExpiry(2026, 11, HOLIDAYS).lastTradingDay).toBe('2026-11-10');
+  });
+});
+
+describe('base の翌営業日から target までの営業日数（両端を含む。#393）', () => {
+  it('optionchan に確認した 3 例（日付だけ）: 04-07（月）→ 04-10 = 3、04-09 → 04-10 = 1、2026-03-11 → 03-12 = 1', () => {
+    expect(businessDaysAfter('2025-04-07', '2025-04-10', [])).toBe(3);
+    expect(businessDaysAfter('2025-04-09', '2025-04-10', [])).toBe(1);
+    expect(businessDaysAfter('2026-03-11', '2026-03-12', [])).toBe(1);
+  });
+
+  it('target ≤ base は 0、週末・休業日は数えない、土日の base からも翌営業日から', () => {
+    expect(businessDaysAfter('2025-04-10', '2025-04-10', [])).toBe(0);
+    expect(businessDaysAfter('2025-04-11', '2025-04-10', [])).toBe(0);
+    // 金曜 → 次の水曜 = 月・火・水の 3 日、月曜が休業なら 2 日
+    expect(businessDaysAfter('2025-04-04', '2025-04-09', [])).toBe(3);
+    expect(businessDaysAfter('2025-04-04', '2025-04-09', ['2025-04-07'])).toBe(2);
+    expect(businessDaysAfter('2025-04-04', '2025-04-09', new Set(['2025-04-07']))).toBe(2);
+    expect(businessDaysAfter('2025-04-05', '2025-04-07', [])).toBe(1);
+    // target が休業日なら、その前の営業日まで
+    expect(businessDaysAfter('2025-04-07', '2025-04-12', [])).toBe(4);
+  });
+
+  it('limit を超えたら limit + 1 で止める（limit 以下の数は変わらない）', () => {
+    expect(businessDaysAfter('2025-04-01', '2026-04-01', [], 3)).toBe(4);
+    expect(businessDaysAfter('2025-04-07', '2025-04-10', [], 3)).toBe(3);
+    expect(businessDaysAfter('2025-04-07', '2025-04-10', [], 2)).toBe(3);
+    // 種つきでない総当たり: limit の有無で「≤ limit か」の判定が同じ
+    for (let d = 1; d <= 28; d++) {
+      const base = `2025-02-${String(d).padStart(2, '0')}`;
+      for (const lim of [0, 1, 3, 5]) {
+        const full = businessDaysAfter(base, '2025-03-13', HOLIDAYS);
+        expect(businessDaysAfter(base, '2025-03-13', HOLIDAYS, lim) <= lim).toBe(full <= lim);
+      }
+    }
   });
 });
 

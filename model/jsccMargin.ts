@@ -9,15 +9,55 @@
  *   小さい方から t = n × q / 10^6 本（q = round((100 − 信頼水準) × 10^4)）の平均（端数の本は按分）の符号を変えたもの
  *   （期待ショートフォール）を円に切り上げる = 符号つきの ES。分子は BigInt の有理数で求める（浮動小数では切り上げで
  *   1 円ずれることがあり、足が多いと 2^53 を超えうる）
- * - VaR 証拠金額 V = max(0, ES, ceil(−NOV_清算))。NOV_清算 = Σ OP 符号 × 枚数 × 清算値段 × Contract Size
+ * - VaR 証拠金額 V = max(0, ES, ceil(−NOV_下限))。NOV_清算 = Σ OP 符号 × 枚数 × 清算値段 × Contract Size
  *   （JSCC の仕様: VaR リスク額 = VaR 証拠金額（符号付）+ NOV ≥ 0。1 枚の OP の売りの「清算値段 × Contract Size が
- *   下限」はこの特別な場合）
+ *   下限」はこの特別な場合）。NOV_下限 = NOV_清算から、取引最終日まで JSCC_NOV_FLOOR_EXEMPT_BUSINESS_DAYS 営業日
+ *   以内の OP の足を外したもの（JSCC は SQ 直前の当月限の売りに下限を掛けない。#393）
  *
  * 銘柄のキー（API の i= と同じ）: OP = `NK225E-YYYYMM-C|P-行使価格`、先物 = `NK225F|NK225MF|NK225MCF-YYYYMM`。
  */
 
 import type { Leg } from './position';
 import type { FutureProduct } from './products';
+import { businessDaysAfter, type Holidays, lastTradingDay } from './time';
+
+/**
+ * VaR 証拠金額の下限（ceil(−NOV)）を外す OP の足: 基準日の翌営業日から取引最終日までの営業日数（両端を含む。
+ * 取引最終日が翌営業日なら 1。取引最終日が基準日以前なら 0）がこれ以下の限月（#393。暫定）。
+ *
+ * 根拠: optionchan #171（2025-02-10 以降の全営業日）で、OP の売りの ES が「清算値段 × Contract Size」を下回った
+ * 22 件のうち、JSCC が下限を掛けなかった 20 件は当月限で取引最終日まで 1・3 営業日、下限を掛けた 2 件は 1〜2 年先の
+ * 限月だった。K が 3 以上・約 250 未満ならどれでも 22 件を説明でき、データからは決まらない。合う中でいちばん小さい
+ * 3 にした = 外す足が売りの OP なら下限を残す側（証拠金を大きめに出す側）。外す足が買いの OP なら逆で、外すと
+ * NOV_下限が小さく（より負に）なり下限が上がる = K を小さくすると証拠金は小さめに出る（当月限の買い + 遠い限月の売り
+ * など）。新しい例が出たら見直す。ポートフォリオで下限を掛けるときの JSCC の挙動（足ごとの判定か）と、祝日取引の日を
+ * 営業日に数えるか（取引カレンダーの休業日に入らないので数えている）は分からない（設計 5.10.1・5.10.7・ADR-0013 の追補）
+ */
+export const JSCC_NOV_FLOOR_EXEMPT_BUSINESS_DAYS = 3;
+
+/** 下限を外す判定に使う日: 基準日（JSCC の営業日。YYYY-MM-DD）と休業日（取引カレンダーの版） */
+export interface JsccNovFloorBasis {
+  baseDate: string;
+  holidays: Holidays;
+}
+
+const EXPIRY_ID = /^(\d{4})-(0[1-9]|1[0-2])$/;
+
+/**
+ * 限月 expiry（YYYY-MM）の OP の足を、基準日 baseDate の VaR 証拠金額の下限から外すか（取引最終日までの営業日数 ≤ k）。
+ * 限月・基準日の形が外れたら false（下限を残す側）
+ */
+export function jsccNovFloorExempt(
+  expiry: string,
+  baseDate: string,
+  holidays: Holidays,
+  k: number = JSCC_NOV_FLOOR_EXEMPT_BUSINESS_DAYS,
+): boolean {
+  const m = EXPIRY_ID.exec(expiry);
+  if (!m || !/^\d{4}-\d{2}-\d{2}$/.test(baseDate)) return false;
+  const ltd = lastTradingDay(Number(m[1]), Number(m[2]), holidays);
+  return businessDaysAfter(baseDate, ltd, holidays, k) <= k;
+}
 
 /** シナリオの並び（pnl の添字の意味）と、集計グループのパラメータ（レコード 0） */
 export interface JsccScenarioSet {
@@ -155,7 +195,9 @@ export interface JsccVarMargin {
   esSigned: number;
   /** NOV_清算（円。OP の 符号 × 枚数 × 清算値段 × Contract Size の和） */
   novSettle: number;
-  /** VaR 証拠金額（円）= max(0, ES, ceil(−NOV_清算)) */
+  /** 下限に使う NOV（円。NOV_清算から floorExempt の OP の足を外した和。#393） */
+  novFloor: number;
+  /** VaR 証拠金額（円）= max(0, ES, ceil(−NOV_下限)) */
   varMargin: number;
 }
 
@@ -166,6 +208,8 @@ export interface JsccPosition {
   qty: number;
   /** OP なら true（NOV_清算に入る） */
   option: boolean;
+  /** OP で、取引最終日が近く VaR 証拠金額の下限から外す足なら true（jsccNovFloorExempt。#393）。省略 = false */
+  floorExempt?: boolean;
 }
 
 /**
@@ -179,6 +223,7 @@ export function jsccVarMargin(
   const n = set.isHist.length;
   const v = new Float64Array(n);
   let novSettle = 0;
+  let novFloor = 0;
   for (const p of positions) {
     if (!Number.isSafeInteger(p.qty)) throw new Error('枚数が整数でない');
     const pnl = p.inst.pnl;
@@ -187,12 +232,14 @@ export function jsccVarMargin(
     if (p.option) {
       const price = p.inst.price;
       if (price === null || !Number.isFinite(price)) throw new Error('清算値段が無い');
-      novSettle += p.qty * price * p.inst.contractSize;
+      const value = p.qty * price * p.inst.contractSize;
+      novSettle += value;
+      if (!p.floorExempt) novFloor += value;
     }
   }
-  if (positions.length === 0) return { esSigned: 0, novSettle: 0, varMargin: 0 };
+  if (positions.length === 0) return { esSigned: 0, novSettle: 0, novFloor: 0, varMargin: 0 };
   const esSigned = jsccEsSigned(v, set);
   // 清算値段 × Contract Size は円の整数（浮動小数の端数を 1e-6 円で吸ってから切り上げる）
-  const floor = Math.ceil(-novSettle - 1e-6);
-  return { esSigned, novSettle, varMargin: Math.max(0, esSigned, floor) };
+  const floor = Math.ceil(-novFloor - 1e-6);
+  return { esSigned, novSettle, novFloor, varMargin: Math.max(0, esSigned, floor) };
 }

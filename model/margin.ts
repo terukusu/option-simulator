@@ -26,7 +26,13 @@
  * F が決まらない足（no_forward）は入れない。h・休業日・現在時刻は呼び出し側が決めて渡す。
  */
 
-import { type JsccData, type JsccPosition, jsccKeyOfLeg, jsccVarMargin } from './jsccMargin';
+import {
+  type JsccData,
+  type JsccPosition,
+  jsccKeyOfLeg,
+  jsccNovFloorExempt,
+  jsccVarMargin,
+} from './jsccMargin';
 import {
   legSigma,
   legValue,
@@ -125,12 +131,17 @@ export interface MarginResult {
 export interface MarginJsccDetail {
   /** JSCC の営業日（前営業日の清算値で 1 日固定の、その日。YYYY-MM-DD） */
   businessDate: string;
-  /** VaR 証拠金額（円）= max(0, ES, ceil(−NOV_清算)) */
+  /** VaR 証拠金額（円）= max(0, ES, ceil(−NOV_下限)) */
   varMargin: number;
   /** 符号つきの ES（円） */
   esSigned: number;
   /** NOV_清算（円。清算値段の NOV） */
   novSettle: number;
+  /**
+   * 下限に使った NOV（円。novSettle から取引最終日が近い OP の足を外した和。jscc_refit は状態 S の評価価格。#393・
+   * JSCC_NOV_FLOOR_EXEMPT_BUSINESS_DAYS）
+   */
+  novFloor: number;
 }
 
 /** M の足・NOV・先物の評価損益・清算額（格子と JSCC の両方で使う最初のループ） */
@@ -282,6 +293,7 @@ function jsccPlan(
   legs: readonly PreparedLeg[],
   inMargin: readonly boolean[],
   data: JsccData,
+  holidays: Holidays | null = null,
 ): JsccPlan {
   const positions: JsccPosition[] = [];
   const groups = new Set<string>();
@@ -300,7 +312,11 @@ function jsccPlan(
       return { ok: false, reason: 'missing' };
     }
     groups.add(inst.aggregationGroup);
-    positions.push({ inst, qty: p.sign * p.leg.qty, option });
+    const floorExempt =
+      holidays !== null &&
+      p.leg.kind === 'option' &&
+      jsccNovFloorExempt(p.leg.expiry, data.businessDate, holidays);
+    positions.push({ inst, qty: p.sign * p.leg.qty, option, floorExempt });
   }
   if (fractional) return { ok: false, reason: 'fractional' };
   if (positions.length === 0) return { ok: false, reason: 'none' };
@@ -328,7 +344,8 @@ export function jsccEligibility(
 
 /**
  * 今の必要証拠金を JSCC の計算で（#382・設計 5.10・ADR-0013）:
- * - 必要証拠金 = k × V（V = VaR 証拠金額。jsccVarMargin）
+ * - 必要証拠金 = k × V（V = VaR 証拠金額。jsccVarMargin）。下限 ceil(−NOV) から、基準日（data.businessDate）で取引最終日
+ *   まで K 営業日以内の OP の足を外す（#393。holidays = 取引カレンダーの休業日。null = 外さない = #393 の前の式）
  * - NOV・先物の評価損益・清算額は marginAt と同じ（今の評価価格。NOV は所要額で 2 回効く = 証券会社の形）
  * - 所要額 = max(0, k × V − NOV)
  * JSCC の計算にできなければ（jsccEligibility）null = 呼び出し側が格子の概算に戻す。state は今（d = 0）を渡す前提
@@ -340,11 +357,12 @@ export function marginNowJscc(
   settings: ModelSettings,
   params: MarginParams,
   data: JsccData,
+  holidays: Holidays | null = null,
 ): MarginResult | null {
   const base = marginLegs(legs, state, ctx, settings, params);
-  const plan = jsccPlan(legs, base.inMargin, data);
+  const plan = jsccPlan(legs, base.inMargin, data, holidays);
   if (!plan.ok) return null;
-  const { esSigned, novSettle, varMargin } = jsccVarMargin(plan.positions, data.set);
+  const { esSigned, novSettle, novFloor, varMargin } = jsccVarMargin(plan.positions, data.set);
   const margin = params.factor * varMargin;
   return {
     pfe: varMargin,
@@ -356,7 +374,7 @@ export function marginNowJscc(
     settledCash: base.settledCash,
     worst: null,
     source: 'jscc',
-    jscc: { businessDate: data.businessDate, varMargin, esSigned, novSettle },
+    jscc: { businessDate: data.businessDate, varMargin, esSigned, novSettle, novFloor },
   };
 }
 
