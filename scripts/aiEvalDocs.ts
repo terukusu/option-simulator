@@ -42,9 +42,17 @@ export const DOC_QUESTIONS: DocQuestion[] = [
     id: 'margin',
     kind: 'premise',
     text: '必要証拠金（概算）はどうやって計算しているの？実際の証拠金と違うことはある？',
-    expect: ['user-guide:8', 'user-guide:8.4', 'user-guide:13.2.1', 'design:5.10'],
+    expect: [
+      'user-guide:8',
+      'user-guide:8.4',
+      'user-guide:13.2.1',
+      'design:5.10',
+      'design:5.10.1',
+      'design:5.10.3',
+      'design:5.10.7',
+    ],
     points:
-      '原資産 ±R・IV の上げ下げ・経過の格子の最悪の損失（PFE）× 掛け目。JSCC の VaR 方式の再現ではない概算で、答え合わせをしていない形（急落の日・先物との組み合わせ・レシオなど）では実際の額と違うことがある',
+      '今の必要証拠金は前営業日の JSCC の VaR パラメータから JSCC と同じ手順（ES → V → 掛け目 × V）で求め、シナリオの点・テール・追証の線は JSCC のシナリオの当て直し（JSCC 推定）。データが無い・当て直せないときは格子（原資産 ±R・IV の倍率・経過）の最悪の損失 × 掛け目の概算に戻り、概算は形によって実際の額と大きくずれうる。証券会社の額とは NOV の評価価格（今の板）・扱わないもの（割増・SAM など）の分だけ違いうる',
   },
   {
     id: 'sticky',

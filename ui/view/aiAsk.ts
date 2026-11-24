@@ -76,7 +76,22 @@ const G_IV_NOW: AskDoc = {
 };
 const D_PNL: AskDoc = { file: 'design', section: '5.6', title: '損益・指標・グリーク' };
 const D_SCENARIO: AskDoc = { file: 'design', section: '5.4', title: 'シナリオ（IV の 1 本の式）' };
-const D_MARGIN: AskDoc = { file: 'design', section: '5.10', title: '証拠金の概算' };
+/** 証拠金は 5.10 の小節（#385。1 回の read_doc で読める大きさ） */
+const D_MARGIN_NOW: AskDoc = {
+  file: 'design',
+  section: '5.10.1',
+  title: '今の必要証拠金は JSCC の VaR 証拠金の計算',
+};
+const D_MARGIN_SCENARIO: AskDoc = {
+  file: 'design',
+  section: '5.10.2',
+  title: 'シナリオの点・テール・追証の線は JSCC のシナリオの当て直し',
+};
+const D_MARGIN_ROOM: AskDoc = {
+  file: 'design',
+  section: '5.10.4',
+  title: '余力・建てられる倍数・追証の線',
+};
 
 /** 場所ごとの説明の節（先頭がマニュアル） */
 export const ASK_DOCS: Record<AiAskTopic, readonly AskDoc[]> = {
@@ -86,14 +101,14 @@ export const ASK_DOCS: Record<AiAskTopic, readonly AskDoc[]> = {
   'tile.premium': [G_TILE, D_PNL],
   'tile.scenario': [G_TILE, D_SCENARIO],
   'tile.greeks': [G_TILE, D_PNL],
-  'tile.margin': [G_MARGIN, D_MARGIN],
-  'tile.room': [G_MARGIN, D_MARGIN],
+  'tile.margin': [G_MARGIN, D_MARGIN_NOW],
+  'tile.room': [G_MARGIN, D_MARGIN_ROOM],
   'readout.date': [G_READOUT, D_SCENARIO],
   'readout.expiry': [G_READOUT, D_PNL],
   'readout.delta': [G_READOUT, D_PNL],
   'readout.premium': [G_READOUT, D_PNL],
   'tail.pnl': [G_TAIL, D_SCENARIO],
-  'tail.margin': [G_MARGIN, D_MARGIN],
+  'tail.margin': [G_MARGIN, D_MARGIN_SCENARIO],
   'iv.history': [G_IV, G_IV_NOW],
 };
 
