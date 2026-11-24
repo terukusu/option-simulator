@@ -32,6 +32,7 @@ import {
   capitalOf,
   MARGIN_LINE_OUTER_SAMPLES,
   MARGIN_LINE_SETTLE_MS,
+  type MarginCalc,
   type MarginView,
   marginCalc,
   marginLine,
@@ -69,6 +70,8 @@ import {
   MARGIN_POINT_ROW_LABEL,
   MARGIN_POINT_SAME_TEXT,
   MARGIN_REFIT_QUALITY_ROW_LABEL,
+  MARGIN_REFIT_SCALE_NONE_TEXT,
+  MARGIN_REFIT_SCALE_ROW_LABEL,
   MARGIN_REFIT_SUB,
   MARGIN_TAIL_BUSY_MARK,
   MARGIN_TAIL_TITLE,
@@ -87,6 +90,8 @@ import {
   ROOM_FULL_LABEL,
   ROOM_NO_CAPITAL_TEXT,
   ROOM_TILE_LABEL,
+  refitScaleRows,
+  refitScaleValue,
 } from '../../ui/view/metricsPanel';
 import {
   DEFAULT_PNL_Y,
@@ -1462,6 +1467,58 @@ describe('#387 シナリオの点・テール・追証の線を JSCC のシナ�
     expect(marginBasisText(poor?.basis ?? { kind: 'estimate', reason: null })).toBe(
       `概算（${JSCC_REASON_TEXT.poor_fit}）`,
     );
+  });
+
+  it('急変の係数（#395）: 基準日の F が無い応答は内訳に「なし」、大きく動いた点は ×s（> 1）で必要証拠金が増える', () => {
+    const m = metricsOf(s);
+    const b = baseOf(s);
+    const base = factorsOf(s);
+    if (base.status !== 'ok') throw new Error('ok でない');
+    const rowOf = (point: MarginCalc | null) => {
+      const mv: MarginView = { ...viewOf(s, withCapital(capital)), point };
+      return metricsBreakdown(m, mv).find((r) => r.k === MARGIN_REFIT_SCALE_ROW_LABEL)?.v;
+    };
+    const none = marginPoint(b, s.scenario, params, capital, holidays, base);
+    expect(none?.basis).toMatchObject({ kind: 'jscc_refit', ewmaScale: null });
+    expect(rowOf(none)).toBe(MARGIN_REFIT_SCALE_NONE_TEXT);
+    // 基準日の F を 2 割上に置く = 点は基準日から 2 割近く下げた状態（架空）
+    const far: JsccFactorsInput = {
+      status: 'ok',
+      data: {
+        ...base.data,
+        rows: new Map([...base.data.rows].map(([k, r]) => [k, { ...r, forward: b.ctx.x0 * 1.2 }])),
+      },
+    };
+    const big = marginPoint(b, s.scenario, params, capital, holidays, far);
+    const sc = big?.basis.kind === 'jscc_refit' ? big.basis.ewmaScale : undefined;
+    expect(sc).toBeGreaterThan(1.1);
+    expect(rowOf(big)).toBe(`×${(sc as number).toFixed(2)}`);
+    expect(big?.result.margin).toBeGreaterThan(none?.result.margin ?? Number.POSITIVE_INFINITY);
+    // 今（BPF。jscc）が点なら行を出さない
+    expect(rowOf(null)).toBeUndefined();
+    // 表示で ×1.00 になる係数（基準日の F = 点の F 近く）は行を出さない（レビュー 6）
+    const calm = marginPoint(b, s.scenario, params, capital, holidays, {
+      status: 'ok',
+      data: {
+        ...base.data,
+        rows: new Map(
+          [...base.data.rows].map(([k, r]) => [k, { ...r, forward: big?.x ?? b.ctx.x0 }]),
+        ),
+      },
+    });
+    expect(calm?.basis).toMatchObject({ kind: 'jscc_refit' });
+    expect(refitScaleValue(calm?.basis)).toBeNull();
+    expect(rowOf(calm)).toBeUndefined();
+    // 今が当て直し（基準日の BPF が無い）で点が今と同じなら、今の係数を「急変の係数（今）」に（レビュー 3）
+    const view0 = viewOf(s, withCapital(capital));
+    expect(refitScaleRows({ ...view0, now: big, point: big })).toEqual([
+      { k: MARGIN_REFIT_SCALE_ROW_LABEL, v: `×${(sc as number).toFixed(2)}` },
+    ]);
+    expect(refitScaleRows({ ...view0, now: big, point: null })).toEqual([
+      { k: `${MARGIN_REFIT_SCALE_ROW_LABEL}（今）`, v: `×${(sc as number).toFixed(2)}` },
+    ]);
+    // 点が別の当て直しで ×1.00 なら、今の係数は出さない（点の値の行と食い違わせない）
+    expect(refitScaleRows({ ...view0, now: big, point: calm })).toEqual([]);
   });
 
   it('今: 基準日の BPF が無ければ、直近の使える日の r・g で今の状態を当て直す（JSCC 推定 + 使った日。#387）', () => {

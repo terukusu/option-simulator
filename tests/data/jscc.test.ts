@@ -322,6 +322,7 @@ describe('#387 当て直しの r・g の応答（validateJsccFactorsJson・loadJ
         g: Array(13 * n).fill(1500),
         check_median_rel: 0.002,
         check_p90_rel: 0.15,
+        forward: 41234.5,
       },
       {
         key: 'NK225F-202703',
@@ -347,6 +348,9 @@ describe('#387 当て直しの r・g の応答（validateJsccFactorsJson・loadJ
     expect(row?.checkMedianRel).toBe(0.002);
     expect(row?.checkP90Rel).toBe(0.15);
     expect(r.value.data.rows.get('NK225F-202703')?.checkMedianRel).toBeNull();
+    // 基準日の F（#395）: ある行は値、無い行（forward を返す前の応答 = 古いキャッシュ）は null
+    expect(row?.forward).toBe(41234.5);
+    expect(r.value.data.rows.get('NK225F-202703')?.forward).toBeNull();
     expect(r.value.data.set).toEqual({
       isHist: [true, true, true, true, false],
       confidence: 97.5,
@@ -375,6 +379,22 @@ describe('#387 当て直しの r・g の応答（validateJsccFactorsJson・loadJ
     [
       '質が文字列',
       { rows: [{ key: 'NK225E-202612', r: [0, 0, 0, 0, 0], g: null, check_p90_rel: 'x' }] },
+    ],
+    [
+      '基準日の F が0',
+      { rows: [{ key: 'NK225E-202612', r: [0, 0, 0, 0, 0], g: null, forward: 0 }] },
+    ],
+    [
+      '基準日の F が負',
+      { rows: [{ key: 'NK225E-202612', r: [0, 0, 0, 0, 0], g: null, forward: -1 }] },
+    ],
+    [
+      '基準日の F が文字列',
+      { rows: [{ key: 'NK225E-202612', r: [0, 0, 0, 0, 0], g: null, forward: 'x' }] },
+    ],
+    [
+      '基準日の F が真偽値',
+      { rows: [{ key: 'NK225E-202612', r: [0, 0, 0, 0, 0], g: null, forward: true }] },
     ],
     ['週次の行', { rows: [{ key: 'NK225W1-202612', r: [0, 0, 0, 0, 0], g: null }] }],
     ['重複', { rows: [factorsJson().rows[0], factorsJson().rows[0]] }],

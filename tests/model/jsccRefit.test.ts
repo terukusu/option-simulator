@@ -10,9 +10,11 @@ import {
   jsccTailCount,
 } from '../../model/jsccMargin';
 import {
+  JSCC_REFIT_EWMA_LAMBDA,
   JSCC_REFIT_MAX_MEDIAN_REL,
   type JsccFactors,
   jsccFactorRowOf,
+  jsccRefitEwmaScale,
   jsccRefitPlan,
   jsccRefitQuality,
   jsccRefitRoomEvaluator,
@@ -457,6 +459,10 @@ describe('#387 当て直しの値（jsccRefitVector）', () => {
   });
 });
 
+/** KEYS の基準日の F の元（合成の板の F。#395 のテストで少しずらして使う） */
+const fwdOf = (k: string) =>
+  k === 'NK225E-202611' ? M1.F : k === 'NK225E-202612' ? M2.F : FUT.price;
+
 describe('#387 追証の線: 裾の候補で絞った二分法 = 全シナリオの二分法', () => {
   // 本物より小さい並び（H 300・S 30）で、候補（4 × 裾の本数 + S）が全体より十分に少ない形
   const set = realisticSet(300, 30, 2, 97.5);
@@ -487,7 +493,13 @@ describe('#387 追証の線: 裾の候補で絞った二分法 = 全シナリオ
       const legs = legsOf(r);
       if (legs.length === 0) continue;
       const p = preparePosition(legs, ctx, S);
-      const factors = synthFactors(set, KEYS, 1000 + c);
+      // 半分は基準日の F を付けて急変の係数を入れる（#395。x ごとに s が変わっても二分法の根が全シナリオと同じ）
+      const factors = synthFactors(
+        set,
+        KEYS,
+        1000 + c,
+        c % 2 === 0 ? { forwards: Object.fromEntries(KEYS.map((k) => [k, fwdOf(k) * 0.99])) } : {},
+      );
       const premium = premiumSummary(p, S);
       const capital = 300_000 + Math.floor(r() * 3_000_000);
       const sc = { ...ZERO_SCENARIO, days: Math.floor(r() * 5) };
@@ -538,6 +550,202 @@ describe('#387 追証の線: 裾の候補で絞った二分法 = 全シナリオ
       const t = jsccTailCount(m, set.confidence);
       expect(jsccEsOfSorted(xs.slice(0, t), m, set)).toBe(jsccEsSigned(v, set));
       expect(() => jsccEsOfSorted(xs.slice(0, t - 1), m, set)).toThrow();
+    }
+  });
+});
+
+describe('#395 急変の係数（縮めない EWMA。r × s）', () => {
+  const { ctx, op, fut } = market(false);
+  const set = smallSet();
+  const n = set.isHist.length;
+  const lam = JSCC_REFIT_EWMA_LAMBDA;
+  /** H の r の母標準偏差（独立に計算） */
+  const hStd = (r: Float64Array) => {
+    const h = Array.from(r).filter((_, j) => set.isHist[j]);
+    const m = h.reduce((a, b) => a + b, 0) / h.length;
+    return Math.sqrt(h.reduce((a, b) => a + (b - m) ** 2, 0) / h.length);
+  };
+
+  it('係数の式: |x| ≤ σ は 1、|x| > σ は √(λ + (1 − λ)x²/σ²)、符号によらない、σ が正でなければ 1', () => {
+    expect(lam).toBe(0.976);
+    expect(jsccRefitEwmaScale(0, 0.03)).toBe(1);
+    expect(jsccRefitEwmaScale(0.03, 0.03)).toBe(1);
+    expect(jsccRefitEwmaScale(-0.02, 0.03)).toBe(1);
+    expect(jsccRefitEwmaScale(0.09, 0.03)).toBeCloseTo(Math.sqrt(lam + (1 - lam) * 9), 14);
+    expect(jsccRefitEwmaScale(-0.09, 0.03)).toBe(jsccRefitEwmaScale(0.09, 0.03));
+    expect(jsccRefitEwmaScale(0.3, 0.03)).toBeCloseTo(Math.sqrt(lam + (1 - lam) * 100), 14);
+    for (const bad of [0, -0.01, Number.NaN, Number.POSITIVE_INFINITY]) {
+      expect(jsccRefitEwmaScale(0.1, bad)).toBe(1);
+    }
+    expect(jsccRefitEwmaScale(Number.NaN, 0.03)).toBe(1);
+    // x について単調（|x| が大きいほど大きい）
+    let prev = 0;
+    for (let x = 0; x <= 0.3; x += 0.01) {
+      const v = jsccRefitEwmaScale(x, 0.03);
+      expect(v).toBeGreaterThanOrEqual(prev);
+      prev = v;
+    }
+  });
+
+  it('基準日の F が無い応答は係数なし（null）で、F が状態と同じ応答（s = 1）と 1 円も違わない', () => {
+    const legs = [
+      op(M1, 'put', 66000, 'sell', 2),
+      op(M2, 'call', 70000, 'sell'),
+      fut('buy', 1, 'fut_mini'),
+    ];
+    const p = preparePosition(legs, ctx, S);
+    const st = nowState(ctx);
+    const old = synthFactors(set, KEYS, 21);
+    const same = synthFactors(set, KEYS, 21, {
+      forwards: Object.fromEntries(KEYS.map((k) => [k, fwdOf(k)])),
+    });
+    const a = jsccRefitPlan(p, st, ctx, S, P, old);
+    const b = jsccRefitPlan(p, st, ctx, S, P, same);
+    if (!a.ok || !b.ok) throw new Error('計画にならない');
+    expect(a.plan.ewmaScale).toBeNull();
+    expect(b.plan.ewmaScale).toBe(1);
+    expect(Array.from(jsccRefitVector(b.plan))).toEqual(Array.from(jsccRefitVector(a.plan)));
+    expect(marginAtJsccRefit(p, st, ctx, S, P, old)?.result.jscc?.ewmaScale).toBeNull();
+    expect(marginAtJsccRefit(p, st, ctx, S, P, same)?.result.jscc?.ewmaScale).toBe(1);
+  });
+
+  it('大きく動いた状態: s を独立に求め、先物は round(乗数 × F_S (e^{s·r} − 1))、OP は F′ = F_S e^{s·r} の Black-76 と一致', () => {
+    // 基準日の F を 8% 上に置く = 状態 S は基準日から約 −8% 下げた（2 日の σ の数倍）
+    const f = synthFactors(set, KEYS, 22, {
+      forwards: Object.fromEntries(KEYS.map((k) => [k, fwdOf(k) * 1.08])),
+    });
+    const [pf, po] = preparePosition(
+      [fut('sell', 1, 'fut_mini'), op(M1, 'put', 65000, 'sell')],
+      ctx,
+      S,
+    ) as [PreparedLeg, PreparedLeg];
+    const st = nowState(ctx);
+    const planned = jsccRefitPlan([pf, po], st, ctx, S, P, f);
+    if (!planned.ok) throw new Error('計画にならない');
+    // 基準の足 = 限月の最も早い M1（2026-11）の OP
+    const row1 = f.rows.get('NK225E-202611');
+    const rowF = f.rows.get('NK225MF-202612');
+    if (!row1?.g || !rowF) throw new Error('行が無い');
+    const x = Math.log(po.F / (row1.forward as number));
+    const sigma = hStd(row1.r);
+    const s = Math.sqrt(Math.max(1, lam + ((1 - lam) * x * x) / (sigma * sigma)));
+    expect(s).toBeGreaterThan(1.05);
+    expect(planned.plan.ewmaScale).toBeCloseTo(s, 12);
+    const v = jsccRefitVector(planned.plan);
+    const sig = legSigma(po, ctx.x0, ZERO_SCENARIO, ctx, S) as number;
+    const z = Math.log(65000 / po.F) / (sig * Math.sqrt(po.T0));
+    const { m, wt } = nodeWeight(z, REFIT_NODES);
+    for (const j of [0, 3, 17, n - 1]) {
+      const fu = -Math.round(pf.multiplier * pf.F * (Math.exp(s * (rowF.r[j] as number)) - 1));
+      const g = (1 - wt) * (row1.g[j * 13 + m] as number) + wt * (row1.g[j * 13 + m + 1] as number);
+      const o =
+        -1000 *
+        Math.max(
+          1,
+          Math.round(
+            black76Price(
+              'put',
+              po.F * Math.exp(s * (row1.r[j] as number)),
+              65000,
+              po.T0 - H / 365,
+              sig * Math.exp(g),
+              R,
+            ),
+          ),
+        );
+      expect(v[j]).toBe(fu + o);
+    }
+  });
+
+  it('係数は状態ごとに 1 つ: 同じ plan のすべての足が同じ s で、x が同じなら限月によらない', () => {
+    const f = synthFactors(set, KEYS, 23, {
+      forwards: Object.fromEntries(KEYS.map((k) => [k, fwdOf(k) * 0.93])),
+    });
+    const p = preparePosition(
+      [op(M2, 'call', 70000, 'sell'), op(M1, 'put', 65000, 'sell'), fut('sell', 2, 'fut_mini')],
+      ctx,
+      S,
+    );
+    const planned = jsccRefitPlan(p, nowState(ctx), ctx, S, P, f);
+    if (!planned.ok) throw new Error('計画にならない');
+    const s = planned.plan.ewmaScale as number;
+    expect(s).toBeGreaterThan(1);
+    const rows = [
+      f.rows.get('NK225E-202612'),
+      f.rows.get('NK225E-202611'),
+      f.rows.get('NK225MF-202612'),
+    ];
+    planned.plan.legs.forEach((L, i) => {
+      const r = (rows[i] as { r: Float64Array }).r;
+      for (const j of [0, 5, n - 1])
+        expect(L.eR[j]).toBeCloseTo(Math.exp(s * (r[j] as number)), 14);
+    });
+    // 基準は限月の最も早い M1。M1 の基準日の F だけを変えると s が変わり、M2 だけを変えても変わらない
+    const shift = (key: string, k: number): JsccFactors => ({
+      ...f,
+      rows: new Map(
+        [...f.rows].map(
+          ([kk, r]) => [kk, kk === key ? { ...r, forward: (r.forward as number) * k } : r] as const,
+        ),
+      ),
+    });
+    const sOf = (ff: JsccFactors) => {
+      const r = jsccRefitPlan(p, nowState(ctx), ctx, S, P, ff);
+      return r.ok ? r.plan.ewmaScale : Number.NaN;
+    };
+    expect(sOf(shift('NK225E-202612', 0.95))).toBe(s);
+    expect(sOf(shift('NK225E-202611', 0.95))).not.toBe(s);
+  });
+
+  it('h の間に SQ がある足（T′ ≤ 0.5 日）は基準にしない。その足だけなら、その足で求める', () => {
+    const f = synthFactors(set, KEYS, 24, {
+      forwards: { 'NK225E-202611': M1.F * 1.1, 'NK225E-202612': M2.F * 0.95 },
+    });
+    const [p1, p2] = preparePosition(
+      [op(M1, 'put', 65000, 'sell'), op(M2, 'put', 65000, 'sell')],
+      ctx,
+      S,
+    ) as [PreparedLeg, PreparedLeg];
+    // M1 の SQ を h の中に入れる（h = M1 の残存の日数 + 1）
+    const st: MarginState = { ...nowState(ctx), horizonDays: Math.ceil(p1.T0 * 365) + 1 };
+    const both = jsccRefitPlan([p1, p2], st, ctx, S, P, f);
+    const only1 = jsccRefitPlan([p1], st, ctx, S, P, f);
+    if (!both.ok || !only1.ok) throw new Error('計画にならない');
+    const row2 = f.rows.get('NK225E-202612') as { r: Float64Array; forward: number };
+    const row1 = f.rows.get('NK225E-202611') as { r: Float64Array; forward: number };
+    expect(both.plan.ewmaScale).toBeCloseTo(
+      jsccRefitEwmaScale(Math.log(p2.F / row2.forward), hStd(row2.r)),
+      12,
+    );
+    expect(only1.plan.ewmaScale).toBeCloseTo(
+      jsccRefitEwmaScale(Math.log(p1.F / row1.forward), hStd(row1.r)),
+      12,
+    );
+    expect(only1.plan.ewmaScale).toBeGreaterThan(1);
+  });
+
+  it('合成の検証: 状態の動きが大きいほど先物の売りの ES が s 倍に近く増え、落ち着いた動き（|x| ≤ σ）では変わらない', () => {
+    const p = preparePosition([fut('sell', 1, 'fut_mini')], ctx, S);
+    const st = nowState(ctx);
+    const base = marginAtJsccRefit(p, st, ctx, S, P, synthFactors(set, KEYS, 25))?.result.jscc
+      ?.esSigned;
+    if (base === undefined) throw new Error('計算にならない');
+    const rowF = synthFactors(set, KEYS, 25).rows.get('NK225MF-202612') as { r: Float64Array };
+    const sigma = hStd(rowF.r);
+    for (const k of [0.5, 1, 3, 6]) {
+      const fw = FUT.price * Math.exp(k * sigma);
+      const f = synthFactors(set, KEYS, 25, { forwards: { 'NK225MF-202612': fw } });
+      const re = marginAtJsccRefit(p, st, ctx, S, P, f)?.result;
+      const s = re?.jscc?.ewmaScale as number;
+      const es = re?.jscc?.esSigned as number;
+      if (k <= 1) {
+        expect(s).toBe(1);
+        expect(es).toBe(base);
+      } else {
+        expect(s).toBeCloseTo(Math.sqrt(lam + (1 - lam) * k * k), 3);
+        // 先物の損益は r にほぼ線形（e^{sr} − 1 ≈ s·r）。ES の比は s の 3% 以内
+        expect(Math.abs(es / base / s - 1)).toBeLessThan(0.03);
+      }
     }
   });
 });

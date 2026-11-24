@@ -1931,7 +1931,10 @@ describe('性能（#387 JSCC の当て直し）', () => {
   const params = { ...DEFAULT_MARGIN_PARAMS, ignoreLongOptions: false };
   const factors = {
     status: 'ok' as const,
-    data: synthFactors(realisticSet(), ['NK225E-202611', 'NK225E-202612'], 387),
+    // 基準日の F を付けて急変の係数（#395）の経路も測る（基準日から少し下げた状態 = 線の二分法で x ごとに s が変わる）
+    data: synthFactors(realisticSet(), ['NK225E-202611', 'NK225E-202612'], 387, {
+      forwards: { 'NK225E-202611': ctx.x0 * 1.02, 'NK225E-202612': ctx.x0 * 1.02 },
+    }),
   };
   const scenario0 = { ...ZERO_SCENARIO, days: 5 };
   const today = todayLine(base, null, 1000, scenario0);

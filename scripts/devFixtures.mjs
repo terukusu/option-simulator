@@ -1169,6 +1169,8 @@ export function synthJsccFactors(date, periods) {
   const { ret, vol, types } = jsccScenarios();
   const r = ret.map((x) => Math.round(Math.log(1 + x) * 1e6));
   const g = vol.flatMap((v) => JSCC_FACTOR_NODES.map(() => Math.round(Math.log(v) * 1e4)));
+  // 基準日の F（#395。急変の係数の x）: 合成の板の今の先物と同じ（ΔX を動かすと係数が効く）
+  const forward = Math.round(futNowPrice() * 10) / 10;
   const rows = [];
   const missing = [];
   for (const p of periods) {
@@ -1184,9 +1186,17 @@ export function synthJsccFactors(date, periods) {
       g,
       check_median_rel: near ? 0.004 : 0.001,
       check_p90_rel: near ? 0.12 : 0.006,
+      forward,
     });
     if (Number(p.slice(4)) % 3 === 0) {
-      rows.push({ key: `NK225F-${p}`, r, g: null, check_median_rel: null, check_p90_rel: null });
+      rows.push({
+        key: `NK225F-${p}`,
+        r,
+        g: null,
+        check_median_rel: null,
+        check_p90_rel: null,
+        forward,
+      });
     }
   }
   return {

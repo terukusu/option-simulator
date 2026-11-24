@@ -79,7 +79,13 @@ export function synthFactors(
   set: JsccScenarioSet,
   keys: readonly string[],
   seed = 387,
-  opts: { futuresOnly?: readonly string[]; businessDate?: string; scale?: number } = {},
+  opts: {
+    futuresOnly?: readonly string[];
+    businessDate?: string;
+    scale?: number;
+    /** キー → 基準日の F（#395。無いキーは forward 無し = 古い応答と同じ） */
+    forwards?: Readonly<Record<string, number>>;
+  } = {},
 ): JsccFactors {
   const r = rng(seed);
   const n = set.isHist.length;
@@ -108,7 +114,8 @@ export function synthFactors(
         }
       }
     }
-    rows.set(key, { r: rr, g });
+    const fw = opts.forwards?.[key];
+    rows.set(key, fw === undefined ? { r: rr, g } : { r: rr, g, forward: fw });
   }
   return { businessDate: opts.businessDate ?? '2026-10-09', set, nodes: REFIT_NODES, rows };
 }

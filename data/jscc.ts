@@ -362,7 +362,8 @@ export function jsccFactorsUrl(
 
 /**
  * `/api/jscc_factors` の JSON の検査（#387）。date は要求した基準日、periods は要求した限月。行は要求した限月だけ、
- * r は本数の整数（|r| ≤ 1 = 1e6）、g は 13 × 本数の整数（|g| ≤ 3 = 3e4）か null。節点は 13 個の昇順
+ * r は本数の整数（|r| ≤ 1 = 1e6）、g は 13 × 本数の整数（|g| ≤ 3 = 3e4）か null。節点は 13 個の昇順。
+ * forward（基準日の F。#395）は正の数か、無い・null（古い応答 = 急変の係数を使わない）
  */
 export function validateJsccFactorsJson(
   v: unknown,
@@ -485,6 +486,15 @@ export function validateJsccFactorsJson(
       const med = rel(r.check_median_rel, 'check_median_rel');
       const p90 = rel(r.check_p90_rel, 'check_p90_rel');
       if (med === undefined || p90 === undefined) return;
+      // 基準日の F（#395。急変の係数の x）。無い・null = forward を返す前の応答（古いキャッシュ）= 係数を使わない
+      let forward: number | null = null;
+      if (r.forward !== undefined && r.forward !== null) {
+        if (typeof r.forward !== 'number' || !Number.isFinite(r.forward) || !(r.forward > 0)) {
+          add(`${p}.forward`, '正の数か null でない');
+          return;
+        }
+        forward = r.forward;
+      }
       let g: Float64Array | null = null;
       if (r.g !== null) {
         g = ints(r.g, n * NODE_COUNT, 3 * JSCC_FACTOR_SCALE.g, JSCC_FACTOR_SCALE.g);
@@ -493,7 +503,7 @@ export function validateJsccFactorsJson(
           return;
         }
       }
-      rows.set(key as string, { r: rr, g, checkMedianRel: med, checkP90Rel: p90 });
+      rows.set(key as string, { r: rr, g, checkMedianRel: med, checkP90Rel: p90, forward });
     });
   }
   const missing: string[] = [];

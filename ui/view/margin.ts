@@ -112,6 +112,11 @@ export type MarginBasis =
       businessDate: string;
       /** 足の OP の限月の推定の質（#387。内訳・注記に出す） */
       quality: JsccRefitQuality[];
+      /**
+       * 急変の係数（#395。この状態でシナリオの r に掛けた s。内訳に出す）。null = 基準日の F の無い応答で使わなかった。
+       * 省略 = 分からない（行を出さない）
+       */
+      ewmaScale?: number | null;
     }
   | { kind: 'estimate'; reason: JsccReason | null };
 
@@ -295,6 +300,7 @@ export function marginCalcAt(
         kind: 'jscc_refit',
         businessDate: factors.data.businessDate,
         quality: jsccRefitQuality(legs, factors.data),
+        ewmaScale: r.result.jscc?.ewmaScale ?? null,
       });
     }
   } catch {
