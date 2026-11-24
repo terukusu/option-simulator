@@ -314,13 +314,14 @@ def jscc_factor_world(w: "World", d: date, run_id="run-1", periods=("202612",), 
     n = len(JSCC_TYPES) if n is None else n
     for cp in periods:
         w.jscc_factors.append({"business_date": d, "jscc_run_id": run_id, "product_code": "NK225E",
-                               "contract_period_code": cp, "nodes": list(FACTOR_NODES),
+                               "contract_period_code": cp, "forward": 40000.0 + 10 * len(w.jscc_factors),
+                               "nodes": list(FACTOR_NODES),
                                "r": [rnd.uniform(-0.08, 0.08) for _ in range(n)],
                                "g": [rnd.uniform(-0.5, 0.5) for _ in range(13 * n)],
                                "check_median_rel": 0.004, "check_p90_rel": 0.012})
     for cp in futures_only:
         w.jscc_factors.append({"business_date": d, "jscc_run_id": run_id, "product_code": "NK225F",
-                               "contract_period_code": cp, "nodes": [],
+                               "contract_period_code": cp, "forward": 40100.0, "nodes": [],
                                "r": [rnd.uniform(-0.08, 0.08) for _ in range(n)], "g": [],
                                "check_median_rel": None, "check_p90_rel": None})
 

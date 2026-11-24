@@ -6,16 +6,18 @@
  *   r_j = 先物の対数リターン、g_j(z) = 標準化 moneyness z をキーにした IV の対数変化（13 節点の折れ線。節点の外は端の値）
  * に分けたもの（optionchan が毎日当てはめた派生の表。#383 の手順）を、状態 S の各足に当て直す:
  *
- * - F′ = F_S·e^{r_j}、σ′ = max(σ_min, σ_S·exp(g_j(z_S)))、T′ = T_S − h_S（h_S = S から 2 営業日後までの暦日。格子と同じ）
+ * - F′ = F_S·e^{s·r_j}、σ′ = max(σ_min, σ_S·exp(g_j(z_S)))、T′ = T_S − h_S（h_S = S から 2 営業日後までの暦日。格子と同じ）
  * - z_S = ln(K / F_S) / (σ_ATM,S·√T_S)。σ_ATM,S = 限月のスマイル（無ければ足の σ の基準）の ATM をシナリオで動かした σ
  * - OP の 1 単位の値 = max(1, round(Black-76))（T′ ≤ tMin は割引本源的価値、T′ ≤ 0 は本源的価値。同じ下限）。
- *   1 枚の値 = 乗数 × 値、先物の 1 枚 = round(乗数 × F_S·(e^{r_j} − 1))（シナリオの損益）。どちらも 1 枚の整数に
+ *   1 枚の値 = 乗数 × 値、先物の 1 枚 = round(乗数 × F_S·(e^{s·r_j} − 1))（シナリオの損益）。どちらも 1 枚の整数に
  *   符号 × 枚数を掛ける（BPF の pnl は 1 枚あたりの整数 = 今の JSCC の計算と同じ足し方）
  * - v_j の和 → #382 と同じ ES（jsccEsSigned）→ V_S = max(0, ES, ceil(−NOV_S,下限))、必要証拠金 = k·V_S、
  *   所要額 = max(0, k·V_S − NOV_S)。NOV_S・先物の評価損益・清算額・M の足は marginAt と同じ（marginLegs）。
  *   NOV_S,下限 = NOV_S から、状態 S の基準日（floor.baseDate。呼び出し側が S の時刻から jsccBaseDate の規則で決める）で
  *   取引最終日まで K 営業日以内の OP の足を外したもの（#393。floor = null なら外さない）
  * - g が空の行（先物だけの限月）は IV を動かさない（g = 0）
+ * - s = 急変の係数（#395。JSCC の EWMA のスケールし直し）= √max(1, λ + (1 − λ)·x²/σ²)、x = ln(F_S / F_基準)、
+ *   σ = 基準日の H のシナリオの r の標準偏差。状態 S で 1 つ（基準の足は jsccRefitPlan）。基準日の F の無い応答は 1
  *
  * 行の引き方: OP の足 = `NK225E-YYYYMM`（g が空 = 当てはめられなかった限月は IV を動かさない）。先物の足 = 限月で引き、
  * 商品は問わない（自分の商品 → 同じ限月の NK225E → ほかの先物の順。optionchan は先物だけの限月に最も優先する先物の行を
@@ -69,12 +71,35 @@ export const JSCC_REFIT_MAX_MEDIAN_REL = 0.05;
  */
 export const JSCC_REFIT_WIDE_P90_REL = 0.05;
 
+/**
+ * 急変の係数の λ（#395・ADR-0014 の決定 8）: JSCC は先物のシナリオの規模を 2 日の対数リターンの EWMA で毎日スケールし
+ * 直している。#394 の Spike（過去分 126 営業日）で、同じシナリオ ID の r の日ごとの比 s が
+ * s² = λ + (1 − λ)·x²/σ²（x = 2 日の対数リターン、σ = 前日の H のシナリオの r の標準偏差）に R² 0.98 で合い、
+ * λ = 0.976（2026-01 の JSCC の改定の前後で同じ）と推定した
+ */
+export const JSCC_REFIT_EWMA_LAMBDA = 0.976;
+
+/**
+ * 急変の係数 s = √max(1, λ + (1 − λ)·x²/σ²)（#395）。縮めない形（|x| ≤ σ は 1）: 縮める形（λ^k の減衰）は落ち着いた
+ * 日に偏りを足して全体で悪くなる（#394）。x の符号によらない。σ が正の有限でない・x が有限でなければ 1
+ */
+export function jsccRefitEwmaScale(x: number, sigma: number): number {
+  if (!(sigma > 0) || !Number.isFinite(sigma) || !Number.isFinite(x)) return 1;
+  const lam = JSCC_REFIT_EWMA_LAMBDA;
+  return Math.sqrt(Math.max(1, lam + ((1 - lam) * x * x) / (sigma * sigma)));
+}
+
 /** 1 行（商品 × 限月）の r・g */
 export interface JsccFactorRow {
   /** シナリオごとの先物の対数リターン（長さ = シナリオの本数） */
   r: Float64Array;
   /** シナリオごとの g の節点の値（長さ = 13 × 本数。g[j·13 + m]）。先物だけの行は null（IV を動かさない） */
   g: Float64Array | null;
+  /**
+   * 基準日のこの行の F（optionchan の表の forward。#395 の急変の係数の x = ln(F_S / F_基準) に使う）。
+   * 無い（forward を返す前の応答 = 古いキャッシュ）は null / 省略 = 係数を使わない
+   */
+  forward?: number | null;
   /** 推定の質（比。基準の状態の 1 枚の売りの ES の相対誤差の中央値・90 パーセンタイル。分からなければ null） */
   checkMedianRel?: number | null;
   checkP90Rel?: number | null;
@@ -137,6 +162,7 @@ interface RefitLeg {
   q: number;
   /** 乗数 */
   mult: number;
+  /** e^{s·r_j}（s = 急変の係数。状態 S で 1 回） */
   eR: Float64Array;
   future: boolean;
   /** 状態 S の足の原資産 */
@@ -158,6 +184,10 @@ export interface JsccRefitPlan {
   base: MarginLegs;
   /** 下限に使う NOV（base.nov から取引最終日が近い OP の足を外した和。#393） */
   novFloor: number;
+  /**
+   * 急変の係数 s（#395。r に掛けた値）。null = 基準日の F の無い応答で係数を使わなかった（s = 1 で計算。開示する）
+   */
+  ewmaScale: number | null;
   legs: RefitLeg[];
   n: number;
   r: number;
@@ -185,6 +215,43 @@ function floorExemptOf(floor: JsccNovFloorBasis, expiry: string): boolean {
   }
   return v;
 }
+/** 行の r の H のシナリオの母標準偏差（行ごとに 1 回。#395 の σ） */
+const sigmaCache = new WeakMap<Float64Array, number>();
+function histStdOf(r: Float64Array, isHist: readonly boolean[]): number {
+  let v = sigmaCache.get(r);
+  if (v === undefined) {
+    let n = 0;
+    let s = 0;
+    for (let j = 0; j < r.length; j++) {
+      if (!isHist[j]) continue;
+      n++;
+      s += r[j] as number;
+    }
+    const mean = n > 0 ? s / n : 0;
+    let ss = 0;
+    for (let j = 0; j < r.length; j++) {
+      if (!isHist[j]) continue;
+      const d = (r[j] as number) - mean;
+      ss += d * d;
+    }
+    v = n > 0 ? Math.sqrt(ss / n) : Number.NaN;
+    sigmaCache.set(r, v);
+  }
+  return v;
+}
+
+/** e^{s·r}。s = 1 は expOf、ほかは行ごとに直前の 1 つ（追証の線の二分法で同じ x を繰り返すとき）を覚える */
+const scaledCache = new WeakMap<Float64Array, { s: number; e: Float64Array }>();
+function expScaledOf(r: Float64Array, s: number): Float64Array {
+  if (s === 1) return expOf(r);
+  const c = scaledCache.get(r);
+  if (c && c.s === s) return c.e;
+  const e = new Float64Array(r.length);
+  for (let j = 0; j < r.length; j++) e[j] = Math.exp(s * (r[j] as number));
+  scaledCache.set(r, { s, e });
+  return e;
+}
+
 function expOf(r: Float64Array): Float64Array {
   let e = expCache.get(r);
   if (!e) {
@@ -268,6 +335,22 @@ export function jsccRefitPlan(
   const sc = state.scenario;
   const n = factors.set.isHist.length;
   const out: RefitLeg[] = [];
+  const outRows: JsccFactorRow[] = [];
+  // 急変の係数の基準の足（#395）: 行に基準日の F がある足のうち、T′ > 0.5 日（h の間に SQ が無い = #394 の E0）の
+  // 足を先に、その中で限月が最も早いもの（同じなら足の順で最初）。h の間に SQ がある足だけなら、その足で。
+  // 先物の足が NK225E の行に戻ると F_基準 は OP の行の F・F_S は先物の価格で、基差の分 x がずれる（σ に比べて小さい）
+  let ref: { e0: boolean; period: string; fS: number; row: JsccFactorRow } | null = null;
+  let anyForward = false;
+  const consider = (period: string | null, fS: number, tPrime: number, row: JsccFactorRow) => {
+    const fb = row.forward;
+    if (typeof fb !== 'number' || !(fb > 0) || !Number.isFinite(fb)) return;
+    anyForward = true;
+    if (period === null || !(fS > 0)) return;
+    const e0 = !(tPrime * 365 > 0.5);
+    if (ref === null || (ref.e0 && !e0) || (ref.e0 === e0 && period < ref.period)) {
+      ref = { e0, period, fS, row };
+    }
+  };
   let novFloor = base.nov;
   let fractional = false;
   let missing = false;
@@ -290,14 +373,18 @@ export function jsccRefitPlan(
     }
     const q = p.sign * p.leg.qty;
     const mult = p.multiplier;
-    const eR = expOf(row.r);
+    // e^{s·r} は s が決まってから（ループの後）入れる
+    const eR = row.r;
+    outRows.push(row);
     if (p.leg.kind === 'future') {
+      const fS = legValue(p, state.x, sc, ctx, settings);
+      consider(periodOf(p.leg.contract), fS, p.T0 - sc.days / 365 - state.horizonDays / 365, row);
       out.push({
         q,
         mult,
         eR,
         future: true,
-        fS: legValue(p, state.x, sc, ctx, settings),
+        fS,
         call: false,
         strike: 0,
         sigmaS: 0,
@@ -320,6 +407,8 @@ export function jsccRefitPlan(
     const atm = atmSigmaAt(p, state.x, sc, ctx, settings, fS);
     const z = fS > 0 && tS > 0 && atm > 0 ? Math.log(p.leg.strike / fS) / (atm * Math.sqrt(tS)) : 0;
     const { m, wt } = nodeWeight(Number.isFinite(z) ? z : 0, factors.nodes);
+    const tPrime = tS - state.horizonDays / 365;
+    consider(periodOf(p.leg.expiry), fS, tPrime, row);
     out.push({
       q,
       mult,
@@ -329,7 +418,7 @@ export function jsccRefitPlan(
       call: p.leg.type === 'call',
       strike: p.leg.strike,
       sigmaS,
-      tPrime: tS - state.horizonDays / 365,
+      tPrime,
       g: row.g,
       m,
       wt,
@@ -339,11 +428,25 @@ export function jsccRefitPlan(
   if (missing) return { ok: false, reason: 'missing' };
   if (poor) return { ok: false, reason: 'poor_fit' };
   if (out.length === 0) return { ok: false, reason: 'none' };
+  // 急変の係数（#395）: 状態 S で 1 回。x = ln(F_S / F_基準)、σ = 基準の行の r の H の標準偏差。どの行にも基準日の F
+  // が無い（古い応答）は null（s = 1 で計算し、開示する）
+  const picked = ref as { e0: boolean; period: string; fS: number; row: JsccFactorRow } | null;
+  const s = picked
+    ? jsccRefitEwmaScale(
+        Math.log(picked.fS / (picked.row.forward as number)),
+        histStdOf(picked.row.r, factors.set.isHist),
+      )
+    : 1;
+  for (let i = 0; i < out.length; i++) {
+    const L = out[i] as RefitLeg;
+    L.eR = expScaledOf((outRows[i] as JsccFactorRow).r, s);
+  }
   return {
     ok: true,
     plan: {
       base,
       novFloor,
+      ewmaScale: anyForward ? s : null,
       legs: out,
       n,
       r: ctx.r,
@@ -354,7 +457,7 @@ export function jsccRefitPlan(
 }
 
 /**
- * 足 L の 1 枚の値（円の整数。OP = 乗数 × max(1, round(1 単位の値))、先物 = round(乗数 × F_S (e^r − 1))）を、
+ * 足 L の 1 枚の値（円の整数。OP = 乗数 × max(1, round(1 単位の値))、先物 = round(乗数 × F_S (e^{s·r} − 1))）を、
  * シナリオ idx（null = 全部）について out に「符号 × 枚数 ×」で足す。OP の Black-76 は black76Price と同じ式を
  * 足ごとの定数（√T′・割引）を前に出して展開したもの（値は black76Price と同じ。#387 の性能）
  */
@@ -445,7 +548,14 @@ function resultOf(
     settledCash: plan.base.settledCash,
     worst: null,
     source: 'jscc_refit',
-    jscc: { businessDate, varMargin, esSigned, novSettle: nov, novFloor },
+    jscc: {
+      businessDate,
+      varMargin,
+      esSigned,
+      novSettle: nov,
+      novFloor,
+      ewmaScale: plan.ewmaScale,
+    },
   };
 }
 

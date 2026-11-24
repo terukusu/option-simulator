@@ -284,6 +284,7 @@ class FactorRow:
     g: array | None  # int32（g × 1e4。13 × 本数）。先物だけ・当てはめられない行は None
     check_median_rel: float | None = None  # 推定の質（基準の状態の 1 枚の売りの ES の相対誤差の中央値。比）
     check_p90_rel: float | None = None  # 同じ 90 パーセンタイル
+    forward: float | None = None  # 基準日の F（#395。急変の係数の x）。正の有限の数でなければ None（係数を使わない）
 
 
 @dataclass(frozen=True)
@@ -311,6 +312,14 @@ def _rel(v) -> float | None:
         return None
     f = float(v)
     return f if math.isfinite(f) and f >= 0 else None
+
+
+def _positive(v) -> float | None:
+    """正の有限の数（基準日の F。#395）。ほかは None（行は落とさず、画面は急変の係数を使わない）"""
+    if isinstance(v, bool) or not isinstance(v, (int, float, Decimal)):
+        return None
+    f = float(v)
+    return f if math.isfinite(f) and f > 0 else None
 
 
 def factor_day(run_id: str, rows: list[dict], n: int) -> FactorDay:
@@ -346,7 +355,8 @@ def factor_day(run_id: str, rows: list[dict], n: int) -> FactorDay:
                 raise Inconsistent("factor")
         out[key] = FactorRow(array("i", (round(x * FACTOR_SCALE_R) for x in r)),
                              array("i", (round(x * FACTOR_SCALE_G) for x in g)) if g else None,
-                             _rel(row.get("check_median_rel")), _rel(row.get("check_p90_rel")))
+                             _rel(row.get("check_median_rel")), _rel(row.get("check_p90_rel")),
+                             _positive(row.get("forward")))
     return FactorDay(nodes, out, dropped)
 
 
@@ -396,7 +406,8 @@ def factors_ok_json(req: FactorRequest, s: ScenarioSet, day: FactorDay, used: da
         for k in keys:
             fr = day.rows[k]
             rows.append({"key": k, "r": fr.r.tolist(), "g": fr.g.tolist() if fr.g is not None else None,
-                         "check_median_rel": fr.check_median_rel, "check_p90_rel": fr.check_p90_rel})
+                         "check_median_rel": fr.check_median_rel, "check_p90_rel": fr.check_p90_rel,
+                         "forward": fr.forward})
             got = True
         if not got:
             missing.append(p)

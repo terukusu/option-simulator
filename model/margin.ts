@@ -142,6 +142,11 @@ export interface MarginJsccDetail {
    * JSCC_NOV_FLOOR_EXEMPT_BUSINESS_DAYS）
    */
   novFloor: number;
+  /**
+   * 急変の係数（jscc_refit だけ。#395。シナリオの r に掛けた s）。null = 基準日の F の無い応答で使わなかった。
+   * jscc（BPF そのもの）は省略
+   */
+  ewmaScale?: number | null;
 }
 
 /** M の足・NOV・先物の評価損益・清算額（格子と JSCC の両方で使う最初のループ） */

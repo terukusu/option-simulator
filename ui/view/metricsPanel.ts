@@ -177,6 +177,10 @@ export const MARGIN_NOW_REFIT_ROW_LABEL = '今を推定で';
 export const MARGIN_REFIT_WIDE_MARK = '誤差大';
 /** 内訳の推定の質の行の見出し（#387） */
 export const MARGIN_REFIT_QUALITY_ROW_LABEL = '推定の誤差';
+/** 内訳の急変の係数の行の見出し（#395。シナリオの点の r に掛けた s） */
+export const MARGIN_REFIT_SCALE_ROW_LABEL = '急変の係数';
+/** 急変の係数を使わなかった（基準日の F の無い応答 = 古いキャッシュ）ときの値（#395） */
+export const MARGIN_REFIT_SCALE_NONE_TEXT = 'なし（基準日の F が無い）';
 /** テールを作っている間の印（#387） */
 export const MARGIN_TAIL_BUSY_MARK = '計算中…';
 /** 内訳・全文の今の出どころの行の見出し（#382） */
@@ -204,7 +208,7 @@ export const ROOM_NO_CAPITAL_TEXT = '資金は ⋯ > 設定…';
 export const MARGIN_CALL_MARK = '追証';
 /** ⓘ の証拠金の文（方式・物差し・NOV・JSCC との違い・既定の決め方・未確認の形・Web 試算で確かめる。設計 5.10・#150） */
 export const MARGIN_HINT =
-  '今の必要証拠金は JSCC の計算: JSCC が毎営業日に公開する VaR 証拠金のパラメータ（過去の値動きとストレスシナリオ）で、今のポジションの VaR 証拠金額を JSCC と同じ手順で求め、掛け目を掛ける。証券会社の額と同じく前営業日の清算値で 1 日固定（場中に計算し直しても同じ額）。所要額 = 必要証拠金 − NOV で、NOV は今の板の値段で評価する（証券会社の必要委託と同じ形）。基準日のデータがまだ無い（平日 17:00〜18:30 ごろなど）・銘柄が無い・読めないときは、直近の使える日（10 営業日まで）の JSCC のシナリオを今の状態に当て直した推定になり、副題に「JSCC 推定 11/19」のように使った日が出る。どの日の JSCC も使えないときだけ概算に戻り、副題に「概算」と出る。シナリオの点（見出しの横に d・ΔF・Δσ・Δs のうち 0 でないもの。全部 0 なら「今」で、値は今と同じ）・テール・追証の線は JSCC 推定: 同じ日の JSCC のシナリオ（限月ごとの先物の動きと ATM からの離れ方ごとの IV の動き）を、シナリオで動かした先の状態に当て直して JSCC と同じ手順で求め、掛け目を掛ける。今の値とは前営業日からの値動きと推定の誤差の分だけ違い（内訳の「今を推定で」）、下げた点では数 % 小さめに出うる。推定の誤差（その日の JSCC の値に当て直したときの 1 枚の売りの誤差の中央値と 90% 点）は内訳の「推定の誤差」に限月ごとに出し、90% 点が 5% を超える限月があれば印に「誤差大」（期近の翼など）。中央値が 5% を超える限月がある日は使わず、直近の質のよい日の JSCC で推定する（どの日もだめなら概算）。テールと追証の線はスライダーを止めてから計算する。JSCC のデータが無いときは概算: 原資産 ±R・±R/2・0 × 足の今の IV の ×(1 + 上げ) / ×1 / ×(1 − 下げ) × 経過 0 / 2 営業日の格子で、損失の最悪値に掛け目を掛ける（受け取るプレミアムの NOV を含まない）。概算の既定（R 5%・IV +50% / −25%）は 1 枚ずつの売りの 6 通りのポジションでの答え合わせ（0.98〜1.07 倍）で決めた。組み合わせによっては JSCC の値と大きくずれうる（売り put 中心は小さめ、売り call 中心は大きめ）。ストレス日・先物との組み合わせなどは未確認で、⋯ > 設定… の幅・掛け目で合わせる。余力 = 資金 − 支払 + 受取 − 手数料 − 先物の評価損 − (必要証拠金 − NOV)。先物の評価益は、指定日が日中の引け（値洗い）をまたぐまでは足さず、またいだら足す。余力 < 0 が追証（証券会社の計算式の追加証拠金と同じ判定）。値はシナリオの点、副題は今。simulator の NOV は今の板で計算するので場中の値動きの分だけ証券会社の額と違う。';
+  '今の必要証拠金は JSCC の計算: JSCC が毎営業日に公開する VaR 証拠金のパラメータ（過去の値動きとストレスシナリオ）で、今のポジションの VaR 証拠金額を JSCC と同じ手順で求め、掛け目を掛ける。証券会社の額と同じく前営業日の清算値で 1 日固定（場中に計算し直しても同じ額）。所要額 = 必要証拠金 − NOV で、NOV は今の板の値段で評価する（証券会社の必要委託と同じ形）。基準日のデータがまだ無い（平日 17:00〜18:30 ごろなど）・銘柄が無い・読めないときは、直近の使える日（10 営業日まで）の JSCC のシナリオを今の状態に当て直した推定になり、副題に「JSCC 推定 11/19」のように使った日が出る。どの日の JSCC も使えないときだけ概算に戻り、副題に「概算」と出る。シナリオの点（見出しの横に d・ΔF・Δσ・Δs のうち 0 でないもの。全部 0 なら「今」で、値は今と同じ）・テール・追証の線は JSCC 推定: 同じ日の JSCC のシナリオ（限月ごとの先物の動きと ATM からの離れ方ごとの IV の動き）を、シナリオで動かした先の状態に当て直して JSCC と同じ手順で求め、掛け目を掛ける。今の値とは前営業日からの値動きと推定の誤差の分だけ違う（内訳の「今を推定で」）。JSCC は大きく動いた後にシナリオの規模を大きくし直すので、推定も基準日からの値動きに合わせて先物の動きを大きくする（内訳の「急変の係数」）。それでも大きく動いた点（とくに −5% を超える下げ）では IV の動きの大きさの変化を入れない分、数 % 小さめになりうる（遡った日から大きく上げた点は逆にやや大きめ）。限月をまたぐカレンダー・スプレッドは急変の後に大きく外れる。推定の誤差（その日の JSCC の値に当て直したときの 1 枚の売りの誤差の中央値と 90% 点）は内訳の「推定の誤差」に限月ごとに出し、90% 点が 5% を超える限月があれば印に「誤差大」（期近の翼など）。中央値が 5% を超える限月がある日は使わず、直近の質のよい日の JSCC で推定する（どの日もだめなら概算）。テールと追証の線はスライダーを止めてから計算する。JSCC のデータが無いときは概算: 原資産 ±R・±R/2・0 × 足の今の IV の ×(1 + 上げ) / ×1 / ×(1 − 下げ) × 経過 0 / 2 営業日の格子で、損失の最悪値に掛け目を掛ける（受け取るプレミアムの NOV を含まない）。概算の既定（R 5%・IV +50% / −25%）は 1 枚ずつの売りの 6 通りのポジションでの答え合わせ（0.98〜1.07 倍）で決めた。組み合わせによっては JSCC の値と大きくずれうる（売り put 中心は小さめ、売り call 中心は大きめ）。ストレス日・先物との組み合わせなどは未確認で、⋯ > 設定… の幅・掛け目で合わせる。余力 = 資金 − 支払 + 受取 − 手数料 − 先物の評価損 − (必要証拠金 − NOV)。先物の評価益は、指定日が日中の引け（値洗い）をまたぐまでは足さず、またいだら足す。余力 < 0 が追証（証券会社の計算式の追加証拠金と同じ判定）。値はシナリオの点、副題は今。simulator の NOV は今の板で計算するので場中の値動きの分だけ証券会社の額と違う。';
 
 /** 内訳・全文のシナリオ点の行の見出し（#164） */
 export const MARGIN_POINT_ROW_LABEL = 'シナリオ点';
@@ -422,6 +426,27 @@ export function refitQualityValues(b: MarginBasis | null | undefined): string[] 
   );
 }
 
+/** 急変の係数の値（#395。`×1.12` / 使わなかった = `なし（基準日の F が無い）`）。出さない（当て直しでない・分からない・表示で ×1.00）は null */
+export function refitScaleValue(b: MarginBasis | null | undefined): string | null {
+  if (b?.kind !== 'jscc_refit' || b.ewmaScale === undefined) return null;
+  if (b.ewmaScale === null) return MARGIN_REFIT_SCALE_NONE_TEXT;
+  const t = b.ewmaScale.toFixed(2);
+  // 縮めない形なので落ち着いた状態はほぼ全部 1。×1.00 は行を増やすだけなので出さない（#395 レビュー 6）
+  return t === '1.00' ? null : `×${t}`;
+}
+
+/**
+ * 内訳の急変の係数の行（#395。出す条件はここ 1 か所）: シナリオの点が当て直しならその点の係数、点が今と同じか当て直しで
+ * なく、今が当て直し（基準日の BPF が使えない）なら今の係数（見出しに「（今）」）。どちらも refitScaleValue が null なら出さない
+ */
+export function refitScaleRows(mv: MarginView): FullRow[] {
+  const point = mv.point?.basis.kind === 'jscc_refit' ? refitScaleValue(mv.point.basis) : null;
+  if (point !== null) return [{ k: MARGIN_REFIT_SCALE_ROW_LABEL, v: point }];
+  if (mv.point?.basis.kind === 'jscc_refit' && mv.point !== mv.now) return [];
+  const now = refitScaleValue(mv.now?.basis);
+  return now === null ? [] : [{ k: `${MARGIN_REFIT_SCALE_ROW_LABEL}（今）`, v: now }];
+}
+
 /** 基準日（YYYY-MM-DD）→ `M/D` */
 const monthDay = (d: string) => `${Number(d.slice(5, 7))}/${Number(d.slice(8, 10))}`;
 
@@ -503,6 +528,8 @@ interface MarginGroups {
   pointBasis: FullRow[];
   /** 今を当て直した値（#387。今が JSCC で r・g があるときだけ） */
   nowRefit: FullRow[];
+  /** 急変の係数（#395。シナリオ点が当て直しのとき） */
+  scale: FullRow[];
   /** 推定の質（#387。シナリオ点が当て直しのとき、限月ごと） */
   quality: FullRow[];
   worst: FullRow[];
@@ -535,6 +562,7 @@ function marginGroups(mv: MarginView, u: AmountUnit): MarginGroups {
         ? [{ k: MARGIN_POINT_BASIS_ROW_LABEL, v: marginBasisText(mv.point.basis) }]
         : [],
     nowRefit: mv.nowRefit ? [{ k: MARGIN_NOW_REFIT_ROW_LABEL, v: A(marginOf(mv.nowRefit)) }] : [],
+    scale: refitScaleRows(mv),
     quality: refitQualityValues(mv.point?.basis ?? tailBasis(mv)).map((v, i) => ({
       k: i === 0 ? MARGIN_REFIT_QUALITY_ROW_LABEL : '',
       v,
@@ -809,6 +837,7 @@ export function metricsBreakdown(
       ...g.basis,
       ...g.nowRefit,
       ...g.pointBasis,
+      ...g.scale,
       ...g.quality,
       ...g.worst,
       ...g.params,
