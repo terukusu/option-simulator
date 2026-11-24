@@ -46,6 +46,7 @@ export const DOC_QUESTIONS: DocQuestion[] = [
       'user-guide:8',
       'user-guide:8.4',
       'user-guide:13.2.1',
+      // 5.10 は小節 5.10.1〜（#385）。頭（方式の使い分け）だけを読んでも当たりにする
       'design:5.10',
       'design:5.10.1',
       'design:5.10.3',
