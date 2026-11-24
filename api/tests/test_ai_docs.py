@@ -206,9 +206,10 @@ def test_read_errors_have_no_body(idx, args, want):
 def test_request_byte_cap(idx):
     r = docs.Reader(idx)
     total = 0
-    # 5.10 は 16 KiB を超える（part の切れ目は節の中の段落による）→ 途中の part で上限
+    # 5 章は 16 KiB を超える（part の切れ目は節の中の段落による）→ 途中の part で上限。5.10 は小節に分けたので（#385）
+    # 小節ごとには上限に掛からない（test_design_5_10_subsections_single_read）
     for p in range(1, docs.PART_MAX + 1):
-        text, err = r({"file": "design", "section": "5.10", "part": p})
+        text, err = r({"file": "design", "section": "5", "part": p})
         if err:
             assert "上限" in text
             break
@@ -216,7 +217,7 @@ def test_request_byte_cap(idx):
     else:
         pytest.fail("上限に達しない")
     assert r.used_bytes == total <= st.AI_DOC_REQUEST_MAX_BYTES
-    assert r.read == ["design:5.10"] + [f"design:5.10#{p}" for p in range(2, len(r.read) + 1)]
+    assert r.read == ["design:5"] + [f"design:5#{p}" for p in range(2, len(r.read) + 1)]
 
 
 def test_overhead_bounds_results(idx):
@@ -389,3 +390,58 @@ def test_user_guide_sections_match_ui_rules():
 ])
 def test_clean_title_same_as_ui(title, want):
     assert docs.clean_title(title) == want
+
+
+# ---- #385: 証拠金（設計書 5.10）は小節ごとに 1 回の読みに収まり、中身を失わない ----
+
+MARGIN_SUBSECTIONS = [f"5.10.{n}" for n in range(1, 9)]
+
+
+def margin_subsections(idx):
+    return [s for s in idx.sections.values() if s.file == "design" and s.id.startswith("5.10.")]
+
+
+def test_design_5_10_subsections_single_read(idx):
+    """AC1: 5.10 の小節はどれも part 1 つ。AC2: 5.10 の頭（最初の小節の前）は 2 KiB 以下で小節を案内する"""
+    subs = margin_subsections(idx)
+    assert [s.id for s in subs] == MARGIN_SUBSECTIONS
+    for s in subs:
+        assert s.level == 4 and len(s.parts()) == 1, s.id
+        text, err = docs.Reader(idx)({"file": "design", "section": s.id})
+        assert not err and len(text.encode("utf-8")) <= st.AI_DOC_READ_MAX_BYTES, s.id
+    lead = idx.get("design", "5.10").text.split("\n#### ", 1)[0]
+    assert len(lead.encode("utf-8")) <= 2 * 1024
+    assert all(sid in lead for sid in MARGIN_SUBSECTIONS)
+
+
+def test_ai_ask_margin_design_sections_fit(idx):
+    """AC3: [AI に聞く] の証拠金の場所（ui/view/aiAsk.ts）が引く設計書の節はどれも part 1 つ。
+    2 つ読んでも 1 要求に収まる"""
+    src = (Path(__file__).resolve().parents[2] / "ui" / "view" / "aiAsk.ts").read_text(encoding="utf-8")
+    secs = re.findall(r"file: 'design',\s*section: '(5\.10[0-9.]*)'", src)
+    assert sorted(secs) == ["5.10.1", "5.10.2", "5.10.4"]
+    for a in secs:
+        for b in secs:
+            if a == b:
+                continue
+            r = docs.Reader(idx)
+            assert not r({"file": "design", "section": a})[1]
+            assert not r({"file": "design", "section": b})[1]
+            assert r.used_bytes <= st.AI_DOC_REQUEST_MAX_BYTES
+
+
+def test_design_5_10_keeps_decisions(idx):
+    """AC5: 小節に分けて縮めても、AI が答えに要る決定・未確認の点は設計書に残る（どれかの小節にある）"""
+    body = "".join(s.text for s in margin_subsections(idx))
+    for word in ("戻る先の順", "10 日", "5%", "誤差大", "未確認", "値洗い", "15:45", "二分法", "折れ点",
+                 "| 資金（円） |", "| 掛け目 k |", "| 値動き幅 R |", "| IV の上げ u_up |", "| IV の下げ u_down |",
+                 "| 買いの OP で減らさない", "margin_exclude_long_options", "0.98〜1.07", "±200 円"):
+        assert word in body, word
+    # 戻る先の順は 1 か所（重複させない）
+    assert body.count("**戻る先の順**（") == 1
+    # ADR へ移した経緯は ADR の「詳細」にある（ADR はイメージに入らない = 設計書から参照する）
+    adr2 = (docs.REPO_DOCS / "adr-0002-margin-grid-approximation.md").read_text(encoding="utf-8")
+    adr13 = (docs.REPO_DOCS / "adr-0013-margin-now-jscc-var.md").read_text(encoding="utf-8")
+    assert "margin_iv_up_pt" in adr2.split("## 詳細", 1)[1] and "| 約 26% OTM の put |" in adr2
+    assert "LRU 16 件" in adr13.split("## 詳細", 1)[1]
+    assert "adr-0002" in body and "adr-0013" in body
